@@ -2034,6 +2034,9 @@ final class Routes
         $app->post   ('/api/submissions/receipts/{id:[0-9]+}/match',   [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'match']);
         $app->get    ('/api/submissions/inbox',            [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'list']);
         $app->post   ('/api/submissions/inbox/poll',       [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'poll']);
+        $app->post   ('/api/submissions/inbox/poll/password', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'pollWithPassword']);
+        $app->post   ('/api/submissions/inbox/mobile-key/start', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'mobileKeyStart']);
+        $app->post   ('/api/submissions/inbox/mobile-key/status', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'mobileKeyStatus']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
         // Doručení a jeho následky. `delivery/refresh` nesahá na síť — jen znovu
         // posoudí už stažené zprávy, protože běžící lhůta fikce (§ 17 odst. 4

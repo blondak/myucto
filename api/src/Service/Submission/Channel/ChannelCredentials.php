@@ -11,10 +11,11 @@ namespace MyInvoice\Service\Submission\Channel;
  * přihlášení). Cokoliv tajného je {@see SensitiveValue}, takže se to nedostane
  * do výpisu, do JSONu ani do stack trace.
  *
- * ⚠️ **Žádné `login` ani `password`, a nikdy nebudou.** Přístupové údaje ke
- * schránce nesmí opustit zařízení pod kontrolou uživatele (§ 9 odst. 2 zák.
- * 300/2008 Sb.), takže je aplikace nedrží ani na okamžik v paměti. Jediná
- * průchozí cesta je systémový certifikát.
+ * Uživatelské přístupové údaje se nikdy neukládají. Pro ručně vyžádané jedno
+ * volání mohou být přítomné jen jako {@see SensitiveValue}; Mobilní klíč pak
+ * používá samostatný komunikační kód a krátkodobou cookie ISDS. § 9 odst. 2
+ * zák. 300/2008 Sb. vyžaduje zabránit zneužití, proto tyto hodnoty nesmějí do
+ * logu, session, cache ani fronty.
  */
 final readonly class ChannelCredentials
 {
@@ -23,6 +24,9 @@ final readonly class ChannelCredentials
         public string $authMode,
         public ?SensitiveValue $certificate = null,
         public ?SensitiveValue $certificatePassphrase = null,
+        public ?SensitiveValue $username = null,
+        public ?SensitiveValue $password = null,
+        public ?SensitiveValue $sessionCookie = null,
     ) {}
 
     /**

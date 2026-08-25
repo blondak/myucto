@@ -16555,7 +16555,7 @@
             "gatewayDescription": "For every dispatch, MyÚčto redirects you to the official ISDS sign-in page. You choose the sign-in method there from the options enabled for your account.",
             "gatewayBoundary": "MyÚčto never sees or stores your username, password, security code or Mobile Key.",
             "gatewayAvailable": "The sending gateway is ready for the selected environment.",
-            "gatewayUnavailable": "The sending gateway is not active for the selected environment yet; manual dispatch and the system certificate remain available.",
+            "gatewayUnavailable": "The sending gateway is a separate outgoing-only service and the operator has not activated it for this environment yet. Incoming messages can be fetched independently on the Incoming messages tab.",
             "methods": {
                 "password": "Username and password",
                 "mobileKey": "Mobile eGovernment Key (app PIN/password and confirmation in the key)",
@@ -16567,6 +16567,12 @@
             "certificateTitle": "Company system certificate",
             "certificateDescription": "The stored system certificate is used for direct server operations on this company's data box, especially manually requested collection of incoming messages.",
             "certificateRecommendedByIsds": "The ISDS operating rules recommend this method for third-party applications. The certificate and its password are stored encrypted.",
+            "inboxLoginTitle": "Sign-in for incoming messages",
+            "inboxLoginDescription": "Choose an access method when you manually fetch messages. The sending gateway is unrelated to this operation.",
+            "inboxMobileKey": "Mobile Key: username + communication code (app password), followed by confirmation of each session in the key.",
+            "inboxPassword": "Username + password: used once for a single request.",
+            "inboxCertificate": "System certificate: encrypted and stored for the currently selected company.",
+            "inboxLoginBoundary": "The username, password and communication code are never stored permanently. The mailbox is never fetched automatically.",
             "certificateSettings": "System certificate settings",
             "certificateOnly": "This setting applies only to the currently selected company. Interactive sign-in for dispatch takes place separately in ISDS.",
             "label": "Label",
@@ -16688,6 +16694,32 @@
             "polled": "New messages downloaded: {count}",
             "manualOnly": "The mailbox is never collected automatically. You must start and confirm every fetch.",
             "pollConfirm": "Fetch new messages from the data box now? Fetching may count as delivery and start statutory deadlines.",
+            "authTitle": "How do you want to sign in for this fetch?",
+            "authIntro": "The choice applies only to the fetch you start now. Mobile Key and a regular password both remain one-time credentials.",
+            "auth": {
+                "mobile_key": {
+                    "title": "Mobile eGovernment Key",
+                    "description": "Recommended: enter your username and app password, then confirm this session in Mobile Key."
+                },
+                "password": {
+                    "title": "Username and password",
+                    "description": "The password is sent directly to ISDS only during this fetch and is not stored by MyÚčto."
+                },
+                "certificate": {
+                    "title": "Company system certificate",
+                    "description": "Uses the encrypted certificate stored on the Access tab."
+                }
+            },
+            "username": "ISDS username",
+            "password": "ISDS password",
+            "communicationCode": "Communication code / app password",
+            "communicationCodeHint": "A separate code configured for external application access; you then confirm this session in Mobile Key.",
+            "startMobileKey": "Request Mobile Key confirmation",
+            "fetchOnce": "Sign in and fetch once",
+            "certificateMissing": "No system certificate is stored for this company and environment.",
+            "usernameRequired": "Enter your ISDS username.",
+            "passwordRequired": "Enter your ISDS password.",
+            "communicationCodeRequired": "Enter the communication code (app password).",
             "subject": "Subject",
             "sender": "Sender",
             "classification": "Classification",

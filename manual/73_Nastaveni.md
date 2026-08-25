@@ -946,11 +946,18 @@ potvrzení v klíči), Identitu občana, SMS, uživatelský certifikát nebo bez
 kód podle nastavení účtu. Zpráva se neodešle pouhým přesměrováním:
 uživatel musí připravený koncept v ISDS vědomě schválit.
 
-Druhou cestou je **systémový certifikát firmy** pro přímé serverové operace,
-zejména pro ruční načtení příchozích zpráv. Je uložený šifrovaně a patří pouze
-aktuální firmě; po přepnutí firmy se používá její vlastní nastavení. Přihlašovací
-jméno a heslo se do MyÚčta neukládá. Provozní řád ISDS pro aplikace třetích stran
-doporučuje právě systémový certifikát.
+Příchozí zprávy se načítají přímým rozhraním ISDS nezávisle na odesílací bráně.
+Při každém ručním načtení si uživatel zvolí jednu ze tří metod:
+
+- **Mobilní klíč eGovernmentu** — zadá uživatelské jméno a komunikační kód
+  (heslo pro externí aplikaci) a konkrétní relaci potvrdí v Mobilním klíči;
+- **jméno a heslo** — použijí se pouze pro jeden synchronní požadavek;
+- **systémový certifikát firmy** — uložený šifrovaně pouze u aktuální firmy.
+
+Jméno, heslo ani komunikační kód se trvale neukládají. Krátkodobá relace
+Mobilního klíče platí jen pro právě zahájené načtení a po něm se aplikace z ISDS
+odhlásí. Provozní řád ISDS pro aplikace třetích stran doporučuje systémový
+certifikát, ale jeho absence neblokuje obě jednorázové interaktivní metody.
 
 Globální registraci odesílací brány v **Systém → Odesílací brána ISDS** a její
 komerční certifikát spravuje pouze
@@ -962,7 +969,9 @@ z ISDS mohla bezpečně vrátit i mzdová role bez práva spravovat globální
 certifikát brány.
 
 Příchozí schránka se **nevybírá automaticky ani plánovanou úlohou**. Nové zprávy
-se načtou jen po kliknutí uživatele na **Načíst nové zprávy** a potvrzení
-upozornění. Je to záměrná pojistka: vyzvednutí zprávy může být právně rozhodným
-doručením a spustit navazující lhůty. Automatické stahování nelze v nastavení
-zapnout.
+se načtou jen po kliknutí uživatele na **Vyzvednout nové zprávy**, zvolení metody
+přihlášení a samostatném potvrzení upozornění. Je to záměrná pojistka: vyzvednutí
+zprávy může být právně rozhodným doručením a spustit navazující lhůty.
+Automatické stahování nelze v nastavení zapnout. U Mobilního klíče se po této
+akci automaticky kontroluje pouze stav právě vyžádaného potvrzení; nejde o
+opakované ani plánované vybírání schránky.

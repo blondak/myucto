@@ -1286,7 +1286,10 @@ prostředí lze použít k nácviku.
 Odpovědi ani doručenky z datové schránky se nikdy nestahují automaticky.
 Načtení příchozích zpráv vyvolá uživatel samostatným tlačítkem v
 **Firma → Datová schránka** a před síťovým voláním potvrdí upozornění, že
-vyzvednutí může založit doručení a spustit zákonné lhůty.
+vyzvednutí může založit doručení a spustit zákonné lhůty. Pro toto jediné
+načtení si zvolí firemní systémový certifikát, jednorázové jméno a heslo, nebo
+Mobilní klíč: jméno a komunikační kód (heslo pro aplikaci) a potvrzení konkrétní
+relace v klíči. Uživatelské přihlašovací údaje se trvale neukládají.
 
 Pro běžný profil JMHZ se u každé schválené revize samostatně potvrzuje pět
 právních skutečností: evidované srážky ze mzdy, slevu zaměstnance pro sezónní

@@ -390,6 +390,27 @@ export interface GatewayStart {
   resumed: boolean
 }
 
+export interface InboxPollResult {
+  fetched: number
+  stored: number
+  skipped: number
+  failed: number
+  unclassified: number
+}
+
+export interface MobileKeyInboxStart {
+  flow_token: string
+  state: number
+  description: string
+  expires_at: string
+}
+
+export interface MobileKeyInboxStatus {
+  state: number
+  description: string
+  result: InboxPollResult | null
+}
+
 export interface IsdsGatewayCapability {
   environment: 'production' | 'test'
   available: boolean
@@ -533,10 +554,31 @@ export const dataBoxApi = {
     }).then(r => r.data),
 
   pollInbox: (environment: string) =>
-    api.post<{ fetched: number; stored: number; skipped: number; failed: number; unclassified: number }>(
+    api.post<InboxPollResult>(
       '/submissions/inbox/poll',
       { environment, acknowledged: true },
     ).then(r => r.data),
+
+  pollInboxWithPassword: (environment: string, username: string, password: string) =>
+    api.post<InboxPollResult>('/submissions/inbox/poll/password', {
+      environment,
+      username,
+      password,
+      acknowledged: true,
+    }).then(r => r.data),
+
+  startMobileKeyInbox: (environment: string, username: string, communicationCode: string) =>
+    api.post<MobileKeyInboxStart>('/submissions/inbox/mobile-key/start', {
+      environment,
+      username,
+      communication_code: communicationCode,
+      acknowledged: true,
+    }).then(r => r.data),
+
+  mobileKeyInboxStatus: (flowToken: string) =>
+    api.post<MobileKeyInboxStatus>('/submissions/inbox/mobile-key/status', {
+      flow_token: flowToken,
+    }).then(r => r.data),
 
   classify: (id: number, classification: InboxClassification, outboxId: number | null) =>
     api.post(`/submissions/inbox/${id}/classify`, { classification, outbox_id: outboxId }).then(r => r.data),

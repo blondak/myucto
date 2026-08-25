@@ -16555,7 +16555,7 @@
             "gatewayDescription": "Při každém odeslání Vás MyÚčto přesměruje na oficiální přihlašovací stránku ISDS. Způsob přihlášení vybíráte tam podle možností svého účtu.",
             "gatewayBoundary": "MyÚčto žádné uživatelské jméno, heslo, bezpečnostní kód ani mobilní klíč nevidí a neukládá.",
             "gatewayAvailable": "Odesílací brána je pro zvolené prostředí připravená.",
-            "gatewayUnavailable": "Odesílací brána zatím není pro zvolené prostředí aktivní; zůstává ruční cesta a systémový certifikát.",
+            "gatewayUnavailable": "Odesílací brána je samostatná služba pouze pro odchozí podání a provozovatel ji pro toto prostředí ještě neaktivoval. Příchozí zprávy můžete načíst nezávisle na ní na kartě Příchozí zprávy.",
             "methods": {
                 "password": "Jméno a heslo",
                 "mobileKey": "Mobilní klíč eGovernmentu (PIN / heslo aplikace a potvrzení v klíči)",
@@ -16567,6 +16567,12 @@
             "certificateTitle": "Systémový certifikát firmy",
             "certificateDescription": "Uložený systémový certifikát slouží k přímým serverovým operacím nad schránkou této firmy, zejména k ručně vyžádanému načtení příchozích zpráv.",
             "certificateRecommendedByIsds": "Pro aplikace třetích stran jde o způsob doporučený Provozním řádem ISDS. Certifikát a jeho heslo se ukládají šifrovaně.",
+            "inboxLoginTitle": "Přihlášení pro příchozí zprávy",
+            "inboxLoginDescription": "Při ručním načtení si zvolíte způsob přístupu. Odesílací brána s tímto načtením nesouvisí.",
+            "inboxMobileKey": "Mobilní klíč: jméno + komunikační kód (heslo pro aplikaci) a potvrzení každé relace v klíči.",
+            "inboxPassword": "Jméno + heslo: použijí se jednorázově pro jeden požadavek.",
+            "inboxCertificate": "Systémový certifikát: šifrovaně uložený u právě zvolené firmy.",
+            "inboxLoginBoundary": "Jméno, heslo ani komunikační kód se trvale neukládají. Schránka se nikdy nenačítá automaticky.",
             "certificateSettings": "Nastavení systémového certifikátu",
             "certificateOnly": "Toto nastavení platí jen pro právě zvolenou firmu. Interaktivní přihlášení při odeslání probíhá odděleně přímo v ISDS.",
             "label": "Označení",
@@ -16688,6 +16694,32 @@
             "polled": "Staženo nových zpráv: {count}",
             "manualOnly": "Schránka se automaticky nevybírá. Každé načtení musíte spustit a potvrdit Vy.",
             "pollConfirm": "Opravdu teď chcete načíst nové zprávy z datové schránky? Vyzvednutí se může počítat jako doručení a spustit zákonné lhůty.",
+            "authTitle": "Jak se chcete pro toto načtení přihlásit?",
+            "authIntro": "Volba platí jen pro právě spuštěné načtení. Mobilní klíč i běžné heslo zůstávají jednorázové.",
+            "auth": {
+                "mobile_key": {
+                    "title": "Mobilní klíč eGovernmentu",
+                    "description": "Doporučeno: zadáte jméno a heslo pro aplikaci, potom tuto relaci potvrdíte v Mobilním klíči."
+                },
+                "password": {
+                    "title": "Jméno a heslo",
+                    "description": "Heslo se odešle přímo ISDS pouze během tohoto načtení a MyÚčto ho neuloží."
+                },
+                "certificate": {
+                    "title": "Systémový certifikát firmy",
+                    "description": "Použije se šifrovaně uložený certifikát z karty Přístup."
+                }
+            },
+            "username": "Uživatelské jméno ISDS",
+            "password": "Heslo ISDS",
+            "communicationCode": "Komunikační kód / heslo pro aplikaci",
+            "communicationCodeHint": "Samostatný kód nastavený pro přístup externí aplikace; následně potvrdíte tuto relaci v Mobilním klíči.",
+            "startMobileKey": "Požádat o potvrzení v klíči",
+            "fetchOnce": "Přihlásit a jednou načíst",
+            "certificateMissing": "Pro tuto firmu a prostředí není uložený systémový certifikát.",
+            "usernameRequired": "Vyplňte uživatelské jméno ISDS.",
+            "passwordRequired": "Vyplňte heslo ISDS.",
+            "communicationCodeRequired": "Vyplňte komunikační kód (heslo pro aplikaci).",
             "subject": "Předmět",
             "sender": "Odesílatel",
             "classification": "Zařazení",

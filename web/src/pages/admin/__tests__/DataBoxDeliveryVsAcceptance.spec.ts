@@ -21,6 +21,9 @@ const m = vi.hoisted(() => ({
   outbox: vi.fn(),
   inbox: vi.fn(),
   pollInbox: vi.fn(),
+  pollInboxWithPassword: vi.fn(),
+  startMobileKeyInbox: vi.fn(),
+  mobileKeyInboxStatus: vi.fn(),
   unmatchedReceipts: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -33,6 +36,9 @@ vi.mock('@/api/dataBox', () => ({
     outbox: m.outbox,
     inbox: m.inbox,
     pollInbox: m.pollInbox,
+    pollInboxWithPassword: m.pollInboxWithPassword,
+    startMobileKeyInbox: m.startMobileKeyInbox,
+    mobileKeyInboxStatus: m.mobileKeyInboxStatus,
     unmatchedReceipts: m.unmatchedReceipts,
   },
 }))
@@ -104,12 +110,13 @@ function submission(overrides: Partial<OutboxSubmission> = {}): OutboxSubmission
   }
 }
 
-async function mountWith(rows: OutboxSubmission[]) {
-  m.credentials.mockResolvedValue([credential])
+async function mountWith(rows: OutboxSubmission[], credentials: DataBoxCredential[] = [credential]) {
+  m.credentials.mockResolvedValue(credentials)
   m.recipients.mockResolvedValue([])
   m.outbox.mockResolvedValue(rows)
   m.inbox.mockResolvedValue({ items: [], state: null })
   m.pollInbox.mockResolvedValue({ fetched: 0, stored: 0, skipped: 0, failed: 0, unclassified: 0 })
+  m.pollInboxWithPassword.mockResolvedValue({ fetched: 0, stored: 0, skipped: 0, failed: 0, unclassified: 0 })
   m.unmatchedReceipts.mockResolvedValue([])
 
   const wrapper = mount(DataBox, {
@@ -175,20 +182,30 @@ describe('DataBox — doručeno vs. zpracováno', () => {
   })
 
   it('schránku vyzvedne jen po výslovné akci a potvrzení uživatele', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
     const wrapper = await mountWith([])
     await wrapper.findAll('nav button')[2].trigger('click')
 
     expect(wrapper.text()).toContain('databox.inbox.manualOnly')
-    const pollButton = wrapper.findAll('button').find(b => b.text().includes('databox.inbox.poll'))
-    expect(pollButton?.attributes('disabled')).toBeUndefined()
-
-    await pollButton?.trigger('click')
+    expect(wrapper.find('input[type="radio"][value="mobile_key"]').exists()).toBe(true)
+    const certificate = wrapper.find('input[type="radio"][value="certificate"]')
+    await certificate.setValue()
+    const fetchButton = wrapper.findAll('button').find(b => b.text().includes('databox.inbox.fetchOnce'))
+    await fetchButton?.trigger('click')
     expect(m.pollInbox).not.toHaveBeenCalled()
 
-    await pollButton?.trigger('click')
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+    await fetchButton?.trigger('click')
     await flushPromises()
-    expect(confirm).toHaveBeenCalledTimes(2)
     expect(m.pollInbox).toHaveBeenCalledWith('production')
+  })
+
+  it('nabídne Mobilní klíč a jednorázové heslo i bez uloženého certifikátu', async () => {
+    const wrapper = await mountWith([], [])
+    await wrapper.findAll('nav button')[2].trigger('click')
+
+    expect(wrapper.find('input[type="radio"][value="mobile_key"]').exists()).toBe(true)
+    expect(wrapper.find('input[type="radio"][value="password"]').exists()).toBe(true)
+    expect(wrapper.find('input[autocomplete="username"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('databox.inbox.communicationCode')
   })
 })

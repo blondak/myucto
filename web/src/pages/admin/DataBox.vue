@@ -13,7 +13,7 @@
  *    (§ 17 odst. 3 zák. 300/2008 Sb.) a rozjede lhůty, takže se zapíná
  *    vědomě, s vysvětlením, a ne přepínačem bez kontextu.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { isAxiosError } from 'axios'
 import {
@@ -85,6 +85,19 @@ const certFileInput = ref<HTMLInputElement | null>(null)
 const currentCredential = computed(
   () => credentials.value.find(c => c.environment === environment.value) ?? null,
 )
+
+// ── Jednorázové ruční načtení inboxu ────────────────────────────────────────
+// Tohle není plánovač ani trvalé povolení. Volba přihlášení je na kartě stále
+// viditelná; uživatel potvrdí právní účinek a spustí právě jeden síťový dotaz.
+type InboxAuthMethod = 'mobile_key' | 'password' | 'certificate'
+const inboxAuthMethod = ref<InboxAuthMethod>('mobile_key')
+const inboxAcknowledged = ref(false)
+const inboxUsername = ref('')
+const inboxPassword = ref('')
+const mobileCommunicationCode = ref('')
+const mobileFlowToken = ref('')
+const mobileStatus = ref('')
+let mobileStatusTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── Recipient form ───────────────────────────────────────────────────────────
 const recipientCode = ref('')
@@ -506,18 +519,98 @@ async function toggleAttempts(row: OutboxSubmission) {
   }
 }
 
+function clearMobileStatusTimer() {
+  if (mobileStatusTimer !== null) clearTimeout(mobileStatusTimer)
+  mobileStatusTimer = null
+}
+
+function resetInboxAuth() {
+  clearMobileStatusTimer()
+  mobileFlowToken.value = ''
+  mobileStatus.value = ''
+  inboxPassword.value = ''
+  mobileCommunicationCode.value = ''
+}
+
+async function finishInboxPoll(result: { stored: number }) {
+  toast.success(t('databox.inbox.polled', { count: result.stored }))
+  inboxAcknowledged.value = false
+  resetInboxAuth()
+  await loadAll()
+}
+
+async function pollMobileKeyStatus() {
+  if (mobileFlowToken.value === '') return
+  try {
+    const status = await dataBoxApi.mobileKeyInboxStatus(mobileFlowToken.value)
+    mobileStatus.value = status.description
+    if (status.state === 2 && status.result) {
+      await finishInboxPoll(status.result)
+      return
+    }
+    mobileStatusTimer = setTimeout(() => { void pollMobileKeyStatus() }, 2000)
+  } catch (e) {
+    clearMobileStatusTimer()
+    mobileFlowToken.value = ''
+    toast.error(apiErrorMessage(e))
+  }
+}
+
 async function pollInbox() {
-  if (!window.confirm(t('databox.inbox.pollConfirm'))) return
+  if (!inboxAcknowledged.value) {
+    toast.error(t('databox.polling.ackRequired'))
+    return
+  }
   saving.value = true
   try {
-    const result = await dataBoxApi.pollInbox(environment.value)
-    toast.success(t('databox.inbox.polled', { count: result.stored }))
-    await loadAll()
+    if (inboxAuthMethod.value === 'certificate') {
+      if (!currentCredential.value) {
+        toast.error(t('databox.inbox.certificateMissing'))
+        return
+      }
+      await finishInboxPoll(await dataBoxApi.pollInbox(environment.value))
+      return
+    }
+    if (inboxUsername.value.trim() === '') {
+      toast.error(t('databox.inbox.usernameRequired'))
+      return
+    }
+    if (inboxAuthMethod.value === 'password') {
+      if (inboxPassword.value === '') {
+        toast.error(t('databox.inbox.passwordRequired'))
+        return
+      }
+      await finishInboxPoll(await dataBoxApi.pollInboxWithPassword(
+        environment.value,
+        inboxUsername.value,
+        inboxPassword.value,
+      ))
+      return
+    }
+    if (mobileCommunicationCode.value === '') {
+      toast.error(t('databox.inbox.communicationCodeRequired'))
+      return
+    }
+    const start = await dataBoxApi.startMobileKeyInbox(
+      environment.value,
+      inboxUsername.value,
+      mobileCommunicationCode.value,
+    )
+    mobileFlowToken.value = start.flow_token
+    mobileStatus.value = start.description
+    mobileCommunicationCode.value = ''
+    mobileStatusTimer = setTimeout(() => { void pollMobileKeyStatus() }, 1500)
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
     saving.value = false
   }
+}
+
+async function changeEnvironment() {
+  resetInboxAuth()
+  inboxAcknowledged.value = false
+  await loadAll()
 }
 
 async function saveRecipient() {
@@ -679,6 +772,8 @@ onMounted(async () => {
   // zbytek by bylo zbytečné volání navíc.
   if (!returning || gatewayNotice.value?.state !== 'awaiting_approval') await loadAll()
 })
+
+onUnmounted(clearMobileStatusTimer)
 </script>
 
 <template>
@@ -694,7 +789,7 @@ onMounted(async () => {
       <select
         v-model="environment"
         class="h-9 min-w-[11rem] rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 shadow-xs outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
-        @change="loadAll"
+        @change="changeEnvironment"
       >
         <option value="production">{{ t('databox.env.production') }}</option>
         <option value="test">{{ t('databox.env.test') }}</option>
@@ -722,7 +817,7 @@ onMounted(async () => {
 
     <!-- ─────────────── Přístup ─────────────── -->
     <section v-if="tab === 'access'" class="space-y-5">
-      <div class="grid gap-4 lg:grid-cols-2">
+      <div class="grid gap-4 lg:grid-cols-3">
         <article class="rounded-lg border border-primary-500/40 bg-primary-50 p-4 shadow-sm">
           <div class="flex flex-wrap items-start justify-between gap-2">
             <h2 class="font-medium text-neutral-900">{{ t('databox.access.gatewayTitle') }}</h2>
@@ -750,6 +845,17 @@ onMounted(async () => {
           <h2 class="font-medium text-neutral-900">{{ t('databox.access.certificateTitle') }}</h2>
           <p class="mt-2 text-sm text-neutral-500">{{ t('databox.access.certificateDescription') }}</p>
           <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.certificateRecommendedByIsds') }}</p>
+        </article>
+
+        <article class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+          <h2 class="font-medium text-neutral-900">{{ t('databox.access.inboxLoginTitle') }}</h2>
+          <p class="mt-2 text-sm text-neutral-500">{{ t('databox.access.inboxLoginDescription') }}</p>
+          <ul class="mt-3 space-y-2 text-sm text-neutral-700">
+            <li>{{ t('databox.access.inboxMobileKey') }}</li>
+            <li>{{ t('databox.access.inboxPassword') }}</li>
+            <li>{{ t('databox.access.inboxCertificate') }}</li>
+          </ul>
+          <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.inboxLoginBoundary') }}</p>
         </article>
       </div>
 
@@ -1257,17 +1363,6 @@ onMounted(async () => {
       </div>
 
       <div class="flex flex-wrap gap-2">
-        <button
-          type="button"
-          :class="btnOutline('primary')"
-          :disabled="saving || !currentCredential"
-          @click="pollInbox"
-        >
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.inbox" />
-          </svg>
-          {{ t('databox.inbox.poll') }}
-        </button>
         <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="refreshDelivery">
           {{ t('databox.delivery.refresh') }}
         </button>
@@ -1276,6 +1371,68 @@ onMounted(async () => {
       <p class="text-sm text-neutral-500">
         {{ t('databox.inbox.manualOnly') }}
       </p>
+
+      <div class="min-w-0 rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+        <h2 class="font-medium text-neutral-900">{{ t('databox.inbox.authTitle') }}</h2>
+        <p class="mt-1 text-sm text-neutral-500">{{ t('databox.inbox.authIntro') }}</p>
+
+        <div class="mt-4 grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <label
+            v-for="method in (['mobile_key', 'password', 'certificate'] as InboxAuthMethod[])"
+            :key="method"
+            class="flex min-w-0 cursor-pointer gap-3 rounded-lg border p-3"
+            :class="inboxAuthMethod === method ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 bg-surface'"
+          >
+            <input v-model="inboxAuthMethod" type="radio" :value="method" class="mt-0.5" />
+            <span class="min-w-0 break-words">
+              <span class="block text-sm font-medium text-neutral-900">{{ t(`databox.inbox.auth.${method}.title`) }}</span>
+              <span class="mt-1 block text-xs text-neutral-500">{{ t(`databox.inbox.auth.${method}.description`) }}</span>
+              <span v-if="method === 'certificate' && !currentCredential" class="mt-1 block text-xs text-warning-700 dark:text-warning-300">
+                {{ t('databox.inbox.certificateMissing') }}
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <div v-if="inboxAuthMethod !== 'certificate'" class="mt-4 grid gap-3 sm:grid-cols-2">
+          <label class="block">
+            <span class="text-sm font-medium">{{ t('databox.inbox.username') }}</span>
+            <input v-model="inboxUsername" type="text" autocomplete="username" class="form-input mt-1 w-full" />
+          </label>
+          <label v-if="inboxAuthMethod === 'password'" class="block">
+            <span class="text-sm font-medium">{{ t('databox.inbox.password') }}</span>
+            <input v-model="inboxPassword" type="password" autocomplete="current-password" class="form-input mt-1 w-full" />
+          </label>
+          <label v-else class="block">
+            <span class="text-sm font-medium">{{ t('databox.inbox.communicationCode') }}</span>
+            <input v-model="mobileCommunicationCode" type="password" autocomplete="off" class="form-input mt-1 w-full" />
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.inbox.communicationCodeHint') }}</span>
+          </label>
+        </div>
+
+        <div v-if="mobileStatus" class="mt-4 rounded-lg border border-primary-500/40 bg-primary-50 p-3 text-sm text-primary-800 dark:text-primary-200">
+          {{ mobileStatus }}
+        </div>
+
+        <label class="mt-4 flex gap-3 rounded-lg border border-warning-500/50 bg-warning-50 p-3 text-sm text-warning-900 dark:text-warning-100">
+          <input v-model="inboxAcknowledged" type="checkbox" class="mt-0.5" />
+          <span>{{ t('databox.polling.acknowledge') }}</span>
+        </label>
+
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            :class="btnFilled('primary')"
+            :disabled="saving || mobileFlowToken !== '' || (inboxAuthMethod === 'certificate' && !currentCredential)"
+            @click="pollInbox"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.inbox" />
+            </svg>
+            {{ inboxAuthMethod === 'mobile_key' ? t('databox.inbox.startMobileKey') : t('databox.inbox.fetchOnce') }}
+          </button>
+        </div>
+      </div>
 
       <EmptyState v-if="!loading && inbox.length === 0" icon="inbox" :title="t('databox.inbox.empty')" />
 
