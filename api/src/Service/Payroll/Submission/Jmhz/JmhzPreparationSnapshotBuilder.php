@@ -15,7 +15,8 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_V4_BUILDER_VERSION = 'jmhz-preparation-source.v4';
     public const PREVIOUS_V5_BUILDER_VERSION = 'jmhz-preparation-source.v5';
     public const PREVIOUS_V6_BUILDER_VERSION = 'jmhz-preparation-source.v6';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v7';
+    public const PREVIOUS_V7_BUILDER_VERSION = 'jmhz-preparation-source.v7';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v8';
 
     private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
 
@@ -98,13 +99,6 @@ final class JmhzPreparationSnapshotBuilder
         $resultPeople = $this->indexResultPeople($result);
 
         $issues = $sourceIssues;
-        if (($revision['revision_kind'] ?? null) !== 'regular') {
-            $issues[] = $this->issue(
-                'jmhz_correction_revision_unsupported',
-                'revision',
-                $revisionId,
-            );
-        }
 
         $normalizedPeople = [];
         $sourceVersions = [];

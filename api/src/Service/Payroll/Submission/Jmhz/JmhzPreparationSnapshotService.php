@@ -20,14 +20,16 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V4_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v4';
     private const PREVIOUS_V5_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v5';
     private const PREVIOUS_V6_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v6';
-    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v7';
+    private const PREVIOUS_V7_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v7';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v8';
     private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
     private const PREVIOUS_V2_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
     private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
     private const PREVIOUS_V4_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v4';
     private const PREVIOUS_V5_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v5';
     private const PREVIOUS_V6_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v6';
-    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v7';
+    private const PREVIOUS_V7_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v7';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v8';
 
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
@@ -82,7 +84,6 @@ final readonly class JmhzPreparationSnapshotService
                 || ($revision['revision_no'] ?? null) !== $verified->revisionNo
                 || ($revision['current_revision_no'] ?? null) !== $verified->revisionNo
                 || ($revision['status'] ?? null) !== 'approved'
-                || ($revision['revision_kind'] ?? null) !== 'regular'
                 || ($revision['input_snapshot_hash'] ?? null)
                     !== ($sourceRevision['input_snapshot_hash'] ?? null)
                 || ($revision['result_snapshot_hash'] ?? null)
@@ -629,6 +630,11 @@ final readonly class JmhzPreparationSnapshotService
                 'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V6_SCHEMA_REFERENCE,
                 'manifest_schema' => self::PREVIOUS_V6_MANIFEST_SCHEMA,
                 'request_schema' => self::PREVIOUS_V6_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V7_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V7_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V7_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V7_REQUEST_SCHEMA,
             ],
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION => [
                 'snapshot_schema' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,

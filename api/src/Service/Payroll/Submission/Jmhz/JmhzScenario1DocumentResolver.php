@@ -17,6 +17,7 @@ final class JmhzScenario1DocumentResolver
         JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::PREVIOUS_V5_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::PREVIOUS_V6_BUILDER_VERSION,
+        JmhzPreparationSnapshotBuilder::PREVIOUS_V7_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
     ];
 

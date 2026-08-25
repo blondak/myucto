@@ -27,7 +27,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v7',
+            'payroll-jmhz-preparation-source.v8',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -75,6 +75,25 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertStringNotContainsString('"entity_id"', $public);
         self::assertStringNotContainsString('Synthetic Person', $public);
         self::assertFalse($snapshot->readiness()['official_submission_supported']);
+    }
+
+    public function testCurrentApprovedCorrectionRevisionCanBeTheSourceOfFirstRegularSubmission(): void
+    {
+        $source = $this->source();
+        $source['revision']['revision_kind'] = 'correction';
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+        );
+
+        self::assertNotContains(
+            'jmhz_correction_revision_unsupported',
+            $snapshot->payload['readiness_issue_codes'],
+        );
     }
 
     public function testLegacyRunWithoutSelectorEvidenceRemainsBlocked(): void

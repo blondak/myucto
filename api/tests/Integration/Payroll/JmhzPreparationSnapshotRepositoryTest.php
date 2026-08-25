@@ -154,6 +154,24 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         self::assertObjectNotHasProperty('snapshotCiphertext', $verified);
     }
 
+    public function testVerifiedLoaderKeepsCurrentApprovedCorrectionRevisionUsable(): void
+    {
+        $created = $this->service->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            'synthetic-jmhz-correction-source-loader',
+            null,
+        );
+        $verified = $this->service->loadVerified(
+            $this->supplierId,
+            'test',
+            (int) $created['id'],
+        );
+
+        self::assertSame($this->revisionId, $verified->sourceRevisionId);
+    }
+
     public function testVerifiedLoaderHidesCrossEnvironmentAndUnknownScope(): void
     {
         $created = $this->service->freeze(
@@ -601,7 +619,7 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
                  schema_version, ruleset_manifest_hash, input_snapshot_json,
                  input_snapshot_hash, result_snapshot_json,
                  result_snapshot_hash, idempotency_key_hash, approved_at)
-             VALUES (?, ?, 1, "regular", "approved",
+             VALUES (?, ?, 1, "correction", "approved",
                      "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, NOW())',
         )->execute([
             $this->supplierId,
