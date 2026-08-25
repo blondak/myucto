@@ -11,7 +11,7 @@ final class JmhzExternalCodebookCatalog
     public const DEFAULT_OVERLAY_KEY =
         'jmhz-external-codebooks-cisob-2026_czemalfa-2026-08-13-v1';
     public const DEFAULT_MANIFEST_SHA256 =
-        '851a6405fd05840743f521e3d1cee250db26b8573653e3b51b34391d79e68c4b';
+        'ec79c28524b0a8e6a9102dbc879ce69fb7ec8dfdf5489873c81066f4d26b230c';
 
     private const DIRECTORY = 'external-codebooks-2026-08-13';
     private const SNAPSHOT_DATE = '2026-08-13';

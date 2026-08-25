@@ -10,9 +10,9 @@ final class JmhzExternalCodebookPackageBuilder
 {
     private const PACKAGE_KEY = 'jmhz-external-codebooks-cisob-2026_czemalfa-2026-08-13-v1';
     private const SPEC_PACKAGE_KEY =
-        'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.7_manifest-v1';
+        'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1';
     private const SPEC_MANIFEST_SHA256 =
-        'f449e605be6f1ee293f3ac359ab4921604c5fc9a225d71fee51b4f94584a0a6b';
+        '429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205';
     private const MUNICIPALITY_FILENAME = 'sb-2025-511-priloha-2-fragment-1093782.ttl';
     private const MUNICIPALITY_SHA256 =
         'b4f130984c94904d083306b19e47f146e6e703847d315219daf97589a7526d44';

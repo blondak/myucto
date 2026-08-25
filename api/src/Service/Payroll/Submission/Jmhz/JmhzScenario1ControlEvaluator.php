@@ -8,7 +8,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
  * Vykonávací implementace kontrol katalogu ČSSZ nad prvním profilem měsíčního
  * hlášení (`scenario_1`, `form:bezPriznaku`, řádné podání).
  *
- * Katalog 1.4.2.7 popisuje 199 kontrol textem, ne strojově. Tahle třída je
+ * Katalog 1.4.2.8 popisuje 199 kontrol textem, ne strojově. Tahle třída je
  * jediné místo, kde se text překládá do kódu, a drží tři pravidla:
  *
  * 1. **Sazby se nezadrátovávají.** Každý koeficient se bere z parametrických
@@ -64,7 +64,8 @@ final class JmhzScenario1ControlEvaluator
             . ' takže by se musel uhodnout; shodu s registrem zaměstnavatelů'
             . ' ČSSZ navíc lokálně ověřit nelze.',
         164 => 'Lhůta splatnosti se odvozuje od data přijetí podání (10006),'
-            . ' které přiděluje až ČSSZ.',
+            . ' které přiděluje až ČSSZ; od verze 1.4.2.8 kontrola platí jen'
+            . ' od období 04/2026 a první přijatou pojistnou část zná evidence ČSSZ.',
         217 => 'Odkaz na GUID jiného podání ověří jen evidence ČSSZ.',
         218 => 'Existenci GUID stornovaného podání ověří jen evidence ČSSZ.',
         220 => 'Existenci GUID stornované součásti ověří jen evidence ČSSZ.',
@@ -89,7 +90,7 @@ final class JmhzScenario1ControlEvaluator
         263 => 'Existenci IK MPSV ověřuje pouze registr ČSSZ.',
         264 => 'Existenci dvojice IK MPSV a ID PPV ověřuje pouze registr ČSSZ.',
         290 => 'Porovnání se slevou z posledního včas podaného hlášení vyžaduje'
-            . ' historii podání, kterou drží ČSSZ.',
+            . ' historii akceptovaných pojistných částí, kterou drží ČSSZ.',
         291 => 'Platnost oznámeného záměru uplatňovat slevu (OZUSPOJ) eviduje ČSSZ.',
         323 => 'Detekce duplicitního přijetí se opírá o identifikátor zprávy'
             . ' a čas přijetí, které přiděluje až ČSSZ.',
@@ -106,8 +107,10 @@ final class JmhzScenario1ControlEvaluator
             . ' který první profil nevykazuje.',
         326 => 'Jedinečnost řádného podání za období se rozhoduje nad evidencí'
             . ' podání, ne nad obsahem jednoho XML.',
-        333 => 'Časové omezení slevy se odvozuje od data přijetí podání (10006),'
-            . ' které přiděluje až ČSSZ.',
+        333 => 'Oficiální katalog 1.4.2.8 má u kontroly časového omezení slevy'
+            . ' rozporné odkazy na atributy. Věcný výsledek navíc závisí na datu'
+            . ' přijetí podání, které přiděluje až ČSSZ; lokálně se proto'
+            . ' neodhaduje a rozhodne protokol ČSSZ.',
         334 => 'Ztotožnění osoby provádí kmenová evidence ČSSZ.',
     ];
 

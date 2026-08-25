@@ -53,6 +53,19 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         }
     }
 
+    public function testOfficialControl333SourceAnomalyIsLeftToTheCsszProtocol(): void
+    {
+        $report = $this->validate(JmhzXmlSample::minimal());
+        $finding = array_values(array_filter(
+            $report->findings,
+            static fn (JmhzControlFinding $finding): bool => $finding->controlId === 333,
+        ))[0];
+
+        self::assertSame(JmhzControlOutcome::NotEvaluable, $finding->outcome);
+        self::assertStringContainsString('rozporné odkazy', $finding->message);
+        self::assertNotContains($finding, $report->coverageGaps());
+    }
+
     /**
      * Sazba se bere z parametrických konstant katalogu, ne z kódu. Pojistné
      * za zaměstnavatele je 24,8 % základu zaokrouhlených nahoru — 248 Kč

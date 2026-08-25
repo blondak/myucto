@@ -49,12 +49,12 @@ return [
         ],
         'control-catalog' => [
             'target' => 'dictionary-1.4.1.6',
-            'filename' => 'Katalog kontrol MH(public)_1.4.2.7.xlsx',
-            'version' => '1.4.2.7',
+            'filename' => 'Katalog kontrol MH(public)_1.4.2.8.xlsx',
+            'version' => '1.4.2.8',
             'url' => 'https://developers.mpsv.cz/assets/documents/'
-                . '5ef0b0d3-e7b2-4788-8fd1-1075d44a27f5/Katalog kontrol MH(public)_1.4.2.7.xlsx',
-            'sha256' => 'fbc87a3aab479af1c58bd44aa710e43f5a522d5ebca5de6eec9bbb690ad8a440',
-            'byte_length' => 200374,
+                . '2ba833e2-8ccd-4a7b-b1cb-489259901b40/Katalog kontrol MH(public)_1.4.2.8.xlsx',
+            'sha256' => '8c861badbd6229e9185482b0caaf19d6ded4797b27bf37f8b53dcb3b31151b49',
+            'byte_length' => 200045,
             'content_types' => [
                 'application/octet-stream',
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -100,8 +100,8 @@ return [
         'dictionary-1.4.1.6/manifest.json' => [
             'schema_version' => 'jmhz-spec-package.v1',
             'identity_key' => 'package_key',
-            'identity' => 'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.7_manifest-v1',
-            'manifest_sha256' => 'f449e605be6f1ee293f3ac359ab4921604c5fc9a225d71fee51b4f94584a0a6b',
+            'identity' => 'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1',
+            'manifest_sha256' => '429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205',
             'counts' => [
                 'attributes' => 442,
                 'monthly_attributes' => 234,
@@ -124,7 +124,7 @@ return [
             'schema_version' => 'jmhz-external-codebook-overlay.v1',
             'identity_key' => 'overlay_key',
             'identity' => 'jmhz-external-codebooks-cisob-2026_czemalfa-2026-08-13-v1',
-            'manifest_sha256' => '851a6405fd05840743f521e3d1cee250db26b8573653e3b51b34391d79e68c4b',
+            'manifest_sha256' => 'ec79c28524b0a8e6a9102dbc879ce69fb7ec8dfdf5489873c81066f4d26b230c',
             'counts' => [
                 'codebooks' => 2,
                 'municipalities' => 6254,
@@ -132,7 +132,7 @@ return [
                 'entries' => 6504,
             ],
             'external_reference_codebooks' => [],
-            'base_manifest_sha256' => 'f449e605be6f1ee293f3ac359ab4921604c5fc9a225d71fee51b4f94584a0a6b',
+            'base_manifest_sha256' => '429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205',
         ],
     ],
 ];
