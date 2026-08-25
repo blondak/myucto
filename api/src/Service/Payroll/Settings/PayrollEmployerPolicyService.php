@@ -141,8 +141,8 @@ final class PayrollEmployerPolicyService
             }
             $result[$field] = $value;
         }
+        $result['four_eyes_required'] = false;
         foreach ([
-            'four_eyes_required',
             'automatic_calculation_enabled',
             'automatic_posting_enabled',
             'automatic_payments_enabled',

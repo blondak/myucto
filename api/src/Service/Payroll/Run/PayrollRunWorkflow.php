@@ -108,17 +108,9 @@ final class PayrollRunWorkflow
         ], true) && !$context->hasCalculatedResult) {
             throw new \DomainException('Kontrola a schválení vyžadují uložený výsledek.');
         }
-        if ($command === PayrollRunCommand::REVIEW
-            && $context->calculatedBy === $context->actorUserId
-        ) {
-            throw new \DomainException('Výsledek musí zkontrolovat jiný uživatel než kalkulátor.');
-        }
         if ($command === PayrollRunCommand::APPROVE) {
             if ($context->reviewedBy === null) {
                 throw new \DomainException('Před schválením musí být evidována odborná kontrola.');
-            }
-            if ($context->calculatedBy === $context->actorUserId) {
-                throw new \DomainException('Mzdu musí schválit jiný uživatel než kalkulátor.');
             }
             if ($context->blockerCount > 0) {
                 throw new \DomainException('Mzdový běh obsahuje blokující validace.');

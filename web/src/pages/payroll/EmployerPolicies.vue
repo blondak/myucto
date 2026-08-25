@@ -71,7 +71,7 @@ function newPolicy(): PayrollEmployerPolicyPayload {
     balance_rounding_mode: 'exact_minor_units',
     home_office_policy: 'not_used',
     travel_expense_policy: 'not_used',
-    four_eyes_required: true,
+    four_eyes_required: false,
     automatic_calculation_enabled: false,
     automatic_posting_enabled: false,
     automatic_payments_enabled: false,
@@ -206,7 +206,7 @@ function edit(policy: PayrollEmployerPolicy) {
     balance_rounding_mode: policy.balance_rounding_mode,
     home_office_policy: policy.home_office_policy,
     travel_expense_policy: policy.travel_expense_policy,
-    four_eyes_required: policy.four_eyes_required,
+    four_eyes_required: false,
     automatic_calculation_enabled: policy.automatic_calculation_enabled,
     automatic_posting_enabled: policy.automatic_posting_enabled,
     automatic_payments_enabled: policy.automatic_payments_enabled,
@@ -739,11 +739,7 @@ onMounted(load)
         <legend class="text-sm font-semibold text-neutral-900">
           {{ t('payroll.employer.policies.automation_title') }}
         </legend>
-        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <label class="flex items-start gap-2">
-            <input v-model="form.four_eyes_required" type="checkbox" :disabled="!canWrite" class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
-            <span class="text-sm text-neutral-700">{{ t('payroll.employer.policies.four_eyes') }}</span>
-          </label>
+        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <label class="flex items-start gap-2">
             <input v-model="form.automatic_calculation_enabled" type="checkbox" :disabled="!canWrite" class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
             <span class="text-sm text-neutral-700">{{ t('payroll.employer.policies.automatic_calculation') }}</span>

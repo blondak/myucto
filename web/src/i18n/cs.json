@@ -1129,7 +1129,7 @@
         },
         "runs": {
             "title": "Mzdové běhy",
-            "subtitle": "Uzamknutí vstupů, neměnný výpočet, kontrola čtyř očí a schválení měsíční mzdy.",
+            "subtitle": "Uzamknutí vstupů, neměnný výpočet, odborná kontrola a schválení měsíční mzdy jednou účetní.",
             "period": "Mzdové období",
             "payment_date": "Datum výplaty",
             "payment_date_value": "Výplata {date}",

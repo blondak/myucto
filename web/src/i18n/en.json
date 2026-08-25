@@ -1129,7 +1129,7 @@
         },
         "runs": {
             "title": "Payroll runs",
-            "subtitle": "Input locking, immutable calculation, four-eye review and monthly payroll approval.",
+            "subtitle": "Input locking, immutable calculation, professional review and monthly payroll approval by one accountant.",
             "period": "Payroll period",
             "payment_date": "Payment date",
             "payment_date_value": "Payment {date}",

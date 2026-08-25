@@ -253,22 +253,21 @@ final class PayrollRunWorkflowTest extends TestCase
         );
     }
 
-    public function testFourEyesRejectsCalculatorAsReviewerOrApprover(): void
+    public function testSingleAccountantCanCalculateReviewAndApprove(): void
     {
-        foreach ([PayrollRunCommand::REVIEW, PayrollRunCommand::APPROVE] as $command) {
-            try {
-                $this->workflow->transition(
-                    $command === PayrollRunCommand::REVIEW
-                        ? PayrollRunStatus::CALCULATED
-                        : PayrollRunStatus::REVIEWED,
-                    $command,
-                    $this->context(actorUserId: 10, calculatedBy: 10),
-                );
-                self::fail($command->value);
-            } catch (\DomainException $e) {
-                self::assertStringContainsString('jiný uživatel', $e->getMessage());
-            }
-        }
+        $review = $this->workflow->transition(
+            PayrollRunStatus::CALCULATED,
+            PayrollRunCommand::REVIEW,
+            $this->context(actorUserId: 10, calculatedBy: 10),
+        );
+        self::assertSame(PayrollRunStatus::REVIEWED, $review->to);
+
+        $approval = $this->workflow->transition(
+            $review->to,
+            PayrollRunCommand::APPROVE,
+            $this->context(actorUserId: 10, calculatedBy: 10, reviewedBy: 10),
+        );
+        self::assertSame(PayrollRunStatus::APPROVED, $approval->to);
     }
 
     public function testApprovalRejectsBlockersAndUnresolvedOverrides(): void

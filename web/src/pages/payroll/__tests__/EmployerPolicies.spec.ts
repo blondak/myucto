@@ -249,7 +249,7 @@ describe('EmployerPolicies', () => {
     expect(m.createEmployerPolicy.mock.calls[0][0]).toMatchObject({
       row_version: 0,
       source_kind: 'manual',
-      four_eyes_required: true,
+      four_eyes_required: false,
       automatic_calculation_enabled: false,
       automatic_posting_enabled: false,
       automatic_payments_enabled: false,
