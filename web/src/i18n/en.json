@@ -11745,6 +11745,10 @@
                     "title": "Invoice look and logo",
                     "text": "Upload a logo, pick an accent colour and a document footer. Multiple profiles are fine if you invoice under several brands."
                 },
+                "suppliers": {
+                    "title": "Add more companies",
+                    "text": "Your licence covers several companies. Each keeps its own documents, number series and reports; you switch between them in the header."
+                },
                 "numbering": {
                     "title": "Numbering and documents",
                     "text": "Number formats for invoices, proformas and credit notes, plus default due date and currency. Set it before the first document."
@@ -11753,9 +11757,9 @@
                     "title": "Journal document series",
                     "text": "Accounting document series for the journal — prefix and numbering separately for invoices, bank, cash and internal documents."
                 },
-                "email": {
-                    "title": "Outgoing e-mail",
-                    "text": "The sending profile and address your invoices go out from — including your own SMTP server if you want one."
+                "bank_email": {
+                    "title": "Payment notices from e-mail",
+                    "text": "Connect the mailbox your bank sends payment notices to. MyÚčto matches invoice payments from them, even between statements."
                 },
                 "databox": {
                     "title": "Data box",

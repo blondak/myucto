@@ -11745,6 +11745,10 @@
                     "title": "Vzhled faktur a logo",
                     "text": "Nahrajte logo, zvolte barvu a patičku dokladu. Profilů může být víc, když fakturujete pod několika značkami."
                 },
+                "suppliers": {
+                    "title": "Přidat další firmy",
+                    "text": "Licence vám dovoluje účtovat víc firem. Každá má vlastní doklady, číselné řady i výkazy; mezi firmami se přepíná v hlavičce."
+                },
                 "numbering": {
                     "title": "Číselné řady a doklady",
                     "text": "Formát čísel faktur, proforem a dobropisů, výchozí splatnost a měna. Nastavte dřív, než vystavíte první doklad."
@@ -11753,9 +11757,9 @@
                     "title": "Číselné řady deníku",
                     "text": "Řady účetních dokladů pro deník — prefix a číslování zvlášť pro faktury, banku, pokladnu a interní doklady."
                 },
-                "email": {
-                    "title": "Odesílání e-mailů",
-                    "text": "Odesílací profil a adresa, ze které chodí faktury klientům — včetně vlastního SMTP, pokud ho chcete použít."
+                "bank_email": {
+                    "title": "Avíza plateb z e-mailů",
+                    "text": "Připoj schránku, do které banka posílá avíza o pohybech. MyÚčto z nich páruje úhrady faktur i mezi výpisy."
                 },
                 "databox": {
                     "title": "Datová schránka",

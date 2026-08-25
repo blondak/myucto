@@ -287,9 +287,10 @@ vyplnit, než začneš fakturovat. Vidí ho každý, kdo smí zapisovat.
 | Daně a účetnictví | Nastavení → Daně a účetnictví (`/admin/settings?tab=accounting`) |
 | Bankovní účty | [Banka → Účty](28_Banka.md) |
 | Vzhled faktur a logo | [Brandingové profily](73_Nastaveni.md#7312-brandingove-profily) |
+| Přidat další firmy | Jen licence na víc firem, dokud v ní zbývá místo — Systém → Dodavatelé (`/admin/suppliers`) |
 | Číselné řady a doklady | Nastavení → Fakturace (`/admin/settings?tab=documents`) |
 | Číselné řady deníku | Jen podvojné účetnictví — [Účetní nástroje](69_Ucetni_nastroje.md) |
-| Odesílání e-mailů | [Odesílací e-mailové profily](73_Nastaveni.md#737-odesilaci-e-mailove-profily) (`/admin/emails`) |
+| Avíza plateb z e-mailů | [Banka → Bankovní avíza z e-mailu](28_Banka.md) (`/bank?tab=email`) |
 | Datová schránka | Systém → Datová schránka (`/admin/databox`) |
 | Uživatelé a role | [Uživatelé](73_Nastaveni.md#732-uzivatele) |
 | První klient / první faktura | [Klienti](18_Klienti.md) · [Faktury](14_Faktury.md) |

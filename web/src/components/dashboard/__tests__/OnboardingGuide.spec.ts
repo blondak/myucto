@@ -21,6 +21,7 @@ const m = vi.hoisted(() => ({
   canWrite: vi.fn((_p: string) => true),
   isSuperadmin: true,
   accountingMode: 'tax_evidence' as string,
+  license: null as null | { max_companies: number | null; companies_active: number },
 }))
 
 vi.mock('@/api/preferences', () => ({
@@ -35,6 +36,7 @@ vi.mock('@/stores/auth', () => ({
     canRead: m.canRead,
     canWrite: m.canWrite,
     get isSuperadmin() { return m.isSuperadmin },
+    get license() { return m.license },
   }),
 }))
 
@@ -64,6 +66,7 @@ beforeEach(() => {
   m.canWrite.mockReturnValue(true)
   m.isSuperadmin = true
   m.accountingMode = 'tax_evidence'
+  m.license = null
 })
 
 describe('OnboardingGuide', () => {
@@ -73,6 +76,22 @@ describe('OnboardingGuide', () => {
     expect(wrapper.findAll('article')).toHaveLength(10)
     expect(wrapper.emitted('update:visible')?.at(-1)).toEqual([true])
     expect(wrapper.text()).toContain('dashboard.onboarding.title')
+  })
+
+  it('další firmy nabídne jen licenci na víc firem, dokud v ní zbývá místo', async () => {
+    expect((await mountGuide()).text()).not.toContain('dashboard.onboarding.steps.suppliers.title')
+
+    m.license = { max_companies: 1, companies_active: 1 }
+    expect((await mountGuide()).text()).not.toContain('dashboard.onboarding.steps.suppliers.title')
+
+    m.license = { max_companies: 5, companies_active: 5 }   // licence na víc firem, ale plno
+    expect((await mountGuide()).text()).not.toContain('dashboard.onboarding.steps.suppliers.title')
+
+    m.license = { max_companies: 5, companies_active: 1 }
+    expect((await mountGuide()).text()).toContain('dashboard.onboarding.steps.suppliers.title')
+
+    m.license = { max_companies: null, companies_active: 3 } // neomezeně
+    expect((await mountGuide()).text()).toContain('dashboard.onboarding.steps.suppliers.title')
   })
 
   it('číselné řady deníku nabídne jen podvojnému účetnictví', async () => {
