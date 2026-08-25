@@ -79,15 +79,32 @@ final class JmhzScenario1DocumentResolver
         }
 
         $blockers = [];
-        if (($preparation->readiness['status'] ?? null) !== 'source_ready') {
+        $scope = $this->object($preparation->payload['scope'] ?? null);
+        $sourceRevision = $this->object(
+            $preparation->payload['source_revision'] ?? null,
+        );
+        $ordinaryEvidence = $this->ordinaryEvidenceByEmployment($preparation);
+        $people = $this->officePeople(
+            $this->rows($preparation->payload['people'] ?? null),
+            $officeId,
+        );
+        $readinessIssues = $this->rows(
+            $preparation->payload['readiness_issues'] ?? null,
+        );
+        $scopedReadinessIssues = $this->readinessIssuesForOffice(
+            $readinessIssues,
+            $people,
+            $officeId,
+        );
+        if (($preparation->readiness['status'] ?? null) !== 'source_ready'
+            && ($scopedReadinessIssues !== [] || $readinessIssues === [])
+        ) {
             $blockers[] = $this->blocker(
                 'jmhz_preparation_not_ready',
                 'preparation',
                 $preparation->id,
             );
-            foreach ($this->rows(
-                $preparation->payload['readiness_issues'] ?? null,
-            ) as $issue) {
+            foreach ($scopedReadinessIssues as $issue) {
                 $attributeIds = $issue['attribute_ids'] ?? [];
                 $blockers[] = $this->blocker(
                     is_string($issue['code'] ?? null)
@@ -106,19 +123,10 @@ final class JmhzScenario1DocumentResolver
             }
         }
 
-        $scope = $this->object($preparation->payload['scope'] ?? null);
-        $sourceRevision = $this->object(
-            $preparation->payload['source_revision'] ?? null,
-        );
-        $ordinaryEvidence = $this->ordinaryEvidenceByEmployment($preparation);
         $registration = $this->registration(
             $preparation,
             $officeId,
             $blockers,
-        );
-        $people = $this->officePeople(
-            $this->rows($preparation->payload['people'] ?? null),
-            $officeId,
         );
         if (count($people) > 1500) {
             $blockers[] = $this->blocker(
@@ -640,6 +648,55 @@ final class JmhzScenario1DocumentResolver
         }
 
         return $filtered;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $issues
+     * @param list<array<string,mixed>> $people
+     * @return list<array<string,mixed>>
+     */
+    private function readinessIssuesForOffice(
+        array $issues,
+        array $people,
+        ?int $officeId,
+    ): array {
+        if ($officeId === null) {
+            return $issues;
+        }
+        $employeeIds = [];
+        $employmentIds = [];
+        foreach ($people as $person) {
+            $employeeId = $person['employee_id'] ?? null;
+            if (is_int($employeeId)) {
+                $employeeIds[$employeeId] = true;
+            }
+            foreach ($this->rows($person['employments'] ?? null) as $employment) {
+                $employmentId = $employment['employment_id'] ?? null;
+                if (is_int($employmentId)) {
+                    $employmentIds[$employmentId] = true;
+                }
+            }
+        }
+
+        return array_values(array_filter(
+            $issues,
+            static function (array $issue) use (
+                $employeeIds,
+                $employmentIds,
+                $officeId,
+            ): bool {
+                $entityType = $issue['entity_type'] ?? null;
+                $entityId = $issue['entity_id'] ?? null;
+                return match ($entityType) {
+                    'employment' => is_int($entityId)
+                        && isset($employmentIds[$entityId]),
+                    'person', 'employee' => is_int($entityId)
+                        && isset($employeeIds[$entityId]),
+                    'office' => $entityId === $officeId,
+                    default => true,
+                };
+            },
+        ));
     }
 
     /**
