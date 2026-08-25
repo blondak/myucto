@@ -763,9 +763,11 @@ final class Bootstrap
 
         $app = AppFactory::create();
 
-        self::enableRouteCache($app, $config);
-
         Routes::register($app);
+
+        // AŽ ZA registrací: otisk cache se počítá z rout, které jsou reálně
+        // v paměti tohohle procesu (viz enableRouteCache()).
+        self::enableRouteCache($app, $config);
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
@@ -820,17 +822,26 @@ final class Bootstrap
     }
 
     /**
-     * Zapne FastRoute cache — předpočítané regexy pro 586 rout.
+     * Zapne FastRoute cache — předpočítané regexy pro routy.
      *
      * Bez ní se vzory parsují při KAŽDÉM requestu: naměřeno 10,2 ms dispatch
      * proti 1,5 ms s cache. Registrace rout se tím neušetří (Route objekty
      * vznikají vždy), ale kompilace regexů ano — a ta je tou drahou částí.
      *
-     * INVALIDACE JMÉNEM SOUBORU: v názvu je otisk Routes.php (mtime + velikost)
-     * a verze aplikace. Změna rout tedy automaticky vede na JINÝ soubor, takže
-     * zastaralá cache nemůže vzniknout ani při zapomenutém úklidu na deployi.
-     * To je podstatné: stará cache by znamenala 404 na nové routě nebo, hůř,
-     * routování na starý handler — a to bez jediné chybové hlášky.
+     * INVALIDACE JMÉNEM SOUBORU: v názvu je otisk rout, které TENHLE proces
+     * právě zaregistroval — identifikátor, metody a vzor každé z nich. Volá se
+     * proto až ZA {@see Routes::register()}; Slim si cacheFile přečte líně, až
+     * při prvním dispatchi, takže pozdější nastavení nic nerozbíjí.
+     *
+     * Otisk se dřív počítal z mtime + velikosti `Routes.php` a z `VERSION`,
+     * tedy z metadat na disku. To je proti procesu, který má v opcache ještě
+     * starý bytekód (nebo běží nad rozpracovaným swapem), slepé: disk už hlásí
+     * novou verzi, ale proces registruje staré routy — a zapíše je pod jméno
+     * nové. Ostatní procesy pak čtou mapping, kde `route757` znamená něco
+     * jiného, než co mají v paměti, a aplikace tiše routuje na cizí handlery
+     * (25. 8. 2026: `GET /api/dashboard/summary` končilo na `undoBatch`
+     * s `invalid_batch`). Otisk z živých rout tuhle skulinu zavírá: proces se
+     * starým kódem si sáhne na jiný soubor a ten správný nezamoří.
      *
      * Selhání je vždy tiché a bezpečné: bez cache aplikace jen běží pomaleji.
      *
@@ -848,17 +859,17 @@ final class Bootstrap
                 return;
             }
 
-            $routesFile = __DIR__ . DIRECTORY_SEPARATOR . 'Routes.php';
-            $mtime = @filemtime($routesFile);
-            $size = @filesize($routesFile);
-            if ($mtime === false || $size === false) {
-                return;
+            $collector = $app->getRouteCollector();
+            $signature = '';
+            foreach ($collector->getRoutes() as $identifier => $route) {
+                $signature .= $identifier . ' ' . implode(',', $route->getMethods())
+                    . ' ' . $route->getPattern() . "\n";
+            }
+            if ($signature === '') {
+                return; // routy ještě nejsou zaregistrované — cache by byla prázdná
             }
 
-            $versionFile = self::rootDir() . DIRECTORY_SEPARATOR . 'VERSION';
-            $version = is_file($versionFile) ? trim((string) @file_get_contents($versionFile)) : '';
-
-            $fingerprint = substr(hash('xxh128', $version . '|' . $mtime . '|' . $size), 0, 16);
+            $fingerprint = substr(hash('xxh128', $signature), 0, 16);
             $dir = ($config->dataDir() ?? self::rootDir())
                 . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'cache';
             if (!is_dir($dir) && !@mkdir($dir, 0o775, true) && !is_dir($dir)) {
@@ -878,7 +889,7 @@ final class Bootstrap
                 }
             }
 
-            $app->getRouteCollector()->setCacheFile($cacheFile);
+            $collector->setCacheFile($cacheFile);
         } catch (\Throwable) {
             // Cache je optimalizace — nikdy nesmí bránit startu aplikace.
         }
