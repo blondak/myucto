@@ -1990,10 +1990,9 @@ final class Routes
         $app->get    ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'list']);
         $app->post   ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'upload']);
         // Datová schránka jako průřezový kanál podání (DPH, KH, SH, DPPO,
-        // přehledy ZP…). Systémový certifikát a souhlas s vybíráním schránky.
+        // přehledy ZP…). Systémový certifikát je vždy nastavení aktuální firmy.
         $app->get    ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'list']);
         $app->post   ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'save']);
-        $app->post   ('/api/settings/databox/polling',     [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'setPolling']);
         $app->delete ('/api/settings/databox/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'delete']);
         // Registrace odesílací brány je věc PROVOZOVATELE, ne zákazníka:
         // certifikát je jeden pro celou službu a zákazník k odeslání přes bránu
@@ -2024,6 +2023,11 @@ final class Routes
         // relace, `appToken` z přesměrování jen dohledává rozpracované podání.
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/gateway',   [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'start']);
         $app->post   ('/api/submissions/gateway/callback',             [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'complete']);
+        $app->get    ('/api/submissions/gateway/capability',           [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'capability']);
+        // Tatáž brána pro mzdovou roli. Globální registraci certifikátu tím
+        // nezískává — aliasy jen zahájí a dokončí její vlastní podání.
+        $app->post   ('/api/payroll/submissions/isds-gateway/outbox/{id:[0-9]+}', [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'payrollStart']);
+        $app->post   ('/api/payroll/submissions/isds-gateway/callback',            [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'payrollComplete']);
         $app->post   ('/api/submissions/receipts',                     [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'upload']);
         $app->get    ('/api/submissions/receipts/unmatched',           [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'unmatched']);
         $app->get    ('/api/submissions/receipts/{id:[0-9]+}/candidates', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'candidates']);

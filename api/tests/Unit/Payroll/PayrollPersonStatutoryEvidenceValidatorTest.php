@@ -59,6 +59,27 @@ final class PayrollPersonStatutoryEvidenceValidatorTest extends TestCase
         $this->validator->normalize(42, '2026-06-30', $raw);
     }
 
+    public function testVerifiedStatusesDoNotRequireEvidenceReferences(): void
+    {
+        $raw = $this->completeRaw();
+        $raw['health']['coverages'][0]['insurer_evidence_reference'] = null;
+        $raw['health']['minimum_reductions'][0]['evidence_reference'] = null;
+        $raw['health']['month_evidence'][0]['selected_top_up_employer_evidence_reference'] = null;
+        $raw['health']['other_employer_bases'][0]['evidence_reference'] = null;
+        $raw['income_tax']['declarations'][0]['evidence_reference'] = null;
+        $raw['income_tax']['residences'][0]['evidence_reference'] = null;
+        $raw['income_tax']['credit_claims'][0]['evidence_reference'] = null;
+        $raw['income_tax']['child_claims'][0]['evidence_reference'] = null;
+        $raw['social']['discount_claims'][0]['evidence_reference'] = null;
+
+        $snapshot = $this->validator->normalize(42, '2026-06-30', $raw);
+
+        self::assertNull($snapshot['health']['coverage']['insurer_evidence_reference']);
+        self::assertNull($snapshot['health']['other_employer_bases'][0]['evidence_reference']);
+        self::assertNull($snapshot['income_tax']['declaration']['evidence_reference']);
+        self::assertNull($snapshot['social']['working_pensioner_discount']['evidence_reference']);
+    }
+
     public function testRejectsForeignJurisdictionWithoutCountryAndA1Evidence(): void
     {
         $raw = $this->completeRaw();

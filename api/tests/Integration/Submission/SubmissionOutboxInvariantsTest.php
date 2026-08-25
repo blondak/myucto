@@ -193,14 +193,23 @@ final class SubmissionOutboxInvariantsTest extends TestCase
         $this->enqueue(str_repeat('Z', 51));
     }
 
-    /** Číselník: ID schránky bez doloženého zdroje se neuloží. */
-    public function testRecipientBoxIdWithoutSourceIsRejected(): void
+    /** Odkaz na zdroj je užitečný auditní údaj, ale nesmí blokovat firemní číselník. */
+    public function testRecipientBoxIdWithoutSourceIsAllowed(): void
     {
-        $this->expectException(PDOException::class);
         $this->db->pdo()->prepare(
             "INSERT INTO submission_recipients (supplier_id, code, name, kind, isds_box_id)
              VALUES (?, 'fu_bez_dokladu', 'FÚ bez dokladu', 'tax_office', 'abcdefg')"
         )->execute([$this->supplierId]);
+
+        $stored = $this->db->pdo()->prepare(
+            'SELECT isds_box_id, source_url FROM submission_recipients WHERE supplier_id = ? AND code = ?'
+        );
+        $stored->execute([$this->supplierId, 'fu_bez_dokladu']);
+        $row = $stored->fetch(PDO::FETCH_ASSOC);
+
+        self::assertIsArray($row);
+        self::assertSame('abcdefg', $row['isds_box_id']);
+        self::assertNull($row['source_url']);
     }
 
     /**
@@ -247,18 +256,7 @@ final class SubmissionOutboxInvariantsTest extends TestCase
         self::assertSame('9tsaf6s', $byCode['cssz_epodani_test'] ?? null);
     }
 
-    /** Souhlas s vybíráním schránky musí nést, kdo a kdy ho dal (§ 17 odst. 3). */
-    public function testInboxPollingCannotBeEnabledWithoutRecordingConsent(): void
-    {
-        $this->insertCredential();
-
-        $this->expectException(PDOException::class);
-        $this->db->pdo()->prepare(
-            'UPDATE submission_channel_credentials SET inbox_polling_enabled = 1 WHERE supplier_id = ?'
-        )->execute([$this->supplierId]);
-    }
-
-    /** Vybírání schránky je ve výchozím stavu vypnuté. */
+    /** Historický příznak zůstává vypnutý; produkt automatický režim nenabízí. */
     public function testInboxPollingIsDisabledByDefault(): void
     {
         $this->insertCredential();

@@ -192,7 +192,7 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         $snapshot = $this->completeSnapshot();
         $term = &$snapshot['people'][0]['employments'][0]['term'];
         $term['social_part_time_discount_reason'] = 'age_55_plus';
-        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_evidence'] = null;
         $term['social_part_time_discount_notified_on'] = '2026-05-20';
         $term['weekly_hours'] = '20.00';
         unset($term);
@@ -207,10 +207,7 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             SocialPartTimeDiscountReason::Age55Plus,
             $relationship?->partTimeEmployerDiscountReason,
         );
-        self::assertSame(
-            'osobni-spis/2026/42',
-            $relationship?->partTimeEmployerDiscountEvidenceReference,
-        );
+        self::assertNull($relationship?->partTimeEmployerDiscountEvidenceReference);
         self::assertSame(98_000, $relationship?->partTimeDiscountAssessableMillihours);
         self::assertSame(20_000, $relationship?->agreedWeeklyWorkingMillihours);
         self::assertSame(30, $relationship?->partTimeDiscountMonthDays);
@@ -292,7 +289,7 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         $snapshot = $this->completeSnapshot();
         $term = &$snapshot['people'][0]['employments'][0]['term'];
         $term['social_part_time_discount_reason'] = 'age_55_plus';
-        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_evidence'] = null;
         $term['social_part_time_discount_notified_on'] = null;
         $term['social_part_time_discount_intent'] = [
             'status' => 'accepted',
@@ -316,6 +313,7 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             SocialPartTimeDiscountReason::Age55Plus,
             $relationship?->partTimeEmployerDiscountReason,
         );
+        self::assertNull($relationship?->partTimeEmployerDiscountEvidenceReference);
     }
 
     /**
@@ -362,12 +360,7 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         ];
     }
 
-    /**
-     * Zařazení nad běžnou sazbu se dokládá. Bez podkladu vstup kategorii
-     * nedostane — a hlavně nespadne zpět na běžnou sazbu, protože nižší sazba
-     * je pro zaměstnavatele levnější a tichý default by mířil vždy tím směrem.
-     */
-    public function testRateCategoryWithoutEvidenceBecomesUnverifiedInsteadOfOrdinary(): void
+    public function testRateCategoryDoesNotRequireEvidenceReference(): void
     {
         $snapshot = $this->completeSnapshot();
         $snapshot['people'][0]['employments'][0]['term']['social_employer_rate_category'] =
@@ -377,10 +370,12 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
 
         $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
 
+        $relationship = $bundle->socialInsurance?->people[0]->relationships[0];
         self::assertSame(
-            SocialEmployerRateCategory::Unverified,
-            $bundle->socialInsurance?->people[0]->relationships[0]->employerRateCategory,
+            SocialEmployerRateCategory::RescueAndCompanyFireService,
+            $relationship?->employerRateCategory,
         );
+        self::assertNull($relationship?->employerRateCategoryEvidenceReference);
     }
 
     /**
@@ -597,12 +592,7 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         );
     }
 
-    /**
-     * Výjimka podle věty třetí § 3 odst. 10 (překážky na straně organizace)
-     * zůstává vázaná na doklad. Bez něj se NESMÍ sesypat na zákonný default —
-     * jinak by šlo přenést doplatek na zaměstnavatele smazáním reference.
-     */
-    public function testEmployerObstacleWithoutEvidenceStillBlocksHealthInputs(): void
+    public function testEmployerObstacleDoesNotRequireEvidenceReference(): void
     {
         $snapshot = $this->completeSnapshot();
         $month = &$snapshot['people'][0]['statutory_evidence']['health']
@@ -613,14 +603,14 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
 
         $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
 
-        self::assertNull($bundle->healthInsurance);
+        self::assertNotNull($bundle->healthInsurance);
+        self::assertSame([], $bundle->issues);
+        $person = $bundle->healthInsurance->people[0];
         self::assertSame(
-            ['health_insurance|health_evidence_mapping_failed'],
-            array_map(
-                static fn ($issue): string => "{$issue->domain}|{$issue->code}",
-                $bundle->issues,
-            ),
+            HealthMinimumTopUpResponsibility::EmployerObstacleVerified,
+            $person->topUpResponsibility,
         );
+        self::assertNull($person->topUpResponsibilityEvidenceReference);
     }
 
     /**

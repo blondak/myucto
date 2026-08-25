@@ -14,14 +14,6 @@ final readonly class TaxResidenceEvidence
         public ?string $effectiveTo = null,
         public ?string $evidenceReference = null,
     ) {
-        if (
-            $residence !== TaxResidence::Unverified
-            && trim((string) $evidenceReference) === ''
-        ) {
-            throw new InvalidArgumentException(
-                'Verified tax residence requires an evidence reference.',
-            );
-        }
         if ($residence !== TaxResidence::Unverified && $effectiveFrom === null) {
             throw new InvalidArgumentException(
                 'Verified tax residence requires an effective interval.',

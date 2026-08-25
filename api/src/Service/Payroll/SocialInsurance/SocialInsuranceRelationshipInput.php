@@ -130,8 +130,8 @@ final readonly class SocialInsuranceRelationshipInput
          * Zvýšená sazba podle § 5a odst. 1 písm. b) a c) stojí na věcném
          * zařazení zaměstnance, které se dokládá (rizikové zaměstnání podle
          * § 37d odst. 2 zákona o důchodovém pojištění vzniká z kategorizace
-         * prací, ne z políčka ve mzdovém listu). Vstup ho proto bez odkazu na
-         * podklad nepřijme; běžná sazba naopak žádný podklad nemá a mít nesmí.
+         * prací, ne z políčka ve mzdovém listu). Textový odkaz na podklad je
+         * volitelný; běžná sazba naopak žádný takový odkaz nemá a mít nesmí.
          */
         if (
             !in_array(
@@ -139,14 +139,14 @@ final readonly class SocialInsuranceRelationshipInput
                 [SocialEmployerRateCategory::Ordinary, SocialEmployerRateCategory::Unverified],
                 true,
             )
-            && ($employerRateCategoryEvidenceReference === null
-                || preg_match(
+            && $employerRateCategoryEvidenceReference !== null
+            && preg_match(
                     '/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D',
                     $employerRateCategoryEvidenceReference,
-                ) !== 1)
+                ) !== 1
         ) {
             throw new InvalidArgumentException(
-                'Employer rate category above the ordinary rate requires an evidence reference.',
+                'Employer rate category evidence reference is not canonical.',
             );
         }
         if (
@@ -189,10 +189,10 @@ final readonly class SocialInsuranceRelationshipInput
     ): void {
         if (
             $evidence === SocialDiscountEvidence::Verified
-            && ($reference === null
-                || preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D', $reference) !== 1)
+            && $reference !== null
+            && preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D', $reference) !== 1
         ) {
-            throw new InvalidArgumentException("{$label} verification requires an evidence reference.");
+            throw new InvalidArgumentException("{$label} evidence reference is not canonical.");
         }
         if ($evidence !== SocialDiscountEvidence::Verified && $reference !== null) {
             throw new InvalidArgumentException(

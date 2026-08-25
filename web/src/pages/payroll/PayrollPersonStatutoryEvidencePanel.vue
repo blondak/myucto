@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -169,13 +169,23 @@ function onInput(
   setField(section, row, key, (event.target as HTMLInputElement).value)
 }
 
-/** Vybraný typický důvod, nebo „jiné", když v řádku je vlastní označení. */
+const customReferenceEditors = reactive(
+  new WeakMap<PayrollStatutoryEvidenceRow, Set<string>>(),
+)
+
+function usesCustomReference(row: PayrollStatutoryEvidenceRow, key: string): boolean {
+  return customReferenceEditors.get(row)?.has(key) ?? false
+}
+
+/** Prázdno, typický důvod, nebo „jiné", když v řádku je vlastní označení. */
 function reasonSelection(
   section: StatutorySectionSpec,
   row: PayrollStatutoryEvidenceRow,
   field: StatutoryFieldSpec,
 ): string {
+  if (usesCustomReference(row, field.key)) return CUSTOM_REASON
   const current = statutoryText(row, field.key)
+  if (current === '') return ''
   return reasonOptions(section.key, field.key, row).includes(current)
     ? current
     : CUSTOM_REASON
@@ -187,9 +197,11 @@ function onReason(
   event: Event,
 ) {
   const selected = (event.target as HTMLSelectElement).value
-  // „Jiné" nechá pole prázdné schválně: uživatel má napsat konkrétní číslo
-  // dokladu a dokud ho nenapíše, formulář to hlásí jako chybějící údaj.
-  row[field.key] = selected === CUSTOM_REASON ? null : selected
+  const customFields = customReferenceEditors.get(row) ?? new Set<string>()
+  if (selected === CUSTOM_REASON) customFields.add(field.key)
+  else customFields.delete(field.key)
+  customReferenceEditors.set(row, customFields)
+  row[field.key] = selected === CUSTOM_REASON || selected === '' ? null : selected
 }
 
 function hydrate(value: PayrollStatutoryEvidence) {
@@ -512,6 +524,9 @@ onMounted(() => {
                       class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
                       @change="onReason(row, field, $event)"
                     >
+                      <option value="">
+                        {{ t('payroll.people.statutory_evidence.reference_optional') }}
+                      </option>
                       <option
                         v-for="reason in reasonOptions(section.key, field.key, row)"
                         :key="reason"

@@ -47,10 +47,6 @@ final class CronDispatcher
     private const WORK_GATES = [
         'cron-epo-status' => [CronPreflight::class, 'hasEpoWork'],
         'cron-ai-worker'  => [CronPreflight::class, 'hasAiWork'],
-        // Datová schránka: bez výslovně zapnutého vybírání nemá cron co dělat
-        // — a nesmí mít. Vyzvednutí seznamu je doručení (§ 17 odst. 3
-        // zák. 300/2008 Sb.) a rozjíždí zákonné lhůty.
-        'cron-databox-inbox' => [CronPreflight::class, 'hasDataBoxInboxWork'],
     ];
 
     /** Minuta nárokována — úloha se spustí. */

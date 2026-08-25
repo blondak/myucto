@@ -96,10 +96,8 @@ final class SubmissionChannelCredentialRepository
     public function save(int $supplierId, string $channel, string $environment, array $data, ?int $userId): void
     {
         $this->assertAvailable();
-        // `inbox_polling_enabled` se tu ZÁMĚRNĚ nenastavuje. Výměna certifikátu
-        // není souhlas s vybíráním schránky (§ 17 odst. 3) — ten se dává zvlášť
-        // přes setInboxPolling(). Kdyby se tu resetoval na 1, uložení nového
-        // certifikátu by tiše zapnulo doručování.
+        // Historické sloupce `inbox_polling_*` se tu nenastavují. Automatické
+        // vybírání bylo odstraněno; migrace 1530 případné staré volby vynuluje.
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO ' . self::TABLE . '
                 (supplier_id, environment, channel, label, box_id, auth_mode,
@@ -126,55 +124,6 @@ final class SubmissionChannelCredentialRepository
             $data['certificate_valid_to'],
             $userId,
         ]);
-    }
-
-    /**
-     * Zapne/vypne vybírání schránky (§ 17 odst. 3 zák. 300/2008 Sb.).
-     *
-     * Zapnutí je právně významný úkon, proto se vždy ukládá i KDO a KDY.
-     * Vypnutí souhlas maže — už neplatí, ale v auditní stopě zůstává.
-     */
-    public function setInboxPolling(
-        int $supplierId,
-        string $channel,
-        string $environment,
-        bool $enabled,
-        int $userId,
-    ): bool {
-        $this->assertAvailable();
-        $stmt = $this->db->pdo()->prepare(
-            'UPDATE ' . self::TABLE . '
-                SET inbox_polling_enabled = ?,
-                    inbox_polling_enabled_at = ' . ($enabled ? 'UTC_TIMESTAMP()' : 'NULL') . ',
-                    inbox_polling_enabled_by = ' . ($enabled ? '?' : 'NULL') . '
-              WHERE supplier_id = ? AND channel = ? AND environment = ?'
-        );
-        $params = $enabled
-            ? [1, $userId, $supplierId, $channel, $environment]
-            : [0, $supplierId, $channel, $environment];
-        $stmt->execute($params);
-
-        return $stmt->rowCount() > 0;
-    }
-
-    /**
-     * Firmy, které vybírání schránky vědomě zapnuly — jediné, na které smí
-     * cron sáhnout.
-     *
-     * @return list<array<string,mixed>>
-     */
-    public function listWithInboxPolling(string $channel): array
-    {
-        if (!$this->isAvailable()) {
-            return [];
-        }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::PUBLIC_COLUMNS . ' FROM ' . self::TABLE . '
-              WHERE channel = ? AND inbox_polling_enabled = 1
-              ORDER BY supplier_id ASC, environment ASC'
-        );
-        $stmt->execute([$channel]);
-        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
     public function delete(int $supplierId, string $channel, string $environment): bool

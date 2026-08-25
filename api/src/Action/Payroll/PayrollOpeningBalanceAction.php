@@ -72,11 +72,6 @@ final class PayrollOpeningBalanceAction
                 throw new \InvalidArgumentException('Tělo požadavku musí být objekt.');
             }
             $reference = trim(is_string($body['source_reference'] ?? null) ? $body['source_reference'] : '');
-            if ($reference === '') {
-                throw new \InvalidArgumentException(
-                    'Uveďte, odkud úhrny jsou — bez zdroje se po letech nedá ověřit, co se zadalo.',
-                );
-            }
 
             return Json::ok($response, ['openings' => $this->openings->save(
                 $this->currentSupplierId($request),

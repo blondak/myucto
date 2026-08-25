@@ -643,6 +643,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
         { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
         { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },
+        { to: '/admin/databox',               label: t('nav.databox'),         icon: ICONS.documents, permission: 'settings.signing' as PermissionKey },
       ],
     })
     // Systém — globální nastavení a licenční agenda v jednom menu.
@@ -663,6 +664,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/admin/emails',           label: t('nav.emails'),          icon: ICONS.email },
         { to: '/admin/activity-log',     label: t('nav.log'),             icon: ICONS.log },
         { to: '/admin/cron-jobs',        label: t('nav.cron_jobs'),       icon: ICONS.cron },
+        { to: '/admin/isds-gateway',     label: t('nav.isds_gateway'),    icon: ICONS.documents },
         { to: '/admin/update',           label: t('nav.updates'),         icon: ICONS.updates },
         ...(isAdmin ? [
           // Hosting — JEN spravovaná (hostovaná) instalace. Na self-hosted se
@@ -699,6 +701,14 @@ const navSections = computed<NavSection[]>(() => {
     // Non-admin role (accountant/readonly) nemá žádnou jinou cestu k vlastním API
     // tokenům — route /profile/api-tokens nemá adminOnly, ale dřív byl jediný
     // sidebar link uvnitř isAdmin bloku výše, takže k němu vedla jen přímá URL.
+    if (auth.canWrite('settings.signing')) {
+      sections.push({
+        key: 'company_databox',
+        title: t('nav.section_company'),
+        accent: 'warning',
+        items: [{ to: '/admin/databox', label: t('nav.databox'), icon: ICONS.documents, permission: 'settings.signing' }],
+      })
+    }
     const nonAdminSystemItems: NavItem[] = []
     if (auth.canRead('settings.signing') && accountantSigningProfilesEnabled.value) {
       nonAdminSystemItems.push({ to: '/admin/electronic-signatures', label: t('nav.electronic_signatures'), icon: ICONS.approvals })
@@ -760,6 +770,7 @@ function navPermission(item: NavItem): PermissionKey | null {
   if (path === '/templates') return 'accounting.templates'
   if (path === '/utilities') return 'utilities'
   if (path === '/admin/electronic-signatures') return 'settings.signing'
+  if (path === '/admin/databox') return 'settings.signing'
   if (path.startsWith('/admin/settings') || path.startsWith('/admin/integrations')) return 'settings.company'
   if (path.startsWith('/admin/branding')) return 'settings.branding'
   if (path.startsWith('/profile/api-tokens') || path.startsWith('/profile/mcp-server')) return 'profile.tokens'
@@ -776,6 +787,7 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
       if (item.to.startsWith('/admin/settings') || item.to.startsWith('/admin/integrations')) return auth.isDemo || auth.canWrite('settings.company.write')
       if (item.to.startsWith('/admin/branding')) return auth.isDemo ? auth.canRead('settings.branding') : auth.canWrite('settings.branding')
       if (item.to.startsWith('/admin/electronic-signatures')) return auth.canWrite('settings.signing')
+      if (item.to.startsWith('/admin/databox')) return auth.canWrite('settings.signing')
       return permission ? auth.canRead(permission) : auth.isSuperadmin
     }),
   })).filter(section => section.items.length > 0)

@@ -269,39 +269,26 @@ final class HealthInsuranceMonthCalculatorTest extends TestCase
         );
     }
 
-    public function testCombinesOtherEmployerBaseAndRequiresSelectedEmployerEvidence(): void
+    public function testCombinesOtherEmployerBaseWithoutEvidenceReferences(): void
     {
         $otherEmployer = new HealthOtherEmployerBase(
             'employer-2',
             1_000_000,
             '2026-08-01',
             null,
-            'confirmation:synthetic-employer-2',
+            null,
         );
-        $review = $this->calculate([
-            $this->person(
-                'person-1',
-                [$this->relationship('hpp', HealthEmploymentKind::Employment, 500_000)],
-                otherEmployerBases: [$otherEmployer],
-            ),
-        ]);
-        self::assertSame(HealthCalculationStatus::ManualReview, $review->status);
-        self::assertContains(
-            'person:person-1:selected_top_up_employer_evidence_required',
-            $review->issues,
-        );
-
         $result = $this->calculate([
             $this->person(
                 'person-1',
                 [$this->relationship('hpp', HealthEmploymentKind::Employment, 500_000)],
                 otherEmployerBases: [$otherEmployer],
-                selectedEmployerEvidence: 'selection:synthetic-employer-1',
                 topUpEmployerSelection:
                     HealthMinimumTopUpEmployerSelection::ThisEmployer,
             ),
         ]);
         $expected = $this->golden('multiple_employers');
+        self::assertSame(HealthCalculationStatus::Calculated, $result->status);
         self::assertSame(
             $expected['other_employer_assessment_base_minor_units'],
             $result->people[0]->otherEmployerAssessmentBaseMinorUnits,

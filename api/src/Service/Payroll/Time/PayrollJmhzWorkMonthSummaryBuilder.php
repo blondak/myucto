@@ -233,10 +233,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $values['agreed_fund_millihours'],
         );
         $values += $conditionalValues;
-        $note = $input['confirmation_note'] ?? null;
-        if (!is_string($note) || mb_strlen(trim($note)) < 5 || mb_strlen(trim($note)) > 500) {
+        $note = $input['confirmation_note'] ?? '';
+        if (!is_string($note) || mb_strlen(trim($note)) > 500) {
             throw new \InvalidArgumentException(
-                'Poznámka ke zdroji potvrzených hodnot musí mít 5 až 500 znaků.',
+                'Volitelná poznámka k potvrzeným hodnotám smí mít nejvýše 500 znaků.',
             );
         }
         $note = trim($note);

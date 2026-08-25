@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 const m = vi.hoisted(() => ({
   submissionOverview: vi.fn(),
   runs: vi.fn(),
+  jmhzPvpojOffices: vi.fn(),
   jmhzPvpojPreview: vi.fn(),
   healthPaymentOverviews: vi.fn(),
 }))
@@ -12,6 +13,7 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     submissionOverview: m.submissionOverview,
     runs: m.runs,
+    jmhzPvpojOffices: m.jmhzPvpojOffices,
     jmhzPvpojPreview: m.jmhzPvpojPreview,
     healthPaymentOverviews: m.healthPaymentOverviews,
   },
@@ -69,6 +71,7 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
       },
     })
     m.runs.mockResolvedValue([])
+    m.jmhzPvpojOffices.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -82,7 +85,7 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     const wrapper = mount(PayrollSubmissionOverviewPanel, {
       props: { mode: 'jmhz' },
       // Podřízené panely mají vlastní testy; tady jen zavazí.
-      global: { stubs: { PayrollJmhzOrdinaryEvidencePanel: true, PayrollJmhzXmlDryRunPanel: true } },
+      global: { stubs: { PayrollJmhzOrdinaryEvidencePanel: true, PayrollJmhzXmlDryRunPanel: true, PayrollJmhzDispatchPanel: true } },
     })
     await flushPromises()
 
@@ -99,7 +102,7 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     const wrapper = mount(PayrollSubmissionOverviewPanel, {
       props: { mode: 'jmhz' },
       // Podřízené panely mají vlastní testy; tady jen zavazí.
-      global: { stubs: { PayrollJmhzOrdinaryEvidencePanel: true, PayrollJmhzXmlDryRunPanel: true } },
+      global: { stubs: { PayrollJmhzOrdinaryEvidencePanel: true, PayrollJmhzXmlDryRunPanel: true, PayrollJmhzDispatchPanel: true } },
     })
     await flushPromises()
 

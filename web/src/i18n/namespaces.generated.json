@@ -667,6 +667,12 @@
     "admin-databox": [
       "databox"
     ],
+    "admin-isds-gateway": [
+      "databox"
+    ],
+    "isds-gateway-callback": [
+      "databox"
+    ],
     "admin-bank-rule-templates": [
       "bank",
       "bank_template_admin"

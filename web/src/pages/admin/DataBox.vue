@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Systém → Datová schránka.
+ * Firma → Datová schránka.
  *
  * Průřezový kanál podání: DPH, kontrolní i souhrnné hlášení, DPPO, přehledy
  * zdravotním pojišťovnám. Ne mzdová odbočka.
@@ -15,6 +15,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { isAxiosError } from 'axios'
 import {
   dataBoxApi,
   type AcceptanceState,
@@ -24,7 +25,8 @@ import {
   type DeliveryBasis,
   type DispatchState,
   type GatewaySessionState,
-  type IsdsGatewayRegistration,
+  type GatewayStart,
+  type IsdsGatewayCapability,
   type InboxMessage,
   type InboxPollState,
   type OutboxAttempt,
@@ -35,15 +37,17 @@ import {
   type SubmissionRecipient,
 } from '@/api/dataBox'
 import { apiErrorMessage } from '@/api/errors'
+import { useAutoSlug } from '@/composables/useAutoSlug'
 import { useToast } from '@/composables/useToast'
+import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import IsdsGatewayRegistrations from '@/components/settings/IsdsGatewayRegistrations.vue'
 
 const { t } = useI18n()
 const toast = useToast()
+const supplierStore = useSupplierStore()
 
-type Tab = 'access' | 'outbox' | 'inbox' | 'notices' | 'recipients' | 'gateway'
+type Tab = 'access' | 'outbox' | 'inbox' | 'notices' | 'recipients'
 const tab = ref<Tab>('access')
 const environment = ref<'production' | 'test'>('production')
 const loading = ref(true)
@@ -69,15 +73,14 @@ const uploadTargetId = ref<number | null>(null)
 const markSentFor = ref<number | null>(null)
 const markSentMessageId = ref('')
 
-// ── Přístup: pouze systémový certifikát ──────────────────────────────────────
-// Přihlašovací jméno a heslo tu vědomě nejsou: přístupové údaje ke schránce
-// nesmí opustit zařízení uživatele (§ 9 odst. 2 zák. 300/2008 Sb.).
+// ── Přístup konkrétní firmy ──────────────────────────────────────────────────
+// Odesílací brána nechává volbu přihlášení na oficiální stránce ISDS. Uložený
+// systémový certifikát je samostatná možnost pro serverové operace této firmy.
 const certLabel = ref('')
 const certBoxId = ref('')
 const certPassword = ref('')
 const certFile = ref<File | null>(null)
 const certFileInput = ref<HTMLInputElement | null>(null)
-const pollingAck = ref(false)
 
 const currentCredential = computed(
   () => credentials.value.find(c => c.environment === environment.value) ?? null,
@@ -89,6 +92,7 @@ const recipientName = ref('')
 const recipientKind = ref<RecipientKind>('tax_office')
 const recipientBoxId = ref('')
 const recipientSource = ref('')
+const recipientCodeSlug = useAutoSlug(value => { recipientCode.value = value }, { maxLen: 48 })
 
 const recipientsWithoutBox = computed(() => recipients.value.filter(r => !r.has_box_id))
 
@@ -129,7 +133,7 @@ function noticeTone(notice: DefectNotice): string {
     case 'cured': return 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-200'
     default: return notice.assessment.needs_attention
       ? 'bg-warning-50 text-warning-700 dark:bg-warning-900/30 dark:text-warning-200'
-      : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+      : 'bg-neutral-100 text-neutral-600'
   }
 }
 
@@ -140,7 +144,7 @@ function deliveryTone(basis: DeliveryBasis | undefined): string {
     case 'login_or_fiction': return 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-200'
     case 'fiction': return 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'
     case 'pending': return 'bg-warning-50 text-warning-700 dark:bg-warning-900/30 dark:text-warning-200'
-    default: return 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+    default: return 'bg-neutral-100 text-neutral-600'
   }
 }
 
@@ -152,13 +156,13 @@ function deliveryTone(basis: DeliveryBasis | undefined): string {
  */
 function dispatchTone(state: DispatchState): string {
   switch (state) {
-    case 'ready': return 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'
+    case 'ready': return 'bg-neutral-100 text-neutral-700'
     case 'sending': return 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'
     case 'send_uncertain': return 'bg-warning-50 text-warning-700 dark:bg-warning-900/30 dark:text-warning-200'
     case 'sent': return 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'
     case 'delivered': return 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-200'
     case 'failed': return 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-200'
-    default: return 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+    default: return 'bg-neutral-100 text-neutral-600'
   }
 }
 
@@ -168,7 +172,7 @@ function acceptanceTone(state: AcceptanceState): string {
     case 'rejected': return 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-200'
     // `unknown` je u datovky legitimní KONCOVÝ stav, ne mezistupeň — proto
     // neutrální šeď, ne varovná barva. Není to porucha, je to fakt.
-    default: return 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+    default: return 'bg-neutral-100 text-neutral-600'
   }
 }
 
@@ -437,23 +441,6 @@ async function saveCredential() {
   }
 }
 
-async function togglePolling(enabled: boolean) {
-  if (enabled && !pollingAck.value) {
-    toast.error(t('databox.polling.ackRequired'))
-    return
-  }
-  saving.value = true
-  try {
-    await dataBoxApi.setPolling(environment.value, enabled, true)
-    toast.success(enabled ? t('databox.polling.enabled') : t('databox.polling.disabled'))
-    await loadAll()
-  } catch (e) {
-    toast.error(apiErrorMessage(e))
-  } finally {
-    saving.value = false
-  }
-}
-
 async function confirmSend(row: OutboxSubmission) {
   busyId.value = row.id
   try {
@@ -520,6 +507,7 @@ async function toggleAttempts(row: OutboxSubmission) {
 }
 
 async function pollInbox() {
+  if (!window.confirm(t('databox.inbox.pollConfirm'))) return
   saving.value = true
   try {
     const result = await dataBoxApi.pollInbox(environment.value)
@@ -533,10 +521,6 @@ async function pollInbox() {
 }
 
 async function saveRecipient() {
-  if (recipientBoxId.value.trim() !== '' && recipientSource.value.trim() === '') {
-    toast.error(t('databox.errors.sourceRequired'))
-    return
-  }
   saving.value = true
   try {
     await dataBoxApi.saveRecipient({
@@ -548,6 +532,7 @@ async function saveRecipient() {
       is_active: true,
     })
     recipientCode.value = ''
+    recipientCodeSlug.init('')
     recipientName.value = ''
     recipientBoxId.value = ''
     recipientSource.value = ''
@@ -585,35 +570,22 @@ async function deleteRecipient(row: SubmissionRecipient) {
  * vydávat za „brána není", takže tlačítko se v takovém případě nenabízí
  * a ruční cesta zůstává beze změny.
  */
-const gatewayRegistrations = ref<IsdsGatewayRegistration[] | null>(null)
+const gatewayCapabilities = ref<IsdsGatewayCapability[] | null>(null)
 const gatewayBusyId = ref<number | null>(null)
 const gatewayNotice = ref<{ state: GatewaySessionState; message: string; messageId: string | null } | null>(null)
+const gatewayPreflight = ref<{ outboxId: number; start: GatewayStart } | null>(null)
 
 const gatewayAvailable = computed(() =>
-  (gatewayRegistrations.value ?? []).some(r => r.environment === environment.value && r.is_active),
+  (gatewayCapabilities.value ?? []).some(r => r.environment === environment.value && r.available),
 )
 
-/**
- * Záložka se správou registrací se nabízí jen tomu, komu výpis prošel — tedy
- * účtu s právem `settings.signing`. Nabízet ji ostatním by slibovalo obrazovku,
- * na které by dostali jen 403.
- */
-const canManageGateway = computed(() => gatewayRegistrations.value !== null)
-
-const tabs = computed<Tab[]>(() => {
-  const list: Tab[] = ['access', 'outbox', 'inbox', 'notices', 'recipients']
-  if (canManageGateway.value) list.push('gateway')
-
-  return list
-})
+const tabs: Tab[] = ['access', 'outbox', 'inbox', 'notices', 'recipients']
 
 async function loadGatewayRegistrations() {
   try {
-    gatewayRegistrations.value = await dataBoxApi.gatewayRegistrations()
+    gatewayCapabilities.value = await dataBoxApi.gatewayCapabilities()
   } catch {
-    // 403 (bez práva) i výpadek: obojí je „nevíme". Mlčky — není to chyba
-    // uživatele a ruční cesta funguje dál.
-    gatewayRegistrations.value = null
+    gatewayCapabilities.value = null
   }
 }
 
@@ -626,14 +598,19 @@ async function startGateway(row: OutboxSubmission) {
   gatewayBusyId.value = row.id
   try {
     const start = await dataBoxApi.gatewayStart(row.id)
-    // Plná navigace, ne router: cíl je v perimetru ISDS a musí se z něj dát
-    // vrátit zpátky na naši návratovou adresu.
-    window.location.assign(start.redirect_url)
+    gatewayPreflight.value = { outboxId: row.id, start }
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
     gatewayBusyId.value = null
   }
+}
+
+function continueGateway() {
+  if (!gatewayPreflight.value) return
+  // Plná navigace, ne router: cíl je v perimetru ISDS a musí se z něj dát
+  // vrátit zpátky na naši návratovou adresu.
+  window.location.assign(gatewayPreflight.value.start.redirect_url)
 }
 
 /**
@@ -655,7 +632,15 @@ async function handleGatewayReturn(): Promise<boolean> {
 
   tab.value = 'outbox'
   try {
-    const result = await dataBoxApi.gatewayComplete(appToken, sessionId)
+    let result
+    try {
+      result = await dataBoxApi.gatewayComplete(appToken, sessionId)
+    } catch (exception) {
+      // Mzdová role nespravuje globální certifikát brány. Vrací-li obecný
+      // callback jen 403, dokončí vlastní relaci pod payroll.submissions.
+      if (!isAxiosError(exception) || exception.response?.status !== 403) throw exception
+      result = await dataBoxApi.gatewayCompletePayroll(appToken, sessionId)
+    }
     if (result.redirect_url) {
       // Koncept leží v datové schránce. Uživatel ho jde zkontrolovat
       // a schválit — teprve tím zpráva odejde.
@@ -684,6 +669,10 @@ async function handleGatewayReturn(): Promise<boolean> {
 }
 
 onMounted(async () => {
+  const requestedTab = new URLSearchParams(window.location.search).get('tab')
+  if (requestedTab && ['access', 'outbox', 'inbox', 'notices', 'recipients'].includes(requestedTab)) {
+    tab.value = requestedTab as Tab
+  }
   await loadGatewayRegistrations()
   const returning = await handleGatewayReturn()
   // Při odchodu na schvalovací obrazovku se stránka stejně opouští — načítat
@@ -696,16 +685,23 @@ onMounted(async () => {
   <div class="space-y-6">
     <header class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 class="text-xl font-semibold">{{ t('databox.title') }}</h1>
-        <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ t('databox.subtitle') }}</p>
+        <h1 class="text-xl font-semibold text-neutral-900">{{ t('databox.title') }}</h1>
+        <p class="text-sm text-neutral-500">{{ t('databox.subtitle') }}</p>
+        <p class="mt-1 text-sm font-medium text-primary-700">
+          {{ t('databox.companyScope', { company: supplierStore.currentSupplier?.company_name ?? '—' }) }}
+        </p>
       </div>
-      <select v-model="environment" class="form-select" @change="loadAll">
+      <select
+        v-model="environment"
+        class="h-9 min-w-[11rem] rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 shadow-xs outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+        @change="loadAll"
+      >
         <option value="production">{{ t('databox.env.production') }}</option>
         <option value="test">{{ t('databox.env.test') }}</option>
       </select>
     </header>
 
-    <nav class="flex flex-wrap gap-2 border-b border-neutral-200 dark:border-neutral-700">
+    <nav class="flex flex-wrap gap-2 border-b border-neutral-200">
       <button
         v-for="key in tabs"
         :key="key"
@@ -726,16 +722,47 @@ onMounted(async () => {
 
     <!-- ─────────────── Přístup ─────────────── -->
     <section v-if="tab === 'access'" class="space-y-5">
-      <div class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900">
-        <h2 class="mb-1 font-medium">{{ t('databox.access.title') }}</h2>
-        <p class="mb-4 text-sm text-neutral-500 dark:text-neutral-400">{{ t('databox.access.certificateOnly') }}</p>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <article class="rounded-lg border border-primary-500/40 bg-primary-50 p-4 shadow-sm">
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <h2 class="font-medium text-neutral-900">{{ t('databox.access.gatewayTitle') }}</h2>
+            <span class="rounded-full bg-success-50 px-2 py-0.5 text-xs font-medium text-success-700">
+              {{ t('databox.access.recommended') }}
+            </span>
+          </div>
+          <p class="mt-2 text-sm text-neutral-600">{{ t('databox.access.gatewayDescription') }}</p>
+          <ul class="mt-3 grid gap-2 text-sm text-neutral-700 sm:grid-cols-2">
+            <li v-for="method in ['password', 'mobileKey', 'identity', 'sms', 'certificate', 'securityCode']" :key="method" class="flex gap-2">
+              <svg class="mt-0.5 h-4 w-4 shrink-0 text-success-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+              </svg>
+              {{ t(`databox.access.methods.${method}`) }}
+            </li>
+          </ul>
+          <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.gatewayBoundary') }}</p>
+          <div class="mt-3 flex items-center gap-2 text-sm">
+            <span class="h-2.5 w-2.5 rounded-full" :class="gatewayAvailable ? 'bg-success-500' : 'bg-warning-500'" />
+            <span>{{ gatewayAvailable ? t('databox.access.gatewayAvailable') : t('databox.access.gatewayUnavailable') }}</span>
+          </div>
+        </article>
 
-        <div v-if="currentCredential" class="mb-4 rounded-md bg-neutral-50 p-3 text-sm dark:bg-neutral-800">
+        <article class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+          <h2 class="font-medium text-neutral-900">{{ t('databox.access.certificateTitle') }}</h2>
+          <p class="mt-2 text-sm text-neutral-500">{{ t('databox.access.certificateDescription') }}</p>
+          <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.certificateRecommendedByIsds') }}</p>
+        </article>
+      </div>
+
+      <div class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+        <h2 class="mb-1 font-medium text-neutral-900">{{ t('databox.access.certificateSettings') }}</h2>
+        <p class="mb-4 text-sm text-neutral-500">{{ t('databox.access.certificateOnly') }}</p>
+
+        <div v-if="currentCredential" class="mb-4 rounded-md bg-neutral-50 p-3 text-sm">
           <div class="font-medium">{{ currentCredential.label }}</div>
-          <div class="text-neutral-500 dark:text-neutral-400">
+          <div class="text-neutral-500">
             {{ t('databox.access.boxId') }}: <code>{{ currentCredential.box_id }}</code>
           </div>
-          <div v-if="currentCredential.certificate_valid_to" class="text-neutral-500 dark:text-neutral-400">
+          <div v-if="currentCredential.certificate_valid_to" class="text-neutral-500">
             {{ t('databox.access.validTo') }}: {{ currentCredential.certificate_valid_to }}
           </div>
         </div>
@@ -766,41 +793,14 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Vybírání schránky: samostatný, vědomý souhlas -->
-      <div class="rounded-lg border border-warning-300 bg-warning-50 p-4 dark:border-warning-700 dark:bg-warning-900/20">
+      <!-- Schránku vybírá jen člověk samostatnou akcí; automatický režim není. -->
+      <div class="rounded-lg border border-warning-500/50 bg-warning-50 p-4">
         <h2 class="mb-1 font-medium">{{ t('databox.polling.title') }}</h2>
-        <p class="mb-3 text-sm">{{ t('databox.polling.explanation') }}</p>
-
-        <div v-if="currentCredential?.inbox_polling_enabled" class="flex flex-wrap items-center gap-3">
-          <span class="text-sm font-medium">{{ t('databox.polling.isOn') }}</span>
-          <button type="button" :class="btnOutline('warning')" :disabled="saving" @click="togglePolling(false)">
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.pause" />
-            </svg>
-            {{ t('databox.polling.turnOff') }}
-          </button>
-        </div>
-        <div v-else class="space-y-3">
-          <label class="flex items-start gap-2 text-sm">
-            <input v-model="pollingAck" type="checkbox" class="mt-1" />
-            <span>{{ t('databox.polling.acknowledge') }}</span>
-          </label>
-          <button
-            type="button"
-            :class="btnOutline('warning')"
-            :disabled="saving || !pollingAck || !currentCredential"
-            @click="togglePolling(true)"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" />
-            </svg>
-            {{ t('databox.polling.turnOn') }}
-          </button>
-        </div>
+        <p class="text-sm">{{ t('databox.polling.explanation') }}</p>
       </div>
 
       <!-- Jedno společné Uložit pro celou sekci -->
-      <div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-white/95 py-3 dark:border-neutral-700 dark:bg-neutral-900/95">
+      <div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 py-3">
         <button type="button" :class="btnFilled('primary')" :disabled="saving" @click="saveCredential">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
@@ -820,10 +820,10 @@ onMounted(async () => {
            a musí vidět, co s ním je a co má udělat dál. -->
       <div
         v-if="lastUpload && lastUpload.status !== 'matched'"
-        class="rounded-lg border border-warning-300 bg-warning-50 p-4 text-sm dark:border-warning-700 dark:bg-warning-900/20"
+        class="rounded-lg border border-warning-500/50 bg-warning-50 p-4 text-sm"
       >
         <div class="font-medium">{{ lastUpload.message }}</div>
-        <div class="mt-1 text-xs text-neutral-600 dark:text-neutral-300">
+        <div class="mt-1 text-xs text-neutral-600">
           {{ t('databox.receipts.messageId') }}: <code>{{ lastUpload.receipt.message_id }}</code>
           <span v-if="lastUpload.receipt.delivered_at">
             · {{ t('databox.receipts.deliveredAt') }}: {{ lastUpload.receipt.delivered_at }}
@@ -834,14 +834,14 @@ onMounted(async () => {
           <div
             v-for="c in lastUpload.candidates"
             :key="c.id"
-            class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white p-2 dark:bg-neutral-900"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-surface p-2"
           >
             <div class="min-w-0">
               <div class="font-medium">{{ c.subject }}</div>
-              <div class="text-xs text-neutral-500 dark:text-neutral-400">
+              <div class="text-xs text-neutral-500">
                 {{ c.agenda_code }} · <code>{{ c.correlation_reference }}</code> · {{ c.created_at }}
               </div>
-              <div v-if="c.reasons.length" class="text-xs text-neutral-500 dark:text-neutral-400">
+              <div v-if="c.reasons.length" class="text-xs text-neutral-500">
                 {{ c.reasons.map(r => t(`databox.receipts.reasons.${r}`)).join(' · ') }}
               </div>
             </div>
@@ -860,15 +860,15 @@ onMounted(async () => {
       <!-- Nespárované doručenky. Nezmizely, jen čekají na člověka. -->
       <div
         v-if="unmatchedReceipts.length"
-        class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900"
+        class="rounded-lg border border-neutral-200 bg-surface p-4"
       >
         <h2 class="font-medium">{{ t('databox.receipts.title', { count: unmatchedReceipts.length }) }}</h2>
-        <p class="mb-3 text-sm text-neutral-500 dark:text-neutral-400">{{ t('databox.receipts.intro') }}</p>
-        <div v-for="m in unmatchedReceipts" :key="m.id" class="border-t border-neutral-100 py-2 dark:border-neutral-800">
+        <p class="mb-3 text-sm text-neutral-500">{{ t('databox.receipts.intro') }}</p>
+        <div v-for="m in unmatchedReceipts" :key="m.id" class="border-t border-neutral-100 py-2">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="min-w-0">
               <div class="text-sm font-medium">{{ m.subject ?? t('databox.receipts.noSubject') }}</div>
-              <div class="text-xs text-neutral-500 dark:text-neutral-400">
+              <div class="text-xs text-neutral-500">
                 {{ t('databox.receipts.messageId') }}: <code>{{ m.external_message_id }}</code>
                 <span v-if="m.delivered_at"> · {{ m.delivered_at }}</span>
               </div>
@@ -878,17 +878,17 @@ onMounted(async () => {
             </button>
           </div>
           <div v-if="receiptCandidates[m.id]" class="mt-2 space-y-2">
-            <p v-if="!receiptCandidates[m.id].length" class="text-sm text-neutral-500 dark:text-neutral-400">
+            <p v-if="!receiptCandidates[m.id].length" class="text-sm text-neutral-500">
               {{ t('databox.receipts.noCandidates') }}
             </p>
             <div
               v-for="c in receiptCandidates[m.id]"
               :key="c.id"
-              class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-neutral-50 p-2 dark:bg-neutral-800"
+              class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-neutral-50 p-2"
             >
               <div class="min-w-0 text-sm">
                 <div class="font-medium">{{ c.subject }}</div>
-                <div class="text-xs text-neutral-500 dark:text-neutral-400">
+                <div class="text-xs text-neutral-500">
                   {{ c.agenda_code }} · <code>{{ c.correlation_reference }}</code>
                   <span v-if="c.reasons.length">
                     · {{ c.reasons.map(r => t(`databox.receipts.reasons.${r}`)).join(' · ') }}
@@ -924,10 +924,10 @@ onMounted(async () => {
         v-if="gatewayNotice"
         class="rounded-lg border p-3 text-sm"
         :class="gatewayNotice.state === 'approved'
-          ? 'border-success-200 bg-success-50 text-success-800 dark:border-success-800 dark:bg-success-900/20 dark:text-success-200'
+          ? 'border-success-500/50 bg-success-50 text-success-800 dark:text-success-200'
           : gatewayNotice.state === 'uncertain'
-            ? 'border-warning-300 bg-warning-50 text-warning-800 dark:border-warning-800 dark:bg-warning-900/20 dark:text-warning-200'
-            : 'border-neutral-200 bg-neutral-50 text-neutral-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'"
+            ? 'border-warning-500/50 bg-warning-50 text-warning-800 dark:text-warning-200'
+            : 'border-neutral-200 bg-neutral-50 text-neutral-700'"
       >
         <div class="font-medium">{{ t(`databox.gateway.state.${gatewayNotice.state}`) }}</div>
         <p class="mt-1">{{ gatewayNotice.message }}</p>
@@ -942,17 +942,49 @@ onMounted(async () => {
         </button>
       </div>
 
+      <!-- Přihlašovací instrukce musí uživatel vidět ještě PŘED odchodem do
+           ISDS. Server je vrací podle doložené politiky registrace; klient je
+           nesmí zahodit ani sám slibovat konkrétní metodu přihlášení. -->
+      <div
+        v-if="gatewayPreflight"
+        class="rounded-lg border border-primary-500/40 bg-primary-50 p-4 text-sm text-primary-900"
+        data-test="gateway-preflight"
+      >
+        <div class="font-medium">{{ t('databox.gateway.preflightTitle') }}</div>
+        <p class="mt-1">{{ gatewayPreflight.start.login_guidance }}</p>
+        <p class="mt-2 text-xs">
+          {{ t('databox.gateway.credentialsStayInIsds') }}
+        </p>
+        <p v-if="!gatewayPreflight.start.login_policy_documented" class="mt-2 text-xs text-warning-800 dark:text-warning-200">
+          {{ t('databox.gateway.methodsByIsds') }}
+        </p>
+        <p class="mt-2 text-xs">
+          {{ t('databox.gateway.expiresAt', { value: gatewayPreflight.start.expires_at }) }}
+        </p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button type="button" :class="btnFilled('primary')" @click="continueGateway">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" />
+            </svg>
+            {{ t('databox.gateway.continueToIsds') }}
+          </button>
+          <button type="button" :class="btnOutline('neutral')" @click="gatewayPreflight = null">
+            {{ t('common.cancel') }}
+          </button>
+        </div>
+      </div>
+
       <EmptyState v-if="!loading && outbox.length === 0" icon="send" :title="t('databox.outbox.empty')" />
 
       <div
         v-for="row in outbox"
         :key="row.id"
-        class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900"
+        class="rounded-lg border border-neutral-200 bg-surface p-4"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="font-medium">{{ row.subject }}</div>
-            <div class="text-sm text-neutral-500 dark:text-neutral-400">
+            <div class="text-sm text-neutral-500">
               {{ row.agenda_code }} · {{ row.artifact_filename }}
               <span v-if="row.recipient_box_id"> · <code>{{ row.recipient_box_id }}</code></span>
             </div>
@@ -975,7 +1007,7 @@ onMounted(async () => {
         <!-- Věta, podle které se dá jednat -->
         <p
           v-if="row.dispatch_state === 'delivered' && row.acceptance_state === 'unknown'"
-          class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+          class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600"
         >
           {{ t('databox.outbox.deliveredNotProcessed') }}
         </p>
@@ -997,25 +1029,25 @@ onMounted(async () => {
              včetně čísla jednacího, díky kterému se doručenka spáruje sama. -->
         <div
           v-if="needsManualSteps(row)"
-          class="mt-3 rounded-md border border-primary-200 bg-primary-50 p-3 text-sm dark:border-primary-800 dark:bg-primary-900/20"
+          class="mt-3 rounded-md border border-primary-500/40 bg-primary-50 p-3 text-sm"
         >
           <div class="font-medium">{{ t('databox.manual.title') }}</div>
           <ol class="mt-2 list-decimal space-y-1 pl-5">
             <li>{{ t('databox.manual.step1', { file: row.artifact_filename }) }}</li>
             <li>
               {{ t('databox.manual.step2', { box: row.recipient_box_id ?? '—' }) }}
-              <code class="rounded bg-white px-1 dark:bg-neutral-900">{{ row.correlation_reference }}</code>
+              <code class="rounded bg-surface px-1">{{ row.correlation_reference }}</code>
             </li>
             <li>{{ t('databox.manual.step3') }}</li>
             <li>{{ t('databox.manual.step4') }}</li>
           </ol>
-          <p class="mt-2 text-xs text-neutral-600 dark:text-neutral-300">{{ t('databox.manual.why') }}</p>
+          <p class="mt-2 text-xs text-neutral-600">{{ t('databox.manual.why') }}</p>
         </div>
 
         <!-- Doručenka jako důkaz — a hned vedle poctivé „podpis neověřujeme". -->
         <p
           v-if="row.receipt_document_id"
-          class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+          class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600"
         >
           {{ t('databox.outbox.receiptAttached', { at: row.receipt_attached_at ?? '' }) }}
           <span v-if="row.receipt_matched_by">
@@ -1023,7 +1055,7 @@ onMounted(async () => {
           </span>
           — {{ t('databox.outbox.receiptUnverified') }}
         </p>
-        <p v-else-if="row.dispatch_mode === 'manual'" class="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
+        <p v-else-if="row.dispatch_mode === 'manual'" class="mt-3 text-sm text-neutral-500">
           {{ t('databox.outbox.manualDispatch') }}
         </p>
 
@@ -1037,12 +1069,12 @@ onMounted(async () => {
         <!-- „Odeslal jsem to" — ID zprávy je přesný identifikátor, ne formalita. -->
         <div
           v-if="markSentFor === row.id"
-          class="mt-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-700"
+          class="mt-3 rounded-md border border-neutral-200 p-3"
         >
           <label class="block">
             <span class="text-sm font-medium">{{ t('databox.outbox.messageIdLabel') }}</span>
             <input v-model="markSentMessageId" type="text" maxlength="64" class="form-input mt-1 w-full sm:w-72" />
-            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <span class="mt-1 block text-xs text-neutral-500">
               {{ t('databox.outbox.messageIdHint') }}
             </span>
           </label>
@@ -1196,7 +1228,7 @@ onMounted(async () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="a in attempts[row.id] ?? []" :key="a.id" class="border-t border-neutral-100 dark:border-neutral-800">
+              <tr v-for="a in attempts[row.id] ?? []" :key="a.id" class="border-t border-neutral-100">
                 <td class="py-1 pr-3">{{ a.attempt_no }}</td>
                 <td class="py-1 pr-3">{{ t(`databox.attempt.${a.outcome}`) }}</td>
                 <td class="py-1 pr-3"><code>{{ a.external_message_id ?? '—' }}</code></td>
@@ -1213,14 +1245,14 @@ onMounted(async () => {
       <!-- Prázdno vs. porucha musí být rozlišitelné na první pohled -->
       <div
         v-if="pollState && pollState.consecutive_failures > 0"
-        class="rounded-lg border border-danger-300 bg-danger-50 p-3 text-sm text-danger-800 dark:border-danger-700 dark:bg-danger-900/20 dark:text-danger-200"
+        class="rounded-lg border border-danger-500/50 bg-danger-50 p-3 text-sm text-danger-800 dark:text-danger-200"
       >
         {{ t('databox.inbox.unreachable', { count: pollState.consecutive_failures }) }}
         <div v-if="pollState.last_ok_at" class="mt-1 text-xs">
           {{ t('databox.inbox.lastOkAt', { at: pollState.last_ok_at }) }}
         </div>
       </div>
-      <div v-else-if="pollState?.last_ok_at" class="text-sm text-neutral-500 dark:text-neutral-400">
+      <div v-else-if="pollState?.last_ok_at" class="text-sm text-neutral-500">
         {{ t('databox.inbox.lastOkAt', { at: pollState.last_ok_at }) }}
       </div>
 
@@ -1228,7 +1260,7 @@ onMounted(async () => {
         <button
           type="button"
           :class="btnOutline('primary')"
-          :disabled="saving || !currentCredential?.inbox_polling_enabled"
+          :disabled="saving || !currentCredential"
           @click="pollInbox"
         >
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -1240,9 +1272,9 @@ onMounted(async () => {
           {{ t('databox.delivery.refresh') }}
         </button>
       </div>
-      <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ t('databox.delivery.explain') }}</p>
-      <p v-if="!currentCredential?.inbox_polling_enabled" class="text-sm text-neutral-500 dark:text-neutral-400">
-        {{ t('databox.inbox.pollingOff') }}
+      <p class="text-sm text-neutral-500">{{ t('databox.delivery.explain') }}</p>
+      <p class="text-sm text-neutral-500">
+        {{ t('databox.inbox.manualOnly') }}
       </p>
 
       <EmptyState v-if="!loading && inbox.length === 0" icon="inbox" :title="t('databox.inbox.empty')" />
@@ -1260,14 +1292,14 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="m in inbox" :key="m.id" class="border-t border-neutral-100 dark:border-neutral-800 align-top">
+            <tr v-for="m in inbox" :key="m.id" class="border-t border-neutral-100 align-top">
               <td class="py-2 pr-3">{{ m.subject ?? '—' }}</td>
               <td class="py-2 pr-3">{{ m.sender_name ?? m.sender_box_id ?? '—' }}</td>
               <td class="py-2 pr-3">
                 <span
                   class="rounded-full px-2 py-0.5 text-xs"
                   :class="m.classification === 'unclassified'
-                    ? 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                    ? 'bg-neutral-100 text-neutral-600'
                     : 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'"
                 >
                   {{ t(`databox.classification.${m.classification}`) }}
@@ -1279,7 +1311,7 @@ onMounted(async () => {
                 u fikce i u běžící lhůty musí být poznat, čím je to podložené,
                 protože od toho dne běží navazující lhůty.
               -->
-              <td v-if="m.classification === 'delivery_receipt'" class="py-2 pr-3 text-xs text-neutral-500 dark:text-neutral-400">
+              <td v-if="m.classification === 'delivery_receipt'" class="py-2 pr-3 text-xs text-neutral-500">
                 <!--
                   Doručenka popisuje NAŠE odeslané podání, ne zprávu doručovanou
                   nám. Fikce doručení se na ni nevztahuje, takže tu odznak
@@ -1291,13 +1323,13 @@ onMounted(async () => {
                 <span class="rounded-full px-2 py-0.5 text-xs" :class="deliveryTone(m.delivery_basis)">
                   {{ t(`databox.delivery.basis.${m.delivery_basis ?? 'unknown'}`) }}
                 </span>
-                <div v-if="m.delivered_on" class="mt-1 text-xs text-neutral-600 dark:text-neutral-300">
+                <div v-if="m.delivered_on" class="mt-1 text-xs text-neutral-600">
                   {{ t('databox.delivery.deliveredOn', { date: m.delivered_on }) }}
                 </div>
-                <div v-else-if="m.fiction_due_on" class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                <div v-else-if="m.fiction_due_on" class="mt-1 text-xs text-neutral-500">
                   {{ t('databox.delivery.fictionDueOn', { date: m.fiction_due_on }) }}
                 </div>
-                <div v-if="m.delivery_note" class="mt-1 max-w-md text-xs text-neutral-500 dark:text-neutral-400">
+                <div v-if="m.delivery_note" class="mt-1 max-w-md text-xs text-neutral-500">
                   {{ m.delivery_note }}
                 </div>
               </td>
@@ -1314,9 +1346,9 @@ onMounted(async () => {
 
     <!-- ─────────────── Výzvy k odstranění vad (§ 74 DŘ) ─────────────── -->
     <section v-else-if="tab === 'notices'" class="space-y-4">
-      <div class="rounded-lg border border-neutral-200 bg-white p-4 text-sm dark:border-neutral-700 dark:bg-neutral-900">
+      <div class="rounded-lg border border-neutral-200 bg-surface p-4 text-sm">
         <h2 class="mb-1 font-medium">{{ t('databox.notices.title') }}</h2>
-        <p class="text-neutral-500 dark:text-neutral-400">{{ t('databox.notices.intro') }}</p>
+        <p class="text-neutral-500">{{ t('databox.notices.intro') }}</p>
       </div>
 
       <!-- Prázdno není „nic nepřišlo" a tahle věta to musí říct nahlas. -->
@@ -1324,13 +1356,13 @@ onMounted(async () => {
         v-if="noticesHint"
         class="rounded-lg border p-3 text-sm"
         :class="noticesSupported
-          ? 'border-neutral-200 bg-neutral-50 text-neutral-600 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
-          : 'border-warning-300 bg-warning-50 text-warning-800 dark:border-warning-700 dark:bg-warning-900/20 dark:text-warning-200'"
+          ? 'border-neutral-200 bg-neutral-50 text-neutral-600'
+          : 'border-warning-500/50 bg-warning-50 text-warning-800 dark:text-warning-200'"
       >
         {{ noticesHint }}
       </div>
 
-      <div class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900">
+      <div class="rounded-lg border border-neutral-200 bg-surface p-4">
         <h3 class="mb-3 font-medium">{{ t('databox.notices.addTitle') }}</h3>
         <div class="grid gap-3 sm:grid-cols-2">
           <label class="block">
@@ -1364,7 +1396,7 @@ onMounted(async () => {
             <input v-model="noticeForm.note" type="text" class="form-input w-full" />
           </label>
         </div>
-        <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{{ t('databox.notices.deadlineHint') }}</p>
+        <p class="mt-2 text-sm text-neutral-500">{{ t('databox.notices.deadlineHint') }}</p>
         <div class="mt-4 flex justify-end">
           <button type="button" :class="btnFilled('primary')" :disabled="saving" @click="submitNotice">
             {{ t('databox.notices.save') }}
@@ -1374,12 +1406,12 @@ onMounted(async () => {
 
       <EmptyState v-if="!loading && notices.length === 0" icon="inbox" :title="t('databox.notices.empty')" />
 
-      <div v-for="n in notices" :key="n.id" class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900">
+      <div v-for="n in notices" :key="n.id" class="rounded-lg border border-neutral-200 bg-surface p-4">
         <div class="flex flex-wrap items-center gap-2">
           <span class="rounded-full px-2 py-0.5 text-xs" :class="noticeTone(n)">
             {{ t(`databox.notices.statuses.${n.assessment.status}`) }}
           </span>
-          <span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+          <span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">
             {{ t(`databox.notices.grounds.${n.defect_ground}`) }}
           </span>
           <span v-if="n.notice_reference" class="text-sm font-medium">{{ n.notice_reference }}</span>
@@ -1388,7 +1420,7 @@ onMounted(async () => {
         <!-- Věta, podle které se dá jednat — ne technický kód stavu. -->
         <p class="mt-2 text-sm">{{ n.assessment.sentence }}</p>
 
-        <div v-if="n.assessment.respond_by_shifted" class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <div v-if="n.assessment.respond_by_shifted" class="mt-1 text-xs text-neutral-500">
           {{ t('databox.notices.shifted') }}
         </div>
         <div v-if="n.assessment.suspiciously_short_period" class="mt-1 text-xs text-warning-700 dark:text-warning-300">
@@ -1418,20 +1450,15 @@ onMounted(async () => {
       </div>
     </section>
 
-    <!-- ─────────────── Odesílací brána (registrace provozovatele) ─────────────── -->
-    <section v-else-if="tab === 'gateway'" class="space-y-4">
-      <IsdsGatewayRegistrations @changed="loadGatewayRegistrations" />
-    </section>
-
     <!-- ─────────────── Příjemci ─────────────── -->
     <section v-else class="space-y-4">
       <div
         v-if="recipientsWithoutBox.length"
-        class="rounded-lg border border-warning-300 bg-warning-50 p-3 text-sm text-warning-800 dark:border-warning-700 dark:bg-warning-900/20 dark:text-warning-200"
+        class="rounded-lg border border-warning-500/50 bg-warning-50 p-3 text-sm text-warning-800 dark:text-warning-200"
       >
         {{ t('databox.recipients.missingBoxIds', { count: recipientsWithoutBox.length }) }}
       </div>
-      <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ t('databox.recipients.taxOfficeHint') }}</p>
+      <p class="text-sm text-neutral-500">{{ t('databox.recipients.taxOfficeHint') }}</p>
 
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -1445,7 +1472,7 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in recipients" :key="r.id" class="border-t border-neutral-100 dark:border-neutral-800">
+            <tr v-for="r in recipients" :key="r.id" class="border-t border-neutral-100">
               <td class="py-2 pr-3">{{ r.name }}</td>
               <td class="py-2 pr-3">{{ t(`databox.recipientKind.${r.kind}`) }}</td>
               <td class="py-2 pr-3">
@@ -1474,16 +1501,28 @@ onMounted(async () => {
         </table>
       </div>
 
-      <div class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900">
+      <div class="rounded-lg border border-neutral-200 bg-surface p-4">
         <h2 class="mb-3 font-medium">{{ t('databox.recipients.addTitle') }}</h2>
         <div class="grid gap-3 sm:grid-cols-2">
           <label class="block">
-            <span class="text-sm font-medium">{{ t('databox.recipients.code') }}</span>
-            <input v-model="recipientCode" type="text" class="form-input mt-1 w-full" />
+            <span class="text-sm font-medium">{{ t('databox.recipients.name') }}</span>
+            <input
+              v-model="recipientName"
+              type="text"
+              class="form-input mt-1 w-full"
+              @input="recipientCodeSlug.fromName(($event.target as HTMLInputElement).value)"
+            />
           </label>
           <label class="block">
-            <span class="text-sm font-medium">{{ t('databox.recipients.name') }}</span>
-            <input v-model="recipientName" type="text" class="form-input mt-1 w-full" />
+            <span class="text-sm font-medium">{{ t('databox.recipients.code') }}</span>
+            <input
+              v-model="recipientCode"
+              type="text"
+              maxlength="48"
+              class="form-input mt-1 w-full font-mono"
+              @input="recipientCodeSlug.markManual(($event.target as HTMLInputElement).value)"
+            />
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.recipients.codeHint') }}</span>
           </label>
           <label class="block">
             <span class="text-sm font-medium">{{ t('databox.recipients.kind') }}</span>
@@ -1501,14 +1540,14 @@ onMounted(async () => {
           <label class="block sm:col-span-2">
             <span class="text-sm font-medium">{{ t('databox.recipients.source') }}</span>
             <input v-model="recipientSource" type="url" class="form-input mt-1 w-full" />
-            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <span class="mt-1 block text-xs text-neutral-500">
               {{ t('databox.recipients.sourceHint') }}
             </span>
           </label>
         </div>
       </div>
 
-      <div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-white/95 py-3 dark:border-neutral-700 dark:bg-neutral-900/95">
+      <div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 py-3">
         <button type="button" :class="btnFilled('primary')" :disabled="saving" @click="saveRecipient">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />

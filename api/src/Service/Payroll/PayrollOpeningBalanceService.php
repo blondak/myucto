@@ -61,18 +61,20 @@ final readonly class PayrollOpeningBalanceService
      * Co je za daný rok uložené. Vrací i `id` aktuální verze — oprava se na něj
      * musí explicitně navázat, jinak ji repozitář odmítne jako duplicitu.
      *
-     * @return array{year:int,months:list<OpeningMonth>,openings:array<string,?int>,locked:bool}
+     * @return array{year:int,months:list<OpeningMonth>,openings:array<string,?int>,source_reference:string,locked:bool}
      */
     public function current(int $supplierId, int $employeeId, int $year): array
     {
         $openings = [];
         $months = [];
+        $sourceReference = '';
         foreach (self::KINDS as $kind) {
             $opening = $this->accumulators->openingBalance($supplierId, $employeeId, $year, $kind);
             $openings[$kind] = $opening === null ? null : (int) $opening['id'];
             // Rozpis měsíců je v evidence u obou druhů stejný; stačí ten první nalezený.
             if ($months === [] && $opening !== null && is_array($opening['evidence']['months'] ?? null)) {
                 $months = $opening['evidence']['months'];
+                $sourceReference = (string) $opening['source_reference'];
             }
         }
 
@@ -80,6 +82,7 @@ final readonly class PayrollOpeningBalanceService
             'year' => $year,
             'months' => array_values($months),
             'openings' => $openings,
+            'source_reference' => $sourceReference,
             'locked' => $this->accumulators->hasApprovedResult($supplierId, $employeeId, $year),
         ];
     }
@@ -89,7 +92,7 @@ final readonly class PayrollOpeningBalanceService
      * vrátí původní řádek), změna čísel je oprava navázaná na aktuální verzi.
      *
      * @param list<OpeningMonth> $months
-     * @return array{year:int,months:list<OpeningMonth>,openings:array<string,?int>,locked:bool}
+     * @return array{year:int,months:list<OpeningMonth>,openings:array<string,?int>,source_reference:string,locked:bool}
      */
     public function save(
         int $supplierId,
@@ -99,6 +102,7 @@ final readonly class PayrollOpeningBalanceService
         string $sourceReference,
         ?int $actorUserId,
     ): array {
+        $sourceReference = trim($sourceReference);
         if ($months === []) {
             throw new \InvalidArgumentException('Doplňte aspoň jeden měsíc předchozího zpracování.');
         }

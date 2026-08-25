@@ -263,7 +263,7 @@ final class PayrollTimeApiTest extends TestCase
                         'worked_hours' => '7.5',
                         'unworked_hours_occurred' => false,
                         'work_obstacles_occurred' => false,
-                        'confirmation_note' => 'Potvrzeno ze syntetické docházky.',
+                        'confirmation_note' => '',
                     ],
                 ]),
             new Response(),
@@ -274,7 +274,7 @@ final class PayrollTimeApiTest extends TestCase
         $stored = $this->db->pdo()->prepare(
             'SELECT standard_fund_millihours, agreed_fund_millihours,
                     weekly_work_centihours, evidence_days, worked_millihours,
-                    source_snapshot_sha256, summary_sha256
+                    confirmation_note, source_snapshot_sha256, summary_sha256
                FROM payroll_jmhz_work_month_revisions
               WHERE supplier_id = ? AND employment_id = ?'
         );
@@ -286,6 +286,7 @@ final class PayrollTimeApiTest extends TestCase
         self::assertSame(4000, (int) $revision['weekly_work_centihours']);
         self::assertSame(31, (int) $revision['evidence_days']);
         self::assertSame(7500, (int) $revision['worked_millihours']);
+        self::assertSame('', $revision['confirmation_note']);
         self::assertSame($preview['source_snapshot_sha256'], $revision['source_snapshot_sha256']);
 
         $event = $this->db->pdo()->prepare(

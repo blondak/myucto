@@ -38,7 +38,7 @@ use Psr\Log\NullLogger;
 use Symfony\Component\Clock\NativeClock;
 
 /**
- * Příchozí cesta: souhlas podle § 17 odst. 3, rozlišení prázdna od poruchy
+ * Příchozí cesta: vědomá akce podle § 17 odst. 3, rozlišení prázdna od poruchy
  * a zařazování zpráv.
  *
  * Nic z toho nesahá na síť — {@see FakeIsdsTransport} je paměťová náhrada.
@@ -126,10 +126,11 @@ final class SubmissionInboxServiceTest extends TestCase
     }
 
     /**
-     * § 17 odst. 3 zák. 300/2008 Sb.: vyzvednutí seznamu je doručení. Bez
-     * výslovného souhlasu se na schránku nesmí sáhnout — ani ručně, ani cronem.
+     * § 17 odst. 3 zák. 300/2008 Sb.: vyzvednutí seznamu může způsobit
+     * doručení. Bez konkrétního uživatele, který právě spustil akci, se na
+     * schránku nesmí sáhnout.
      */
-    public function testPollingIsRefusedWithoutExplicitConsent(): void
+    public function testPollingIsRefusedWithoutInteractiveActor(): void
     {
         $this->insertCredential();
 
@@ -137,42 +138,46 @@ final class SubmissionInboxServiceTest extends TestCase
             $this->service->poll($this->context(), 'isds');
             self::fail('Vybírání schránky bez souhlasu mělo být odmítnuto.');
         } catch (SubmissionChannelException $e) {
-            self::assertSame('inbox_polling_not_enabled', $e->errorCode);
+            self::assertSame('interactive_action_required', $e->errorCode);
         }
 
         // A hlavně: k síti se to vůbec nedostalo.
         self::assertNotContains('listReceived', $this->transport->callLog);
     }
 
-    public function testPollingIsDisabledOnFreshCredential(): void
+    public function testFreshCredentialDoesNotEnablePersistentPolling(): void
     {
         $this->insertCredential();
 
         $credential = $this->credentials->findPublic($this->supplierId, 'isds', 'test');
         self::assertNotNull($credential);
         self::assertFalse($credential['inbox_polling_enabled']);
-        self::assertSame([], $this->service->suppliersWithPollingEnabled('isds'));
     }
 
-    public function testEnablingPollingRecordsWhoAndWhen(): void
+    public function testInteractivePollingWorksWithoutPersistentOptIn(): void
     {
         $this->insertCredential();
+        $this->transport->inboxMessages = [];
 
-        $this->service->setPollingEnabled($this->supplierId, 'test', true, $this->userId);
+        $result = $this->service->poll(
+            $this->context(),
+            'isds',
+            null,
+            50,
+            $this->userId,
+        );
 
         $credential = $this->credentials->findPublic($this->supplierId, 'isds', 'test');
         self::assertNotNull($credential);
-        self::assertTrue($credential['inbox_polling_enabled']);
-        self::assertSame($this->userId, $credential['inbox_polling_enabled_by']);
-        self::assertNotNull($credential['inbox_polling_enabled_at']);
+        self::assertFalse($credential['inbox_polling_enabled']);
+        self::assertSame(0, $result['fetched']);
+        self::assertContains('listReceived', $this->transport->callLog);
     }
 
     /** Uložení nového certifikátu nesmí souhlas s vybíráním schránky zapnout. */
     public function testSavingCredentialDoesNotSilentlyEnablePolling(): void
     {
         $this->insertCredential();
-        $this->service->setPollingEnabled($this->supplierId, 'test', false, $this->userId);
-
         $this->credentials->save($this->supplierId, 'isds', 'test', [
             'label' => 'Nový certifikát',
             'box_id' => 'abcdefg',
@@ -197,7 +202,7 @@ final class SubmissionInboxServiceTest extends TestCase
         $this->enablePolling();
         $this->transport->inboxBehaviour = 'fail';
 
-        $result = $this->service->poll($this->context(), 'isds');
+        $result = $this->pollInteractively();
 
         self::assertSame(1, $result['failed']);
         self::assertNotNull($result['error']);
@@ -217,7 +222,7 @@ final class SubmissionInboxServiceTest extends TestCase
         $this->enablePolling();
         $this->transport->inboxMessages = [];
 
-        $result = $this->service->poll($this->context(), 'isds');
+        $result = $this->pollInteractively();
 
         self::assertSame(0, $result['fetched']);
         self::assertSame(0, $result['failed']);
@@ -243,7 +248,7 @@ final class SubmissionInboxServiceTest extends TestCase
         ]];
         $this->transport->downloads['DM-777'] = $this->syntheticZfo();
 
-        $result = $this->service->poll($this->context(), 'isds');
+        $result = $this->pollInteractively();
 
         self::assertSame(1, $result['stored']);
         self::assertSame(1, $result['unclassified']);
@@ -268,7 +273,7 @@ final class SubmissionInboxServiceTest extends TestCase
         ]];
         $this->transport->downloads['DM-778'] = $this->syntheticZfo();
 
-        $this->service->poll($this->context(), 'isds');
+        $this->pollInteractively();
 
         $stored = $this->inbox->find($this->supplierId, 'isds', 'test', 'DM-778');
         self::assertNotNull($stored);
@@ -290,7 +295,7 @@ final class SubmissionInboxServiceTest extends TestCase
         ]];
         $this->transport->downloads['DM-779'] = $this->syntheticZfo();
 
-        $this->service->poll($this->context(), 'isds');
+        $this->pollInteractively();
 
         $stored = $this->inbox->find($this->supplierId, 'isds', 'test', 'DM-779');
         self::assertNotNull($stored);
@@ -313,8 +318,8 @@ final class SubmissionInboxServiceTest extends TestCase
         ]];
         $this->transport->downloads['DM-780'] = $this->syntheticZfo();
 
-        $first = $this->service->poll($this->context(), 'isds');
-        $second = $this->service->poll($this->context(), 'isds');
+        $first = $this->pollInteractively();
+        $second = $this->pollInteractively();
 
         self::assertSame(1, $first['stored']);
         self::assertSame(0, $second['stored']);
@@ -345,7 +350,18 @@ final class SubmissionInboxServiceTest extends TestCase
     private function enablePolling(): void
     {
         $this->insertCredential();
-        $this->service->setPollingEnabled($this->supplierId, 'test', true, $this->userId);
+    }
+
+    /** @return array{fetched:int,stored:int,skipped:int,failed:int,unclassified:int,error:?string} */
+    private function pollInteractively(): array
+    {
+        return $this->service->poll(
+            $this->context(),
+            'isds',
+            null,
+            50,
+            $this->userId,
+        );
     }
 
     private function context(): ChannelContext

@@ -86,14 +86,6 @@ final readonly class ExternalEmployerTaxCertificate implements JsonSerializable
                 throw new InvalidArgumentException('External tax certificate amounts cannot be negative.');
             }
         }
-        if (
-            $evidenceStatus === TaxEvidenceStatus::Verified
-            && trim((string) $evidenceReference) === ''
-        ) {
-            throw new InvalidArgumentException(
-                'Verified external tax certificate requires an evidence reference.',
-            );
-        }
         if ($receivedOn !== null && preg_match('~^\d{4}-\d{2}-\d{2}$~', $receivedOn) !== 1) {
             throw new InvalidArgumentException(
                 'External tax certificate receipt date must be an ISO date.',

@@ -105,7 +105,7 @@ async function load() {
       for (const field of AMOUNT_FIELDS) draft[field] = toInput(row[field])
       drafts.value[row.month] = draft
     }
-    if (saved.months.length > 0) sourceReference.value = t('payroll.people.openings.source_default')
+    sourceReference.value = saved.source_reference
     emit('loaded', hasAnyAmount.value)
   } catch (exception) {
     error.value = apiErrorMessage(exception, t('payroll.people.openings.load_failed'))
@@ -144,8 +144,8 @@ async function save() {
     emit('loaded', hasAnyAmount.value)
     toast.success(t('payroll.people.openings.saved'))
   } catch (exception) {
-    // Hláška ze serveru jmenuje konkrétní důvod (zamčeno schválenou mzdou,
-    // chybějící zdroj) — nesmí ji přebít obecný text.
+    // Hláška ze serveru jmenuje konkrétní důvod (např. zamčeno schválenou
+    // mzdou) — nesmí ji přebít obecný text.
     error.value = apiErrorMessage(exception, t('payroll.people.openings.save_failed'))
   } finally {
     saving.value = false

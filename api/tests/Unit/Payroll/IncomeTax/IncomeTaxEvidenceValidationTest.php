@@ -4,19 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\IncomeTax;
 
-use InvalidArgumentException;
 use MyInvoice\Service\Payroll\IncomeTax\TaxChildClaim;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use PHPUnit\Framework\TestCase;
 
 final class IncomeTaxEvidenceValidationTest extends TestCase
 {
-    public function testVerifiedEvidenceRequiresReference(): void
+    public function testVerifiedEvidenceDoesNotRequireReference(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('evidence reference');
-
-        new TaxChildClaim(
+        $claim = new TaxChildClaim(
             'synthetic-child',
             1,
             false,
@@ -26,11 +22,13 @@ final class IncomeTaxEvidenceValidationTest extends TestCase
             true,
             true,
         );
+
+        self::assertNull($claim->evidenceReference);
     }
 
     public function testEvidenceIntervalMustBeOrdered(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('effective interval');
 
         new TaxChildClaim(

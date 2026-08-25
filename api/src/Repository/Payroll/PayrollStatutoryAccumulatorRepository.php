@@ -59,9 +59,9 @@ final class PayrollStatutoryAccumulatorRepository
             true,
         );
         $sourceReference = trim($sourceReference);
-        if ($sourceReference === '' || mb_strlen($sourceReference) > 190) {
+        if (mb_strlen($sourceReference) > 190) {
             throw new \InvalidArgumentException(
-                'Zdroj opening balance musí mít neprázdnou referenci do 190 znaků.',
+                'Volitelná reference počátečního stavu smí mít nejvýše 190 znaků.',
             );
         }
         if ($idempotencyKey === '') {

@@ -226,7 +226,7 @@ function claimPayload(): PayrollDependantClaimPayload {
     claim_reason: claimForm.claim_reason,
     evidence_status: claimForm.evidence_status,
     evidence_reference: claimForm.evidence_status === 'verified'
-      ? claimForm.evidence_reference.trim()
+      ? claimForm.evidence_reference.trim() || null
       : null,
     shared_household_confirmed: claimForm.shared_household_confirmed,
     other_claimant_excluded: claimForm.other_claimant_excluded,

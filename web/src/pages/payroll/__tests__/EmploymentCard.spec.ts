@@ -341,6 +341,32 @@ describe('EmploymentCard', () => {
     expect(wrapper.find('[data-test="social-employer-rate-category-evidence"]').exists()).toBe(false)
   })
 
+  it('uloží zvýšenou sazbu a slevu i bez volitelných odkazů na podklady', async () => {
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="social-employer-rate-category"]')
+      .setValue('risk_employment')
+    await wrapper.get('[data-test="social-part-time-discount-reason"]')
+      .setValue('under_21')
+    await wrapper.get('textarea').setValue('Změna ověřených podmínek')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const payload = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
+    expect(payload?.social_employer_rate_category).toBe('risk_employment')
+    expect(payload?.social_employer_rate_category_evidence).toBeNull()
+    expect(payload?.social_part_time_discount_reason).toBe('under_21')
+    expect(payload?.social_part_time_discount_evidence).toBeNull()
+  })
+
   it('vyžádá 10502 jen pro druh činnosti 1 až 9 a při změně jej vyčistí', async () => {
     const wrapper = mount(EmploymentCard, {
       props: { employment: employment(), canWrite: true },

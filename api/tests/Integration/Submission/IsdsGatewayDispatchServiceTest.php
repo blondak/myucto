@@ -130,6 +130,7 @@ final class IsdsGatewayDispatchServiceTest extends TestCase
         );
 
         $this->service = new IsdsGatewayDispatchService(
+            $this->db,
             $this->outbox,
             $attempts,
             $this->sessions,
@@ -301,6 +302,84 @@ final class IsdsGatewayDispatchServiceTest extends TestCase
         $again = $this->service->complete($this->supplierId, $this->userId, $started['app_token'], '01-session-3');
         self::assertSame('approved', $again['state']);
         self::assertCount(1, $this->queue->attemptsFor($this->supplierId, $outboxId));
+    }
+
+    /**
+     * Pád staršího procesu mohl nastat po uzavření gateway relace, ale před
+     * projekcí dmID do outboxu. Opakovaný callback musí chybějící lokální zápis
+     * dokončit, ne pouze podle relace tvrdit, že už je podání evidované.
+     */
+    public function testApprovedSessionRepairsMissingOutboxProjection(): void
+    {
+        $outboxId = $this->enqueue($this->supplierId, $this->recipientId);
+        $started = $this->service->start($this->supplierId, $outboxId, $this->userId);
+        $this->service->complete($this->supplierId, $this->userId, $started['app_token'], '01-session-1');
+
+        $sessions = $this->sessions->listForOutbox($this->supplierId, $outboxId);
+        self::assertCount(1, $sessions);
+        self::assertNotNull($this->sessions->markApproved(
+            $this->supplierId,
+            (int) $sessions[0]['id'],
+            'DM-RECOVERED',
+            '0000',
+            'Zpráva byla odeslána.',
+        ));
+
+        $before = $this->outbox->find($this->supplierId, $outboxId);
+        self::assertNotNull($before);
+        self::assertSame('ready', $before['dispatch_state']);
+
+        $result = $this->service->complete(
+            $this->supplierId,
+            $this->userId,
+            $started['app_token'],
+            '01-session-unused',
+        );
+
+        self::assertSame('approved', $result['state']);
+        self::assertSame('DM-RECOVERED', $result['external_message_id']);
+
+        $after = $this->outbox->find($this->supplierId, $outboxId);
+        self::assertNotNull($after);
+        self::assertSame('sent', $after['dispatch_state']);
+        self::assertSame('gateway', $after['dispatch_mode']);
+        self::assertSame('DM-RECOVERED', $after['external_message_id']);
+
+        $attempts = $this->queue->attemptsFor($this->supplierId, $outboxId);
+        self::assertCount(1, $attempts);
+        self::assertSame('sent', $attempts[0]['outcome']);
+        self::assertSame('DM-RECOVERED', $attempts[0]['external_message_id']);
+    }
+
+    /** Externí dmID se nesmí ztratit ani tehdy, když lokální outbox mezitím někdo změnil. */
+    public function testApprovedMessageIdSurvivesOutboxProjectionConflict(): void
+    {
+        $outboxId = $this->enqueue($this->supplierId, $this->recipientId);
+        $started = $this->service->start($this->supplierId, $outboxId, $this->userId);
+        $this->service->complete($this->supplierId, $this->userId, $started['app_token'], '01-session-1');
+
+        $row = $this->outbox->find($this->supplierId, $outboxId);
+        self::assertNotNull($row);
+        $this->outbox->cancel($this->supplierId, $outboxId, (int) $row['row_version']);
+
+        $this->client->conceptResolved = true;
+        try {
+            $this->service->complete($this->supplierId, $this->userId, $started['app_token'], '01-session-2');
+            self::fail('Kolize lokální projekce nesmí být hlášena jako úspěšně dokončené odeslání.');
+        } catch (SubmissionChannelException $e) {
+            self::assertSame('isds_gateway_projection_failed', $e->errorCode);
+            self::assertStringContainsString('znovu neodesílejte', mb_strtolower($e->getMessage()));
+        }
+
+        $sessions = $this->sessions->listForOutbox($this->supplierId, $outboxId);
+        self::assertCount(1, $sessions);
+        self::assertSame('approved', $sessions[0]['state']);
+        self::assertSame('DM-9000', $sessions[0]['concept_dm_id']);
+
+        $after = $this->outbox->find($this->supplierId, $outboxId);
+        self::assertNotNull($after);
+        self::assertSame('cancelled', $after['dispatch_state']);
+        self::assertSame([], $this->queue->attemptsFor($this->supplierId, $outboxId));
     }
 
     /**

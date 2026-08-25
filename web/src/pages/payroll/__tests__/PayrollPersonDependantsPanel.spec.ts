@@ -161,6 +161,22 @@ describe('PayrollPersonDependantsPanel', () => {
     expect(mocks.success).toHaveBeenCalled()
   })
 
+  it('uloží ověřený nárok i bez odkazu na doklad', async () => {
+    mocks.createPersonDependantClaim.mockResolvedValue(response())
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('tbody [aria-expanded]').trigger('click')
+    await wrapper.find('[data-test="add-claim-7"]').trigger('click')
+    await wrapper.find('[data-test="claim-effective-from"]').setValue('2026-01-01')
+    await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.createPersonDependantClaim).toHaveBeenCalledWith(21, 7, expect.objectContaining({
+      evidence_status: 'verified',
+      evidence_reference: null,
+    }))
+  })
+
   it('surfaces the API validation message instead of a generic failure', async () => {
     mocks.createPersonDependantClaim.mockRejectedValue({
       response: { data: { error: { code: 'validation_failed', message: 'Pořadí dítěte 1 už je obsazené.' } } },

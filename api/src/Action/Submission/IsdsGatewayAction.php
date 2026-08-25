@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Submission;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Submission\IsdsGatewaySessionRepository;
+use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
@@ -33,15 +35,17 @@ use Psr\Http\Message\UploadedFileInterface;
  *
  * ── Registrace brány je provozovatelská, ne zákaznická ──────────────────────
  * Certifikát platí provozovatel a je jeden pro celou službu, takže endpointy
- * `/api/settings/isds-gateway` jsou dostupné jen s právem na `settings.signing`
- * a měly by být v produkci navíc omezené na provozní účet. Zákazník k odesílání
- * přes bránu nepotřebuje nastavit nic.
+ * `/api/settings/isds-gateway` jsou dostupné pouze provoznímu superadminovi.
+ * Zákazník k odesílání přes bránu nepotřebuje nastavovat ani vidět její ATS ID,
+ * hostitele nebo certifikát.
  */
 final class IsdsGatewayAction
 {
     public function __construct(
         private readonly IsdsGatewayDispatchService $dispatch,
         private readonly IsdsGatewayRegistrationService $registrations,
+        private readonly IsdsGatewaySessionRepository $sessions,
+        private readonly SubmissionOutboxRepository $outbox,
         private readonly ActivityLogger $logger,
     ) {}
 
@@ -55,7 +59,33 @@ final class IsdsGatewayAction
      */
     public function start(Request $request, Response $response, array $args): Response
     {
-        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+        return $this->startForPermission(
+            $request,
+            $response,
+            $args,
+            'settings.signing',
+        );
+    }
+
+    /** @param array<string,string> $args */
+    public function payrollStart(Request $request, Response $response, array $args): Response
+    {
+        return $this->startForPermission(
+            $request,
+            $response,
+            $args,
+            'payroll.submissions',
+        );
+    }
+
+    /** @param array<string,string> $args */
+    private function startForPermission(
+        Request $request,
+        Response $response,
+        array $args,
+        string $permission,
+    ): Response {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE, $permission)) !== null) {
             return $denied;
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -63,6 +93,9 @@ final class IsdsGatewayAction
         $id = (int) ($args['id'] ?? 0);
 
         try {
+            if ($permission === 'payroll.submissions') {
+                $this->assertPayrollOutbox($supplierId, $id);
+            }
             $result = $this->dispatch->start($supplierId, $id, $userId);
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
@@ -88,7 +121,28 @@ final class IsdsGatewayAction
     /** Návrat z ISDS. Fáze se pozná ze stavu relace, ne z parametru. */
     public function complete(Request $request, Response $response): Response
     {
-        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+        return $this->completeForPermission(
+            $request,
+            $response,
+            'settings.signing',
+        );
+    }
+
+    public function payrollComplete(Request $request, Response $response): Response
+    {
+        return $this->completeForPermission(
+            $request,
+            $response,
+            'payroll.submissions',
+        );
+    }
+
+    private function completeForPermission(
+        Request $request,
+        Response $response,
+        string $permission,
+    ): Response {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE, $permission)) !== null) {
             return $denied;
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -108,6 +162,12 @@ final class IsdsGatewayAction
         }
 
         try {
+            if ($permission === 'payroll.submissions') {
+                $session = $this->sessions->findByAppToken($appToken);
+                if ($session !== null && (int) $session['supplier_id'] === $supplierId) {
+                    $this->assertPayrollOutbox($supplierId, (int) $session['outbox_id']);
+                }
+            }
             $result = $this->dispatch->complete($supplierId, $userId, $appToken, $sessionId);
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
@@ -133,9 +193,32 @@ final class IsdsGatewayAction
 
     // ───────────────────────── registrace provozovatele ─────────────────────────
 
+    /** Bezpečná capability projekce bez ATS ID, URL, certifikátu a hostitelů. */
+    public function capability(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard(
+            $request,
+            $response,
+            AccessLevel::READ,
+            'settings.signing',
+        )) !== null) {
+            return $denied;
+        }
+
+        return Json::ok($response, [
+            'items' => array_map(
+                fn (string $environment): array => [
+                    'environment' => $environment,
+                    'available' => $this->registrations->isDispatchReady($environment),
+                ],
+                ['production', 'test'],
+            ),
+        ]);
+    }
+
     public function settings(Request $request, Response $response): Response
     {
-        if (($denied = $this->guard($request, $response, AccessLevel::READ)) !== null) {
+        if (($denied = $this->operatorGuard($request, $response, AccessLevel::READ)) !== null) {
             return $denied;
         }
 
@@ -147,7 +230,7 @@ final class IsdsGatewayAction
 
     public function saveSettings(Request $request, Response $response): Response
     {
-        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+        if (($denied = $this->operatorGuard($request, $response, AccessLevel::WRITE)) !== null) {
             return $denied;
         }
         $body = (array) ($request->getParsedBody() ?? []);
@@ -185,7 +268,7 @@ final class IsdsGatewayAction
 
     public function setActive(Request $request, Response $response): Response
     {
-        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+        if (($denied = $this->operatorGuard($request, $response, AccessLevel::WRITE)) !== null) {
             return $denied;
         }
         $body = (array) ($request->getParsedBody() ?? []);
@@ -215,7 +298,7 @@ final class IsdsGatewayAction
     /** @param array<string,string> $args */
     public function deleteSettings(Request $request, Response $response, array $args): Response
     {
-        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+        if (($denied = $this->operatorGuard($request, $response, AccessLevel::WRITE)) !== null) {
             return $denied;
         }
         $environment = (string) ($args['environment'] ?? 'test');
@@ -238,9 +321,53 @@ final class IsdsGatewayAction
 
     // ───────────────────────── interní ─────────────────────────
 
-    private function guard(Request $request, Response $response, AccessLevel $level): ?Response
+    private function assertPayrollOutbox(int $supplierId, int $outboxId): void
     {
-        if (!RequestAuthorization::allows($request, 'settings.signing', $level)) {
+        $row = $this->outbox->find($supplierId, $outboxId);
+        if ($row === null) {
+            throw new SubmissionChannelException(
+                'submission_outbox_not_found',
+                'Připravené podání nebylo nalezeno.',
+                404,
+            );
+        }
+        if (!str_starts_with(strtoupper((string) $row['agenda_code']), 'JMHZ')) {
+            throw new SubmissionChannelException(
+                'payroll_gateway_outbox_forbidden',
+                'Mzdové oprávnění smí přes ISDS odeslat pouze podání JMHZ.',
+                403,
+            );
+        }
+    }
+
+    private function operatorGuard(
+        Request $request,
+        Response $response,
+        AccessLevel $level,
+    ): ?Response {
+        if (($denied = $this->guard($request, $response, $level, 'settings.signing')) !== null) {
+            return $denied;
+        }
+        if (!RequestAuthorization::isSuperadmin($request)) {
+            return Json::error(
+                $response,
+                'forbidden',
+                'Registraci odesílací brány smí spravovat pouze provozní superadmin.',
+                403,
+            );
+        }
+
+        return null;
+    }
+
+    private function guard(
+        Request $request,
+        Response $response,
+        AccessLevel $level,
+        string $permission,
+    ): ?Response
+    {
+        if (!RequestAuthorization::allows($request, $permission, $level)) {
             return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
         if ($this->userId($request) <= 0) {

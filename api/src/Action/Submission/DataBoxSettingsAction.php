@@ -12,21 +12,21 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
-use MyInvoice\Service\Submission\SubmissionInboxService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
 
 /**
- * Systém → Datová schránka: systémový certifikát a souhlas s vybíráním schránky.
+ * Firma → Datová schránka: systémový certifikát aktuální firmy pro ručně
+ * spuštěné operace.
  *
  * Bezpečnostní režim se přebírá od trezoru certifikátů beze změny:
  * jen z přihlášené webové relace, nikdy přes bearer token. Certifikát k datové
  * schránce otevírá odesílání podání jménem firmy — je to stejná třída tajemství
  * jako soukromý klíč, a tak se s ním zachází.
  *
- * Přihlašovací formulář (jméno a heslo) tu ZÁMĚRNĚ není: přístupové údaje ke
- * schránce nesmí opustit zařízení uživatele (§ 9 odst. 2 zák. 300/2008 Sb.).
+ * Jméno a heslo se do serverového trezoru neukládají. Uživatelské metody
+ * přihlášení nabízí odesílací brána přímo v ISDS, mimo perimetr aplikace.
  *
  * Odpověď NIKDY neobsahuje uložený certifikát ani jeho heslo: čte se z projekce,
  * která ciphertext sloupce vůbec nevybírá.
@@ -35,7 +35,6 @@ final class DataBoxSettingsAction
 {
     public function __construct(
         private readonly SubmissionCredentialService $credentials,
-        private readonly SubmissionInboxService $inbox,
         private readonly ActivityLogger $logger,
     ) {}
 
@@ -82,48 +81,6 @@ final class DataBoxSettingsAction
         $this->logger->log('databox_credentials_save', $userId, 'databox', $saved['id'], null, null, null, $supplierId);
 
         return Json::ok($response, $saved);
-    }
-
-    /**
-     * Zapnutí/vypnutí vybírání schránky.
-     *
-     * Samostatný endpoint schválně: není to nastavení jako každé jiné.
-     * Vyzvednutím seznamu se zprávy DORUČÍ (§ 17 odst. 3 zák. 300/2008 Sb.)
-     * a rozeběhnou se lhůty, takže to musí být vlastní vědomé rozhodnutí,
-     * ne vedlejší efekt uložení certifikátu.
-     */
-    public function setPolling(Request $request, Response $response): Response
-    {
-        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
-            return $denied;
-        }
-        $body = (array) ($request->getParsedBody() ?? []);
-        $enabled = (bool) ($body['enabled'] ?? false);
-
-        // Zapnutí vyžaduje výslovné potvrzení, že uživatel ví, co dělá.
-        // Bez něj by stačilo omylem přepnout přepínač a začaly by běžet lhůty.
-        if ($enabled && ($body['acknowledged'] ?? false) !== true) {
-            return Json::error(
-                $response,
-                'acknowledgement_required',
-                'Vyzvednutí zprávy z datové schránky se počítá jako doručení a rozjíždí zákonné lhůty. '
-                . 'Zapnutí proto musíte výslovně potvrdit.',
-                400,
-            );
-        }
-
-        try {
-            $this->inbox->setPollingEnabled(
-                SupplierGuard::currentId($request),
-                (string) ($body['environment'] ?? 'production'),
-                $enabled,
-                $this->userId($request),
-            );
-        } catch (SubmissionChannelException $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
-        }
-
-        return Json::ok($response, ['inbox_polling_enabled' => $enabled]);
     }
 
     /** @param array<string,string> $args */

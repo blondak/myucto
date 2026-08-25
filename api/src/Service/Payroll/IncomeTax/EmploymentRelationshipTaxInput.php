@@ -25,17 +25,6 @@ final readonly class EmploymentRelationshipTaxInput
         if (trim($payerReference) === '') {
             throw new InvalidArgumentException('Employment payer reference must not be empty.');
         }
-        if (
-            in_array($otherWithholdingEligibility, [
-                OtherWithholdingEligibility::EligibleVerified,
-                OtherWithholdingEligibility::IneligibleVerified,
-            ], true)
-            && trim((string) $classificationEvidenceReference) === ''
-        ) {
-            throw new InvalidArgumentException(
-                'Verified other-withholding eligibility requires a classification evidence reference.',
-            );
-        }
     }
 
     public function includedBaseMinorUnits(): int

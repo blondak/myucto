@@ -138,7 +138,7 @@ final readonly class SubmissionCredentialService
         if ($row === null) {
             throw new SubmissionChannelException(
                 'credentials_missing',
-                'Přístup k datové schránce není nastavený. Doplňte systémový certifikát v Systém → Datová schránka.',
+                'Přístup k datové schránce není nastavený. Doplňte systémový certifikát v Firma → Datová schránka.',
                 409,
             );
         }

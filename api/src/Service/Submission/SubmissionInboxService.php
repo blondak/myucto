@@ -26,15 +26,10 @@ use Psr\Log\LoggerInterface;
  * Od té chvíle běží zákonné lhůty — u výzvy k odstranění vad, u odvolání,
  * u všeho.
  *
- * Kdyby tenhle cron běžel po instalaci sám od sebe, aplikace by uživateli
- * doručovala zprávy bez jeho vědomí a on by se to dozvěděl až z propadlé
- * lhůty. Proto:
- *   - vybírání schránky je ve výchozím stavu VYPNUTÉ
- *     (`submission_channel_credentials.inbox_polling_enabled = 0`),
- *   - zapnout ho musí člověk vědomě a zaznamenává se KDO a KDY,
- *   - každé vyzvednutí seznamu jde do auditní stopy jako právně významný úkon.
- * {@see assertPollingAllowed()} je jediná brána; bez ní se {@see poll()}
- * nedostane k síti.
+ * Aplikace proto schránku automaticky NEVYBÍRÁ. Každé vyzvednutí musí spustit
+ * přihlášený člověk samostatnou akcí v UI; jeho ID se zapíše do auditní stopy
+ * ještě před síťovým voláním. Bez konkrétního uživatele se {@see poll()}
+ * k síti nedostane.
  *
  * ── Prázdno není totéž co porucha ────────────────────────────────────────────
  * Druhá nebezpečná chyba téhle vrstvy by byla tichá: dotaz na schránku selže,
@@ -81,17 +76,28 @@ final readonly class SubmissionInboxService
     /**
      * Vyzvedne a zpracuje nové zprávy jedné firmy.
      *
-     * @throws SubmissionChannelException když uživatel vybírání schránky
-     *         nezapnul — viz § 17 odst. 3 v hlavičce třídy
+     * @throws SubmissionChannelException když vyzvednutí nespustil konkrétní
+     *         přihlášený uživatel — viz § 17 odst. 3 v hlavičce třídy
      * @return array{fetched:int,stored:int,skipped:int,failed:int,unclassified:int,error:?string}
      */
-    public function poll(ChannelContext $context, string $channelCode, ?int $folderId = null, int $limit = 50): array
+    public function poll(
+        ChannelContext $context,
+        string $channelCode,
+        ?int $folderId = null,
+        int $limit = 50,
+        ?int $actorUserId = null,
+    ): array
     {
         $supplierId = $context->supplierId;
         $environment = $context->environment;
         $result = ['fetched' => 0, 'stored' => 0, 'skipped' => 0, 'failed' => 0, 'unclassified' => 0, 'error' => null];
 
-        $this->assertPollingAllowed($supplierId, $channelCode, $environment);
+        $this->assertInteractivePollingAllowed(
+            $supplierId,
+            $channelCode,
+            $environment,
+            $actorUserId,
+        );
         $channel = $this->channels->inbox($channelCode);
 
         // Auditní stopa se zapisuje PŘED voláním, ne po něm: doručení nastane
@@ -99,7 +105,7 @@ final readonly class SubmissionInboxService
         // úspěchu by právě ty sporné případy zamlčel.
         $this->activity->log(
             'databox_inbox_list_fetched',
-            null,
+            $actorUserId,
             'databox',
             $supplierId,
             ['environment' => $environment, 'legal_basis' => '§ 17 odst. 3 zák. 300/2008 Sb.'],
@@ -198,56 +204,32 @@ final readonly class SubmissionInboxService
         return $this->inbox->reclassify($supplierId, $messageId, $classification, $outboxId);
     }
 
-    /**
-     * Zapne nebo vypne vybírání schránky.
-     *
-     * Není to nastavení jako každé jiné: zapnutím uživatel bere na sebe, že mu
-     * aplikace bude zprávy doručovat (§ 17 odst. 3 zák. 300/2008 Sb.) a že tím
-     * poběží lhůty. Kdo a kdy to zapnul, se ukládá, aby se dalo doložit.
-     */
-    public function setPollingEnabled(int $supplierId, string $environment, bool $enabled, int $userId): void
-    {
-        $this->credentials->setInboxPolling($supplierId, 'isds', $environment, $enabled, $userId);
-        $this->activity->log(
-            $enabled ? 'databox_inbox_polling_enabled' : 'databox_inbox_polling_disabled',
-            $userId,
-            'databox',
-            $supplierId,
-            ['environment' => $environment, 'legal_basis' => '§ 17 odst. 3 zák. 300/2008 Sb.'],
-            null,
-            null,
-            $supplierId,
-        );
-    }
-
-    /** Firmy, které vybírání schránky vědomě zapnuly — jediné, na které smí cron sáhnout. */
-    /** @return list<array<string,mixed>> */
-    public function suppliersWithPollingEnabled(string $channelCode = 'isds'): array
-    {
-        return $this->credentials->listWithInboxPolling($channelCode);
-    }
-
     // ───────────────────────── interní ─────────────────────────
 
     /**
-     * Brána § 17 odst. 3. Bez výslovného souhlasu se na schránku nesahá —
-     * ani ručně z UI, ani cronem.
+     * Brána § 17 odst. 3. Bez konkrétního uživatele, který právě stiskl akci
+     * v UI, se na schránku nesahá. Trvalý souhlas ani cron tuto podmínku
+     * nenahrazují.
      */
-    private function assertPollingAllowed(int $supplierId, string $channelCode, string $environment): void
+    private function assertInteractivePollingAllowed(
+        int $supplierId,
+        string $channelCode,
+        string $environment,
+        ?int $actorUserId,
+    ): void
     {
+        if ($actorUserId === null || $actorUserId <= 0) {
+            throw new SubmissionChannelException(
+                'interactive_action_required',
+                'Datovou schránku lze vyzvednout jen výslovnou akcí přihlášeného uživatele.',
+                409,
+            );
+        }
         $credential = $this->credentials->findPublic($supplierId, $channelCode, $environment);
         if ($credential === null) {
             throw new SubmissionChannelException(
                 'credentials_missing',
-                'Přístup k datové schránce není nastavený. Doplňte systémový certifikát v Systém → Datová schránka.',
-                409,
-            );
-        }
-        if (!(bool) $credential['inbox_polling_enabled']) {
-            throw new SubmissionChannelException(
-                'inbox_polling_not_enabled',
-                'Vybírání datové schránky není zapnuté. Vyzvednutí zprávy se počítá jako doručení '
-                . 'a rozjíždí zákonné lhůty, takže to musíte zapnout vědomě v Systém → Datová schránka.',
+                'Přístup k datové schránce není nastavený. Doplňte systémový certifikát v Firma → Datová schránka.',
                 409,
             );
         }

@@ -25,7 +25,8 @@ final class PayrollPersonHealthInsurerSeedService
     /**
      * Běžná česká situace, shodně s `DEFAULT_VALUES` ve
      * `web/src/pages/payroll/statutoryEvidenceForm.ts`: český režim veřejného
-     * zdravotního pojištění a pojišťovna doložená registrací u ní.
+     * zdravotního pojištění a uživatelem ověřená pojišťovna. Textovou
+     * dohledávku podkladu si aplikace nesmí domýšlet.
      *
      * @var array<string,?string>
      */
@@ -34,7 +35,7 @@ final class PayrollPersonHealthInsurerSeedService
         'foreign_country_code' => null,
         'jurisdiction_evidence_reference' => null,
         'insurer_status' => 'verified',
-        'insurer_evidence_reference' => 'health:insurer-registration',
+        'insurer_evidence_reference' => null,
     ];
 
     public function __construct(

@@ -150,11 +150,9 @@ final class JmhzEldpEvidenceBuilder
         ) {
             $this->invalid('jmhz_eldp_interaction_unsupported', 'První ELDP řez vyžaduje explicitní Ne pro IN03 i IN04.');
         }
-        $note = $confirmation['confirmation_note'] ?? null;
-        if (!is_string($note) || mb_strlen(trim($note), 'UTF-8') < 5
-            || mb_strlen(trim($note), 'UTF-8') > 500
-        ) {
-            $this->invalid('jmhz_eldp_confirmation_note_invalid', 'Potvrzení ELDP musí mít 5 až 500 znaků.');
+        $note = $confirmation['confirmation_note'] ?? '';
+        if (!is_string($note) || mb_strlen(trim($note), 'UTF-8') > 500) {
+            $this->invalid('jmhz_eldp_confirmation_note_invalid', 'Volitelná poznámka ELDP smí mít nejvýše 500 znaků.');
         }
 
         $spec = $this->specManifest();

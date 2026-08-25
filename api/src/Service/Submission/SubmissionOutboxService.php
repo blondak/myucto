@@ -102,7 +102,7 @@ final readonly class SubmissionOutboxService
             if ($channel === 'isds' && $recipientBoxId === null) {
                 throw new SubmissionChannelException(
                     'recipient_box_missing',
-                    'Vybraný příjemce nemá v číselníku ID datové schránky. Doplňte ho i s odkazem na zdroj, odkud je doložené.',
+                    'Vybraný příjemce nemá v číselníku ID datové schránky. Doplňte ho před odesláním.',
                     409,
                 );
             }

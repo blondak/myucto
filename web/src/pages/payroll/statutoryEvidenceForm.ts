@@ -9,13 +9,10 @@
  *    stát „CZ", u českého sociálního režimu „A1 se netýká"), formulář dosadí sám
  *    a schová.
  * 2. **Přepnutí volby dorovná závislá pole.** Neviditelné pole se vyprázdní (nebo
- *    dostane svou odvozenou hodnotu), viditelný doklad dostane typický důvod.
- *    Formulář se tak nikdy nedostane do stavu, který server odmítne — a hlavně
- *    ne hned po „Přidat záznam", jak to dělala nabídka „první možnost z enumu".
- * 3. **Doklad se vybírá, nepíše.** Kanonickou referenci (`^[A-Za-z0-9][…]*$`)
- *    nikdo ručně nepíše a při tisícovce zaměstnanců to ani nejde. Uživatel proto
- *    volí typický důvod a reference se z něj vygeneruje; volný text zůstává
- *    dostupný jako „jiné" pro konkrétní číslo dokladu.
+ *    dostane svou odvozenou hodnotu), aby formulář neposílal rozporné údaje.
+ * 3. **Odkaz na doklad je volitelný.** Kdo ho chce evidovat, vybere typický
+ *    podklad nebo napíše vlastní kanonickou referenci; prázdná hodnota uložení
+ *    ani zákonný výpočet neblokuje.
  *
  * Modul je záměrně bez Vue: pravidla jde tak přečíst i otestovat samostatně.
  */
@@ -315,13 +312,13 @@ export function normalizeRow(
       continue
     }
     if (field.kind !== 'evidence') continue
-    const offered = reasonOptions(section.key, field.key, row)
     const known = EVIDENCE_REASONS[`${section.key}.${field.key}`] ?? []
     const current = text(row, field.key)
+    const offered = reasonOptions(section.key, field.key, row)
     // Vlastní označení (mimo číselník důvodů) je uživatelův vstup — ten se
-    // nepřepisuje. Důvod, který k nové volbě nepatří, ano.
-    if (current === '' || (known.includes(current) && !offered.includes(current))) {
-      row[field.key] = offered[0] ?? null
+    // nepřepisuje. Jen typický důvod, který k nové volbě nepatří, se uklidí.
+    if (known.includes(current) && !offered.includes(current)) {
+      row[field.key] = null
     }
   }
 }
@@ -457,8 +454,7 @@ export function rowIssues(
       }
     }
     if (field.kind === 'evidence') {
-      if (value === '') issues.push({ key: 'reference_required', params: { label } })
-      else if (!CANONICAL_REFERENCE.test(value)) {
+      if (value !== '' && !CANONICAL_REFERENCE.test(value)) {
         issues.push({ key: 'reference_invalid', params: { label } })
       }
     }

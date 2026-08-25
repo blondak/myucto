@@ -18,8 +18,9 @@ nemění dosavadní Mzdovou rekapitulaci.
 > **Do ostrého spuštění ale výsledek, odvody, dokumenty i podání vždy ověř proti
 > jinému důvěryhodnému zdroji** a nepoužívej modul jako jediný podklad pro
 > výplatu nebo zákonné podání. Neúplný či nepodporovaný scénář systém zastaví
-> v ruční kontrole a **zákonná podání se zatím jen připravují a stahují, aplikace
-> je neodesílá** ([§ 58.16](#5816-podani-a-hlaseni)). Pro zaúčtování zůstává
+> v ruční kontrole. **Běžné měsíční JMHZ lze po kontrolním nácviku odeslat přes
+> ISDS nebo VREP; ostatní nepodporované agendy se dál pouze připravují a stahují**
+> ([§ 58.16](#5816-podani-a-hlaseni)). Pro zaúčtování zůstává
 > k dispozici [Mzdová rekapitulace](57_Mzdy.md).
 
 ## 58.1 Zapnutí pro firmu
@@ -76,7 +77,9 @@ V části **Platební účty institucí** se evidují účty ČSSZ, finančního
 zdravotních pojišťoven, zákonného pojištění a dalších příjemců. Pro každý účet
 vyber typ instituce a ulož zaměstnavatelský variabilní symbol, měnu, období
 platnosti, druh ověřovacího zdroje a datum ověření; reference zdroje (číslo
-sdělení nebo dopisu) je nepovinná. Povinná pole jsou ve formuláři označená
+sdělení nebo dopisu) je nepovinná a lze ji nechat prázdnou. Stejně tak jsou
+volitelné reference podkladů v politikách zaměstnavatele a u počátečních stavů
+převzatých z předchozího zpracování. Povinná pole jsou ve formuláři označená
 hvězdičkou. V seznamu jsou celé číslo účtu a variabilní symbol vidět hned
 v prvních sloupcích, bez rozklikávání; v úložišti zůstává účet šifrovaný.
 Změnu samotného účtu, typu nebo kódu
@@ -225,9 +228,9 @@ s vlastním obdobím účinnosti, kde uvedeš:
   poplatníka, ne k dítěti; dvě děti nesmí mít v jednom měsíci stejné pořadí;
 - **ZTP/P** — zvýhodnění za dítě s průkazem ZTP/P je dvojnásobné a zaškrtnout
   je lze jen tehdy, je-li ZTP/P vedeno i u samotné osoby;
-- **důvod a doklad** — doložený nárok vyžaduje odkaz do mzdové dokumentace
-  a podepsané prohlášení poplatníka platné k počátku nároku; bez obojího se
-  nárok uloží jen jako nedoložený a do výpočtu mzdy nevstoupí;
+- **důvod a stav ověření** — podepsané prohlášení poplatníka musí být platné
+  k počátku nároku; volitelně lze přidat odkaz do mzdové dokumentace, ale jeho
+  vyplnění není podmínkou uložení ani výpočtu;
 - **potvrzení společně hospodařící domácnosti a druhého poplatníka** — chybí-li,
   výpočet skončí v ruční kontrole.
 
@@ -270,20 +273,18 @@ Měsíční evidence zdravotního minima je **nepovinná**. Není-li za měsíc 
 platí zákonný výchozí stav podle § 3 odst. 10 zákona č. 592/1992 Sb.: doplatek
 do minimálního vyměřovacího základu hradí zaměstnanec. Zadává se tedy jen tehdy,
 když je skutečnost jiná — doplatek jde k tíži zaměstnavatele, protože nižší
-základ způsobily překážky na jeho straně (vyžaduje doklad), nebo si zaměstnanec
+základ způsobily překážky na jeho straně, nebo si zaměstnanec
 při souběhu zvolil pro doplatek jiného zaměstnavatele. Rozklad pojistného u
 schválené mzdy pak ukazuje i to, jestli hodnota vznikla zápisem, nebo odvozením
 ze zákona. Volba **neověřeno** dál znamená ruční posouzení.
 
-Ověřené hodnoty (český nebo zahraniční režim, doložená pojišťovna, platný A1)
-jsou právní skutečnosti, takže vyžadují **doklad**. Ten se ale nepíše ručně —
-u každého dokladu se vybírá **typický důvod** (například „Podepsané prohlášení
-poplatníka (§ 38k)", „Rodné číslo a adresa bydliště v ČR", „Registrace
-u zdravotní pojišťovny") a evidence si z něj sama vytvoří odkaz do mzdové
-dokumentace. Volba **Jiné** odemkne volný text pro konkrétní číslo dokladu
-(písmena, číslice a znaky `.`, `:`, `/`, `_`, `-`). Lidské vysvětlení patří do
-pole **Poznámka k dokladu**. Kdo doklad nemá, zvolí variantu **neověřeno**; ta
-se uloží, ale zůstane vidět jako důvod ručního posouzení.
+Ověřené hodnoty (český nebo zahraniční režim, ověřená pojišťovna, platný A1)
+jsou rozhodnutím uživatele. **Odkaz na podklad je všude volitelný**: lze zvolit
+typický podklad nebo přes volbu **Jiné** zapsat konkrétní číslo dokladu (písmena,
+číslice a znaky `.`, `:`, `/`, `_`, `-`), ale prázdné pole uložení, výpočet ani
+podání neblokuje. Aplikace žádný domnělý odkaz sama nevytváří. Za ověření
+správnosti právní skutečnosti odpovídá uživatel. Varianta **neověřeno** se dál
+ukládá jako důvod ručního posouzení.
 
 Tlačítko **Přidat záznam** předvyplní běžný český případ: daňový rezident ČR,
 český sociální i zdravotní režim, formulář A1 se netýká, sleva pracujícího
@@ -294,7 +295,7 @@ zaměstnance tak není co vyplňovat — stačí zkontrolovat a uložit.
 Na co se evidence neptá, to si odvodí: u českého daňového rezidenta je stát vždy
 ČR, u českého sociálního režimu je A1 vždy „netýká se". Tato pole se proto
 nezobrazují a objeví se až po přepnutí na cizí režim — tehdy si evidence vyžádá
-stát (ze seznamu států) a doklad k režimu. Stát i zdravotní pojišťovna se vždy
+stát ze seznamu; odkaz k režimu zůstává nepovinný. Stát i zdravotní pojišťovna se vždy
 vybírají ze seznamu, nepíšou se. Chybí-li něco, co server nepřijme, napíše to
 evidence rovnou u záznamu i s tím, co s tím udělat.
 
@@ -684,7 +685,8 @@ Při schválení měsíce v **Mzdy → Docházka a směny** se samostatně
 potvrzuje pracovní jádro JMHZ: stanovený a sjednaný měsíční fond, stanovená
 týdenní doba, evidenční dny a skutečně odpracované hodiny. Nabídnuté hodnoty
 jsou pouze dohledatelný podklad; před schválením je potvrď jako přesná desetinná
-čísla a uveď zdroj. Aplikace zde potichu nezaokrouhluje minuty ani nedopočítá
+čísla. Poznámku k ověření můžeš nechat prázdnou. Aplikace zde potichu
+nezaokrouhluje minuty ani nedopočítá
 chybějící profesní fond. Potvrzený souhrn je neměnný a navázaný na konkrétní
 revizi schváleného měsíce; po znovuotevření je nutné vytvořit nové potvrzení.
 
@@ -1078,7 +1080,7 @@ následující. Nezodpovězená otázka má stejný účinek jako záporná odpo
 platí „nevíme", zúčtování se neprovádí.
 
 - **Zaměstnanec o zúčtování požádal**, a to nejpozději 15. února po skončení
-  zdaňovacího období. K podané žádosti se ukládá datum i doložení.
+  zdaňovacího období. Povinné je datum žádosti; odkaz na podklad je volitelný.
 - **Prohlášení poplatníka je u vás na daný rok podepsané.** Bere se stav
   z karty zaměstnance k 31. prosinci zúčtovávaného roku.
 - **Doklady od předchozích zaměstnavatelů** za tentýž rok jsou doložené,
@@ -1136,6 +1138,10 @@ Potvrzení, které je vedené jako **nedoložené**, se do úhrnu nezapočítá 
 odst. 4 mluví o úhrnu mezd od všech plátců a do toho úhrnu patří doklad, ne
 nepodložený údaj. Sekci smí zadávat jen ten, kdo smí zúčtování i provést: ta
 čísla jdou přímo do úhrnu, ze kterého vychází přeplatek.
+
+Stav **Doložené** potvrzuje uživatel. Textový odkaz na podklad je nepovinná
+dohledávka a jeho nevyplnění samo o sobě zúčtování nezastaví; povinné zůstává
+označení konkrétního potvrzení a jeho rozhodné částky.
 
 Na výsledném dokladu je úhrn rozepsaný — kolik základu a záloh je od tohoto
 zaměstnavatele a kolik podle potvrzení od předchozích.
@@ -1196,9 +1202,9 @@ a opravné scénáře nejsou bez odpovídajícího oficiálního XSD dostupné.
 Záložky **JMHZ** a **Zdravotní pojišťovny** zobrazují za vybraný měsíc skutečný
 přehled evidovaných povinností, termínů, kanálů a posledních stavů podání.
 Produkční a testovací prostředí zůstávají oddělená. Přehled je pouze
-kontrolní — bez implementovaného důvěryhodného transportu a parseru protokolu
-nenabízí falešné tlačítko odeslání ani nepovyšuje lokální stav na přijaté
-podání.
+kontrolní; samotný řádek povinnosti ani stažení náhledu nikdy neznamená, že bylo
+podání odesláno nebo přijato. Běžné měsíční JMHZ má navíc řízené odeslání přes
+ISDS nebo VREP a stav **Přijato** získá teprve z ověřeného protokolu ČSSZ.
 
 Záložka **JMHZ** ukazuje všechny povinnosti vůči ČSSZ, tedy vedle měsíčního
 hlášení i registrace zaměstnance a zaměstnavatele, evidenční list důchodového
@@ -1257,6 +1263,30 @@ připravené k odeslání. Prostřední stav je varovný, ne zelený. Část kon
 rozhoduje až ČSSZ proti svému registru — ty se nikdy nevykazují jako splněné,
 jen se počítají zvlášť. Panel zároveň ukazuje lhůtu pro podání za vykazované
 období, včetně posunu na nejbližší pracovní den.
+
+Panel **Zmrazení a odeslání JMHZ** navazuje až na schválenou revizi, úplné
+právní evidence a úspěšné kontroly. Pro každou registraci u OSSZ pracuje se
+samostatnou povinností a variabilním symbolem. Před odesláním neměnně uloží
+přesné XML a jeho otisk; další kliknutí proto nevytvoří jiné podání pod stejnou
+identitou. Ostré podání je zablokované do začátku zákonné lhůty, testovací
+prostředí lze použít k nácviku.
+
+- **Odeslat přes ISDS** připraví datovou zprávu pro doloženou schránku ČSSZ.
+  Je-li aktivní odesílací brána, MyÚčto před přesměrováním vysvětlí přihlášení
+  a pošle uživatele přímo do ISDS. Přihlašovací údaje aplikace nevidí ani
+  neukládá a zpráva odejde až po schválení konceptu uživatelem v ISDS.
+  Konkrétní nabídku metod určuje ISDS a nastavení účtu; může zahrnovat jméno
+  a heslo, heslo aplikace s bezpečnostním klíčem eGovernmentu nebo Mobilní klíč
+  eGovernmentu. Není-li brána aktivní, připravená zpráva zůstane v odchozí
+  frontě pro ruční odeslání a doplnění ID zprávy a doručenky.
+- **Odeslat přes VREP** předá stejné zmrazené podání bráně ČSSZ. Výsledek,
+  protokol a případné chyby se sledují na záložce **Stav odeslání**. Převzetí
+  transportem ještě není přijetí podání.
+
+Odpovědi ani doručenky z datové schránky se nikdy nestahují automaticky.
+Načtení příchozích zpráv vyvolá uživatel samostatným tlačítkem v
+**Firma → Datová schránka** a před síťovým voláním potvrdí upozornění, že
+vyzvednutí může založit doručení a spustit zákonné lhůty.
 
 Pro běžný profil JMHZ se u každé schválené revize samostatně potvrzuje pět
 právních skutečností: evidované srážky ze mzdy, slevu zaměstnance pro sezónní

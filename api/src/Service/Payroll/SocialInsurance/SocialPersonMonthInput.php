@@ -53,14 +53,14 @@ final readonly class SocialPersonMonthInput
         }
         if (
             $jurisdiction === SocialJurisdictionEvidence::ForeignRegimeVerified
-            && ($jurisdictionEvidenceReference === null
-                || preg_match(
+            && $jurisdictionEvidenceReference !== null
+            && preg_match(
                     '/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D',
                     $jurisdictionEvidenceReference,
-                ) !== 1)
+                ) !== 1
         ) {
             throw new InvalidArgumentException(
-                'Verified foreign social insurance regime requires an evidence reference.',
+                'Foreign social insurance regime evidence reference is not canonical.',
             );
         }
         if (
@@ -73,14 +73,14 @@ final readonly class SocialPersonMonthInput
         }
         if (
             $workingPensionerDiscount === SocialDiscountEvidence::Verified
-            && ($workingPensionerDiscountEvidenceReference === null
-                || preg_match(
+            && $workingPensionerDiscountEvidenceReference !== null
+            && preg_match(
                     '/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D',
                     $workingPensionerDiscountEvidenceReference,
-                ) !== 1)
+                ) !== 1
         ) {
             throw new InvalidArgumentException(
-                'Working pensioner discount verification requires an evidence reference.',
+                'Working pensioner discount evidence reference is not canonical.',
             );
         }
         if (

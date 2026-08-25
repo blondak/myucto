@@ -49,7 +49,7 @@ export interface DataBoxCredential {
   certificate_fingerprint: string | null
   certificate_valid_to: string | null
   last_verified_at: string | null
-  /** Vybírání schránky — vypnuté, dokud ho uživatel vědomě nezapne (§ 17 odst. 3). */
+  /** Legacy projekce; automatické vybírání není podporované a hodnota zůstává false. */
   inbox_polling_enabled: boolean
   inbox_polling_enabled_at: string | null
   inbox_polling_enabled_by: number | null
@@ -390,6 +390,11 @@ export interface GatewayStart {
   resumed: boolean
 }
 
+export interface IsdsGatewayCapability {
+  environment: 'production' | 'test'
+  available: boolean
+}
+
 /**
  * Stav relace po návratu z ISDS.
  *
@@ -426,18 +431,6 @@ export const dataBoxApi = {
 
   deleteCredential: (environment: string) =>
     api.delete(`/settings/databox/${environment}`).then(r => r.data),
-
-  /**
-   * Zapnutí/vypnutí vybírání schránky. `acknowledged` musí být `true` —
-   * je to potvrzení, že uživatel ví, že vyzvednutí zprávy je doručení
-   * a rozjíždí zákonné lhůty.
-   */
-  setPolling: (environment: string, enabled: boolean, acknowledged: boolean) =>
-    api.post<{ inbox_polling_enabled: boolean }>('/settings/databox/polling', {
-      environment,
-      enabled,
-      acknowledged,
-    }).then(r => r.data),
 
   recipients: (kind?: RecipientKind) =>
     api.get<{ items: SubmissionRecipient[] }>('/submissions/recipients', {
@@ -511,12 +504,25 @@ export const dataBoxApi = {
   gatewayStart: (id: number) =>
     api.post<GatewayStart>(`/submissions/outbox/${id}/gateway`, {}).then(r => r.data),
 
+  gatewayStartPayroll: (id: number) =>
+    api.post<GatewayStart>(`/payroll/submissions/isds-gateway/outbox/${id}`, {}).then(r => r.data),
+
+  gatewayCapabilities: () =>
+    api.get<{ items: IsdsGatewayCapability[] }>('/submissions/gateway/capability')
+      .then(r => r.data.items),
+
   /**
    * Návrat z ISDS. Volá se pro OBĚ přesměrování — o tom, která fáze to je,
    * rozhoduje stav relace na serveru, ne parametr z prohlížeče.
    */
   gatewayComplete: (appToken: string, sessionId: string) =>
     api.post<GatewayComplete>('/submissions/gateway/callback', {
+      app_token: appToken,
+      session_id: sessionId,
+    }).then(r => r.data),
+
+  gatewayCompletePayroll: (appToken: string, sessionId: string) =>
+    api.post<GatewayComplete>('/payroll/submissions/isds-gateway/callback', {
       app_token: appToken,
       session_id: sessionId,
     }).then(r => r.data),
@@ -529,7 +535,7 @@ export const dataBoxApi = {
   pollInbox: (environment: string) =>
     api.post<{ fetched: number; stored: number; skipped: number; failed: number; unclassified: number }>(
       '/submissions/inbox/poll',
-      { environment },
+      { environment, acknowledged: true },
     ).then(r => r.data),
 
   classify: (id: number, classification: InboxClassification, outboxId: number | null) =>

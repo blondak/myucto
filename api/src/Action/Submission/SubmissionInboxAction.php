@@ -47,7 +47,7 @@ final class SubmissionInboxAction
         ]);
     }
 
-    /** Ruční vyzvednutí — tatáž cesta jako cron, jen spuštěná uživatelem. */
+    /** Ruční vyzvednutí — jediná povolená cesta, vždy spuštěná uživatelem. */
     public function poll(Request $request, Response $response): Response
     {
         if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
@@ -56,6 +56,14 @@ final class SubmissionInboxAction
         $supplierId = SupplierGuard::currentId($request);
         $body = (array) ($request->getParsedBody() ?? []);
         $environment = (string) ($body['environment'] ?? 'production');
+        if (($body['acknowledged'] ?? false) !== true) {
+            return Json::error(
+                $response,
+                'acknowledgement_required',
+                'Vyzvednutí zpráv se může počítat jako doručení a spustit zákonné lhůty. Akci musíte výslovně potvrdit.',
+                400,
+            );
+        }
 
         try {
             $context = $this->credentials->unlock($supplierId, $environment);
@@ -63,7 +71,13 @@ final class SubmissionInboxAction
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
 
-        $result = $this->inbox->poll($context, 'isds');
+        $result = $this->inbox->poll(
+            $context,
+            'isds',
+            null,
+            50,
+            $this->userId($request),
+        );
         if ($result['error'] !== null && $result['fetched'] === 0) {
             // Neúspěšný dotaz se nesmí uživateli ukázat jako „nic nového".
             return Json::error(
