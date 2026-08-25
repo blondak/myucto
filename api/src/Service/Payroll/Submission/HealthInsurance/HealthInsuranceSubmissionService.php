@@ -6,9 +6,12 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
 use MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
+use MyInvoice\Service\Pdf\PayrollHealthPaymentOverviewPdfRenderer;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use Psr\Clock\ClockInterface;
 
 /**
  * Most mezi zdravotní agendou a platformou podání MZ-19.
@@ -24,11 +27,12 @@ use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
  *    vidí soubor i důvod, proč není připravený k odeslání; kdyby se prepare
  *    celý zhroutil, nezůstalo by po něm nic a povinnost by se tvářila jako
  *    nezpracovaná.
- * 3. **Kanál se nehádá.** Ani jedna ze sedmi pojišťoven nemá veřejně popsanou
- *    transportní obálku, takže se nic neodesílá a
- *    {@see HealthInsurerChannelCatalog} to pojmenuje.
+ * 3. **Kanál se nehádá.** Portálové API bez veřejně popsané transportní
+ *    obálky se nevolá. Doložený formát přílohy PPZ lze u pojišťoven s
+ *    ověřeným příjemcem připravit do obecné ISDS fronty; odeslání vždy
+ *    potvrzuje uživatel a firma může výchozího příjemce překrýt.
  * 4. **Stav `ready` znamená „lze odeslat", ne „odesláno".** Přechod dál patří
- *    transportu, který zatím doložený není.
+ *    potvrzenému ISDS transportu; samotné zařazení do fronty stav nemění.
  */
 final readonly class HealthInsuranceSubmissionService
 {
@@ -41,6 +45,7 @@ final readonly class HealthInsuranceSubmissionService
     private const CHANNEL = 'health_portal';
     private const SUBJECT_EMPLOYMENT = 'employment';
     private const SUBJECT_RUN = 'payroll_run';
+    private const PDF_TEMPLATE_VERSION = 'payroll-health-payment-overview.v1';
 
     /** Strop stránky je tvrdý — z URL ho zvednout nejde. */
     public const PERIOD_MAX_LIMIT = 200;
@@ -56,10 +61,13 @@ final readonly class HealthInsuranceSubmissionService
         private HealthInsurerChannelCatalog $channels,
         private HealthInsuranceXmlSerializer $serializer,
         private HealthInsuranceXmlValidator $validator,
+        private PayrollHealthPaymentOverviewPdfRenderer $pdfRenderer,
+        private ClockInterface $clock,
         private HealthPaymentOverviewService $overviews,
         private PayrollObligationService $obligations,
         private PayrollSubmissionService $submissions,
         private PayrollSubmissionRepository $submissionRepository,
+        private SubmissionRecipientRepository $recipients,
     ) {}
 
     /**
@@ -68,7 +76,7 @@ final readonly class HealthInsuranceSubmissionService
      *
      * @return array<string,mixed>
      */
-    public function capability(): array
+    public function capability(int $supplierId): array
     {
         $documents = [];
         foreach ($this->schemas->documentTypes() as $documentType) {
@@ -84,7 +92,10 @@ final readonly class HealthInsuranceSubmissionService
         }
         $channels = [];
         foreach ($this->channels->channels() as $code => $channel) {
-            $channels[$code] = $channel->toArray();
+            $channels[$code] = $this->channelDescription(
+                $supplierId,
+                (string) $code,
+            );
         }
 
         return [
@@ -96,6 +107,11 @@ final readonly class HealthInsuranceSubmissionService
                 'supported' => false,
                 'reason_code' =>
                     HealthInsurerChannelCatalog::REASON_TRANSPORT_UNDOCUMENTED,
+            ],
+            'isds_dispatch' => [
+                'supported' => true,
+                'requires_user_confirmation' => true,
+                'automatic_inbox' => false,
             ],
             'change_codes' => [
                 'total' => count($this->codes->codes()),
@@ -207,7 +223,11 @@ final readonly class HealthInsuranceSubmissionService
                 ) {
                     continue;
                 }
-                $all[] = $this->periodItem($duty, $row['full_name']);
+                $all[] = $this->periodItem(
+                    $supplierId,
+                    $duty,
+                    $row['full_name'],
+                );
             }
         }
 
@@ -224,10 +244,7 @@ final readonly class HealthInsuranceSubmissionService
             'code_undocumented' => 0,
             'overdue' => 0,
         ];
-        $today = (new \DateTimeImmutable(
-            'now',
-            new \DateTimeZone('Europe/Prague'),
-        ))->format('Y-m-d');
+        $today = $this->today();
         foreach ($all as $item) {
             $summary[$item['reported_by_employer']
                 ? 'reported_by_employer'
@@ -351,13 +368,23 @@ final readonly class HealthInsuranceSubmissionService
         );
         $payload = $this->payload($supplierId, $overview);
         $xml = $this->serializer->serializePaymentOverview($payload);
+        $channel = $this->channelDescription($supplierId, $insurerCode);
+        $pdf = $this->pdfRenderer->renderPayload(
+            $payload,
+            is_string($channel['insurer_name'] ?? null)
+                ? $channel['insurer_name']
+                : null,
+            $this->today(),
+        );
         $window = $this->deadlines->forPaymentOverview($overview->period);
         $sourceHash = hash('sha256', CanonicalJson::encode([
-            'schema_reference' => 'payroll-health-payment-overview-submission.v1',
+            'schema_reference' => 'payroll-health-payment-overview-submission.v4',
             'revision_id' => $overview->revisionId,
             'insurer_code' => $insurerCode,
             'statutory_result_hash' => $overview->statutoryResultHash,
             'xml_sha256' => hash('sha256', $xml),
+            'pdf_template_version' => self::PDF_TEMPLATE_VERSION,
+            'isds_attachment_rules' => $channel['isds_attachment_rules'],
         ]));
         $obligation = $this->obligations->register(
             $supplierId,
@@ -394,6 +421,7 @@ final readonly class HealthInsuranceSubmissionService
             $overview,
             $payload,
             $xml,
+            $pdf,
             $sourceHash,
             $obligation,
             $window,
@@ -423,19 +451,59 @@ final readonly class HealthInsuranceSubmissionService
                 $environment,
             );
             if (!$submission['created']) {
+                $artifactId = $this->submissionRepository
+                    ->findOutboundXmlArtifactId(
+                        $supplierId,
+                        $environment,
+                        (int) $submission['id'],
+                    );
+                $pdfArtifactId = $this->submissionRepository
+                    ->findOutboundPdfArtifactId(
+                        $supplierId,
+                        $environment,
+                        (int) $submission['id'],
+                    );
+                $xmlArtifact = $artifactId === null
+                    ? null
+                    : $this->submissionRepository->findArtifact(
+                        $supplierId,
+                        $artifactId,
+                    );
+                $pdfArtifact = $pdfArtifactId === null
+                    ? null
+                    : $this->submissionRepository->findArtifact(
+                        $supplierId,
+                        $pdfArtifactId,
+                    );
+                if ($xmlArtifact === null || $pdfArtifact === null) {
+                    throw new HealthNotificationException(
+                        'zp_submission_artifact_missing',
+                        'Dříve připravené podání nemá oba zmrazené podklady.',
+                    );
+                }
                 return [
                     'submission_id' => (int) $submission['id'],
                     'obligation_id' => $obligation['id'],
+                    'artifact_id' => $artifactId,
+                    'pdf_artifact_id' => $pdfArtifactId,
                     'status' => (string) $submission['status'],
                     'row_version' => (int) $submission['row_version'],
                     'insurer_code' => $insurerCode,
                     'period' => $overview->period,
                     'agenda_code' => self::AGENDA_PAYMENT_OVERVIEW,
-                    'artifact_sha256' => hash('sha256', $xml),
+                    'artifact_sha256' =>
+                        (string) $xmlArtifact['artifact_sha256'],
+                    'pdf_artifact_sha256' =>
+                        (string) $pdfArtifact['artifact_sha256'],
                     'created' => false,
                     'deadline' => $window->toArray(),
-                    'schema_validated' => $this->schemas->isBundleAvailable(),
-                    'dispatch' => $this->dispatchDescription($insurerCode),
+                    'schema_validated' => $this->isSchemaValidatedStatus(
+                        (string) $submission['status'],
+                    ),
+                    'dispatch' => $this->dispatchDescription(
+                        $supplierId,
+                        $insurerCode,
+                    ),
                 ];
             }
             $part = $this->submissions->addPart(
@@ -450,7 +518,7 @@ final readonly class HealthInsuranceSubmissionService
                     . ':' . $insurerCode,
                 $sourceHash,
             );
-            $artifact = $this->submissions->storeArtifact(
+            $xmlArtifact = $this->submissions->storeArtifact(
                 $supplierId,
                 (int) $submission['id'],
                 (int) $part['submission_row_version'],
@@ -462,12 +530,12 @@ final readonly class HealthInsuranceSubmissionService
                 HealthInsuranceSchemaCatalog::XSD_VERSION,
                 null,
                 self::CHANNEL,
-                $keys['artifact'],
+                $keys['xml_artifact'],
                 $createdBy,
             );
             if (!hash_equals(
                 hash('sha256', $xml),
-                (string) $artifact['artifact_sha256'],
+                (string) $xmlArtifact['artifact_sha256'],
             )) {
                 throw new HealthNotificationException(
                     'zp_artifact_mismatch',
@@ -475,7 +543,32 @@ final readonly class HealthInsuranceSubmissionService
                 );
             }
 
-            $rowVersion = (int) $artifact['submission_row_version'];
+            $pdfArtifact = $this->submissions->storeArtifact(
+                $supplierId,
+                (int) $submission['id'],
+                (int) $xmlArtifact['submission_row_version'],
+                (int) $part['id'],
+                'outbound_pdf',
+                'outbound',
+                'application/pdf',
+                $pdf,
+                null,
+                null,
+                self::CHANNEL,
+                $keys['pdf_artifact'],
+                $createdBy,
+            );
+            if (!hash_equals(
+                hash('sha256', $pdf),
+                (string) $pdfArtifact['artifact_sha256'],
+            )) {
+                throw new HealthNotificationException(
+                    'zp_pdf_artifact_mismatch',
+                    'Otisk uloženého PDF neodpovídá zmrazenému přehledu.',
+                );
+            }
+
+            $rowVersion = (int) $pdfArtifact['submission_row_version'];
             $status = (string) $submission['status'];
             $validated = false;
             try {
@@ -521,33 +614,40 @@ final readonly class HealthInsuranceSubmissionService
                 'submission_id' => (int) $submission['id'],
                 'obligation_id' => $obligation['id'],
                 'part_id' => (int) $part['id'],
-                'artifact_id' => (int) $artifact['id'],
+                'artifact_id' => (int) $xmlArtifact['id'],
+                'pdf_artifact_id' => (int) $pdfArtifact['id'],
                 'status' => $status,
                 'row_version' => $rowVersion,
                 'insurer_code' => $insurerCode,
                 'period' => $overview->period,
                 'agenda_code' => self::AGENDA_PAYMENT_OVERVIEW,
-                'artifact_sha256' => (string) $artifact['artifact_sha256'],
+                'artifact_sha256' => (string) $xmlArtifact['artifact_sha256'],
+                'pdf_artifact_sha256' =>
+                    (string) $pdfArtifact['artifact_sha256'],
                 'created' => true,
                 'deadline' => $window->toArray(),
                 'schema_validated' => $validated,
-                'dispatch' => $this->dispatchDescription($insurerCode),
+                'dispatch' => $this->dispatchDescription(
+                    $supplierId,
+                    $insurerCode,
+                ),
             ];
         });
     }
 
     /**
-     * Jak se soubor dostane k pojišťovně.
+     * Dostupnost přímého portálového API pojišťovny.
      *
-     * `assertDispatchable()` je `never` — u všech sedmi pojišťoven skončí
-     * výjimkou. Metoda proto vždy vrátí popis nedostupnosti; kdyby katalog
-     * někdy začal odesílání dokládat, přestala by se výjimka házet a tady
-     * by chyběl návrat, takže se `never` vědomě NEobchází a případný doklad
-     * si vyžádá i změnu tady.
+     * `assertDispatchable()` je `never` — bez veřejně popsané portálové
+     * obálky skončí výjimkou. ISDS je oddělená podporovaná cesta a tento
+     * příznak ji nesmí vydávat za nedostupnou.
      *
      * @return array<string,mixed>
      */
-    private function dispatchDescription(string $insurerCode): array
+    private function dispatchDescription(
+        int $supplierId,
+        string $insurerCode,
+    ): array
     {
         try {
             $this->channels->assertDispatchable($insurerCode);
@@ -556,9 +656,10 @@ final readonly class HealthInsuranceSubmissionService
                 'supported' => false,
                 'reason_code' => $e->errorCode,
                 'reason' => $e->getMessage(),
-                'channel' => $this->channels
-                    ->forInsurer($insurerCode)
-                    ->toArray(),
+                'channel' => $this->channelDescription(
+                    $supplierId,
+                    $insurerCode,
+                ),
             ];
         }
     }
@@ -570,6 +671,7 @@ final readonly class HealthInsuranceSubmissionService
      * @return array<string,mixed>
      */
     private function periodItem(
+        int $supplierId,
         HealthNotificationDuty $duty,
         string $fullName,
     ): array {
@@ -586,7 +688,10 @@ final readonly class HealthInsuranceSubmissionService
         }
         $channel = null;
         try {
-            $channel = $this->channels->forInsurer($duty->insurerCode)->toArray();
+            $channel = $this->channelDescription(
+                $supplierId,
+                $duty->insurerCode,
+            );
         } catch (HealthNotificationException $exception) {
             $channel = [
                 'insurer_code' => $duty->insurerCode,
@@ -614,8 +719,28 @@ final readonly class HealthInsuranceSubmissionService
                 'reason' => $codeReason,
             ],
             'channel' => $channel,
-            'dispatch' => $this->dispatchDescription($duty->insurerCode),
+            'dispatch' => $this->dispatchDescription(
+                $supplierId,
+                $duty->insurerCode,
+            ),
         ];
+    }
+
+    /** @return array<string,mixed> */
+    private function channelDescription(
+        int $supplierId,
+        string $insurerCode,
+    ): array {
+        $channel = $this->channels->forInsurer($insurerCode);
+        $recipient = $this->recipients->findVisibleByCode(
+            $supplierId,
+            $this->channels->recipientCodeFor($insurerCode),
+        );
+        if ($recipient !== null && !$recipient['is_active']) {
+            $recipient = null;
+        }
+
+        return $channel->toArray($recipient, $this->today());
     }
 
     /**
@@ -770,7 +895,7 @@ final readonly class HealthInsuranceSubmissionService
         return $this->factsFromRow($row);
     }
 
-    /** @return array{submission:string,artifact:string} */
+    /** @return array{submission:string,xml_artifact:string,pdf_artifact:string} */
     private function idempotencyKeys(
         string $environment,
         string $sourceHash,
@@ -783,7 +908,33 @@ final readonly class HealthInsuranceSubmissionService
 
         return [
             'submission' => 'health-overview-submission:' . $fingerprint,
-            'artifact' => 'health-overview-artifact:' . $fingerprint,
+            'xml_artifact' => 'health-overview-xml-artifact:' . $fingerprint,
+            'pdf_artifact' => 'health-overview-pdf-artifact:' . $fingerprint,
         ];
+    }
+
+    private function today(): string
+    {
+        return \DateTimeImmutable::createFromInterface($this->clock->now())
+            ->setTimezone(new \DateTimeZone('Europe/Prague'))
+            ->format('Y-m-d');
+    }
+
+    private function isSchemaValidatedStatus(string $status): bool
+    {
+        return in_array($status, [
+            'validated',
+            'prepared',
+            'ready',
+            'submitted',
+            'processing',
+            'waiting_for_identity',
+            'partially_accepted',
+            'accepted',
+            'rejected',
+            'correction_required',
+            'superseded',
+            'cancelled_in_time',
+        ], true);
     }
 }

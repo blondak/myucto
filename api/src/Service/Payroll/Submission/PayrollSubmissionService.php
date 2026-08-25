@@ -27,6 +27,7 @@ final class PayrollSubmissionService
     ];
     private const ARTIFACT_KINDS = [
         'outbound_xml',
+        'outbound_pdf',
         'outbound_zip',
         'validation_protocol',
         'receipt_original',

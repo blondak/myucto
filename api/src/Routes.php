@@ -90,6 +90,7 @@ use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
+use MyInvoice\Action\Payroll\PayrollHealthInsuranceIsdsAction;
 use MyInvoice\Action\Payroll\PayrollHealthNotificationAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
@@ -1257,6 +1258,10 @@ final class Routes
             $g->post(
                 '/submissions/health-notifications/payment-overview/{revisionId:[0-9]+}/{insurerCode:[0-9]{3}}/prepare',
                 [PayrollHealthNotificationAction::class, 'preparePaymentOverview'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/health-isds/{insurerCode:[0-9]{3}}',
+                [PayrollHealthInsuranceIsdsAction::class, 'enqueue'],
             );
             $g->get('/time/month', [PayrollTimeAction::class, 'month']);
             $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);

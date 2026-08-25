@@ -243,6 +243,8 @@ final class PayrollEnumContractTest extends TestCase
         // holým klíčem v tabulce.
         'payrollHealthNotifications.ts::HealthDutyKind'
             => 'enum:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyKind',
+        'payrollHealthNotifications.ts::HealthIsdsAttachmentFormat'
+            => 'enum:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerIsdsAttachmentFormat',
         // Důvod, proč aplikace nesmí odeslat sama. Každý má na obrazovce vlastní
         // větu; nový kód bez věty by se vykreslil jako prázdné místo přesně tam,
         // kde má stát přiznání, co modul neumí.

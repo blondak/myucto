@@ -920,18 +920,53 @@ final class PayrollSubmissionRepository
         string $environment,
         int $submissionId,
     ): ?int {
+        return $this->findOutboundArtifactId(
+            $supplierId,
+            $environment,
+            $submissionId,
+            'outbound_xml',
+        );
+    }
+
+    public function findOutboundPdfArtifactId(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): ?int {
+        return $this->findOutboundArtifactId(
+            $supplierId,
+            $environment,
+            $submissionId,
+            'outbound_pdf',
+        );
+    }
+
+    private function findOutboundArtifactId(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $artifactKind,
+    ): ?int {
+        if (!in_array($artifactKind, ['outbound_xml', 'outbound_pdf'], true)) {
+            throw new \InvalidArgumentException('Druh odchozího artefaktu není podporovaný.');
+        }
         $statement = $this->db->pdo()->prepare(
             'SELECT id
                FROM payroll_submission_artifacts
               WHERE supplier_id = ?
                 AND environment = ?
                 AND submission_id = ?
-                AND artifact_kind = "outbound_xml"
+                AND artifact_kind = ?
                 AND direction = "outbound"
               ORDER BY id
               LIMIT 1',
         );
-        $statement->execute([$supplierId, $environment, $submissionId]);
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $submissionId,
+            $artifactKind,
+        ]);
         $id = $statement->fetchColumn();
 
         return $id === false ? null : (int) $id;

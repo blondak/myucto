@@ -39,7 +39,10 @@ final class PayrollHealthNotificationAction
             return $this->guardFailure($error);
         }
 
-        return Json::ok($response, $this->service->capability());
+        return Json::ok(
+            $response,
+            $this->service->capability($this->currentSupplierId($request)),
+        );
     }
 
     /** @param array{employmentId:string} $args */

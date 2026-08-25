@@ -90,6 +90,7 @@ final class SubmissionInboxServiceTest extends TestCase
             $this->stubArtifacts(),
             new SubmissionArtifactValidator(new XmlSchemaValidator()),
             new NullLogger(),
+            null,
         );
 
         $documents = $container->get(DocumentIngestService::class);

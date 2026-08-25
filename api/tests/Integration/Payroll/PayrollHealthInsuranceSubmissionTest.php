@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException;
@@ -105,11 +106,22 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
 
     public function testCapabilityNamesWhatIsPinnedAndWhatIsNot(): void
     {
-        $capability = $this->service->capability();
+        $capability = $this->service->capability($this->supplierId);
 
         self::assertSame('2026-01-01', $capability['shared_data_message_since']);
         self::assertCount(7, $capability['channels']);
         self::assertFalse($capability['automated_dispatch']['supported']);
+        self::assertSame(
+            ['205', '207', '211', '213'],
+            array_values(array_map(
+                'strval',
+                array_keys(array_filter(
+                    $capability['channels'],
+                    static fn (array $channel): bool =>
+                        $channel['accepts_shared_data_message'],
+                )),
+            )),
+        );
         self::assertSame(25, $capability['change_codes']['total']);
         // Mapování druh → kód dokládá anotace připnutého XSD, ale jen tam,
         // kde schéma určuje jediný kód; opravy a přestup zůstávají otevřené.
@@ -137,6 +149,34 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
                 $documentType,
             );
         }
+    }
+
+    public function testCapabilityUsesTheSameCompanyOverrideAsDispatch(): void
+    {
+        (new SubmissionRecipientRepository($this->db))->upsertForSupplier(
+            $this->supplierId,
+            [
+                'code' => 'zp_cpzp_205',
+                'name' => 'Firemní příjemce ČPZP',
+                'business_id' => '47672234',
+                'address' => 'Syntetická firemní adresa',
+                'kind' => 'health_insurer',
+                'isds_box_id' => 'zzzzzzz',
+                'source_url' => null,
+                'source_note' => null,
+                'is_active' => true,
+            ],
+            null,
+        );
+
+        $channel = $this->service->capability($this->supplierId)['channels']['205'];
+
+        self::assertSame(
+            'Firemní příjemce ČPZP',
+            $channel['insurer_name'],
+        );
+        self::assertSame('zzzzzzz', $channel['data_box_id']);
+        self::assertSame('company', $channel['recipient_source']);
     }
 
     /**
@@ -219,6 +259,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         self::assertSame('2026-06', $result['period']);
         self::assertSame('2026-07-20', $result['deadline']['due_on']);
         self::assertGreaterThan(0, $result['artifact_id']);
+        self::assertGreaterThan(0, $result['pdf_artifact_id']);
         self::assertMatchesRegularExpression(
             '/^[0-9a-f]{64}$/D',
             $result['artifact_sha256'],
@@ -252,6 +293,15 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         self::assertSame(
             $result['artifact_sha256'],
             hash('sha256', $xml),
+        );
+        $pdf = $this->submissions->artifactBytes(
+            $this->supplierId,
+            (int) $result['pdf_artifact_id'],
+        );
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertSame(
+            $result['pdf_artifact_sha256'],
+            hash('sha256', $pdf),
         );
 
         if (!$bundleAvailable) {
@@ -296,9 +346,18 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         self::assertTrue($first['created']);
         self::assertFalse($second['created']);
         self::assertSame($first['submission_id'], $second['submission_id']);
+        self::assertSame($first['artifact_id'], $second['artifact_id']);
+        self::assertSame(
+            $first['pdf_artifact_id'],
+            $second['pdf_artifact_id'],
+        );
         self::assertSame(
             $first['artifact_sha256'],
             $second['artifact_sha256'],
+        );
+        self::assertSame(
+            $first['pdf_artifact_sha256'],
+            $second['pdf_artifact_sha256'],
         );
     }
 
