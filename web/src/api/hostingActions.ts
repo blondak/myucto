@@ -20,7 +20,7 @@
  *     položka. Procenta se nedopočítávají (viz {@link resolveStorageLevel}).
  */
 
-import type { ManagedInstanceInfo } from './license'
+import type { LicenseStatus } from './license'
 import { resolveBillingNarrative, resolveStorageLevel } from './instanceHealth'
 
 /**
@@ -33,6 +33,9 @@ export type HostingActionSeverity = 'high' | 'medium' | 'info'
 
 export type HostingActionKind =
   | 'unpaid'
+  | 'license_key_missing'
+  | 'users_overage'
+  | 'companies_overage'
   | 'storage_exhausted'
   | 'storage_low'
   | 'storage_provisioning'
@@ -50,11 +53,18 @@ export interface HostingAction {
   percent: number | null
   /** Objednaný objem u zaváděného rozšíření. */
   quotaGb: number | null
+  /** Aktuální počet u překročené kapacity. */
+  active: number | null
+  /** Zaplacený limit u překročené kapacity. */
+  limit: number | null
   /** Kam vede proklik — tam, kde se to řeší. */
   link: string
 }
 
 const LINK_BILLING = '/hosting#platba'
+const LINK_KEY = '/activation/purchase#activate'
+const LINK_USERS = '/hosting#uzivatele'
+const LINK_COMPANIES = '/hosting#tarif'
 const LINK_STORAGE = '/hosting#misto'
 
 /**
@@ -63,9 +73,11 @@ const LINK_STORAGE = '/hosting#misto'
  * ⚠️ Pořadí je součást zadání: platba je vždy první. Když nejde zaplatit,
  * je jedno, kolik zbývá místa.
  */
-export function resolveHostingActions(instance: ManagedInstanceInfo | null | undefined): HostingAction[] {
+export function resolveHostingActions(status: LicenseStatus | null | undefined): HostingAction[] {
   // Self-hosted / neznámý stav → ani řádek.
-  if (!instance) return []
+  if (!status?.instance) return []
+
+  const instance = status.instance
 
   const actions: HostingAction[] = []
 
@@ -82,7 +94,59 @@ export function resolveHostingActions(instance: ManagedInstanceInfo | null | und
       at: narrative.nextAt,
       percent: null,
       quotaGb: null,
+      active: null,
+      limit: null,
       link: LINK_BILLING,
+    })
+  }
+
+  // ── Licence a zaplacená kapacita ────────────────────────────────────────
+  if (!status.license_key_masked) {
+    actions.push({
+      kind: 'license_key_missing',
+      severity: 'high',
+      titleKey: 'hosting.action.license_key_missing_title',
+      hintKey: 'hosting.action.license_key_missing_hint',
+      at: null,
+      percent: null,
+      quotaGb: null,
+      active: null,
+      limit: null,
+      link: LINK_KEY,
+    })
+  }
+
+  if (status.users_licensed > 0 && status.users_active > status.users_licensed) {
+    actions.push({
+      kind: 'users_overage',
+      severity: 'high',
+      titleKey: 'hosting.action.users_overage_title',
+      hintKey: status.overage_deadline === null
+        ? 'hosting.action.users_overage_hint_nodate'
+        : 'hosting.action.users_overage_hint',
+      at: status.overage_deadline,
+      percent: null,
+      quotaGb: null,
+      active: status.users_active,
+      limit: status.users_licensed,
+      link: LINK_USERS,
+    })
+  }
+
+  if (status.max_companies !== null && status.companies_active > status.max_companies) {
+    actions.push({
+      kind: 'companies_overage',
+      severity: 'high',
+      titleKey: 'hosting.action.companies_overage_title',
+      hintKey: status.overage_deadline === null
+        ? 'hosting.action.companies_overage_hint_nodate'
+        : 'hosting.action.companies_overage_hint',
+      at: status.overage_deadline,
+      percent: null,
+      quotaGb: null,
+      active: status.companies_active,
+      limit: status.max_companies,
+      link: LINK_COMPANIES,
     })
   }
 
@@ -101,6 +165,8 @@ export function resolveHostingActions(instance: ManagedInstanceInfo | null | und
       at: null,
       percent: storage.percent,
       quotaGb: storage.quota_gb_ordered,
+      active: null,
+      limit: null,
       link: LINK_STORAGE,
     })
   } else if (pending) {
@@ -113,6 +179,8 @@ export function resolveHostingActions(instance: ManagedInstanceInfo | null | und
       at: null,
       percent: storage.percent,
       quotaGb: storage.quota_gb_ordered,
+      active: null,
+      limit: null,
       link: LINK_STORAGE,
     })
   } else if (level === 'notice' || level === 'warning') {
@@ -124,6 +192,8 @@ export function resolveHostingActions(instance: ManagedInstanceInfo | null | und
       at: null,
       percent: storage.percent,
       quotaGb: null,
+      active: null,
+      limit: null,
       link: LINK_STORAGE,
     })
   }

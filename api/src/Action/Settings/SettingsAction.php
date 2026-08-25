@@ -13,6 +13,8 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseCapacityGate;
+use MyInvoice\Service\License\LicenseCompanyLimitExceeded;
 use MyInvoice\Service\Mail\RecipientResolver;
 use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -49,8 +51,8 @@ final class SettingsAction
         private readonly \MyInvoice\Service\Invoice\VarsymbolSeriesCollisionChecker $seriesCollisions,
         // SEC-01: brání „nárokování" cizího bankovního účtu do currencies.
         private readonly \MyInvoice\Repository\BankStatementOwnershipResolver $bankOwnership,
-        // E4: licenční limit počtu firem (max_companies) při zakládání dodavatele.
-        private readonly \MyInvoice\Service\License\LicenseService $license,
+        // E4: atomický licenční limit počtu firem při zakládání dodavatele.
+        private readonly LicenseCapacityGate $licenseCapacity,
         // VH-01: sdílená zápisová cesta do supplier_vat_status_history.
         private readonly \MyInvoice\Service\Vat\VatStatusService $vatStatus,
         private readonly \MyInvoice\Service\Vat\VatStatusGuard $vatStatusGuard,
@@ -257,12 +259,6 @@ final class SettingsAction
     {
         if (!$this->guard($request, $response, $err)) return $err;
 
-        // Licenční limit (E4): počet firem podle tarifu (max_companies; null = neomezeno).
-        if (!$this->license->current()->allowsNewCompany()) {
-            return Json::error($response, 'license_company_limit',
-                'Byl dosažen počet firem podle vaší licence. Rozšiřte předplatné na myucto.cz.', 403);
-        }
-
         $b = (array) ($request->getParsedBody() ?? []);
 
         $required = ['company_name', 'street', 'city', 'zip', 'email'];
@@ -290,101 +286,132 @@ final class SettingsAction
         $defaultVatId = (int) $pdo->query("SELECT id FROM vat_rates WHERE is_default = 1 ORDER BY id LIMIT 1")->fetchColumn()
             ?: (int) $pdo->query("SELECT id FROM vat_rates ORDER BY id LIMIT 1")->fetchColumn();
 
-        $pdo->beginTransaction();
         $fkSuspended = false;
         try {
-            // 1. Insert supplier (default_currency_id placeholder, opravíme po insertu currencies).
-            //    Cyklický FK supplier.default_currency_id ↔ currencies.supplier_id: pokud už existuje
-            //    nějaká currency (alespoň jeden supplier v DB), použijeme ji jako bootstrap placeholder.
-            //    Při prvním supplier po deferred-supplier setupu currencies tabulka je prázdná
-            //    → fallback na SET FOREIGN_KEY_CHECKS = 0 (stejný trik jako SetupAction::insertSupplier).
-            $bootstrapCurId = (int) $pdo->query("SELECT id FROM currencies ORDER BY id LIMIT 1")->fetchColumn();
-            if ($bootstrapCurId === 0) {
-                $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-                $fkSuspended = true;
-            }
-
-            $stmt = $pdo->prepare(
-                'INSERT INTO supplier (company_name, display_name, street, city, zip, country_id,
-                                       ic, dic, is_vat_payer, is_identified, email, phone, web, tagline, commercial_register, taxpayer_type,
-                                       default_currency_id, default_vat_rate_id,
-                                       default_payment_due_days, default_hourly_rate)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
-            );
-            // Heuristika „má DIČ → je plátce" neplatí pro identifikovanou osobu
-            // (§ 6g–6l, issue #94) — IO má DIČ, ale plátce není.
-            $isIdentified = !empty($b['is_identified']);
-            $stmt->execute([
-                (string) $b['company_name'],
-                $this->nullable($b, 'display_name') ?: (string) $b['company_name'],
-                (string) $b['street'],
-                (string) $b['city'],
-                (string) $b['zip'],
-                $countryId,
-                $this->nullable($b, 'ic'),
-                $this->nullable($b, 'dic'),
-                $isIdentified ? 0 : (!empty($b['is_vat_payer']) ? 1 : (!empty($b['dic']) ? 1 : 0)),
-                $isIdentified ? 1 : 0,
-                (string) $b['email'],
-                $this->nullable($b, 'phone'),
-                $this->nullable($b, 'web'),
-                $this->nullable($b, 'tagline'),
-                $this->nullable($b, 'commercial_register'),
-                in_array($b['taxpayer_type'] ?? null, ['fo', 'po'], true) ? (string) $b['taxpayer_type'] : null,
-                $bootstrapCurId ?: 0,
-                $defaultVatId ?: 1,
-                (int) ($b['default_payment_due_days'] ?? 14),
-                (float) ($b['default_hourly_rate'] ?? 1500.00),
-            ]);
-            $newSupplierId = (int) $pdo->lastInsertId();
-            \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus(
+            $newSupplierId = $this->licenseCapacity->createCompany(function () use (
                 $pdo,
-                $newSupplierId,
-                $isIdentified ? false : (!empty($b['is_vat_payer']) || !empty($b['dic'])),
-                $isIdentified,
-            );
+                $b,
+                $countryId,
+                $defaultVatId,
+                &$fkSuspended,
+            ): int {
+                $ownsTransaction = !$pdo->inTransaction();
+                if ($ownsTransaction) {
+                    $pdo->beginTransaction();
+                } else {
+                    $pdo->exec('SAVEPOINT create_supplier');
+                }
+                try {
+                    // 1. Insert supplier (default_currency_id placeholder, opravíme po insertu currencies).
+                    //    Cyklický FK supplier.default_currency_id ↔ currencies.supplier_id: pokud už existuje
+                    //    nějaká currency (alespoň jeden supplier v DB), použijeme ji jako bootstrap placeholder.
+                    //    Při prvním supplier po deferred-supplier setupu currencies tabulka je prázdná
+                    //    → fallback na SET FOREIGN_KEY_CHECKS = 0 (stejný trik jako SetupAction::insertSupplier).
+                    $bootstrapCurId = (int) $pdo->query("SELECT id FROM currencies ORDER BY id LIMIT 1")->fetchColumn();
+                    if ($bootstrapCurId === 0) {
+                        $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+                        $fkSuspended = true;
+                    }
 
-            // 2. Seed default currencies pro nového supplier (CZK + EUR, bez bank polí)
-            $insertCur = $pdo->prepare(
-                'INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1)'
-            );
-            $insertCur->execute([$newSupplierId, 'CZK', 'CZK — výchozí', 'Kč', 'Česká koruna', 'Czech Koruna', 2]);
-            $newDefaultCurId = (int) $pdo->lastInsertId();
-            $insertCur->execute([$newSupplierId, 'EUR', 'EUR — výchozí', '€', 'Euro', 'Euro', 2]);
-            $newEurCurId = (int) $pdo->lastInsertId();
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO supplier (company_name, display_name, street, city, zip, country_id,
+                                               ic, dic, is_vat_payer, is_identified, email, phone, web, tagline, commercial_register, taxpayer_type,
+                                               default_currency_id, default_vat_rate_id,
+                                               default_payment_due_days, default_hourly_rate)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                    );
+                    // Heuristika „má DIČ → je plátce" neplatí pro identifikovanou osobu
+                    // (§ 6g–6l, issue #94) — IO má DIČ, ale plátce není.
+                    $isIdentified = !empty($b['is_identified']);
+                    $stmt->execute([
+                        (string) $b['company_name'],
+                        $this->nullable($b, 'display_name') ?: (string) $b['company_name'],
+                        (string) $b['street'],
+                        (string) $b['city'],
+                        (string) $b['zip'],
+                        $countryId,
+                        $this->nullable($b, 'ic'),
+                        $this->nullable($b, 'dic'),
+                        $isIdentified ? 0 : (!empty($b['is_vat_payer']) ? 1 : (!empty($b['dic']) ? 1 : 0)),
+                        $isIdentified ? 1 : 0,
+                        (string) $b['email'],
+                        $this->nullable($b, 'phone'),
+                        $this->nullable($b, 'web'),
+                        $this->nullable($b, 'tagline'),
+                        $this->nullable($b, 'commercial_register'),
+                        in_array($b['taxpayer_type'] ?? null, ['fo', 'po'], true) ? (string) $b['taxpayer_type'] : null,
+                        $bootstrapCurId ?: 0,
+                        $defaultVatId ?: 1,
+                        (int) ($b['default_payment_due_days'] ?? 14),
+                        (float) ($b['default_hourly_rate'] ?? 1500.00),
+                    ]);
+                    $newSupplierId = (int) $pdo->lastInsertId();
+                    \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus(
+                        $pdo,
+                        $newSupplierId,
+                        $isIdentified ? false : (!empty($b['is_vat_payer']) || !empty($b['dic'])),
+                        $isIdentified,
+                    );
 
-            // 2b. Volitelný bankovní účet (např. načtený z registru plátců DPH) → na seeded měnu.
-            $bank = isset($b['bank_account']) && is_array($b['bank_account']) ? $b['bank_account'] : null;
-            if ($bank !== null) {
-                $bankCcy = strtoupper((string) ($bank['currency'] ?? 'CZK'));
-                $targetCurId = $bankCcy === 'EUR' ? $newEurCurId : $newDefaultCurId;
-                $pdo->prepare(
-                    'UPDATE currencies SET account_number = ?, bank_code = ?, bank_name = ?, iban = ?, bic = ? WHERE id = ?'
-                )->execute([
-                    $this->nullable($bank, 'account_number'),
-                    $this->nullable($bank, 'bank_code'),
-                    $this->nullable($bank, 'bank_name'),
-                    $this->nullable($bank, 'iban'),
-                    $this->nullable($bank, 'bic'),
-                    $targetCurId,
-                ]);
-            }
+                    // 2. Seed default currencies pro nového supplier (CZK + EUR, bez bank polí)
+                    $insertCur = $pdo->prepare(
+                        'INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1)'
+                    );
+                    $insertCur->execute([$newSupplierId, 'CZK', 'CZK — výchozí', 'Kč', 'Česká koruna', 'Czech Koruna', 2]);
+                    $newDefaultCurId = (int) $pdo->lastInsertId();
+                    $insertCur->execute([$newSupplierId, 'EUR', 'EUR — výchozí', '€', 'Euro', 'Euro', 2]);
+                    $newEurCurId = (int) $pdo->lastInsertId();
 
-            // 3. Update supplier.default_currency_id na CZK supplier
-            $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')
-                ->execute([$newDefaultCurId, $newSupplierId]);
+                    // 2b. Volitelný bankovní účet (např. načtený z registru plátců DPH) → na seeded měnu.
+                    $bank = isset($b['bank_account']) && is_array($b['bank_account']) ? $b['bank_account'] : null;
+                    if ($bank !== null) {
+                        $bankCcy = strtoupper((string) ($bank['currency'] ?? 'CZK'));
+                        $targetCurId = $bankCcy === 'EUR' ? $newEurCurId : $newDefaultCurId;
+                        $pdo->prepare(
+                            'UPDATE currencies SET account_number = ?, bank_code = ?, bank_name = ?, iban = ?, bic = ? WHERE id = ?'
+                        )->execute([
+                            $this->nullable($bank, 'account_number'),
+                            $this->nullable($bank, 'bank_code'),
+                            $this->nullable($bank, 'bank_name'),
+                            $this->nullable($bank, 'iban'),
+                            $this->nullable($bank, 'bic'),
+                            $targetCurId,
+                        ]);
+                    }
 
-            if ($fkSuspended) {
-                $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
-                $fkSuspended = false;
-            }
-            $pdo->commit();
+                    // 3. Update supplier.default_currency_id na CZK supplier
+                    $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')
+                        ->execute([$newDefaultCurId, $newSupplierId]);
+
+                    if ($fkSuspended) {
+                        $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+                        $fkSuspended = false;
+                    }
+                    if ($ownsTransaction) {
+                        $pdo->commit();
+                    } else {
+                        $pdo->exec('RELEASE SAVEPOINT create_supplier');
+                    }
+                    return $newSupplierId;
+                } catch (\Throwable $e) {
+                    if ($ownsTransaction) {
+                        if ($pdo->inTransaction()) $pdo->rollBack();
+                    } else {
+                        $pdo->exec('ROLLBACK TO SAVEPOINT create_supplier');
+                        $pdo->exec('RELEASE SAVEPOINT create_supplier');
+                    }
+                    if ($fkSuspended) {
+                        $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+                        $fkSuspended = false;
+                    }
+                    throw $e;
+                }
+            });
+        } catch (LicenseCompanyLimitExceeded) {
+            return Json::error($response, 'license_company_limit',
+                'Byl dosažen počet firem podle vaší licence. Rozšiřte předplatné na myucto.cz.', 403);
         } catch (\Throwable $e) {
-            $pdo->rollBack();
-            if ($fkSuspended) {
-                $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
-            }
             return Json::error($response, 'create_failed', 'Vytvoření supplier selhalo: ' . $e->getMessage(), 500);
         }
 

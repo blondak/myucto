@@ -11,9 +11,9 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
-use MyInvoice\Service\License\LicenseService;
+use MyInvoice\Service\License\LicenseCapacityGate;
+use MyInvoice\Service\License\LicenseSeatLimitExceeded;
 use MyInvoice\Service\License\LicenseState;
-use MyInvoice\Service\License\SeatPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -24,9 +24,8 @@ final class UserAdminAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly PasswordHasher $hasher,
-        private readonly LicenseService $license,
         private readonly SessionManager $sessions,
-        private readonly SeatPolicy $seats,
+        private readonly LicenseCapacityGate $capacity,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -54,61 +53,30 @@ final class UserAdminAction
         if (!in_array($locale, ['cs', 'en'], true)) return Json::error($response, 'validation_failed', 'Neplatný locale.', 400);
         $role = $this->activeRole($roleId);
         if ($role === null) return Json::error($response, 'validation_failed', 'Vybraná role neexistuje nebo není aktivní.', 400);
-        // Licenční limit (E4): rychlá odpověď dřív, než se počítá hash hesla.
-        // ZÁVAZNÁ kontrola je až v transakci níž — tahle jen šetří práci.
-        if ($this->roleCountsAsSeat($roleId)) {
-            $state = $this->license->current();
-            $blocked = $state->newUserBlockReason();
-            if ($blocked !== null) {
-                return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked, $state), 403);
-            }
-        }
         try {
             $this->hasher->validate($password);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
+        $passwordHash = $this->hasher->hash($password);
 
-        // ⚠️ Kontrola licenčního místa a samotný zápis musí být JEDNA operace.
-        //
-        // Kontrola výš čte počet obsazených míst z cache, takže dva souběžné
-        // požadavky oba viděly volno a oba prošly — licence na jedno místo
-        // skončila se dvěma zapisujícími uživateli. Kontrola posledního
-        // superadmina v téhle třídě zámek používá odjakživa (`guardedUserUpdate`),
-        // licenční limit ne.
-        //
-        // Uvnitř transakce se počet zjišťuje ZNOVU a přímo z databáze — cache
-        // by tu byla k ničemu, protože právě ji ten souběh obchází.
-        $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        // Zápis i čerstvý přepočet míst jsou jedna serializovaná operace.
         try {
-            if ($this->roleCountsAsSeat($roleId)) {
-                $pdo->query('SELECT id FROM users WHERE is_active = 1 FOR UPDATE')->fetchAll();
-                $state = $this->license->current()->withActiveUsers($this->seats->countActiveSeats());
-                $blocked = $state->newUserBlockReason();
-                if ($blocked !== null) {
-                    $pdo->rollBack();
-                    return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked, $state), 403);
-                }
-            }
-
-            $stmt = $pdo->prepare(
-                'INSERT INTO users (email, password_hash, name, role, role_id, locale, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)'
+            $id = $this->capacity->mutateSeats(
+                function () use ($email, $passwordHash, $name, $role, $roleId, $locale): int {
+                    $pdo = $this->db->pdo();
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO users (email, password_hash, name, role, role_id, locale, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)'
+                    );
+                    $stmt->execute([$email, $passwordHash, $name, $this->legacyRole($role), $roleId, $locale]);
+                    return (int) $pdo->lastInsertId();
+                },
             );
-            $stmt->execute([$email, $this->hasher->hash($password), $name, $this->legacyRole($role), $roleId, $locale]);
-            $id = (int) $pdo->lastInsertId();
-            $pdo->commit();
+        } catch (LicenseSeatLimitExceeded $e) {
+            return Json::error($response, self::blockCode($e->reason), self::blockMessage($e->reason, $e->state), 403);
         } catch (\PDOException $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
             if (str_contains($e->getMessage(), 'uq_users_email')) {
                 return Json::error($response, 'email_taken', 'Email je už registrovaný.', 409);
-            }
-            throw $e;
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
             }
             throw $e;
         }
@@ -146,19 +114,6 @@ final class UserAdminAction
             : (bool) $row['is_superadmin'];
         $willBeActive = array_key_exists('is_active', $body) ? (bool) $body['is_active'] : (bool) $row['is_active'];
 
-        // Licenční limit (E4): blokuj přechod uživatele DO licencovaného místa (aktivace
-        // nebo změna z readonly/client na provozní roli), pokud už není volná kapacita.
-        $newRoleId = $newRole !== null ? (int) $newRole['id'] : (int) $row['role']['id'];
-        $willCount = $willBeActive && $this->roleCountsAsSeat($newRoleId);
-        $wasCount  = (bool) $row['is_active'] && $this->roleCountsAsSeat((int) $row['role']['id']);
-        if ($willCount && !$wasCount) {
-            $state = $this->license->current();
-            $blocked = $state->newUserBlockReason();
-            if ($blocked !== null) {
-                return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked, $state), 403);
-            }
-        }
-
         $sets = [];
         $params = [];
         if (array_key_exists('name', $body)) {
@@ -184,8 +139,12 @@ final class UserAdminAction
         }
         if ($sets === []) return Json::ok($response, $row);
 
-        if (!$this->guardedUserUpdate($id, implode(', ', $sets), $params, $willBeSuperadmin, $willBeActive)) {
-            return Json::error($response, 'last_admin', 'Nelze odebrat roli ani deaktivovat posledního aktivního superadmina.', 409);
+        try {
+            if (!$this->guardedUserUpdate($id, implode(', ', $sets), $params, $willBeSuperadmin, $willBeActive)) {
+                return Json::error($response, 'last_admin', 'Nelze odebrat roli ani deaktivovat posledního aktivního superadmina.', 409);
+            }
+        } catch (LicenseSeatLimitExceeded $e) {
+            return Json::error($response, self::blockCode($e->reason), self::blockMessage($e->reason, $e->state), 403);
         }
         if ($newRole !== null && (int) $row['role_id'] !== (int) $newRole['id']) {
             $this->log($request, 'user.role_updated', $id, ['from_role_id' => $row['role_id'], 'to_role_id' => (int) $newRole['id']]);
@@ -212,8 +171,12 @@ final class UserAdminAction
         if ($row === null) return Json::error($response, 'not_found', 'Uživatel nenalezen.', 404);
         $actor = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if ((int) ($actor['id'] ?? 0) === $id) return Json::error($response, 'self_delete_forbidden', 'Nelze deaktivovat vlastní účet.', 409);
-        if (!$this->guardedUserUpdate($id, 'is_active = 0', [], false, false)) {
-            return Json::error($response, 'last_admin', 'Nelze deaktivovat posledního aktivního superadmina.', 409);
+        try {
+            if (!$this->guardedUserUpdate($id, 'is_active = 0', [], false, false)) {
+                return Json::error($response, 'last_admin', 'Nelze deaktivovat posledního aktivního superadmina.', 409);
+            }
+        } catch (LicenseSeatLimitExceeded $e) {
+            return Json::error($response, self::blockCode($e->reason), self::blockMessage($e->reason, $e->state), 403);
         }
         $this->sessions->destroyAllForUser($id);
         $this->log($request, 'user.deactivated', $id, []);
@@ -262,9 +225,14 @@ final class UserAdminAction
         bool $willBeActive,
     ): bool
     {
-        $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
-        try {
+        return $this->capacity->mutateSeats(function () use (
+            $id,
+            $setSql,
+            $params,
+            $willBeSuperadmin,
+            $willBeActive,
+        ): bool {
+            $pdo = $this->db->pdo();
             $stmt = $pdo->query(
                 "SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
                   WHERE u.is_active = 1 AND r.is_active = 1
@@ -276,18 +244,13 @@ final class UserAdminAction
                 && (!$willBeSuperadmin || !$willBeActive)
                 && count($activeSuperadminIds) <= 1
             ) {
-                $pdo->rollBack();
                 return false;
             }
 
             $params[] = $id;
             $pdo->prepare('UPDATE users SET ' . $setSql . ' WHERE id = ?')->execute($params);
-            $pdo->commit();
             return true;
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            throw $e;
-        }
+        });
     }
 
     private function fetchUser(int $id): ?array
@@ -317,11 +280,6 @@ final class UserAdminAction
         ];
     }
 
-    /**
-     * Zabírá tato role licenční místo? Ano pro provozní role (superadmin, accountant,
-     * vlastní staff role); ne pro systémovou roli readonly a všechny client role.
-     * Zrcadlí LicenseService::countActiveUsers().
-     */
     /**
      * Kód chyby podle důvodu. ⚠️ Dva různé kódy schválně: frontend na ně reaguje
      * jinak — u chybějící licence vede k aktivaci, u vyčerpaných míst k navýšení.
@@ -354,18 +312,6 @@ final class UserAdminAction
         return 'Bez platné licence lze zakládat jen uživatele s právem jen pro čtení. '
             . 'Aktivujte licenci v sekci Aktivace, nebo uživateli přidělte roli jen pro čtení.';
     }
-    /**
-     * Zabere účet s touhle rolí licenční místo?
-     *
-     * ⚠️ Rozhoduje právo ZÁPISU, ne název role: vlastní staff role bez zápisu
-     * („Auditor", „Náhled") místo nezabere, zatímco role pojmenovaná
-     * „Pouze pro čtení", které někdo zápis přidal, ano.
-     */
-    private function roleCountsAsSeat(int $roleId): bool
-    {
-        return $this->seats->roleGrantsWrite($roleId);
-    }
-
     private function legacyRole(array $role): string
     {
         return match ($role['system_key'] ?? null) {

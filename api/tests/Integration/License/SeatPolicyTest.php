@@ -38,6 +38,7 @@ final class SeatPolicyTest extends TestCase
     private int $readonlyRoleId = 0;
     private int $accountantRoleId = 0;
     private int $superadminRoleId = 0;
+    private int $clientRoleId = 0;
 
     protected function setUp(): void
     {
@@ -58,7 +59,10 @@ final class SeatPolicyTest extends TestCase
         $this->readonlyRoleId   = $this->roleIdByKey('readonly');
         $this->accountantRoleId = $this->roleIdByKey('accountant');
         $this->superadminRoleId = $this->roleIdByKey('superadmin');
-        if ($this->readonlyRoleId === 0 || $this->accountantRoleId === 0 || $this->superadminRoleId === 0) {
+        $this->clientRoleId = $this->roleIdByKey('client');
+        if ($this->readonlyRoleId === 0 || $this->accountantRoleId === 0
+            || $this->superadminRoleId === 0 || $this->clientRoleId === 0
+        ) {
             $this->markTestSkipped('Systémové role nejsou naseedované.');
         }
 
@@ -104,6 +108,43 @@ final class SeatPolicyTest extends TestCase
         self::assertSame(0, $stored, 'Superadmin nemá uložená práva — na tom test stojí.');
 
         self::assertTrue($this->seats->roleGrantsWrite($this->superadminRoleId));
+    }
+
+    public function testWritingClientRoleOccupiesASeat(): void
+    {
+        self::assertTrue(
+            $this->seats->roleGrantsWrite($this->clientRoleId),
+            'Systémová klientská role má business WRITE a typ client ji nesmí vyjmout z licence.',
+        );
+
+        $before = $this->seats->countActiveSeats();
+        $this->createUser($this->clientRoleId);
+        self::assertSame($before + 1, $this->seats->countActiveSeats());
+    }
+
+    public function testInactiveWritingRoleDoesNotOccupyASeat(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, ?, 'staff', 1)")
+            ->execute(['Seat inactive ' . bin2hex(random_bytes(4))]);
+        $roleId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, 'invoices', 2)")
+            ->execute([$roleId]);
+
+        $before = $this->seats->countActiveSeats();
+        $this->createUser($roleId);
+        self::assertSame($before + 1, $this->seats->countActiveSeats());
+
+        $pdo->prepare('UPDATE roles SET is_active = 0 WHERE id = ?')->execute([$roleId]);
+        self::assertFalse($this->seats->roleGrantsWrite($roleId));
+        self::assertSame($before, $this->seats->countActiveSeats());
+    }
+
+    public function testSelfServiceExceptionIsExplicitAndNarrow(): void
+    {
+        self::assertTrue(SeatPolicy::isSelfServicePermission('profile'));
+        self::assertTrue(SeatPolicy::isSelfServicePermission('profile.tokens'));
+        self::assertFalse(SeatPolicy::isSelfServicePermission('invoices'));
     }
 
     // ── obejití přes per-firemní override ─────────────────────────────────

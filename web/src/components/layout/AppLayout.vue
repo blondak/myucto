@@ -210,7 +210,7 @@ const ACCENT_ITEM: Record<NonNullable<NavSection['accent']>, string> = {
  * ⚠️ Na self-hosted instalaci je `instance` null a vrací se `null`: položka
  * Hosting tam stejně není.
  */
-const hostingAttention = computed(() => hostingNavAttention(resolveHostingActions(instanceStatus.instance.value)))
+const hostingAttention = computed(() => hostingNavAttention(resolveHostingActions(instanceStatus.status.value)))
 
 /** Outline icon paths — Heroicons style, stroke 2, viewBox 24, currentColor */
 const ICONS = {

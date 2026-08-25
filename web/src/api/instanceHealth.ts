@@ -112,17 +112,16 @@ export function currentQuotaGb(storage: ManagedStorageInfo | null | undefined): 
 }
 
 /**
- * Velikosti, které jde objednat — jen ty VĚTŠÍ než současná.
+ * Cílové velikosti, na které lze předplatné změnit. Vyšší se aktivuje
+ * hned po poměrném doplatku, nižší server naplánuje od dalšího období.
  *
- * Když současnou neznáme, nabídnou se všechny: server si menší nebo stejnou
- * odmítne sám (`not_an_upgrade`) a schovat všechno by znamenalo neumožnit
- * nákup nikomu, o kom zrovna nevíme, kolik má.
+ * Když současnou neznáme, nabídnou se všechny a rozhodne autoritativní server.
  */
 export function storageUpgradeOptionsGb(currentGb: number | null): number[] {
   const sizes = [...STORAGE_SIZES_GB]
   if (currentGb === null) return sizes
 
-  return sizes.filter((gb) => gb > currentGb)
+  return sizes.filter((gb) => gb !== currentGb)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -55,15 +55,22 @@ final class SeatPolicy
         if (!$this->supportsPermissionCounting()) {
             // Instalace před migrací 1074 (dynamické role) — spadne se na
             // legacy sloupec. Nová pravidla nad ním vyhodnotit nejde.
-            return (int) $this->db->pdo()
-                ->query("SELECT COUNT(*) FROM users WHERE is_active = 1 AND role NOT IN ('readonly', 'client')")
-                ->fetchColumn();
+            $statement = $this->db->pdo()
+                ->query("SELECT COUNT(*) FROM users WHERE is_active = 1 AND role <> 'readonly'");
+            if ($statement === false) {
+                throw new \RuntimeException('Počet licenčních míst se nepodařilo načíst.');
+            }
+            return (int) $statement->fetchColumn();
         }
 
         $sql = 'SELECT COUNT(DISTINCT u.id) FROM users u
                  WHERE u.is_active = 1 AND (' . $this->seatConditionSql('u.role_id', 'u.id') . ')';
 
-        return (int) $this->db->pdo()->query($sql)->fetchColumn();
+        $statement = $this->db->pdo()->query($sql);
+        if ($statement === false) {
+            throw new \RuntimeException('Počet licenčních míst se nepodařilo načíst.');
+        }
+        return (int) $statement->fetchColumn();
     }
 
     /**
@@ -84,7 +91,12 @@ final class SeatPolicy
         return false;
     }
 
-    /** Dává role právo zápisu k něčemu jinému než k vlastnímu profilu? */
+    /**
+     * Dává aktivní role alespoň jedno business WRITE oprávnění?
+     *
+     * Typ role nerozhoduje: zapisující staff i client role zabírají místo.
+     * Jedinou výjimkou jsou samoobslužná práva vlastního profilu a tokenů.
+     */
     public function roleGrantsWrite(int $roleId): bool
     {
         if ($roleId <= 0 || !$this->supportsPermissionCounting()) {
@@ -95,7 +107,7 @@ final class SeatPolicy
         // implicitní. Kdyby se počítalo jen podle uložených práv, jediný účet,
         // který instalaci opravdu ovládá, by se do počtu nikdy nezapočítal.
         $stmt = $this->db->pdo()->prepare(
-            "SELECT r.role_type,
+            "SELECT r.role_type, r.is_active,
                     EXISTS (
                         SELECT 1 FROM role_permissions rp
                          WHERE rp.role_id = r.id
@@ -109,13 +121,19 @@ final class SeatPolicy
         if (!$row) {
             return false;
         }
+        if (!(bool) $row['is_active']) {
+            return false;
+        }
         if ((string) $row['role_type'] === 'superadmin') {
             return true;
         }
-        if ((string) $row['role_type'] === 'client') {
-            return false;
-        }
         return (bool) $row['grants_write'];
+    }
+
+    /** Autoritativní definice bezplatného samoobslužného zápisu. */
+    public static function isSelfServicePermission(string $permissionKey): bool
+    {
+        return in_array($permissionKey, self::SELF_SERVICE_KEYS, true);
     }
 
     /**
@@ -131,18 +149,18 @@ final class SeatPolicy
 
         return "
             EXISTS (SELECT 1 FROM roles r
-                     WHERE r.id = {$roleIdExpr} AND r.role_type = 'superadmin')
+                     WHERE r.id = {$roleIdExpr} AND r.is_active = 1 AND r.role_type = 'superadmin')
          OR EXISTS (SELECT 1 FROM roles r
                       JOIN role_permissions rp ON rp.role_id = r.id
                      WHERE r.id = {$roleIdExpr}
-                       AND r.role_type <> 'client'
+                       AND r.is_active = 1
                        AND rp.access_level >= {$write}
                        AND rp.permission_key NOT IN ({$keys}))
          OR EXISTS (SELECT 1 FROM user_suppliers us
                       JOIN roles r2 ON r2.id = us.role_id
                       JOIN role_permissions rp2 ON rp2.role_id = r2.id
                      WHERE us.user_id = {$userIdExpr}
-                       AND r2.role_type <> 'client'
+                       AND r2.is_active = 1
                        AND rp2.access_level >= {$write}
                        AND rp2.permission_key NOT IN ({$keys}))";
     }

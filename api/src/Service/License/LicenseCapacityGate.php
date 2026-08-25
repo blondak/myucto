@@ -1,0 +1,146 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\License;
+
+use MyInvoice\Infrastructure\Database\Connection;
+
+/**
+ * Jediná atomická brána pro mutace, které mohou změnit licenční kapacitu.
+ *
+ * Named lock serializuje uživatele, jejich per-firemní role, oprávnění rolí a
+ * zakládání firem i tehdy, když zatím neexistuje žádný řádek vhodný pro FOR UPDATE.
+ */
+final class LicenseCapacityGate
+{
+    private const LOCK_PREFIX = 'myucto_license_capacity_';
+    private const LOCK_TIMEOUT_SECONDS = 10;
+    private const SAVEPOINT = 'license_capacity_gate';
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly LicenseService $license,
+        private readonly SeatPolicy $seats,
+    ) {}
+
+    /**
+     * @template T
+     * @param callable():T $mutation
+     * @return T
+     */
+    public function mutateSeats(callable $mutation): mixed
+    {
+        return $this->withLock(function () use ($mutation): mixed {
+            $before = $this->seats->countActiveSeats();
+
+            return $this->transactional(function () use ($mutation, $before): mixed {
+                $result = $mutation();
+                $after = $this->seats->countActiveSeats();
+                $state = $this->license->current()->withActiveUsers($before);
+                $reason = $state->seatCountBlockReason($after);
+                if ($reason !== null) {
+                    throw new LicenseSeatLimitExceeded($reason, $state, $before, $after);
+                }
+
+                return $result;
+            });
+        });
+    }
+
+    /**
+     * Serializuje kontrolu COUNT(*) a vytvoření právě jedné firmy.
+     *
+     * @template T
+     * @param callable():T $mutation
+     * @return T
+     */
+    public function createCompany(callable $mutation): mixed
+    {
+        return $this->withLock(function () use ($mutation): mixed {
+            $count = $this->db->pdo()->query('SELECT COUNT(*) FROM supplier');
+            if ($count === false) {
+                throw new \RuntimeException('Počet firem se nepodařilo načíst.');
+            }
+            $companies = (int) $count->fetchColumn();
+            $state = $this->license->current()->withActiveCompanies($companies);
+            if (!$state->allowsNewCompany()) {
+                throw new LicenseCompanyLimitExceeded($state, $companies);
+            }
+
+            return $mutation();
+        });
+    }
+
+    /**
+     * @template T
+     * @param callable():T $callback
+     * @return T
+     */
+    private function withLock(callable $callback): mixed
+    {
+        $pdo = $this->db->pdo();
+        $lockName = $this->lockName();
+        $stmt = $pdo->prepare('SELECT GET_LOCK(?, ?)');
+        $stmt->execute([$lockName, self::LOCK_TIMEOUT_SECONDS]);
+        if ((int) $stmt->fetchColumn() !== 1) {
+            throw new \RuntimeException('Licenční kapacitní zámek se nepodařilo získat.');
+        }
+
+        try {
+            return $callback();
+        } finally {
+            $release = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+            $release->execute([$lockName]);
+        }
+    }
+
+    private function lockName(): string
+    {
+        $statement = $this->db->pdo()->query('SELECT DATABASE()');
+        if ($statement === false) {
+            throw new \RuntimeException('Aktuální databázi pro licenční zámek nelze načíst.');
+        }
+        $database = (string) $statement->fetchColumn();
+        if ($database === '') {
+            throw new \RuntimeException('Aktuální databázi pro licenční zámek nelze určit.');
+        }
+
+        return self::LOCK_PREFIX . substr(hash('sha256', $database), 0, 32);
+    }
+
+    /**
+     * @template T
+     * @param callable():T $callback
+     * @return T
+     */
+    private function transactional(callable $callback): mixed
+    {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT ' . self::SAVEPOINT);
+        }
+
+        try {
+            $result = $callback();
+            if ($ownsTransaction) {
+                $pdo->commit();
+            } else {
+                $pdo->exec('RELEASE SAVEPOINT ' . self::SAVEPOINT);
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction) {
+                $pdo->rollBack();
+            } else {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::SAVEPOINT);
+                $pdo->exec('RELEASE SAVEPOINT ' . self::SAVEPOINT);
+            }
+            throw $e;
+        }
+    }
+}

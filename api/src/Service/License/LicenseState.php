@@ -38,9 +38,8 @@ final class LicenseState
      * funkce zůstanou plně funkční včetně vytváření a změn dat. Jakmile si
      * licenci koupí, platí počet míst z ní.
      *
-     * ⚠️ Nepočítají se sem účty s právem jen pro čtení ani klientské účty:
-     * ty licenční místo nezabírají a jde jich založit kolik je potřeba
-     * ({@see \MyInvoice\Action\Admin\UserAdminAction::roleCountsAsSeat()}).
+     * ⚠️ Nepočítají se sem účty bez business WRITE oprávnění. Typ role není
+     * výjimka: zapisující klientská role zabírá místo stejně jako staff role.
      */
     public const FREE_SEATS = 1;
 
@@ -135,9 +134,8 @@ final class LicenseState
      * se ptal na `hasCommercialFeatures()`, bezplatný tarif by měl uživatele
      * bez omezení — a přitom je to tarif, kde se za ně platí.
      *
-     * ⚠️ Týká se JEN rolí, které zabírají licenční místo. Uživatele s právem
-     * jen pro čtení a klientské účty tahle otázka nezajímá — ti jdou zakládat
-     * vždycky ({@see \MyInvoice\Action\Admin\UserAdminAction::roleCountsAsSeat()}).
+     * ⚠️ Týká se JEN rolí, které zabírají licenční místo. Uživatel bez business
+     * WRITE oprávnění jde založit vždy; samotný typ client žádnou výjimkou není.
      */
     public function allowsNewUser(): bool
     {
@@ -153,6 +151,18 @@ final class LicenseState
      */
     public function newUserBlockReason(): ?string
     {
+        return $this->seatCountBlockReason($this->usersActive + 1);
+    }
+
+    /**
+     * Ověří konkrétní cílový počet míst. Používá atomická kapacitní brána po
+     * mutaci, která může jedním krokem přidat více míst změnou sdílené role.
+     */
+    public function seatCountBlockReason(int $targetSeats): ?string
+    {
+        if ($targetSeats <= $this->usersActive) {
+            return null;
+        }
         // Zkušební období běží v plném rozsahu, včetně počtu uživatelů.
         if ($this->state === self::TRIAL) {
             return null;
@@ -173,10 +183,10 @@ final class LicenseState
             if (!$this->managed) {
                 return null;
             }
-            return $this->usersActive < self::FREE_SEATS ? null : self::BLOCK_NO_LICENSE;
+            return $targetSeats <= self::FREE_SEATS ? null : self::BLOCK_NO_LICENSE;
         }
         if ($this->state === self::ACTIVE) {
-            return ($this->usersLicensed <= 0 || $this->usersActive < $this->usersLicensed)
+            return ($this->usersLicensed <= 0 || $targetSeats <= $this->usersLicensed)
                 ? null
                 : self::BLOCK_SEAT_LIMIT;
         }
@@ -197,6 +207,18 @@ final class LicenseState
         return new self(
             $this->state, $this->instanceId, $this->tier, $this->maxCompanies,
             $this->usersLicensed, $usersActive, $this->companiesActive,
+            $this->validUntil, $this->trialEndsAt, $this->overageDeadline,
+            $this->licenseKey, $this->lastCheckAt, $this->lastCheckOk,
+            $this->perpetual, $this->subscription, $this->commercial, $this->managed,
+        );
+    }
+
+    /** Kopie stavu s čerstvým COUNT(*) firem pro atomickou kapacitní bránu. */
+    public function withActiveCompanies(int $companiesActive): self
+    {
+        return new self(
+            $this->state, $this->instanceId, $this->tier, $this->maxCompanies,
+            $this->usersLicensed, $this->usersActive, $companiesActive,
             $this->validUntil, $this->trialEndsAt, $this->overageDeadline,
             $this->licenseKey, $this->lastCheckAt, $this->lastCheckOk,
             $this->perpetual, $this->subscription, $this->commercial, $this->managed,

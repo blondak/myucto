@@ -55,6 +55,10 @@ final class StorageQuoteAction
             'recurring_delta'  => $result['recurring_delta'] ?? null,
             'currency'         => $result['currency'] ?? null,
             'period_end'       => $result['period_end'] ?? null,
+            'quote_token'      => $result['quote_token'] ?? null,
+            'expires_at'       => $result['expires_at'] ?? null,
+            'scheduled'        => ($result['scheduled'] ?? false) === true || ($result['change'] ?? '') === 'scheduled',
+            'effective_at'     => $result['effective_at'] ?? null,
         ]);
     }
 }

@@ -67,11 +67,15 @@ final class StorageUpgradeAction
 
         $body = (array) ($request->getParsedBody() ?? []);
         $quotaGb = (int) ($body['quota_gb'] ?? 0);
+        $quoteToken = trim((string) ($body['quote_token'] ?? ''));
         if ($quotaGb < 1) {
             return Json::error($response, 'validation_failed', 'Zadejte cílovou velikost úložiště.', 400);
         }
+        if ($quoteToken === '') {
+            return Json::error($response, 'quote_required', 'Nejdříve si nechte spočítat aktuální cenu.', 400);
+        }
 
-        $result = $this->license->storageUpgrade($quotaGb);
+        $result = $this->license->storageUpgrade($quotaGb, $quoteToken);
         if (($result['ok'] ?? false) !== true) {
             $error = (string) ($result['error'] ?? 'upgrade_failed');
             $status = $error === 'server_unreachable' ? 503 : 422;
@@ -83,6 +87,10 @@ final class StorageUpgradeAction
             'new_quota_gb'         => $result['new_quota_gb'] ?? $quotaGb,
             'amount_charged'       => $result['amount_charged'] ?? null,
             'provisioning_pending' => $result['provisioning_pending'] ?? false,
+            'scheduled'            => (bool) ($result['scheduled'] ?? false),
+            'effective_at'         => $result['effective_at'] ?? null,
+            'pending'              => (bool) ($result['pending'] ?? false),
+            'order_id'             => isset($result['order_id']) ? (string) $result['order_id'] : null,
             'state'                => $result['state']->toArray($this->license->buyUrl()),
         ]);
     }

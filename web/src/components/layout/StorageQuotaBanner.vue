@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { formatQuotaBytes, storageQuota } from '@/api/storageQuota'
 import { instanceStatus } from '@/api/instanceStatus'
+import { instancePreview } from '@/api/instancePreview'
 import { resolveStorageLevel, STORAGE_NOTICE_PERCENT } from '@/api/instanceHealth'
 
 /**
@@ -32,6 +33,9 @@ const { t } = useI18n()
 
 const headerState = storageQuota.state
 const percent = storageQuota.percent
+const previewing = instancePreview.isActive
+const statusStorage = instanceStatus.storage
+const changePending = computed(() => statusStorage.value?.change_pending === true)
 
 /**
  * Úroveň k vykreslení. Hlavička má přednost: je to poslední známý stav
@@ -39,26 +43,43 @@ const percent = storageQuota.percent
  * session.
  */
 const level = computed<'notice' | 'warning' | 'exhausted' | null>(() => {
+  // Náhled musí být deterministický: reálná lepkavá hlavička nesmí přebarvit
+  // syntetický scénář a warning/exhausted se nesmí ztratit jen proto, že nejsou
+  // ve skutečných response headers.
+  if (previewing.value) {
+    const previewLevel = resolveStorageLevel(statusStorage.value)
+
+    return previewLevel === 'notice' || previewLevel === 'warning' || previewLevel === 'exhausted'
+      ? previewLevel
+      : null
+  }
+
   if (headerState.value === 'exhausted') return 'exhausted'
   if (headerState.value === 'warning') return 'warning'
 
-  const fromStatus = resolveStorageLevel(instanceStatus.storage.value)
+  const fromStatus = resolveStorageLevel(statusStorage.value)
 
   return fromStatus === 'notice' ? 'notice' : null
 })
 
 /** Procenta z hlavičky; u `notice` je zdrojem stažený stav. */
 const shownPercent = computed(() => {
-  const value = level.value === 'notice' ? (instanceStatus.storage.value?.percent ?? null) : percent.value
+  const value = previewing.value || level.value === 'notice'
+    ? (statusStorage.value?.percent ?? null)
+    : percent.value
 
   return value === null ? null : value.toLocaleString(undefined, { maximumFractionDigits: 1 })
 })
 
 const used = computed(() => formatQuotaBytes(
-  level.value === 'notice' ? (instanceStatus.storage.value?.usage_bytes ?? null) : storageQuota.usedBytes.value,
+  previewing.value || level.value === 'notice'
+    ? (statusStorage.value?.usage_bytes ?? null)
+    : storageQuota.usedBytes.value,
 ))
 const limit = computed(() => formatQuotaBytes(
-  level.value === 'notice' ? (instanceStatus.storage.value?.quota_bytes ?? null) : storageQuota.limitBytes.value,
+  previewing.value || level.value === 'notice'
+    ? (statusStorage.value?.quota_bytes ?? null)
+    : storageQuota.limitBytes.value,
 ))
 
 const text = computed(() => {
@@ -82,6 +103,15 @@ const detail = computed(() =>
     : null,
 )
 
+const hint = computed(() => {
+  if (!changePending.value) return t('common.storage_quota.hint')
+  const gb = statusStorage.value?.quota_gb_ordered
+
+  return gb
+    ? t('common.storage_quota.provisioning_hint', { gb })
+    : t('common.storage_quota.provisioning_hint_nogb')
+})
+
 const tone = computed(() => {
   if (level.value === 'exhausted') return 'border-danger-500/40 bg-danger-50 text-danger-600'
   if (level.value === 'warning') return 'border-warning-500/40 bg-warning-50 text-warning-600'
@@ -103,14 +133,14 @@ const tone = computed(() => {
       <span v-if="detail" class="ml-1 opacity-80 whitespace-nowrap">{{ detail }}</span>
     </span>
     <span class="flex flex-wrap items-center gap-2">
-      <span class="text-xs opacity-90">{{ t('common.storage_quota.hint') }}</span>
+      <span class="text-xs opacity-90">{{ hint }}</span>
       <!-- Výzva musí vést tam, kde se to dá vyřešit; „objednejte si víc" bez
            odkazu je jen konstatování. -->
       <RouterLink
         to="/hosting#misto"
         class="whitespace-nowrap rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-medium hover:bg-neutral-100"
       >
-        {{ t('common.storage_quota.expand_cta') }}
+        {{ t(changePending ? 'common.storage_quota.detail_cta' : 'common.storage_quota.expand_cta') }}
       </RouterLink>
     </span>
   </div>

@@ -46,8 +46,8 @@ prodeje předplatného upravují obchodní podmínky na
 
 ## 79.2 Kde licenci spravovat
 
-Správa licence je v menu **Aktivace** — úplně dole v hlavním menu. Obsahuje
-tři stránky:
+Správa licence je v menu **Systém → Zakoupení**. Související informace jsou
+rozdělené do tří stránek:
 
 | Stránka | Co obsahuje |
 |---|---|
@@ -61,7 +61,7 @@ tři stránky:
 ## 79.3 Zkušební období a stavy licence
 
 Stav licence se počítá při každém přihlášeném požadavku a promítá se do banneru
-v aplikaci i do karty stavu na stránce **Aktivace → Zakoupení**.
+v aplikaci i do karty stavu na stránce **Systém → Zakoupení**.
 
 | Stav | Význam | Provoz |
 |---|---|---|
@@ -72,10 +72,13 @@ v aplikaci i do karty stavu na stránce **Aktivace → Zakoupení**.
 | **Komerční funkce nedostupné (degraded)** | Předplatné neobnoveno (po ochranné lhůtě), případně chybí/neplatný podpis tokenu. | Bezplatné funkce plně; komerční moduly nedostupné |
 
 **Kdo se počítá do limitu uživatelů.** Do počtu licencovaných míst se počítají
-**aktivní uživatelé**, kromě účtů s rolí **jen pro čtení** (readonly) a
-klientských portálových účtů. Deaktivované účty se nepočítají a nejsou
-zpoplatněné. Vedle uživatelů se hlídá i **počet firem** (dodavatelů) proti
-limitu tarifu.
+**aktivní uživatelé**, kterým alespoň jedna aktivní aplikační nebo klientská
+role dovoluje zápis do obchodních dat. Počítá se i zapisovací role přiřazená
+jen pro jednu firmu. Klientská role tedy není automaticky zdarma; rozhodují
+její skutečná oprávnění. Bezplatná je role pouze pro čtení a také self-service
+role, která dovoluje měnit jen vlastní profil nebo vlastní přístupové tokeny.
+Deaktivované účty se nepočítají. Vedle uživatelů se hlídá i **počet firem**
+(dodavatelů) proti limitu tarifu; počítá se každá založená firma.
 
 **Překročení rozsahu (overage).** Když aktivních uživatelů nebo firem přibude
 nad rámec klíče, aplikace na to upozorní a poskytne lhůtu 14 dní na rozšíření
@@ -95,9 +98,10 @@ a komerční nadstavba se vypne.
 
 ## 79.4 Zakoupení předplatného
 
-Na stránce **Aktivace → Zakoupení** klikni na **Zakoupit předplatné**. Otevře
-se objednávka na myucto.cz s předvyplněnou instalací a fakturačními údaji firmy
-(vše lze na webu ještě upravit). Tam zvolíš:
+Na stránce **Systém → Zakoupení** klikni na **Zakoupit předplatné**. Aplikace
+vytvoří krátce platnou relaci svázanou právě s touto instalací a otevře
+objednávku na myucto.cz s předvyplněnými fakturačními údaji firmy. Identifikátor
+instalace ani licenční tajemství se nedají změnit formulářem. Na webu zvolíš:
 
 - **tarif** podle počtu firemních agend — **Jedna firma** (1 agenda),
   **Účetní kancelář** (až 10 agend) nebo **Neomezeně** (bez limitu firem),
@@ -106,12 +110,14 @@ se objednávka na myucto.cz s předvyplněnou instalací a fakturačními údaji
 
 > 💡 **Roční předplatné = 10 měsíčních plateb** (dva měsíce zdarma).
 
-Po zaplacení první platby je smlouva uzavřena a **licenční klíč přijde
-e-mailem** (obvykle během minut), spolu s potvrzením.
+Po zaplacení první platby tě myucto.cz vrátí přímo do aplikace. Ta bezpečně
+vyzvedne nový klíč a licenci sama aktivuje; klíč se nepřenáší v URL ani se
+nekopíruje ručně. Potvrzení a licenční klíč zároveň přijdou e-mailem jako
+záložní cesta. Když se automatický návrat nepodaří, lze klíč aktivovat ručně.
 
 ## 79.5 Aktivace licenčním klíčem
 
-Klíč z e-mailu vlož na stránce **Aktivace → Zakoupení** do pole v sekci
+Klíč z e-mailu vlož na stránce **Systém → Zakoupení** do pole v sekci
 **Aktivace licenčního klíče** a klikni **Aktivovat**. Aktivací se licence
 **naváže na tuto instalaci** (jedinečný identifikátor vytvořený při prvním
 spuštění). Jeden klíč smí být v jednom okamžiku aktivní na jedné instalaci.
@@ -126,17 +132,31 @@ samo, na pozadí — **nevyžaduje žádné nastavení uživatele**.
 > uživatelů a firem. **Žádná účetní ani osobní data** se na licenční server
 > neposílají.
 
-## 79.6 Navýšení počtu uživatelů
+## 79.6 Změny kapacity a tarifu
 
-Potřebuješ-li přidat další licencované uživatele během běžícího období, není
-třeba zakládat novou objednávku — navýšení se dělá **přímo v aplikaci**.
+Potřebuješ-li změnit tarif nebo počet licencovaných uživatelů během běžícího
+období, není třeba zakládat nové předplatné — změna se dělá **přímo v aplikaci**.
 V sekci **Navýšit počet uživatelů** (na stránce Zakoupení) zadej cílový počet,
 nech si **Spočítat cenu** a potvrď. Server strhne jen **poměrný doplatek do
 konce aktuálního období z uložené karty** a **místa naskočí ihned**. Od dalšího
 cyklu se pak účtuje plná nová cena.
 
-Stejné tlačítko se nabídne i v případě, že jsi v překročeném rozsahu
-(overage) — navýšením přečerpání odstraníš.
+Stejné ovládání se nabídne i v případě, že jsi v překročeném rozsahu
+(overage) — navýšením přečerpání odstraníš. Změna licence, tarifu a počtu
+uživatelů funguje stejně u samostatného self-hosted předplatného i u
+spravovaného SaaS hostingu.
+
+Stejný postup platí pro vyšší tarif podle počtu firem a u spravovaného
+hostingu také pro větší prostor. Nákup prostoru a hostingové akce se u
+self-hosted licence nezobrazují. Nabídka ceny je krátkodobě platná a potvrzení
+je svázané právě se zobrazenou částkou. Pokud platební brána platbu zpracovává
+asynchronně, aplikace její stav průběžně ověřuje a nový rozsah zpřístupní
+hned po potvrzení.
+
+**Snížení počtu uživatelů, tarifu nebo prostoru** se neprojeví uprostřed už
+zaplaceného období. Po potvrzení se naplánuje od začátku následujícího
+fakturačního období a jeho nižší rozsah se použije pro další pravidelnou
+platbu. Za současné období se neposkytuje vratka ani dobropis.
 
 ## 79.7 Přenos licence a přeinstalace
 
@@ -165,7 +185,7 @@ Licenci lze přesunout na jinou instalaci (nový server, přeinstalace) —
   [myucto.cz](https://myucto.cz/).
 
 **Zrušení automatického prodlužování v aplikaci.** Na stránce
-**Aktivace → Zakoupení** je sekce **Automatické prodlužování**: vidíš v ní, zda
+**Systém → Zakoupení** je sekce **Automatické prodlužování**: vidíš v ní, zda
 se licence prodlužuje sama a kdy je **další platba**. Tlačítkem
 **Zrušit automatické prodlužování** obnovu vypneš.
 
@@ -174,7 +194,14 @@ se licence prodlužuje sama a kdy je **další platba**. Tlačítkem
 > nestrhne další platba. Komerční funkce ani přístup k datům se zrušením
 > prodlužování okamžitě nemění. Poměrná část se nevrací. Prodlužování se po
 > zrušení nedá zapnout zpět; obnovíš ho **novým nákupem předplatného**. Detailní
-> pravidla jsou v **Aktivace → Obchodní podmínky**.
+> pravidla jsou v **Systém → Obchodní podmínky**.
+
+> ⚠️ **U spravovaného SaaS hostingu zrušíš i budoucí provoz instance.** Po
+> skončení zaplaceného období ztratíš přístup k hostingu a následně mohou být
+> podle retenčních pravidel odstraněna i uložená data. Účetní doklady musíš
+> uchovávat po zákonnou dobu, proto před zrušením použij **Systém → Kompletní
+> export dat** a zálohu ulož mimo hosting. Toto upozornění se netýká samostatné
+> self-hosted licence, protože její server a data provozuješ sám.
 
 ## 79.9 Řešení potíží
 

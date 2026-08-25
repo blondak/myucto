@@ -115,7 +115,8 @@ final class UserSupplierRepository
     public function replaceForUser(int $userId, array $assignments): void
     {
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) $pdo->beginTransaction();
         try {
             $pdo->prepare('DELETE FROM user_suppliers WHERE user_id = ?')->execute([$userId]);
             if ($assignments !== []) {
@@ -126,9 +127,11 @@ final class UserSupplierRepository
                     $ins->execute([$userId, (int) $a['supplier_id'], $a['role_id'] ?? null]);
                 }
             }
-            $pdo->commit();
+            if ($ownsTransaction) $pdo->commit();
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            if ($ownsTransaction) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+            }
             throw $e;
         }
     }

@@ -43,11 +43,15 @@ final class UpgradeLicenseAction
 
         $body = (array) ($request->getParsedBody() ?? []);
         $users = (int) ($body['users'] ?? 0);
+        $quoteToken = trim((string) ($body['quote_token'] ?? ''));
         if ($users < 1) {
             return Json::error($response, 'validation_failed', 'Zadejte cílový počet uživatelů.', 400);
         }
+        if ($quoteToken === '') {
+            return Json::error($response, 'quote_required', 'Nejdříve si nechte spočítat aktuální cenu.', 400);
+        }
 
-        $result = $this->license->upgrade($users);
+        $result = $this->license->upgrade($users, $quoteToken);
         if (($result['ok'] ?? false) !== true) {
             $error = (string) ($result['error'] ?? 'upgrade_failed');
             $message = self::ERROR_MESSAGES[$error] ?? self::ERROR_MESSAGES['upgrade_failed'];
@@ -58,6 +62,10 @@ final class UpgradeLicenseAction
         return Json::ok($response, [
             'new_users'      => $result['new_users'] ?? $users,
             'amount_charged' => $result['amount_charged'] ?? null,
+            'scheduled'      => (bool) ($result['scheduled'] ?? false),
+            'effective_at'   => $result['effective_at'] ?? null,
+            'pending'        => (bool) ($result['pending'] ?? false),
+            'order_id'       => isset($result['order_id']) ? (string) $result['order_id'] : null,
             'state'          => $result['state']->toArray($this->license->buyUrl()),
         ]);
     }

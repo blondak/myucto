@@ -122,6 +122,10 @@ const PREVIEW_STORAGE_QUOTE: StorageQuote = {
   recurring_delta: 120,
   currency: 'CZK',
   period_end: null,
+  quote_token: 'preview',
+  expires_at: null,
+  scheduled: false,
+  effective_at: null,
 }
 
 const PREVIEW_USER_QUOTE: UpgradeQuote = {
@@ -130,6 +134,10 @@ const PREVIEW_USER_QUOTE: UpgradeQuote = {
   amount: 430,
   currency: 'CZK',
   period_end: null,
+  quote_token: 'preview',
+  expires_at: null,
+  scheduled: false,
+  effective_at: null,
 }
 
 /** Co má mít formulář rozepsané. `null` = nic, obrazovka je ve výchozím stavu. */

@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\License;
 
+use MyInvoice\Action\Admin\RoleAdminAction;
 use MyInvoice\Action\Admin\UserAdminAction;
+use MyInvoice\Action\Admin\UserSupplierAdminAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\RoleRepository;
 use MyInvoice\Service\License\LicenseClient;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseTokenVerifier;
@@ -22,7 +25,7 @@ use Slim\Psr7\Response as Psr7Response;
 /**
  * Licenční limity (E4) na úrovni Action tříd:
  *  - seat limit: UserAdminAction::create blokuje nového provozního uživatele nad
- *    počet míst; readonly/client role se nepočítají; trial je bez limitu.
+ *    počet míst; bez business WRITE se role nepočítá; trial je bez limitu.
  *  - max_companies: SettingsAction::createSupplier blokuje nad limit; null (unlimited)
  *    i trial projdou.
  *  - LicenseService::countActiveUsers() — počítací dotaz vč. JOIN na roles.
@@ -35,6 +38,9 @@ final class LicenseLimitsTest extends TestCase
     private Connection $db;
     private LicenseService $service;
     private UserAdminAction $userAdmin;
+    private UserSupplierAdminAction $userSuppliers;
+    private RoleAdminAction $roleAdmin;
+    private RoleRepository $roles;
     private SettingsAction $settings;
     private string $instanceId;
     private bool $inTx = false;
@@ -59,6 +65,9 @@ final class LicenseLimitsTest extends TestCase
             );
             $container->set(LicenseService::class, $this->service);
             $this->userAdmin = $container->get(UserAdminAction::class);
+            $this->userSuppliers = $container->get(UserSupplierAdminAction::class);
+            $this->roleAdmin = $container->get(RoleAdminAction::class);
+            $this->roles = $container->get(RoleRepository::class);
             $this->settings  = $container->get(SettingsAction::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -83,23 +92,26 @@ final class LicenseLimitsTest extends TestCase
 
     // ── countActiveUsers: JOIN na roles ──────────────────────────────────────
 
-    public function testCountActiveUsersIgnoresReadonlyAndClientRoles(): void
+    public function testCountActiveUsersUsesWritePermissionRegardlessOfRoleType(): void
     {
         $roles = $this->roleIds();
         $baseline = $this->service->countActiveUsers();
 
-        // readonly (staff, system_key=readonly) i client se do licenčních míst nepočítají.
+        // Readonly má jen self-service zápis a místo nezabírá.
         $this->insertUser('readonly', $roles['readonly']);
+        self::assertSame($baseline, $this->service->countActiveUsers(), 'Readonly role nezabírá místo.');
+
+        // Systémová client role má business WRITE a typ role ji z licence nevyjímá.
         $this->insertUser('client', $roles['client']);
-        self::assertSame($baseline, $this->service->countActiveUsers(), 'readonly/client role nezabírají místo.');
+        self::assertSame($baseline + 1, $this->service->countActiveUsers(), 'Zapisující client role zabírá místo.');
 
         // accountant (provozní staff role) místo zabírá.
         $this->insertUser('accountant', $roles['accountant']);
-        self::assertSame($baseline + 1, $this->service->countActiveUsers(), 'accountant zabírá licenční místo.');
+        self::assertSame($baseline + 2, $this->service->countActiveUsers(), 'Accountant zabírá licenční místo.');
 
         // Deaktivovaný uživatel se nepočítá.
         $this->insertUser('accountant', $roles['accountant'], active: false);
-        self::assertSame($baseline + 1, $this->service->countActiveUsers(), 'neaktivní uživatel se nepočítá.');
+        self::assertSame($baseline + 2, $this->service->countActiveUsers(), 'Neaktivní uživatel se nepočítá.');
     }
 
     // ── seat limit přes UserAdminAction::create ─────────────────────────────
@@ -128,6 +140,17 @@ final class LicenseLimitsTest extends TestCase
         self::assertSame('validation_failed', $this->error($resp));
     }
 
+    public function testWritingClientRoleIsSubjectToSeatLimit(): void
+    {
+        $roles = $this->roleIds();
+        $this->licenseWithToken($this->token(['users' => $this->service->countActiveUsers()]));
+
+        $resp = $this->createUser($roles['client']);
+
+        self::assertSame(403, $resp->getStatusCode());
+        self::assertSame('license_user_limit', $this->error($resp));
+    }
+
     public function testTrialHasNoSeatLimit(): void
     {
         $this->trialLicense();
@@ -140,6 +163,115 @@ final class LicenseLimitsTest extends TestCase
         self::assertSame('validation_failed', $this->error($resp));
     }
 
+    public function testActivationWithWritingOverrideIsBlockedAndRolledBack(): void
+    {
+        $roles = $this->roleIds();
+        $userId = $this->insertUser('readonly', $roles['readonly'], active: false);
+        $supplierId = (int) $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $this->db->pdo()->prepare(
+            'INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)'
+        )->execute([$userId, $supplierId, $roles['accountant']]);
+        $this->licenseWithToken($this->token(['users' => $this->service->countActiveUsers()]));
+
+        $resp = $this->updateUser($userId, ['is_active' => true]);
+
+        self::assertSame(403, $resp->getStatusCode(), (string) $resp->getBody());
+        self::assertSame('license_user_limit', $this->error($resp));
+        self::assertSame(0, (int) $this->db->pdo()->query('SELECT is_active FROM users WHERE id = ' . $userId)->fetchColumn());
+    }
+
+    public function testWritingOverrideForActiveUserIsBlockedAndRolledBack(): void
+    {
+        $roles = $this->roleIds();
+        $userId = $this->insertUser('readonly', $roles['readonly']);
+        $supplierId = (int) $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $this->licenseWithToken($this->token(['users' => $this->service->countActiveUsers()]));
+
+        $resp = $this->replaceAssignments($userId, $supplierId, $roles['accountant']);
+
+        self::assertSame(403, $resp->getStatusCode(), (string) $resp->getBody());
+        self::assertSame('license_user_limit', $this->error($resp));
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM user_suppliers WHERE user_id = ?');
+        $stmt->execute([$userId]);
+        self::assertSame(0, (int) $stmt->fetchColumn(), 'Zakázaná override role se musí rollbacknout.');
+    }
+
+    public function testWritingOverrideForInactiveUserDoesNotConsumeSeat(): void
+    {
+        $roles = $this->roleIds();
+        $userId = $this->insertUser('readonly', $roles['readonly'], active: false);
+        $supplierId = (int) $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $before = $this->service->countActiveUsers();
+        $this->licenseWithToken($this->token(['users' => $before]));
+
+        $resp = $this->replaceAssignments($userId, $supplierId, $roles['accountant']);
+
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
+        self::assertSame($before, $this->service->countActiveUsers());
+    }
+
+    public function testAddingWriteToUsedRoleIsBlockedAndRolledBack(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, ?, 'staff', 1)")
+            ->execute(['Capacity role ' . bin2hex(random_bytes(4))]);
+        $roleId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, 'invoices', 1)")
+            ->execute([$roleId]);
+        $this->insertUser('readonly', $roleId);
+        $this->insertUser('readonly', $roleId);
+        $this->licenseWithToken($this->token(['users' => $this->service->countActiveUsers() + 1]));
+        $role = $this->roles->find($roleId);
+        self::assertIsArray($role);
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('PUT', '/api/admin/roles/' . $roleId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'is_superadmin' => true])
+            ->withParsedBody([
+                'name' => $role['name'],
+                'is_active' => true,
+                'permissions' => ['invoices' => 2],
+                'revision' => $role['updated_at'],
+            ]);
+        $resp = $this->roleAdmin->update($request, new Psr7Response(), ['id' => (string) $roleId]);
+
+        self::assertSame(403, $resp->getStatusCode(), (string) $resp->getBody());
+        self::assertSame('license_user_limit', $this->error($resp));
+        $level = $pdo->query(
+            "SELECT access_level FROM role_permissions WHERE role_id = {$roleId} AND permission_key = 'invoices'"
+        )->fetchColumn();
+        self::assertSame(1, (int) $level, 'Oprávnění používané role se musí rollbacknout.');
+    }
+
+    public function testActivatingUsedWritingRoleIsBlockedAndRolledBack(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, ?, 'staff', 0)")
+            ->execute(['Inactive capacity role ' . bin2hex(random_bytes(4))]);
+        $roleId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, 'invoices', 2)")
+            ->execute([$roleId]);
+        $this->insertUser('readonly', $roleId);
+        $this->licenseWithToken($this->token(['users' => $this->service->countActiveUsers()]));
+        $role = $this->roles->find($roleId);
+        self::assertIsArray($role);
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('PUT', '/api/admin/roles/' . $roleId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'is_superadmin' => true])
+            ->withParsedBody([
+                'name' => $role['name'],
+                'is_active' => true,
+                'permissions' => ['invoices' => 2],
+                'revision' => $role['updated_at'],
+            ]);
+        $resp = $this->roleAdmin->update($request, new Psr7Response(), ['id' => (string) $roleId]);
+
+        self::assertSame(403, $resp->getStatusCode(), (string) $resp->getBody());
+        self::assertSame('license_user_limit', $this->error($resp));
+        self::assertSame(0, (int) $pdo->query('SELECT is_active FROM roles WHERE id = ' . $roleId)->fetchColumn());
+    }
+
     // ── max_companies přes SettingsAction::createSupplier ────────────────────
 
     public function testCreateSupplierBlockedOverCompanyLimit(): void
@@ -147,21 +279,21 @@ final class LicenseLimitsTest extends TestCase
         $companies = $this->companyCount();
         $this->licenseWithToken($this->token(['max_companies' => $companies])); // obsazeno na doraz
 
-        $resp = $this->createSupplier();
+        $resp = $this->createSupplier(valid: true);
 
         self::assertSame(403, $resp->getStatusCode());
         self::assertSame('license_company_limit', $this->error($resp));
     }
 
-    public function testUnlimitedCompaniesPassLicenseGate(): void
+    public function testUnlimitedCompaniesCanBeCreatedThroughAtomicGate(): void
     {
         $this->licenseWithToken($this->token(['max_companies' => null])); // null = neomezeno
+        $before = $this->companyCount();
 
-        // Licenční brána projde → padne až na validaci povinných polí (prázdné tělo).
-        $resp = $this->createSupplier();
+        $resp = $this->createSupplier(valid: true);
 
-        self::assertSame(400, $resp->getStatusCode());
-        self::assertSame('validation_failed', $this->error($resp));
+        self::assertSame(201, $resp->getStatusCode(), (string) $resp->getBody());
+        self::assertSame($before + 1, $this->companyCount());
     }
 
     public function testTrialHasNoCompanyLimit(): void
@@ -192,17 +324,45 @@ final class LicenseLimitsTest extends TestCase
         return $this->userAdmin->create($request, new Psr7Response());
     }
 
-    private function createSupplier(): Psr7Response
+    /** @param array<string,mixed> $body */
+    private function updateUser(int $userId, array $body): Psr7Response
     {
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('PUT', '/api/admin/users/' . $userId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'is_superadmin' => true])
+            ->withParsedBody($body);
+
+        return $this->userAdmin->update($request, new Psr7Response(), ['id' => (string) $userId]);
+    }
+
+    private function replaceAssignments(int $userId, int $supplierId, int $roleId): Psr7Response
+    {
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('PUT', '/api/admin/users/' . $userId . '/suppliers')
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'is_superadmin' => true])
+            ->withParsedBody(['assignments' => [['supplier_id' => $supplierId, 'role_id' => $roleId]]]);
+
+        return $this->userSuppliers->replace($request, new Psr7Response(), ['id' => (string) $userId]);
+    }
+
+    private function createSupplier(bool $valid = false): Psr7Response
+    {
+        $body = $valid ? [
+            'company_name' => 'License Gate s.r.o.',
+            'street' => 'Testovací 1',
+            'city' => 'Praha',
+            'zip' => '10000',
+            'email' => 'license-gate@example.test',
+        ] : [];
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/suppliers')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin'])
-            ->withParsedBody([]); // prázdné tělo — po licenční bráně spadne na validaci
+            ->withParsedBody($body);
 
         return $this->settings->createSupplier($request, new Psr7Response());
     }
 
-    private function insertUser(string $legacyRole, int $roleId, bool $active = true): void
+    private function insertUser(string $legacyRole, int $roleId, bool $active = true): int
     {
         $this->db->pdo()->prepare(
             'INSERT INTO users (email, password_hash, name, role, role_id, locale, is_active)
@@ -216,6 +376,7 @@ final class LicenseLimitsTest extends TestCase
             'cs',
             $active ? 1 : 0,
         ]);
+        return (int) $this->db->pdo()->lastInsertId();
     }
 
     /** @return array{accountant:int,readonly:int,client:int} */

@@ -20,6 +20,11 @@ use Psr\Log\NullLogger;
  *   POST {server}/api/license/renew
  *   POST {server}/api/license/deactivate
  *   POST {server}/api/license/upgrade
+ *   POST {server}/api/license/quota
+ *   POST {server}/api/license/tier
+ *   POST {server}/api/license/change-status
+ *   POST {server}/api/license/purchase-session
+ *   POST {server}/api/license/purchase-claim
  *   POST {server}/api/license/cancel-renewal
  *   POST {server}/api/license/support-session
  */
@@ -51,14 +56,24 @@ final class LicenseClient
      * @return array<string,mixed>
      * @throws LicenseNetworkException
      */
-    public function activate(string $licenseKey, string $instanceId, string $fingerprint, string $appVersion, bool $takeover = false): array
+    public function activate(
+        string $licenseKey,
+        string $instanceId,
+        string $fingerprint,
+        string $appVersion,
+        bool $takeover = false,
+        int $usersActive = 0,
+        int $companiesActive = 0,
+    ): array
     {
         return $this->post('/api/license/activate', [
-            'license_key' => $licenseKey,
-            'instance_id' => $instanceId,
-            'fingerprint' => $fingerprint,
-            'app_version' => $appVersion,
-            'takeover'    => $takeover,
+            'license_key'      => $licenseKey,
+            'instance_id'      => $instanceId,
+            'fingerprint'      => $fingerprint,
+            'app_version'      => $appVersion,
+            'takeover'         => $takeover,
+            'users_active'     => max(0, $usersActive),
+            'companies_active' => max(0, $companiesActive),
         ]);
     }
 
@@ -111,6 +126,53 @@ final class LicenseClient
     }
 
     /**
+     * Založí checkout session svázanou s instalací a PKCE challenge.
+     *
+     * @return array<string,mixed> {ok,token,buy_url,expires_in} / {error}
+     * @throws LicenseNetworkException
+     */
+    public function purchaseSession(
+        string $instanceId,
+        string $state,
+        string $codeChallenge,
+        string $returnUrl,
+    ): array {
+        return $this->post('/api/license/purchase-session', [
+            'instance_id'   => $instanceId,
+            'state'         => $state,
+            'code_challenge' => $codeChallenge,
+            'return_url'    => $returnUrl,
+        ]);
+    }
+
+    /**
+     * Vymění zaplacený jednorázový order token za klíč a podepsaný token.
+     * PKCE verifier zůstává server-to-server a nikdy nejde přes prohlížeč.
+     *
+     * @return array<string,mixed> {ok,license_key,token,subscription?,instance?} / {error}
+     * @throws LicenseNetworkException
+     */
+    public function purchaseClaim(
+        string $orderToken,
+        string $codeVerifier,
+        string $instanceId,
+        string $fingerprint,
+        string $appVersion,
+        int $usersActive,
+        int $companiesActive,
+    ): array {
+        return $this->post('/api/license/purchase-claim', [
+            'order_token'      => $orderToken,
+            'code_verifier'    => $codeVerifier,
+            'instance_id'      => $instanceId,
+            'fingerprint'      => $fingerprint,
+            'app_version'      => $appVersion,
+            'users_active'     => max(0, $usersActive),
+            'companies_active' => max(0, $companiesActive),
+        ]);
+    }
+
+    /**
      * Vypnutí automatického prodlužování předplatného. NENÍ to deaktivace —
      * licence doběhne do konce zaplaceného období, jen se nestrhne další platba.
      *
@@ -151,12 +213,13 @@ final class LicenseClient
      * @return array<string,mixed> {ok,new_users,amount_charged} / {error}
      * @throws LicenseNetworkException
      */
-    public function upgrade(string $licenseKey, string $instanceId, int $users): array
+    public function upgrade(string $licenseKey, string $instanceId, int $users, string $quoteToken): array
     {
         return $this->post('/api/license/upgrade', [
             'license_key' => $licenseKey,
             'instance_id' => $instanceId,
             'users'       => $users,
+            'quote_token' => $quoteToken,
         ], self::CHARGE_TIMEOUT);
     }
 
@@ -188,13 +251,46 @@ final class LicenseClient
      * @return array<string,mixed> {ok,new_quota_gb,amount_charged,provisioning_pending} / {error}
      * @throws LicenseNetworkException
      */
-    public function storageUpgrade(string $licenseKey, string $instanceId, int $quotaGb): array
+    public function storageUpgrade(string $licenseKey, string $instanceId, int $quotaGb, string $quoteToken): array
     {
         return $this->post('/api/license/quota', [
             'instance_id' => $instanceId,
             'license_key' => $licenseKey,
             'quota_gb'    => $quotaGb,
+            'quote_token' => $quoteToken,
         ], self::CHARGE_TIMEOUT);
+    }
+
+    /** @return array<string,mixed> */
+    public function tierQuote(string $licenseKey, string $instanceId, string $tier): array
+    {
+        return $this->post('/api/license/tier', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+            'tier'        => $tier,
+            'quote'       => true,
+        ]);
+    }
+
+    /** @return array<string,mixed> */
+    public function tierChange(string $licenseKey, string $instanceId, string $tier, string $quoteToken): array
+    {
+        return $this->post('/api/license/tier', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+            'tier'        => $tier,
+            'quote_token' => $quoteToken,
+        ], self::CHARGE_TIMEOUT);
+    }
+
+    /** @return array<string,mixed> */
+    public function changeStatus(string $licenseKey, string $instanceId, string $orderId): array
+    {
+        return $this->post('/api/license/change-status', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+            'order_id'    => $orderId,
+        ]);
     }
 
     /**

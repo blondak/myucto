@@ -105,12 +105,40 @@ final class RbacSourceGuardsTest extends TestCase
     public function testLastSuperadminGuardIsSerializedInDatabaseTransaction(): void
     {
         $source = file_get_contents(dirname(__DIR__, 2) . '/src/Action/Admin/UserAdminAction.php');
+        $capacityGate = file_get_contents(dirname(__DIR__, 2) . '/src/Service/License/LicenseCapacityGate.php');
         self::assertNotFalse($source);
-        self::assertStringContainsString('beginTransaction()', $source);
+        self::assertNotFalse($capacityGate);
+        self::assertStringContainsString('capacity->mutateSeats(', $source);
         self::assertStringContainsString('ORDER BY u.id FOR UPDATE', $source);
         self::assertStringContainsString('guardedUserUpdate(', $source);
-        self::assertStringContainsString('rollBack()', $source);
-        self::assertStringContainsString('commit()', $source);
+        self::assertStringContainsString('GET_LOCK(', $capacityGate);
+        self::assertStringContainsString('SELECT DATABASE()', $capacityGate);
+        self::assertStringContainsString("hash('sha256', \$database)", $capacityGate);
+        self::assertStringContainsString('beginTransaction()', $capacityGate);
+        self::assertStringContainsString('rollBack()', $capacityGate);
+        self::assertStringContainsString('commit()', $capacityGate);
+    }
+
+    public function testLicenseCapacityMutationsUseSingleDatabaseGate(): void
+    {
+        $src = dirname(__DIR__, 2) . '/src';
+        $roleAdmin = file_get_contents($src . '/Action/Admin/RoleAdminAction.php');
+        $userAdmin = file_get_contents($src . '/Action/Admin/UserAdminAction.php');
+        $userSuppliers = file_get_contents($src . '/Action/Admin/UserSupplierAdminAction.php');
+        $settings = file_get_contents($src . '/Action/Settings/SettingsAction.php');
+        $capacityGate = file_get_contents($src . '/Service/License/LicenseCapacityGate.php');
+
+        self::assertIsString($roleAdmin);
+        self::assertIsString($userAdmin);
+        self::assertIsString($userSuppliers);
+        self::assertIsString($settings);
+        self::assertIsString($capacityGate);
+        self::assertStringContainsString('capacity->mutateSeats(', $roleAdmin);
+        self::assertGreaterThanOrEqual(2, substr_count($userAdmin, 'capacity->mutateSeats('));
+        self::assertStringContainsString('capacity->mutateSeats(', $userSuppliers);
+        self::assertStringContainsString('licenseCapacity->createCompany(', $settings);
+        self::assertStringContainsString('countActiveSeats()', $capacityGate);
+        self::assertStringContainsString('withActiveCompanies(', $capacityGate);
     }
 
     /** @return list<string> */

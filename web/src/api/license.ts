@@ -244,12 +244,20 @@ export interface UpgradeQuote {
   amount: number | null
   currency: string | null
   period_end: number | string | null
+  quote_token: string
+  expires_at: number | string | null
+  scheduled: boolean
+  effective_at: number | string | null
 }
 
 export interface UpgradeResult {
   new_users: number
   amount_charged: number | null
   state: LicenseStatus
+  scheduled: boolean
+  effective_at: number | string | null
+  pending: boolean
+  order_id: string | null
 }
 
 /**
@@ -266,6 +274,10 @@ export interface StorageQuote {
   recurring_delta: number | null
   currency: string | null
   period_end: number | string | null
+  quote_token: string
+  expires_at: number | string | null
+  scheduled: boolean
+  effective_at: number | string | null
 }
 
 /**
@@ -280,6 +292,74 @@ export interface StorageUpgradeResult {
   amount_charged: number | null
   provisioning_pending: boolean
   state: LicenseStatus
+  scheduled: boolean
+  effective_at: number | string | null
+  pending: boolean
+  order_id: string | null
+}
+
+export interface TierQuote {
+  current_tier: string
+  new_tier: string
+  amount: number | null
+  recurring_delta: number | null
+  currency: string | null
+  period_end: number | string | null
+  quote_token: string
+  expires_at: number | string | null
+  scheduled: boolean
+  effective_at: number | string | null
+  pending_target?: string | null
+}
+
+export interface TierChangeResult {
+  new_tier: string
+  amount_charged: number | null
+  scheduled: boolean
+  effective_at: number | string | null
+  pending: boolean
+  order_id: string | null
+  state: LicenseStatus
+}
+
+export interface ChangeStatusResult {
+  order_id: string
+  state: 'pending' | 'paid' | 'failed' | string
+  applied: boolean
+  license?: LicenseStatus
+}
+
+export interface PurchaseStartResult {
+  buy_url: string
+  expires_in: number
+}
+
+const PENDING_CHANGE_STORAGE_KEY = 'myucto.license.pending_change_orders'
+
+function pendingOrderIds(): string[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PENDING_CHANGE_STORAGE_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string' && id !== '') : []
+  } catch {
+    return []
+  }
+}
+
+function rememberPendingOrder(orderId: string): void {
+  try {
+    const ids = new Set(pendingOrderIds())
+    ids.add(orderId)
+    window.localStorage.setItem(PENDING_CHANGE_STORAGE_KEY, JSON.stringify([...ids]))
+  } catch { /* Polling v otevřené stránce funguje i bez localStorage. */ }
+}
+
+function forgetPendingOrder(orderId: string): void {
+  try {
+    window.localStorage.setItem(
+      PENDING_CHANGE_STORAGE_KEY,
+      JSON.stringify(pendingOrderIds().filter(id => id !== orderId)),
+    )
+  } catch { /* Bezpečně ignorovat nedostupné perzistentní úložiště. */ }
 }
 
 /**
@@ -317,13 +397,21 @@ export const licenseApi = {
   cancelRenewal: () =>
     api.post<CancelRenewalResult>('/license/cancel-renewal').then((r) => r.data),
 
+  /** Založí serverově svázaný PKCE checkout. Instance ani tajemství nejdou v URL. */
+  startPurchase: () =>
+    api.post<PurchaseStartResult>('/license/purchase/start').then((r) => r.data),
+
+  /** Po návratu z platby převezme licenci server-to-server a vrátí jen běžný stav. */
+  completePurchase: (purchase: string, state: string) =>
+    api.post<LicenseStatus>('/license/purchase/complete', { purchase, state }).then((r) => r.data),
+
   /** Admin — kalkulace poměrného doplatku za navýšení na `users` (nic se nestrhává). */
   upgradeQuote: (users: number) =>
     api.post<UpgradeQuote>('/license/upgrade/quote', { users }).then((r) => r.data),
 
   /** Admin — in-place navýšení na `users` (strhne doplatek z uložené karty). */
-  upgrade: (users: number) =>
-    api.post<UpgradeResult>('/license/upgrade', { users }).then((r) => r.data),
+  upgrade: (users: number, quote_token: string) =>
+    api.post<UpgradeResult>('/license/upgrade', { users, quote_token }).then((r) => r.data),
 
   /**
    * Admin — kolik by stálo rozšíření úložiště na `quota_gb`. Nic nestrhává.
@@ -341,8 +429,43 @@ export const licenseApi = {
    * `storage` mezi skrytými kvůli datovému adresáři a požadavek by skončil
    * na 404.8 dřív, než se dostane k routeru.
    */
-  storageUpgrade: (quota_gb: number) =>
-    api.post<StorageUpgradeResult>('/license/quota', { quota_gb }).then((r) => r.data),
+  storageUpgrade: (quota_gb: number, quote_token: string) =>
+    api.post<StorageUpgradeResult>('/license/quota', { quota_gb, quote_token }).then((r) => r.data),
+
+  tierQuote: (tier: string) =>
+    api.post<TierQuote>('/license/tier/quote', { tier }).then((r) => r.data),
+
+  changeTier: (tier: string, quote_token: string) =>
+    api.post<TierChangeResult>('/license/tier', { tier, quote_token }).then((r) => r.data),
+
+  changeStatus: (order_id: string) =>
+    api.post<ChangeStatusResult>('/license/change-status', { order_id }).then((r) => r.data),
+
+  /** Aktivní krátký polling po asynchronní platbě; po `applied` backend
+   * vynutí renew tokenu, takže vrácená licence už obsahuje nový rozsah. */
+  waitForChange: async (order_id: string, attempts = 30): Promise<ChangeStatusResult> => {
+    rememberPendingOrder(order_id)
+    let last: ChangeStatusResult = { order_id, state: 'pending', applied: false }
+    for (let i = 0; i < attempts; i += 1) {
+      if (i > 0) await new Promise(resolve => window.setTimeout(resolve, 2000))
+      last = await licenseApi.changeStatus(order_id)
+      if (last.applied || last.state === 'failed') {
+        forgetPendingOrder(order_id)
+        return last
+      }
+    }
+    return last
+  },
+
+  /** Naváže na polling i po reloadu/zavření stránky. Ukládá se jen
+   * neškodné ID objednávky, nikdy licenční klíč ani platební údaje. */
+  resumePendingChanges: async (): Promise<ChangeStatusResult[]> => {
+    const results: ChangeStatusResult[] = []
+    for (const orderId of pendingOrderIds()) {
+      results.push(await licenseApi.waitForChange(orderId))
+    }
+    return results
+  },
 
   /** Admin — přihlášený přechod na portál podpory (jednorázový token v URL). */
   supportLink: () => api.post<SupportLink>('/license/support-link').then((r) => r.data),

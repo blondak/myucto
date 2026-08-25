@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { ManagedInstanceInfo } from '../license'
+import type { LicenseStatus, ManagedInstanceInfo } from '../license'
 import { hostingNavAttention, resolveHostingActions } from '../hostingActions'
 import { buildPreviewStatus } from '../instancePreview'
 
@@ -47,8 +47,21 @@ function instance(over: Partial<ManagedInstanceInfo> = {}): ManagedInstanceInfo 
   }
 }
 
+function managedStatus(
+  instanceOver: Partial<ManagedInstanceInfo> = {},
+  statusOver: Partial<LicenseStatus> = {},
+): LicenseStatus {
+  const base = buildPreviewStatus('manual_key', 1_800_000_000)
+
+  return {
+    ...base,
+    ...statusOver,
+    instance: instance(instanceOver),
+  }
+}
+
 function withStorage(over: Partial<ManagedInstanceInfo['storage']>) {
-  return instance({ storage: { ...instance().storage, ...over } })
+  return managedStatus({ storage: { ...instance().storage, ...over } })
 }
 
 describe('resolveHostingActions', () => {
@@ -61,10 +74,11 @@ describe('resolveHostingActions', () => {
   it('self-hosted instalace nedostane ani řádek', () => {
     expect(resolveHostingActions(null)).toEqual([])
     expect(resolveHostingActions(undefined)).toEqual([])
+    expect(resolveHostingActions({ ...managedStatus(), instance: undefined })).toEqual([])
   })
 
   it('zdravá instalace nemá co řešit', () => {
-    expect(resolveHostingActions(instance())).toEqual([])
+    expect(resolveHostingActions(managedStatus())).toEqual([])
     expect(hostingNavAttention([])).toBeNull()
   })
 
@@ -80,7 +94,7 @@ describe('resolveHostingActions', () => {
   })
 
   it('platba je vždy první a neuhrazená je červená', () => {
-    const actions = resolveHostingActions(instance({
+    const actions = resolveHostingActions(managedStatus({
       billing: { ...instance().billing, unpaid: true, phase: 'past_due', subscription_state: 'past_due', next_attempt_at: 1_800_100_000 },
       storage: { ...instance().storage, percent: 96 },
     }))
@@ -94,7 +108,7 @@ describe('resolveHostingActions', () => {
   })
 
   it('zrušená obnova je vážná, ale nehoří', () => {
-    const actions = resolveHostingActions(instance({
+    const actions = resolveHostingActions(managedStatus({
       billing: { ...instance().billing, phase: 'cancelled', subscription_state: 'cancelled', access_until: 1_801_000_000 },
     }))
     expect(actions[0].severity).toBe('medium')
@@ -105,6 +119,33 @@ describe('resolveHostingActions', () => {
     expect(resolveHostingActions(withStorage({ percent: 82 }))[0]).toMatchObject({ kind: 'storage_low', severity: 'medium' })
     expect(resolveHostingActions(withStorage({ percent: 95 }))[0]).toMatchObject({ kind: 'storage_low', severity: 'medium' })
     expect(resolveHostingActions(withStorage({ percent: 100 }))[0]).toMatchObject({ kind: 'storage_exhausted', severity: 'high' })
+  })
+
+  it('překročení uživatelů a firem propaguje jako dvě červené akce', () => {
+    const actions = resolveHostingActions(managedStatus({}, {
+      state: 'overage',
+      users_active: 6,
+      users_licensed: 3,
+      companies_active: 12,
+      max_companies: 10,
+      overage_deadline: 1_801_000_000,
+    }))
+
+    expect(actions.map(a => a.kind)).toEqual(['users_overage', 'companies_overage'])
+    expect(actions[0]).toMatchObject({ severity: 'high', active: 6, limit: 3, link: '/hosting#uzivatele' })
+    expect(actions[1]).toMatchObject({ severity: 'high', active: 12, limit: 10, link: '/hosting#tarif' })
+    expect(hostingNavAttention(actions)).toBe('danger')
+  })
+
+  it('chybějící licenční klíč vede přímo na aktivaci', () => {
+    const actions = resolveHostingActions(managedStatus({}, { license_key_masked: null }))
+
+    expect(actions).toHaveLength(1)
+    expect(actions[0]).toMatchObject({
+      kind: 'license_key_missing',
+      severity: 'high',
+      link: '/activation/purchase#activate',
+    })
   })
 
   /**
@@ -134,11 +175,13 @@ describe('resolveHostingActions', () => {
 
   it('scénáře náhledu projdou touž logikou', () => {
     const kinds = (s: Parameters<typeof buildPreviewStatus>[0]) =>
-      resolveHostingActions(buildPreviewStatus(s, 1_800_000_000).instance!).map(a => a.kind)
+      resolveHostingActions(buildPreviewStatus(s, 1_800_000_000)).map(a => a.kind)
 
     expect(kinds('storage_80')).toEqual(['storage_low'])
     expect(kinds('storage_100')).toEqual(['storage_exhausted'])
     expect(kinds('provisioning')).toEqual(['storage_provisioning'])
     expect(kinds('suspended')).toEqual(['unpaid'])
+    expect(kinds('overage')).toEqual(['users_overage', 'companies_overage'])
+    expect(kinds('no_license')).toEqual(['license_key_missing'])
   })
 })

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { licenseApi, type LicenseStatus, type LicenseStateKind, type UpgradeQuote } from '@/api/license'
+import { licenseApi, type LicenseStatus, type LicenseStateKind, type TierQuote, type UpgradeQuote } from '@/api/license'
 import { formatQuotaBytes } from '@/api/storageQuota'
 import { ensureInstanceDunning, instanceStatus } from '@/api/instanceStatus'
 import { resolveBillingNarrative } from '@/api/instanceHealth'
@@ -118,14 +118,38 @@ const upgrading = ref(false)
 const quote = ref<UpgradeQuote | null>(null)
 const upgradeError = ref<string | null>(null)
 const upgradeSuccess = ref<string | null>(null)
+const targetTier = ref('single')
+const tierQuote = ref<TierQuote | null>(null)
+const tierBusy = ref(false)
+const tierError = ref<string | null>(null)
+const tierSuccess = ref<string | null>(null)
 
 // Automatické prodlužování předplatného (vypnutí = licence doběhne do valid_until).
 const cancellingRenewal = ref(false)
 const renewalSuccess = ref<string | null>(null)
 const renewalError = ref<string | null>(null)
+const purchasing = ref(false)
+const purchaseSuccess = ref<string | null>(null)
+const purchaseError = ref<string | null>(null)
+
+/**
+ * Fragment se odstraní synchronně při vytvoření komponenty, ještě před prvním
+ * await nebo síťovým voláním. Token se tak nedostane do historie, logů ani
+ * případné diagnostiky stránky.
+ */
+const purchaseReturn = (() => {
+  const raw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : ''
+  const params = new URLSearchParams(raw)
+  if (!params.has('purchase') && !params.has('state')) return null
+  const purchase = params.get('purchase') ?? ''
+  const state = params.get('state') ?? ''
+  window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}`)
+  return { purchase, state }
+})()
 
 /** Stav předplatného z licenčního serveru; null = licence se neprodlužuje. */
 const subscription = computed(() => status.value?.subscription ?? null)
+const canStartPurchase = computed(() => subscription.value === null || subscription.value.state === 'expired')
 /** Konec zaplaceného období — do něj licence poběží i po zrušení obnovy. */
 const paidUntil = computed(() => subscription.value?.valid_until ?? status.value?.valid_until ?? null)
 const periodLabel = computed(() =>
@@ -171,15 +195,12 @@ const tierLabel = computed(() => {
   return map[tier] ?? tier
 })
 
-/** CTA URL na objednávku s předvyplněnou instalací, počty a fakturačními údaji firmy.
- *  Vše jen jako výchozí hodnoty — zákazník je na webu může změnit (tam proběhne ARES). */
-const buyUrl = computed(() => {
+/** Doplní jen pohodlné předvyplnění. Vazbu na instanci nese serverový handoff. */
+function checkoutUrl(base: string): string {
   const s = status.value
-  if (!s) return 'https://myucto.cz/objednavka?src=app'
-  const base = s.buy_url || 'https://myucto.cz/objednavka?src=app'
+  if (!s) return base
   const c = s.company
   const raw: Record<string, string> = {
-    instance: s.instance_id,
     users: String(s.users_active),
     companies: String(s.companies_active),
     company: c?.name ?? '',
@@ -194,8 +215,41 @@ const buyUrl = computed(() => {
   for (const [k, v] of Object.entries(raw)) {
     if (v !== '') params.set(k, v)
   }
-  return `${base}${base.includes('?') ? '&' : '?'}${params.toString()}`
-})
+  const query = params.toString()
+  return query === '' ? base : `${base}${base.includes('?') ? '&' : '?'}${query}`
+}
+
+async function startPurchase(): Promise<void> {
+  if (purchasing.value || !canStartPurchase.value) return
+  purchasing.value = true
+  purchaseError.value = null
+  purchaseSuccess.value = null
+  try {
+    const result = await licenseApi.startPurchase()
+    window.location.assign(checkoutUrl(result.buy_url))
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { error?: { message?: string } } } }
+    purchaseError.value = err.response?.data?.error?.message ?? t('license.purchase_start_failed')
+    purchasing.value = false
+  }
+}
+
+async function completePurchase(): Promise<void> {
+  if (!purchaseReturn) return
+  if (!/^[a-f0-9]{32,64}$/i.test(purchaseReturn.purchase)
+    || !/^[A-Za-z0-9_-]{43}$/.test(purchaseReturn.state)) {
+    purchaseError.value = t('license.purchase_return_invalid')
+    return
+  }
+  try {
+    status.value = await licenseApi.completePurchase(purchaseReturn.purchase, purchaseReturn.state)
+    purchaseSuccess.value = t('license.purchase_auto_success')
+    await auth.refresh()
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { error?: { message?: string } } } }
+    purchaseError.value = err.response?.data?.error?.message ?? t('license.purchase_auto_failed')
+  }
+}
 
 function fmtDate(ts: number | null): string {
   if (!ts) return '—'
@@ -220,6 +274,7 @@ async function load() {
     status.value = await licenseApi.status()
     // Výchozí cílový počet = aktuální aktivní počet uživatelů.
     upgradeUsers.value = Math.max(status.value.users_active, 1)
+    targetTier.value = status.value.tier ?? 'single'
   } catch (e: unknown) {
     errorMsg.value = (e as Error)?.message ?? 'Nepodařilo se načíst stav licence.'
   } finally {
@@ -317,15 +372,23 @@ async function calcQuote() {
 async function doUpgrade() {
   if (upgrading.value || !quote.value) return
   const n = quote.value.new_users
-  if (!confirm(t('license.upgrade_confirm', { n }))) return
+  if (!confirm(t(quote.value.scheduled ? 'license.capacity_schedule_confirm' : 'license.upgrade_confirm', { n }))) return
   upgrading.value = true
   upgradeError.value = null
   upgradeSuccess.value = null
   try {
-    const res = await licenseApi.upgrade(n)
+    let res = await licenseApi.upgrade(n, quote.value.quote_token)
+    if (res.pending && res.order_id) {
+      const settled = await licenseApi.waitForChange(res.order_id)
+      if (settled.applied && settled.license) res = { ...res, pending: false, state: settled.license }
+    }
     status.value = res.state
     quote.value = null
-    upgradeSuccess.value = t('license.upgrade_success', { n: res.new_users })
+    upgradeSuccess.value = res.scheduled
+      ? t('license.change_scheduled', { date: fmtEffective(res.effective_at) })
+      : res.pending
+        ? t('license.change_pending')
+        : t('license.upgrade_success', { n: res.new_users })
     upgradeUsers.value = Math.max(res.state.users_active, res.new_users)
     // Obnov /me, ať zmizí overage banner a projeví se nový limit.
     await auth.refresh()
@@ -336,13 +399,62 @@ async function doUpgrade() {
   }
 }
 
+function fmtEffective(value: number | string | null): string {
+  if (!value) return '—'
+  const date = new Date(typeof value === 'number' ? value * 1000 : value)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString()
+}
+
+async function calcTierQuote(): Promise<void> {
+  if (tierBusy.value || targetTier.value === status.value?.tier) return
+  tierBusy.value = true
+  tierError.value = null
+  tierSuccess.value = null
+  try {
+    tierQuote.value = await licenseApi.tierQuote(targetTier.value)
+  } catch (e: unknown) {
+    tierError.value = upgradeErrMsg(e)
+  } finally {
+    tierBusy.value = false
+  }
+}
+
+async function applyTierChange(): Promise<void> {
+  const quote = tierQuote.value
+  if (!quote || tierBusy.value) return
+  if (!confirm(t(quote.scheduled ? 'license.tier_schedule_confirm' : 'license.tier_change_confirm'))) return
+  tierBusy.value = true
+  tierError.value = null
+  try {
+    let result = await licenseApi.changeTier(quote.new_tier, quote.quote_token)
+    if (result.pending && result.order_id) {
+      const settled = await licenseApi.waitForChange(result.order_id)
+      if (settled.applied && settled.license) result = { ...result, pending: false, state: settled.license }
+    }
+    status.value = result.state
+    targetTier.value = result.state.tier ?? quote.new_tier
+    tierQuote.value = null
+    tierSuccess.value = result.scheduled
+      ? t('license.change_scheduled', { date: fmtEffective(result.effective_at) })
+      : result.pending ? t('license.change_pending') : t('license.tier_change_success')
+    await auth.refresh()
+  } catch (e: unknown) {
+    tierError.value = upgradeErrMsg(e)
+  } finally {
+    tierBusy.value = false
+  }
+}
+
 /**
  * Vypnutí automatického prodlužování. Není to deaktivace — licence běží dál do
  * konce zaplaceného období, jen se nestrhne další platba.
  */
 async function cancelRenewal() {
   if (cancellingRenewal.value) return
-  if (!confirm(t('license.renewal_cancel_confirm', { date: fmtDate(paidUntil.value) }))) return
+  const confirmKey = isManaged.value
+    ? 'license.renewal_cancel_confirm_managed'
+    : 'license.renewal_cancel_confirm'
+  if (!confirm(t(confirmKey, { date: fmtDate(paidUntil.value) }))) return
   cancellingRenewal.value = true
   renewalError.value = null
   renewalSuccess.value = null
@@ -439,7 +551,15 @@ async function openSupportPortal() {
   else window.open(url, '_blank', 'noopener')
 }
 
-onMounted(load)
+onMounted(async () => {
+  await completePurchase()
+  await load()
+  if (!isAdmin.value) return
+  const settled = await licenseApi.resumePendingChanges()
+  const latest = [...settled].reverse().find(change => change.applied && change.license)
+  if (latest?.license) status.value = latest.license
+  if (latest) await auth.refresh()
+})
 </script>
 
 <template>
@@ -679,6 +799,60 @@ onMounted(load)
         </p>
       </section>
 
+      <section
+        v-if="subscription"
+        class="rounded-lg border p-5"
+        :class="subscription.auto_renew ? 'border-neutral-200 bg-surface' : 'border-warning-200 bg-warning-50/30'"
+        data-managed-renewal
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.renewal_title') }}</h2>
+            <p class="mt-1 text-sm font-medium" :class="subscription.auto_renew ? 'text-success-700' : 'text-warning-800'">
+              {{ subscription.auto_renew ? t('license.renewal_on') : t('license.renewal_off') }}
+            </p>
+          </div>
+          <div v-if="subscription.auto_renew && subscription.next_charge_at" class="text-sm sm:text-right">
+            <span class="block text-xs uppercase tracking-wider text-neutral-500">{{ t('license.renewal_next_charge') }}</span>
+            <span class="mt-0.5 block font-medium text-neutral-900">{{ fmtDate(subscription.next_charge_at) }}</span>
+          </div>
+        </div>
+
+        <p class="mt-2 text-sm text-neutral-600">
+          {{ subscription.auto_renew
+            ? t('license.renewal_on_desc', { period: periodLabel })
+            : t('license.renewal_off_desc', { date: fmtDate(paidUntil) }) }}
+        </p>
+
+        <div
+          v-if="subscription.auto_renew"
+          class="mt-4 rounded-md border-2 border-danger-400 bg-danger-50 p-4 text-sm text-danger-800"
+          data-managed-cancellation-warning
+        >
+          <p class="font-semibold">{{ t('license.renewal_managed_warning_title') }}</p>
+          <p class="mt-1">{{ t('license.renewal_managed_warning_body', { date: fmtDate(paidUntil) }) }}</p>
+          <p class="mt-2">{{ t('license.renewal_managed_retention') }}</p>
+          <RouterLink to="/admin/instance-export" :class="[btnFilled('danger'), 'mt-3']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ t('license.renewal_export_cta') }}
+          </RouterLink>
+        </div>
+
+        <div v-if="subscription.auto_renew" class="mt-4 flex flex-wrap gap-2">
+          <button type="button" @click="cancelRenewal" :disabled="cancellingRenewal" :class="btnOutline('warning')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.pause" /></svg>
+            {{ cancellingRenewal ? t('license.renewal_cancelling') : t('license.renewal_cancel_cta') }}
+          </button>
+        </div>
+
+        <div v-if="renewalSuccess" class="mt-3 rounded-md bg-success-50 border border-success-300 p-3 text-sm text-success-700">
+          {{ renewalSuccess }}
+        </div>
+        <div v-if="renewalError" class="mt-3 rounded-md bg-danger-50 border border-danger-500/40 p-3 text-sm text-danger-600">
+          {{ renewalError }}
+        </div>
+      </section>
+
     </div>
 
     <div v-else-if="status" class="space-y-6">
@@ -735,17 +909,24 @@ onMounted(load)
         <div v-if="hasOverage" class="mt-4 rounded-md border border-danger-300 bg-danger-50/60 p-3 text-sm text-danger-700">
           <p class="font-medium">{{ t('license.overage_title') }}</p>
           <p class="mt-1 text-danger-600">{{ t('license.overage_desc') }}</p>
-          <a v-if="canUpgrade" href="#upgrade" :class="[btnFilled('danger'), 'mt-3']">
+          <a v-if="canUpgrade" :href="companiesOverage ? '#tier-change' : '#upgrade'" :class="[btnFilled('danger'), 'mt-3']">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
             {{ t('license.overage_cta') }}
           </a>
         </div>
 
         <div class="mt-5 flex flex-wrap gap-2">
-          <a :href="buyUrl" target="_blank" rel="noopener" :class="btnFilled('primary')">
+          <button
+            v-if="canStartPurchase"
+            type="button"
+            :disabled="purchasing"
+            :class="btnFilled('primary')"
+            data-license-purchase-start
+            @click="startPurchase"
+          >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
-            {{ t('license.buy_cta') }}
-          </a>
+            {{ purchasing ? t('license.purchase_starting') : t('license.buy_cta') }}
+          </button>
           <button
             v-if="status.license_key_masked"
             type="button" @click="deactivate" :disabled="deactivating"
@@ -762,6 +943,15 @@ onMounted(load)
             {{ t('support.help_paid') }}
           </button>
         </div>
+        <p v-if="!canStartPurchase && subscription" class="mt-3 text-sm text-neutral-600">
+          {{ t('license.purchase_existing_subscription_hint') }}
+        </p>
+        <p v-if="purchaseSuccess" class="mt-3 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700" data-license-purchase-success>
+          {{ purchaseSuccess }}
+        </p>
+        <p v-if="purchaseError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600" data-license-purchase-error>
+          {{ purchaseError }}
+        </p>
       </section>
 
       <!-- Automatické prodlužování předplatného -->
@@ -795,6 +985,20 @@ onMounted(load)
             : t('license.renewal_off_desc', { date: fmtDate(paidUntil) }) }}
         </p>
 
+        <div
+          v-if="isManaged && subscription.auto_renew"
+          class="mt-4 rounded-md border-2 border-danger-400 bg-danger-50 p-4 text-sm text-danger-800"
+          data-managed-cancellation-warning
+        >
+          <p class="font-semibold">{{ t('license.renewal_managed_warning_title') }}</p>
+          <p class="mt-1">{{ t('license.renewal_managed_warning_body', { date: fmtDate(paidUntil) }) }}</p>
+          <p class="mt-2">{{ t('license.renewal_managed_retention') }}</p>
+          <RouterLink to="/admin/instance-export" :class="[btnFilled('danger'), 'mt-3']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ t('license.renewal_export_cta') }}
+          </RouterLink>
+        </div>
+
         <div v-if="subscription.auto_renew" class="mt-4 flex flex-wrap gap-2">
           <button type="button" @click="cancelRenewal" :disabled="cancellingRenewal" :class="btnOutline('warning')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.pause" /></svg>
@@ -821,6 +1025,35 @@ onMounted(load)
          instance dostává při zřízení automaticky — o důvod víc, aby šel opravit
          ručně, když se to nepovede. -->
     <div v-if="status && isAdmin && !loading" class="space-y-6 mt-6">
+      <section v-if="canUpgrade" id="tier-change" class="rounded-lg border border-primary-200 bg-primary-50/30 p-5">
+        <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.tier_change_title') }}</h2>
+        <p class="mt-1 text-sm text-neutral-600">{{ t('license.tier_change_desc') }}</p>
+        <div class="mt-3 flex flex-wrap items-end gap-3">
+          <label class="text-sm">
+            <span class="mb-1 block text-xs uppercase tracking-wider text-neutral-500">{{ t('license.tier_target') }}</span>
+            <select v-model="targetTier" class="h-9 rounded-md border border-neutral-300 px-3 text-sm" @change="tierQuote = null">
+              <option value="single">{{ t('license.tier_single') }}</option>
+              <option value="multi10">{{ t('license.tier_multi10') }}</option>
+              <option value="unlimited">{{ t('license.tier_unlimited') }}</option>
+            </select>
+          </label>
+          <button type="button" :disabled="tierBusy || targetTier === status.tier" :class="btnOutline('primary')" @click="calcTierQuote">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
+            {{ tierBusy ? t('license.upgrade_quoting') : t('license.upgrade_quote_cta') }}
+          </button>
+        </div>
+        <div v-if="tierQuote" class="mt-4 rounded-md border border-primary-300 bg-surface p-3 text-sm">
+          <p class="font-medium text-neutral-900">{{ tierQuote.scheduled ? t('license.tier_decrease_next_period') : t('license.upgrade_amount', { amount: fmtAmount(tierQuote.amount, tierQuote.currency) }) }}</p>
+          <p v-if="tierQuote.effective_at" class="mt-1 text-neutral-500">{{ t('license.effective_at', { date: fmtEffective(tierQuote.effective_at) }) }}</p>
+          <button type="button" :disabled="tierBusy" :class="[btnFilled(tierQuote.scheduled ? 'warning' : 'success'), 'mt-3']" @click="applyTierChange">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ tierQuote.scheduled ? t('license.schedule_change_cta') : t('license.upgrade_pay_cta') }}
+          </button>
+        </div>
+        <p v-if="tierSuccess" class="mt-3 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ tierSuccess }}</p>
+        <p v-if="tierError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ tierError }}</p>
+      </section>
+
       <!-- In-place navýšení počtu uživatelů -->
       <section v-if="canUpgrade" id="upgrade" class="rounded-lg border border-primary-200 bg-primary-50/30 p-5">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.upgrade_title') }}</h2>
@@ -856,7 +1089,7 @@ onMounted(load)
             :class="[btnFilled('success'), 'mt-3']"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
-            {{ upgrading ? t('license.upgrading') : t('license.upgrade_pay_cta') }}
+            {{ upgrading ? t('license.upgrading') : t(quote.scheduled ? 'license.schedule_change_cta' : 'license.upgrade_pay_cta') }}
           </button>
         </div>
 

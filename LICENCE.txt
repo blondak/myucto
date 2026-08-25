@@ -62,7 +62,10 @@ https://myucto.cz/obchodni-podminky
 jedinečným identifikátorem instalace vytvořeným při prvním spuštění.
 
 1.10 „Aktivní uživatel“ znamená uživatelský účet Instalace, který není
-deaktivován a má jinou roli než pouze pro čtení (readonly).
+deaktivován a kterému alespoň jedna aktivní aplikační nebo klientská role,
+včetně role přiřazené jen pro určitou firemní agendu, dovoluje zápis do
+obchodních dat. Oprávnění měnit pouze vlastní profil nebo vlastní přístupové
+tokeny se za zápis do obchodních dat nepovažuje.
 
 1.11 „Licenční mechanismus“ znamená technické prostředky aktivace, vazby
 licence na Instalaci a pravidelného ověřování přes internet popsané v článku 6.
@@ -174,9 +177,10 @@ cena Předplatného je násobkem ceny varianty a počtu Aktivních uživatelů.
 Rozhodná je cena podle aktuálního ceníku na myucto.cz v okamžiku objednávky.
 
 5.3 Licence platí pro jednu Instalaci a pro zaplacený počet Aktivních
-uživatelů a firemních agend. Uživatelské účty s rolí pouze pro čtení a
-deaktivované účty se do počtu Aktivních uživatelů nezapočítávají a nejsou
-zpoplatněny.
+uživatelů a firemních agend. Uživatelské účty bez práva zápisu do obchodních
+dat a deaktivované účty se do počtu Aktivních uživatelů nezapočítávají a
+nejsou zpoplatněny. Klientská role není sama o sobě bezplatná; rozhodují její
+skutečná oprávnění podle definice v článku 1.10.
 
 5.4 Roční Předplatné zahrnuje 12 měsíců za cenu 10 měsíčních plateb.
 

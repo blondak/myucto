@@ -88,7 +88,8 @@ final class RoleRepository
         $levels = $this->validatePermissions((string) $current['role_type'], $permissions);
         $this->guardReadOnlyRole($current, $levels);
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare(
                 'UPDATE roles SET name = ?, is_active = ?,
@@ -99,10 +100,12 @@ final class RoleRepository
             $stmt->execute([$name, $isActive ? 1 : 0, $id, $revision]);
             if ($stmt->rowCount() !== 1) throw new RoleRevisionConflict();
             $this->replacePermissions($id, $levels);
-            $pdo->commit();
+            if ($ownsTransaction) $pdo->commit();
             return $this->find($id) ?? throw new \RuntimeException('Updated role not found');
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($ownsTransaction) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+            }
             throw $e;
         }
     }

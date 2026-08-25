@@ -86,7 +86,20 @@ final class LicenseActivationActionTest extends TestCase
     public function testActivateHappyPathStoresKeyAndToken(): void
     {
         $token = $this->token();
-        $this->client->expects($this->once())->method('activate')->willReturn(['ok' => true, 'token' => $token]);
+        $expectedUsers = $this->service->countActiveUsers();
+        $expectedCompanies = (int) $this->db->pdo()->query('SELECT COUNT(*) FROM supplier')->fetchColumn();
+        $this->client->expects($this->once())
+            ->method('activate')
+            ->with(
+                'MYU-TEST-0001-AAAA',
+                $this->instanceId,
+                $this->anything(),
+                $this->anything(),
+                false,
+                $expectedUsers,
+                $expectedCompanies,
+            )
+            ->willReturn(['ok' => true, 'token' => $token]);
 
         $resp = $this->activate->__invoke($this->adminRequest(['license_key' => 'MYU-TEST-0001-AAAA']), new Psr7Response());
 
@@ -98,6 +111,32 @@ final class LicenseActivationActionTest extends TestCase
         self::assertSame('MYU-TEST-0001-AAAA', $row['license_key']);
         self::assertSame($token, $row['token']);
         self::assertSame(1, (int) $row['last_check_ok']);
+    }
+
+    public function testActivateHoldsPurchaseLockAcrossServerCall(): void
+    {
+        $second = $this->independentConnection();
+        $lockName = $this->purchaseLockName();
+        self::assertNotSame($this->db->pdo(), $second->pdo());
+        $this->client->expects($this->once())
+            ->method('activate')
+            ->willReturnCallback(function () use ($second, $lockName): array {
+                $this->assertLockUnavailable($second, $lockName);
+
+                return ['ok' => true, 'token' => $this->token()];
+            });
+
+        try {
+            $response = $this->activate->__invoke(
+                $this->adminRequest(['license_key' => 'MYU-TEST-0001-AAAA']),
+                new Psr7Response(),
+            );
+
+            self::assertSame(200, $response->getStatusCode());
+            $this->assertLockReleased($second, $lockName);
+        } finally {
+            $second->close();
+        }
     }
 
     public function testActivateServerRejectionReturns422(): void
@@ -137,12 +176,44 @@ final class LicenseActivationActionTest extends TestCase
         self::assertNull($this->row()['license_key']);
     }
 
+    public function testActivateForeignInstanceTokenDoesNotOverwriteExistingLicense(): void
+    {
+        $oldToken = $this->token();
+        $this->db->pdo()->prepare(
+            'UPDATE license SET license_key = ?, token = ?, last_check_ok = 1 WHERE id = 1'
+        )->execute(['MYU-OLD-0001-AAAA', $oldToken]);
+        $foreignToken = $this->token(['iid' => '11111111-2222-3333-4444-555555555555']);
+        $this->client->expects($this->once())->method('activate')->willReturn([
+            'ok' => true,
+            'token' => $foreignToken,
+        ]);
+
+        $resp = $this->activate->__invoke(
+            $this->adminRequest(['license_key' => 'MYU-NEW-0001-BBBB']),
+            new Psr7Response(),
+        );
+
+        self::assertSame(422, $resp->getStatusCode());
+        self::assertSame('invalid_token', $this->body($resp)['error']['code']);
+        $row = $this->row();
+        self::assertSame('MYU-OLD-0001-AAAA', $row['license_key']);
+        self::assertSame($oldToken, $row['token']);
+    }
+
     public function testActivateTakeoverPassesFlagToClient(): void
     {
         $token = $this->token();
         $this->client->expects($this->once())
             ->method('activate')
-            ->with($this->anything(), $this->anything(), $this->anything(), $this->anything(), true)
+            ->with(
+                $this->anything(),
+                $this->anything(),
+                $this->anything(),
+                $this->anything(),
+                true,
+                $this->anything(),
+                $this->anything(),
+            )
             ->willReturn(['ok' => true, 'token' => $token]);
 
         $resp = $this->activate->__invoke(
@@ -158,7 +229,15 @@ final class LicenseActivationActionTest extends TestCase
     {
         $this->client->expects($this->once())
             ->method('activate')
-            ->with($this->anything(), $this->anything(), $this->anything(), $this->anything(), false)
+            ->with(
+                $this->anything(),
+                $this->anything(),
+                $this->anything(),
+                $this->anything(),
+                false,
+                $this->anything(),
+                $this->anything(),
+            )
             ->willReturn(['ok' => true, 'token' => $this->token()]);
 
         $resp = $this->activate->__invoke($this->adminRequest(['license_key' => 'MYU-TEST-0001-AAAA']), new Psr7Response());
@@ -239,6 +318,30 @@ final class LicenseActivationActionTest extends TestCase
         self::assertNull($row['token']);
     }
 
+    public function testDeactivateHoldsPurchaseLockAcrossServerCall(): void
+    {
+        $this->seedActivated();
+        $second = $this->independentConnection();
+        $lockName = $this->purchaseLockName();
+        self::assertNotSame($this->db->pdo(), $second->pdo());
+        $this->client->expects($this->once())
+            ->method('deactivate')
+            ->willReturnCallback(function () use ($second, $lockName): array {
+                $this->assertLockUnavailable($second, $lockName);
+
+                return ['ok' => true];
+            });
+
+        try {
+            $response = $this->deactivate->__invoke($this->adminRequest([]), new Psr7Response());
+
+            self::assertSame(200, $response->getStatusCode());
+            $this->assertLockReleased($second, $lockName);
+        } finally {
+            $second->close();
+        }
+    }
+
     public function testDeactivateClearsLocalEvenWhenServerUnreachable(): void
     {
         $this->seedActivated();
@@ -296,6 +399,42 @@ final class LicenseActivationActionTest extends TestCase
     private function row(): array
     {
         return (array) $this->db->pdo()->query('SELECT * FROM license WHERE id = 1')->fetch(\PDO::FETCH_ASSOC);
+    }
+
+    private function independentConnection(): Connection
+    {
+        $config = Bootstrap::buildApp()->getContainer()->get(Config::class);
+
+        return Connection::withoutSharedTestConnection(static fn (): Connection => new Connection($config));
+    }
+
+    private function purchaseLockName(): string
+    {
+        $database = (string) $this->db->pdo()->query('SELECT DATABASE()')->fetchColumn();
+
+        return 'myucto_license_purchase_' . substr(hash('sha256', $database), 0, 32);
+    }
+
+    private function assertLockUnavailable(Connection $connection, string $lockName): void
+    {
+        $statement = $connection->pdo()->prepare('SELECT GET_LOCK(?, 0)');
+        $statement->execute([$lockName]);
+        self::assertSame(0, (int) $statement->fetchColumn(), 'Ruční změna musí držet purchase lock i během volání serveru.');
+    }
+
+    private function assertLockReleased(Connection $connection, string $lockName): void
+    {
+        $statement = $connection->pdo()->prepare('SELECT GET_LOCK(?, 0)');
+        $statement->execute([$lockName]);
+        $acquired = (int) $statement->fetchColumn();
+        try {
+            self::assertSame(1, $acquired, 'Po dokončení ruční změny musí být purchase lock uvolněný.');
+        } finally {
+            if ($acquired === 1) {
+                $release = $connection->pdo()->prepare('SELECT RELEASE_LOCK(?)');
+                $release->execute([$lockName]);
+            }
+        }
     }
 
     /** @param array<string,mixed> $overrides */

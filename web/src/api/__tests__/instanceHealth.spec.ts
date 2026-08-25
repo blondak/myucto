@@ -141,14 +141,14 @@ describe('currentQuotaGb', () => {
 
 describe('storageUpgradeOptionsGb', () => {
   /**
-   * ⚠️ PROČ BY TO BEZ OPRAVY PADALO: nabídnout současnou nebo menší velikost
-   * znamená pustit zákazníka do platby, kterou server odmítne (`not_an_upgrade`)
-   * — a u „koupit" se nezkouší, jestli to projde.
+   * Vyšší cíl se zavede hned po doplatku. Nižší je platná změna, ale server ji
+   * pouze naplánuje na další období bez vratky za už zaplacený čas. Současná
+   * velikost se nenabízí, protože by nic neměnila.
    */
-  it('nabízí jen větší velikosti', () => {
+  it('nabízí všechny jiné velikosti včetně plánovaného snížení', () => {
     expect(storageUpgradeOptionsGb(2)).toEqual([7, 22, 102])
-    expect(storageUpgradeOptionsGb(22)).toEqual([102])
-    expect(storageUpgradeOptionsGb(102)).toEqual([])
+    expect(storageUpgradeOptionsGb(22)).toEqual([2, 7, 102])
+    expect(storageUpgradeOptionsGb(102)).toEqual([2, 7, 22])
   })
 
   it('neznámou současnou velikost nepřekládá na „nic nenabízet"', () => {

@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { licenseApi, type StorageQuote, type UpgradeQuote } from '@/api/license'
+import { licenseApi, type StorageQuote, type TierQuote, type UpgradeQuote } from '@/api/license'
 import { formatQuotaBytes } from '@/api/storageQuota'
 import { instanceStatus, publishInstanceStatus } from '@/api/instanceStatus'
 import {
@@ -106,7 +106,15 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  if (!auth.isSuperadmin) return
+  const settled = await licenseApi.resumePendingChanges()
+  if (settled.some(change => change.applied)) {
+    await load()
+    await auth.refresh()
+  }
+})
 
 // ─── Formátování ───────────────────────────────────────────────────────────
 
@@ -214,6 +222,9 @@ const companiesTone = computed<Tone>(() => {
   return 'ok'
 })
 
+/** Chybějící klíč je blokující provozní stav hostované instalace. */
+const licenseKeyTone = computed<Tone>(() => (status.value?.license_key_masked ? 'ok' : 'critical'))
+
 const storageMode = computed(() => resolveStorageMode(storage.value))
 const storageLevel = computed(() => resolveStorageLevel(storage.value))
 
@@ -301,6 +312,7 @@ const openFeatures = computed(() => (tm('license.open_features') as unknown[]).m
 const attention = computed(() => {
   const items: Array<{ key: string; anchor: string; tone: Tone }> = []
   if (billingTone.value !== 'ok') items.push({ key: 'hosting.attention_billing', anchor: '#platba', tone: billingTone.value })
+  if (licenseKeyTone.value !== 'ok') items.push({ key: 'hosting.attention_key', anchor: '#klic', tone: licenseKeyTone.value })
   if (usersTone.value !== 'ok') items.push({ key: 'hosting.attention_users', anchor: '#uzivatele', tone: usersTone.value })
   if (companiesTone.value !== 'ok') items.push({ key: 'hosting.attention_companies', anchor: '#tarif', tone: companiesTone.value })
   if (storageTone.value !== 'ok') items.push({ key: 'hosting.attention_storage', anchor: '#misto', tone: storageTone.value })
@@ -317,6 +329,57 @@ const userQuote = ref<UpgradeQuote | null>(null)
 const userError = ref<string | null>(null)
 const userDone = ref<string | null>(null)
 
+const targetTier = ref('single')
+const tierQuote = ref<TierQuote | null>(null)
+const quotingTier = ref(false)
+const changingTier = ref(false)
+const tierMessage = ref<string | null>(null)
+const tierError = ref<string | null>(null)
+
+watch(status, (s) => {
+  if (s?.tier && !tierQuote.value) targetTier.value = s.tier
+}, { immediate: true })
+
+async function calcTierQuote(): Promise<void> {
+  if (quotingTier.value || previewing.value || targetTier.value === status.value?.tier) return
+  quotingTier.value = true
+  tierError.value = null
+  tierMessage.value = null
+  try {
+    tierQuote.value = await licenseApi.tierQuote(targetTier.value)
+  } catch (e: unknown) {
+    tierError.value = apiError(e, 'license.tier_change_failed').message
+  } finally {
+    quotingTier.value = false
+  }
+}
+
+async function applyTierChange(): Promise<void> {
+  const quote = tierQuote.value
+  if (!quote || changingTier.value || previewing.value) return
+  if (!confirm(t(quote.scheduled ? 'license.tier_schedule_confirm' : 'license.tier_change_confirm'))) return
+  changingTier.value = true
+  tierError.value = null
+  try {
+    let result = await licenseApi.changeTier(quote.new_tier, quote.quote_token)
+    if (result.pending && result.order_id) {
+      const settled = await licenseApi.waitForChange(result.order_id)
+      if (settled.applied && settled.license) result = { ...result, pending: false, state: settled.license }
+    }
+    tierQuote.value = null
+    tierMessage.value = result.scheduled
+      ? t('license.change_scheduled', { date: fmtPeriodEnd(result.effective_at) ?? '—' })
+      : result.pending ? t('license.change_pending') : t('license.tier_change_success')
+    publishInstanceStatus(result.state)
+    await load()
+    await auth.refresh()
+  } catch (e: unknown) {
+    tierError.value = apiError(e, 'license.tier_change_failed').message
+  } finally {
+    changingTier.value = false
+  }
+}
+
 /**
  * Navýšení má smysl jen u aktivního placeného předplatného s klíčem.
  *
@@ -329,12 +392,6 @@ const canBuyUsers = computed(() => {
 
   return s.state === 'active' || s.state === 'overage'
 })
-
-/**
- * Licenční klíč. Hostovaná instance ho dostává při zřízení, ale musí jít
- * opravit ručně — když se zřízení nepovede, je tohle jediná cesta ven.
- */
-const licenseKeyTone = computed<Tone>(() => (status.value?.license_key_masked ? 'ok' : 'critical'))
 
 watch(status, (s) => {
   if (s && !userQuote.value) upgradeUsers.value = Math.max(s.users_active, s.users_licensed, 1)
@@ -362,16 +419,24 @@ async function buyUsers(): Promise<void> {
   // ⚠️ Zámek jako první příkaz — dvojklik nesmí odeslat druhou platbu.
   if (upgradingUsers.value || previewing.value || !userQuote.value) return
   const n = userQuote.value.new_users
-  if (!confirm(t('license.upgrade_confirm', { n }))) return
+  if (!confirm(t(userQuote.value.scheduled ? 'license.capacity_schedule_confirm' : 'license.upgrade_confirm', { n }))) return
 
   upgradingUsers.value = true
   userError.value = null
   userDone.value = null
   try {
-    const res = await licenseApi.upgrade(n)
+    let res = await licenseApi.upgrade(n, userQuote.value.quote_token)
+    if (res.pending && res.order_id) {
+      const settled = await licenseApi.waitForChange(res.order_id)
+      if (settled.applied && settled.license) res = { ...res, pending: false, state: settled.license }
+    }
     publishInstanceStatus(res.state)
     userQuote.value = null
-    userDone.value = t('license.upgrade_success', { n: res.new_users })
+    userDone.value = res.scheduled
+      ? t('license.change_scheduled', { date: fmtPeriodEnd(res.effective_at) ?? '—' })
+      : res.pending
+        ? t('license.change_pending')
+        : t('license.upgrade_success', { n: res.new_users })
     await auth.refresh()
   } catch (e: unknown) {
     userError.value = apiError(e, 'license.upgrade_failed').message
@@ -431,7 +496,7 @@ async function buyStorage(): Promise<void> {
   const quote = storageQuote.value
   if (!quote) return
 
-  const confirmed = confirm(t('hosting.storage_confirm', {
+  const confirmed = confirm(t(quote.scheduled ? 'license.capacity_schedule_confirm' : 'hosting.storage_confirm', {
     gb: quote.new_quota_gb,
     amount: fmtAmount(quote.amount, quote.currency),
   }))
@@ -441,12 +506,20 @@ async function buyStorage(): Promise<void> {
   storageError.value = null
   storageDone.value = null
   try {
-    const res = await licenseApi.storageUpgrade(quote.new_quota_gb)
+    let res = await licenseApi.storageUpgrade(quote.new_quota_gb, quote.quote_token)
+    if (res.pending && res.order_id) {
+      const settled = await licenseApi.waitForChange(res.order_id)
+      if (settled.applied && settled.license) res = { ...res, pending: false, state: settled.license }
+    }
     // Zaplaceno — ať už se kvóta zvedla, nebo se teprve zavádí. Konec nabídky.
     offerClosed.value = true
     storageQuote.value = null
     selectedGb.value = null
-    storageDone.value = res.provisioning_pending
+    storageDone.value = res.scheduled
+      ? t('license.change_scheduled', { date: fmtPeriodEnd(res.effective_at) ?? '—' })
+      : res.pending
+        ? t('license.change_pending')
+        : res.provisioning_pending
       ? t('hosting.storage_pending', { gb: res.new_quota_gb })
       : t('hosting.storage_done', { gb: res.new_quota_gb })
     publishInstanceStatus(res.state)
@@ -485,6 +558,9 @@ watch(previewScenario, (scenario) => {
   userDone.value = null
   storageError.value = null
   userError.value = null
+  tierQuote.value = null
+  tierMessage.value = null
+  tierError.value = null
   offerClosed.value = false
   selectedGb.value = null
   if (scenario === null) return
@@ -874,7 +950,7 @@ watch(previewScenario, (scenario) => {
                 @click="buyStorage"
               >
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
-                {{ buyingStorage ? t('hosting.storage_ordering') : t('hosting.storage_order_cta') }}
+                {{ buyingStorage ? t('hosting.storage_ordering') : t(storageQuote.scheduled ? 'license.schedule_change_cta' : 'hosting.storage_order_cta') }}
               </button>
               <p v-if="previewing" class="mt-2 text-xs text-neutral-800">{{ t('hosting.preview_no_orders') }}</p>
             </div>
@@ -900,6 +976,36 @@ watch(previewScenario, (scenario) => {
       <!-- ── DOKOUPENÍ UŽIVATELŮ ────────────────────────────────────────────
            Tentýž tok jako v Aktivaci; tady proto, že přehled má na otázku
            „co s tím" odpovědět akcí, ne odkazem jinam. -->
+      <section v-if="canBuyUsers" id="tarif" class="rounded-lg border border-neutral-200 bg-surface p-5">
+        <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.tier_change_title') }}</h2>
+        <p class="mt-1 text-sm text-neutral-600">{{ t('license.tier_change_desc') }}</p>
+        <div class="mt-4 flex flex-wrap items-end gap-3">
+          <label class="block">
+            <span class="mb-1 block text-xs uppercase tracking-wider text-neutral-500">{{ t('license.tier_target') }}</span>
+            <select v-model="targetTier" class="h-9 rounded-md border border-neutral-300 px-2 text-sm" @change="tierQuote = null">
+              <option value="single">{{ t('license.tier_single') }}</option>
+              <option value="multi10">{{ t('license.tier_multi10') }}</option>
+              <option value="unlimited">{{ t('license.tier_unlimited') }}</option>
+            </select>
+          </label>
+          <button type="button" :disabled="quotingTier || previewing || targetTier === status?.tier" :class="btnOutline('primary')" data-hosting-tier-quote @click="calcTierQuote">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
+            {{ quotingTier ? t('license.upgrade_quoting') : t('license.upgrade_quote_cta') }}
+          </button>
+        </div>
+        <div v-if="tierQuote" class="mt-4 rounded-md border border-primary-300 bg-primary-50/40 p-4 text-sm">
+          <p class="font-medium text-neutral-900">{{ tierQuote.scheduled ? t('license.tier_decrease_next_period') : t('license.upgrade_amount', { amount: fmtAmount(tierQuote.amount, tierQuote.currency) }) }}</p>
+          <p v-if="tierQuote.effective_at" class="mt-1 text-neutral-600">{{ t('license.effective_at', { date: fmtPeriodEnd(tierQuote.effective_at) }) }}</p>
+          <button type="button" :disabled="changingTier || previewing" :class="[btnFilled(tierQuote.scheduled ? 'warning' : 'success'), 'mt-3']" data-hosting-tier-apply @click="applyTierChange">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
+            {{ tierQuote.scheduled ? t('license.schedule_change_cta') : t('license.upgrade_pay_cta') }}
+          </button>
+        </div>
+        <p v-if="tierMessage" class="mt-3 text-sm text-success-700">{{ tierMessage }}</p>
+        <p v-if="tierError" class="mt-3 text-sm text-danger-600">{{ tierError }}</p>
+        <p v-if="previewing" class="mt-2 text-xs text-neutral-800">{{ t('hosting.preview_no_orders') }}</p>
+      </section>
+
       <section v-if="canBuyUsers" id="uzivatele" class="rounded-lg border border-neutral-200 bg-surface p-5" data-hosting-users-order>
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.upgrade_title') }}</h2>
         <p class="mt-1 text-sm text-neutral-600">{{ t('license.upgrade_desc') }}</p>
@@ -936,7 +1042,7 @@ watch(previewScenario, (scenario) => {
             @click="buyUsers"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
-            {{ upgradingUsers ? t('license.upgrading') : t('license.upgrade_pay_cta') }}
+            {{ upgradingUsers ? t('license.upgrading') : t(userQuote.scheduled ? 'license.schedule_change_cta' : 'license.upgrade_pay_cta') }}
           </button>
           <p v-if="previewing" class="mt-2 text-xs text-neutral-800">{{ t('hosting.preview_no_orders') }}</p>
         </div>

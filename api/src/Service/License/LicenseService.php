@@ -28,6 +28,9 @@ final class LicenseService
     public const DEFAULT_PUBLIC_KEY = 'lDwgisBH87eegfc95Z3dvc9FhMpZz/sQtat8JMd+KdE=';
 
     private const TRIAL_DAYS = 60;
+    private const PURCHASE_LOCK_PREFIX = 'myucto_license_purchase_';
+    private const PURCHASE_LOCK_TIMEOUT = 10;
+    private const PURCHASE_PERSIST_SAVEPOINT = 'license_purchase_persist';
 
     /** Klíč v požadavku na podporu → sloupec dotazu nad `supplier`. */
     private const SUPPORT_COMPANY_FIELDS = [
@@ -110,54 +113,179 @@ final class LicenseService
      */
     public function activate(string $licenseKey, bool $takeover = false): array
     {
-        $licenseKey = trim($licenseKey);
-        if ($licenseKey === '') {
-            return ['ok' => false, 'error' => 'invalid_key'];
-        }
-        $row = $this->loadRow();
-        $fingerprint = $this->ensureFingerprint($row);
-
-        try {
-            $resp = $this->client->activate($licenseKey, (string) $row['instance_id'], $fingerprint, $this->appVersion(), $takeover);
-        } catch (LicenseNetworkException $e) {
-            $this->logger->info('license.activate.network_error', ['error' => $e->getMessage()]);
-            return ['ok' => false, 'error' => 'server_unreachable'];
-        }
-
-        if (($resp['ok'] ?? false) !== true || empty($resp['token'])) {
-            $result = ['ok' => false, 'error' => (string) ($resp['error'] ?? 'activation_failed')];
-            // Zbývající přenosy propagujeme do UI (nabídka „přenést" u already_bound).
-            if (isset($resp['transfers_remaining'])) {
-                $result['transfers_remaining'] = (int) $resp['transfers_remaining'];
+        return $this->withPurchaseLock(function () use ($licenseKey, $takeover): array {
+            $licenseKey = trim($licenseKey);
+            if ($licenseKey === '') {
+                return ['ok' => false, 'error' => 'invalid_key'];
             }
-            return $result;
-        }
+            $row = $this->loadRow();
+            $fingerprint = $this->ensureFingerprint($row);
+            $usersActive = $this->countActiveUsers();
+            $companiesActive = $this->countCompanies();
 
-        $token = (string) $resp['token'];
-        $payload = $this->verifier->verify($token, $this->publicKeys());
-        if ($payload === null) {
-            $this->logger->warning('license.activate.bad_signature');
-            return ['ok' => false, 'error' => 'invalid_token'];
-        }
+            try {
+                $resp = $this->client->activate(
+                    $licenseKey,
+                    (string) $row['instance_id'],
+                    $fingerprint,
+                    $this->appVersion(),
+                    $takeover,
+                    $usersActive,
+                    $companiesActive,
+                );
+            } catch (LicenseNetworkException $e) {
+                $this->logger->info('license.activate.network_error', ['error' => $e->getMessage()]);
+                return ['ok' => false, 'error' => 'server_unreachable'];
+            }
 
-        $this->writeLicense(
-            'UPDATE license
-                SET license_key = ?, token = ?, token_payload = ?, last_nonce = ?,
-                    counter = 0, last_check_at = NOW(), last_check_ok = 1
-              WHERE id = 1',
-            [
+            if (($resp['ok'] ?? false) !== true || empty($resp['token'])) {
+                $result = ['ok' => false, 'error' => (string) ($resp['error'] ?? 'activation_failed')];
+                // Zbývající přenosy propagujeme do UI (nabídka „přenést" u already_bound).
+                if (isset($resp['transfers_remaining'])) {
+                    $result['transfers_remaining'] = (int) $resp['transfers_remaining'];
+                }
+                return $result;
+            }
+
+            return $this->persistActivationResponse(
                 $licenseKey,
-                $token,
-                json_encode($payload, JSON_UNESCAPED_UNICODE),
-                $this->nonceOf($payload),
-            ],
-        );
-        // Aktivace je nový začátek — stav předplatného z předchozího klíče nesmí
-        // přežít, proto se ukládá i prázdná hodnota (server ho nemusí hlásit).
-        $this->storeSubscription(['subscription' => $resp['subscription'] ?? null]);
-        $this->storeInstanceInfo(['instance' => $resp['instance'] ?? null]);
+                $resp,
+                (string) $row['instance_id'],
+            );
+        });
+    }
 
-        return ['ok' => true, 'state' => $this->current()];
+    /**
+     * Založí PKCE checkout session pro NOVÉ předplatné.
+     * Existující živá licence se nenahrazuje ani nesčítá — změny jejího rozsahu
+     * mají vlastní in-place operace a nový nákup by vytvořil duplicitní platbu.
+     *
+     * @return array{ok:bool,error?:string,buy_url?:string,expires_in?:int}
+     */
+    public function startPurchaseHandoff(): array
+    {
+        if (!$this->purchaseHandoffSchemaReady()) {
+            return ['ok' => false, 'error' => 'schema_outdated'];
+        }
+
+        return $this->withPurchaseLock(function (): array {
+            $row = $this->loadRow();
+            $state = $this->computeState($row);
+            if ($this->keyOf($row) !== null
+                && $state->commercial
+                && ($state->state === LicenseState::ACTIVE || $state->state === LicenseState::OVERAGE)
+            ) {
+                return ['ok' => false, 'error' => 'already_licensed'];
+            }
+
+            $returnUrl = $this->purchaseReturnUrl();
+            if ($returnUrl === null) {
+                return ['ok' => false, 'error' => 'invalid_return_url'];
+            }
+
+            $stateToken = self::base64Url(random_bytes(32));
+            $verifier = self::base64Url(random_bytes(32));
+            $challenge = self::base64Url(hash('sha256', $verifier, true));
+
+            try {
+                $resp = $this->client->purchaseSession(
+                    (string) ($row['instance_id'] ?? ''),
+                    $stateToken,
+                    $challenge,
+                    $returnUrl,
+                );
+            } catch (LicenseNetworkException $e) {
+                $this->logger->info('license.purchase_start.network_error', ['error' => $e->getMessage()]);
+                return ['ok' => false, 'error' => 'server_unreachable'];
+            }
+
+            $buyUrl = is_string($resp['buy_url'] ?? null) ? trim($resp['buy_url']) : '';
+            if (($resp['ok'] ?? false) !== true || !$this->isLicenseServerUrl($buyUrl)) {
+                $error = (string) ($resp['error'] ?? 'purchase_failed');
+                $this->logger->info('license.purchase_start.rejected', ['error' => $error]);
+                return ['ok' => false, 'error' => $error];
+            }
+
+            $expiresIn = max(60, min(7200, (int) ($resp['expires_in'] ?? 7200)));
+            $expiresAt = date('Y-m-d H:i:s', time() + $expiresIn);
+            $this->writeLicense(
+                'UPDATE license
+                    SET purchase_handoff_state_hash = ?, purchase_handoff_verifier = ?,
+                        purchase_handoff_expires_at = ?
+                  WHERE id = 1',
+                [hash('sha256', $stateToken), $verifier, $expiresAt],
+            );
+
+            return ['ok' => true, 'buy_url' => $buyUrl, 'expires_in' => $expiresIn];
+        });
+    }
+
+    /**
+     * Claimne zaplacenou objednávku a uloží její klíč až po ověření podpisu
+     * a explicitní shody `iid`. Při jakékoli chybě zůstává původní licence beze změny.
+     *
+     * @return array{ok:bool,error?:string,state?:LicenseState}
+     */
+    public function completePurchaseHandoff(string $orderToken, string $stateToken): array
+    {
+        $orderToken = strtolower(trim($orderToken));
+        $stateToken = trim($stateToken);
+        if (preg_match('/^[a-f0-9]{32,64}$/', $orderToken) !== 1
+            || preg_match('/^[A-Za-z0-9_-]{43}$/', $stateToken) !== 1
+        ) {
+            return ['ok' => false, 'error' => 'invalid_request'];
+        }
+        if (!$this->purchaseHandoffSchemaReady()) {
+            return ['ok' => false, 'error' => 'schema_outdated'];
+        }
+
+        return $this->withPurchaseLock(function () use ($orderToken, $stateToken): array {
+            $row = $this->loadRow();
+            $stateHash = (string) ($row['purchase_handoff_state_hash'] ?? '');
+            $verifier = (string) ($row['purchase_handoff_verifier'] ?? '');
+            if ($stateHash === '' || $verifier === '') {
+                return ['ok' => false, 'error' => 'handoff_not_started'];
+            }
+            if (!hash_equals($stateHash, hash('sha256', $stateToken))) {
+                return ['ok' => false, 'error' => 'invalid_handoff'];
+            }
+            $expiresAt = strtotime((string) ($row['purchase_handoff_expires_at'] ?? '')) ?: 0;
+            if ($expiresAt < time()) {
+                $this->clearPurchaseHandoff();
+                return ['ok' => false, 'error' => 'handoff_expired'];
+            }
+
+            $fingerprint = $this->ensureFingerprint($row);
+            try {
+                $resp = $this->client->purchaseClaim(
+                    $orderToken,
+                    $verifier,
+                    (string) ($row['instance_id'] ?? ''),
+                    $fingerprint,
+                    $this->appVersion(),
+                    $this->countActiveUsers(),
+                    $this->countCompanies(),
+                );
+            } catch (LicenseNetworkException $e) {
+                $this->logger->info('license.purchase_claim.network_error', ['error' => $e->getMessage()]);
+                return ['ok' => false, 'error' => 'server_unreachable'];
+            }
+
+            if (($resp['ok'] ?? false) !== true) {
+                return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'activation_failed')];
+            }
+            $licenseKey = is_string($resp['license_key'] ?? null) ? trim($resp['license_key']) : '';
+            if ($licenseKey === '') {
+                return ['ok' => false, 'error' => 'license_unavailable'];
+            }
+
+            return $this->persistActivationResponse(
+                $licenseKey,
+                $resp,
+                (string) ($row['instance_id'] ?? ''),
+                true,
+            );
+        });
     }
 
     /**
@@ -168,29 +296,31 @@ final class LicenseService
      */
     public function deactivate(): array
     {
-        $row = $this->loadRow();
-        $key = $this->keyOf($row);
-        $transfersRemaining = null;
+        return $this->withPurchaseLock(function (): array {
+            $row = $this->loadRow();
+            $key = $this->keyOf($row);
+            $transfersRemaining = null;
 
-        if ($key !== null) {
-            try {
-                $resp = $this->client->deactivate($key, (string) $row['instance_id']);
-                if (isset($resp['transfers_remaining'])) {
-                    $transfersRemaining = (int) $resp['transfers_remaining'];
+            if ($key !== null) {
+                try {
+                    $resp = $this->client->deactivate($key, (string) $row['instance_id']);
+                    if (isset($resp['transfers_remaining'])) {
+                        $transfersRemaining = (int) $resp['transfers_remaining'];
+                    }
+                } catch (LicenseNetworkException $e) {
+                    $this->logger->info('license.deactivate.network_error', ['error' => $e->getMessage()]);
                 }
-            } catch (LicenseNetworkException $e) {
-                $this->logger->info('license.deactivate.network_error', ['error' => $e->getMessage()]);
             }
-        }
 
-        $this->writeLicense(
-            'UPDATE license
-                SET license_key = NULL, token = NULL, token_payload = NULL,
-                    last_nonce = NULL, counter = 0, last_check_ok = 1
-              WHERE id = 1'
-        );
+            $this->writeLicense(
+                'UPDATE license
+                    SET license_key = NULL, token = NULL, token_payload = NULL,
+                        last_nonce = NULL, counter = 0, last_check_ok = 1
+                  WHERE id = 1'
+            );
 
-        return ['ok' => true, 'transfers_remaining' => $transfersRemaining, 'state' => $this->current()];
+            return ['ok' => true, 'transfers_remaining' => $transfersRemaining, 'state' => $this->current()];
+        });
     }
 
     /**
@@ -389,7 +519,7 @@ final class LicenseService
      *
      * @return array{ok:bool,error?:string,new_users?:int,amount_charged?:mixed,state?:LicenseState}
      */
-    public function upgrade(int $users): array
+    public function upgrade(int $users, string $quoteToken): array
     {
         $row = $this->loadRow();
         $key = $this->keyOf($row);
@@ -398,24 +528,31 @@ final class LicenseService
         }
 
         try {
-            $resp = $this->client->upgrade($key, $this->instanceIdOf($row), $users);
+            $resp = $this->client->upgrade($key, $this->instanceIdOf($row), $users, $quoteToken);
         } catch (LicenseNetworkException $e) {
             $this->logger->info('license.upgrade.network_error', ['error' => $e->getMessage()]);
             return ['ok' => false, 'error' => 'server_unreachable'];
         }
 
-        if (($resp['ok'] ?? false) !== true) {
+        if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
             $this->logger->warning('license.upgrade.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
             return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'upgrade_failed')];
         }
 
-        // Vynuť obnovu tokenu — přijde nový token s vyšším limitem uživatelů.
-        $this->forceRenew();
+        $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
+        $scheduled = ($resp['scheduled'] ?? false) === true || ($resp['change'] ?? '') === 'scheduled';
+        if (!$pending && !$scheduled) {
+            $this->forceRenew();
+        }
 
         return [
             'ok'             => true,
             'new_users'      => (int) ($resp['new_users'] ?? $users),
             'amount_charged' => $resp['amount_charged'] ?? null,
+            'scheduled'      => $scheduled,
+            'effective_at'   => $resp['effective_at'] ?? null,
+            'pending'        => $pending,
+            'order_id'       => $resp['order_id'] ?? null,
             'state'          => $this->current(),
         ];
     }
@@ -461,7 +598,7 @@ final class LicenseService
      *
      * @return array{ok:bool,error?:string,new_quota_gb?:int,amount_charged?:mixed,provisioning_pending?:bool,state?:LicenseState}
      */
-    public function storageUpgrade(int $quotaGb): array
+    public function storageUpgrade(int $quotaGb, string $quoteToken): array
     {
         $row = $this->loadRow();
         $key = $this->keyOf($row);
@@ -470,7 +607,7 @@ final class LicenseService
         }
 
         try {
-            $resp = $this->client->storageUpgrade($key, $this->instanceIdOf($row), $quotaGb);
+            $resp = $this->client->storageUpgrade($key, $this->instanceIdOf($row), $quotaGb, $quoteToken);
         } catch (LicenseNetworkException $e) {
             // ⚠️ Odpověď se ztratila, ale platba mohla proběhnout. Nepobízet
             // k opakování — druhý pokus by strhl podruhé.
@@ -478,20 +615,95 @@ final class LicenseService
             return ['ok' => false, 'error' => 'result_unknown'];
         }
 
-        if (($resp['ok'] ?? false) !== true) {
+        if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
             $this->logger->warning('license.storage_upgrade.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
             return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'upgrade_failed')];
         }
 
-        $this->forceRenew();
+        $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
+        $scheduled = ($resp['scheduled'] ?? false) === true || ($resp['change'] ?? '') === 'scheduled';
+        if (!$pending && !$scheduled) {
+            $this->forceRenew();
+        }
 
         return [
             'ok'                   => true,
             'new_quota_gb'         => (int) ($resp['new_quota_gb'] ?? $quotaGb),
             'amount_charged'       => $resp['amount_charged'] ?? null,
             'provisioning_pending' => (bool) ($resp['provisioning_pending'] ?? false),
+            'scheduled'            => $scheduled,
+            'effective_at'         => $resp['effective_at'] ?? null,
+            'pending'              => $pending,
+            'order_id'             => $resp['order_id'] ?? null,
             'state'                => $this->current(),
         ];
+    }
+
+    /** @return array<string,mixed> */
+    public function tierQuote(string $tier): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+        try {
+            $resp = $this->client->tierQuote($key, $this->instanceIdOf($row), $tier);
+            $resp['scheduled'] = ($resp['scheduled'] ?? false) === true || ($resp['change'] ?? '') === 'scheduled';
+            return $resp;
+        } catch (LicenseNetworkException $e) {
+            $this->logger->info('license.tier_quote.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'server_unreachable'];
+        }
+    }
+
+    /** @return array<string,mixed> */
+    public function changeTier(string $tier, string $quoteToken): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+        try {
+            $resp = $this->client->tierChange($key, $this->instanceIdOf($row), $tier, $quoteToken);
+        } catch (LicenseNetworkException $e) {
+            $this->logger->warning('license.tier_change.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'result_unknown'];
+        }
+        if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
+            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'change_failed')];
+        }
+        $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
+        $scheduled = ($resp['scheduled'] ?? false) === true || ($resp['change'] ?? '') === 'scheduled';
+        if (!$pending && !$scheduled) {
+            $this->forceRenew();
+        }
+        $resp['ok'] = true;
+        $resp['pending'] = $pending;
+        $resp['scheduled'] = $scheduled;
+        $resp['state_local'] = $this->current();
+        return $resp;
+    }
+
+    /** @return array<string,mixed> */
+    public function changeStatus(string $orderId): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+        try {
+            $resp = $this->client->changeStatus($key, $this->instanceIdOf($row), $orderId);
+        } catch (LicenseNetworkException $e) {
+            return ['ok' => false, 'error' => 'server_unreachable'];
+        }
+        if (($resp['ok'] ?? false) === true && ($resp['applied'] ?? false) === true) {
+            $this->forceRenew();
+            $resp['state_local'] = $this->current();
+        }
+        return $resp;
     }
 
     /**
@@ -660,6 +872,184 @@ final class LicenseService
         }
 
         return $company;
+    }
+
+    /**
+     * Jediný persist aktivační odpovědi. Podpis i vazbu na instanci ověří
+     * PŘED prvním zápisem, takže cizí validně podepsaný token nepřepíše
+     * stávající licenci ani dočasně.
+     *
+     * @param array<string,mixed> $resp
+     * @return array{ok:bool,error?:string,state?:LicenseState}
+     */
+    private function persistActivationResponse(
+        string $licenseKey,
+        array $resp,
+        string $expectedInstanceId,
+        bool $clearPurchaseHandoff = false,
+    ): array {
+        $token = is_string($resp['token'] ?? null) ? trim($resp['token']) : '';
+        if ($token === '') {
+            return ['ok' => false, 'error' => 'activation_failed'];
+        }
+        $payload = $this->verifier->verify($token, $this->publicKeys());
+        if ($payload === null) {
+            $this->logger->warning('license.activate.bad_signature');
+            return ['ok' => false, 'error' => 'invalid_token'];
+        }
+        if ($expectedInstanceId === ''
+            || !hash_equals($expectedInstanceId, (string) ($payload['iid'] ?? ''))
+        ) {
+            $this->logger->warning('license.activate.instance_mismatch');
+            return ['ok' => false, 'error' => 'invalid_token'];
+        }
+
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT ' . self::PURCHASE_PERSIST_SAVEPOINT);
+        }
+
+        try {
+            $this->writeLicense(
+                'UPDATE license
+                    SET license_key = ?, token = ?, token_payload = ?, last_nonce = ?,
+                        counter = 0, last_check_at = NOW(), last_check_ok = 1
+                  WHERE id = 1',
+                [
+                    trim($licenseKey),
+                    $token,
+                    json_encode($payload, JSON_UNESCAPED_UNICODE),
+                    $this->nonceOf($payload),
+                ],
+            );
+            // Aktivace je nový začátek; cache předchozího klíče nesmí přežít.
+            $this->storeSubscription(['subscription' => $resp['subscription'] ?? null]);
+            $this->storeInstanceInfo(['instance' => $resp['instance'] ?? null]);
+            if ($clearPurchaseHandoff) {
+                $this->clearPurchaseHandoff();
+            }
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            } else {
+                $pdo->exec('RELEASE SAVEPOINT ' . self::PURCHASE_PERSIST_SAVEPOINT);
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            } elseif (!$ownsTransaction) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::PURCHASE_PERSIST_SAVEPOINT);
+                $pdo->exec('RELEASE SAVEPOINT ' . self::PURCHASE_PERSIST_SAVEPOINT);
+            }
+            $this->rowCache = null;
+            throw $e;
+        }
+
+        return ['ok' => true, 'state' => $this->current()];
+    }
+
+    private function purchaseHandoffSchemaReady(): bool
+    {
+        return $this->db->hasColumn('license', 'purchase_handoff_state_hash')
+            && $this->db->hasColumn('license', 'purchase_handoff_verifier')
+            && $this->db->hasColumn('license', 'purchase_handoff_expires_at');
+    }
+
+    private function clearPurchaseHandoff(): void
+    {
+        if (!$this->purchaseHandoffSchemaReady()) {
+            return;
+        }
+        $this->writeLicense(
+            'UPDATE license
+                SET purchase_handoff_state_hash = NULL,
+                    purchase_handoff_verifier = NULL,
+                    purchase_handoff_expires_at = NULL
+              WHERE id = 1',
+        );
+    }
+
+    private function purchaseReturnUrl(): ?string
+    {
+        $url = trim((string) $this->config->get('app.url', ''));
+        try {
+            $parts = parse_url($url);
+        } catch (\ValueError) {
+            return null;
+        }
+        if (!is_array($parts)
+            || strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
+            || empty($parts['host'])
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || isset($parts['query'])
+            || isset($parts['fragment'])
+            || !in_array((string) ($parts['path'] ?? ''), ['', '/'], true)
+        ) {
+            return null;
+        }
+
+        $port = isset($parts['port']) ? ':' . (int) $parts['port'] : '';
+        return 'https://' . strtolower((string) $parts['host']) . $port . '/activation/purchase';
+    }
+
+    private function isLicenseServerUrl(string $url): bool
+    {
+        if ($url === '') {
+            return false;
+        }
+        try {
+            $actual = parse_url($url);
+            $expected = parse_url((string) $this->config->get('license.server_url', 'https://myucto.cz'));
+        } catch (\ValueError) {
+            return false;
+        }
+        if (!is_array($actual) || !is_array($expected)
+            || empty($actual['host']) || empty($expected['host'])
+            || isset($actual['user']) || isset($actual['pass'])
+        ) {
+            return false;
+        }
+        $origin = static fn (array $parts): string => sprintf(
+            '%s://%s:%d',
+            strtolower((string) ($parts['scheme'] ?? '')),
+            strtolower((string) ($parts['host'] ?? '')),
+            (int) ($parts['port'] ?? (strtolower((string) ($parts['scheme'] ?? '')) === 'https' ? 443 : 80)),
+        );
+
+        return in_array(strtolower((string) ($actual['scheme'] ?? '')), ['https', 'http'], true)
+            && hash_equals($origin($expected), $origin($actual));
+    }
+
+    /** @template T @param callable():T $callback @return T */
+    private function withPurchaseLock(callable $callback): mixed
+    {
+        $pdo = $this->db->pdo();
+        $database = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
+        if ($database === '') {
+            throw new \RuntimeException('Aktuální databázi pro purchase lock nelze určit.');
+        }
+        $lockName = self::PURCHASE_LOCK_PREFIX . substr(hash('sha256', $database), 0, 32);
+        $statement = $pdo->prepare('SELECT GET_LOCK(?, ?)');
+        $statement->execute([$lockName, self::PURCHASE_LOCK_TIMEOUT]);
+        if ((int) $statement->fetchColumn() !== 1) {
+            throw new \RuntimeException('Purchase handoff se právě zpracovává.');
+        }
+
+        try {
+            return $callback();
+        } finally {
+            $release = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+            $release->execute([$lockName]);
+        }
+    }
+
+    private static function base64Url(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     }
 
     /** @return array<string,mixed> */

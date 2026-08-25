@@ -16,6 +16,9 @@ use MyInvoice\Repository\SystemRoleLocked;
 use MyInvoice\Security\PermissionCatalog;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseCapacityGate;
+use MyInvoice\Service\License\LicenseSeatLimitExceeded;
+use MyInvoice\Service\License\LicenseState;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -26,6 +29,7 @@ final class RoleAdminAction
         private readonly PermissionCatalog $catalog,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly LicenseCapacityGate $capacity,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -79,12 +83,14 @@ final class RoleAdminAction
             if ((int) $value !== (int) ($current['permissions'][$key] ?? 0)) $changed[] = (string) $key;
         }
         try {
-            $role = $this->roles->update(
-                $id,
-                (string) ($body['name'] ?? $current['name']),
-                (bool) ($body['is_active'] ?? $current['is_active']),
-                $permissions,
-                (string) ($body['revision'] ?? $body['updated_at'] ?? ''),
+            $role = $this->capacity->mutateSeats(
+                fn (): array => $this->roles->update(
+                    $id,
+                    (string) ($body['name'] ?? $current['name']),
+                    (bool) ($body['is_active'] ?? $current['is_active']),
+                    $permissions,
+                    (string) ($body['revision'] ?? $body['updated_at'] ?? ''),
+                ),
             );
             if ((bool) $current['is_active'] !== (bool) $role['is_active']) {
                 $this->log($request, $role['is_active'] ? 'role.activated' : 'role.deactivated', $id, ['usage' => $role['usage']]);
@@ -131,6 +137,13 @@ final class RoleAdminAction
             $e instanceof RoleInUse => Json::error($response, 'role_in_use', 'Používanou roli nelze smazat.', 409, ['usage' => $e->usage]),
             $e instanceof SystemRoleLocked => Json::error($response, 'system_role_locked', 'Systémovou roli nelze změnit.', 409),
             $e instanceof DuplicateRoleName => Json::error($response, 'role_name_taken', 'Aktivní role tohoto typu už má stejný název.', 409),
+            $e instanceof LicenseSeatLimitExceeded => Json::error(
+                $response,
+                $e->reason === LicenseState::BLOCK_NO_LICENSE ? 'license_required' : 'license_user_limit',
+                'Změna role by dala právo zápisu více aktivním uživatelům, než dovoluje licence. '
+                    . 'Nejprve rozšiřte předplatné nebo uvolněte licenční místo.',
+                403,
+            ),
             $e instanceof \OutOfBoundsException => Json::error($response, 'not_found', 'Role nenalezena.', 404),
             $e instanceof \InvalidArgumentException => Json::error($response, 'validation_failed', 'Neplatná data role.', 400),
             default => throw $e,

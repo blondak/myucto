@@ -27,7 +27,7 @@ const openMenuIdx = ref<number | null>(null)
  * ⚠️ Na self-hosted instalaci je seznam prázdný a nevykreslí se ani řádek;
  * `instanceStatus` tam nic nenačte (viz `ensureInstanceStatus`).
  */
-const hostingItems = computed(() => resolveHostingActions(instanceStatus.instance.value))
+const hostingItems = computed(() => resolveHostingActions(instanceStatus.status.value))
 
 watch(
   () => [auth.isManagedInstallation, auth.isSuperadmin] as const,
@@ -43,11 +43,13 @@ const HOSTING_TONE: Record<HostingActionSeverity, { row: string; dot: string; ti
 }
 
 /** Termín se formátuje až tady; `null` znamená, že v textu žádný nebude. */
-function hostingHint(item: { hintKey: string; at: number | null; percent: number | null; quotaGb: number | null }): string {
+function hostingHint(item: { hintKey: string; at: number | null; percent: number | null; quotaGb: number | null; active: number | null; limit: number | null }): string {
   return t(item.hintKey, {
     date: item.at === null ? '' : new Date(item.at * 1000).toLocaleDateString(),
     percent: item.percent === null ? '' : new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(item.percent),
     gb: item.quotaGb ?? '',
+    active: item.active ?? '',
+    limit: item.limit ?? '',
   })
 }
 
