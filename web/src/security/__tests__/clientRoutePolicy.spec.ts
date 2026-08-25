@@ -285,9 +285,9 @@ function clientRouteParityErrors(manifestRoutes: readonly ManifestRoute[]): stri
 }
 
 describe('sdílená klientská plocha vlastní domény', () => {
-  it('obsahuje auditovaných 32 core rout a tři legacy aliasy', () => {
-    expect(clientDomainRoutes).toHaveLength(35)
-    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(35)
+  it('obsahuje auditovaných 33 core rout a tři legacy aliasy', () => {
+    expect(clientDomainRoutes).toHaveLength(36)
+    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(36)
     expect(clientDomainRoutes.slice(-3).map(route => route.name))
       .toEqual(['data-exchange', 'admin-export', 'admin-import'])
   })
@@ -309,7 +309,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       if (route!.path.includes(':')) parameterized.push(definition.name)
     }
 
-    expect(rendered).toHaveLength(27)
+    expect(rendered).toHaveLength(28)
     expect(redirects).toEqual([
       'profile-totp',
       'profile-shortcuts',
@@ -339,7 +339,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       client_redirect: 3,
       permission: 22,
       router_redirect: 8,
-      self_service: 2,
+      self_service: 3,
     })
   })
 
@@ -467,8 +467,14 @@ describe('sdílená klientská plocha vlastní domény', () => {
   })
 
   it('drží self-service obrazovky, jejich aliasy a query handoff odděleně od path parity', () => {
+    // `isds-gateway-callback` je návratová stránka brány ISDS: routa sama nemá
+    // permission, protože o právu rozhoduje až API (podání dokumentů vs. mzdové
+    // podání — stránka na 403 přepadá na druhý endpoint). Na plochu vlastní
+    // domény patří proto, že návratová adresa se skládá z `window.location.origin`
+    // toho, kdo odesílání spustil; kdyby tu nebyla, návrat z brány by na klientské
+    // doméně skončil přesměrováním na canonical origin i s tokeny v query.
     expect(clientDomainRoutes.filter(route => route.kind === 'self_service').map(route => route.name))
-      .toEqual(['profile-password', 'setup-mfa'])
+      .toEqual(['profile-password', 'isds-gateway-callback', 'setup-mfa'])
     expect(clientDomainRoutes.filter(route => route.kind === 'router_redirect').slice(0, 5)
       .map(route => route.name))
       .toEqual([

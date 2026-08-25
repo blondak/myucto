@@ -37,6 +37,8 @@
     { "name": "profile-passkeys", "path_pattern": "^/profile/passkeys/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=passkeys", "canonical_handoff": { "to": "/profile/password?tab=passkeys" } },
     { "name": "profile-session-lock", "path_pattern": "^/profile/session-lock/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=session-lock" },
 
+    { "name": "isds-gateway-callback", "path_pattern": "^/isds-gateway/callback/?$", "kind": "self_service" },
+
     { "name": "setup-mfa", "path_pattern": "^/setup-mfa/?$", "kind": "self_service", "canonical_handoff": { "to": "/setup-mfa", "query_targets": { "method": { "totp": "/setup-mfa?method=totp" } } } },
     { "name": "setup-totp", "path_pattern": "^/setup-totp/?$", "kind": "router_redirect", "redirect_to": "/setup-mfa?method=totp", "canonical_handoff": { "to": "/setup-mfa?method=totp" } },
 
