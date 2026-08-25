@@ -274,3 +274,27 @@ a deníkem, položka se zobrazí se závažností **vysoká** a počtem nálezů
 popisku. Klik — na hlavním řádku i na kterémkoli štítku rozpadu — vede vždy na
 [Účetní deník](45_Ucetni_denik.md); appka nemá samostatnou stránku s výpisem
 jednotlivých nálezů; ty najdeš jen přes CLI (viz § 45.10).
+
+## 10.11 Průvodce prvním nastavením
+
+Dokud v systému nejsou žádné doklady ani klienti, Přehled místo prázdných grafů
+ukáže **průvodce prvním nastavením** — rozcestník po místech, která je potřeba
+vyplnit, než začneš fakturovat. Vidí ho každý, kdo smí zapisovat.
+
+| Krok | Vede na |
+|---|---|
+| Údaje o firmě | [Nastavení → Údaje firmy](73_Nastaveni.md) (`/admin/settings?tab=company`) |
+| Daně a účetnictví | Nastavení → Daně a účetnictví (`/admin/settings?tab=accounting`) |
+| Bankovní účty | [Banka → Účty](28_Banka.md) |
+| Vzhled faktur a logo | [Brandingové profily](73_Nastaveni.md#7312-brandingove-profily) |
+| Číselné řady a doklady | Nastavení → Fakturace (`/admin/settings?tab=documents`) |
+| Číselné řady deníku | Jen podvojné účetnictví — [Účetní nástroje](69_Ucetni_nastroje.md) |
+| Odesílání e-mailů | [Odesílací e-mailové profily](73_Nastaveni.md#737-odesilaci-e-mailove-profily) (`/admin/emails`) |
+| Datová schránka | Systém → Datová schránka (`/admin/databox`) |
+| Uživatelé a role | [Uživatelé](73_Nastaveni.md#732-uzivatele) |
+| První klient / první faktura | [Klienti](18_Klienti.md) · [Faktury](14_Faktury.md) |
+
+Kroky se **odškrtávají ručně** — aplikace nic nekontroluje a odškrtnutí nemá
+žádný vliv na chování, je to tvoje poznámka. Tlačítkem **Skrýt průvodce** zmizí
+a zůstane po něm jen řádek s odkazem **Zobrazit průvodce**, kterým ho kdykoli
+vrátíš. Stav (odškrtnuté kroky i skrytí) se ukládá per uživatel.

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest } from '@/api/settings'
@@ -53,8 +53,24 @@ const tabs: SettingsTab[] = ['company', 'documents', 'accounting', 'advanced']
 // Na záložku se dá odkázat zvenčí (?tab=accounting) — odjinud v aplikaci sem
 // vedou rady typu „zapněte účetnictví v Nastavení", a ty musí skončit u toho
 // přepínače, ne na první záložce.
-const requestedTab = String(router.currentRoute.value.query.tab ?? '') as SettingsTab
-const tab = ref<SettingsTab>(tabs.includes(requestedTab) ? requestedTab : 'company')
+//
+// Query je zdroj pravdy obou směrů: přepnutí záložky ji zapíše (adresa jde
+// poslat i uložit do záložek) a watch ji čte zpátky. Bez toho čtení by odkaz
+// z jiné záložky TÉHOŽ Nastavení neudělal nic — routa se nemění, komponenta se
+// nepřemountuje a jednorázové čtení při setupu už dávno proběhlo.
+function tabFromQuery(q: unknown): SettingsTab {
+  const v = String(q ?? '') as SettingsTab
+  return tabs.includes(v) ? v : 'company'
+}
+const tab = ref<SettingsTab>(tabFromQuery(router.currentRoute.value.query.tab))
+
+watch(() => router.currentRoute.value.query.tab, q => { tab.value = tabFromQuery(q) })
+
+function switchTab(v: SettingsTab) {
+  if (tab.value === v) return
+  tab.value = v
+  void router.replace({ query: { ...router.currentRoute.value.query, tab: v } })
+}
 
 // Kolik dní zbývá ze zkušebního období. Jen pro trial — u zaplacené licence
 // není co odpočítávat a po vypršení mluví jiná hláška.
@@ -690,7 +706,7 @@ function vatCollisionLabel(c: VatStatusCollision): string {
         :class="tab === item
           ? 'border-primary-600 text-primary-700'
           : 'border-transparent text-neutral-600 hover:text-neutral-900 hover:border-neutral-300'"
-        @click="tab = item"
+        @click="switchTab(item)"
       >
         {{ t(`settings.tab_${item}`) }}
       </button>

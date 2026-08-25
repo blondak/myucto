@@ -202,6 +202,29 @@ final class UserPreferenceActionTest extends TestCase
         self::assertTrue($del['body']['deleted']);
     }
 
+    public function testOnboardingGuideKeyAcceptedFilteredAndDeleted(): void
+    {
+        // Průvodce prvním nastavením na Přehledu — ručně odškrtnuté kroky + skrytí.
+        $payload = ['hidden' => false, 'done' => ['company', 'bank']];
+
+        $put = $this->call('put', 'PUT', ['args' => ['key' => 'onboarding.guide'], 'body' => $payload]);
+        self::assertSame(200, $put['status']);
+        self::assertSame($payload, $put['body']);
+
+        $filtered = $this->call('list', 'GET', ['query' => ['keys' => 'onboarding.guide']]);
+        self::assertSame($payload, $filtered['body']['onboarding.guide']);
+        self::assertCount(1, $filtered['body']);
+
+        $del = $this->call('delete', 'DELETE', ['args' => ['key' => 'onboarding.guide']]);
+        self::assertSame(200, $del['status']);
+        self::assertTrue($del['body']['deleted']);
+
+        // Sousední klíč v namespace onboarding.* whitelistovaný není.
+        $bad = $this->call('put', 'PUT', ['args' => ['key' => 'onboarding.other'], 'body' => ['a' => 'b']]);
+        self::assertSame(422, $bad['status']);
+        self::assertSame('invalid_pref_key', $bad['body']['error']['code']);
+    }
+
     public function testReadonlyRoleCanWriteOwnPreferences(): void
     {
         $put = $this->call('put', 'PUT', ['args' => ['key' => 'table.invoices'], 'body' => ['density' => 'compact'], 'role' => 'readonly']);

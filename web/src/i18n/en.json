@@ -621,7 +621,8 @@
         "unpaid_title": "Předplatné není uhrazené",
         "unpaid_desc": "Komerční moduly (účetnictví, mzdy, sklad) jsou proto zavřené; fakturaci ani čtení dat to nezastavuje. Uhraďte předplatné a moduly se otevřou samy.",
         "unpaid_cta": "Uhradit předplatné",
-        "unpaid_desc_open": "Paid modules still work for now, but they will close without payment. Details and dates are in Subscription and hosting.",
+        "unpaid_desc_open": "Paid modules still work for now, but they will close without payment. Details and dates are in Subscription and hosting."
+,
         "pay_cta": "Pay now",
         "pay_cta_amount": "Pay {amount}",
         "unpaid_detail": "Details"
@@ -9407,7 +9408,8 @@
             "VAT returns and the control statement",
             "Company settings, users and data exports"
         ],
-        "replace_confirm": "This installation already has an active license. Activating a new key deactivates the current one — licenses do not add up. If you need more users, increase the count on the existing license. Replace anyway?",
+        "replace_confirm": "This installation already has an active license. Activating a new key deactivates the current one — licenses do not add up. If you need more users, increase the count on the existing license. Replace anyway?"
+,
         "dunning_amount_due": "Amount due:",
         "dunning_pay": "Pay now",
         "dunning_pay_amount": "Pay {amount}",
@@ -11675,6 +11677,85 @@
             "non_admin": "Please ask your administrator to create a supplier in Settings → Codebooks → Suppliers."
         },
         "welcome": "Welcome to MyÚčto.cz!",
+        "onboarding": {
+            "eyebrow": "First-run setup guide",
+            "title": "Welcome to MyÚčto.cz",
+            "intro": "Before you issue the first invoice, walk through a few settings so your documents match your company, tax regime and bank from day one. Open each step from its link and tick it off yourself; the guide can be hidden any time.",
+            "manual": "Open the manual",
+            "hide": "Hide the guide",
+            "show": "Show the guide",
+            "hidden_note": "The first-run setup guide is hidden.",
+            "progress": "{done} of {total} done",
+            "progress_hint": "Tick the steps off yourself as you finish them.",
+            "progress_all_done": "All done — you can hide the guide.",
+            "step_n": "Step {n}",
+            "open": "Open",
+            "mark_done": "Mark as done",
+            "marked_done": "Done",
+            "footnote": "The guide shows until there are documents in the system. Ticking a step is your own note — the application neither changes nor verifies anything by it.",
+            "groups": {
+                "company": {
+                    "title": "Company setup",
+                    "hint": "details printed on every document"
+                },
+                "documents": {
+                    "title": "Documents and communication",
+                    "hint": "numbering, e-mail, filings and access"
+                },
+                "start": {
+                    "title": "First documents",
+                    "hint": "getting invoicing started"
+                }
+            },
+            "steps": {
+                "company": {
+                    "title": "Company details",
+                    "text": "Name, registration number, VAT ID, address and contact. They print on every invoice and feed the tax reports, so start here."
+                },
+                "taxes": {
+                    "title": "Tax and accounting",
+                    "text": "Taxpayer type, VAT registration and filing period, tax evidence or double-entry bookkeeping. Taxes and reports follow this setting."
+                },
+                "bank": {
+                    "title": "Bank accounts",
+                    "text": "The accounts your payments arrive on. The account number prints on invoices and drives payment matching from statements."
+                },
+                "branding": {
+                    "title": "Invoice look and logo",
+                    "text": "Upload a logo, pick an accent colour and a document footer. Multiple profiles are fine if you invoice under several brands."
+                },
+                "numbering": {
+                    "title": "Numbering and documents",
+                    "text": "Number formats for invoices, proformas and credit notes, plus default due date and currency. Set it before the first document."
+                },
+                "series": {
+                    "title": "Journal document series",
+                    "text": "Accounting document series for the journal — prefix and numbering separately for invoices, bank, cash and internal documents."
+                },
+                "email": {
+                    "title": "Outgoing e-mail",
+                    "text": "The sending profile and address your invoices go out from — including your own SMTP server if you want one."
+                },
+                "databox": {
+                    "title": "Data box",
+                    "text": "The connection for filing to the tax authority straight from the application: VAT returns, control statements and other forms."
+                },
+                "users": {
+                    "title": "Users and roles",
+                    "text": "Invite colleagues or your accountant. The role decides what each of them sees and may change."
+                },
+                "client": {
+                    "title": "Add your first client",
+                    "text": "Just enter the registration number — the address and the rest are pulled from the public register.",
+                    "cta": "New client"
+                },
+                "invoice": {
+                    "title": "Issue your first invoice",
+                    "text": "Pick a client, add items and you are done. Numbers, VAT and reports are calculated for you.",
+                    "cta": "New invoice"
+                }
+            }
+        },
         "empty_hint": "The dashboard fills up as soon as there is data. Start with your first client and issue an invoice — the figures, charts and tax reports follow on their own.",
         "subtitle_year": "Business overview for {year}",
         "tax_net_title": "Taxes {year}",

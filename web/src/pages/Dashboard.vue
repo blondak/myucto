@@ -16,6 +16,7 @@ import TaxCalendarWidget from '@/components/dashboard/TaxCalendarWidget.vue'
 import ActionItemsWidget from '@/components/dashboard/ActionItemsWidget.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import OnboardingGuide from '@/components/dashboard/OnboardingGuide.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -42,6 +43,10 @@ const supplierIdentity = computed<string>(() => {
     address,
   ].filter(Boolean).join(' · ')
 })
+
+// Průvodce prvním nastavením si sám řekne, jestli je vidět (uživatel si ho mohl
+// schovat) — dokud svítí, prázdný stav pod ním by byl jen šum.
+const guideVisible = ref(false)
 
 const summary = ref<DashboardSummary | null>(null)
 const loading = ref(true)
@@ -165,14 +170,23 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
       {{ error }}
     </div>
 
-    <EmptyState v-else-if="!hasAnyData" boxed icon="chart"
-      :title="t('dashboard.welcome')"
-      :message="t('dashboard.empty_hint')"
-      :cta="auth.canWrite('dashboard') ? t('client.new') : undefined"
-      to="/clients/new"
-      :secondary="auth.canWrite('dashboard') ? t('invoice.new') : undefined"
-      secondary-to="/invoices/new"
-      secondary-icon="doc" />
+    <!-- Prázdný Přehled (typicky čerstvá instance ze SaaS provisioningu): místo
+         holého „zatím tu nic není" ukážeme rozcestník po prvním nastavení.
+         `EmptyState` zůstává pro readonly uživatele a pro chvíli, kdy si uživatel
+         průvodce schová — bez něj by stránka byla úplně prázdná. -->
+    <template v-else-if="!hasAnyData">
+      <OnboardingGuide v-if="auth.canWrite('dashboard')" @update:visible="guideVisible = $event" />
+
+      <EmptyState v-if="!guideVisible" boxed icon="chart"
+        :title="t('dashboard.welcome')"
+        :message="t('dashboard.empty_hint')"
+        :cta="auth.canWrite('dashboard') ? t('client.new') : undefined"
+        to="/clients/new"
+        :secondary="auth.canWrite('dashboard') ? t('invoice.new') : undefined"
+        secondary-to="/invoices/new"
+        secondary-icon="doc"
+        class="mt-6" />
+    </template>
 
     <div v-else-if="summary && summary.kpi" class="space-y-6">
       <!-- Přehled byl jediná stránka v aplikaci bez H1 — začínal rovnou widgetem,

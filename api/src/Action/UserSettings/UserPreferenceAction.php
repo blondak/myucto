@@ -31,6 +31,12 @@ final class UserPreferenceAction
     /** Nastavitelné klávesové zkratky — globální per user. */
     private const KEYBOARD_SHORTCUTS_KEY = 'keyboard.shortcuts';
 
+    /**
+     * Průvodce prvním nastavením na Přehledu — ručně odškrtnuté kroky a skrytí
+     * průvodce. Per uživatel (ne per firma): je to stav ČTENÍ návodu, ne stav dat.
+     */
+    private const ONBOARDING_KEY = 'onboarding.guide';
+
     /** Nav order a klávesové zkratky jsou o úroveň hlubší než ploché table.* prefy. */
     private const MAX_DEPTH = 4;
 
@@ -48,6 +54,7 @@ final class UserPreferenceAction
             $valid = array_map(static fn (string $p) => self::PREFIX . $p, SavedFilterAction::PAGE_KEYS);
             $valid[] = self::NAV_ORDER_KEY;
             $valid[] = self::KEYBOARD_SHORTCUTS_KEY;
+            $valid[] = self::ONBOARDING_KEY;
             $keys = array_values(array_unique(array_intersect($keys, $valid)));
             if ($keys === []) {
                 return Json::ok($response, (object) []);
@@ -118,7 +125,7 @@ final class UserPreferenceAction
 
     private function validPrefKey(string $key): bool
     {
-        if ($key === self::NAV_ORDER_KEY || $key === self::KEYBOARD_SHORTCUTS_KEY) {
+        if ($key === self::NAV_ORDER_KEY || $key === self::KEYBOARD_SHORTCUTS_KEY || $key === self::ONBOARDING_KEY) {
             return true;
         }
         if (!str_starts_with($key, self::PREFIX)) {

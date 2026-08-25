@@ -621,7 +621,8 @@
         "unpaid_title": "Předplatné není uhrazené",
         "unpaid_desc": "Komerční moduly (účetnictví, mzdy, sklad) jsou proto zavřené; fakturaci ani čtení dat to nezastavuje. Uhraďte předplatné a moduly se otevřou samy.",
         "unpaid_cta": "Uhradit předplatné",
-        "unpaid_desc_open": "Placené moduly zatím fungují dál, ale bez úhrady se zavřou. Podrobnosti a termíny najdete v Předplatném a provozu.",
+        "unpaid_desc_open": "Placené moduly zatím fungují dál, ale bez úhrady se zavřou. Podrobnosti a termíny najdete v Předplatném a provozu."
+,
         "pay_cta": "Zaplatit",
         "pay_cta_amount": "Zaplatit {amount}",
         "unpaid_detail": "Podrobnosti"
@@ -9407,7 +9408,8 @@
             "Přiznání k DPH a kontrolní hlášení",
             "Nastavení firmy, uživatelé a exporty dat"
         ],
-        "replace_confirm": "Tahle instalace už má aktivní licenci. Aktivací nového klíče ta stávající přestane platit — licence se nesčítají. Chcete-li víc uživatelů, navyšte počet u stávající licence. Opravdu nahradit?",
+        "replace_confirm": "Tahle instalace už má aktivní licenci. Aktivací nového klíče ta stávající přestane platit — licence se nesčítají. Chcete-li víc uživatelů, navyšte počet u stávající licence. Opravdu nahradit?"
+,
         "dunning_amount_due": "K úhradě:",
         "dunning_pay": "Zaplatit",
         "dunning_pay_amount": "Zaplatit {amount}",
@@ -11675,6 +11677,85 @@
             "non_admin": "Požádejte prosím správce, aby vytvořil dodavatele v Nastavení → Číselníky → Dodavatelé."
         },
         "welcome": "Vítej v MyÚčto.cz!",
+        "onboarding": {
+            "eyebrow": "Průvodce prvním nastavením",
+            "title": "Vítejte v MyÚčto.cz",
+            "intro": "Než vystavíte první fakturu, projděte pár nastavení — ať doklady od začátku sedí na vaši firmu, daňový režim i banku. Každý krok otevřete odkazem a ručně si ho odškrtnete; průvodce jde kdykoliv skrýt.",
+            "manual": "Otevřít manuál",
+            "hide": "Skrýt průvodce",
+            "show": "Zobrazit průvodce",
+            "hidden_note": "Průvodce prvním nastavením je skrytý.",
+            "progress": "{done} z {total} hotovo",
+            "progress_hint": "Kroky si odškrtáváte sami, jak je budete mít za sebou.",
+            "progress_all_done": "Máte hotovo — průvodce můžete skrýt.",
+            "step_n": "Krok {n}",
+            "open": "Otevřít",
+            "mark_done": "Označit jako hotové",
+            "marked_done": "Hotovo",
+            "footnote": "Průvodce se ukazuje, dokud v systému nemáte doklady. Odškrtnutí je vaše poznámka — aplikace podle něj nic nemění ani nekontroluje.",
+            "groups": {
+                "company": {
+                    "title": "Nastavení firmy",
+                    "hint": "údaje, které jdou na každý doklad"
+                },
+                "documents": {
+                    "title": "Doklady a komunikace",
+                    "hint": "číslování, e-maily, podání a přístupy"
+                },
+                "start": {
+                    "title": "První doklady",
+                    "hint": "rozjezd fakturace"
+                }
+            },
+            "steps": {
+                "company": {
+                    "title": "Údaje o firmě",
+                    "text": "Název, IČ, DIČ, adresa a kontakt. Tisknou se na každou fakturu a plní se z nich výkazy, takže tohle vyplňte jako první."
+                },
+                "taxes": {
+                    "title": "Daně a účetnictví",
+                    "text": "Typ poplatníka, plátcovství DPH a zdaňovací období, daňová evidence nebo podvojné účetnictví. Podle toho se počítají daně i sestavy."
+                },
+                "bank": {
+                    "title": "Bankovní účty",
+                    "text": "Účty, na které vám chodí platby. Číslo účtu se tiskne na faktury a slouží k párování plateb z výpisů."
+                },
+                "branding": {
+                    "title": "Vzhled faktur a logo",
+                    "text": "Nahrajte logo, zvolte barvu a patičku dokladu. Profilů může být víc, když fakturujete pod několika značkami."
+                },
+                "numbering": {
+                    "title": "Číselné řady a doklady",
+                    "text": "Formát čísel faktur, proforem a dobropisů, výchozí splatnost a měna. Nastavte dřív, než vystavíte první doklad."
+                },
+                "series": {
+                    "title": "Číselné řady deníku",
+                    "text": "Řady účetních dokladů pro deník — prefix a číslování zvlášť pro faktury, banku, pokladnu a interní doklady."
+                },
+                "email": {
+                    "title": "Odesílání e-mailů",
+                    "text": "Odesílací profil a adresa, ze které chodí faktury klientům — včetně vlastního SMTP, pokud ho chcete použít."
+                },
+                "databox": {
+                    "title": "Datová schránka",
+                    "text": "Propojení pro podání na finanční správu přímo z aplikace: přiznání k DPH, kontrolní hlášení i další formuláře."
+                },
+                "users": {
+                    "title": "Uživatelé a role",
+                    "text": "Pozvěte kolegy nebo účetní. Role určuje, co kdo uvidí a co smí měnit."
+                },
+                "client": {
+                    "title": "Založte prvního klienta",
+                    "text": "Stačí zadat IČ — adresu a další údaje si aplikace natáhne z ARESu.",
+                    "cta": "Nový klient"
+                },
+                "invoice": {
+                    "title": "Vystavte první fakturu",
+                    "text": "Vyberte klienta, přidejte položky a je hotovo. Čísla, DPH i výkazy se dopočítají samy.",
+                    "cta": "Nová faktura"
+                }
+            }
+        },
         "empty_hint": "Přehled se naplní, jakmile budou v systému data. Začni prvním klientem a vystav mu fakturu — čísla, grafy i daňové sestavy se dopočítají samy.",
         "subtitle_year": "Přehled hospodaření za rok {year}",
         "tax_net_title": "Daně {year}",
