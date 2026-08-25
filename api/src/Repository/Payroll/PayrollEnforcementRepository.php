@@ -199,6 +199,77 @@ final class PayrollEnforcementRepository implements
             ?? throw new \RuntimeException('Exekuční případ nebyl po vytvoření nalezen.');
     }
 
+    /** @return array<string,mixed>|null */
+    public function deleteUnusedCase(
+        int $supplierId,
+        int $caseId,
+        int $expectedVersion,
+    ): ?array {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT * FROM payroll_enforcement_cases
+                  WHERE supplier_id = ? AND id = ? FOR UPDATE'
+            );
+            $stmt->execute([$supplierId, $caseId]);
+            $value = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($value === false) {
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+                return null;
+            }
+            $case = PayrollTimeValue::row($value, 'enforcement_case');
+            $currentVersion = PayrollTimeValue::int(
+                $case['row_version'] ?? null,
+                'row_version',
+            );
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollEnforcementConflictException($currentVersion);
+            }
+
+            $this->assertCaseCanBeDeleted($supplierId, $caseId, $case);
+
+            $delete = $pdo->prepare(
+                "DELETE FROM payroll_enforcement_cases
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?
+                    AND status = 'received'"
+            );
+            try {
+                $delete->execute([$supplierId, $caseId, $expectedVersion]);
+            } catch (\PDOException $e) {
+                $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
+                if (!in_array($sqlState, ['23000', '45000'], true)) {
+                    throw $e;
+                }
+                throw new PayrollEnforcementDeletionBlockedException(
+                    'concurrent_footprint_exists',
+                    'Případ mezitím získal právní, mzdovou nebo platební návaznost. '
+                    . 'Obnovte detail a případ zachovejte v historii.',
+                );
+            }
+            if ($delete->rowCount() !== 1) {
+                $this->throwConflictOrNotFound($supplierId, $caseId);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            self::rollbackOwned($pdo, $ownsTransaction);
+            throw $e;
+        }
+
+        $deleted = self::castCase($case);
+        unset($deleted['case_key'], $deleted['created_by'], $deleted['updated_by']);
+        $deleted['claim_count'] = 0;
+        $deleted['outstanding_minor_units'] = 0;
+        return $deleted;
+    }
+
     /**
      * @param array<string,mixed> $data
      * @return array<string,mixed>
@@ -1329,6 +1400,73 @@ final class PayrollEnforcementRepository implements
             throw new \InvalidArgumentException('Exekuční případ nebyl nalezen.');
         }
         return PayrollTimeValue::row($value, 'enforcement_case');
+    }
+
+    /** @param array<string,mixed> $case */
+    private function assertCaseCanBeDeleted(
+        int $supplierId,
+        int $caseId,
+        array $case,
+    ): void {
+        $footprints = [
+            'payroll_enforcement_claims' => [
+                'claim_exists',
+                'Případ nelze smazat, protože už obsahuje pohledávku. '
+                . 'Zachovejte právní historii a případ případně zastavte.',
+            ],
+            'payroll_enforcement_events' => [
+                'event_exists',
+                'Případ nelze smazat, protože už má právně významnou změnu stavu. '
+                . 'Zachovejte časovou osu a použijte zastavení případu.',
+            ],
+            'payroll_enforcement_case_documents' => [
+                'document_exists',
+                'Případ nelze smazat, protože už je propojený s rozhodnutím nebo dokladem. '
+                . 'Zachovejte právní historii a použijte zastavení případu.',
+            ],
+            'payroll_enforcement_allocations' => [
+                'allocation_exists',
+                'Případ nelze smazat, protože už vstoupil do výpočtu a má alokaci srážky. '
+                . 'Případ uzavřete standardním stavovým krokem.',
+            ],
+            'payroll_enforcement_ledger' => [
+                'ledger_exists',
+                'Případ nelze smazat, protože už obsahuje pohyb srážky. '
+                . 'Případ uzavřete standardním stavovým krokem.',
+            ],
+        ];
+        foreach ($footprints as $table => [$code, $message]) {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT 1 FROM {$table}
+                  WHERE supplier_id = ? AND case_id = ? LIMIT 1"
+            );
+            $stmt->execute([$supplierId, $caseId]);
+            if ($stmt->fetchColumn() !== false) {
+                throw new PayrollEnforcementDeletionBlockedException($code, $message);
+            }
+        }
+
+        $liability = $this->db->pdo()->prepare(
+            "SELECT 1 FROM payroll_payment_liabilities
+              WHERE supplier_id = ? AND liability_kind = 'enforcement'
+                AND liability_reference LIKE ? LIMIT 1"
+        );
+        $liability->execute([$supplierId, "enforcement:c{$caseId}:%"]);
+        if ($liability->fetchColumn() !== false) {
+            throw new PayrollEnforcementDeletionBlockedException(
+                'payment_footprint_exists',
+                'Případ nelze smazat, protože už z něj vznikl platební závazek '
+                . 'nebo navazující platba. Případ uzavřete standardním stavovým krokem.',
+            );
+        }
+
+        if (PayrollTimeValue::string($case['status'] ?? null, 'status') !== 'received') {
+            throw new PayrollEnforcementDeletionBlockedException(
+                'case_started',
+                'Smazat lze jen případ, který je stále ve stavu „Přijato — čeká na ověření“. '
+                . 'Tento případ už zachovejte v historii a případně jej zastavte.',
+            );
+        }
     }
 
     private function assertEmployee(int $supplierId, int $employeeId): void

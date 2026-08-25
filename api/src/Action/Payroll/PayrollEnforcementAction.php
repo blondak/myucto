@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Repository\Payroll\PayrollEnforcementConflictException;
+use MyInvoice\Repository\Payroll\PayrollEnforcementDeletionBlockedException;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
@@ -126,6 +127,60 @@ final class PayrollEnforcementAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
         return Json::ok($response, ['case' => $this->presentCase($request, $case)], 201);
+    }
+
+    /** @param array{id:string} $args */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->input($request);
+            $deleted = $this->transactional(
+                function () use ($request, $args, $body): ?array {
+                    $case = $this->repository->deleteUnusedCase(
+                        $this->currentSupplierId($request),
+                        (int) $args['id'],
+                        $this->positiveInt($body['row_version'] ?? null, 'row_version'),
+                    );
+                    if ($case !== null) {
+                        $this->audit(
+                            $request,
+                            'payroll.enforcement.case.deleted',
+                            $case,
+                        );
+                    }
+                    return $case;
+                },
+            );
+        } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (PayrollEnforcementConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        } catch (PayrollEnforcementDeletionBlockedException $e) {
+            return Json::error(
+                $response,
+                'enforcement_case_delete_blocked',
+                $e->getMessage(),
+                409,
+                ['blocker' => $e->blockerCode, 'suggestion' => 'stop'],
+            );
+        }
+        if ($deleted === null) {
+            return Json::error(
+                $response,
+                'not_found',
+                'Exekuční případ nebyl nalezen.',
+                404,
+            );
+        }
+        return Json::ok($response, [
+            'deleted' => true,
+            'id' => PayrollTimeValue::int($deleted['id'] ?? null, 'id'),
+        ]);
     }
 
     /** @param array{id:string} $args */

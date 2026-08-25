@@ -17,9 +17,11 @@ const m = vi.hoisted(() => ({
   dependants: vi.fn(),
   peopleOptions: vi.fn(),
   institutionAccounts: vi.fn(),
+  deleteCase: vi.fn(),
   canRead: vi.fn(),
   canWrite: vi.fn(),
   error: vi.fn(),
+  success: vi.fn(),
 }))
 
 // Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
@@ -39,6 +41,7 @@ vi.mock('@/api/payrollEnforcement', () => ({
     addClaim: vi.fn(),
     updateEvidence: vi.fn(),
     transition: vi.fn(),
+    deleteCase: m.deleteCase,
     monthEvidence: m.monthEvidence,
     saveMonthEvidence: vi.fn(),
     dependants: m.dependants,
@@ -62,7 +65,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: m.error, success: vi.fn(), warning: vi.fn() }),
+  useToast: () => ({ error: m.error, success: m.success, warning: vi.fn() }),
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -184,8 +187,49 @@ describe('EnforcementCases', () => {
     m.detail.mockImplementation(async () => detailOf(summary()))
     m.peopleOptions.mockResolvedValue([{ id: 3, full_name: 'Syntetický Povinný' }])
     m.institutionAccounts.mockResolvedValue([])
+    m.deleteCase.mockResolvedValue({ deleted: true, id: 11 })
     m.monthEvidence.mockResolvedValue(monthEvidenceOf())
     m.dependants.mockResolvedValue([])
+  })
+
+  it('offers deletion for an unused received case even after draft evidence changed', async () => {
+    const unused = summary({
+      claim_count: 0,
+      outstanding_minor_units: 0,
+      recipient_verified: true,
+      row_version: 3,
+    })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    const action = wrapper.findComponent({ name: 'ActionBar' })
+      .props('actions').find((item: any) => item.key === 'delete')
+    expect(action).toMatchObject({ variant: 'danger', tier: 'overflow', show: true })
+    wrapper.unmount()
+  })
+
+  it('confirms deletion and sends the current row version', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const unused = summary({ claim_count: 0, outstanding_minor_units: 0, row_version: 3 })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    const action = wrapper.findComponent({ name: 'ActionBar' })
+      .props('actions').find((item: any) => item.key === 'delete')
+    await action.run()
+    await flushPromises()
+
+    expect(window.confirm).toHaveBeenCalledWith('payroll.enforcement.delete_confirm')
+    expect(m.deleteCase).toHaveBeenCalledWith(11, 3)
+    expect(m.success).toHaveBeenCalledWith('payroll.enforcement.case_deleted')
+    expect(wrapper.find('[data-test="enforcement-detail-panel"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   /*

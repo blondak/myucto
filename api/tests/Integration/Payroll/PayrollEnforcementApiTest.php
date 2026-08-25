@@ -1421,6 +1421,97 @@ final class PayrollEnforcementApiTest extends TestCase
         )->execute([$this->supplierId, $caseId]);
     }
 
+    public function testUnusedReceivedCaseCanBeDeletedAfterDraftEvidenceWasSaved(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $changed = $this->repository->updateCaseEvidence(
+            $this->supplierId,
+            $caseId,
+            false,
+            true,
+            1,
+            $this->userId,
+        );
+        $rowVersion = PayrollTimeValue::int($changed['row_version'] ?? null, 'row_version');
+
+        $response = $this->deleteCase($caseId, $rowVersion);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertTrue((bool) ($this->json($response)['deleted'] ?? false));
+        self::assertNull($this->repository->findCase($this->supplierId, $caseId));
+
+        $audit = $this->db->pdo()->prepare(
+            'SELECT action FROM activity_log
+              WHERE supplier_id = ? AND entity_type = ? AND entity_id = ?
+              ORDER BY id'
+        );
+        $audit->execute([$this->supplierId, 'payroll_enforcement_case', $caseId]);
+        self::assertSame([
+            'payroll.enforcement.case.created',
+            'payroll.enforcement.case.deleted',
+        ], $audit->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    public function testDeleteFailsClosedForClaimAndStaleVersion(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+
+        $stale = $this->deleteCase($caseId, 2);
+        self::assertSame(409, $stale->getStatusCode());
+        self::assertSame('row_version_conflict', $this->errorCode($stale));
+
+        $this->repository->addClaim($this->supplierId, $caseId, [
+            'legal_basis' => 'statutory',
+            'category' => 'non_priority',
+            'outstanding_minor_units' => 100_000,
+            'maintenance_weight_minor_units' => null,
+            'priority_date' => '2026-05-20',
+            'order_issued_on' => '2026-05-19',
+            'legal_title_verified' => false,
+            'order_or_notice_delivered' => false,
+            'priority_classification_verified' => false,
+            'agreement_verified' => false,
+            'due_monetary_claim_verified' => false,
+        ]);
+        $blocked = $this->deleteCase($caseId, 2);
+        self::assertSame(409, $blocked->getStatusCode());
+        self::assertSame('enforcement_case_delete_blocked', $this->errorCode($blocked));
+        self::assertStringContainsString('pohledávku', (string) $blocked->getBody());
+        self::assertNotNull($this->repository->findCase($this->supplierId, $caseId));
+    }
+
+    public function testDeleteRequiresSessionAndTenantOwnership(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+
+        $bearer = $this->action->delete(
+            $this->request(
+                'DELETE',
+                "/api/payroll/enforcement/cases/{$caseId}",
+                authMethod: 'bearer',
+            )->withParsedBody(['row_version' => 1]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->errorCode($bearer));
+
+        $foreign = $this->action->delete(
+            $this->request(
+                'DELETE',
+                "/api/payroll/enforcement/cases/{$caseId}",
+                supplierId: $this->otherSupplierId,
+            )->withParsedBody(['row_version' => 1]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(404, $foreign->getStatusCode());
+        self::assertNotNull($this->repository->findCase($this->supplierId, $caseId));
+    }
+
     /** @return array<string,mixed> */
     private function createCase(int $employeeId, ?int $supplierId = null): array
     {
@@ -1436,6 +1527,16 @@ final class PayrollEnforcementApiTest extends TestCase
         $response = $this->action->create($request, new Response());
         self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
         return PayrollTimeValue::row($this->json($response)['case'] ?? null, 'case');
+    }
+
+    private function deleteCase(int $caseId, int $rowVersion): ResponseInterface
+    {
+        return $this->action->delete(
+            $this->request('DELETE', "/api/payroll/enforcement/cases/{$caseId}")
+                ->withParsedBody(['row_version' => $rowVersion]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
     }
 
     /** @return array<string,mixed> */

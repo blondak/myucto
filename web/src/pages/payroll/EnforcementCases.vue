@@ -27,6 +27,7 @@ import {
 import { eligibleAllowances, evidenceScope } from '@/pages/payroll/enforcementEvidenceScope'
 import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
@@ -201,6 +202,28 @@ const transitionCanSubmit = computed(() => {
   if (documentCommands.has(command) && !selectedDocument.value) return false
   return !reasonCommands.has(command) || transitionReason.value.trim().length > 0
 })
+
+const canDeleteUnusedCase = computed(() => {
+  const current = detail.value
+  return current !== null
+    && current.status === 'received'
+    && current.claim_count === 0
+    && current.claims.length === 0
+    && current.events.length === 0
+    && current.ledger.length === 0
+})
+
+const detailActions = computed<ActionItem[]>(() => [{
+  key: 'delete',
+  label: t('payroll.enforcement.delete_case'),
+  icon: 'trash',
+  tier: 'overflow',
+  variant: 'danger',
+  show: canWrite.value && canDeleteUnusedCase.value,
+  disabled: saving.value,
+  loading: saving.value,
+  run: deleteCase,
+}])
 
 /*
  * Proč nejde přechod potvrdit. Obě podmínky mají konkrétní nápravu hned
@@ -447,6 +470,23 @@ async function createCase() {
     toast.success(t('payroll.enforcement.case_created'))
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('payroll.enforcement.save_failed'))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function deleteCase() {
+  const current = detail.value
+  if (!current || !canDeleteUnusedCase.value) return
+  if (!window.confirm(t('payroll.enforcement.delete_confirm'))) return
+  saving.value = true
+  try {
+    await payrollEnforcementApi.deleteCase(current.id, current.row_version)
+    collapseDetail()
+    await load()
+    toast.success(t('payroll.enforcement.case_deleted'))
+  } catch (error: any) {
+    await handleMutationError(error)
   } finally {
     saving.value = false
   }
@@ -795,6 +835,7 @@ onMounted(load)
             <button v-for="command in (commandByStatus[detail.status] || [])" :key="command" :class="commandVariant(command)" :disabled="saving || (documentCommands.has(command) && !canReadDocuments)" :title="documentCommands.has(command) && !canReadDocuments ? t('payroll.enforcement.document_permission_required') : undefined" @click="openTransition(command)">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="command === 'stop' ? ICONS.x : ICONS.cycle" /></svg>{{ t(`payroll.enforcement.commands.${command}`) }}
             </button>
+            <ActionBar :actions="detailActions" />
           </div>
         </div>
 

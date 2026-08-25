@@ -214,6 +214,10 @@ export const payrollEnforcementApi = {
   }) =>
     api.post<{ case: EnforcementCaseDetail }>('/payroll/enforcement/cases', payload)
       .then(response => response.data.case),
+  deleteCase: (caseId: number, rowVersion: number) =>
+    api.delete<{ deleted: true; id: number }>(`/payroll/enforcement/cases/${caseId}`, {
+      data: { row_version: rowVersion },
+    }).then(response => response.data),
   addClaim: (caseId: number, payload: EnforcementClaimPayload) =>
     api.post<{ claim: EnforcementClaim }>(
       `/payroll/enforcement/cases/${caseId}/claims`,

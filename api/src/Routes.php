@@ -744,6 +744,7 @@ final class Routes
             $g->get('/enforcement/cases', [PayrollEnforcementAction::class, 'list']);
             $g->post('/enforcement/cases', [PayrollEnforcementAction::class, 'create']);
             $g->get('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'detail']);
+            $g->delete('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'delete']);
             $g->post('/enforcement/cases/{id:[0-9]+}/claims', [PayrollEnforcementAction::class, 'addClaim']);
             $g->put('/enforcement/cases/{id:[0-9]+}/evidence', [PayrollEnforcementAction::class, 'updateEvidence']);
             $g->post(
