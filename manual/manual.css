@@ -465,7 +465,7 @@ a:hover { text-decoration: underline; }
     color: var(--code-fg);
     padding: 1px 5px;
     border-radius: 4px;
-    font-family: "Geist Mono", ui-monospace, "JetBrains Mono", Consolas, monospace;
+    font-family: "Geist Mono", ui-monospace, Consolas, monospace;
     font-size: 12.5px;
 }
 .content pre.code-block {
@@ -476,7 +476,7 @@ a:hover { text-decoration: underline; }
     border-radius: 8px;
     overflow-x: auto;
     margin: 0 auto 16px;
-    font-family: "Geist Mono", ui-monospace, "JetBrains Mono", Consolas, monospace;
+    font-family: "Geist Mono", ui-monospace, Consolas, monospace;
     font-size: 12.5px;
     line-height: 1.55;
     max-width: 100%;

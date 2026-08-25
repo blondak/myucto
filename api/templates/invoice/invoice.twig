@@ -345,7 +345,7 @@
               {% endif %}
               {% set _vs = payment_varsymbol|default(invoice.varsymbol) %}
               {% if _vs %}
-                <div class="bank-meta-line">{{ t('Var. symbol', 'Var. symbol') }}: <span style="font-family:'jetbrainsmono','DejaVu Sans Mono',monospace;color:#15131D;">{{ _vs }}</span></div>
+                <div class="bank-meta-line">{{ t('Var. symbol', 'Var. symbol') }}: <span style="font-family:'geistmono',monospace;color:#15131D;">{{ _vs }}</span></div>
               {% endif %}
               {% if bank.bic or bank.bank_name %}
                 <div class="spacer-2">&nbsp;</div>
@@ -590,7 +590,7 @@
 <div style="margin-bottom:5mm;">
   <div class="wr-title">{{ work_report.title }}</div>
   <div style="font-size:9pt;color:#5A5470;">
-    {{ t('K faktuře', 'For invoice') }} <span style="font-family:'jetbrainsmono','DejaVu Sans Mono',monospace;">{{ invoice.varsymbol }}</span>
+    {{ t('K faktuře', 'For invoice') }} <span style="font-family:'geistmono',monospace;">{{ invoice.varsymbol }}</span>
     {% if invoice.project_name %} · {{ t('Zakázka', 'Project') }}: {{ invoice.project_name }}{% endif %}
   </div>
 </div>

@@ -13,7 +13,7 @@ use Twig\Loader\FilesystemLoader;
 /**
  * Renderer pro PDF platebního příkazu (portrait A4) — přehled plateb k odeslání do banky:
  * hlavička s účtem plátce + datem splatnosti, tabulka příjemců (účet, VS/KS/SS, částka,
- * ověření účtu) a součet. Sdílí fonty/branding přes MpdfFontConfig (Montserrat + JetBrains).
+ * ověření účtu) a součet. Sdílí fonty/branding přes MpdfFontConfig (Montserrat + Geist Mono).
  */
 final class PaymentOrderPdfRenderer
 {

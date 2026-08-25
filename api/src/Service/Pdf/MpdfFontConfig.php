@@ -13,11 +13,21 @@ use Mpdf\Config\FontVariables;
  *
  * Primární písmo je Montserrat (SIL OFL) — geometrický bezpatkový font s výraznými
  * tučnými řezy a brandovým charakterem, plná česká diakritika, řezy R/B/I/BI.
- * Monospace (částky, varsymboly, IBANy, datumy) je JetBrains Mono (SIL OFL) —
- * tabulkové číslice → zarovnání číselných sloupců; stejný mono brand-font jako appka.
+ * Monospace (částky, varsymboly, IBANy, datumy) je Geist Mono (SIL OFL) —
+ * tabulkové číslice → zarovnání číselných sloupců.
+ *
+ * ⚠️ Nula NESMÍ být tečkovaná. Předchozí JetBrains Mono má uprostřed nuly tečku,
+ * která se v 8 pt a zvlášť po tisku na papír slévá s obvodem číslice → 0 se čte
+ * jako 8 (issue #35: varsymbol 26088 čten jako 26888, částka 105 400 jako 105 488).
+ * Geist Mono má nulu přeškrtnutou — škrt jde přes celou plochu znaku, takže se
+ * nemá s čím slít, a je to standardní disambiguátor pro ruční přepis i OCR.
+ * Plná kulatá nula je taky v pořádku; tečkovaná ne.
+ *
+ * Geist Mono je zároveň mono font aplikace (web/src/styles/fonts.css) — doklad
+ * a obrazovka sázejí čísla stejně. Při výměně fontu drž obě strany v páru.
  *
  * DejaVu Sans zůstává jako jediný `backupSubsFont` pro glyfy, které Montserrat
- * nemá (✓ ✗ ◆ ⚠ …). Monospace pasáže jedou přes JetBrains Mono (vlastní font),
+ * nemá (✓ ✗ ◆ ⚠ …). Monospace pasáže jedou přes Geist Mono (vlastní font),
  * takže DejaVu Sans Mono se nepoužívá (a `api/bin/cleanup-mpdf-fonts.php` ho maže).
  *
  * Fonty jsou v api/resources/fonts/ — mimo vendor/mpdf/mpdf/ttfonts/, takže je
@@ -61,13 +71,17 @@ final class MpdfFontConfig
             'I'  => 'Montserrat-Italic.ttf',
             'BI' => 'Montserrat-BoldItalic.ttf',
         ];
-        // Monospace pro číselné pasáže (CSS na ně cílí přes font-family:'jetbrainsmono').
+        // Monospace pro číselné pasáže (CSS na ně cílí přes font-family:'geistmono').
         // Kurzíva se v mono nepoužívá → I/BI mapujeme na R/B.
-        $fontData['jetbrainsmono'] = [
-            'R'  => 'JetBrainsMono-Regular.ttf',
-            'B'  => 'JetBrainsMono-Bold.ttf',
-            'I'  => 'JetBrainsMono-Regular.ttf',
-            'BI' => 'JetBrainsMono-Bold.ttf',
+        // Tučný slot drží SemiBold (600), ne Bold (700): 600 je nejtěžší mono řez,
+        // který deklaruje aplikace (`font-weight: 400 600` ve web/src/styles/fonts.css),
+        // takže součet na dokladu má stejnou váhu jako tentýž údaj na obrazovce.
+        // 700 navíc opticky přebíjí zbytek sazby, která je navržená na lehčí tučný řez.
+        $fontData['geistmono'] = [
+            'R'  => 'GeistMono-Regular.ttf',
+            'B'  => 'GeistMono-SemiBold.ttf',
+            'I'  => 'GeistMono-Regular.ttf',
+            'BI' => 'GeistMono-SemiBold.ttf',
         ];
 
         return [
@@ -88,11 +102,11 @@ final class MpdfFontConfig
             // (po cleanup-mpdf-fonts.php). mPDF defaultně mapuje sans-serif →
             // DejaVuSansCondensed, monospace → DejaVuSansMono, serif → DejaVuSerif —
             // ty jsme smazali, takže bez tohohle by `font-family: …, sans-serif`
-            // shodilo render (Cannot find TTF …). Přemapujeme na Montserrat / JetBrains
+            // shodilo render (Cannot find TTF …). Přemapujeme na Montserrat / Geist Mono
             // / DejaVu Sans (jediný fallback pro symboly).
             'sans_fonts'       => ['montserrat', 'dejavusans'],
             'serif_fonts'      => ['dejavusans'],
-            'mono_fonts'       => ['jetbrainsmono', 'dejavusans'],
+            'mono_fonts'       => ['geistmono', 'dejavusans'],
         ];
     }
 }

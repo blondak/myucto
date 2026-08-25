@@ -669,7 +669,7 @@ php api/bin/migrate.php</code></pre>
   padding: 0 4px;
   border-radius: 3px;
   font-size: 0.85em;
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
 }
 .release-notes :deep(pre) {
   background: #1e1e2e;

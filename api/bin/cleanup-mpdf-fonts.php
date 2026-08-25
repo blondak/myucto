@@ -32,9 +32,9 @@ if (!is_dir($ttfontsDir)) {
 
 $keep = [
     // DejaVu Sans = jediný `backupSubsFont` pro glyfy, které Montserrat nemá
-    // (✓ ✗ ⚠ ◆ …). Primární písma (Montserrat + JetBrains Mono) jsou v
+    // (✓ ✗ ⚠ ◆ …). Primární písma (Montserrat + Geist Mono) jsou v
     // api/resources/fonts/ (mimo tenhle adresář). Mono pasáže (varsymboly, IBANy,
-    // čísla účtů) jedou přes JetBrains Mono → DejaVu Sans Mono ANI Condensed netřeba.
+    // čísla účtů) jedou přes Geist Mono → DejaVu Sans Mono ANI Condensed netřeba.
     // ⚠️ Pozor: tenhle whitelist MUSÍ sedět s `backupSubsFont` v MpdfFontConfig.php
     // (= ['dejavusans']). Kdyby tam přibyl 'dejavusansmono', vrať sem i DejaVuSansMono*.
     'DejaVuSans.ttf',

@@ -671,7 +671,7 @@ strong { color: #4c1d95; }
 em { font-style: italic; }
 
 code {
-  font-family: jetbrainsmono, monospace;
+  font-family: geistmono, monospace;
   font-size: 9pt;
   background: #f3f0ff;
   border: 1px solid #e0d7fa;
@@ -770,7 +770,7 @@ pre.code-block {
   border-radius: 3pt;
   padding: 3mm 4mm;
   margin: 3mm 0 4mm 0;
-  font-family: jetbrainsmono, monospace;
+  font-family: geistmono, monospace;
   font-size: 9pt;
   line-height: 1.45;
   page-break-inside: avoid;
@@ -792,7 +792,7 @@ $html = $cover . $tocHtml . $body;
 $tmpDir = sys_get_temp_dir() . '/mpdf-myinvoice';
 @mkdir($tmpDir, 0755, true);
 
-// Stejné fonty jako faktury: Montserrat (text) + JetBrains Mono (kód), DejaVu Sans
+// Stejné fonty jako faktury: Montserrat (text) + Geist Mono (kód), DejaVu Sans
 // jen jako backupSubsFont pro symboly. PDF/A pro manuál nezapínáme (jen font klíče).
 $fontOpts = \MyInvoice\Service\Pdf\MpdfFontConfig::options();
 unset($fontOpts['PDFA'], $fontOpts['PDFAversion'], $fontOpts['PDFAauto']);

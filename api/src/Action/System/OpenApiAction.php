@@ -243,7 +243,7 @@ final class OpenApiAction
             lineHeight: '1.25em'
           },
           code: {
-            fontFamily: '"JetBrains Mono", "Fira Code", Consolas, monospace',
+            fontFamily: '"Geist Mono", ui-monospace, Consolas, monospace',
             fontSize: '14px',
             lineHeight: '1.55em',
             color:    '#3B2D83',
@@ -446,7 +446,7 @@ HTML;
     .swagger-ui .opblock.opblock-patch  .opblock-summary-method { background: #7E6DD6; }
     .swagger-ui .opblock-summary-path,
     .swagger-ui .opblock-summary-path__deprecated {
-      color: var(--ink); font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      color: var(--ink); font-family: "Geist Mono", ui-monospace, Consolas, monospace;
     }
     .swagger-ui .btn {
       border-radius: 10px; font-weight: 600;
@@ -723,7 +723,7 @@ HTML;
           --scalar-border-color: #ecebe9;
           --scalar-radius: 10px;
           --scalar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
-          --scalar-font-code: "JetBrains Mono", "Fira Code", Consolas, monospace;
+          --scalar-font-code: "Geist Mono", ui-monospace, Consolas, monospace;
           --scalar-color-green:  #21A86A;
           --scalar-color-blue:   #6753AE;
           --scalar-color-orange: #D49C2E;

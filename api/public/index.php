@@ -250,7 +250,7 @@ try {
       <style>
         body { font: 14px/1.5 system-ui, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 20px; color: #15131D; }
         h1 { color: #3B2D83; }
-        code { background: #F4F2F8; padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', Consolas, monospace; }
+        code { background: #F4F2F8; padding: 2px 6px; border-radius: 4px; font-family: 'Geist Mono', ui-monospace, Consolas, monospace; }
         pre { background: #15131D; color: #fff; padding: 12px 16px; border-radius: 6px; overflow-x: auto; }
         .err { background: #FBEDED; border-left: 3px solid #D45B5B; padding: 12px; margin: 16px 0; }
       </style>
