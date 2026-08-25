@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceScope;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceSource;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
+use MyInvoice\Service\Payroll\Garnishment\GarnishmentInput;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzOrdinaryEvidenceBuilder
@@ -336,7 +340,6 @@ final class JmhzOrdinaryEvidenceBuilder
         $claims = $enforcement['claims'] ?? null;
         $insolvency = $this->object($enforcement['insolvency'] ?? null, 'insolvency');
         if (!is_array($claims) || !array_is_list($claims)
-            || ($enforcement['claim_register_evidence_complete'] ?? null) !== true
             || $claims !== [] || ($insolvency['mode'] ?? null) !== 'none'
         ) {
             $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Revize obsahuje exekuční nebo insolvenční evidenci.');
@@ -377,9 +380,48 @@ final class JmhzOrdinaryEvidenceBuilder
         $resultEnforcement = $this->object($resultPerson['enforcement'] ?? null, 'result.enforcement');
         $enforcementInput = $this->object($resultEnforcement['input'] ?? null, 'result.enforcement.input');
         $enforcementResult = $this->object($resultEnforcement['result'] ?? null, 'result.enforcement.result');
+        try {
+            $calculationInput = GarnishmentInput::fromCanonicalArray($enforcementInput);
+            $calculationEvidence = new EnforcementPersonMonthEvidence(
+                $calculationInput->claims,
+                $calculationInput->eligibleDependants,
+                $calculationInput->dependantsEvidenceComplete,
+                $calculationInput->eligibleSpouse,
+                $calculationInput->spouseEvidenceComplete,
+                $calculationInput->pensionEvidence,
+                $calculationInput->hasMultiplePayers,
+                $calculationInput->protectedAmountOverrideMinorUnits,
+                $calculationInput->protectedAmountOverrideVerified,
+                $calculationInput->claimRegisterEvidenceComplete,
+                $calculationInput->insolvency,
+            );
+        } catch (\Throwable) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_source_invalid',
+                'Výsledek neobsahuje platný vstup výpočtu srážek.',
+            );
+        }
+        if (($enforcement['claim_register_evidence_complete'] ?? null) !== true) {
+            try {
+                $evidenceScope = EnforcementEvidenceScope::fromCanonicalArray(
+                    $this->object($enforcementResult['evidence_source'] ?? null, 'result.enforcement.result.evidence_source'),
+                );
+            } catch (\Throwable) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_source_invalid',
+                    'Výsledek neobsahuje platný rozsah kontroly exekuční evidence.',
+                );
+            }
+            if ($evidenceScope->claimRegister !== EnforcementEvidenceSource::NotApplicable) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_deduction_conflict',
+                    'Kontrola evidence pohledávek není doložená ani označená jako nepoužitelná.',
+                );
+            }
+        }
         if (($enforcementResult['status'] ?? null) !== 'supported'
             || ($enforcementResult['issues'] ?? null) !== []
-            || CanonicalJson::encode($enforcementInput) !== CanonicalJson::encode($enforcement)
+            || CanonicalJson::encode($calculationEvidence->toCanonicalArray()) !== CanonicalJson::encode($enforcement)
             || ($enforcementResult['allocations'] ?? null) !== []
             || ($enforcementResult['total_withheld_minor_units'] ?? null) !== 0
             || ($enforcementResult['insolvency_applied'] ?? null) !== false

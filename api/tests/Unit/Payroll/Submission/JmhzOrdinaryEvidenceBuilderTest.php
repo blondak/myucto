@@ -144,6 +144,66 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
         }
     }
 
+    public function testEmptyClaimRegisterDoesNotRequireManualConfirmationWhenFrozenScopeSaysNotApplicable(): void
+    {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['enforcement_evidence']['claim_register_evidence_complete'] = false;
+        $this->replaceInput($source, $input);
+
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($result);
+        $result['people'][0]['enforcement']['input']['evidence']['claim_register_complete'] = false;
+        $result['people'][0]['enforcement']['result']['evidence_source'] = [
+            'claim_register' => 'not_applicable',
+            'dependants' => 'not_applicable',
+            'spouse' => 'not_applicable',
+        ];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(
+            7,
+            $source,
+            101,
+            $this->facts(),
+            12,
+            '2026-08-13T12:00:00Z',
+        );
+
+        self::assertSame(101, $snapshot->payload['scope']['employment_id']);
+    }
+
+    public function testMissingClaimRegisterScopeIsRejectedWhenMonthlyConfirmationIsFalse(): void
+    {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['enforcement_evidence']['claim_register_evidence_complete'] = false;
+        $this->replaceInput($source, $input);
+
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($result);
+        $result['people'][0]['enforcement']['input']['evidence']['claim_register_complete'] = false;
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+
+        try {
+            (new JmhzOrdinaryEvidenceBuilder())->build(
+                7,
+                $source,
+                101,
+                $this->facts(),
+                12,
+                '2026-08-13T12:00:00Z',
+            );
+            self::fail('Chybějící rozsah kontroly musí být odmítnut.');
+        } catch (JmhzOrdinaryEvidenceException $exception) {
+            self::assertSame('jmhz_ordinary_evidence_source_invalid', $exception->validationCode);
+        }
+    }
+
     public function testResultDeductionIsRejectedEvenWhenInputRegistersAreEmpty(): void
     {
         $source = $this->source();
@@ -250,7 +310,20 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
         $enforcement = [
             'claim_register_evidence_complete' => true,
             'claims' => [],
-            'insolvency' => ['mode' => 'none'],
+            'dependants_evidence_complete' => false,
+            'eligible_dependants' => 0,
+            'eligible_spouse' => false,
+            'has_multiple_payers' => false,
+            'insolvency' => [
+                'court_determined_amount_minor_units' => null,
+                'decision_verified' => false,
+                'mode' => 'none',
+                'recipient_verified' => false,
+            ],
+            'pension_evidence' => 'unknown',
+            'protected_amount_override_minor_units' => null,
+            'protected_amount_override_verified' => false,
+            'spouse_evidence_complete' => false,
         ];
         $input = [
             'schema_version' => 'payroll-run-input.v2',
@@ -283,7 +356,35 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
                     ],
                 ],
                 'enforcement' => [
-                    'input' => $enforcement,
+                    'input' => [
+                        'claims' => [],
+                        'evidence' => [
+                            'claim_register_complete' => true,
+                            'dependants_complete' => false,
+                            'eligible_dependants' => 0,
+                            'eligible_spouse' => false,
+                            'has_multiple_payers' => false,
+                            'pension' => 'unknown',
+                            'protected_amount_override_minor_units' => null,
+                            'protected_amount_override_verified' => false,
+                            'spouse_complete' => false,
+                        ],
+                        'income' => [
+                            'excluded_minor_units' => 0,
+                            'garnishable_minor_units' => 0,
+                            'issues' => [],
+                            'status' => 'supported',
+                            'trace' => [],
+                        ],
+                        'insolvency' => [
+                            'court_determined_amount_minor_units' => null,
+                            'decision_verified' => false,
+                            'mode' => 'none',
+                            'recipient_verified' => false,
+                        ],
+                        'payment_date' => '2026-08-15',
+                        'period' => '2026-07',
+                    ],
                     'result' => [
                         'status' => 'supported',
                         'issues' => [],

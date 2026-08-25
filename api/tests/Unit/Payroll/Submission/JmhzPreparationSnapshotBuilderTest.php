@@ -714,6 +714,77 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
     }
 
+    public function testCanonicalStoredDerivedOrdinaryEvidenceIsAccepted(): void
+    {
+        $source = $this->source();
+        $ordinary = $this->ordinaryEvidenceSource($source, 11, 101, 701);
+        $ordinary['payload']['confirmation'] = [
+            'source_kind' => 'derived_from_frozen_payroll_sources',
+            'source_term_id' => 201,
+            'source_term_row_version' => 1,
+            'confirmed_by_user_id' => 12,
+            'confirmed_at' => '2026-08-13T12:00:00.000000Z',
+        ];
+        $ordinary['payload'] = json_decode(
+            CanonicalJson::encode($ordinary['payload']),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+            [],
+            [],
+            [101 => $ordinary],
+        );
+
+        self::assertNotContains(
+            'jmhz_ordinary_evidence_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+    }
+
+    public function testDerivedOrdinaryEvidenceWithDifferentTermVersionIsRejected(): void
+    {
+        $source = $this->source();
+        $ordinary = $this->ordinaryEvidenceSource($source, 11, 101, 701);
+        $ordinary['payload']['confirmation'] = [
+            'source_kind' => 'derived_from_frozen_payroll_sources',
+            'source_term_id' => 201,
+            'source_term_row_version' => 99,
+            'confirmed_by_user_id' => 12,
+            'confirmed_at' => '2026-08-13T12:00:00.000000Z',
+        ];
+        $ordinary['payload'] = json_decode(
+            CanonicalJson::encode($ordinary['payload']),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+
+        try {
+            (new JmhzPreparationSnapshotBuilder())->build(
+                7,
+                'test',
+                $source,
+                [],
+                [],
+                [],
+                [],
+                [101 => $ordinary],
+            );
+            self::fail('Odvozená evidence z jiné verze podmínek musí být odmítnuta.');
+        } catch (JmhzPreparationSnapshotException $exception) {
+            self::assertSame(
+                'jmhz_ordinary_evidence_confirmation_invalid',
+                $exception->validationCode,
+            );
+        }
+    }
+
     /**
      * Vztah bez evidence je ADRESNÝ nález na vztahu, ne výjimka a ne nález
      * na revizi — účetní musí vědět, komu evidenci doplnit.

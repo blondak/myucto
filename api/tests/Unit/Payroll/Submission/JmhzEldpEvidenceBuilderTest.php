@@ -32,6 +32,24 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         );
     }
 
+    public function testBuildsEvidenceFromCurrentApprovedCorrectionRevision(): void
+    {
+        $source = $this->source();
+        $source['revision']['revision_no'] = 2;
+        $source['revision']['current_revision_no'] = 2;
+        $source['revision']['revision_kind'] = 'correction';
+
+        $snapshot = (new JmhzEldpEvidenceBuilder())->build(
+            7,
+            101,
+            $source,
+            $this->confirmation(),
+        );
+
+        self::assertSame(401, $snapshot->payload['scope']['source_revision_id']);
+        self::assertSame('1++', $snapshot->payload['eldp_sections'][0]['code']);
+    }
+
     public function testRejectsOffByOneCalendarDay(): void
     {
         $confirmation = $this->confirmation();

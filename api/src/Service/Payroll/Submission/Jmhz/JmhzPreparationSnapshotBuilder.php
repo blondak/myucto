@@ -226,6 +226,7 @@ final class JmhzPreparationSnapshotBuilder
                         $revision,
                         $employeeId,
                         $employmentId,
+                        $term,
                     );
                     $usedOrdinaryEvidence[$employmentId] = $ordinary;
                 }
@@ -637,6 +638,7 @@ final class JmhzPreparationSnapshotBuilder
     /**
      * @param array<string,mixed> $evidence
      * @param array<string,mixed> $revision
+     * @param array<string,mixed> $term
      */
     private function assertOrdinaryEvidence(
         array $evidence,
@@ -649,6 +651,7 @@ final class JmhzPreparationSnapshotBuilder
         array $revision,
         int $employeeId,
         int $employmentId,
+        array $term,
     ): void {
         $this->positiveInt($evidence['id'] ?? null, 'ordinary_evidence.id');
         $this->hash(
@@ -745,13 +748,23 @@ final class JmhzPreparationSnapshotBuilder
                 'row_sha256' => $catalog->interaction($interactionId)->rowHash,
             ];
         }
-        if (($payload['interaction_decisions'] ?? null) !== $expectedInteractions
-            || ($payload['derived_interactions'] ?? null) !== [[
-                'interaction_id' => 'IN36',
-                'triggered' => false,
-                'source_attribute_id' => '10546',
-                'row_sha256' => $catalog->interaction('IN36')->rowHash,
-            ]]
+        $expectedDerivedInteractions = [[
+            'interaction_id' => 'IN36',
+            'triggered' => false,
+            'source_attribute_id' => '10546',
+            'row_sha256' => $catalog->interaction('IN36')->rowHash,
+        ]];
+        $actualInteractions = $this->rows(
+            $payload['interaction_decisions'] ?? null,
+            'ordinary_evidence.interaction_decisions',
+        );
+        $actualDerivedInteractions = $this->rows(
+            $payload['derived_interactions'] ?? null,
+            'ordinary_evidence.derived_interactions',
+        );
+        if (CanonicalJson::encode($actualInteractions) !== CanonicalJson::encode($expectedInteractions)
+            || CanonicalJson::encode($actualDerivedInteractions)
+                !== CanonicalJson::encode($expectedDerivedInteractions)
         ) {
             $this->invalid(
                 'jmhz_ordinary_evidence_interaction_mismatch',
@@ -762,7 +775,13 @@ final class JmhzPreparationSnapshotBuilder
             $payload['confirmation'] ?? null,
             'ordinary_evidence.confirmation',
         );
-        if (($confirmation['source_kind'] ?? null) !== 'explicit_confirmation'
+        $sourceKind = $confirmation['source_kind'] ?? null;
+        $sourceIsValid = $sourceKind === 'explicit_confirmation';
+        if ($sourceKind === 'derived_from_frozen_payroll_sources') {
+            $sourceIsValid = ($confirmation['source_term_id'] ?? null) === ($term['id'] ?? null)
+                && ($confirmation['source_term_row_version'] ?? null) === ($term['row_version'] ?? null);
+        }
+        if (!$sourceIsValid
             || !is_int($confirmation['confirmed_by_user_id'] ?? null)
             || $confirmation['confirmed_by_user_id'] <= 0
             || !is_string($confirmation['confirmed_at'] ?? null)

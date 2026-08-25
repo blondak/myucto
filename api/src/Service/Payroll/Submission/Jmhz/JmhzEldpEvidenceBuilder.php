@@ -38,10 +38,10 @@ final class JmhzEldpEvidenceBuilder
         $runId = $this->positiveInt($revision['run_id'] ?? null, 'revision.run_id');
         $revisionNo = $this->positiveInt($revision['revision_no'] ?? null, 'revision.revision_no');
         if (($revision['status'] ?? null) !== 'approved'
-            || ($revision['revision_kind'] ?? null) !== 'regular'
+            || !in_array($revision['revision_kind'] ?? null, ['regular', 'correction'], true)
             || ($revision['current_revision_no'] ?? null) !== $revisionNo
         ) {
-            $this->invalid('jmhz_eldp_revision_not_current_approved', 'ELDP vyžaduje aktuální schválenou řádnou revizi.');
+            $this->invalid('jmhz_eldp_revision_not_current_approved', 'ELDP vyžaduje aktuální schválenou řádnou nebo opravnou revizi.');
         }
         $periodStart = $this->date($revision['period_start'] ?? null, 'revision.period_start');
         if (!str_ends_with($periodStart, '-01')) {
