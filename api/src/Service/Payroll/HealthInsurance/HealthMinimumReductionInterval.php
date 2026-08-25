@@ -22,10 +22,11 @@ final readonly class HealthMinimumReductionInterval
         }
         if (
             $reason !== HealthMinimumReductionReason::Unverified
+            && $evidenceReference !== null
             && !self::isEvidenceReference($evidenceReference)
         ) {
             throw new InvalidArgumentException(
-                'A verified health minimum reduction requires an evidence reference.',
+                'Health minimum reduction evidence reference is not canonical.',
             );
         }
         if ($reason === HealthMinimumReductionReason::Unverified && $evidenceReference !== null) {

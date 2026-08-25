@@ -1362,7 +1362,7 @@ onMounted(load)
         </div>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.note') }}</span>
-          <textarea v-model="approvalNote" data-test="jmhz-note" required minlength="5" maxlength="500" rows="3" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
+          <textarea v-model="approvalNote" data-test="jmhz-note" maxlength="500" rows="3" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
         </label>
         <div class="flex flex-wrap justify-end gap-2">
           <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeApproval">
@@ -1372,7 +1372,7 @@ onMounted(load)
           <button
             type="submit"
             :class="btnFilled('success')"
-            :disabled="saving || !approvalNote.trim() || !approvalConditionalComplete || Boolean(approvalItem.jmhz_work_summary.preview?.issues.length)"
+            :disabled="saving || !approvalConditionalComplete || Boolean(approvalItem.jmhz_work_summary.preview?.issues.length)"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
             {{ t('payroll.time.jmhz.confirm') }}

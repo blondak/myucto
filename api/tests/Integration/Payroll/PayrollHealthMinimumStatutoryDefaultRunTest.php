@@ -30,7 +30,7 @@ use PHPUnit\Framework\TestCase;
  * a hlídá obě strany zjednodušení:
  *  • běžný zaměstnanec bez jediného řádku evidence doběhne do `calculated`,
  *    a to i v měsíci, kdy dopočet skutečně vzniká (pak ho platí zaměstnanec),
- *  • výjimka „hradí zaměstnavatel" zůstává vázaná na doklad,
+ *  • výjimku „hradí zaměstnavatel" lze potvrdit bez textové reference,
  *  • prohlášené `unverified` dál končí ručním posouzením.
  */
 #[Group('integration')]
@@ -209,13 +209,7 @@ final class PayrollHealthMinimumStatutoryDefaultRunTest extends TestCase
         );
     }
 
-    /**
-     * Výjimka podle věty třetí § 3 odst. 10 (překážky na straně organizace)
-     * zůstává vázaná na doklad — na obou vrstvách. Databáze řádek bez reference
-     * vůbec nepřijme a evidence s prázdnou referencí neprojde ani do snímku,
-     * takže se běh nemá o co opřít a nespočítá se.
-     */
-    public function testEmployerObstacleWithoutDocumentNeverReachesCalculation(): void
+    public function testEmployerObstacleDoesNotRequireDocumentReference(): void
     {
         $insert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_person_health_month_evidence
@@ -224,22 +218,20 @@ final class PayrollHealthMinimumStatutoryDefaultRunTest extends TestCase
              VALUES (?, ?, "2026-06-01", "employer_obstacle_verified", ?)'
         );
 
-        try {
-            $insert->execute([$this->supplierId, $this->employeeId, null]);
-            self::fail('Databáze přijala překážku zaměstnavatele bez dokladu.');
-        } catch (\PDOException $exception) {
-            self::assertStringContainsString(
-                'chk_pp_health_month_responsibility',
-                $exception->getMessage(),
-            );
-        }
+        $insert->execute([$this->supplierId, $this->employeeId, null]);
+        $this->seedWage(self::GROSS_BELOW_MINIMUM_MINOR);
 
-        // Prázdný řetězec projde CHECKem sloupce, ale doklad to není — snímek
-        // zákonné evidence takový řádek odmítne a běh se nespočítá.
-        $insert->execute([$this->supplierId, $this->employeeId, '']);
+        $statutory = $this->calculateRun();
 
-        $this->expectException(\InvalidArgumentException::class);
-        $this->calculateRun();
+        self::assertSame('calculated', $statutory['result']['status']);
+        $health = $statutory['result']['people'][0]['health_insurance'];
+        self::assertSame('declared', $health['top_up_responsibility_source']);
+        self::assertNull($health['top_up_responsibility_evidence_reference']);
+        self::assertSame(0, $health['employee_minimum_top_up_minor_units']);
+        self::assertSame(
+            self::EXPECTED_TOP_UP_MINOR,
+            $health['employer_minimum_top_up_minor_units'],
+        );
     }
 
     /**

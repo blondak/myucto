@@ -420,6 +420,8 @@ export interface PayrollOpeningBalances {
   months: PayrollOpeningMonth[]
   /** Id aktuální verze podle druhu kumulace; oprava se na ně navazuje. */
   openings: Record<string, number | null>
+  /** Volitelná uživatelská dohledávka k převzatým úhrnům. */
+  source_reference: string
   /** Po schválené mzdě za daný rok už počáteční stavy měnit nelze. */
   locked: boolean
 }
@@ -791,7 +793,7 @@ export interface PayrollJmhzWorkSummaryApproval {
   care_hours: string | null
   employee_obstacle_paid_hours: string | null
   employer_obstacle_hours: string | null
-  confirmation_note: string
+  confirmation_note?: string
 }
 
 /**
@@ -3500,7 +3502,7 @@ export const payrollApi = {
     ).then(response => response.data.openings),
   saveStatutoryOpenings: (
     employeeId: number,
-    payload: { year: number, source_reference: string, months: PayrollOpeningMonth[] },
+    payload: { year: number, source_reference?: string, months: PayrollOpeningMonth[] },
   ) =>
     api.put<{ openings: PayrollOpeningBalances }>(
       `/payroll/people/${employeeId}/statutory-openings`,

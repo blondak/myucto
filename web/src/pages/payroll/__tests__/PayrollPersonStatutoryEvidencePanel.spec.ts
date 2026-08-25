@@ -65,18 +65,17 @@ function validatorRejection(
 
   if (section === 'tax_declarations') {
     const verified = value('status') !== 'unverified'
-    if (verified && value('evidence_reference') === null) return 'Ověřená evidence vyžaduje důkaz.'
     if (!verified && value('evidence_reference') !== null) return 'Neověřená evidence nesmí nést důkaz.'
   }
   if (section === 'tax_residences') {
     const residence = value('residence')
     const country = value('country_code')
     const evidence = value('evidence_reference')
-    if (residence === 'czech-resident' && (country !== 'CZ' || evidence === null)) {
-      return 'Česká daňová rezidence vyžaduje CZ a důkaz.'
+    if (residence === 'czech-resident' && country !== 'CZ') {
+      return 'Česká daňová rezidence vyžaduje CZ.'
     }
-    if (residence === 'non-resident' && (country === null || country === 'CZ' || evidence === null)) {
-      return 'Daňový nerezident vyžaduje zahraniční zemi a důkaz.'
+    if (residence === 'non-resident' && (country === null || country === 'CZ')) {
+      return 'Daňový nerezident vyžaduje zahraniční zemi.'
     }
     if (residence === 'unverified' && (country !== null || evidence !== null)) {
       return 'Neověřená daňová rezidence nesmí nést ověřené údaje.'
@@ -87,8 +86,8 @@ function validatorRejection(
     const country = value('foreign_country_code')
     const jurisdictionEvidence = value('jurisdiction_evidence_reference')
     if (jurisdiction === 'foreign_regime_verified') {
-      if (country === null || jurisdictionEvidence === null) {
-        return 'Ověřená zahraniční sociální jurisdikce vyžaduje zemi a důkaz.'
+      if (country === null) {
+        return 'Ověřená zahraniční sociální jurisdikce vyžaduje zemi.'
       }
     } else if (country !== null || jurisdictionEvidence !== null) {
       return 'Česká nebo neověřená sociální jurisdikce nesmí nést zahraniční důkaz.'
@@ -97,8 +96,8 @@ function validatorRejection(
     if (a1 === null) return 'Pole a1_status musí být neprázdný text.'
     const reference = value('a1_certificate_reference')
     const until = value('a1_valid_until')
-    if (a1 === 'verified' && (reference === null || until === null || until < effectiveOn)) {
-      return 'Ověřený A1 musí mít důkaz a platit k datu snímku.'
+    if (a1 === 'verified' && (until === null || until < effectiveOn)) {
+      return 'Ověřený A1 musí platit k datu snímku.'
     }
     if (a1 !== 'verified' && (reference !== null || until !== null)) {
       return 'Neověřený nebo nepoužitelný A1 nesmí nést ověřené údaje.'
@@ -109,7 +108,6 @@ function validatorRejection(
   }
   if (section === 'social_discount_claims') {
     const verified = value('status') === 'verified'
-    if (verified && value('evidence_reference') === null) return 'Ověřená evidence vyžaduje důkaz.'
     if (!verified && value('evidence_reference') !== null) return 'Neověřená evidence nesmí nést důkaz.'
   }
   if (section === 'health_coverages') {
@@ -117,8 +115,8 @@ function validatorRejection(
     const country = value('foreign_country_code')
     const jurisdictionEvidence = value('jurisdiction_evidence_reference')
     if (jurisdiction === 'foreign_regime_verified') {
-      if (country === null || jurisdictionEvidence === null) {
-        return 'Ověřená zahraniční zdravotní jurisdikce vyžaduje zemi a důkaz.'
+      if (country === null) {
+        return 'Ověřená zahraniční zdravotní jurisdikce vyžaduje zemi.'
       }
     } else if (country !== null || jurisdictionEvidence !== null) {
       return 'Česká nebo neověřená zdravotní jurisdikce nesmí nést zahraniční důkaz.'
@@ -129,8 +127,8 @@ function validatorRejection(
     if (code !== null && !['111', '201', '205', '207', '209', '211', '213'].includes(code)) {
       return `Kód zdravotní pojišťovny ${code} neexistuje.`
     }
-    if (status === 'verified' && (code === null || evidence === null)) {
-      return 'Ověřená zdravotní pojišťovna vyžaduje kód a důkaz.'
+    if (status === 'verified' && code === null) {
+      return 'Ověřená zdravotní pojišťovna vyžaduje kód.'
     }
     if (status === 'not_applicable' && (code !== null || evidence !== null)) {
       return 'Nepoužitelná česká zdravotní pojišťovna nesmí nést kód ani důkaz.'
@@ -145,16 +143,13 @@ function validatorRejection(
   if (section === 'health_month_evidence') {
     const responsibility = value('top_up_responsibility')
     const evidence = value('top_up_responsibility_evidence_reference')
-    if (responsibility === 'employer_obstacle_verified' && evidence === null) {
-      return 'Ověřená evidence vyžaduje důkaz.'
-    }
     if (responsibility !== 'employer_obstacle_verified' && evidence !== null) {
       return 'Neověřená evidence nesmí nést důkaz.'
     }
     const selected = value('selected_top_up_employer_reference')
     const selectedEvidence = value('selected_top_up_employer_evidence_reference')
-    if ((selected === null) !== (selectedEvidence === null)) {
-      return 'Volba zaměstnavatele pro doplatek vyžaduje referenci i důkaz.'
+    if (selected === null && selectedEvidence !== null) {
+      return 'Doklad k volbě zaměstnavatele vyžaduje zvoleného zaměstnavatele.'
     }
   }
 
@@ -314,7 +309,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(savedRow('tax_residences')).toMatchObject({
       residence: 'czech-resident',
       country_code: 'CZ',
-      evidence_reference: 'residence:cz-birth-number-address',
+      evidence_reference: null,
     })
     expect(savedRow('social_jurisdictions')).toMatchObject({
       jurisdiction: 'czech_regime_verified',
@@ -328,7 +323,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       jurisdiction: 'czech_regime_verified',
       insurer_status: 'verified',
       insurer_code: '205',
-      insurer_evidence_reference: 'health:insurer-registration',
+      insurer_evidence_reference: null,
     })
   })
 
@@ -359,7 +354,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     ).toBe('211')
   })
 
-  it('přepnutí na cizí sociální režim odkryje stát, doklad i A1 a vyžádá si je', async () => {
+  it('přepnutí na cizí sociální režim vyžádá stát, ale odkaz nechá volitelný', async () => {
     const wrapper = await startEditing()
     await wrapper.get('[data-test="add-social_jurisdictions"]').trigger('click')
     await wrapper.get('[data-test="social_jurisdictions-0-jurisdiction"]')
@@ -368,11 +363,11 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(wrapper.find('[data-test="social_jurisdictions-0-foreign_country_code"]').exists())
       .toBe(true)
     expect(wrapper.find('[data-test="social_jurisdictions-0-a1_status"]').exists()).toBe(true)
-    // Doklad k režimu se předvyplnil typickým důvodem, stát ne — ten nikdo neuhodne.
+    // Odkaz k režimu se nesmí domýšlet; povinný je jen skutečný stát.
     expect(
       (wrapper.get('[data-test="social_jurisdictions-0-jurisdiction_evidence_reference-reason"]')
         .element as HTMLSelectElement).value,
-    ).toBe('social:a1-certificate')
+    ).toBe('')
     expect(wrapper.get('[data-test="issues-social_jurisdictions-0"]').text())
       .toContain('payroll.people.statutory_evidence.issue.country_required')
 
@@ -387,7 +382,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(row).toMatchObject({
       jurisdiction: 'foreign_regime_verified',
       foreign_country_code: 'SK',
-      jurisdiction_evidence_reference: 'social:a1-certificate',
+      jurisdiction_evidence_reference: null,
       a1_status: 'not_applicable',
     })
     expect(validatorRejection('social_jurisdictions', row)).toBeNull()
@@ -433,7 +428,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
 
     const issues = wrapper.get('[data-test="issues-social_jurisdictions-0"]').text()
     expect(issues).toContain('payroll.people.statutory_evidence.issue.a1_valid_until_required')
-    // Doklad k A1 se předvyplnil sám, takže zbývá doplnit jen datum.
+    // Odkaz k A1 je volitelný; blokuje jen chybějící datum platnosti.
     expect(issues).not.toContain('reference_required')
 
     await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
@@ -488,17 +483,25 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(validatorRejection('health_coverages', savedRow('health_coverages'))).toBeNull()
   })
 
-  it('typický důvod vygeneruje kanonickou referenci, „jiné“ nechá napsat vlastní', async () => {
+  it('prázdný odkaz uloží jako nepovinný údaj', async () => {
     const wrapper = await startEditing()
     await wrapper.get('[data-test="add-tax_declarations"]').trigger('click')
 
     // Volný text se nenabízí, dokud si ho uživatel nevyžádá.
     expect(wrapper.find('[data-test="tax_declarations-0-evidence_reference"]').exists()).toBe(false)
 
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+    expect(savedRow('tax_declarations').evidence_reference).toBeNull()
+  })
+
+  it('zadanou referenci kontroluje a vlastní platnou hodnotu uloží', async () => {
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-tax_declarations"]').trigger('click')
+
     await wrapper.get('[data-test="tax_declarations-0-evidence_reference-reason"]')
       .setValue('custom')
-    expect(wrapper.get('[data-test="issues-tax_declarations-0"]').text())
-      .toContain('payroll.people.statutory_evidence.issue.reference_required')
+    expect(wrapper.find('[data-test="issues-tax_declarations-0"]').exists()).toBe(false)
 
     await wrapper.get('[data-test="tax_declarations-0-evidence_reference"]')
       .setValue('prohlášení 12/2026')
@@ -534,10 +537,10 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       .findAll('option')
       .map(option => option.attributes('value'))
 
-    expect(reasons()).toEqual(['declaration:38k-signed', 'custom'])
+    expect(reasons()).toEqual(['', 'declaration:38k-signed', 'custom'])
 
     await wrapper.get('[data-test="tax_declarations-0-status"]').setValue('not-signed')
-    expect(reasons()).toEqual(['declaration:38k-not-signed', 'custom'])
+    expect(reasons()).toEqual(['', 'declaration:38k-not-signed', 'custom'])
 
     await wrapper.get('[data-test="tax_declarations-0-status"]').setValue('unverified')
     // Neověřená varianta doklad nést nesmí, tak se pole schová.
@@ -552,7 +555,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     })
   })
 
-  it('nerezident si vyžádá zahraniční stát a nabídne zahraniční doklad', async () => {
+  it('nerezident si vyžádá zahraniční stát a odkaz ponechá nepovinný', async () => {
     const wrapper = await startEditing()
     await wrapper.get('[data-test="add-tax_residences"]').trigger('click')
     await wrapper.get('[data-test="tax_residences-0-residence"]').setValue('non-resident')
@@ -561,7 +564,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(
       (wrapper.get('[data-test="tax_residences-0-evidence_reference-reason"]')
         .element as HTMLSelectElement).value,
-    ).toBe('residence:foreign-domicile-certificate')
+    ).toBe('')
     expect(wrapper.get('[data-test="issues-tax_residences-0"]').text())
       .toContain('payroll.people.statutory_evidence.issue.country_required')
 
@@ -575,7 +578,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(row).toMatchObject({
       residence: 'non-resident',
       country_code: 'SK',
-      evidence_reference: 'residence:foreign-domicile-certificate',
+      evidence_reference: null,
     })
     expect(validatorRejection('tax_residences', row)).toBeNull()
   })

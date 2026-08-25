@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Submission\Channel\Isds\Gateway;
 
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Submission\IsdsGatewaySessionRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxAttemptRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
@@ -65,6 +66,7 @@ final readonly class IsdsGatewayDispatchService
     private const LOGIN_WINDOW_SECONDS = 300;
 
     public function __construct(
+        private Connection $db,
         private SubmissionOutboxRepository $outbox,
         private SubmissionOutboxAttemptRepository $attempts,
         private IsdsGatewaySessionRepository $sessions,
@@ -216,14 +218,7 @@ final readonly class IsdsGatewayDispatchService
         return match ((string) $session['state']) {
             'awaiting_login' => $this->pushConcept($session, $registration, $sessionId),
             'awaiting_approval' => $this->recordApproval($session, $registration, $sessionId),
-            'approved' => [
-                // Uživatel obnovil stránku. Druhé odeslání se nekoná.
-                'state' => 'approved',
-                'outbox_id' => $outboxId,
-                'redirect_url' => null,
-                'external_message_id' => $session['concept_dm_id'] !== null ? (string) $session['concept_dm_id'] : null,
-                'message' => 'Podání už bylo odesláno datovou schránkou.',
-            ],
+            'approved' => $this->completeApprovedSession($session),
             default => [
                 'state' => (string) $session['state'],
                 'outbox_id' => $outboxId,
@@ -444,13 +439,55 @@ final readonly class IsdsGatewayDispatchService
         // ── Brána idempotence relace ──
         // Přechod uspěje právě jednou. Druhý (souběžný i pozdější) návrat
         // dostane null a odejde s aktuálním stavem — bez druhého zápisu.
-        $closed = $this->sessions->markApproved(
-            $supplierId,
-            $id,
-            $messageId,
-            (string) $credential->conceptStatusCode,
-            $credential->conceptStatusMessage,
-        );
+        try {
+            $closed = $this->transactional(function () use ($supplierId, $outboxId, $id, $session, $messageId, $credential): ?array {
+                $approved = $this->sessions->markApproved(
+                    $supplierId,
+                    $id,
+                    $messageId,
+                    (string) $credential->conceptStatusCode,
+                    $credential->conceptStatusMessage,
+                );
+                if ($approved === null) {
+                    $approved = $this->sessions->find($supplierId, $id);
+                    if ($approved === null || (string) $approved['state'] !== 'approved') {
+                        return null;
+                    }
+                    if (!hash_equals((string) ($approved['concept_dm_id'] ?? ''), $messageId)) {
+                        throw new \RuntimeException('Relace ISDS obsahuje jiné dmID než potvrzený callback.');
+                    }
+                }
+
+                $this->recordDispatch($supplierId, $outboxId, (int) $session['user_id'], $messageId);
+
+                return $approved;
+            });
+        } catch (\Throwable $e) {
+            try {
+                $this->sessions->markApproved(
+                    $supplierId,
+                    $id,
+                    $messageId,
+                    (string) $credential->conceptStatusCode,
+                    $credential->conceptStatusMessage,
+                );
+            } catch (\Throwable $preserveError) {
+                $this->logger->critical('ISDS gateway dmID could not be preserved after projection failure', [
+                    'supplier_id' => $supplierId,
+                    'outbox_id' => $outboxId,
+                    'session_id' => $id,
+                    'error' => $preserveError->getMessage(),
+                ]);
+            }
+
+            throw new SubmissionChannelException(
+                'isds_gateway_projection_failed',
+                'Datová schránka potvrdila odeslání zprávy, ale její stav se nepodařilo zapsat do fronty. '
+                . 'Podání znovu neodesílejte; obnovte stránku a pokud chyba trvá, kontaktujte správce.',
+                500,
+                $e,
+            );
+        }
         if ($closed === null) {
             $current = $this->sessions->find($supplierId, $id);
 
@@ -458,14 +495,12 @@ final readonly class IsdsGatewayDispatchService
                 'state' => (string) ($current['state'] ?? 'approved'),
                 'outbox_id' => $outboxId,
                 'redirect_url' => null,
-                'external_message_id' => $current['concept_dm_id'] !== null
+                'external_message_id' => isset($current['concept_dm_id'])
                     ? (string) $current['concept_dm_id']
                     : null,
                 'message' => 'Odeslání už bylo zaznamenané.',
             ];
         }
-
-        $this->recordDispatch($supplierId, $outboxId, (int) $session['user_id'], $messageId);
 
         $this->logger->info('ISDS gateway dispatch recorded', [
             'supplier_id' => $supplierId,
@@ -486,6 +521,52 @@ final readonly class IsdsGatewayDispatchService
     // ───────────────────────── zápis do fronty ─────────────────────────
 
     /**
+     * @param array<string,mixed> $session
+     * @return array{state:string,outbox_id:int,redirect_url:null,external_message_id:string,message:string}
+     */
+    private function completeApprovedSession(array $session): array
+    {
+        $supplierId = (int) $session['supplier_id'];
+        $outboxId = (int) $session['outbox_id'];
+        $messageId = trim((string) ($session['concept_dm_id'] ?? ''));
+        if ($messageId === '') {
+            throw new SubmissionChannelException(
+                'isds_gateway_approved_without_message_id',
+                'Datová schránka označila relaci jako odeslanou, ale chybí identifikátor zprávy. '
+                . 'Podání znovu neodesílejte a kontaktujte správce.',
+                500,
+            );
+        }
+
+        try {
+            $this->transactional(fn (): null => $this->recordDispatch(
+                $supplierId,
+                $outboxId,
+                (int) $session['user_id'],
+                $messageId,
+            ));
+        } catch (SubmissionChannelException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw new SubmissionChannelException(
+                'isds_gateway_projection_failed',
+                'Zpráva už byla odeslána datovou schránkou, ale její stav se nepodařilo dokončit ve frontě. '
+                . 'Podání znovu neodesílejte; obnovte stránku a pokud chyba trvá, kontaktujte správce.',
+                500,
+                $e,
+            );
+        }
+
+        return [
+            'state' => 'approved',
+            'outbox_id' => $outboxId,
+            'redirect_url' => null,
+            'external_message_id' => $messageId,
+            'message' => 'Podání už bylo odesláno datovou schránkou.',
+        ];
+    }
+
+    /**
      * Zapíše odeslání do fronty a do ledgeru pokusů.
      *
      * Řádek se tady zabírá poprvé (`ready` → `sending`) a hned uzavírá na
@@ -496,15 +577,33 @@ final readonly class IsdsGatewayDispatchService
      */
     private function recordDispatch(int $supplierId, int $outboxId, int $userId, string $messageId): void
     {
+        $current = $this->outbox->find($supplierId, $outboxId);
+        if ($current === null) {
+            throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
+        }
+        if ((string) $current['dispatch_state'] === DispatchState::Sent->value
+            && (string) $current['dispatch_mode'] === 'gateway'
+            && hash_equals((string) ($current['external_message_id'] ?? ''), $messageId)
+        ) {
+            return;
+        }
+        if ((string) $current['dispatch_state'] !== DispatchState::Ready->value) {
+            throw new SubmissionChannelException(
+                'isds_gateway_dispatch_conflict',
+                'Zpráva byla v datové schránce odeslána, ale podání se mezitím ve frontě změnilo. '
+                . 'Podání znovu neodesílejte a kontaktujte správce.',
+                409,
+            );
+        }
+
         $claimed = $this->outbox->claimForGatewaySending($supplierId, $outboxId, $userId);
         if ($claimed === null) {
-            $this->logger->warning('ISDS gateway dispatch could not claim the submission', [
-                'supplier_id' => $supplierId,
-                'outbox_id' => $outboxId,
-                'external_message_id' => $messageId,
-            ]);
-
-            return;
+            throw new SubmissionChannelException(
+                'isds_gateway_dispatch_conflict',
+                'Zpráva byla v datové schránce odeslána, ale podání právě změnil jiný proces. '
+                . 'Podání znovu neodesílejte a obnovte stránku.',
+                409,
+            );
         }
 
         $attempt = $this->attempts->open(
@@ -519,6 +618,44 @@ final readonly class IsdsGatewayDispatchService
 
         $this->outbox->markSent($supplierId, $outboxId, $messageId, (int) $claimed['row_version']);
         $this->attempts->markSent($supplierId, (int) $attempt['id'], $messageId, (int) $attempt['row_version']);
+    }
+
+    /**
+     * @template T
+     * @param \Closure():T $operation
+     * @return T
+     */
+    private function transactional(\Closure $operation): mixed
+    {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        $savepoint = 'isds_gateway_dispatch';
+
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT ' . $savepoint);
+        }
+
+        try {
+            $result = $operation();
+            if ($ownsTransaction) {
+                $pdo->commit();
+            } else {
+                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction) {
+                $pdo->rollBack();
+            } else {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            }
+
+            throw $e;
+        }
     }
 
     /**

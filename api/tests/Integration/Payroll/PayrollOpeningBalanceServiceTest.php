@@ -104,6 +104,24 @@ final class PayrollOpeningBalanceServiceTest extends TestCase
         self::assertSame(8000000, $state['totals']['assessment_base_minor_units']);
     }
 
+    /** Reference podkladu je uživatelská poznámka a nesmí blokovat uložení. */
+    public function testOpeningBalanceDoesNotRequireSourceReference(): void
+    {
+        $saved = $this->service->save(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            [$this->month(1, 4000000, 900000)],
+            '',
+            null,
+        );
+
+        self::assertNotNull($saved['openings']['social_insurance']);
+        self::assertSame('', $this->accumulators
+            ->openingBalance($this->supplierId, $this->employeeId, 2026, 'social_insurance')
+            ['source_reference']);
+    }
+
     /**
      * Uložit dvakrát totéž je replay (uživatel klikl dvakrát), změna částky je
      * oprava navázaná na aktuální verzi. Klíč se proto odvozuje z dat, ne z času.

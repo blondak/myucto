@@ -928,17 +928,6 @@ final class JmhzPvpojPreviewBuilder
                     $discount = 'not_claimed';
                 }
                 if ($discount === 'verified') {
-                    if (!is_string(
-                        $result['part_time_employer_discount_evidence_reference']
-                            ?? null,
-                    ) || trim((string) $result[
-                        'part_time_employer_discount_evidence_reference'
-                    ]) === '') {
-                        $this->invalid(
-                            'jmhz_relationship_not_calculated',
-                            "Sleva employment:{$employmentId} nemá důkaz.",
-                        );
-                    }
                     $partTimeDiscountClaims++;
                     $partTimeDiscountBase = $this->add(
                         $partTimeDiscountBase,
@@ -994,17 +983,6 @@ final class JmhzPvpojPreviewBuilder
                 );
             }
             if ($employeeDiscount > 0) {
-                if (!is_string(
-                    $personResult['working_pensioner_discount_evidence_reference']
-                        ?? null,
-                ) || trim((string) $personResult[
-                    'working_pensioner_discount_evidence_reference'
-                ]) === '') {
-                    $this->invalid(
-                        'jmhz_person_not_calculated',
-                        "Sleva employee:{$employeeId} nemá důkaz.",
-                    );
-                }
                 $totals['employee_discount_person_count']++;
                 $totals['employee_discount_base_minor'] = $this->add(
                     $totals['employee_discount_base_minor'],

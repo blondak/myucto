@@ -32,11 +32,9 @@ final readonly class AnnualSettlementRequest
         if ($taxYear < 2000 || $taxYear > 2199) {
             throw new \InvalidArgumentException('Rok žádosti není platný.');
         }
-        if ($status === AnnualSettlementRequestStatus::Requested
-            && ($requestedOn === null || trim((string) $requestEvidenceReference) === '')
-        ) {
+        if ($status === AnnualSettlementRequestStatus::Requested && $requestedOn === null) {
             throw new \InvalidArgumentException(
-                'Podaná žádost musí mít datum i doložení.',
+                'Podaná žádost musí mít datum.',
             );
         }
         if ($status !== AnnualSettlementRequestStatus::Requested

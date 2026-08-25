@@ -439,9 +439,9 @@ final class PayrollEmploymentValidator
     /**
      * Nárok na slevu zaměstnavatele podle § 7a odst. 1 ZPSZ.
      *
-     * Podklad ani datum oznámení ČSSZ nejsou povinné vstupy: účetní smí důvod
-     * zapsat dřív, než oznámení odešle. Do výpočtu se ale takový vztah
-     * nedostane — bez obojího z něj
+     * Odkaz na podklad ani datum oznámení ČSSZ nejsou povinné vstupy: účetní
+     * smí důvod zapsat dřív, než oznámení odešle. O uplatnění ve výpočtu
+     * rozhoduje přijatý záměr OZUSPOJ; bez něj z něj
      * {@see \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler}
      * udělá nedoložený nárok a měsíc skončí na ručním posouzení. Tichý pád na
      * uplatněnou slevu by z ní podle § 7c odst. 3 udělal dluh na pojistném.

@@ -73,13 +73,14 @@ final class PayrollDependantValidatorTest extends TestCase
         self::assertNull($result['birth_number']);
     }
 
-    public function testVerifiedClaimRequiresEvidenceReference(): void
+    public function testVerifiedClaimAllowsMissingEvidenceReference(): void
     {
         $input = $this->claim(['evidence_reference' => null]);
 
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('odkaz na doklad');
-        $this->validator->validateClaim($input);
+        $result = $this->validator->validateClaim($input);
+
+        self::assertSame('verified', $result['evidence_status']);
+        self::assertNull($result['evidence_reference']);
     }
 
     public function testUnverifiedClaimMustNotCarryEvidence(): void

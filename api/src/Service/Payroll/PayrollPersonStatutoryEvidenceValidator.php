@@ -233,9 +233,9 @@ final class PayrollPersonStatutoryEvidenceValidator
             'jurisdiction_evidence_reference',
         );
         if ($jurisdiction === 'foreign_regime_verified') {
-            if ($country === null || $jurisdictionEvidence === null) {
+            if ($country === null) {
                 throw new InvalidArgumentException(
-                    'Ověřená zahraniční zdravotní jurisdikce vyžaduje zemi a důkaz.',
+                    'Ověřená zahraniční zdravotní jurisdikce vyžaduje zemi.',
                 );
             }
         } elseif ($country !== null || $jurisdictionEvidence !== null) {
@@ -259,11 +259,9 @@ final class PayrollPersonStatutoryEvidenceValidator
         if ($insurerCode !== null && !HealthInsurers::isValid($insurerCode)) {
             throw new InvalidArgumentException(HealthInsurers::invalidCodeMessage($insurerCode));
         }
-        if ($insurerStatus === 'verified'
-            && ($insurerCode === null || $insurerEvidence === null)
-        ) {
+        if ($insurerStatus === 'verified' && $insurerCode === null) {
             throw new InvalidArgumentException(
-                'Ověřená zdravotní pojišťovna vyžaduje kód a důkaz.',
+                'Ověřená zdravotní pojišťovna vyžaduje kód.',
             );
         }
         if ($insurerStatus === 'not_applicable'
@@ -340,7 +338,7 @@ final class PayrollPersonStatutoryEvidenceValidator
             ],
         );
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
-        $this->assertEvidenceStatus($reason !== 'unverified', $evidence, 'redukce minima');
+        $this->assertEvidenceAllowed($reason !== 'unverified', $evidence, 'redukce minima');
 
         return $this->baseInterval($row) + [
             'reason' => $reason,
@@ -362,7 +360,7 @@ final class PayrollPersonStatutoryEvidenceValidator
             $row,
             'top_up_responsibility_evidence_reference',
         );
-        $this->assertEvidenceStatus(
+        $this->assertEvidenceAllowed(
             $responsibility === 'employer_obstacle_verified',
             $responsibilityEvidence,
             'odpovědnost za doplatek minima',
@@ -375,9 +373,9 @@ final class PayrollPersonStatutoryEvidenceValidator
             $row,
             'selected_top_up_employer_evidence_reference',
         );
-        if (($selected === null) !== ($selectedEvidence === null)) {
+        if ($selected === null && $selectedEvidence !== null) {
             throw new InvalidArgumentException(
-                'Volba zaměstnavatele pro doplatek vyžaduje referenci i důkaz.',
+                'Doklad k volbě zaměstnavatele vyžaduje zvoleného zaměstnavatele.',
             );
         }
 
@@ -410,7 +408,7 @@ final class PayrollPersonStatutoryEvidenceValidator
             ),
             'employment_from' => $employmentFrom,
             'employment_to' => $employmentTo,
-            'evidence_reference' => $this->canonical($row, 'evidence_reference'),
+            'evidence_reference' => $this->nullableCanonical($row, 'evidence_reference'),
         ];
     }
 
@@ -421,7 +419,7 @@ final class PayrollPersonStatutoryEvidenceValidator
     {
         $status = $this->enum($row, 'status', ['signed', 'not-signed', 'unverified']);
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
-        $this->assertEvidenceStatus($status !== 'unverified', $evidence, 'daňové prohlášení');
+        $this->assertEvidenceAllowed($status !== 'unverified', $evidence, 'daňové prohlášení');
 
         return $this->baseInterval($row) + [
             'status' => $status,
@@ -441,18 +439,16 @@ final class PayrollPersonStatutoryEvidenceValidator
         );
         $country = $this->country($row, 'country_code');
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
-        if ($residence === 'czech-resident'
-            && ($country !== 'CZ' || $evidence === null)
-        ) {
+        if ($residence === 'czech-resident' && $country !== 'CZ') {
             throw new InvalidArgumentException(
-                'Česká daňová rezidence vyžaduje CZ a důkaz.',
+                'Česká daňová rezidence vyžaduje kód země CZ.',
             );
         }
         if ($residence === 'non-resident'
-            && ($country === null || $country === 'CZ' || $evidence === null)
+            && ($country === null || $country === 'CZ')
         ) {
             throw new InvalidArgumentException(
-                'Daňový nerezident vyžaduje zahraniční zemi a důkaz.',
+                'Daňový nerezident vyžaduje zahraniční zemi.',
             );
         }
         if ($residence === 'unverified' && ($country !== null || $evidence !== null)) {
@@ -475,7 +471,7 @@ final class PayrollPersonStatutoryEvidenceValidator
     {
         $status = $this->enum($row, 'evidence_status', ['verified', 'unverified']);
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
-        $this->assertEvidenceStatus($status === 'verified', $evidence, 'daňová sleva');
+        $this->assertEvidenceAllowed($status === 'verified', $evidence, 'daňová sleva');
 
         return $this->baseInterval($row) + [
             'credit_kind' => $this->enum(
@@ -495,7 +491,7 @@ final class PayrollPersonStatutoryEvidenceValidator
     {
         $status = $this->enum($row, 'evidence_status', ['verified', 'unverified']);
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
-        $this->assertEvidenceStatus($status === 'verified', $evidence, 'zvýhodnění na dítě');
+        $this->assertEvidenceAllowed($status === 'verified', $evidence, 'zvýhodnění na dítě');
 
         return $this->baseInterval($row) + [
             'child_reference' => $this->canonical($row, 'child_reference'),
@@ -527,9 +523,9 @@ final class PayrollPersonStatutoryEvidenceValidator
             'jurisdiction_evidence_reference',
         );
         if ($jurisdiction === 'foreign_regime_verified') {
-            if ($country === null || $jurisdictionEvidence === null) {
+            if ($country === null) {
                 throw new InvalidArgumentException(
-                    'Ověřená zahraniční sociální jurisdikce vyžaduje zemi a důkaz.',
+                    'Ověřená zahraniční sociální jurisdikce vyžaduje zemi.',
                 );
             }
         } elseif ($country !== null || $jurisdictionEvidence !== null) {
@@ -545,11 +541,9 @@ final class PayrollPersonStatutoryEvidenceValidator
         );
         $a1Reference = $this->nullableCanonical($row, 'a1_certificate_reference');
         $a1Until = $this->nullableDateValue($row, 'a1_valid_until');
-        if ($a1Status === 'verified'
-            && ($a1Reference === null || $a1Until === null || $a1Until < $effectiveOn)
-        ) {
+        if ($a1Status === 'verified' && ($a1Until === null || $a1Until < $effectiveOn)) {
             throw new InvalidArgumentException(
-                'Ověřený A1 musí mít důkaz a platit k datu snímku.',
+                'Ověřený A1 musí platit k datu snímku.',
             );
         }
         if ($a1Status !== 'verified' && ($a1Reference !== null || $a1Until !== null)) {
@@ -580,7 +574,7 @@ final class PayrollPersonStatutoryEvidenceValidator
     {
         $status = $this->enum($row, 'status', ['not_claimed', 'verified', 'unverified']);
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
-        $this->assertEvidenceStatus($status === 'verified', $evidence, 'sleva důchodce');
+        $this->assertEvidenceAllowed($status === 'verified', $evidence, 'sleva důchodce');
 
         return $this->baseInterval($row) + [
             'status' => $status,
@@ -825,15 +819,12 @@ final class PayrollPersonStatutoryEvidenceValidator
         return $value;
     }
 
-    private function assertEvidenceStatus(
-        bool $verified,
+    private function assertEvidenceAllowed(
+        bool $allowed,
         ?string $reference,
         string $label,
     ): void {
-        if ($verified && $reference === null) {
-            throw new InvalidArgumentException("Ověřená evidence {$label} vyžaduje důkaz.");
-        }
-        if (!$verified && $reference !== null) {
+        if (!$allowed && $reference !== null) {
             throw new InvalidArgumentException("Neověřená evidence {$label} nesmí nést důkaz.");
         }
     }

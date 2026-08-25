@@ -511,6 +511,24 @@ final class AnnualTaxSettlementCalculatorTest extends TestCase
         self::assertTrue($certificate->isComplete());
     }
 
+    public function testVerifiedCertificateDoesNotRequireEvidenceReference(): void
+    {
+        $certificate = new ExternalEmployerTaxCertificate(
+            'synthetic-certificate-without-source',
+            0,
+            0,
+            TaxEvidenceStatus::Verified,
+            null,
+            0,
+            0,
+            0,
+            0,
+        );
+
+        self::assertTrue($certificate->isVerified());
+        self::assertNull($certificate->evidenceReference);
+    }
+
     /**
      * § 38ch odst. 4 mluví o úhrnu mezd od všech plátců — nedoložený údaj do
      * něj nevstupuje, i když je vyplněný celý.

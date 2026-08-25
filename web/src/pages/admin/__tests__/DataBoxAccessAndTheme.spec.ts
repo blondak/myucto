@@ -28,4 +28,18 @@ describe('firemní přístup k datové schránce', () => {
     expect(mainCss).toMatch(/\.form-input,[\s\S]*?\.form-select[\s\S]*?background-color: var\(--color-surface\)/)
     expect(mainCss).toContain('border-color: var(--color-primary-500)')
   })
+
+  it('zadává příjemce názvem a kód odvozuje slugifikací', () => {
+    const name = dataBox.indexOf("databox.recipients.name")
+    const code = dataBox.indexOf("databox.recipients.code")
+    expect(name).toBeGreaterThan(-1)
+    expect(code).toBeGreaterThan(name)
+    expect(dataBox).toContain('recipientCodeSlug.fromName')
+    expect(dataBox).toContain('recipientCodeSlug.markManual')
+  })
+
+  it('nevyžaduje u příjemce odkaz na zdroj', () => {
+    expect(dataBox).not.toContain('databox.errors.sourceRequired')
+    expect(dataBox).toContain('source_url: recipientSource.value.trim() || null')
+  })
 })

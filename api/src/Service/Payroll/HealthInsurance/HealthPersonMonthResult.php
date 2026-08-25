@@ -23,7 +23,7 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
     /**
      * @param list<HealthRelationshipResult> $relationships
      * @param list<array{from:string,to:string,reason:string,evidence_reference:?string}> $minimumReductionEvidence
-     * @param list<array{employer_reference:string,assessment_base_minor_units:int,employment_from:string,employment_to:?string,evidence_reference:string}> $otherEmployerEvidence
+     * @param list<array{employer_reference:string,assessment_base_minor_units:int,employment_from:string,employment_to:?string,evidence_reference:?string}> $otherEmployerEvidence
      * @param list<string> $issues
      */
     public function __construct(

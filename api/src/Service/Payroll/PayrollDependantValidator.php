@@ -133,11 +133,6 @@ final class PayrollDependantValidator
 
         $status = $this->enum($input, 'evidence_status', ['verified', 'unverified']);
         $reference = $this->nullableCanonical($input, 'evidence_reference');
-        if ($status === 'verified' && $reference === null) {
-            throw new InvalidArgumentException(
-                'Doložený nárok vyžaduje odkaz na doklad (evidence_reference).',
-            );
-        }
         if ($status === 'unverified' && $reference !== null) {
             throw new InvalidArgumentException(
                 'Nedoložený nárok nesmí nést odkaz na doklad.',

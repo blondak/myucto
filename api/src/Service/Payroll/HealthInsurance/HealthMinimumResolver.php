@@ -148,13 +148,6 @@ final class HealthMinimumResolver
         if (
             $gap > 0
             && $hasOtherEmployers
-            && $input->selectedTopUpEmployerEvidenceReference === null
-        ) {
-            $issues[] = 'selected_top_up_employer_evidence_required';
-        }
-        if (
-            $gap > 0
-            && $hasOtherEmployers
             && $input->topUpEmployerSelection
                 === HealthMinimumTopUpEmployerSelection::Unverified
         ) {

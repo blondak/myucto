@@ -104,10 +104,11 @@ final readonly class HealthPersonMonthInput
         }
         if (
             $topUpResponsibility === HealthMinimumTopUpResponsibility::EmployerObstacleVerified
+            && $topUpResponsibilityEvidenceReference !== null
             && !self::isEvidenceReference($topUpResponsibilityEvidenceReference)
         ) {
             throw new InvalidArgumentException(
-                'Employer-paid minimum top-up requires evidence of an employer-side obstacle.',
+                'Employer-paid minimum top-up evidence is not canonical.',
             );
         }
         if (
@@ -168,10 +169,11 @@ final readonly class HealthPersonMonthInput
     ): void {
         if (
             $jurisdiction === HealthJurisdictionEvidence::ForeignRegimeVerified
+            && $reference !== null
             && !self::isEvidenceReference($reference)
         ) {
             throw new InvalidArgumentException(
-                'A verified foreign health insurance regime requires evidence.',
+                'Foreign health insurance regime evidence is not canonical.',
             );
         }
         if (
@@ -199,9 +201,9 @@ final readonly class HealthPersonMonthInput
                     HealthInsurers::listForMessage(),
                 ));
             }
-            if (!self::isEvidenceReference($reference)) {
+            if ($reference !== null && !self::isEvidenceReference($reference)) {
                 throw new InvalidArgumentException(
-                    'A verified health insurer snapshot requires evidence.',
+                    'Health insurer snapshot evidence is not canonical.',
                 );
             }
 

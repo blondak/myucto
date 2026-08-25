@@ -237,7 +237,7 @@ final class PayrollDependantApiTest extends TestCase
         self::assertSame(0, $this->claimCount());
     }
 
-    public function testClaimWithoutEvidenceReferenceDoesNotArise(): void
+    public function testClaimWithoutEvidenceReferenceIsStored(): void
     {
         $dependantId = $this->createChild();
 
@@ -246,8 +246,11 @@ final class PayrollDependantApiTest extends TestCase
             'evidence_reference' => null,
         ]));
 
-        self::assertSame(422, $response->getStatusCode());
-        self::assertSame(0, $this->claimCount());
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertNull(
+            $this->json($response)['dependants'][0]['claims'][0]['evidence_reference'],
+        );
+        self::assertSame(1, $this->claimCount());
     }
 
     public function testUnverifiedClaimIsStoredButNeverReachesTheCalculation(): void

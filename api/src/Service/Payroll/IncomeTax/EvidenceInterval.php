@@ -19,9 +19,6 @@ final class EvidenceInterval
         if ($effectiveTo !== null && self::date($effectiveTo) < $from) {
             throw new InvalidArgumentException('Tax evidence effective interval is not ordered.');
         }
-        if ($status === TaxEvidenceStatus::Verified && trim((string) $evidenceReference) === '') {
-            throw new InvalidArgumentException('Verified tax evidence requires an evidence reference.');
-        }
     }
 
     public static function includesMonthStart(

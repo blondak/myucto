@@ -11,8 +11,7 @@ use PDO;
  * Číselník datových schránek institucí (migrace 1381).
  *
  * Systémové záznamy mají `supplier_id IS NULL` a vidí je všechny firmy;
- * firma si smí přidat vlastní. `source_url` je u vyplněného ID povinné —
- * hlídá to CHECK v DB, ne jen validace tady.
+ * firma si smí přidat vlastní. `source_url` je volitelný auditní údaj.
  */
 final class SubmissionRecipientRepository
 {

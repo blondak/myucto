@@ -398,7 +398,7 @@ final class PayrollPeopleApiTest extends TestCase
             'jurisdiction' => 'czech_regime_verified',
             'insurer_status' => 'verified',
             'insurer_code' => '111',
-            'insurer_evidence_reference' => 'health:insurer-registration',
+            'insurer_evidence_reference' => null,
             // Evidence se vede po celých měsících, nástup 15. 9. tedy začíná 1. 9.
             'effective_from' => '2026-09-01',
             'effective_to' => null,

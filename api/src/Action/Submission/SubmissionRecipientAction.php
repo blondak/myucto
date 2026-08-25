@@ -17,10 +17,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Číselník datových schránek institucí.
  *
- * Validace ID schránky i povinnost uvést zdroj jsou v DB (CHECK), tady se
- * jen překládají na srozumitelnou chybu. Důvod je ten, na kterém trvá zadání:
- * číselník, do kterého lze zapsat neověřené ID, je horší než prázdný —
- * podání odeslané na špatnou schránku je z pohledu lhůty nepodané.
+ * Formát ID schránky hlídá API i DB. Odkaz na zdroj je volitelný auditní údaj;
+ * firemní číselník lze uložit i bez něj.
  */
 final class SubmissionRecipientAction
 {
@@ -74,16 +72,6 @@ final class SubmissionRecipientAction
                 400,
             );
         }
-        if ($boxId !== null && $sourceUrl === null) {
-            return Json::error(
-                $response,
-                'source_required',
-                'K ID datové schránky uveďte odkaz na zdroj, odkud je doložené. Bez dokladu ho neukládejte — '
-                . 'podání odeslané na špatnou schránku je z pohledu lhůty nepodané.',
-                400,
-            );
-        }
-
         try {
             $id = $this->recipients->upsertForSupplier(SupplierGuard::currentId($request), [
                 'code' => $code,

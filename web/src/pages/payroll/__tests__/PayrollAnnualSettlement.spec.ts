@@ -424,7 +424,57 @@ describe('Roční zúčtování', () => {
     expect(m.saveAnnualSettlementRequest).toHaveBeenCalledWith(
       defaultYear,
       7,
-      expect.objectContaining({ row_version: 1, request_status: 'requested' }),
+      expect.objectContaining({
+        row_version: 1,
+        request_status: 'requested',
+        request_evidence_reference: 'synthetic',
+      }),
+    )
+  })
+
+  it('uloží žádost i potvrzení bez volitelných odkazů na podklady', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      request: {
+        ...previewResponse().request,
+        request_evidence_reference: null,
+      },
+      certificates: [{
+        certificate_reference: 'POT-BEZ-ODKAZU',
+        payer_name: 'Předchozí plátce',
+        payer_tax_identification: null,
+        received_on: '2027-02-10',
+        gross_income_minor_units: 0,
+        advance_base_minor_units: 0,
+        advance_tax_minor_units: 0,
+        non_refundable_credit_minor_units: 0,
+        child_credit_minor_units: 0,
+        tax_bonus_minor_units: 0,
+        evidence_status: 'verified',
+        evidence_reference: null,
+        missing_statutory_fields: [],
+      }],
+    }))
+    m.saveAnnualSettlementRequest.mockResolvedValue({})
+    m.saveAnnualSettlementCertificates.mockResolvedValue([])
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-test="annual-settlement-save-request"]').trigger('click')
+    await flushPromises()
+    expect(m.saveAnnualSettlementRequest).toHaveBeenCalledWith(
+      defaultYear,
+      7,
+      expect.objectContaining({ request_evidence_reference: null }),
+    )
+
+    await wrapper.find('[data-test="annual-settlement-save-certificates"]').trigger('click')
+    await flushPromises()
+    expect(m.saveAnnualSettlementCertificates).toHaveBeenCalledWith(
+      defaultYear,
+      7,
+      [expect.objectContaining({ evidence_reference: null })],
     )
   })
   /**

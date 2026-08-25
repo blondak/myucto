@@ -193,14 +193,23 @@ final class SubmissionOutboxInvariantsTest extends TestCase
         $this->enqueue(str_repeat('Z', 51));
     }
 
-    /** Číselník: ID schránky bez doloženého zdroje se neuloží. */
-    public function testRecipientBoxIdWithoutSourceIsRejected(): void
+    /** Odkaz na zdroj je užitečný auditní údaj, ale nesmí blokovat firemní číselník. */
+    public function testRecipientBoxIdWithoutSourceIsAllowed(): void
     {
-        $this->expectException(PDOException::class);
         $this->db->pdo()->prepare(
             "INSERT INTO submission_recipients (supplier_id, code, name, kind, isds_box_id)
              VALUES (?, 'fu_bez_dokladu', 'FÚ bez dokladu', 'tax_office', 'abcdefg')"
         )->execute([$this->supplierId]);
+
+        $stored = $this->db->pdo()->prepare(
+            'SELECT isds_box_id, source_url FROM submission_recipients WHERE supplier_id = ? AND code = ?'
+        );
+        $stored->execute([$this->supplierId, 'fu_bez_dokladu']);
+        $row = $stored->fetch(PDO::FETCH_ASSOC);
+
+        self::assertIsArray($row);
+        self::assertSame('abcdefg', $row['isds_box_id']);
+        self::assertNull($row['source_url']);
     }
 
     /**

@@ -551,7 +551,7 @@ final class PayrollRunStatutoryInputAssembler
     }
 
     /**
-     * Sazbová kategorie zaměstnavatele podle § 5a odst. 1 a odkaz na podklad.
+     * Sazbová kategorie zaměstnavatele podle § 5a odst. 1 a volitelný odkaz na podklad.
      *
      * Zmrazená revize starší než sloupec kategorie klíč vůbec nemá. Takový
      * snapshot se čte jako běžná sazba — přesně to, co se z něj počítalo
@@ -581,11 +581,7 @@ final class PayrollRunStatutoryInputAssembler
         $evidence = is_string($term['social_employer_rate_category_evidence'] ?? null)
             ? trim($term['social_employer_rate_category_evidence'])
             : '';
-        if ($evidence === '') {
-            return [SocialEmployerRateCategory::Unverified, null];
-        }
-
-        return [$category, $evidence];
+        return [$category, $evidence === '' ? null : $evidence];
     }
 
     /**
@@ -593,9 +589,9 @@ final class PayrollRunStatutoryInputAssembler
      *
      * Sleva je výhoda ZAMĚSTNAVATELE: § 7c odst. 3 dělá z přeplacené slevy dluh
      * na pojistném, kdežto z neuplatněné žádný nedoplatek nevzniká. Fail-closed
-     * proto míří na NEUPLATNĚNÍ — chybějící podklad, chybějící nebo pozdní
-     * oznámení ČSSZ i nepodporovaný druh vztahu končí jako nedoložený nárok
-     * (ruční posouzení), nikdy jako tichá uplatněná sleva.
+     * proto míří na NEUPLATNĚNÍ — chybějící nebo pozdní oznámení ČSSZ i
+     * nepodporovaný druh vztahu končí jako nedoložený nárok (ruční posouzení),
+     * nikdy jako tichá uplatněná sleva. Textový odkaz na podklad je volitelný.
      *
      * § 7a odst. 5 podmiňuje nárok tím, že zaměstnavatel „nejpozději
      * s uplatněním této slevy oznámil České správě sociálního zabezpečení záměr
@@ -651,9 +647,7 @@ final class PayrollRunStatutoryInputAssembler
         $evidence = is_string($term['social_part_time_discount_evidence'] ?? null)
             ? trim($term['social_part_time_discount_evidence'])
             : '';
-        if ($evidence === '') {
-            return [SocialDiscountEvidence::Unverified, null, null];
-        }
+        $evidence = $evidence === '' ? null : $evidence;
         if (!array_key_exists('social_part_time_discount_intent', $term)) {
             return $this->legacySocialPartTimeDiscount(
                 $term,
@@ -689,7 +683,7 @@ final class PayrollRunStatutoryInputAssembler
     private function legacySocialPartTimeDiscount(
         array $term,
         SocialPartTimeDiscountReason $reason,
-        string $evidence,
+        ?string $evidence,
         string $periodEnd,
     ): array {
         $notifiedOn = is_string($term['social_part_time_discount_notified_on'] ?? null)
@@ -1970,7 +1964,7 @@ final class PayrollRunStatutoryInputAssembler
                     ),
                     $this->requiredString($row['employment_from'] ?? null),
                     $this->nullableString($row['employment_to'] ?? null),
-                    $this->requiredString($row['evidence_reference'] ?? null),
+                    $this->nullableString($row['evidence_reference'] ?? null),
                 );
             } catch (\InvalidArgumentException|\UnexpectedValueException) {
                 $this->issue(

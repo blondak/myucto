@@ -365,11 +365,12 @@ describe('TimeAttendance', () => {
       .find(button => button.text() === 'payroll.time.approve')
     await approve!.trigger('click')
     await wrapper.get('[data-test="jmhz-standard-fund"]').setValue('168')
-    await wrapper.get('[data-test="jmhz-note"]').setValue('Potvrzeno ze syntetické docházky.')
     expect(wrapper.get('[data-test="jmhz-work-summary-form"] button[type="submit"]')
       .attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="jmhz-unworked-no"]').setValue(true)
     await wrapper.get('[data-test="jmhz-obstacles-no"]').setValue(true)
+    expect(wrapper.get('[data-test="jmhz-work-summary-form"] button[type="submit"]')
+      .attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
     await flushPromises()
 
@@ -392,7 +393,7 @@ describe('TimeAttendance', () => {
         care_hours: null,
         employee_obstacle_paid_hours: null,
         employer_obstacle_hours: null,
-        confirmation_note: 'Potvrzeno ze syntetické docházky.',
+        confirmation_note: '',
       },
     })
 

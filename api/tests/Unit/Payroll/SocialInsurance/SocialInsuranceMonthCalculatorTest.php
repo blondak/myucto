@@ -632,14 +632,9 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         );
     }
 
-    public function testVerifiedForeignRegimeRequiresEvidenceReference(): void
+    public function testVerifiedForeignRegimeDoesNotRequireEvidenceReference(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage(
-            'Verified foreign social insurance regime requires an evidence reference.',
-        );
-
-        new SocialPersonMonthInput(
+        $person = new SocialPersonMonthInput(
             'person-1',
             SocialJurisdictionEvidence::ForeignRegimeVerified,
             0,
@@ -650,16 +645,13 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
                 1_000_000,
             )],
         );
+
+        self::assertNull($person->jurisdictionEvidenceReference);
     }
 
-    public function testVerifiedEmployerDiscountRequiresEvidenceReference(): void
+    public function testVerifiedEmployerDiscountDoesNotRequireEvidenceReference(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage(
-            'Part-time employer discount verification requires an evidence reference.',
-        );
-
-        new SocialInsuranceRelationshipInput(
+        $relationship = new SocialInsuranceRelationshipInput(
             'hpp',
             SocialEmploymentKind::Employment,
             450_000,
@@ -667,7 +659,10 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
             SocialIncomeAttribution::CurrentEmploymentMonth,
             [$this->component('wage', 1_000_000)],
             SocialDiscountEvidence::Verified,
+            partTimeEmployerDiscountReason: SocialPartTimeDiscountReason::Age55Plus,
         );
+
+        self::assertNull($relationship->partTimeEmployerDiscountEvidenceReference);
     }
 
     /**

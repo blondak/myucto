@@ -14,7 +14,7 @@ final readonly class HealthOtherEmployerBase
         public int $assessmentBaseMinorUnits,
         public string $employmentFrom,
         public ?string $employmentTo,
-        public string $evidenceReference,
+        public ?string $evidenceReference,
     ) {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $employerReference) !== 1) {
             throw new InvalidArgumentException('Other employer reference is not canonical.');
@@ -26,8 +26,10 @@ final readonly class HealthOtherEmployerBase
         if ($employmentTo !== null && self::date($employmentTo) < $start) {
             throw new InvalidArgumentException('Other employer coverage end cannot precede its start.');
         }
-        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D', $evidenceReference) !== 1) {
-            throw new InvalidArgumentException('Other employer base requires canonical evidence.');
+        if ($evidenceReference !== null
+            && preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D', $evidenceReference) !== 1
+        ) {
+            throw new InvalidArgumentException('Other employer base evidence is not canonical.');
         }
     }
 

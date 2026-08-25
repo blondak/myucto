@@ -276,19 +276,19 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         );
     }
 
-    public function testLegalFactWithoutEvidenceReferenceIsRejected(): void
+    public function testLegalFactWithoutEvidenceReferenceIsAccepted(): void
     {
         $payload = $this->completeEvidence();
         $payload['sections']['tax_declarations'][0]['evidence_reference'] = null;
 
         $response = $this->save($payload);
 
-        self::assertSame(422, $response->getStatusCode());
-        self::assertStringContainsString(
-            'důkaz',
-            (string) $this->json($response)['error']['message'],
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertNull(
+            $this->json($response)['evidence']['sections']['tax_declarations'][0]
+                ['evidence_reference'],
         );
-        self::assertSame(0, $this->countRows('payroll_person_tax_declarations'));
+        self::assertSame(1, $this->countRows('payroll_person_tax_declarations'));
     }
 
     public function testHumanExplanationCannotSneakIntoTheCanonicalReference(): void

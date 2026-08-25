@@ -37,6 +37,7 @@ import {
   type SubmissionRecipient,
 } from '@/api/dataBox'
 import { apiErrorMessage } from '@/api/errors'
+import { useAutoSlug } from '@/composables/useAutoSlug'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
@@ -91,6 +92,7 @@ const recipientName = ref('')
 const recipientKind = ref<RecipientKind>('tax_office')
 const recipientBoxId = ref('')
 const recipientSource = ref('')
+const recipientCodeSlug = useAutoSlug(value => { recipientCode.value = value }, { maxLen: 48 })
 
 const recipientsWithoutBox = computed(() => recipients.value.filter(r => !r.has_box_id))
 
@@ -519,10 +521,6 @@ async function pollInbox() {
 }
 
 async function saveRecipient() {
-  if (recipientBoxId.value.trim() !== '' && recipientSource.value.trim() === '') {
-    toast.error(t('databox.errors.sourceRequired'))
-    return
-  }
   saving.value = true
   try {
     await dataBoxApi.saveRecipient({
@@ -534,6 +532,7 @@ async function saveRecipient() {
       is_active: true,
     })
     recipientCode.value = ''
+    recipientCodeSlug.init('')
     recipientName.value = ''
     recipientBoxId.value = ''
     recipientSource.value = ''
@@ -1506,12 +1505,24 @@ onMounted(async () => {
         <h2 class="mb-3 font-medium">{{ t('databox.recipients.addTitle') }}</h2>
         <div class="grid gap-3 sm:grid-cols-2">
           <label class="block">
-            <span class="text-sm font-medium">{{ t('databox.recipients.code') }}</span>
-            <input v-model="recipientCode" type="text" class="form-input mt-1 w-full" />
+            <span class="text-sm font-medium">{{ t('databox.recipients.name') }}</span>
+            <input
+              v-model="recipientName"
+              type="text"
+              class="form-input mt-1 w-full"
+              @input="recipientCodeSlug.fromName(($event.target as HTMLInputElement).value)"
+            />
           </label>
           <label class="block">
-            <span class="text-sm font-medium">{{ t('databox.recipients.name') }}</span>
-            <input v-model="recipientName" type="text" class="form-input mt-1 w-full" />
+            <span class="text-sm font-medium">{{ t('databox.recipients.code') }}</span>
+            <input
+              v-model="recipientCode"
+              type="text"
+              maxlength="48"
+              class="form-input mt-1 w-full font-mono"
+              @input="recipientCodeSlug.markManual(($event.target as HTMLInputElement).value)"
+            />
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.recipients.codeHint') }}</span>
           </label>
           <label class="block">
             <span class="text-sm font-medium">{{ t('databox.recipients.kind') }}</span>

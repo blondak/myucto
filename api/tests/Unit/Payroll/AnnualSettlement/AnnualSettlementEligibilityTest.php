@@ -27,6 +27,14 @@ final class AnnualSettlementEligibilityTest extends TestCase
         self::assertSame([], $this->evaluate($this->complete()));
     }
 
+    public function testRequestedSettlementDoesNotRequireEvidenceReference(): void
+    {
+        $request = $this->complete(evidence: null);
+
+        self::assertSame([], $this->evaluate($request));
+        self::assertNull($request->requestEvidenceReference);
+    }
+
     /** § 38ch odst. 1: bez žádosti není co provádět. */
     public function testMissingRequestBlocks(): void
     {
