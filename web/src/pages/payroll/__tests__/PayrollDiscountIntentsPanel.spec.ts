@@ -83,6 +83,17 @@ describe('PayrollDiscountIntentsPanel', () => {
     m.list.mockResolvedValue([])
   })
 
+  it('používá dark-mode tokeny na kartách a datumových polích', async () => {
+    const wrapper = mount(PayrollDiscountIntentsPanel)
+    await flushPromises()
+
+    expect(wrapper.html()).not.toContain('bg-white')
+    expect(wrapper.get('[data-test="discount-intent-from"]').classes())
+      .toContain('bg-surface')
+    expect(wrapper.get('[data-test="discount-intent-informed-on"]').classes())
+      .toContain('bg-surface')
+  })
+
   /**
    * Nepřijatý záměr slevu nedokládá. Kdyby to obrazovka neřekla, uživatel by
    * z připraveného podání usoudil, že je hotovo — a sleva by se přitom

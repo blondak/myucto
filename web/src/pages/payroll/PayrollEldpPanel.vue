@@ -172,7 +172,7 @@ onMounted(loadPeople)
 
 <template>
   <div class="space-y-4" data-test="eldp-panel">
-    <div class="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">
+    <div class="rounded-xl border border-neutral-200 bg-surface p-4 text-sm text-neutral-700">
       <h3 class="text-base font-semibold text-neutral-900">
         {{ t('payroll.eldp.title') }}
       </h3>
@@ -209,7 +209,7 @@ onMounted(loadPeople)
 
     <div v-if="loading" class="h-48 animate-pulse rounded-xl bg-neutral-100" />
 
-    <div v-else class="space-y-4 rounded-xl border border-neutral-200 bg-white p-4">
+    <div v-else class="space-y-4 rounded-xl border border-neutral-200 bg-surface p-4">
       <div class="grid gap-4 sm:grid-cols-2">
         <label class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
@@ -273,7 +273,7 @@ onMounted(loadPeople)
             v-model="note"
             rows="2"
             maxlength="500"
-            class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+            class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
             data-test="eldp-note"
           />
         </label>

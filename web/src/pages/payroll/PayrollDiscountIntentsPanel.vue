@@ -351,7 +351,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-4" data-test="discount-intents-panel">
-    <div class="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">
+    <div class="rounded-xl border border-neutral-200 bg-surface p-4 text-sm text-neutral-700">
       <h3 class="text-base font-semibold text-neutral-900">
         {{ t('payroll.discountIntents.title') }}
       </h3>
@@ -395,7 +395,7 @@ onMounted(async () => {
       </ul>
     </div>
 
-    <div class="space-y-4 rounded-xl border border-neutral-200 bg-white p-4">
+    <div class="space-y-4 rounded-xl border border-neutral-200 bg-surface p-4">
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <label class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
@@ -416,7 +416,7 @@ onMounted(async () => {
           <input
             v-model="intentFrom"
             type="date"
-            class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+            class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
             data-test="discount-intent-from"
           >
         </label>
@@ -427,7 +427,7 @@ onMounted(async () => {
           <input
             v-model="employeeInformedOn"
             type="date"
-            class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+            class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
             data-test="discount-intent-informed-on"
           >
           <span class="mt-1 block text-xs text-neutral-500">
@@ -459,7 +459,7 @@ onMounted(async () => {
 
     <div v-if="loading" class="h-48 animate-pulse rounded-xl bg-neutral-100" />
 
-    <div v-else-if="!items.length" class="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-600">
+    <div v-else-if="!items.length" class="rounded-xl border border-neutral-200 bg-surface p-4 text-sm text-neutral-600">
       {{ t('payroll.discountIntents.empty') }}
     </div>
 
@@ -467,7 +467,7 @@ onMounted(async () => {
       <li
         v-for="item in items"
         :key="item.id"
-        class="rounded-xl border border-neutral-200 bg-white p-4 text-sm"
+        class="rounded-xl border border-neutral-200 bg-surface p-4 text-sm"
         :data-test="`discount-intent-${item.id}`"
       >
         <div class="flex flex-wrap items-start justify-between gap-2">
@@ -529,7 +529,7 @@ onMounted(async () => {
             <input
               v-model="acceptedOn[item.id]"
               type="date"
-              class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+              class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
               :data-test="`discount-intent-accepted-on-${item.id}`"
             >
           </label>
@@ -541,7 +541,7 @@ onMounted(async () => {
               v-model="rejectionReason[item.id]"
               type="text"
               maxlength="190"
-              class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+              class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
               :data-test="`discount-intent-reason-${item.id}`"
             >
           </label>

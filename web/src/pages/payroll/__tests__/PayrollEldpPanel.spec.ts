@@ -76,6 +76,14 @@ function setup(): void {
 describe('PayrollEldpPanel', () => {
   beforeEach(setup)
 
+  it('používá dark-mode tokeny místo natvrdo bílých ploch formuláře', async () => {
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+
+    expect(wrapper.html()).not.toContain('bg-white')
+    expect(wrapper.get('[data-test="eldp-note"]').classes()).toContain('bg-surface')
+  })
+
   it('nedovolí přípravu bez obou výslovných potvrzení', async () => {
     const wrapper = mount(PayrollEldpPanel)
     await flushPromises()
