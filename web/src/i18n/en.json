@@ -1169,6 +1169,7 @@
                 "enforcement_net_pay_many": "Enforcement withholding cannot yet be calculated for {count} employees because calculated or verified net pay is missing. Complete the statutory payroll calculation first; the withholdings will then be recalculated automatically.",
                 "statutory_incomplete": "The statutory insurance, tax, or net-pay calculation was not completed. Correct the payroll components and employee statutory data, then open a new run revision.",
                 "requires_attention": "A check found data that must be completed or reviewed by a person. Open the place to fix it; the technical detail remains in the audit trail.",
+                "and_more": "and {count} more",
                 "open_remediation": "Open the place to fix"
             },
             "override": {

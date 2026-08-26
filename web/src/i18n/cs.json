@@ -1169,6 +1169,7 @@
                 "enforcement_net_pay_many": "Exekuční srážku u {count} zaměstnanců zatím nelze spočítat, protože chybí vypočtená nebo ověřená čistá mzda. Nejprve dokončete zákonný výpočet; srážky se potom přepočítají automaticky.",
                 "statutory_incomplete": "Zákonný výpočet pojistného, daně nebo čisté mzdy nebyl dokončen. Opravte mzdové složky a zákonné údaje zaměstnanců a potom otevřete novou revizi běhu.",
                 "requires_attention": "Kontrola našla údaj, který je potřeba doplnit nebo ručně ověřit. Otevřete místo k opravě; technický detail zůstává uložený v auditní stopě.",
+                "and_more": "a dalších {count}",
                 "open_remediation": "Otevřít místo k opravě"
             },
             "override": {
