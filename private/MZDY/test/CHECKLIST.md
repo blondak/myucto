@@ -1,6 +1,6 @@
 # Syntetický full-flow mezd – ruční checklist
 
-Tento scénář ověřuje jeden celý mzdový měsíc na třech výhradně syntetických osobách s pracovními vztahy HPP, DPČ a DPP a samostatný čistý HPP řez až po validní zmrazené JMHZ podání pro TEST. Automatizovaná část vytváří izolovanou firmu v databázi `myucto_test`, vše drží v jedné transakci a na konci provede rollback. Výchozí režim nikdy neodesílá data mimo lokální počítač.
+Tento scénář ověřuje jeden celý mzdový měsíc na třech výhradně syntetických osobách s pracovními vztahy HPP, DPČ a DPP a samostatný čistý HPP řez až po validní zmrazené JMHZ podání pro TEST. Ruční část navíc prochází pracovní cesty, účetní shodu, platby, dokumenty a podání ve stejném pořadí jako průvodce v aplikaci. Automatizovaná část vytváří izolovanou firmu v databázi `myucto_test`, vše drží v jedné transakci a na konci provede rollback. Výchozí režim nikdy neodesílá data mimo lokální počítač.
 
 ## Bezpečnostní brána před spuštěním
 
@@ -111,17 +111,23 @@ Tento přepínač stále nic neodesílá. Pouze přidá unit testy, které použ
 
 Automatizovaný scénář rollbackuje data, proto pro vizuální kontrolu nezakládejte výjimku v runneru. V UI použijte samostatnou lokální testovací firmu a opět jen syntetické údaje.
 
+- [ ] Na přehledu mezd zobrazte návod „Jak to funguje“ a ověřte devět kroků v pořadí Absence → Docházka → Pracovní cesty → Rychlý vstup → Mzdové běhy → Shoda účtování → Platby → Dokumenty → Podání.
+- [ ] Každý krok návodu otevře odpovídající mzdovou stránku; odkaz na manuál otevře kapitolu `58_Uplne_mzdy` a odkaz na nastavení stránku Nastavení mezd.
 - [ ] V Zaměstnancích založte tři osoby a ověřte zobrazení HPP, DPČ a DPP v seznamu i detailu.
 - [ ] Ověřte, že hledací pole osoby nevyžaduje render dlouhého seznamu a správně zachová deep-link osoby.
 - [ ] U každého vztahu zkontrolujte datum vzniku, úvazek, účtárnu, daňový režim a účast na pojištění.
 - [ ] V Mzdových složkách ověřte právní zacházení pravidelné mzdy a odměny.
-- [ ] V Rychlém měsíčním vstupu zadejte tři základní částky a jednu odměnu, poté je schvalte.
 - [ ] V Absencích založte směnu, průměr a jednodenní dovolenou; ověřte pořadí schválení.
+- [ ] V Docházce zkontrolujte publikovanou směnu a schvalte období až po zápisu absence.
+- [ ] V Pracovních cestách založte tuzemskou cestu mezi místy „Testovací provozovna A“ a „Testovací provozovna B“, spočítejte náhradu a ověřte, že se propíše do měsíčních podkladů bez skutečné adresy nebo účtenky.
+- [ ] V Rychlém měsíčním vstupu zadejte tři základní částky a jednu odměnu, poté je schvalte.
 - [ ] V Mzdových bězích vytvořte červen 2026, uzamkněte vstupy a proveďte výpočet.
 - [ ] Rozklikněte validace a ověřte, že neobsahují technické anglické kódy bez českého vysvětlení.
 - [ ] Kontrolu a schválení dokončete týmž testovacím účtem účetní.
+- [ ] Schválenou revizi zaúčtujte pouze do lokální syntetické firmy a ve Shodě účtování ověřte, že účetní můstek odpovídá snapshotu; odchylka musí být nulová nebo srozumitelně vysvětlená.
+- [ ] V Platbách ověřte závazky čistých mezd, daně a pojistného proti schválené revizi; dávku pouze připravte, neposílejte do banky ani mimo lokální prostředí.
 - [ ] V Dokumentech ověřte výplatní sestavu a konzistenci částek se snapshotem běhu.
-- [ ] V Podáních otevřete přehled ZP a JMHZ preview; nic neodesílejte.
+- [ ] V Podáních otevřete přehled ZP, JMHZ preview a historii transportu; nic neodesílejte a nevkládejte přístupové údaje ani certifikát.
 - [ ] Ověřte, že bez explicitně nakonfigurovaného bezpečného kanálu UI nenabídne implicitní produkční odeslání.
 
 ## Negativní a fail-closed kontroly
