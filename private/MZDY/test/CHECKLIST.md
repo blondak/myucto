@@ -1,6 +1,6 @@
 # Syntetický full-flow mezd – ruční checklist
 
-Tento scénář ověřuje jeden celý mzdový měsíc na třech výhradně syntetických osobách s pracovními vztahy HPP, DPČ a DPP. Automatizovaná část vytváří izolovanou firmu v databázi `myucto_test`, vše drží v jedné transakci a na konci provede rollback. Výchozí režim nikdy neodesílá data mimo lokální počítač.
+Tento scénář ověřuje jeden celý mzdový měsíc na třech výhradně syntetických osobách s pracovními vztahy HPP, DPČ a DPP a samostatný čistý HPP řez až po validní zmrazené JMHZ podání pro TEST. Automatizovaná část vytváří izolovanou firmu v databázi `myucto_test`, vše drží v jedné transakci a na konci provede rollback. Výchozí režim nikdy neodesílá data mimo lokální počítač.
 
 ## Bezpečnostní brána před spuštěním
 
@@ -100,6 +100,12 @@ Tento přepínač stále nic neodesílá. Pouze přidá unit testy, které použ
 - [ ] Preview má deterministický 64znakový SHA-256.
 - [ ] Preview fail-closed kontroluje shodu snapshotů, osob, vztahů, zákonných součtů a závazku ČSSZ.
 - [ ] Preview není oficiální podání a runner nevolá dispatch službu.
+- [ ] Samostatný HPP má schválený pracovní souhrn JMHZ v2 bez absencí a schválený průměrný výdělek.
+- [ ] Syntetické OIČ a ID PPV jsou uložené jen pro kombinaci firma, vztah a prostředí TEST.
+- [ ] Tarif, pravidelná a nepravidelná odměna pokryjí explicitně atributy 10329, 10330 a 10331; atribut 10328 vznikne kontrolovaným součtem.
+- [ ] Příprava skončí `source_ready` bez jediného nálezu a lokální test XML skončí `dry_run_valid`.
+- [ ] SHA-256 vráceného XML odpovídá skutečnému obsahu.
+- [ ] Zmrazené podání je v prostředí TEST a stavu `ready`, ale nemá žádný transportní pokus.
 
 ## Ruční UI průchod na samostatných syntetických datech
 
@@ -142,4 +148,4 @@ Automatizovaný scénář rollbackuje data, proto pro vizuální kontrolu nezakl
 
 ## Kritérium dokončení
 
-Průchod je úspěšný pouze tehdy, když automatizovaný test doběhne bez skipu, všechny čtyři vstupy a jedna schválená absence se objeví ve zmrazeném běhu právě jednou, revizi vypočítá, zkontroluje a schválí jedna účetní, ZP download i JMHZ preview mají ověřený hash a nebyla provedena žádná síťová nebo externí operace.
+Průchod je úspěšný pouze tehdy, když automatizovaný test doběhne bez skipu, všechny čtyři vstupy a jedna schválená absence se objeví ve smíšeném zmrazeném běhu právě jednou, revizi vypočítá, zkontroluje a schválí jedna účetní, ZP download i JMHZ preview mají ověřený hash a samostatný čistý HPP skončí validním zmrazeným JMHZ TEST podáním bez transportního pokusu a bez jakékoli síťové nebo externí operace.

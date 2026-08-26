@@ -71,7 +71,7 @@ $runSuite = static function (string $label, array $testPaths) use ($apiDirectory
 
 fwrite(STDOUT, "BEZPEČNÝ REŽIM: pouze syntetická data, myucto_test a rollback.\n");
 fwrite(STDOUT, "Externí odeslání: ZAKÁZÁNO.\n");
-$exitCode = $runSuite('HPP + DPČ + DPP, absence, složky, běh, ZP a JMHZ preview', [
+$exitCode = $runSuite('Mzdy HPP + DPČ + DPP a čistý HPP až po validní JMHZ TEST podání bez transportu', [
     $fullFlowTest,
 ]);
 if ($exitCode !== 0) {
