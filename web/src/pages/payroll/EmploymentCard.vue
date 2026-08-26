@@ -223,6 +223,15 @@ const startsBeforePayroll = computed(() => {
 const openingStartPeriod = computed(() => startsBeforePayroll.value
   ? payrollStartMonth.value
   : props.employment.start_date?.slice(0, 7) ?? payrollStartMonth.value)
+const openingFirstIncludedMonth = computed(() => {
+  if (!startsBeforePayroll.value) return null
+  const period = payrollStartMonth.value
+  const start = props.employment.start_date
+  if (period === null || start === null) return null
+  return start.slice(0, 4) === period.slice(0, 4)
+    ? Number(start.slice(5, 7))
+    : 1
+})
 const showOpeningBalances = computed(() => props.employment.is_primary
   && payrollStartMonth.value !== null
   && openingStartPeriod.value !== null)
@@ -644,6 +653,7 @@ const actions = computed<ActionItem[]>(() => [
         :person-id="employment.employee_id"
         :start-period="openingStartPeriod!"
         :include-prior-months="startsBeforePayroll"
+        :first-included-month="openingFirstIncludedMonth"
         :can-write="canWrite"
         @loaded="openingsFilled = $event"
       />

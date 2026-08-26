@@ -229,8 +229,8 @@ describe('EmploymentCard', () => {
       global: {
         stubs: {
           PayrollOpeningBalancesPanel: {
-            props: ['includePriorMonths'],
-            template: '<div data-test="opening-panel" :data-prior="String(includePriorMonths)" />',
+            props: ['includePriorMonths', 'firstIncludedMonth'],
+            template: '<div data-test="opening-panel" :data-prior="String(includePriorMonths)" :data-first="String(firstIncludedMonth)" />',
           },
         },
       },
@@ -238,6 +238,28 @@ describe('EmploymentCard', () => {
 
     expect(wrapper.find('[data-test="opening-balances-needed"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="opening-panel"]').attributes('data-prior')).toBe('false')
+    expect(wrapper.get('[data-test="opening-panel"]').attributes('data-first')).toBe('null')
+  })
+
+  it('u převzatého zaměstnance začíná počáteční stav měsícem nástupu', () => {
+    const wrapper = mount(EmploymentCard, {
+      props: {
+        employment: { ...employment(), start_date: '2026-03-10' },
+        canWrite: true,
+        payrollStartPeriod: '2026-08-01',
+      },
+      global: {
+        stubs: {
+          PayrollOpeningBalancesPanel: {
+            props: ['includePriorMonths', 'firstIncludedMonth'],
+            template: '<div data-test="opening-panel" :data-prior="String(includePriorMonths)" :data-first="String(firstIncludedMonth)" />',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.get('[data-test="opening-panel"]').attributes('data-prior')).toBe('true')
+    expect(wrapper.get('[data-test="opening-panel"]').attributes('data-first')).toBe('3')
   })
 
   it('read-only uživateli ukáže historii a checklist, ale žádné mutace', () => {
