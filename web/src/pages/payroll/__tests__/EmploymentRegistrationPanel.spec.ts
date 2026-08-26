@@ -47,7 +47,7 @@ const preview = {
   xml_sha256: 'a'.repeat(64),
   deadline,
   employer_registration: null,
-  official_submission: { supported: false, reason: 'Nácvik.' },
+  official_submission: { supported: false, reason: 'Test.' },
 }
 
 function mountPanel(canWrite = true) {
