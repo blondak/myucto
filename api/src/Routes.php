@@ -1247,6 +1247,10 @@ final class Routes
                 '/submissions/health-notifications/duties',
                 [PayrollHealthNotificationAction::class, 'periodDuties'],
             );
+            $g->post(
+                '/submissions/health-notifications/duties/obligations',
+                [PayrollHealthNotificationAction::class, 'registerPeriodObligations'],
+            );
             $g->get(
                 '/submissions/health-notifications/duties/{employmentId:[0-9]+}',
                 [PayrollHealthNotificationAction::class, 'duties'],

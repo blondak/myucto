@@ -231,6 +231,19 @@ final readonly class HealthInsuranceSubmissionService
             }
         }
 
+        $obligationIds = $this->submissionRepository
+            ->obligationIdsBySourceReferences(
+                $supplierId,
+                $environment,
+                self::AGENDA_BULK_NOTIFICATION,
+                self::SOURCE_EVENT_NOTIFICATION,
+                array_column($all, 'id'),
+            );
+        foreach ($all as &$item) {
+            $item['obligation_id'] = $obligationIds[$item['id']] ?? null;
+        }
+        unset($item);
+
         // Souhrn se počítá nad CELÝM obdobím, ne nad filtrem ani nad stránkou —
         // stejně jako u inboxu podání. „Kolik je po lhůtě" nesmí záviset na
         // tom, jaký filtr má účetní zrovna zapnutý; kdyby závisel, dal by se
@@ -301,8 +314,10 @@ final readonly class HealthInsuranceSubmissionService
         ) as $duty) {
             if (!$duty->reportedByEmployer || $duty->deadline === null) {
                 $registered[] = [
+                    'duty_id' => $duty->sourceEventReference(),
                     'duty' => $duty->toArray(),
                     'obligation_id' => null,
+                    'created' => false,
                     'skipped_reason_code' =>
                         'zp_duty_not_reported_by_employer',
                 ];
@@ -339,13 +354,100 @@ final readonly class HealthInsuranceSubmissionService
                 $environment,
             );
             $registered[] = [
+                'duty_id' => $duty->sourceEventReference(),
                 'duty' => $duty->toArray(),
                 'obligation_id' => $obligation['id'],
+                'created' => $obligation['created'],
                 'skipped_reason_code' => null,
             ];
         }
 
         return $registered;
+    }
+
+    /** @return array{items:list<array<string,mixed>>,total:int,created:int} */
+    public function registerPeriodObligations(
+        int $supplierId,
+        string $environment,
+        string $period,
+        ?int $createdBy = null,
+    ): array {
+        $candidates = [];
+        $offset = 0;
+        do {
+            $page = $this->dutiesForPeriod(
+                $supplierId,
+                $environment,
+                $period,
+                ['reported' => true],
+                self::PERIOD_MAX_LIMIT,
+                $offset,
+            );
+            foreach ($page['items'] as $item) {
+                if ($item['deadline'] !== null) {
+                    $candidates[$item['id']] = $item;
+                }
+            }
+            $offset += count($page['items']);
+        } while ($offset < $page['total'] && $page['items'] !== []);
+
+        return $this->submissionRepository->transaction(function () use (
+            $supplierId,
+            $environment,
+            $createdBy,
+            $candidates,
+        ): array {
+            $registered = [];
+            $groups = [];
+            foreach ($candidates as $dutyId => $item) {
+                if ($item['obligation_id'] !== null) {
+                    $registered[$dutyId] = [
+                        'duty_id' => $dutyId,
+                        'obligation_id' => $item['obligation_id'],
+                        'created' => false,
+                    ];
+                    continue;
+                }
+                $groups[$item['employment_id'] . ':' . $item['occurred_on']] = [
+                    'employment_id' => $item['employment_id'],
+                    'occurred_on' => $item['occurred_on'],
+                ];
+            }
+            foreach ($groups as $group) {
+                foreach ($this->registerObligations(
+                    $supplierId,
+                    $environment,
+                    $group['employment_id'],
+                    $group['occurred_on'],
+                    $createdBy,
+                ) as $item) {
+                    $dutyId = $item['duty_id'];
+                    if (isset($candidates[$dutyId]) && $item['obligation_id'] !== null) {
+                        $registered[$dutyId] = [
+                            'duty_id' => $dutyId,
+                            'obligation_id' => $item['obligation_id'],
+                            'created' => $item['created'],
+                        ];
+                    }
+                }
+            }
+
+            $items = [];
+            foreach (array_keys($candidates) as $dutyId) {
+                if (isset($registered[$dutyId])) {
+                    $items[] = $registered[$dutyId];
+                }
+            }
+
+            return [
+                'items' => $items,
+                'total' => count($items),
+                'created' => count(array_filter(
+                    $items,
+                    static fn (array $item): bool => $item['created'],
+                )),
+            ];
+        });
     }
 
     /**

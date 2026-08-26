@@ -4782,7 +4782,7 @@
         },
         "health_notifications": {
             "title": "Oznamovací povinnost vůči zdravotní pojišťovně",
-            "subtitle": "Co se za období hlásí, komu a do kdy. Aplikace vyrobí XML, ověří je proti připnutému XSD a u doložených pojišťoven je připraví do odchozí fronty ISDS. Samotné odeslání vždy potvrzuje uživatel.",
+            "subtitle": "HOZ: aplikace vyhodnotí lhůty a zaeviduje povinnosti pro ruční dokončení, ale zatím nesestavuje ani neodesílá samotné oznámení. PPZ: ze schválené revize vytvoří XML i PDF a doložený formát přílohy může připravit do odchozí fronty ISDS. Samotné odeslání vždy potvrzuje uživatel.",
             "load_failed": "Přehled oznamovacích povinností se nepodařilo načíst.",
             "stale": "Zobrazená data jsou z posledního úspěšného načtení. {message}",
             "read_only": "K sestavení podání je potřeba právo zápisu do mzdových podání.",
@@ -4795,13 +4795,22 @@
             "data_box": "Datová schránka: {id}",
             "isds_xml_supported": "XML lze připravit do ISDS",
             "isds_pdf_supported": "Vytěžitelné PDF lze připravit do ISDS",
-            "alternative_route": "Jiný podporovaný postup",
+            "alternative_route": "Formát přílohy ISDS nedoložen",
             "limits": {
                 "title": "Možnosti elektronického podání",
-                "no_transport": "MyÚčto připraví do odchozí fronty ISDS doložený formát přílohy — společné XML nebo vytěžitelné PDF. Odeslání vždy výslovně potvrzuje uživatel.",
-                "manual_delivery": "Každá pojišťovna níže uvádí konkrétní podporovaný postup. Formát se volí z časově účinné matice a před odesláním jej uživatel vidí.",
+                "no_transport": "Do odchozí fronty ISDS lze připravit pouze PPZ a jen tam, kde je doložený formát přílohy — společné XML nebo vytěžitelné PDF. Odeslání vždy výslovně potvrzuje uživatel.",
+                "manual_delivery": "HOZ aplikace zatím nesestavuje ani neodesílá. Zaeviduje pouze povinnost a lhůtu; oznámení připravte a podejte ručně a splnění potvrďte v inboxu povinností.",
                 "undocumented_codes": "U těchto druhů povinnosti neplyne z připnutého schématu jediný kód změny, takže se nevydá vůbec: {kinds}. Odhadnout ho by znamenalo podat větu s kódem, který neplyne z ničeho.",
                 "capability_failed": "Seznam kanálů pojišťoven se nepodařilo načíst. Omezení výše platí i tak — nezmizela, jen k nim chybí detail."
+            },
+            "hoz_sync": {
+                "title": "Evidence povinností HOZ",
+                "description": "Synchronizace projde všechny povinnosti zaměstnavatele ve zvoleném měsíci a idempotentně je zapíše do inboxu povinností. Nevytváří soubor HOZ a nic neodesílá; po ručním podání potvrďte splnění v inboxu.",
+                "action": "Synchronizovat povinnosti HOZ",
+                "wait_for_load": "Nejdřív se musí načíst zvolené období.",
+                "done": "Do inboxu je synchronizováno {count} povinností. Samotné HOZ nebylo sestaveno ani odesláno.",
+                "partial_failed": "Část povinností se nepodařilo synchronizovat ({failed}). Úspěšné zápisy zůstaly zachované; spusťte synchronizaci znovu.",
+                "failed": "Povinnosti HOZ se nepodařilo synchronizovat."
             },
             "reason": {
                 "zp_transport_envelope_undocumented": "Transportní obálka není veřejně popsaná.",
@@ -4846,7 +4855,9 @@
                 "none": "Zaměstnavateli neběží"
             },
             "state": {
-                "manual_only": "K ručnímu podání"
+                "needs_sync": "Vyhodnoceno; synchronizujte do inboxu",
+                "obligation_registered": "V inboxu; HOZ podejte ručně",
+                "insured_reports": "Hlásí sám pojištěnec"
             },
             "kind": {
                 "employment_start": "Nástup do zaměstnání",

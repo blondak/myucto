@@ -26,7 +26,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
   'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'eldp' | 'health'
-  | 'health_notifications' | 'other' | 'inbox' | 'certificate'
+  | 'other' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -39,10 +39,9 @@ const activeTab = ref<SubmissionTab>('transport')
 // ELDP stojí hned za JMHZ: od roku 2026 ho ČSSZ sestavuje z měsíčního
 // hlášení sama, takže samostatný evidenční list je navazující a přechodná
 // agenda, ne konkurenční hlášení.
-// Zdravotní agenda má dvě záložky, protože jde o dvě různé povinnosti:
-// „health" je stav podaných přehledů o platbě, „health_notifications" je
-// oznamovací povinnost z § 10 — ta běží na osm dnů od skutečnosti, ne
-// měsíčně, a slít je do jedné záložky by tenhle rozdíl schovalo.
+// Zdravotní agenda je v jedné záložce, ale panel odděluje měsíční přehled
+// o platbě od oznamovací povinnosti z § 10, která běží na osm dnů od
+// skutečnosti. Uživatel tak nemá dvě konkurenční obrazovky nad stejnými daty.
 // Záměr uplatňovat slevu stojí hned za JMHZ, protože je jeho podmínkou: sleva
 // se sice vykazuje v měsíčním hlášení, ale nárok na ni zakládá tohle podání.
 // „Ostatní" je záchytná záložka pro skupinu `other`: `agenda_code` povinnosti
@@ -51,7 +50,7 @@ const activeTab = ref<SubmissionTab>('transport')
 // filtrují skupinu na serveru, takže by ji ani jeden z nich nenačetl.
 const tabs: SubmissionTab[] = [
   'transport', 'regzel', 'jmhz', 'discount_intents', 'eldp', 'health',
-  'health_notifications', 'other', 'inbox', 'certificate',
+  'other', 'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -318,10 +317,13 @@ onMounted(loadInboxBadge)
     <PayrollEldpPanel v-else-if="activeTab === 'eldp'" />
 
     <!--
-      Oznamovací povinnost si data obstarává sama a na REGZEL profilu
+      Zdravotní agenda si data obstarává sama a na REGZEL profilu
       nezávisí, proto stojí mimo společný skeleton.
     -->
-    <PayrollHealthNotificationPanel v-else-if="activeTab === 'health_notifications'" />
+    <template v-else-if="activeTab === 'health'">
+      <PayrollHealthNotificationPanel />
+      <PayrollSubmissionOverviewPanel mode="health" />
+    </template>
 
     <div v-else-if="loading" class="space-y-4">
       <div class="h-28 animate-pulse rounded-xl bg-neutral-100" />
@@ -594,7 +596,7 @@ onMounted(loadInboxBadge)
 
     <PayrollSubmissionOverviewPanel
       v-else
-      :mode="activeTab === 'health' || activeTab === 'other' ? activeTab : 'jmhz'"
+      :mode="activeTab === 'other' ? activeTab : 'jmhz'"
     />
   </div>
 </template>

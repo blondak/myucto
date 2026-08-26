@@ -392,6 +392,49 @@ final class PayrollSubmissionRepository
         ];
     }
 
+    /**
+     * @param list<string> $sourceReferences
+     * @return array<string,int>
+     */
+    public function obligationIdsBySourceReferences(
+        int $supplierId,
+        string $environment,
+        string $agendaCode,
+        string $sourceEventType,
+        array $sourceReferences,
+    ): array {
+        $result = [];
+        foreach (array_chunk(array_values(array_unique($sourceReferences)), 500) as $chunk) {
+            if ($chunk === []) {
+                continue;
+            }
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $statement = $this->db->pdo()->prepare(
+                'SELECT id, source_event_reference
+                   FROM payroll_obligations
+                  WHERE supplier_id = ?
+                    AND environment = ?
+                    AND agenda_code = ?
+                    AND source_event_type = ?
+                    AND source_event_reference IN (' . $placeholders . ')
+                  ORDER BY id DESC',
+            );
+            $statement->execute([
+                $supplierId,
+                $environment,
+                $agendaCode,
+                $sourceEventType,
+                ...$chunk,
+            ]);
+            while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+                $reference = (string) $row['source_event_reference'];
+                $result[$reference] ??= (int) $row['id'];
+            }
+        }
+
+        return $result;
+    }
+
     public function insertObligation(
         int $supplierId,
         string $environment,

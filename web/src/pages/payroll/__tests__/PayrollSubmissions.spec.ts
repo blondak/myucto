@@ -445,10 +445,10 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    // Devět od chvíle, kdy má vlastní záložku i záměr uplatňovat slevu
+    // Devět včetně vlastní záložky pro záměr uplatňovat slevu
     // (OZUSPOJ) — je to podmínka nároku, ne součást měsíčního hlášení.
-    // Desátá je „Ostatní": skupina `other` jinak nemá kam se zobrazit.
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(10)
+    // „Ostatní" zůstává záchytná skupina; zdravotní povinnosti mají jednu kartu.
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(9)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
@@ -561,7 +561,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    await clickTab(wrapper, 'health_notifications')
+    await clickTab(wrapper, 'health')
     await flushPromises()
 
     expect(wrapper.find('[data-test="health-notifications"]').exists()).toBe(true)
@@ -570,7 +570,7 @@ describe('PayrollSubmissions', () => {
       .toBe(true)
   })
 
-  it('nabídne interní měsíční přehled zdravotní pojišťovny ke stažení', async () => {
+  it('ve společné zdravotní záložce zachová historii měsíčních přehledů ke stažení', async () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 

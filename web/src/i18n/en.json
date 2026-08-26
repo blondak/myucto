@@ -4782,7 +4782,7 @@
         },
         "health_notifications": {
             "title": "Health insurer notification duty",
-            "subtitle": "What has to be reported for the period, to whom and by when. The application builds the XML, validates it against the pinned XSD and can place it into the ISDS outbox for documented insurers. The user always confirms the actual send.",
+            "subtitle": "HOZ: the application evaluates deadlines and records obligations for manual completion, but does not yet build or send the notification itself. PPZ: it creates XML and PDF from an approved revision and can place a documented attachment format into the ISDS outbox. The user always confirms the actual send.",
             "load_failed": "The notification duty overview could not be loaded.",
             "stale": "The data shown comes from the last successful load. {message}",
             "read_only": "Building a submission requires write access to payroll submissions.",
@@ -4795,13 +4795,22 @@
             "data_box": "Data box: {id}",
             "isds_xml_supported": "XML can be prepared for ISDS",
             "isds_pdf_supported": "Extractable PDF can be prepared for ISDS",
-            "alternative_route": "Another supported route",
+            "alternative_route": "ISDS attachment format undocumented",
             "limits": {
                 "title": "Electronic filing options",
-                "no_transport": "MyÚčto places the documented attachment format — shared XML or extractable PDF — into the ISDS outbox. The user always explicitly confirms the send.",
-                "manual_delivery": "Each insurer below states its concrete supported route. The format comes from an effective-dated matrix and is visible before sending.",
+                "no_transport": "Only PPZ can be placed into the ISDS outbox, and only where the attachment format is documented — shared XML or extractable PDF. The user always explicitly confirms the send.",
+                "manual_delivery": "The application does not yet build or send HOZ. It only records the obligation and deadline; prepare and file the notification manually, then confirm completion in the obligation inbox.",
                 "undocumented_codes": "For these duty kinds the pinned schema does not determine a single change code, so none is issued at all: {kinds}. Guessing one would mean filing a record with a code that follows from nothing.",
                 "capability_failed": "The insurer channel list could not be loaded. The limits above still apply — they did not disappear, only their detail is missing."
+            },
+            "hoz_sync": {
+                "title": "HOZ obligation records",
+                "description": "Synchronization checks every employer obligation in the selected month and idempotently records it in the obligation inbox. It creates no HOZ file and sends nothing; after manual filing, confirm completion in the inbox.",
+                "action": "Synchronize HOZ obligations",
+                "wait_for_load": "The selected period must load first.",
+                "done": "{count} obligations are synchronized to the inbox. The HOZ itself was neither built nor sent.",
+                "partial_failed": "Some obligations could not be synchronized ({failed}). Successful records were kept; run synchronization again.",
+                "failed": "HOZ obligations could not be synchronized."
             },
             "reason": {
                 "zp_transport_envelope_undocumented": "The transport envelope is not publicly documented.",
@@ -4846,7 +4855,9 @@
                 "none": "Does not run for the employer"
             },
             "state": {
-                "manual_only": "For manual filing"
+                "needs_sync": "Evaluated; synchronize to inbox",
+                "obligation_registered": "In inbox; file HOZ manually",
+                "insured_reports": "Reported by the insured person"
             },
             "kind": {
                 "employment_start": "Employment start",

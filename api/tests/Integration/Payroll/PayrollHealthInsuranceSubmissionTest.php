@@ -240,6 +240,49 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         );
     }
 
+    public function testPeriodBulkSyncPersistsItsStateAndIsIdempotent(): void
+    {
+        $before = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            '2026-03',
+            ['reported' => true],
+        );
+        self::assertCount(1, $before['items']);
+        self::assertNull($before['items'][0]['obligation_id']);
+
+        $first = $this->service->registerPeriodObligations(
+            $this->supplierId,
+            'production',
+            '2026-03',
+        );
+        self::assertSame(1, $first['total']);
+        self::assertSame(1, $first['created']);
+
+        $after = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            '2026-03',
+            ['reported' => true],
+        );
+        self::assertSame(
+            $first['items'][0]['obligation_id'],
+            $after['items'][0]['obligation_id'],
+        );
+
+        $replay = $this->service->registerPeriodObligations(
+            $this->supplierId,
+            'production',
+            '2026-03',
+        );
+        self::assertSame(1, $replay['total']);
+        self::assertSame(0, $replay['created']);
+        self::assertSame(
+            $first['items'][0]['obligation_id'],
+            $replay['items'][0]['obligation_id'],
+        );
+    }
+
     /**
      * Jádro řezu: artefakt vznikne a uloží se, ale bez připnutého XSD se
      * podání nesmí označit za ověřené — zůstane v `draft` s blokující
