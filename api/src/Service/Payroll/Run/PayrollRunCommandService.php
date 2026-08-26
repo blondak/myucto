@@ -472,8 +472,13 @@ final class PayrollRunCommandService
                 throw new PayrollRunConflictException($currentVersion);
             }
             $from = PayrollRunStatus::from((string) $run['status']);
+            $approvedBaseline = $command === PayrollRunCommand::REOPEN
+                && $from === PayrollRunStatus::CANCELLED
+                    ? $this->runs->latestApprovedRevision($supplierId, $runId)
+                    : null;
             $reopenAsCorrection = $command === PayrollRunCommand::REOPEN
-                && $from === PayrollRunStatus::CORRECTION_PENDING;
+                && ($from === PayrollRunStatus::CORRECTION_PENDING
+                    || $approvedBaseline !== null);
             $revision = $this->runs->currentRevision($supplierId, $runId);
             $snapshot = null;
             if (in_array($command, [
@@ -561,9 +566,9 @@ final class PayrollRunCommandService
                 || $command === PayrollRunCommand::REOPEN
             ) {
                 $revisionNo = (int) $run['current_revision_no'] + 1;
-                $previousRevisionId = $revision === null
-                    ? null
-                    : (int) $revision['id'];
+                $previousRevisionId = $approvedBaseline !== null
+                    ? (int) $approvedBaseline['id']
+                    : ($revision === null ? null : (int) $revision['id']);
                 $revisionId = $this->runs->insertRevision(
                     $supplierId,
                     $runId,

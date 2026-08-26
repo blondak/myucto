@@ -1710,6 +1710,59 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
+    public function testCancelledCorrectionReopensAgainstApprovedBaselineAsCorrection(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $approvedRevisionId = (int) $approved->revision['id'];
+        $this->approvedInput(10_000, 'CORRECTION_RETRY', 'correction');
+
+        $requested = $this->service->requestCorrection(
+            $this->supplierId,
+            $runId,
+            (int) $approved->run['row_version'],
+            'request-correction-before-cancel',
+            $this->actors[2],
+            'Oprava podkladů.',
+        );
+        $firstAttempt = $this->service->reopen(
+            $this->supplierId,
+            $runId,
+            (int) $requested->run['row_version'],
+            'first-correction-before-cancel',
+            $this->actors[1],
+            'První pokus opravy.',
+        );
+        $calculated = $this->service->calculate(
+            $this->supplierId,
+            $runId,
+            (int) $firstAttempt->run['row_version'],
+            'calculate-correction-before-cancel',
+            $this->actors[0],
+        );
+        $cancelled = $this->service->cancel(
+            $this->supplierId,
+            $runId,
+            (int) $calculated->run['row_version'],
+            'cancel-correction-attempt',
+            $this->actors[0],
+            'Podklady korekce je nutné znovu upravit.',
+        );
+
+        $retried = $this->service->reopen(
+            $this->supplierId,
+            $runId,
+            (int) $cancelled->run['row_version'],
+            'retry-correction-after-cancel',
+            $this->actors[1],
+            'Opakovaný pokus opravy.',
+        );
+
+        self::assertSame('correction', $retried->revision['revision_kind']);
+        self::assertSame($approvedRevisionId, $retried->revision['previous_revision_id']);
+        self::assertSame(3, $retried->revision['revision_no']);
+    }
+
     public function testSnapshotValidationBlocksApprovalWithoutChangingReviewedRun(): void
     {
         $this->db->pdo()->prepare(

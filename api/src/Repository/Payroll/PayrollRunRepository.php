@@ -1042,6 +1042,30 @@ final class PayrollRunRepository
         return $row === false ? null : self::castRevision($row);
     }
 
+    /** @return array<string,mixed>|null */
+    public function latestApprovedRevision(
+        int $supplierId,
+        int $runId,
+        ?int $beforeRevisionNo = null,
+    ): ?array
+    {
+        $beforeSql = $beforeRevisionNo === null ? '' : ' AND revision_no < ?';
+        $params = [$supplierId, $runId];
+        if ($beforeRevisionNo !== null) {
+            $params[] = $beforeRevisionNo;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_run_revisions
+              WHERE supplier_id = ? AND run_id = ? AND status = "approved"'
+                . $beforeSql . '
+              ORDER BY revision_no DESC
+              LIMIT 1'
+        );
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::castRevision($row);
+    }
+
     /** @return list<array<string,mixed>> */
     public function revisions(int $supplierId, int $runId): array
     {
