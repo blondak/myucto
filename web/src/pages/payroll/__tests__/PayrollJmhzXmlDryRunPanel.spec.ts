@@ -56,10 +56,10 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
   /**
    * Měsíční hlášení se podává ZA REGISTRACI u OSSZ. Revize přes víc mzdových
    * účtáren proto nesmí nacvičovat naslepo: dokud si uživatel účtárnu nezvolí,
-   * nácvik se nespustí — vykázat lidi jedné účtárny pod variabilním symbolem
+   * test se nespustí — vykázat lidi jedné účtárny pod variabilním symbolem
    * druhé je horší než nic nespustit.
    */
-  it('u dvou registrací žádá volbu účtárny a předá ji do nácviku', async () => {
+  it('u dvou registrací žádá volbu účtárny a předá ji do testu', async () => {
     m.offices.mockResolvedValue([
       {
         office_id: 4,
@@ -128,12 +128,20 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
       official_submission: {
         supported: false,
         reason_code: 'jmhz_dry_run_is_not_a_submission',
-        reason: 'Jde o lokální nácvik, ne o podání.',
+        reason: 'Jde o lokální test, ne o podání.',
       },
     })
 
     const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
       props: { runs: [run] as never[] },
+      global: {
+        stubs: {
+          RouterLink: {
+            props: ['to'],
+            template: '<a data-test="router-link" :data-to="JSON.stringify(to)"><slot /></a>',
+          },
+        },
+      },
     })
     await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
     await flushPromises()
@@ -158,23 +166,92 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
           entity_id: 11,
           attribute_ids: ['10419'],
         },
+        {
+          code: 'jmhz_taxpayer_declaration_unresolved',
+          entity_type: 'person',
+          entity_id: 13,
+          attribute_ids: ['10419'],
+        },
+        {
+          code: 'some_internal_code_not_translated_yet',
+          entity_type: 'employment',
+          entity_id: 12,
+          attribute_ids: [],
+        },
       ],
       official_submission: {
         supported: false,
         reason_code: 'jmhz_dry_run_is_not_a_submission',
-        reason: 'Jde o lokální nácvik, ne o podání.',
+        reason: 'Jde o lokální test, ne o podání.',
       },
     })
 
     const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
       props: { runs: [run] as never[] },
+      global: {
+        stubs: {
+          RouterLink: {
+            props: ['to'],
+            template: '<a data-test="router-link" :data-to="JSON.stringify(to)"><slot /></a>',
+          },
+        },
+      },
     })
     await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('jmhz_dry_run_blocked')
-    expect(wrapper.text()).toContain('10419')
+    expect(wrapper.text()).toContain('jmhz_dry_run_blockers.unknown')
+    expect(wrapper.text()).toContain('jmhz_dry_run_blocker_occurrences')
+    expect(wrapper.findAll('[data-test="jmhz-dry-run-blocker"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="jmhz-dry-run-technical-detail"]')).toHaveLength(2)
+    expect(wrapper.find('[data-test="jmhz-dry-run-remediation-list"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-test="router-link"]')).toHaveLength(2)
+    expect(wrapper.find('[data-test="jmhz-dry-run-remediation"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="router-link"]').attributes('data-to'))
+      .toContain('payroll-people')
+    expect(wrapper.text()).not.toContain('some_internal_code_not_translated_yet')
     expect(wrapper.find('pre').exists()).toBe(false)
+  })
+
+  it('u velké firmy nevyrenderuje stovky odkazů na jednotlivé zaměstnance', async () => {
+    m.dryRun.mockResolvedValue({
+      status: 'blocked',
+      preparation_id: 77,
+      blockers: Array.from({ length: 50 }, (_, index) => ({
+        code: 'jmhz_taxpayer_declaration_unresolved',
+        entity_type: 'person',
+        entity_id: 10_001 + index,
+        attribute_ids: ['10419'],
+      })),
+      official_submission: {
+        supported: false,
+        reason_code: 'jmhz_dry_run_is_not_a_submission',
+        reason: 'Jde o lokální test, ne o podání.',
+      },
+    })
+
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [run] as never[] },
+      global: {
+        stubs: {
+          RouterLink: {
+            props: ['to'],
+            template: '<a data-test="router-link" :data-to="JSON.stringify(to)"><slot /></a>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="jmhz-dry-run-remediation"]')).toHaveLength(1)
+    expect(wrapper.find('[data-test="jmhz-dry-run-remediation-list"]').exists())
+      .toBe(false)
+    expect(wrapper.get('[data-test="jmhz-dry-run-remediation"]').attributes('data-to'))
+      .toBe('{"name":"payroll-people"}')
+    expect(wrapper.text()).not.toContain('10050')
   })
 
   it('vypíše nepropustné vady z katalogu kontrol i s kódem chyby', async () => {
@@ -238,7 +315,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
       official_submission: {
         supported: false,
         reason_code: 'jmhz_dry_run_is_not_a_submission',
-        reason: 'Jde o lokální nácvik, ne o podání.',
+        reason: 'Jde o lokální test, ne o podání.',
       },
     })
 
@@ -257,7 +334,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     expect(wrapper.find('[data-test="jmhz-controls-warnings"]').exists()).toBe(false)
   })
 
-  it('v režimu jen pro čtení nespustí nácvik', async () => {
+  it('v režimu jen pro čtení nespustí test', async () => {
     m.canWrite.mockReturnValue(false)
 
     const wrapper = mount(PayrollJmhzXmlDryRunPanel, {

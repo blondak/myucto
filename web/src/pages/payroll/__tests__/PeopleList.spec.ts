@@ -17,6 +17,7 @@ const m = vi.hoisted(() => ({
   capabilities: vi.fn(),
   employerSettings: vi.fn(),
   saveStatutoryEvidence: vi.fn(),
+  employmentAgendaSummary: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -38,6 +39,7 @@ vi.mock('@/api/payroll', () => ({
     // Nabídka mzdových účtáren a výchozí pojišťovny pro nového zaměstnance.
     employerSettings: m.employerSettings,
     saveStatutoryEvidence: m.saveStatutoryEvidence,
+    employmentAgendaSummary: m.employmentAgendaSummary,
   },
 }))
 
@@ -202,6 +204,11 @@ describe('PeopleList toolbar and shared employee creation', () => {
     m.capabilities.mockResolvedValue({ state: { start_period: '2026-01-01' } })
     m.employerSettings.mockResolvedValue({ offices: [], default_health_insurer_code: null })
     m.saveStatutoryEvidence.mockResolvedValue({})
+    m.employmentAgendaSummary.mockResolvedValue({
+      employment_id: 44,
+      employee_id: 4,
+      agendas: [],
+    })
   })
 
   /*
@@ -718,6 +725,60 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(m.peoplePage).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Beta Neaktivní')
+  })
+
+  it('opens the employee card from an employment deep-link', async () => {
+    m.routeQuery.employment = '44'
+    m.person.mockResolvedValue({
+      ...person(4, 'Delta Nová', true, true),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.employmentAgendaSummary).toHaveBeenCalledWith(44)
+    expect(m.person).toHaveBeenCalledWith(4)
+    expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Delta Nová')
+  })
+
+  it('prefers an explicit person deep-link over an accompanying employment id', async () => {
+    m.routeQuery.person = '2'
+    m.routeQuery.employment = '44'
+    m.person.mockResolvedValue({
+      ...person(2, 'Beta Neaktivní', false, false),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.employmentAgendaSummary).not.toHaveBeenCalled()
+    expect(m.person).toHaveBeenCalledWith(2)
+    expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Beta Neaktivní')
+  })
+
+  it.each(['0', '-1', 'not-an-id'])(
+    'ignores invalid employment deep-link %s without fetching a detail',
+    async (employment) => {
+      m.routeQuery.employment = employment
+      const wrapper = mountPage()
+      await flushPromises()
+
+      expect(m.employmentAgendaSummary).not.toHaveBeenCalled()
+      expect(m.person).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(false)
+    },
+  )
+
+  it('keeps a missing employment deep-link silent and closed', async () => {
+    m.routeQuery.employment = '404'
+    m.employmentAgendaSummary.mockRejectedValue(new Error('not found'))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.person).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(false)
+    expect(m.toastError).not.toHaveBeenCalled()
   })
 
   it('ignores an unknown person id in the query', async () => {

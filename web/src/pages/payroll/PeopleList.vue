@@ -677,7 +677,22 @@ function toggleAdvancedProfile(event: Event) {
  * cizí id nic neotevře.
  */
 async function openFromQuery() {
-  const raw = Array.isArray(route.query.person) ? route.query.person[0] : route.query.person
+  const employmentRaw = Array.isArray(route.query.employment)
+    ? route.query.employment[0]
+    : route.query.employment
+  let raw = Array.isArray(route.query.person) ? route.query.person[0] : route.query.person
+  if ((typeof raw !== 'string' || raw === '')
+    && typeof employmentRaw === 'string' && employmentRaw !== ''
+  ) {
+    const employmentId = Number(employmentRaw)
+    if (!Number.isInteger(employmentId) || employmentId <= 0) return
+    try {
+      const summary = await payrollApi.employmentAgendaSummary(employmentId)
+      raw = String(summary.employee_id)
+    } catch {
+      return
+    }
+  }
   if (typeof raw !== 'string' || raw === '') return
   const id = Number(raw)
   if (!Number.isInteger(id) || id <= 0) return
