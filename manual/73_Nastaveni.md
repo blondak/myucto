@@ -779,7 +779,7 @@ aktuální firmu:
 | Záložka | Použití |
 |---|---|
 | **Kategorie nákladů** | Člení přijaté faktury a další náklady. U kategorie se zadává kód, název, pořadí a druh **fixní / variabilní** pro nákladové přehledy. |
-| **Kategorie tržeb** | Člení tržby z vydaných faktur. Zadává se kód, název a pořadí. Volitelně i **vlastní číselná řada** — faktury s touto kategorií pak dostanou číslo z ní (vlastní řada zákazníka má přednost), viz [§ 72.5.3](72_Multi_supplier.md#7253-islovani-faktur). |
+| **Kategorie tržeb** | Člení tržby z vydaných faktur. Zadává se kód, název a pořadí. Volitelně i **vlastní číselná řada** — faktury s touto kategorií pak dostanou číslo z ní (vlastní řada zákazníka má přednost), viz [§ 72.5.3](72_Multi_supplier.md#7253-cislovani-faktur). |
 
 U každé kategorie stránka ukazuje počet použití. Nepoužitou kategorii lze
 smazat; použitá se kvůli zachování historie pouze archivuje a přestane se
@@ -931,7 +931,7 @@ pokud nezůstane jiný aktivní alias daného účelu, nové odkazy použijí v�
 ## 73.17 Datová schránka
 
 **Cesta: `Firma → Datová schránka`.** Stránka vždy pracuje s právě zvolenou
-firmou a sdružuje její systémový certifikát,
+firmou a sdružuje její firemní certifikát,
 odchozí frontu podání, ručně načítanou příchozí schránku, doručenky a výzvy
 k odstranění vad. Stav dopravy (**připraveno, odesláno, doručeno**) se vždy
 zobrazuje odděleně od výsledku zpracování (**přijato, odmítnuto, neznámé**).
@@ -947,17 +947,22 @@ kód podle nastavení účtu. Zpráva se neodešle pouhým přesměrováním:
 uživatel musí připravený koncept v ISDS vědomě schválit.
 
 Příchozí zprávy se načítají přímým rozhraním ISDS nezávisle na odesílací bráně.
-Při každém ručním načtení si uživatel zvolí jednu ze tří metod:
+Při každém ručním načtení si uživatel zvolí jednu ze čtyř metod:
 
 - **Mobilní klíč eGovernmentu** — zadá uživatelské jméno a komunikační kód
   (heslo pro externí aplikaci) a konkrétní relaci potvrdí v Mobilním klíči;
 - **jméno a heslo** — použijí se pouze pro jeden synchronní požadavek;
-- **systémový certifikát firmy** — uložený šifrovaně pouze u aktuální firmy.
+- **SMS** — nejprve zadá jméno a heslo, potom dokončí právě zahájenou relaci
+  jednorázovým SMS kódem;
+- **firemní certifikát** — uložený šifrovaně pouze u aktuální firmy.
 
-Jméno, heslo ani komunikační kód se trvale neukládají. Krátkodobá relace
-Mobilního klíče platí jen pro právě zahájené načtení a po něm se aplikace z ISDS
-odhlásí. Provozní řád ISDS pro aplikace třetích stran doporučuje systémový
-certifikát, ale jeho absence neblokuje obě jednorázové interaktivní metody.
+Jednorázové heslo a SMS kód se trvale neukládají. U Mobilního klíče lze
+uživatelské jméno a komunikační kód volitelně uložit jako šifrovaný profil
+oddělený podle firmy, uživatele a prostředí; profil lze znovu odstranit.
+Krátkodobá relace Mobilního klíče platí jen pro právě zahájené načtení a po něm
+se aplikace z ISDS odhlásí. Doporučení provozního řádu pro aplikace třetích
+stran samo o sobě neurčuje právní vhodnost metody pro konkrétní organizaci.
+Absence firemního certifikátu neblokuje jednorázové interaktivní metody.
 
 Globální registraci odesílací brány v **Systém → Odesílací brána ISDS** a její
 komerční certifikát spravuje pouze
@@ -975,3 +980,6 @@ zprávy může být právně rozhodným doručením a spustit navazující lhůt
 Automatické stahování nelze v nastavení zapnout. U Mobilního klíče se po této
 akci automaticky kontroluje pouze stav právě vyžádaného potvrzení; nejde o
 opakované ani plánované vybírání schránky.
+
+Použití datové schránky pro mzdová hlášení, stav konceptu, doručenky a věcné
+přijetí popisuje kapitola [Podání a hlášení](58j_Podani_a_hlaseni.md).

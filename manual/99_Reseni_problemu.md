@@ -406,13 +406,15 @@ jsou uložené v auditní stopě návrhu.
 
 ### Úplné mzdy zastavily výpočet v ruční kontrole
 
-Úplné mzdy jsou testovací alfa. Stav **Ruční kontrola** je bezpečnostní výsledek,
+Úplné mzdy jsou zkušební agenda. Stav **Ruční kontrola** je bezpečnostní výsledek,
 ne technická porucha: pro rozhodné datum může chybět účinný a odborně schválený
 ruleset, úplný personální podklad nebo podporovaný scénář. V **Mzdy →
 Legislativní pravidla** ověř období účinnosti a stav všech dotčených oblastí;
 v detailu revize potom projdi konkrétní blokery. Chybějící rok se nesmí nahradit
 nejbližší sadou pravidel. Výsledek neopravuj ručním přepsáním vypočtených částek
-a nepoužívej jej jako jediný podklad pro výplatu nebo podání.
+a nepoužívej jej jako jediný podklad pro výplatu nebo podání. Podrobný postup je
+v kapitolách [Mzdové běhy](58e_Mzdove_behy.md) a
+[Legislativní pravidla mezd](58q_Legislativni_pravidla_mezd.md).
 
 ### Odkaz do EPO po otevření zmizel
 

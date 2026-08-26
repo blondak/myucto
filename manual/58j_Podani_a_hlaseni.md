@@ -1,0 +1,250 @@
+# Podání a hlášení
+
+## Účel
+
+Agenda připravuje vybraná mzdová hlášení, provádí formální kontroly a vede uživatele přes ručně spuštěné odeslání. Pokrývá zejména podporované toky ČSSZ a zdravotních pojišťoven; vytvořený soubor ani datová zpráva nejsou samy o sobě potvrzením věcného přijetí.
+
+## Předpoklady a oprávnění
+
+Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo schválená revize, úplné identifikátory a správně oddělené TEST/produkční prostředí. Pro ČSSZ TEST použijte pouze testovací profil a certifikát v určeném bezpečném úložišti. ISDS musí být nastaveno pro správnou firmu a prostředí.
+
+## Krokový postup
+
+1. Otevřete **Mzdy → Podání a hlášení**, vyberte typ, období a schválenou revizi.
+2. Spusťte náhled nebo kontrolní přípravu a odstraňte blokující chyby. Řádné JMHZ vzniká ze způsobilé běžné revize. Opravu nebo storno již připraveného JMHZ založte z jeho historie řízenou akcí; nejde o ruční nepodporovaný scénář.
+3. Vytvořte výstup. U zdravotního PPZ aplikace podle pojišťovny připraví podporovaný XML nebo vytěžitelný PDF; XDP není odesílaný formulář. HOZ a další nepokryté životní události dokončete ručně na oficiálním kanálu.
+4. Pro ISDS stiskněte **Odeslat přes ISDS**. Aplikace vytvoří záznam v outboxu a provede předběžnou kontrolu, ale zprávu sama neodešle.
+5. Otevřete koncept na oficiálním rozhraní ISDS, přihlaste se metodou, kterou ISDS v daném prostředí skutečně nabídne, zkontrolujte adresáta a přílohy a odeslání výslovně potvrďte.
+6. Alternativně použijte podporovaný profil VREP pro ČSSZ. Přihlašovací a certifikační údaje zadávejte jen do určených polí, nikdy do poznámek.
+7. Inbox načítejte pouze ručně. Před načtením vždy potvrďte, že rozumíte tomu, že přístup ke zprávě může způsobit její doručení. Potom přiřaďte odpověď k podání a ověřte věcný výsledek.
+
+## Stavy
+
+Návrh čeká na doplnění, připravené podání prošlo lokální kontrolou, outbox čeká na uživatelskou akci a koncept čeká na potvrzení v ISDS. Odesláno popisuje transport. Doručeno dokládá doručení datové zprávy, nikoli přijetí obsahu institucí. Přijato, odmítnuto nebo vyžaduje opravu určete až z doručenky, odpovědi či stavu cílového systému.
+
+## Kontroly a bezpečnost
+
+Odesílací brána přesměruje uživatele na oficiální rozhraní ISDS. Podle nabídky
+konkrétního účtu tam lze použít například jméno a heslo, heslo aplikace
+s bezpečnostním klíčem eGovernmentu, Mobilní klíč eGovernmentu, SMS,
+uživatelský certifikát nebo Identitu občana. MyÚčto údaje z této přihlašovací
+stránky nevidí a zpráva odejde až po výslovném schválení konceptu uživatelem.
+
+Ruční načtení inboxu v **Firma → Datová schránka** má v aplikaci čtyři volby:
+
+- **Mobilní klíč eGovernmentu** — jméno, komunikační kód (heslo aplikace)
+  a potvrzení konkrétní relace v klíči;
+- **jméno a heslo** — pouze pro jeden synchronní požadavek;
+- **SMS** — zahájení jménem a heslem a následné dokončení jednorázovým SMS
+  kódem;
+- **firemní certifikát** — šifrovaně uložený pouze u právě zvolené firmy.
+
+Technická dostupnost metody není tvrzením o její právní vhodnosti pro konkrétní
+organizaci. Heslo a SMS kód se trvale neukládají; uložený profil Mobilního
+klíče je oddělen podle firmy, uživatele a prostředí a lze jej odstranit.
+Každé přihlášení, vytvoření konceptu, odeslání a načtení inboxu musí vědomě
+spustit uživatel. Před načtením inboxu navíc vždy výslovně potvrdí, že rozumí
+možnému účinku doručení a spuštění lhůt.
+
+## Časté chyby
+
+- Považování XML, PDF nebo záznamu outboxu za odeslané podání.
+- Záměna testovacího certifikátu či adresáta za produkční.
+- Odeslání řádného JMHZ bez schválené běžné revize nebo založení opravy či storna bez vazby na způsobilé předchozí podání.
+- Považování doručenky za věcné přijetí bez kontroly odpovědi.
+- Automatické nebo neuvážené otevření inboxu bez potvrzení možného účinku doručení.
+- Uložení hesla, SMS kódu či privátního klíče do poznámky nebo evidence podání.
+
+## Návaznosti
+
+Identifikátory nastavte v [Nastavení mezd](58o_Nastaveni_mezd.md) a obecné ISDS konfiguraci v [kapitole 73](73_Nastaveni.md#7317-datova-schranka). Zdrojová data pocházejí z [mzdového běhu](58e_Mzdove_behy.md); kontrolní soubory a doručenky uchovávejte podle [retenčních lhůt](58r_Retencni_lhuty.md).
+
+
+
+## Podrobný tok podání
+
+V **Mzdy → Nastavení mezd → Podání** nejprve potvrď evidenční profil pro
+REGZEL. Samostatně se eviduje, zda je zaměstnavatel sociálním podnikem,
+agenturou práce nebo zaměstnavatelem na chráněném trhu práce. Potvrzení se
+vztahuje i na nezaškrtnuté hodnoty; při každém uložení je proto nutné znovu
+výslovně potvrdit, že byly všechny tři údaje ověřeny.
+
+V **Mzdy → Podání a hlášení** lze připravit doplňující údaje zaměstnavatele
+`REGZELDOPL25` podle lokálně připnutého oficiálního XSD. Vyber produkční nebo testovací prostředí a
+konkrétní aktivní mzdovou účtárnu. Prostředí jsou striktně oddělená:
+test vyžaduje fiktivní desetimístný variabilní symbol začínající `999`,
+zatímco produkce jej odmítne. Před každou přípravou XML znovu potvrď aktuálnost
+prostředí, účtárny, identifikátorů i evidenčních příznaků.
+
+Příprava vytvoří neměnný šifrovaný snapshot a XML ověří proti lokálně
+připnutému oficiálnímu XSD. Historie se filtruje podle právě vybraného
+prostředí a XML lze znovu stáhnout. Při stažení aplikace ověří šifrovaný zdroj,
+tenant, prostředí, XSD i kryptografický otisk výsledného XML.
+
+Tato funkce XML pouze připraví a stáhne. Neodesílá je a neoznačuje registraci
+za přijatou. Prvotní registrace zaměstnavatele, přidání nebo ukončení účtárny
+a opravné scénáře nejsou bez odpovídajícího oficiálního XSD dostupné.
+
+Záložky **JMHZ** a **Zdravotní pojišťovny** zobrazují za vybraný měsíc skutečný
+přehled evidovaných povinností, termínů, kanálů a posledních stavů podání.
+Produkční a testovací prostředí zůstávají oddělená. Přehled je pouze
+kontrolní; samotný řádek povinnosti ani stažení náhledu nikdy neznamená, že bylo
+podání odesláno nebo přijato. Běžné měsíční JMHZ má navíc řízené odeslání přes
+ISDS nebo VREP a stav **Přijato** získá teprve z ověřeného protokolu ČSSZ.
+
+Záložka **JMHZ** ukazuje všechny povinnosti vůči ČSSZ, tedy vedle měsíčního
+hlášení i registrace zaměstnance a zaměstnavatele, evidenční list důchodového
+pojištění a oznámení o zaměstnání osoby pobírající starobní důchod.
+
+Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
+pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
+lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto
+má vlastní záložku; podrobnosti jsou v oddílu
+[Podání zdravotním pojišťovnám](#podani-zdravotnim-pojistovnam).
+
+Záložka **Ostatní** je záchytná. Zobrazí evidované povinnosti, jejichž agendu
+aplikace nezná — typicky zadané ručně nebo importované. Nic se
+tak neztratí z dohledu; přípravu ani odeslání pro ně aplikace nenabízí.
+
+U každého termínu se samostatně zobrazuje jeho aktuální fáze: okno ještě není
+otevřené, otevřeno, blíží se termín, termín je dnes, po termínu, čeká se na
+výsledek, splněno nebo je nutný zásah. Samotný stav **Odesláno** není důkazem
+splnění; po termínu zůstane povinnost zvýrazněná, dokud nepřijde důvěryhodné
+přijetí. Odmítnutí, částečné přijetí nebo čekání na ztotožnění se vždy ukáže
+jako stav vyžadující zásah. Pravidelný termín JMHZ je 20. den následujícího
+měsíce; připadne-li na sobotu, neděli nebo český svátek, aplikace jej posune
+na nejbližší následující pracovní den.
+
+Má-li povinnost připravené podání, tlačítko **Detail** zobrazí jeho bezpečný
+provozní rozpad: stav a kanál, jednotlivé části, metadata archivovaných
+artefaktů, kontroly a problémy a přijaté dodejky. Obsah šifrovaných XML ani
+citlivé podrobnosti validačních chyb se do tohoto přehledu neposílají.
+Rozlišuj zejména stav **Odesláno** od **Přijato** — přijetí se smí zobrazit
+jen na základě důvěryhodně ověřeného protokolu. Tlačítkem **Stáhnout**
+u artefaktu získáš přesně archivovaný XML, ZIP, PDF, JSON nebo jiný podklad;
+každé stažení používá krátkodobé jednorázové oprávnění.
+
+U schválených běhů může záložka JMHZ nabídnout také **Kontrolní náhled
+PVPOJ**. Zobrazuje vyměřovací základ, pojistné k úhradě, počet zahrnutých osob
+a identifikaci připnutého XSD; stejný deterministický kontrolní JSON lze stáhnout.
+Náhled vznikne pouze tehdy, když souhlasí neměnný vstup revize, vypočtené
+sociální pojištění, vztahové i osobní součty a odpovídající závazek ČSSZ.
+Viditelné označení **Pouze kontrolní náhled** znamená, že nejde o úplné XML
+JMHZ, připravené podání ani důkaz odeslání nebo přijetí.
+
+Panel **Test měsíčního hlášení JMHZ** postaví z ověřené přípravy úplné XML
+běžného měsíčního hlášení a projde s ním trojí kontrolu: sestavitelnost
+dokumentu, shodu s připnutým schématem a katalog kontrol ČSSZ. Nic se
+neodesílá ani neukládá jako podání.
+
+Nálezy z katalogu se dělí podle dopadu, ne podle závažnosti textu.
+**Nepropustná vada** by způsobila neúčinnost podání a vyvolala výzvu
+k opravnému hlášení. **Propustná vada** podání nezneplatní, ale úřady dostanou
+chybná data. **Nevykonaná nepropustná kontrola** znamená mezeru na naší straně,
+ne chybu v datech. U každého nálezu je kód chyby v podobě, v jaké ho vrátí ČSSZ,
+a u nálezu vázaného na konkrétního zaměstnance i pořadí jeho součásti.
+
+Výsledek proto rozlišuje tři stavy: dokument nejde postavit, XML vzniklo
+a prošlo schématem, ale katalog kontrol není celý vykonaný, a konečně podání
+připravené k odeslání. Prostřední stav je varovný, ne zelený. Část kontrol
+rozhoduje až ČSSZ proti svému registru — ty se nikdy nevykazují jako splněné,
+jen se počítají zvlášť. Panel zároveň ukazuje lhůtu pro podání za vykazované
+období, včetně posunu na nejbližší pracovní den.
+
+Panel **Zmrazení a odeslání JMHZ** navazuje až na schválenou revizi, úplné
+právní evidence a úspěšné kontroly. Pro každou registraci u OSSZ pracuje se
+samostatnou povinností a variabilním symbolem. Před odesláním neměnně uloží
+přesné XML a jeho otisk; další kliknutí proto nevytvoří jiné podání pod stejnou
+identitou. Ostré podání je zablokované do začátku zákonné lhůty, testovací
+prostředí lze použít k bezpečnému testu celého toku.
+
+- **Odeslat přes ISDS** připraví datovou zprávu pro doloženou schránku ČSSZ.
+  Je-li aktivní odesílací brána, MyÚčto před přesměrováním vysvětlí přihlášení
+  a pošle uživatele přímo do ISDS. Přihlašovací údaje aplikace nevidí ani
+  neukládá a zpráva odejde až po schválení konceptu uživatelem v ISDS.
+  Konkrétní nabídku metod určuje ISDS a nastavení účtu; může zahrnovat jméno
+  a heslo, heslo aplikace s bezpečnostním klíčem eGovernmentu nebo Mobilní klíč
+  eGovernmentu. Není-li brána aktivní, připravená zpráva zůstane v odchozí
+  frontě pro ruční odeslání a doplnění ID zprávy a doručenky.
+- **Odeslat přes VREP** předá stejné zmrazené podání bráně ČSSZ. Výsledek,
+  protokol a případné chyby se sledují na záložce **Stav odeslání**. Převzetí
+  transportem ještě není přijetí podání.
+
+Odpovědi ani doručenky z datové schránky se nikdy nestahují automaticky.
+Načtení příchozích zpráv vyvolá uživatel samostatným tlačítkem v
+**Firma → Datová schránka** a před síťovým voláním potvrdí upozornění, že
+vyzvednutí může založit doručení a spustit zákonné lhůty. Pro toto jediné
+načtení si zvolí firemní certifikát, jednorázové jméno a heslo, SMS, nebo
+Mobilní klíč: jméno a komunikační kód (heslo aplikace) a potvrzení konkrétní
+relace v klíči. Heslo a SMS kód se trvale neukládají; profil Mobilního klíče
+lze volitelně uložit šifrovaně a později odstranit.
+
+Pro běžný profil JMHZ se u každé schválené revize samostatně potvrzuje pět
+právních skutečností: evidované srážky ze mzdy, slevu zaměstnance pro sezónní
+práci, specifickou právní skutečnost, podporu zaměstnávání osob se zdravotním
+postižením a hlubinné hornictví. Potvrzuje se **za každý pracovní vztah zvlášť**,
+takže revize s víc lidmi (a každá revize přes dvě mzdové účtárny) má tolik
+potvrzení, kolik má vztahů; panel ukazuje, kolik vztahů ještě na potvrzení čeká
+a kterých se to týká. Každou odpověď **Ne** je nutné zaškrtnout výslovně; nic se
+nepředvyplňuje ani neodvozuje z chybějících dat. Aplikace současně ověří, že
+schválená revize neobsahuje známý rozpor, například aktivní exekuci, insolvenci,
+dohodu o srážkách nebo skutečně sraženou částku. Potvrzení se uloží jako neměnný
+šifrovaný důkaz svázaný s přesnou revizí a přesným pracovním vztahem. Vztah bez
+potvrzení zůstává adresným nálezem přípravy — je z něj vidět, komu evidence
+chybí. Pokud některá skutečnost nastala, tento první běžný profil ji nepodporuje
+a přípravu uzavře bez falešného výchozího **Ne**.
+
+Záložka **Inbox** shrnuje napříč agendami a prostředím vše, co aktuálně
+vyžaduje pozornost: blížící se nebo prošlou lhůtu, odmítnuté podání, čekání
+na ztotožnění nebo jiný vzdálený problém. Odznak u záložky ukazuje počet
+otevřených položek. Jde o čistě odvozený přehled — potvrzení ani odložení
+nikdy nemění stav povinnosti ani podání, jen připomínku samotnou. Jednou
+dosažená naléhavost (blíží se → dnes → po lhůtě) se u položky už nikdy
+nesníží, ani když se zdánlivě zmírní. Položku lze **potvrdit** (beze změny
+zmizí z pozornosti, zůstane ale vidět jako vyřízená) nebo **odložit** na
+zvolený termín s povinně vyplněným důvodem; po uplynutí termínu se znovu
+vrátí mezi otevřené. Jakmile podání skutečně dojde k výsledku (přijato,
+zrušeno v termínu), položka automaticky zmizí jako vyřešená.
+
+## Oprava a storno JMHZ
+
+Opravné podání a storno JMHZ jsou podporované, ale nevznikají přepsáním
+původního XML. V **Stavu odeslání** otevřete způsobilé předchozí podání a
+zvolte řízenou opravnou akci. **Připravit storno** zruší celé hlášení za
+období; podporovaný opravný tok může zrušit také vybrané součásti podle
+konkrétních pracovněprávních vztahů. Aplikace vytvoří nový neměnný artefakt
+s vlastní identitou a vazbou na původní podání.
+
+Příprava storna ani opravy sama nic neodešle. Nový artefakt odešlete stejným
+kanálem jako řádné JMHZ a samostatně sledujte jeho protokol až do přijetí.
+Opakování stejné přípravy je idempotentní a vrací již vytvořený výsledek.
+
+Nezaměňujte dvě odlišné situace: opravné nebo stornovací **podání JMHZ** nad
+dřívějším podáním je podporované; nové řádné JMHZ se však nesestavuje z opravné
+mzdové revize, pokud obrazovka výslovně požaduje poslední schválenou běžnou
+revizi.
+
+## Podání zdravotním pojišťovnám
+
+Záložky zdravotních pojišťoven oddělují dvě povinnosti:
+
+- **HOZ** je přehled oznamovaných životních událostí a lhůt. Aplikace povinnosti
+  odvodí a umí je idempotentně propsat do pracovního inboxu, ale nevytváří ani
+  neodesílá domnělý HOZ artefakt. Podání dokončete ručně na oficiálním kanálu
+  a teprve potom položku v inboxu výslovně potvrďte.
+- **PPZ** je měsíční přehled o platbě pojistného. Ze schválené revize se
+  sestaví a zmrazí pouze formát doložený pro vybranou pojišťovnu. Připravený
+  soubor není odeslaný.
+
+Aktuální matice podporovaných příloh je záměrně uzavřená: ČPZP (205), OZP
+(207) a RBP (213) používají XML, ZPŠ (209) PDF a ZP MV ČR (211) PDF do
+31. 12. 2026 a XML od 1. 1. 2027. U VZP (111) a VoZP (201) aplikace bez
+doloženého formátu ISDS přílohy nic neodhaduje. Dostupný soubor stáhněte a
+podejte ověřeným ručním kanálem. Tato matice popisuje technický formát
+přílohy, nikoli obecné právní schválení kanálu.
+
+Pokud panel u PPZ nabídne **Odeslat přes ISDS**, adresát musí pocházet ze
+stejného centrálního katalogu pojišťoven jako sestavení souboru. Akci vždy
+spustí uživatel; vytvoření záznamu ve frontě ani konceptu není odeslání.
+Zkontrolujte adresáta, období a přílohu, v ISDS koncept výslovně schvalte
+a následně ověřte doručenku i věcnou odpověď pojišťovny.
