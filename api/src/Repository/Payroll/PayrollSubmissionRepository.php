@@ -89,11 +89,6 @@ final class PayrollSubmissionRepository
 
     public function __construct(private readonly Connection $db) {}
 
-    public function isTransactionActive(): bool
-    {
-        return $this->db->pdo()->inTransaction();
-    }
-
     /**
      * @template T
      * @param callable():T $callback
@@ -399,7 +394,15 @@ final class PayrollSubmissionRepository
 
     /**
      * @param list<string> $sourceReferences
-     * @return array<string,array{id:int,source_event_hash:string,status:string}>
+     * @return array<string,array{
+     *   id:int,source_event_hash:string,status:string,duplicate_count:int,
+     *   subject_type:string,subject_reference:string,period_start:string,
+     *   period_end:string,obligation_kind:string,preferred_channel:string,
+     *   request_fingerprint:string,idempotency_key_hash:string,
+     *   earliest_submission_on:?string,
+     *   due_on:?string,calendar_basis:?string,ruleset_id:?string,
+     *   ruleset_hash:?string,trigger_event_hash:?string
+     * }>
      */
     public function obligationStatesBySourceReferences(
         int $supplierId,
@@ -415,14 +418,26 @@ final class PayrollSubmissionRepository
             }
             $placeholders = implode(',', array_fill(0, count($chunk), '?'));
             $statement = $this->db->pdo()->prepare(
-                'SELECT id, source_event_reference, source_event_hash, status
-                   FROM payroll_obligations
-                  WHERE supplier_id = ?
-                    AND environment = ?
-                    AND agenda_code = ?
-                    AND source_event_type = ?
-                    AND source_event_reference IN (' . $placeholders . ')
-                  ORDER BY id DESC',
+                'SELECT o.id, o.source_event_reference, o.source_event_hash,
+                        o.status, o.subject_type, o.subject_reference,
+                        o.period_start, o.period_end, o.obligation_kind,
+                        o.preferred_channel, o.request_fingerprint,
+                        o.idempotency_key_hash,
+                        d.earliest_submission_on, d.due_on,
+                        d.calendar_basis, d.ruleset_id, d.ruleset_hash,
+                        d.trigger_event_hash
+                   FROM payroll_obligations o
+                   LEFT JOIN payroll_submission_deadlines d
+                     ON d.supplier_id = o.supplier_id
+                    AND d.environment = o.environment
+                    AND d.obligation_id = o.id
+                    AND d.deadline_kind = "regular"
+                  WHERE o.supplier_id = ?
+                    AND o.environment = ?
+                    AND o.agenda_code = ?
+                    AND o.source_event_type = ?
+                    AND o.source_event_reference IN (' . $placeholders . ')
+                  ORDER BY o.id DESC',
             );
             $statement->execute([
                 $supplierId,
@@ -433,10 +448,35 @@ final class PayrollSubmissionRepository
             ]);
             while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
                 $reference = (string) $row['source_event_reference'];
-                $result[$reference] ??= [
+                if (isset($result[$reference])) {
+                    $result[$reference]['duplicate_count']++;
+                    continue;
+                }
+                $result[$reference] = [
                     'id' => (int) $row['id'],
                     'source_event_hash' => (string) $row['source_event_hash'],
                     'status' => (string) $row['status'],
+                    'duplicate_count' => 1,
+                    'subject_type' => (string) $row['subject_type'],
+                    'subject_reference' => (string) $row['subject_reference'],
+                    'period_start' => (string) $row['period_start'],
+                    'period_end' => (string) $row['period_end'],
+                    'obligation_kind' => (string) $row['obligation_kind'],
+                    'preferred_channel' => (string) $row['preferred_channel'],
+                    'request_fingerprint' => (string) $row['request_fingerprint'],
+                    'idempotency_key_hash' => (string) $row['idempotency_key_hash'],
+                    'earliest_submission_on' => $row['earliest_submission_on'] === null
+                        ? null : (string) $row['earliest_submission_on'],
+                    'due_on' => $row['due_on'] === null
+                        ? null : (string) $row['due_on'],
+                    'calendar_basis' => $row['calendar_basis'] === null
+                        ? null : (string) $row['calendar_basis'],
+                    'ruleset_id' => $row['ruleset_id'] === null
+                        ? null : (string) $row['ruleset_id'],
+                    'ruleset_hash' => $row['ruleset_hash'] === null
+                        ? null : (string) $row['ruleset_hash'],
+                    'trigger_event_hash' => $row['trigger_event_hash'] === null
+                        ? null : (string) $row['trigger_event_hash'],
                 ];
             }
         }
@@ -532,6 +572,106 @@ final class PayrollSubmissionRepository
         ]);
 
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /**
+     * @param list<array{
+     *   supplier_id:int,environment:string,agenda_code:string,
+     *   subject_type:string,subject_reference:string,period_start:string,
+     *   period_end:string,obligation_kind:string,preferred_channel:string,
+     *   responsible_user_id:?int,source_event_type:string,
+     *   source_event_reference:string,source_event_hash:string,
+     *   request_fingerprint:string,idempotency_key_hash:string,created_by:?int
+     * }> $rows
+     */
+    public function insertObligationsBatch(array $rows): void
+    {
+        foreach (array_chunk($rows, 200) as $chunk) {
+            if ($chunk === []) {
+                continue;
+            }
+            $values = [];
+            $parameters = [];
+            foreach ($chunk as $row) {
+                $values[] = '(' . implode(',', array_fill(0, 16, '?')) . ')';
+                array_push(
+                    $parameters,
+                    $row['supplier_id'],
+                    $row['environment'],
+                    $row['agenda_code'],
+                    $row['subject_type'],
+                    $row['subject_reference'],
+                    $row['period_start'],
+                    $row['period_end'],
+                    $row['obligation_kind'],
+                    $row['preferred_channel'],
+                    $row['responsible_user_id'],
+                    $row['source_event_type'],
+                    $row['source_event_reference'],
+                    $row['source_event_hash'],
+                    $row['request_fingerprint'],
+                    $row['idempotency_key_hash'],
+                    $row['created_by'],
+                );
+            }
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_obligations
+                    (supplier_id, environment, agenda_code, subject_type,
+                     subject_reference, period_start, period_end,
+                     obligation_kind, preferred_channel,
+                     responsible_user_id, source_event_type,
+                     source_event_reference, source_event_hash,
+                     request_fingerprint, idempotency_key_hash, created_by)
+                 VALUES ' . implode(',', $values),
+            );
+            $statement->execute($parameters);
+        }
+    }
+
+    /**
+     * @param list<array{
+     *   supplier_id:int,environment:string,obligation_id:int,
+     *   deadline_kind:string,earliest_submission_on:string,due_on:string,
+     *   calendar_basis:string,fiction_delivery_days:?int,ruleset_id:string,
+     *   ruleset_hash:string,trigger_event_hash:string,created_by:?int
+     * }> $rows
+     */
+    public function insertDeadlinesBatch(array $rows): void
+    {
+        foreach (array_chunk($rows, 200) as $chunk) {
+            if ($chunk === []) {
+                continue;
+            }
+            $values = [];
+            $parameters = [];
+            foreach ($chunk as $row) {
+                $values[] = '(' . implode(',', array_fill(0, 12, '?')) . ')';
+                array_push(
+                    $parameters,
+                    $row['supplier_id'],
+                    $row['environment'],
+                    $row['obligation_id'],
+                    $row['deadline_kind'],
+                    $row['earliest_submission_on'],
+                    $row['due_on'],
+                    $row['calendar_basis'],
+                    $row['fiction_delivery_days'],
+                    $row['ruleset_id'],
+                    $row['ruleset_hash'],
+                    $row['trigger_event_hash'],
+                    $row['created_by'],
+                );
+            }
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_submission_deadlines
+                    (supplier_id, environment, obligation_id, deadline_kind,
+                     earliest_submission_on, due_on, calendar_basis,
+                     fiction_delivery_days, ruleset_id, ruleset_hash,
+                     trigger_event_hash, created_by)
+                 VALUES ' . implode(',', $values),
+            );
+            $statement->execute($parameters);
+        }
     }
 
     public function obligationExistsForUpdate(

@@ -70,7 +70,155 @@ final class PayrollObligationService
         ?int $createdBy = null,
         ?int $fictionDeliveryDays = null,
         string $environment = 'production',
-        bool $supplierAlreadyLocked = false,
+    ): array {
+        $registration = $this->registrationRows(
+            $supplierId,
+            $agendaCode,
+            $subjectType,
+            $subjectReference,
+            $periodStart,
+            $periodEnd,
+            $obligationKind,
+            $channel,
+            $sourceEventType,
+            $sourceEventReference,
+            $sourceEventHash,
+            $earliestSubmissionOn,
+            $dueOn,
+            $calendarBasis,
+            $rulesetId,
+            $rulesetHash,
+            $idempotencyKey,
+            $responsibleUserId,
+            $createdBy,
+            $fictionDeliveryDays,
+            $environment,
+        );
+        $idempotencyHash = $registration['obligation']['idempotency_key_hash'];
+        $requestFingerprint = $registration['obligation']['request_fingerprint'];
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $agendaCode,
+            $subjectType,
+            $subjectReference,
+            $periodStart,
+            $periodEnd,
+            $obligationKind,
+            $channel,
+            $sourceEventType,
+            $sourceEventReference,
+            $sourceEventHash,
+            $earliestSubmissionOn,
+            $dueOn,
+            $calendarBasis,
+            $rulesetId,
+            $rulesetHash,
+            $idempotencyHash,
+            $responsibleUserId,
+            $createdBy,
+            $fictionDeliveryDays,
+            $environment,
+            $requestFingerprint,
+        ): array {
+            if (!$this->repository->lockSupplier($supplierId)) {
+                throw new \DomainException('Firma povinnosti nebyla nalezena.');
+            }
+            $existing = $this->repository
+                ->findObligationByIdempotencyForUpdate(
+                    $supplierId,
+                    $idempotencyHash,
+                    $environment,
+                );
+            if ($existing !== null) {
+                if (!hash_equals(
+                    $existing['request_fingerprint'],
+                    $requestFingerprint,
+                )) {
+                    throw new \DomainException(
+                        'Idempotency klíč povinnosti už patří jiným vstupům.',
+                    );
+                }
+                return [
+                    'id' => $existing['id'],
+                    'due_on' => $existing['due_on'],
+                    'status' => $existing['status'],
+                    'row_version' => $existing['row_version'],
+                    'created' => false,
+                ];
+            }
+
+            $obligationId = $this->repository->insertObligation(
+                $supplierId,
+                $environment,
+                $agendaCode,
+                $subjectType,
+                $subjectReference,
+                $periodStart,
+                $periodEnd,
+                $obligationKind,
+                $channel,
+                $sourceEventType,
+                $sourceEventReference,
+                $sourceEventHash,
+                $requestFingerprint,
+                $idempotencyHash,
+                $responsibleUserId,
+                $createdBy,
+            );
+            $this->repository->insertDeadline(
+                $supplierId,
+                $environment,
+                $obligationId,
+                'regular',
+                $earliestSubmissionOn,
+                $dueOn,
+                $calendarBasis,
+                $fictionDeliveryDays,
+                $rulesetId,
+                $rulesetHash,
+                $sourceEventHash,
+                $createdBy,
+            );
+
+            return [
+                'id' => $obligationId,
+                'due_on' => $dueOn,
+                'status' => 'open',
+                'row_version' => 1,
+                'created' => true,
+            ];
+        });
+    }
+
+    /**
+     * @return array{
+     *   obligation:array<string,int|string|null>,
+     *   deadline:array<string,int|string|null>
+     * }
+     */
+    public function registrationRows(
+        int $supplierId,
+        string $agendaCode,
+        string $subjectType,
+        string $subjectReference,
+        string $periodStart,
+        string $periodEnd,
+        string $obligationKind,
+        string $channel,
+        string $sourceEventType,
+        string $sourceEventReference,
+        string $sourceEventHash,
+        string $earliestSubmissionOn,
+        string $dueOn,
+        string $calendarBasis,
+        string $rulesetId,
+        string $rulesetHash,
+        string $idempotencyKey,
+        ?int $responsibleUserId = null,
+        ?int $createdBy = null,
+        ?int $fictionDeliveryDays = null,
+        string $environment = 'production',
     ): array {
         $this->assertPositive($supplierId, 'Firma povinnosti');
         $this->assertActor($responsibleUserId);
@@ -139,111 +287,40 @@ final class PayrollObligationService
             ]),
         );
 
-        $persist = function () use (
-            $supplierId,
-            $agendaCode,
-            $subjectType,
-            $subjectReference,
-            $periodStart,
-            $periodEnd,
-            $obligationKind,
-            $channel,
-            $sourceEventType,
-            $sourceEventReference,
-            $sourceEventHash,
-            $earliestSubmissionOn,
-            $dueOn,
-            $calendarBasis,
-            $rulesetId,
-            $rulesetHash,
-            $idempotencyHash,
-            $responsibleUserId,
-            $createdBy,
-            $fictionDeliveryDays,
-            $environment,
-            $requestFingerprint,
-            $supplierAlreadyLocked,
-        ): array {
-            if (!$supplierAlreadyLocked
-                && !$this->repository->lockSupplier($supplierId)
-            ) {
-                throw new \DomainException('Firma povinnosti nebyla nalezena.');
-            }
-            $existing = $this->repository
-                ->findObligationByIdempotencyForUpdate(
-                    $supplierId,
-                    $idempotencyHash,
-                    $environment,
-                );
-            if ($existing !== null) {
-                if (!hash_equals(
-                    $existing['request_fingerprint'],
-                    $requestFingerprint,
-                )) {
-                    throw new \DomainException(
-                        'Idempotency klíč povinnosti už patří jiným vstupům.',
-                    );
-                }
-                return [
-                    'id' => $existing['id'],
-                    'due_on' => $existing['due_on'],
-                    'status' => $existing['status'],
-                    'row_version' => $existing['row_version'],
-                    'created' => false,
-                ];
-            }
-
-            $obligationId = $this->repository->insertObligation(
-                $supplierId,
-                $environment,
-                $agendaCode,
-                $subjectType,
-                $subjectReference,
-                $periodStart,
-                $periodEnd,
-                $obligationKind,
-                $channel,
-                $sourceEventType,
-                $sourceEventReference,
-                $sourceEventHash,
-                $requestFingerprint,
-                $idempotencyHash,
-                $responsibleUserId,
-                $createdBy,
-            );
-            $this->repository->insertDeadline(
-                $supplierId,
-                $environment,
-                $obligationId,
-                'regular',
-                $earliestSubmissionOn,
-                $dueOn,
-                $calendarBasis,
-                $fictionDeliveryDays,
-                $rulesetId,
-                $rulesetHash,
-                $sourceEventHash,
-                $createdBy,
-            );
-
-            return [
-                'id' => $obligationId,
+        return [
+            'obligation' => [
+                'supplier_id' => $supplierId,
+                'environment' => $environment,
+                'agenda_code' => $agendaCode,
+                'subject_type' => $subjectType,
+                'subject_reference' => $subjectReference,
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'obligation_kind' => $obligationKind,
+                'preferred_channel' => $channel,
+                'responsible_user_id' => $responsibleUserId,
+                'source_event_type' => $sourceEventType,
+                'source_event_reference' => $sourceEventReference,
+                'source_event_hash' => $sourceEventHash,
+                'request_fingerprint' => $requestFingerprint,
+                'idempotency_key_hash' => $idempotencyHash,
+                'created_by' => $createdBy,
+            ],
+            'deadline' => [
+                'supplier_id' => $supplierId,
+                'environment' => $environment,
+                'obligation_id' => 0,
+                'deadline_kind' => 'regular',
+                'earliest_submission_on' => $earliestSubmissionOn,
                 'due_on' => $dueOn,
-                'status' => 'open',
-                'row_version' => 1,
-                'created' => true,
-            ];
-        };
-        if ($supplierAlreadyLocked) {
-            if (!$this->repository->isTransactionActive()) {
-                throw new \LogicException(
-                    'Hromadný zápis povinností vyžaduje aktivní transakci.',
-                );
-            }
-            return $persist();
-        }
-
-        return $this->repository->transaction($persist);
+                'calendar_basis' => $calendarBasis,
+                'fiction_delivery_days' => $fictionDeliveryDays,
+                'ruleset_id' => $rulesetId,
+                'ruleset_hash' => $rulesetHash,
+                'trigger_event_hash' => $sourceEventHash,
+                'created_by' => $createdBy,
+            ],
+        ];
     }
 
     public function registerAgendaMatrix(
