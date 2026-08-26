@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunInputSnapshot;
+use MyInvoice\Service\Payroll\Run\PayrollRunValidationMessageFormatter;
 use PDO;
 
 final class PayrollRunRepository
@@ -1297,13 +1298,14 @@ final class PayrollRunRepository
                 continue;
             }
             $issues = $enforcementResult['issues'] ?? [];
-            $message = 'Exekuční srážka vyžaduje doplnění nebo kontrolu podkladů.';
-            if (is_array($issues) && $issues !== []) {
-                $message .= ' ' . implode(', ', array_filter(
-                    $issues,
-                    static fn (mixed $issue): bool => is_string($issue),
-                ));
-            }
+            $message = PayrollRunValidationMessageFormatter::enforcement(
+                is_array($issues)
+                    ? array_values(array_filter(
+                        $issues,
+                        static fn (mixed $issue): bool => is_string($issue),
+                    ))
+                    : [],
+            );
             $insert->execute([
                 $supplierId,
                 $revisionId,
@@ -1332,13 +1334,14 @@ final class PayrollRunRepository
             return;
         }
         $issues = $statutory['issues'] ?? [];
-        $message = 'Zákonný výpočet pojistného, daně nebo čisté mzdy vyžaduje kontrolu.';
-        if (is_array($issues) && $issues !== []) {
-            $message .= ' ' . implode(', ', array_filter(
-                $issues,
-                static fn (mixed $issue): bool => is_string($issue),
-            ));
-        }
+        $message = PayrollRunValidationMessageFormatter::statutory(
+            is_array($issues)
+                ? array_values(array_filter(
+                    $issues,
+                    static fn (mixed $issue): bool => is_string($issue),
+                ))
+                : [],
+        );
         $insert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_validations
                 (supplier_id, revision_id, severity, code, entity_type,
