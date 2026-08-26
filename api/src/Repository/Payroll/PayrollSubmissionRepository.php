@@ -89,6 +89,11 @@ final class PayrollSubmissionRepository
 
     public function __construct(private readonly Connection $db) {}
 
+    public function isTransactionActive(): bool
+    {
+        return $this->db->pdo()->inTransaction();
+    }
+
     /**
      * @template T
      * @param callable():T $callback
@@ -394,9 +399,9 @@ final class PayrollSubmissionRepository
 
     /**
      * @param list<string> $sourceReferences
-     * @return array<string,int>
+     * @return array<string,array{id:int,source_event_hash:string,status:string}>
      */
-    public function obligationIdsBySourceReferences(
+    public function obligationStatesBySourceReferences(
         int $supplierId,
         string $environment,
         string $agendaCode,
@@ -410,7 +415,7 @@ final class PayrollSubmissionRepository
             }
             $placeholders = implode(',', array_fill(0, count($chunk), '?'));
             $statement = $this->db->pdo()->prepare(
-                'SELECT id, source_event_reference
+                'SELECT id, source_event_reference, source_event_hash, status
                    FROM payroll_obligations
                   WHERE supplier_id = ?
                     AND environment = ?
@@ -428,7 +433,11 @@ final class PayrollSubmissionRepository
             ]);
             while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
                 $reference = (string) $row['source_event_reference'];
-                $result[$reference] ??= (int) $row['id'];
+                $result[$reference] ??= [
+                    'id' => (int) $row['id'],
+                    'source_event_hash' => (string) $row['source_event_hash'],
+                    'status' => (string) $row['status'],
+                ];
             }
         }
 

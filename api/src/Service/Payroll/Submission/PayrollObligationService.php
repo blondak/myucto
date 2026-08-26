@@ -70,6 +70,7 @@ final class PayrollObligationService
         ?int $createdBy = null,
         ?int $fictionDeliveryDays = null,
         string $environment = 'production',
+        bool $supplierAlreadyLocked = false,
     ): array {
         $this->assertPositive($supplierId, 'Firma povinnosti');
         $this->assertActor($responsibleUserId);
@@ -138,7 +139,7 @@ final class PayrollObligationService
             ]),
         );
 
-        return $this->repository->transaction(function () use (
+        $persist = function () use (
             $supplierId,
             $agendaCode,
             $subjectType,
@@ -161,8 +162,11 @@ final class PayrollObligationService
             $fictionDeliveryDays,
             $environment,
             $requestFingerprint,
+            $supplierAlreadyLocked,
         ): array {
-            if (!$this->repository->lockSupplier($supplierId)) {
+            if (!$supplierAlreadyLocked
+                && !$this->repository->lockSupplier($supplierId)
+            ) {
                 throw new \DomainException('Firma povinnosti nebyla nalezena.');
             }
             $existing = $this->repository
@@ -229,7 +233,17 @@ final class PayrollObligationService
                 'row_version' => 1,
                 'created' => true,
             ];
-        });
+        };
+        if ($supplierAlreadyLocked) {
+            if (!$this->repository->isTransactionActive()) {
+                throw new \LogicException(
+                    'Hromadný zápis povinností vyžaduje aktivní transakci.',
+                );
+            }
+            return $persist();
+        }
+
+        return $this->repository->transaction($persist);
     }
 
     public function registerAgendaMatrix(

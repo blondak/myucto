@@ -283,6 +283,107 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         );
     }
 
+    public function testPeriodBulkSyncFailsClosedWhenAnEmploymentIsUnresolved(): void
+    {
+        $pdo = $this->db->pdo();
+        $employeeId = $this->employee($pdo, 'Syntetická osoba bez pojišťovny');
+        $this->employment($pdo, $employeeId, 'ZP-2');
+
+        try {
+            $this->service->registerPeriodObligations(
+                $this->supplierId,
+                'production',
+                '2026-03',
+            );
+            self::fail('Neúplný měsíc se nesmí částečně zaevidovat.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame(
+                'zp_period_contains_unresolved_employments',
+                $e->errorCode,
+            );
+        }
+
+        $count = $pdo->prepare(
+            'SELECT COUNT(*) FROM payroll_obligations
+              WHERE supplier_id = ? AND agenda_code = "HOZ_2026"',
+        );
+        $count->execute([$this->supplierId]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
+    public function testPeriodBulkSyncDoesNotReviveACancelledObligation(): void
+    {
+        $first = $this->service->registerPeriodObligations(
+            $this->supplierId,
+            'production',
+            '2026-03',
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_obligations SET status = "cancelled"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([
+            $this->supplierId,
+            $first['items'][0]['obligation_id'],
+        ]);
+
+        try {
+            $this->service->registerPeriodObligations(
+                $this->supplierId,
+                'production',
+                '2026-03',
+            );
+            self::fail('Zrušenou povinnost nelze tiše obnovit.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_registered_duty_changed', $e->errorCode);
+        }
+    }
+
+    public function testPeriodBulkSyncDetectsChangedInsurer(): void
+    {
+        $this->service->registerPeriodObligations(
+            $this->supplierId,
+            'production',
+            '2026-03',
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_health_coverage_history
+                SET insurer_code = "205"
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        try {
+            $this->service->registerPeriodObligations(
+                $this->supplierId,
+                'production',
+                '2026-03',
+            );
+            self::fail('Změna pojišťovny nesmí použít starou povinnost.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_registered_duty_changed', $e->errorCode);
+        }
+    }
+
+    public function testPeriodBulkSyncSeparatesTestAndProduction(): void
+    {
+        $test = $this->service->registerPeriodObligations(
+            $this->supplierId,
+            'test',
+            '2026-03',
+        );
+        $production = $this->service->registerPeriodObligations(
+            $this->supplierId,
+            'production',
+            '2026-03',
+        );
+
+        self::assertNotSame(
+            $test['items'][0]['obligation_id'],
+            $production['items'][0]['obligation_id'],
+        );
+        self::assertSame(1, $test['created']);
+        self::assertSame(1, $production['created']);
+    }
+
     /**
      * Jádro řezu: artefakt vznikne a uloží se, ale bez připnutého XSD se
      * podání nesmí označit za ověřené — zůstane v `draft` s blokující
@@ -451,28 +552,35 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
 
     // --- fixtures --------------------------------------------------------
 
-    private function employee(PDO $pdo): int
+    private function employee(
+        PDO $pdo,
+        string $fullName = 'Syntetická osoba ZP',
+    ): int
     {
         $pdo->prepare(
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, taxpayer_type, employment_type,
                  tax_declaration_signed, tax_credit_taxpayer, child_count,
                  monthly_gross, auto_post, is_active)
-             VALUES (?, "Syntetická osoba ZP", "employee", "hpp",
+             VALUES (?, ?, "employee", "hpp",
                      1, 1, 0, 10000, 0, 1)',
-        )->execute([$this->supplierId]);
+        )->execute([$this->supplierId, $fullName]);
 
         return (int) $pdo->lastInsertId();
     }
 
-    private function employment(PDO $pdo, int $employeeId): int
+    private function employment(
+        PDO $pdo,
+        int $employeeId,
+        string $code = 'ZP-1',
+    ): int
     {
         $pdo->prepare(
             'INSERT INTO payroll_employments
                 (supplier_id, employee_id, code, relation_type, status,
                  is_primary, start_date)
-             VALUES (?, ?, "ZP-1", "employment", "active", 1, "2026-03-01")',
-        )->execute([$this->supplierId, $employeeId]);
+             VALUES (?, ?, ?, "employment", "active", 1, "2026-03-01")',
+        )->execute([$this->supplierId, $employeeId, $code]);
 
         return (int) $pdo->lastInsertId();
     }

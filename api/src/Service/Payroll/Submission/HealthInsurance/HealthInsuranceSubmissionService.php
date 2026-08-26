@@ -189,50 +189,26 @@ final readonly class HealthInsuranceSubmissionService
         int $limit = self::PERIOD_DEFAULT_LIMIT,
         int $offset = 0,
     ): array {
-        $window = $this->periodBounds($period);
+        $set = $this->periodDutySet($supplierId, $period);
         $limit = max(1, min(self::PERIOD_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
-
-        $rows = $this->facts->listNotificationFacts(
-            $supplierId,
-            $window['from'],
-            $window['to'],
-        );
-
         $all = [];
-        $unresolved = [];
-        foreach ($rows as $row) {
-            try {
-                $duties = $this->resolver->resolve($this->factsFromRow($row));
-            } catch (HealthNotificationException $exception) {
-                // Vztah, u kterého se povinnost odvodit NELZE, se nesmí tiše
-                // vypustit — chybějící pojišťovna je přesně ta vada, kvůli
-                // které by oznámení nebylo komu poslat. Vrací se pojmenovaně
-                // vedle seznamu, ne jako prázdno v něm.
-                $unresolved[] = [
-                    'employment_id' => $row['employment_id'],
-                    'full_name' => $row['full_name'],
-                    'reason_code' => $exception->errorCode,
-                    'reason' => $exception->getMessage(),
-                ];
-                continue;
-            }
-            foreach ($duties as $duty) {
-                if ($duty->occurredOn < $window['from']
-                    || $duty->occurredOn > $window['to']
-                ) {
-                    continue;
-                }
-                $all[] = $this->periodItem(
-                    $supplierId,
-                    $duty,
-                    $row['full_name'],
-                );
-            }
+        $sourceHashes = [];
+        foreach ($set['duties'] as $entry) {
+            $duty = $entry['duty'];
+            $all[] = $this->periodItem(
+                $supplierId,
+                $duty,
+                $entry['full_name'],
+            );
+            $sourceHashes[$duty->sourceEventReference()] = [
+                $this->dutySourceHash($duty),
+                $this->legacyDutySourceHash($duty),
+            ];
         }
 
-        $obligationIds = $this->submissionRepository
-            ->obligationIdsBySourceReferences(
+        $obligationStates = $this->submissionRepository
+            ->obligationStatesBySourceReferences(
                 $supplierId,
                 $environment,
                 self::AGENDA_BULK_NOTIFICATION,
@@ -240,7 +216,16 @@ final readonly class HealthInsuranceSubmissionService
                 array_column($all, 'id'),
             );
         foreach ($all as &$item) {
-            $item['obligation_id'] = $obligationIds[$item['id']] ?? null;
+            $state = $obligationStates[$item['id']] ?? null;
+            $item['obligation_id'] = $state !== null
+                && $state['status'] !== 'cancelled'
+                && in_array(
+                    $state['source_event_hash'],
+                    $sourceHashes[$item['id']] ?? [],
+                    true,
+                )
+                    ? $state['id']
+                    : null;
         }
         unset($item);
 
@@ -290,7 +275,7 @@ final readonly class HealthInsuranceSubmissionService
             'limit' => $limit,
             'offset' => $offset,
             'summary' => $summary,
-            'unresolved_employments' => $unresolved,
+            'unresolved_employments' => $set['unresolved'],
         ];
     }
 
@@ -323,35 +308,11 @@ final readonly class HealthInsuranceSubmissionService
                 ];
                 continue;
             }
-            $sourceHash = hash('sha256', CanonicalJson::encode([
-                'schema_reference' => 'payroll-health-notification-obligation.v1',
-                'employment_id' => $duty->employmentId,
-                'kind' => $duty->kind->value,
-                'insurer_code' => $duty->insurerCode,
-                'occurred_on' => $duty->occurredOn,
-            ]));
-            $obligation = $this->obligations->register(
+            $obligation = $this->registerDuty(
                 $supplierId,
-                self::AGENDA_BULK_NOTIFICATION,
-                self::SUBJECT_EMPLOYMENT,
-                $duty->subjectReference(),
-                $duty->occurredOn,
-                $duty->deadline->dueOn,
-                'regular',
-                self::CHANNEL,
-                self::SOURCE_EVENT_NOTIFICATION,
-                $duty->sourceEventReference(),
-                $sourceHash,
-                $duty->deadline->earliestSubmissionOn,
-                $duty->deadline->dueOn,
-                $duty->deadline->calendarBasis,
-                $duty->deadline->rulesetId,
-                $duty->deadline->rulesetHash,
-                'health-notification:' . $environment . ':' . $sourceHash,
-                null,
-                $createdBy,
-                null,
                 $environment,
+                $duty,
+                $createdBy,
             );
             $registered[] = [
                 'duty_id' => $duty->sourceEventReference(),
@@ -372,64 +333,79 @@ final readonly class HealthInsuranceSubmissionService
         string $period,
         ?int $createdBy = null,
     ): array {
-        $candidates = [];
-        $offset = 0;
-        do {
-            $page = $this->dutiesForPeriod(
-                $supplierId,
-                $environment,
-                $period,
-                ['reported' => true],
-                self::PERIOD_MAX_LIMIT,
-                $offset,
-            );
-            foreach ($page['items'] as $item) {
-                if ($item['deadline'] !== null) {
-                    $candidates[$item['id']] = $item;
-                }
-            }
-            $offset += count($page['items']);
-        } while ($offset < $page['total'] && $page['items'] !== []);
-
         return $this->submissionRepository->transaction(function () use (
             $supplierId,
             $environment,
+            $period,
             $createdBy,
-            $candidates,
         ): array {
+            if (!$this->submissionRepository->lockSupplier($supplierId)) {
+                throw new HealthNotificationException(
+                    'zp_supplier_not_found',
+                    'Firma pro evidenci povinností nebyla nalezena.',
+                );
+            }
+            $set = $this->periodDutySet($supplierId, $period);
+            if ($set['unresolved'] !== []) {
+                throw new HealthNotificationException(
+                    'zp_period_contains_unresolved_employments',
+                    sprintf(
+                        'Povinnosti nelze synchronizovat: u %d pracovních vztahů chybí údaje potřebné k určení zdravotní pojišťovny.',
+                        count($set['unresolved']),
+                    ),
+                );
+            }
+
+            $candidates = [];
+            foreach ($set['duties'] as $entry) {
+                $duty = $entry['duty'];
+                if ($duty->reportedByEmployer && $duty->deadline !== null) {
+                    $candidates[$duty->sourceEventReference()] = $duty;
+                }
+            }
+            $existing = $this->submissionRepository
+                ->obligationStatesBySourceReferences(
+                    $supplierId,
+                    $environment,
+                    self::AGENDA_BULK_NOTIFICATION,
+                    self::SOURCE_EVENT_NOTIFICATION,
+                    array_keys($candidates),
+                );
             $registered = [];
-            $groups = [];
-            foreach ($candidates as $dutyId => $item) {
-                if ($item['obligation_id'] !== null) {
+            foreach ($candidates as $dutyId => $duty) {
+                $sourceHash = $this->dutySourceHash($duty);
+                $state = $existing[$dutyId] ?? null;
+                if ($state !== null) {
+                    if ($state['status'] === 'cancelled'
+                        || !$this->sourceHashMatchesDuty(
+                            $state['source_event_hash'],
+                            $duty,
+                        )
+                    ) {
+                        throw new HealthNotificationException(
+                            'zp_registered_duty_changed',
+                            'Dříve evidovaná povinnost už neodpovídá aktuálním údajům. Nejprve zkontrolujte změnu pojišťovny nebo zrušenou povinnost.',
+                        );
+                    }
                     $registered[$dutyId] = [
                         'duty_id' => $dutyId,
-                        'obligation_id' => $item['obligation_id'],
+                        'obligation_id' => $state['id'],
                         'created' => false,
                     ];
                     continue;
                 }
-                $groups[$item['employment_id'] . ':' . $item['occurred_on']] = [
-                    'employment_id' => $item['employment_id'],
-                    'occurred_on' => $item['occurred_on'],
-                ];
-            }
-            foreach ($groups as $group) {
-                foreach ($this->registerObligations(
+                $obligation = $this->registerDuty(
                     $supplierId,
                     $environment,
-                    $group['employment_id'],
-                    $group['occurred_on'],
+                    $duty,
                     $createdBy,
-                ) as $item) {
-                    $dutyId = $item['duty_id'];
-                    if (isset($candidates[$dutyId]) && $item['obligation_id'] !== null) {
-                        $registered[$dutyId] = [
-                            'duty_id' => $dutyId,
-                            'obligation_id' => $item['obligation_id'],
-                            'created' => $item['created'],
-                        ];
-                    }
-                }
+                    true,
+                );
+                $registered[$dutyId] = [
+                    'duty_id' => $dutyId,
+                    'obligation_id' => $obligation['id'],
+                    'created' => $obligation['created'],
+                ];
             }
 
             $items = [];
@@ -764,6 +740,127 @@ final readonly class HealthInsuranceSubmissionService
                 ),
             ];
         }
+    }
+
+    /**
+     * @return array{
+     *   duties:list<array{duty:HealthNotificationDuty,full_name:string}>,
+     *   unresolved:list<array{employment_id:int,full_name:string,reason_code:string,reason:string}>
+     * }
+     */
+    private function periodDutySet(int $supplierId, string $period): array
+    {
+        $window = $this->periodBounds($period);
+        $resolved = [];
+        $unresolved = [];
+        foreach ($this->facts->listNotificationFacts(
+            $supplierId,
+            $window['from'],
+            $window['to'],
+        ) as $row) {
+            try {
+                $duties = $this->resolver->resolve($this->factsFromRow($row));
+            } catch (HealthNotificationException $exception) {
+                $unresolved[] = [
+                    'employment_id' => $row['employment_id'],
+                    'full_name' => $row['full_name'],
+                    'reason_code' => $exception->errorCode,
+                    'reason' => $exception->getMessage(),
+                ];
+                continue;
+            }
+            foreach ($duties as $duty) {
+                if ($duty->occurredOn < $window['from']
+                    || $duty->occurredOn > $window['to']
+                ) {
+                    continue;
+                }
+                $resolved[] = [
+                    'duty' => $duty,
+                    'full_name' => $row['full_name'],
+                ];
+            }
+        }
+
+        return ['duties' => $resolved, 'unresolved' => $unresolved];
+    }
+
+    /** @return array{id:int,due_on:string,status:string,row_version:int,created:bool} */
+    private function registerDuty(
+        int $supplierId,
+        string $environment,
+        HealthNotificationDuty $duty,
+        ?int $createdBy,
+        bool $supplierAlreadyLocked = false,
+    ): array {
+        if (!$duty->reportedByEmployer || $duty->deadline === null) {
+            throw new \LogicException('Nelze evidovat povinnost pojištěnce.');
+        }
+        $sourceHash = $this->dutySourceHash($duty);
+
+        return $this->obligations->register(
+            $supplierId,
+            self::AGENDA_BULK_NOTIFICATION,
+            self::SUBJECT_EMPLOYMENT,
+            $duty->subjectReference(),
+            $duty->occurredOn,
+            $duty->deadline->dueOn,
+            'regular',
+            self::CHANNEL,
+            self::SOURCE_EVENT_NOTIFICATION,
+            $duty->sourceEventReference(),
+            $sourceHash,
+            $duty->deadline->earliestSubmissionOn,
+            $duty->deadline->dueOn,
+            $duty->deadline->calendarBasis,
+            $duty->deadline->rulesetId,
+            $duty->deadline->rulesetHash,
+            'health-notification:' . $environment . ':' . $sourceHash,
+            null,
+            $createdBy,
+            null,
+            $environment,
+            $supplierAlreadyLocked,
+        );
+    }
+
+    private function dutySourceHash(HealthNotificationDuty $duty): string
+    {
+        if ($duty->deadline === null) {
+            throw new \LogicException('Povinnost nemá lhůtu.');
+        }
+
+        return hash('sha256', CanonicalJson::encode([
+            'schema_reference' => 'payroll-health-notification-obligation.v2',
+            'employment_id' => $duty->employmentId,
+            'kind' => $duty->kind->value,
+            'insurer_code' => $duty->insurerCode,
+            'occurred_on' => $duty->occurredOn,
+            'earliest_submission_on' => $duty->deadline->earliestSubmissionOn,
+            'due_on' => $duty->deadline->dueOn,
+            'calendar_basis' => $duty->deadline->calendarBasis,
+            'ruleset_id' => $duty->deadline->rulesetId,
+            'ruleset_hash' => $duty->deadline->rulesetHash,
+        ]));
+    }
+
+    private function legacyDutySourceHash(HealthNotificationDuty $duty): string
+    {
+        return hash('sha256', CanonicalJson::encode([
+            'schema_reference' => 'payroll-health-notification-obligation.v1',
+            'employment_id' => $duty->employmentId,
+            'kind' => $duty->kind->value,
+            'insurer_code' => $duty->insurerCode,
+            'occurred_on' => $duty->occurredOn,
+        ]));
+    }
+
+    private function sourceHashMatchesDuty(
+        string $storedHash,
+        HealthNotificationDuty $duty,
+    ): bool {
+        return hash_equals($storedHash, $this->dutySourceHash($duty))
+            || hash_equals($storedHash, $this->legacyDutySourceHash($duty));
     }
 
     /**

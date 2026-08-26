@@ -265,6 +265,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/submissions/health-overviews/[0-9]+(?:/[0-9]{3}/download)?$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/health-notifications/capability$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/health-notifications/duties$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/health-notifications/duties/obligations$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/health-notifications/duties/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/health-notifications/duties/[0-9]+/obligations$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/health-notifications/payment-overview/[0-9]+/[0-9]{3}/prepare$#', 'payroll.submissions', AccessLevel::WRITE],
