@@ -19,7 +19,7 @@
   <tr>
     {% if logo_show_name and logo_path and logo_path is not empty %}
       {# Logo + název firmy — dvě sousední buňky (stejně jako faktura, kvůli mPDF). #}
-      <td class="logo-img-cell"><img src="{{ logo_path }}" alt="logo"></td>
+      <td class="logo-img-cell"><img src="{{ logo_path }}" alt="logo" style="max-width: 16mm; max-height: 18mm;"></td>
       <td class="logo-name">{{ supplier.display_name|default(supplier.company_name) }}</td>
     {% else %}
       <td class="logo">

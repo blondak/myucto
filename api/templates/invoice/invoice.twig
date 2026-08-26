@@ -24,7 +24,7 @@
       {# Logo + název firmy: dvě SOUSEDNÍ buňky .head (žádná vnořená tabulka — ta v mPDF
          mazala spodní čáru hlavičky). Mezeru dělá pevná šířka buňky loga: mPDF na buňce
          respektuje `width`, ne padding. #}
-      <td class="logo-img-cell"><img src="{{ logo_path }}" alt="logo"></td>
+      <td class="logo-img-cell"><img src="{{ logo_path }}" alt="logo" style="max-width: 16mm; max-height: 18mm;"></td>
       <td class="logo-name">{{ supplier.display_name|default(supplier.company_name) }}</td>
     {% else %}
       <td class="logo">
@@ -567,7 +567,7 @@
       {# Logo + název firmy: dvě SOUSEDNÍ buňky .head (žádná vnořená tabulka — ta v mPDF
          mazala spodní čáru hlavičky). Mezeru dělá pevná šířka buňky loga: mPDF na buňce
          respektuje `width`, ne padding. #}
-      <td class="logo-img-cell"><img src="{{ logo_path }}" alt="logo"></td>
+      <td class="logo-img-cell"><img src="{{ logo_path }}" alt="logo" style="max-width: 16mm; max-height: 18mm;"></td>
       <td class="logo-name">{{ supplier.display_name|default(supplier.company_name) }}</td>
     {% else %}
       <td class="logo">

@@ -44,8 +44,11 @@ td.logo img { max-width: 60mm; max-height: 20mm; }
 /* Logo + název firmy vedle sebe (opt-in pdf_logo_show_name): dvě sousední buňky .head,
    žádná vnořená tabulka (ta v mPDF mazala spodní čáru hlavičky). Mezeru dělá pevná
    šířka buňky loga — mPDF na buňce respektuje `width`, ne padding. */
-td.logo-img-cell { width: 14mm; }
-td.logo-img-cell img { max-width: 13mm; max-height: 18mm; }
+td.logo-img-cell { width: 18mm; }
+/* mPDF neaplikuje max-width/max-height ze stylopisu na <img> — tenhle blok platí jen
+   pro HTML náhled. V PDF musí být stejné hodnoty INLINE na <img> v šabloně (issue #37,
+   bez nich se logo vykreslilo v nativní velikosti a roztáhlo hlavičku). Drž je v páru. */
+td.logo-img-cell img { max-width: 16mm; max-height: 18mm; }
 td.logo-name {
     white-space: nowrap;
     font-size: 14pt;

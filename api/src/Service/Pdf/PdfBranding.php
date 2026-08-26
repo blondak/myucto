@@ -53,14 +53,18 @@ final class PdfBranding
         return PdfLogoFlattener::flattenedPath($abs);
     }
 
-    /** True = supplier má logo, které lze v PDF zobrazit (pro gate `logo_show_name`). */
+    /**
+     * SVG features, které mPDF nevykreslí korektně → fallback na PNG.
+     * Gradienty v blocklistu záměrně nejsou (issue #37) — mPDF je umí a rastrový
+     * fallback ztrácel `<text>` na hostech bez příslušného fontu.
+     */
     private static function svgIsMpdfCompatible(string $svgPath): bool
     {
         $svg = (string) @file_get_contents($svgPath);
         if ($svg === '') {
             return false;
         }
-        $bad = '/<(?:clipPath|use|mask|linearGradient|radialGradient|pattern|filter)\b/i';
+        $bad = '/<(?:clipPath|use|mask|pattern|filter)\b/i';
         return !preg_match($bad, $svg);
     }
 

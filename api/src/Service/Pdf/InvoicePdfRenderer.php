@@ -695,10 +695,16 @@ final class InvoicePdfRenderer
         // PNG je fallback pokud SVG chybí nebo obsahuje mPDF-nekompatibilní prvky.
         //
         // mPDF SVG renderer má známé limity: `<clipPath>`, `<use xlink:href>`,
-        // `<mask>`, `<linearGradient>`, `<radialGradient>`, `<pattern>` a `<filter>`
-        // se často vykreslí černým fillem nebo posunutě. Adobe Illustrator export
-        // tohle používá běžně. U takových SVG fallneme na PNG (rasterizovaný
-        // SupplierLogoConverterem s alfa kanálem = transparentní pozadí).
+        // `<mask>`, `<pattern>` a `<filter>` se často vykreslí černým fillem nebo
+        // posunutě. Adobe Illustrator export tohle používá běžně. U takových SVG
+        // fallneme na PNG (rasterizovaný SupplierLogoConverterem s alfa kanálem
+        // = transparentní pozadí).
+        //
+        // `<linearGradient>` / `<radialGradient>` v blocklistu ZÁMĚRNĚ NEJSOU
+        // (issue #37): mPDF je vykresluje správně a rastrový fallback naopak
+        // rozbíjel loga, která mají vedle gradientu i `<text>` — rasterizace
+        // závisí na fontech hostu, takže na serveru bez daného fontu z loga
+        // zbylo jen barevné pozadí bez písmen.
         // Email vždy používá PNG (Outlook/Gmail SVG nepodporují) — to řeší
         // Mailer + InvoiceEmailVarsBuilder, ne tahle metoda.
         $svgSibling = preg_replace('/\.png$/i', '.svg', (string) $logoPath);
@@ -715,15 +721,16 @@ final class InvoicePdfRenderer
 
     /**
      * Detekce SVG features, které mPDF neumí korektně vykreslit.
-     * Pokud SVG obsahuje něco z {clipPath, use, mask, gradient, pattern, filter},
-     * vrátíme false → caller fallne na PNG variantu.
+     * Pokud SVG obsahuje něco z {clipPath, use, mask, pattern, filter},
+     * vrátíme false → caller fallne na PNG variantu. Gradienty mPDF zvládá,
+     * proto v blocklistu nejsou (issue #37).
      */
     private function svgIsMpdfCompatible(string $svgPath): bool
     {
         $svg = (string) @file_get_contents($svgPath);
         if ($svg === '') return false;
         // Známé problematické features v mPDF SVG rendereru
-        $bad = '/<(?:clipPath|use|mask|linearGradient|radialGradient|pattern|filter)\b/i';
+        $bad = '/<(?:clipPath|use|mask|pattern|filter)\b/i';
         return !preg_match($bad, $svg);
     }
 
