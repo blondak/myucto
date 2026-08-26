@@ -3521,7 +3521,7 @@
                     "ozp_employment_support_claimed": "Není uplatňována podpora zaměstnávání osob se zdravotním postižením řízená interakcí IN28.",
                     "deep_mining_work_occurred": "Nebyla vykonávána práce v hlubinném hornictví řízená interakcí IN30."
                 },
-                "jmhz_dry_run_title": "Test XML JMHZ",
+                "jmhz_dry_run_title": "Test měsíčního hlášení JMHZ",
                 "jmhz_dry_run_description": "Sestaví XML běžného hlášení ze zmrazených zdrojů a ověří je proti připnutému schématu ČSSZ. Nic se neodesílá a žádné podání nevzniká.",
                 "jmhz_dry_run_empty": "Pro zvolené období není žádná schválená revize k otestování.",
                 "jmhz_dry_run_card": "Období {period}, revize {revision}",
@@ -3567,7 +3567,7 @@
                 "jmhz_controls_form": "součást {ordinal}",
                 "jmhz_deadline": "Lhůta pro podání: od {from} do {to} (posunuto na pracovní den).",
                 "jmhz_controls_deviations": "Odchylky od doslovného znění katalogu ({count}) — k ověření proti protokolu ČSSZ",
-                "jmhz_dry_run_failed": "Test XML JMHZ se nepodařilo spustit.",
+                "jmhz_dry_run_failed": "Test měsíčního hlášení JMHZ se nepodařilo spustit.",
                 "jmhz_dispatch_title": "Zmrazení a odeslání JMHZ",
                 "jmhz_dispatch_description": "Vyberte dopravní kanál. V obou případech se nejprve neměnně zmrazí přesně ta XML data, která se odešlou. ISDS připraví datovou zprávu pro ČSSZ a vyžádá Vaše přihlášení a schválení přímo v datové schránce.",
                 "jmhz_dispatch_empty": "Nejprve dokončete schválenou mzdovou revizi, kontrolní náhled a povinné právní evidence.",

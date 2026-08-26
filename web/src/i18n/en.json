@@ -3521,7 +3521,7 @@
                     "ozp_employment_support_claimed": "No employment support for persons with disabilities governed by interaction IN28 is claimed.",
                     "deep_mining_work_occurred": "No deep-mining work governed by interaction IN30 was performed."
                 },
-                "jmhz_dry_run_title": "Monthly report dry run",
+                "jmhz_dry_run_title": "JMHZ monthly report test",
                 "jmhz_dry_run_description": "Builds the ordinary monthly report XML from the frozen sources and validates it against the pinned ČSSZ schema. Nothing is sent and no submission is created.",
                 "jmhz_dry_run_empty": "There is no approved revision to dry-run for the selected period.",
                 "jmhz_dry_run_card": "Period {period}, revision {revision}",
@@ -3567,7 +3567,7 @@
                 "jmhz_controls_form": "component {ordinal}",
                 "jmhz_deadline": "Submission window: {from} to {to} (shifted to a working day).",
                 "jmhz_controls_deviations": "Deviations from the literal catalogue wording ({count}) — verify against the CSSZ protocol",
-                "jmhz_dry_run_failed": "The monthly report dry run could not be started.",
+                "jmhz_dry_run_failed": "The JMHZ monthly report test could not be started.",
                 "jmhz_dispatch_title": "Freeze and submit JMHZ",
                 "jmhz_dispatch_description": "Choose the transport channel. Both paths first freeze the exact XML data that will be sent. ISDS prepares a data message for CSSA and asks you to sign in and approve it directly in the data box.",
                 "jmhz_dispatch_empty": "Complete an approved payroll revision, the validation preview and the mandatory legal evidence first.",
