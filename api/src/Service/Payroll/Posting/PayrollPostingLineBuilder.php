@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Posting;
 
+use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
 use MyInvoice\Service\Payroll\Net\PayoutAllocationRequest;
 use MyInvoice\Service\Payroll\Net\PayoutAllocationService;
 use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
@@ -1580,9 +1581,7 @@ final class PayrollPostingLineBuilder
 
     private function account(mixed $value, string $field): string
     {
-        if (!is_string($value)
-            || preg_match('/^[0-9]{3}[.A-Z0-9]{0,13}$/D', $value) !== 1
-        ) {
+        if (!is_string($value) || !PayrollAccountCode::isValid($value)) {
             throw new \DomainException("Účet {$field} není platný.");
         }
 
