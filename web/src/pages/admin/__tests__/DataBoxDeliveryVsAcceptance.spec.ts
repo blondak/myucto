@@ -24,8 +24,14 @@ const m = vi.hoisted(() => ({
   pollInboxWithPassword: vi.fn(),
   startMobileKeyInbox: vi.fn(),
   mobileKeyInboxStatus: vi.fn(),
+  mobileKeyProfile: vi.fn(),
+  saveMobileKeyProfile: vi.fn(),
+  deleteMobileKeyProfile: vi.fn(),
+  startSmsInbox: vi.fn(),
+  completeSmsInbox: vi.fn(),
   unmatchedReceipts: vi.fn(),
   toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
   toastError: vi.fn(),
 }))
 
@@ -39,6 +45,11 @@ vi.mock('@/api/dataBox', () => ({
     pollInboxWithPassword: m.pollInboxWithPassword,
     startMobileKeyInbox: m.startMobileKeyInbox,
     mobileKeyInboxStatus: m.mobileKeyInboxStatus,
+    mobileKeyProfile: m.mobileKeyProfile,
+    saveMobileKeyProfile: m.saveMobileKeyProfile,
+    deleteMobileKeyProfile: m.deleteMobileKeyProfile,
+    startSmsInbox: m.startSmsInbox,
+    completeSmsInbox: m.completeSmsInbox,
     unmatchedReceipts: m.unmatchedReceipts,
   },
 }))
@@ -46,7 +57,7 @@ vi.mock('@/api/dataBox', () => ({
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
+  useToast: () => ({ success: m.toastSuccess, warning: m.toastWarning, error: m.toastError }),
 }))
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({ currentSupplier: { company_name: 'Testovací firma' } }),
@@ -110,7 +121,11 @@ function submission(overrides: Partial<OutboxSubmission> = {}): OutboxSubmission
   }
 }
 
-async function mountWith(rows: OutboxSubmission[], credentials: DataBoxCredential[] = [credential]) {
+async function mountWith(
+  rows: OutboxSubmission[],
+  credentials: DataBoxCredential[] = [credential],
+  mobileProfile = { saved: false, username: null as string | null, environment: 'production' as const },
+) {
   m.credentials.mockResolvedValue(credentials)
   m.recipients.mockResolvedValue([])
   m.outbox.mockResolvedValue(rows)
@@ -118,6 +133,25 @@ async function mountWith(rows: OutboxSubmission[], credentials: DataBoxCredentia
   m.pollInbox.mockResolvedValue({ fetched: 0, stored: 0, skipped: 0, failed: 0, unclassified: 0 })
   m.pollInboxWithPassword.mockResolvedValue({ fetched: 0, stored: 0, skipped: 0, failed: 0, unclassified: 0 })
   m.unmatchedReceipts.mockResolvedValue([])
+  m.mobileKeyProfile.mockResolvedValue(mobileProfile)
+  m.startMobileKeyInbox.mockResolvedValue({
+    flow_token: 'encrypted-mobile-flow',
+    state: 1,
+    description: 'Čeká na potvrzení.',
+    expires_at: '2026-08-25T20:00:00+02:00',
+  })
+  m.saveMobileKeyProfile.mockResolvedValue({
+    id: 1,
+    saved: true,
+    username: 'mobile-user',
+    environment: 'production',
+  })
+  m.startSmsInbox.mockResolvedValue({
+    flow_token: 'encrypted-sms-flow',
+    description: 'SMS byla odeslána.',
+    expires_at: '2026-08-25T20:00:00+02:00',
+  })
+  m.completeSmsInbox.mockResolvedValue({ fetched: 0, stored: 0, skipped: 0, failed: 0, unclassified: 0 })
 
   const wrapper = mount(DataBox, {
     global: {
@@ -199,6 +233,29 @@ describe('DataBox — doručeno vs. zpracováno', () => {
     expect(m.pollInbox).toHaveBeenCalledWith('production')
   })
 
+  it('částečné selhání stažení ukáže jako varování, ne jako úspěch', async () => {
+    const wrapper = await mountWith([])
+    m.toastSuccess.mockClear()
+    m.toastWarning.mockClear()
+    m.pollInbox.mockResolvedValue({
+      fetched: 2,
+      stored: 1,
+      skipped: 0,
+      failed: 1,
+      unclassified: 0,
+      error: 'isds_inbox_message_ingest_failed',
+    })
+    await wrapper.findAll('nav button')[2].trigger('click')
+    await wrapper.find('input[type="radio"][value="certificate"]').setValue()
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+    const fetchButton = wrapper.findAll('button').find(b => b.text().includes('databox.inbox.fetchOnce'))
+    await fetchButton?.trigger('click')
+    await flushPromises()
+
+    expect(m.toastWarning).toHaveBeenCalledWith('databox.inbox.polledWithErrors')
+    expect(m.toastSuccess).not.toHaveBeenCalledWith('databox.inbox.polled')
+  })
+
   it('nabídne Mobilní klíč a jednorázové heslo i bez uloženého certifikátu', async () => {
     const wrapper = await mountWith([], [])
     await wrapper.findAll('nav button')[2].trigger('click')
@@ -207,5 +264,68 @@ describe('DataBox — doručeno vs. zpracováno', () => {
     expect(wrapper.find('input[type="radio"][value="password"]').exists()).toBe(true)
     expect(wrapper.find('input[autocomplete="username"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('databox.inbox.communicationCode')
+  })
+
+  it('použije osobně uložený Mobilní klíč bez opětovného zobrazení kódu', async () => {
+    const wrapper = await mountWith([], [], { saved: true, username: 'saved-user', environment: 'production' })
+    await wrapper.findAll('nav button')[2].trigger('click')
+
+    expect((wrapper.find('input[autocomplete="username"]').element as HTMLInputElement).value).toBe('saved-user')
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+    const button = wrapper.findAll('button').find(b => b.text().includes('databox.inbox.startMobileKey'))
+    await button?.trigger('click')
+    await flushPromises()
+
+    expect(m.startMobileKeyInbox).toHaveBeenCalledWith('production', 'saved-user', '', true)
+    wrapper.unmount()
+  })
+
+  it('uloží osobní Mobilní klíč až po úspěšném zahájení přihlášení', async () => {
+    const wrapper = await mountWith([], [])
+    await wrapper.findAll('nav button')[2].trigger('click')
+    await wrapper.find('input[autocomplete="username"]').setValue('mobile-user')
+    await wrapper.find('input[autocomplete="off"]').setValue('communication-code')
+    const checkboxes = wrapper.findAll('input[type="checkbox"]')
+    await checkboxes[0].setValue(true)
+    await checkboxes[1].setValue(true)
+
+    const button = wrapper.findAll('button').find(b => b.text().includes('databox.inbox.startMobileKey'))
+    await button?.trigger('click')
+    await flushPromises()
+
+    expect(m.startMobileKeyInbox).toHaveBeenCalledWith(
+      'production',
+      'mobile-user',
+      'communication-code',
+      false,
+    )
+    expect(m.startMobileKeyInbox.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      m.saveMobileKeyProfile.mock.invocationCallOrder.at(-1) ?? 0,
+    )
+    expect(m.saveMobileKeyProfile).toHaveBeenCalledWith(
+      'production',
+      'mobile-user',
+      'communication-code',
+    )
+  })
+
+  it('zadá SMS kód v druhém kroku a teprve potom načte schránku', async () => {
+    const wrapper = await mountWith([], [])
+    await wrapper.findAll('nav button')[2].trigger('click')
+    await wrapper.find('input[type="radio"][value="sms"]').setValue()
+    await wrapper.find('input[autocomplete="username"]').setValue('sms-user')
+    await wrapper.find('input[autocomplete="current-password"]').setValue('one-time-password')
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+
+    const send = wrapper.findAll('button').find(b => b.text().includes('databox.inbox.sendSms'))
+    await send?.trigger('click')
+    await flushPromises()
+    expect(m.startSmsInbox).toHaveBeenCalledWith('production', 'sms-user', 'one-time-password')
+
+    await wrapper.find('input[autocomplete="one-time-code"]').setValue('123456')
+    const complete = wrapper.findAll('button').find(b => b.text().includes('databox.inbox.confirmSmsAndFetch'))
+    await complete?.trigger('click')
+    await flushPromises()
+    expect(m.completeSmsInbox).toHaveBeenCalledWith('encrypted-sms-flow', '123456', 'production')
   })
 })

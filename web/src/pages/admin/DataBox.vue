@@ -27,6 +27,7 @@ import {
   type GatewaySessionState,
   type GatewayStart,
   type IsdsGatewayCapability,
+  type IsdsMobileCredentialProfile,
   type InboxMessage,
   type InboxPollState,
   type OutboxAttempt,
@@ -89,7 +90,7 @@ const currentCredential = computed(
 // ── Jednorázové ruční načtení inboxu ────────────────────────────────────────
 // Tohle není plánovač ani trvalé povolení. Volba přihlášení je na kartě stále
 // viditelná; uživatel potvrdí právní účinek a spustí právě jeden síťový dotaz.
-type InboxAuthMethod = 'mobile_key' | 'password' | 'certificate'
+type InboxAuthMethod = 'mobile_key' | 'password' | 'sms' | 'certificate'
 const inboxAuthMethod = ref<InboxAuthMethod>('mobile_key')
 const inboxAcknowledged = ref(false)
 const inboxUsername = ref('')
@@ -97,14 +98,23 @@ const inboxPassword = ref('')
 const mobileCommunicationCode = ref('')
 const mobileFlowToken = ref('')
 const mobileStatus = ref('')
+const savedMobileCredential = ref<IsdsMobileCredentialProfile | null>(null)
+const rememberMobileCredential = ref(false)
+const smsFlowToken = ref('')
+const smsCode = ref('')
+const smsStatus = ref('')
 let mobileStatusTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── Recipient form ───────────────────────────────────────────────────────────
 const recipientCode = ref('')
 const recipientName = ref('')
+const recipientBusinessId = ref('')
+const recipientAddress = ref('')
 const recipientKind = ref<RecipientKind>('tax_office')
 const recipientBoxId = ref('')
 const recipientSource = ref('')
+const recipientEditing = ref(false)
+const recipientEditingDefault = ref(false)
 const recipientCodeSlug = useAutoSlug(value => { recipientCode.value = value }, { maxLen: 48 })
 
 const recipientsWithoutBox = computed(() => recipients.value.filter(r => !r.has_box_id))
@@ -214,7 +224,7 @@ function needsManualSteps(row: OutboxSubmission): boolean {
 async function loadAll() {
   loading.value = true
   try {
-    const [creds, recips, out, inb, unmatched] = await Promise.all([
+    const [creds, recips, out, inb, unmatched, mobileProfile] = await Promise.all([
       dataBoxApi.credentials(),
       dataBoxApi.recipients(),
       dataBoxApi.outbox(environment.value),
@@ -222,6 +232,11 @@ async function loadAll() {
       // Nespárovaná doručenka nesmí zmizet z očí — načítá se vždycky, ne až
       // na vyžádání.
       dataBoxApi.unmatchedReceipts(environment.value).catch(() => [] as InboxMessage[]),
+      dataBoxApi.mobileKeyProfile(environment.value).catch(() => ({
+        saved: false as const,
+        username: null,
+        environment: environment.value,
+      })),
     ])
     credentials.value = creds
     recipients.value = recips
@@ -229,6 +244,10 @@ async function loadAll() {
     inbox.value = inb.items
     pollState.value = inb.state
     unmatchedReceipts.value = unmatched
+    savedMobileCredential.value = mobileProfile
+    if (mobileProfile.saved && mobileProfile.username && inboxUsername.value === '') {
+      inboxUsername.value = mobileProfile.username
+    }
     await loadNotices()
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -530,10 +549,33 @@ function resetInboxAuth() {
   mobileStatus.value = ''
   inboxPassword.value = ''
   mobileCommunicationCode.value = ''
+  smsFlowToken.value = ''
+  smsCode.value = ''
+  smsStatus.value = ''
 }
 
-async function finishInboxPoll(result: { stored: number }) {
-  toast.success(t('databox.inbox.polled', { count: result.stored }))
+async function forgetMobileCredential() {
+  saving.value = true
+  try {
+    await dataBoxApi.deleteMobileKeyProfile(environment.value)
+    savedMobileCredential.value = { saved: false, username: null, environment: environment.value }
+    rememberMobileCredential.value = false
+    inboxUsername.value = ''
+    mobileCommunicationCode.value = ''
+    toast.success(t('databox.inbox.mobileCredentialDeleted'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function finishInboxPoll(result: { stored: number; failed: number; error?: string | null }) {
+  if (result.failed > 0 || result.error) {
+    toast.warning(t('databox.inbox.polledWithErrors', { stored: result.stored, failed: result.failed }))
+  } else {
+    toast.success(t('databox.inbox.polled', { count: result.stored }))
+  }
   inboxAcknowledged.value = false
   resetInboxAuth()
   await loadAll()
@@ -542,7 +584,7 @@ async function finishInboxPoll(result: { stored: number }) {
 async function pollMobileKeyStatus() {
   if (mobileFlowToken.value === '') return
   try {
-    const status = await dataBoxApi.mobileKeyInboxStatus(mobileFlowToken.value)
+    const status = await dataBoxApi.mobileKeyInboxStatus(mobileFlowToken.value, environment.value)
     mobileStatus.value = status.description
     if (status.state === 2 && status.result) {
       await finishInboxPoll(status.result)
@@ -587,15 +629,49 @@ async function pollInbox() {
       ))
       return
     }
-    if (mobileCommunicationCode.value === '') {
+    if (inboxAuthMethod.value === 'sms') {
+      if (smsFlowToken.value === '') {
+        if (inboxPassword.value === '') {
+          toast.error(t('databox.inbox.passwordRequired'))
+          return
+        }
+        const start = await dataBoxApi.startSmsInbox(
+          environment.value,
+          inboxUsername.value,
+          inboxPassword.value,
+        )
+        smsFlowToken.value = start.flow_token
+        smsStatus.value = start.description
+        inboxPassword.value = ''
+        return
+      }
+      if (smsCode.value.trim() === '') {
+        toast.error(t('databox.inbox.smsCodeRequired'))
+        return
+      }
+      await finishInboxPoll(await dataBoxApi.completeSmsInbox(smsFlowToken.value, smsCode.value, environment.value))
+      return
+    }
+    const useSaved = savedMobileCredential.value?.saved === true
+      && savedMobileCredential.value.username === inboxUsername.value.trim()
+      && mobileCommunicationCode.value === ''
+    if (!useSaved && mobileCommunicationCode.value === '') {
       toast.error(t('databox.inbox.communicationCodeRequired'))
       return
     }
     const start = await dataBoxApi.startMobileKeyInbox(
       environment.value,
       inboxUsername.value,
-      mobileCommunicationCode.value,
+      useSaved ? '' : mobileCommunicationCode.value,
+      useSaved,
     )
+    if (!useSaved && rememberMobileCredential.value) {
+      savedMobileCredential.value = await dataBoxApi.saveMobileKeyProfile(
+        environment.value,
+        inboxUsername.value,
+        mobileCommunicationCode.value,
+      )
+    }
     mobileFlowToken.value = start.flow_token
     mobileStatus.value = start.description
     mobileCommunicationCode.value = ''
@@ -609,6 +685,9 @@ async function pollInbox() {
 
 async function changeEnvironment() {
   resetInboxAuth()
+  inboxUsername.value = ''
+  savedMobileCredential.value = null
+  rememberMobileCredential.value = false
   inboxAcknowledged.value = false
   await loadAll()
 }
@@ -619,16 +698,14 @@ async function saveRecipient() {
     await dataBoxApi.saveRecipient({
       code: recipientCode.value,
       name: recipientName.value,
+      business_id: recipientBusinessId.value.trim() || null,
+      address: recipientAddress.value.trim() || null,
       kind: recipientKind.value,
       isds_box_id: recipientBoxId.value.trim() || null,
       source_url: recipientSource.value.trim() || null,
       is_active: true,
     })
-    recipientCode.value = ''
-    recipientCodeSlug.init('')
-    recipientName.value = ''
-    recipientBoxId.value = ''
-    recipientSource.value = ''
+    resetRecipientForm()
     toast.success(t('databox.saved'))
     await loadAll()
   } catch (e) {
@@ -680,6 +757,33 @@ async function loadGatewayRegistrations() {
   } catch {
     gatewayCapabilities.value = null
   }
+}
+
+function editRecipient(row: SubmissionRecipient) {
+  recipientCode.value = row.code
+  recipientCodeSlug.init(row.code)
+  recipientCodeSlug.markManual(row.code)
+  recipientName.value = row.name
+  recipientBusinessId.value = row.business_id ?? ''
+  recipientAddress.value = row.address ?? ''
+  recipientKind.value = row.kind
+  recipientBoxId.value = row.isds_box_id ?? ''
+  recipientSource.value = row.source_url ?? ''
+  recipientEditing.value = true
+  recipientEditingDefault.value = row.is_system
+}
+
+function resetRecipientForm() {
+  recipientCode.value = ''
+  recipientCodeSlug.init('')
+  recipientName.value = ''
+  recipientBusinessId.value = ''
+  recipientAddress.value = ''
+  recipientKind.value = 'tax_office'
+  recipientBoxId.value = ''
+  recipientSource.value = ''
+  recipientEditing.value = false
+  recipientEditingDefault.value = false
 }
 
 /** Nabízí se jen tam, kde má smysl: připravené podání datovkou a zapnutá brána. */
@@ -826,14 +930,7 @@ onUnmounted(clearMobileStatusTimer)
             </span>
           </div>
           <p class="mt-2 text-sm text-neutral-600">{{ t('databox.access.gatewayDescription') }}</p>
-          <ul class="mt-3 grid gap-2 text-sm text-neutral-700 sm:grid-cols-2">
-            <li v-for="method in ['password', 'mobileKey', 'identity', 'sms', 'certificate', 'securityCode']" :key="method" class="flex gap-2">
-              <svg class="mt-0.5 h-4 w-4 shrink-0 text-success-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
-              </svg>
-              {{ t(`databox.access.methods.${method}`) }}
-            </li>
-          </ul>
+          <p class="mt-3 text-sm text-neutral-700">{{ t('databox.gateway.methodsByIsds') }}</p>
           <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.gatewayBoundary') }}</p>
           <div class="mt-3 flex items-center gap-2 text-sm">
             <span class="h-2.5 w-2.5 rounded-full" :class="gatewayAvailable ? 'bg-success-500' : 'bg-warning-500'" />
@@ -1277,20 +1374,6 @@ onUnmounted(clearMobileStatusTimer)
             </svg>
             {{ t('databox.outbox.confirmSend') }}
           </button>
-          <!-- Strojové odeslání zůstává dostupné, ale ne jako hlavní krok:
-               dokud transport není nasazený, skončí srozumitelnou překážkou. -->
-          <button
-            v-if="row.dispatch_state === 'ready' && row.channel === 'isds'"
-            type="button"
-            :class="btnOutline('primary')"
-            :disabled="busyId === row.id"
-            @click="confirmSend(row)"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" />
-            </svg>
-            {{ t('databox.outbox.confirmSend') }}
-          </button>
           <button
             v-if="primaryAction(row) === 'resolve'"
             type="button"
@@ -1376,9 +1459,9 @@ onUnmounted(clearMobileStatusTimer)
         <h2 class="font-medium text-neutral-900">{{ t('databox.inbox.authTitle') }}</h2>
         <p class="mt-1 text-sm text-neutral-500">{{ t('databox.inbox.authIntro') }}</p>
 
-        <div class="mt-4 grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div class="mt-4 grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label
-            v-for="method in (['mobile_key', 'password', 'certificate'] as InboxAuthMethod[])"
+            v-for="method in (['mobile_key', 'password', 'sms', 'certificate'] as InboxAuthMethod[])"
             :key="method"
             class="flex min-w-0 cursor-pointer gap-3 rounded-lg border p-3"
             :class="inboxAuthMethod === method ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 bg-surface'"
@@ -1394,20 +1477,65 @@ onUnmounted(clearMobileStatusTimer)
           </label>
         </div>
 
-        <div v-if="inboxAuthMethod !== 'certificate'" class="mt-4 grid gap-3 sm:grid-cols-2">
+        <div
+          v-if="inboxAuthMethod !== 'certificate' && !(inboxAuthMethod === 'sms' && smsFlowToken)"
+          class="mt-4 grid gap-3 sm:grid-cols-2"
+        >
           <label class="block">
             <span class="text-sm font-medium">{{ t('databox.inbox.username') }}</span>
             <input v-model="inboxUsername" type="text" autocomplete="username" class="form-input mt-1 w-full" />
           </label>
-          <label v-if="inboxAuthMethod === 'password'" class="block">
+          <label v-if="inboxAuthMethod === 'password' || inboxAuthMethod === 'sms'" class="block">
             <span class="text-sm font-medium">{{ t('databox.inbox.password') }}</span>
             <input v-model="inboxPassword" type="password" autocomplete="current-password" class="form-input mt-1 w-full" />
           </label>
-          <label v-else class="block">
+          <label v-else-if="inboxAuthMethod === 'mobile_key'" class="block">
             <span class="text-sm font-medium">{{ t('databox.inbox.communicationCode') }}</span>
-            <input v-model="mobileCommunicationCode" type="password" autocomplete="off" class="form-input mt-1 w-full" />
+            <input
+              v-model="mobileCommunicationCode"
+              type="password"
+              autocomplete="off"
+              class="form-input mt-1 w-full"
+              :placeholder="savedMobileCredential?.saved ? t('databox.inbox.savedCommunicationCodePlaceholder') : ''"
+            />
             <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.inbox.communicationCodeHint') }}</span>
           </label>
+        </div>
+
+        <div v-if="inboxAuthMethod === 'mobile_key'" class="mt-3 flex flex-wrap items-center gap-3 text-sm">
+          <label v-if="!savedMobileCredential?.saved || mobileCommunicationCode" class="flex items-center gap-2">
+            <input v-model="rememberMobileCredential" type="checkbox" />
+            <span>{{ t('databox.inbox.rememberMobileCredential') }}</span>
+          </label>
+          <template v-if="savedMobileCredential?.saved">
+            <span class="text-success-700 dark:text-success-300">
+              {{ t('databox.inbox.mobileCredentialSaved', { username: savedMobileCredential.username }) }}
+            </span>
+            <button type="button" :class="btnOutlineSm('danger')" :disabled="saving" @click="forgetMobileCredential">
+              {{ t('databox.inbox.forgetMobileCredential') }}
+            </button>
+          </template>
+        </div>
+
+        <div v-if="inboxAuthMethod === 'sms' && smsFlowToken" class="mt-4 grid gap-3 sm:grid-cols-2">
+          <label class="block">
+            <span class="text-sm font-medium">{{ t('databox.inbox.smsCode') }}</span>
+            <input v-model="smsCode" type="text" inputmode="numeric" autocomplete="one-time-code" class="form-input mt-1 w-full" />
+          </label>
+          <div class="flex flex-wrap items-end gap-2">
+            <button
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              :disabled="saving"
+              @click="smsFlowToken = ''; smsCode = ''; smsStatus = ''"
+            >
+              {{ t('databox.inbox.requestNewSms') }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="smsStatus" class="mt-4 rounded-lg border border-primary-500/40 bg-primary-50 p-3 text-sm text-primary-800 dark:text-primary-200">
+          {{ smsStatus }}
         </div>
 
         <div v-if="mobileStatus" class="mt-4 rounded-lg border border-primary-500/40 bg-primary-50 p-3 text-sm text-primary-800 dark:text-primary-200">
@@ -1429,7 +1557,11 @@ onUnmounted(clearMobileStatusTimer)
             <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.inbox" />
             </svg>
-            {{ inboxAuthMethod === 'mobile_key' ? t('databox.inbox.startMobileKey') : t('databox.inbox.fetchOnce') }}
+            {{ inboxAuthMethod === 'mobile_key'
+              ? t('databox.inbox.startMobileKey')
+              : inboxAuthMethod === 'sms'
+                ? (smsFlowToken ? t('databox.inbox.confirmSmsAndFetch') : t('databox.inbox.sendSms'))
+                : t('databox.inbox.fetchOnce') }}
           </button>
         </div>
       </div>
@@ -1622,6 +1754,8 @@ onUnmounted(clearMobileStatusTimer)
           <thead>
             <tr class="text-left text-xs uppercase text-neutral-400">
               <th class="py-2 pr-3">{{ t('databox.recipients.name') }}</th>
+              <th class="py-2 pr-3">{{ t('databox.recipients.businessId') }}</th>
+              <th class="py-2 pr-3">{{ t('databox.recipients.address') }}</th>
               <th class="py-2 pr-3">{{ t('databox.recipients.kind') }}</th>
               <th class="py-2 pr-3">{{ t('databox.recipients.boxId') }}</th>
               <th class="py-2 pr-3">{{ t('databox.recipients.source') }}</th>
@@ -1631,6 +1765,8 @@ onUnmounted(clearMobileStatusTimer)
           <tbody>
             <tr v-for="r in recipients" :key="r.id" class="border-t border-neutral-100">
               <td class="py-2 pr-3">{{ r.name }}</td>
+              <td class="py-2 pr-3"><code v-if="r.business_id">{{ r.business_id }}</code><span v-else>—</span></td>
+              <td class="max-w-xs py-2 pr-3 text-xs text-neutral-600">{{ r.address ?? '—' }}</td>
               <td class="py-2 pr-3">{{ t(`databox.recipientKind.${r.kind}`) }}</td>
               <td class="py-2 pr-3">
                 <code v-if="r.isds_box_id">{{ r.isds_box_id }}</code>
@@ -1643,6 +1779,17 @@ onUnmounted(clearMobileStatusTimer)
                 <span v-else>—</span>
               </td>
               <td class="py-2 pr-3">
+                <div class="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  :class="btnOutlineSm('neutral')"
+                  :disabled="busyId === r.id"
+                  @click="editRecipient(r)"
+                >
+                  {{ r.is_system
+                    ? t('databox.recipients.overrideForCompany')
+                    : t('common.edit') }}
+                </button>
                 <button
                   v-if="!r.is_system"
                   type="button"
@@ -1652,6 +1799,7 @@ onUnmounted(clearMobileStatusTimer)
                 >
                   {{ t('common.delete') }}
                 </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -1659,7 +1807,29 @@ onUnmounted(clearMobileStatusTimer)
       </div>
 
       <div class="rounded-lg border border-neutral-200 bg-surface p-4">
-        <h2 class="mb-3 font-medium">{{ t('databox.recipients.addTitle') }}</h2>
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 class="font-medium">
+            {{ recipientEditingDefault
+              ? t('databox.recipients.overrideTitle')
+              : recipientEditing
+                ? t('databox.recipients.editTitle')
+                : t('databox.recipients.addTitle') }}
+          </h2>
+          <button
+            v-if="recipientEditing"
+            type="button"
+            :class="btnOutlineSm('neutral')"
+            @click="resetRecipientForm"
+          >
+            {{ t('databox.recipients.newRecord') }}
+          </button>
+        </div>
+        <p
+          v-if="recipientEditingDefault"
+          class="mb-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-800"
+        >
+          {{ t('databox.recipients.overrideHint') }}
+        </p>
         <div class="grid gap-3 sm:grid-cols-2">
           <label class="block">
             <span class="text-sm font-medium">{{ t('databox.recipients.name') }}</span>
@@ -1677,9 +1847,18 @@ onUnmounted(clearMobileStatusTimer)
               type="text"
               maxlength="48"
               class="form-input mt-1 w-full font-mono"
+              :readonly="recipientEditing"
               @input="recipientCodeSlug.markManual(($event.target as HTMLInputElement).value)"
             />
             <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.recipients.codeHint') }}</span>
+          </label>
+          <label class="block">
+            <span class="text-sm font-medium">{{ t('databox.recipients.businessId') }}</span>
+            <input v-model="recipientBusinessId" type="text" inputmode="numeric" maxlength="8" class="form-input mt-1 w-full" />
+          </label>
+          <label class="block">
+            <span class="text-sm font-medium">{{ t('databox.recipients.address') }}</span>
+            <input v-model="recipientAddress" type="text" maxlength="500" class="form-input mt-1 w-full" />
           </label>
           <label class="block">
             <span class="text-sm font-medium">{{ t('databox.recipients.kind') }}</span>

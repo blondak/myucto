@@ -16696,7 +16696,7 @@
             "inboxMobileKey": "Mobile Key: username + communication code (app password), followed by confirmation of each session in the key. This personal access can be stored encrypted for you and the selected company.",
             "inboxPassword": "Username + password: used once for a single request; if SMS authentication is enabled on the account, you enter the code in the second step.",
             "inboxCertificate": "System certificate: encrypted and stored for the currently selected company.",
-            "inboxLoginBoundary": "A regular password and SMS code are never stored. At your request, the Mobile Key username and communication code can be stored encrypted only for the company + user combination. The mailbox is never fetched automatically.",
+            "inboxLoginBoundary": "A regular password is not stored in a profile. During the SMS step it remains for at most a few minutes in a one-time encrypted flow; it is erased after use and cannot be used after expiry. The SMS code is not stored. At your request, the Mobile Key username and communication code can be stored encrypted only for the company + user combination. The mailbox is never fetched automatically.",
             "certificateSettings": "System certificate settings",
             "certificateOnly": "This setting applies only to the currently selected company. Interactive sign-in for dispatch takes place separately in ISDS.",
             "label": "Label",
@@ -16816,6 +16816,7 @@
             "empty": "No downloaded messages.",
             "poll": "Fetch new messages",
             "polled": "New messages downloaded: {count}",
+            "polledWithErrors": "Messages downloaded: {stored}. Downloading or storing failed for {failed} messages; the fetch is incomplete and must be repeated.",
             "manualOnly": "The mailbox is never collected automatically. You must start and confirm every fetch.",
             "pollConfirm": "Fetch new messages from the data box now? Fetching may count as delivery and start statutory deadlines.",
             "authTitle": "How do you want to sign in for this fetch?",
@@ -16827,11 +16828,11 @@
                 },
                 "password": {
                     "title": "Username and password",
-                    "description": "For an account without a second factor. The password is sent directly to ISDS only during this fetch and is not stored by MyÚčto."
+                    "description": "For an account without a second factor. The MyÚčto server receives the password only for the fetch you just started, passes it to ISDS, and does not store it."
                 },
                 "sms": {
                     "title": "Username, password and SMS code",
-                    "description": "MyÚčto first asks ISDS to send an SMS, then you enter its code here in the second step."
+                    "description": "MyÚčto first asks ISDS to send an SMS. Between the two steps it keeps the password only in a short-lived encrypted one-time flow; it is erased after use and cannot be used after expiry."
                 },
                 "certificate": {
                     "title": "Company system certificate",

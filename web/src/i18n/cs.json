@@ -16696,7 +16696,7 @@
             "inboxMobileKey": "Mobilní klíč: jméno + komunikační kód (heslo pro aplikaci) a potvrzení každé relace v klíči. Tento osobní přístup lze šifrovaně zapamatovat pro Vás a právě zvolenou firmu.",
             "inboxPassword": "Jméno + heslo: použijí se jednorázově pro jeden požadavek; pokud má účet aktivní SMS autentizaci, kód zadáte ve druhém kroku.",
             "inboxCertificate": "Systémový certifikát: šifrovaně uložený u právě zvolené firmy.",
-            "inboxLoginBoundary": "Běžné heslo ani SMS kód se neukládají. Jméno a komunikační kód Mobilního klíče lze na Vaši žádost uložit šifrovaně pouze pro kombinaci firma + uživatel. Schránka se nikdy nenačítá automaticky.",
+            "inboxLoginBoundary": "Běžné heslo se neukládá do profilu. U SMS mezikroku zůstane nejvýše několik minut v jednorázovém šifrovaném toku; po použití se smaže a po vypršení už ho nelze použít. SMS kód se neukládá. Jméno a komunikační kód Mobilního klíče lze na Vaši žádost uložit šifrovaně pouze pro kombinaci firma + uživatel. Schránka se nikdy nenačítá automaticky.",
             "certificateSettings": "Nastavení systémového certifikátu",
             "certificateOnly": "Toto nastavení platí jen pro právě zvolenou firmu. Interaktivní přihlášení při odeslání probíhá odděleně přímo v ISDS.",
             "label": "Označení",
@@ -16816,6 +16816,7 @@
             "empty": "Žádné stažené zprávy.",
             "poll": "Vyzvednout nové zprávy",
             "polled": "Staženo nových zpráv: {count}",
+            "polledWithErrors": "Staženo zpráv: {stored}. U {failed} zpráv se stažení nebo uložení nezdařilo; načtení není úplné a je potřeba je zopakovat.",
             "manualOnly": "Schránka se automaticky nevybírá. Každé načtení musíte spustit a potvrdit Vy.",
             "pollConfirm": "Opravdu teď chcete načíst nové zprávy z datové schránky? Vyzvednutí se může počítat jako doručení a spustit zákonné lhůty.",
             "authTitle": "Jak se chcete pro toto načtení přihlásit?",
@@ -16827,11 +16828,11 @@
                 },
                 "password": {
                     "title": "Jméno a heslo",
-                    "description": "Pro účet bez druhého faktoru. Heslo se odešle přímo ISDS pouze během tohoto načtení a MyÚčto ho neuloží."
+                    "description": "Pro účet bez druhého faktoru. MyÚčto heslo přijme na serveru pouze pro právě spuštěné načtení, předá ho ISDS a nikam ho neuloží."
                 },
                 "sms": {
                     "title": "Jméno, heslo a SMS kód",
-                    "description": "MyÚčto nejprve požádá ISDS o SMS a kód zadáte ve druhém kroku přímo zde."
+                    "description": "MyÚčto nejprve požádá ISDS o SMS. Heslo mezi oběma kroky drží jen v krátkém šifrovaném jednorázovém toku; po použití ho smaže a po vypršení už ho nelze použít."
                 },
                 "certificate": {
                     "title": "Systémový certifikát firmy",
