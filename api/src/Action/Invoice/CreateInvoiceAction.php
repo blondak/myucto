@@ -17,6 +17,7 @@ use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\InvoiceDefaults;
+use MyInvoice\Service\Invoice\InvoiceNoteAlias;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Oss\OssDocumentCoherence;
 use MyInvoice\Service\Oss\OssItemDeriver;
@@ -54,6 +55,10 @@ final class CreateInvoiceAction
     public function __invoke(Request $request, Response $response): Response
     {
         $body = (array) ($request->getParsedBody() ?? []);
+
+        // Generický `note` → `note_below_items` (issue #38). Musí být nad vším ostatním:
+        // pod klíčem `note` není sloupec, takže by ho repository jinak tiše zahodila.
+        $body = InvoiceNoteAlias::normalize($body);
 
         // BOLA guard (security report 2026-08, R2 #4 / sweep F4) — client_id se váže níž
         // na :59, ale revenue_category_id/project_id/currency_id se dosud forwardovaly

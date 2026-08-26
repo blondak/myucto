@@ -19135,7 +19135,6 @@ components:
         czk_recap:
           description: "CZK rekapitulace u cizoměnových faktur (null pokud měna == CZK nebo není zafixován kurz)"
           type: [object, "null"]
-        note: { type: [string, "null"], description: "Generická poznámka. Pro výstup viz note_above_items / note_below_items." }
         note_above_items: { type: [string, "null"] }
         note_below_items: { type: [string, "null"] }
         bank_account_number: { type: [string, "null"], description: "Z currencies (per-měna bank účet supplier-a)" }
@@ -19331,7 +19330,13 @@ components:
             `payment_method = cash`. Pokladní doklad vznikne až při vystavení faktury;
             NULL volbu (a dřív založený pokladní doklad) zruší.
         exchange_rate: { type: [number, "null"], format: float, description: "Volitelný manuální override ČNB kurzu (CZK / 1 jednotka cizí měny)" }
-        note: { type: [string, "null"], description: "Generická poznámka (mapuje se na note_below_items pokud není uvedeno jinak)" }
+        note:
+          type: [string, "null"]
+          description: |
+            Zkratka pro `note_below_items` — hodnota se uloží do poznámky pod položkami.
+            Přednost má vždy konkrétní klíč: když je v těle i `note_below_items`
+            (třeba `null` jako vyprázdnění), `note` se ignoruje.
+            Jen vstupní alias — odpověď ho nevrací, čti `note_above_items` / `note_below_items`.
         note_above_items: { type: [string, "null"] }
         note_below_items: { type: [string, "null"] }
         items:

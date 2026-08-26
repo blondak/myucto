@@ -23,6 +23,7 @@ use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\InvoiceDefaults;
+use MyInvoice\Service\Invoice\InvoiceNoteAlias;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Oss\OssDocumentCoherence;
@@ -98,6 +99,10 @@ final class UpdateInvoiceAction
         $isAdmin = RequestAuthorization::isSuperadmin($request);
 
         $body = (array) ($request->getParsedBody() ?? []);
+
+        // Generický `note` → `note_below_items` (issue #38). Musí být hned tady, ještě nad
+        // guardy: force_mode="notes_only" i auditní diff čtou už konkrétní klíč.
+        $body = InvoiceNoteAlias::normalize($body);
 
         // Zámek dokladu (Epic F6, H1) — PŘED status guardem (klient dostane 403
         // document_locked, ne 409 not_editable): kontrola staré I nové refDate —
