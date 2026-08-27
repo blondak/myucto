@@ -102,6 +102,76 @@ final class CompanyBackupTableProjectionTest extends TestCase
         }
     }
 
+    public function testPolymorphicContractClassifiesReferenceLikeColumn(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            dataColumns: ['id', 'supplier_id', 'source_type', 'source_id'],
+            polymorphicReferences: [[
+                'column' => 'source_id',
+                'discriminator_column' => 'source_type',
+                'nullable' => true,
+                'cases' => [[
+                    'base' => 0,
+                    'equals' => 'manual',
+                    'mapping' => 'preserve',
+                    'multiplier' => 1,
+                    'slots' => [],
+                    'target' => null,
+                    'target_columns' => [],
+                    'transform' => 'identity',
+                ]],
+            ]],
+        ));
+
+        self::assertSame(
+            ['source_id'],
+            $projection->polymorphicReferences->classifiedColumns(),
+        );
+    }
+
+    public function testRejectsOrdinaryAndPolymorphicClaimOfSameColumn(): void
+    {
+        try {
+            CompanyBackupTableProjection::fromDefinition($this->definition(
+                dataColumns: ['id', 'supplier_id', 'source_type', 'source_id'],
+                references: [
+                    [
+                        'columns' => ['source_id'],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ],
+                    $this->supplierReference(),
+                ],
+                polymorphicReferences: [[
+                    'column' => 'source_id',
+                    'discriminator_column' => 'source_type',
+                    'nullable' => true,
+                    'cases' => [[
+                        'base' => 0,
+                        'equals' => 'manual',
+                        'mapping' => 'preserve',
+                        'multiplier' => 1,
+                        'slots' => [],
+                        'target' => null,
+                        'target_columns' => [],
+                        'transform' => 'identity',
+                    ]],
+                ]],
+            ));
+            self::fail('Jeden sloupec nesmí mít běžný i polymorfní referenční kontrakt.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame(
+                'data_reference_column_classification_duplicate',
+                $e->errorCode,
+            );
+            self::assertSame('source_id', $e->column);
+        }
+    }
+
     public function testRejectsPrimaryKeyAndGeneratedColumnDrift(): void
     {
         $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
@@ -163,6 +233,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param list<string> $generatedColumns
      * @param array<string,string> $omitColumns
      * @param list<array<string,mixed>>|null $references
+     * @param list<array<string,mixed>> $polymorphicReferences
      */
     private function definition(
         array $secrets = [],
@@ -170,6 +241,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
         array $generatedColumns = [],
         array $omitColumns = [],
         ?array $references = null,
+        array $polymorphicReferences = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:synthetic_records',
@@ -188,6 +260,9 @@ final class CompanyBackupTableProjectionTest extends TestCase
                     'embedded_references' => [],
                     'generated_columns' => $generatedColumns,
                     'omit_columns' => $omitColumns,
+                    ...($polymorphicReferences === [] ? [] : [
+                        'polymorphic_references' => $polymorphicReferences,
+                    ]),
                     'references' => $references ?? [$this->supplierReference()],
                     'restore_overrides' => [],
                 ],

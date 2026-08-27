@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupForeignKey;
+use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceMapping;
+use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceTransform;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
@@ -424,6 +426,133 @@ final class CompanyBackupProductionProjectionTest extends TestCase
                 static fn ($reference): string => $reference->signature(),
                 $projection->embeddedReferences->references,
             ),
+        );
+    }
+
+    public function testJournalEntriesDeclareEverySourceIdVariant(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:journal_entries');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'period_id',
+            'entry_date',
+            'document_date',
+            'document_no',
+            'description',
+            'source_type',
+            'source_id',
+            'posted_at',
+            'posted_by',
+            'reversed_by',
+            'row_version',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            [
+                'document_date',
+                'document_no',
+                'description',
+                'source_id',
+                'posted_at',
+                'posted_by',
+                'reversed_by',
+            ],
+            [
+                new CompanyBackupForeignKey(
+                    ['supplier_id', 'period_id'],
+                    'accounting_periods',
+                    ['supplier_id', 'id'],
+                ),
+                new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+                new CompanyBackupForeignKey(['posted_by'], 'users', ['id']),
+                new CompanyBackupForeignKey(
+                    ['reversed_by'],
+                    'journal_entries',
+                    ['id'],
+                ),
+            ],
+        ));
+        $projection->polymorphicReferences->assertRegistryTargets($registry);
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'posted_by->users:id',
+                'reversed_by->journal_entries:id',
+                'supplier_id,period_id->accounting_periods:supplier_id,id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+
+        $polymorphic = $projection->polymorphicReferences->references;
+        self::assertCount(1, $polymorphic);
+        $cases = $polymorphic[0]->cases;
+        self::assertSame(
+            [
+                'asset',
+                'asset_disposal',
+                'bank',
+                'cash',
+                'closing',
+                'deferred_tax',
+                'depreciation',
+                'fx_revaluation',
+                'income_tax',
+                'invoice',
+                'manual',
+                'offset',
+                'opening',
+                'payroll',
+                'prepaid_expense_accrual',
+                'profit_distribution',
+                'provision',
+                'purchase_invoice',
+                'settlement',
+                'small_asset_accrual',
+                'stock',
+                'vat_clearing',
+            ],
+            array_map(static fn ($case): string => $case->equals, $cases),
+        );
+
+        $byType = [];
+        foreach ($cases as $case) {
+            $byType[$case->equals] = $case;
+        }
+        self::assertSame('table:invoices', $byType['invoice']->target);
+        self::assertSame('table:invoices', $byType['provision']->target);
+        self::assertSame('table:payroll_run_revisions', $byType['payroll']->target);
+        self::assertSame(
+            CompanyBackupPolymorphicReferenceMapping::Preserve,
+            $byType['manual']->mapping,
+        );
+        self::assertSame(
+            CompanyBackupPolymorphicReferenceMapping::Preserve,
+            $byType['vat_clearing']->mapping,
+        );
+        self::assertSame(
+            CompanyBackupPolymorphicReferenceTransform::IdentityOrDecimalSlot,
+            $byType['closing']->transform,
+        );
+        self::assertSame(
+            CompanyBackupPolymorphicReferenceTransform::DecimalSlot,
+            $byType['fx_revaluation']->transform,
+        );
+        self::assertSame(
+            CompanyBackupPolymorphicReferenceTransform::IdentityOrOffset,
+            $byType['small_asset_accrual']->transform,
         );
     }
 

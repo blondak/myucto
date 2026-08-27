@@ -244,6 +244,52 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionJournalEntriesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'journal_entries',
+            ['period_id', 'source_type', 'source_id', 'posted_by', 'reversed_by', 'updated_at'],
+        );
+
+        $statement = $this->db->pdo()->query(
+            'SELECT COLUMN_TYPE FROM information_schema.COLUMNS'
+            . " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'journal_entries'"
+            . " AND COLUMN_NAME = 'source_type'",
+        );
+        if ($statement === false) {
+            throw new \RuntimeException('Nelze načíst ENUM journal_entries.source_type.');
+        }
+        $columnType = $statement->fetchColumn();
+        if (!is_string($columnType)
+            || preg_match_all("/'([a-z_]+)'/D", $columnType, $matches) === false
+        ) {
+            throw new \RuntimeException('journal_entries.source_type nemá očekávaný ENUM.');
+        }
+        $schemaSourceTypes = $matches[1];
+        sort($schemaSourceTypes, SORT_STRING);
+
+        $definition = TenantDataRegistryFactory::draftV1()->definition('table:journal_entries');
+        self::assertNotNull($definition);
+        $references = CompanyBackupTableProjection::fromDefinition($definition)
+            ->polymorphicReferences
+            ->references;
+        $sourceReference = $references[0] ?? null;
+        if ($sourceReference === null) {
+            throw new \LogicException('journal_entries nemá polymorfní source_id kontrakt.');
+        }
+        $projectedSourceTypes = array_map(
+            static fn ($case): string => $case->equals,
+            $sourceReference->cases,
+        );
+        sort($projectedSourceTypes, SORT_STRING);
+
+        self::assertSame(
+            $schemaSourceTypes,
+            $projectedSourceTypes,
+            'Každá ENUM varianta source_type musí mít explicitní source_id strategii.',
+        );
+    }
+
     /** @param list<string> $expectedColumns */
     private function assertProductionProjectionMatchesSchema(
         string $table,
@@ -266,6 +312,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $schemaReader->readReferences($this->db->pdo(), $projection),
         );
         $projection->embeddedReferences->assertRegistryTargets($registry);
+        $projection->polymorphicReferences->assertRegistryTargets($registry);
         foreach ($expectedColumns as $column) {
             self::assertContains($column, $schema->columns);
         }

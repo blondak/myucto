@@ -132,10 +132,17 @@ final readonly class CompanyBackupReferenceSet
         return true;
     }
 
-    /** @param list<string> $dataColumns */
-    public function assertProjectionColumns(array $dataColumns): void
+    /**
+     * @param list<string> $dataColumns
+     * @param list<string> $additionalClassifiedColumns
+     */
+    public function assertProjectionColumns(
+        array $dataColumns,
+        array $additionalClassifiedColumns = [],
+    ): void
     {
         $exported = array_fill_keys($dataColumns, true);
+        $additional = array_fill_keys($additionalClassifiedColumns, true);
         $classified = [];
         foreach ($this->references as $reference) {
             $conditionColumn = $reference->condition?->column;
@@ -154,6 +161,13 @@ final readonly class CompanyBackupReferenceSet
                         $column,
                     );
                 }
+                if (isset($additional[$column])) {
+                    throw new CompanyBackupDataSourceException(
+                        'data_reference_column_classification_duplicate',
+                        $this->registryKey,
+                        $column,
+                    );
+                }
                 $classified[$column] = true;
             }
         }
@@ -161,6 +175,7 @@ final readonly class CompanyBackupReferenceSet
             if ($column !== 'id'
                 && (str_ends_with($column, '_id') || str_ends_with($column, '_by'))
                 && !isset($classified[$column])
+                && !isset($additional[$column])
             ) {
                 throw new CompanyBackupDataSourceException(
                     'data_reference_column_unclassified',

@@ -18,6 +18,68 @@ use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupTableSchemaReaderTest extends TestCase
 {
+    public function testIgnoresImplicitSystemVersionedRowEndInPrimaryKey(): void
+    {
+        $columns = $this->statement([
+            [
+                'COLUMN_NAME' => 'id',
+                'EXTRA' => 'auto_increment',
+                'GENERATION_EXPRESSION' => null,
+                'TABLE_TYPE' => 'SYSTEM VERSIONED',
+            ],
+            [
+                'COLUMN_NAME' => 'supplier_id',
+                'EXTRA' => '',
+                'GENERATION_EXPRESSION' => null,
+                'TABLE_TYPE' => 'SYSTEM VERSIONED',
+            ],
+        ]);
+        $primaryKey = $this->statement(['id', 'row_end'], PDO::FETCH_COLUMN);
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::exactly(2))
+            ->method('prepare')
+            ->willReturnOnConsecutiveCalls($columns, $primaryKey);
+
+        $projection = CompanyBackupTableProjection::fromDefinition(new TenantDataDefinition(
+            'table:synthetic_records',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'ownership' => ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                'secrets' => [],
+                'company_backup' => [
+                    'data_columns' => ['id', 'supplier_id'],
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' => [[
+                        'columns' => ['supplier_id'],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ]],
+                    'restore_overrides' => [],
+                ],
+            ],
+        ));
+
+        $schema = (new CompanyBackupTableSchemaReader())->read($pdo, $projection);
+
+        self::assertSame(['id', 'supplier_id'], $schema->columns);
+        self::assertSame([], $schema->generatedColumns);
+        self::assertSame(['id'], $schema->primaryKey);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+        );
+    }
+
     public function testReadsCompositeForeignKeyInDeclaredColumnOrder(): void
     {
         $columns = $this->statement([
@@ -84,8 +146,8 @@ final class CompanyBackupTableSchemaReaderTest extends TestCase
         $projection->references->assertRuntimeSchema($schema);
     }
 
-    /** @param list<array<string,mixed>> $rows */
-    private function statement(array $rows): PDOStatement
+    /** @param list<mixed> $rows */
+    private function statement(array $rows, int $fetchMode = PDO::FETCH_ASSOC): PDOStatement
     {
         $statement = $this->createMock(PDOStatement::class);
         $statement->expects(self::once())
@@ -94,7 +156,7 @@ final class CompanyBackupTableSchemaReaderTest extends TestCase
             ->willReturn(true);
         $statement->expects(self::once())
             ->method('fetchAll')
-            ->with(PDO::FETCH_ASSOC)
+            ->with($fetchMode)
             ->willReturn($rows);
         $statement->expects(self::once())->method('closeCursor')->willReturn(true);
         return $statement;

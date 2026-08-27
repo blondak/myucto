@@ -36,6 +36,8 @@ final readonly class CompanyBackupTableProjection
 
     public CompanyBackupEmbeddedReferenceSet $embeddedReferences;
 
+    public CompanyBackupPolymorphicReferenceSet $polymorphicReferences;
+
     public CompanyBackupRestoreOverrideSet $restoreOverrides;
 
     /**
@@ -58,6 +60,7 @@ final readonly class CompanyBackupTableProjection
         array $secretPolicies,
         CompanyBackupReferenceSet $references,
         CompanyBackupEmbeddedReferenceSet $embeddedReferences,
+        CompanyBackupPolymorphicReferenceSet $polymorphicReferences,
         CompanyBackupRestoreOverrideSet $restoreOverrides,
     ) {
         $this->primaryKey = $primaryKey;
@@ -68,6 +71,7 @@ final readonly class CompanyBackupTableProjection
         $this->secretPolicies = $secretPolicies;
         $this->references = $references;
         $this->embeddedReferences = $embeddedReferences;
+        $this->polymorphicReferences = $polymorphicReferences;
         $this->restoreOverrides = $restoreOverrides;
     }
 
@@ -114,14 +118,19 @@ final readonly class CompanyBackupTableProjection
         }
         $metadataKeys = array_keys($metadata);
         sort($metadataKeys, SORT_STRING);
-        if ($metadataKeys !== [
+        $baseMetadataKeys = [
             'data_columns',
             'embedded_references',
             'generated_columns',
             'omit_columns',
             'references',
             'restore_overrides',
-        ]) {
+        ];
+        $polymorphicMetadataKeys = [...$baseMetadataKeys, 'polymorphic_references'];
+        sort($polymorphicMetadataKeys, SORT_STRING);
+        if ($metadataKeys !== $baseMetadataKeys
+            && $metadataKeys !== $polymorphicMetadataKeys
+        ) {
             throw new CompanyBackupDataSourceException(
                 'data_projection_invalid',
                 $registryKey,
@@ -148,7 +157,15 @@ final readonly class CompanyBackupTableProjection
             $metadata['references'],
             $registryKey,
         );
-        $references->assertProjectionColumns($dataColumns);
+        $polymorphicReferences = CompanyBackupPolymorphicReferenceSet::fromArray(
+            $metadata['polymorphic_references'] ?? [],
+            $registryKey,
+            $dataColumns,
+        );
+        $references->assertProjectionColumns(
+            $dataColumns,
+            $polymorphicReferences->classifiedColumns(),
+        );
         $embeddedReferences = CompanyBackupEmbeddedReferenceSet::fromArray(
             $metadata['embedded_references'],
             $registryKey,
@@ -219,6 +236,7 @@ final readonly class CompanyBackupTableProjection
             $secretPolicies,
             $references,
             $embeddedReferences,
+            $polymorphicReferences,
             $restoreOverrides,
         );
     }

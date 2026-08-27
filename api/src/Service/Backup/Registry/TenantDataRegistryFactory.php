@@ -5,12 +5,20 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Registry;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 
 /** Produkční sestavení registru; company_backup zůstává během inventury draft. */
 final class TenantDataRegistryFactory
 {
+    /** @var array<string,string> */
+    private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
+        'invoice_settlements' => 'accounting',
+        'offset_agreements' => 'accounting',
+        'payroll_run_revisions' => 'payroll',
+    ];
+
     /** @var list<string> */
     private const ACCOUNTING_ARCHIVE_EXPORT_ORDER = [
         'supplier',
@@ -332,6 +340,22 @@ final class TenantDataRegistryFactory
                 'feature_group' => 'identity',
             ],
         );
+        foreach (self::COMPANY_BACKUP_ONLY_REFERENCE_TARGETS as $table => $featureGroup) {
+            $definitions[] = new TenantDataDefinition(
+                'table:' . $table,
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantOwned,
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+                [
+                    'primary_key' => ['id'],
+                    'feature_group' => $featureGroup,
+                    'ownership' => [
+                        'strategy' => 'supplier_id',
+                        'column' => 'supplier_id',
+                    ],
+                ],
+            );
+        }
 
         return new TenantDataRegistry(
             1,
@@ -441,6 +465,7 @@ final class TenantDataRegistryFactory
      *   embedded_references:list<array<string,mixed>>,
      *   generated_columns:list<string>,
      *   omit_columns:array<string,string>,
+     *   polymorphic_references?:list<array<string,mixed>>,
      *   restore_overrides:array<string,array{value:string|int|bool|null,reason:string}>,
      *   references:list<array{
      *     columns:list<string>,
@@ -455,22 +480,42 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
-        $columns = $table === 'accounting_closing_steps'
-            ? CompanyBackupAccountingClosingStepsProjection::dataColumns()
-            : (self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null);
+        $columns = match ($table) {
+            'accounting_closing_steps' =>
+                CompanyBackupAccountingClosingStepsProjection::dataColumns(),
+            'journal_entries' => CompanyBackupJournalEntriesProjection::dataColumns(),
+            default => self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null,
+        };
         if ($columns === null) {
             return [];
+        }
+        $embeddedReferences = $table === 'accounting_closing_steps'
+            ? CompanyBackupAccountingClosingStepsProjection::embeddedReferences()
+            : [];
+        $references = self::companyBackupReferences($table);
+        $restoreOverrides = self::companyBackupRestoreOverrides($table);
+        if ($table === 'journal_entries') {
+            return [
+                'company_backup' => [
+                    'data_columns' => $columns,
+                    'embedded_references' => $embeddedReferences,
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'polymorphic_references' =>
+                        CompanyBackupJournalEntriesProjection::polymorphicReferences(),
+                    'references' => $references,
+                    'restore_overrides' => $restoreOverrides,
+                ],
+            ];
         }
         return [
             'company_backup' => [
                 'data_columns' => $columns,
-                'embedded_references' => $table === 'accounting_closing_steps'
-                    ? CompanyBackupAccountingClosingStepsProjection::embeddedReferences()
-                    : [],
+                'embedded_references' => $embeddedReferences,
                 'generated_columns' => [],
                 'omit_columns' => [],
-                'references' => self::companyBackupReferences($table),
-                'restore_overrides' => self::companyBackupRestoreOverrides($table),
+                'references' => $references,
+                'restore_overrides' => $restoreOverrides,
             ],
         ];
     }
@@ -509,6 +554,7 @@ final class TenantDataRegistryFactory
         return match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::references(),
+            'journal_entries' => CompanyBackupJournalEntriesProjection::references(),
             'accounting_document_series' => [
                 self::companyBackupTenantIdOrZeroReference(
                     'register_id',

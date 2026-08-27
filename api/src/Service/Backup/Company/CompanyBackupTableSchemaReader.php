@@ -73,6 +73,7 @@ final class CompanyBackupTableSchemaReader
 
         $columns = [];
         $generated = [];
+        $systemVersioned = null;
         foreach ($rows as $row) {
             if (!is_array($row) || array_is_list($row)) {
                 throw new CompanyBackupDataSourceException(
@@ -96,6 +97,14 @@ final class CompanyBackupTableSchemaReader
                     $projection->registryKey,
                 );
             }
+            $rowSystemVersioned = $tableType === 'SYSTEM VERSIONED';
+            if ($systemVersioned !== null && $systemVersioned !== $rowSystemVersioned) {
+                throw new CompanyBackupDataSourceException(
+                    'data_schema_invalid',
+                    $projection->registryKey,
+                );
+            }
+            $systemVersioned = $rowSystemVersioned;
             $columns[] = $column;
             if (($generation !== null && $generation !== '')
                 || str_contains(strtoupper($extra), 'GENERATED')
@@ -127,6 +136,12 @@ final class CompanyBackupTableSchemaReader
                 );
             }
             $primaryKey[] = $column;
+        }
+        if ($systemVersioned === true
+            && ($primaryKey[count($primaryKey) - 1] ?? null) === 'row_end'
+            && !in_array('row_end', $columns, true)
+        ) {
+            array_pop($primaryKey);
         }
         return new CompanyBackupTableSchema($columns, $generated, $primaryKey);
     }
