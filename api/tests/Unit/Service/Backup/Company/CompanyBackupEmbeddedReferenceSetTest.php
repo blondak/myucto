@@ -173,11 +173,159 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
         }
     }
 
+    public function testRemapsPolymorphicIdsByCorrelatedDiscriminator(): void
+    {
+        $path = ['checks', '*', 'value', 'findings', '*', 'doc_id'];
+        $conditionPath = ['checks', '*', 'value', 'findings', '*', 'doc_type'];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [
+                [
+                    ...$this->journalEntryReference(),
+                    'path' => $path,
+                    'target' => 'table:invoices',
+                    'nullable' => true,
+                    'condition' => [
+                        'path' => $conditionPath,
+                        'equals' => 'invoice',
+                    ],
+                ],
+                [
+                    ...$this->journalEntryReference(),
+                    'path' => $path,
+                    'target' => 'table:purchase_invoices',
+                    'nullable' => true,
+                    'condition' => [
+                        'path' => $conditionPath,
+                        'equals' => 'purchase_invoice',
+                    ],
+                ],
+            ],
+            'table:accounting_closing_steps',
+            ['payload'],
+        );
+        $references->assertRegistryTargets(new TenantDataRegistry(1, [
+            $this->definition('invoices', TenantDataPolicy::TenantOwned),
+            $this->definition('purchase_invoices', TenantDataPolicy::TenantOwned),
+        ]));
+        $source = ['payload' => [
+            'checks' => [
+                ['value' => ['findings' => [
+                    ['doc_type' => 'invoice', 'doc_id' => 7],
+                    ['doc_type' => 'purchase_invoice', 'doc_id' => 8],
+                    ['doc_id' => null],
+                ]]],
+            ],
+        ]];
+
+        $restored = $references->remap(
+            $source,
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ): int => (int) $value + ($reference->target === 'table:invoices' ? 100 : 200),
+        );
+
+        self::assertSame(
+            [107, 208, null],
+            array_column(
+                $restored['payload']['checks'][0]['value']['findings'],
+                'doc_id',
+            ),
+        );
+        self::assertSame(
+            'payload:checks.*.value.findings.*.doc_id->invoices:id'
+                . '?checks.*.value.findings.*.doc_type=invoice',
+            $references->references[0]->signature(),
+        );
+    }
+
+    public function testRejectsUnclassifiedPolymorphicDiscriminator(): void
+    {
+        $reference = [
+            ...$this->journalEntryReference(),
+            'path' => ['findings', '*', 'doc_id'],
+            'target' => 'table:invoices',
+            'condition' => [
+                'path' => ['findings', '*', 'doc_type'],
+                'equals' => 'invoice',
+            ],
+        ];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [$reference],
+            'table:accounting_closing_steps',
+            ['payload'],
+        );
+
+        try {
+            $references->remap(
+                ['payload' => ['findings' => [[
+                    'doc_type' => 'unknown',
+                    'doc_id' => 7,
+                ]]]],
+                static fn (
+                    CompanyBackupEmbeddedReference $embedded,
+                    int|string $value,
+                ): int|string => $value,
+            );
+            self::fail('Neznámý polymorfní typ nesmí zachovat zdrojové ID.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_embedded_reference_value_invalid', $e->errorCode);
+            self::assertSame('payload', $e->column);
+        }
+    }
+
+    public function testRejectsAmbiguousPolymorphicDiscriminator(): void
+    {
+        $path = ['findings', '*', 'doc_id'];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [
+                [
+                    ...$this->journalEntryReference(),
+                    'path' => $path,
+                    'target' => 'table:invoices',
+                    'condition' => [
+                        'path' => ['findings', '*', 'doc_type'],
+                        'equals' => 'invoice',
+                    ],
+                ],
+                [
+                    ...$this->journalEntryReference(),
+                    'path' => $path,
+                    'target' => 'table:purchase_invoices',
+                    'condition' => [
+                        'path' => ['findings', '*', 'source_type'],
+                        'equals' => 'imported',
+                    ],
+                ],
+            ],
+            'table:accounting_closing_steps',
+            ['payload'],
+        );
+
+        $this->expectExceptionObject(new CompanyBackupDataSourceException(
+            'data_embedded_reference_value_invalid',
+            'table:accounting_closing_steps',
+            'payload',
+        ));
+        $references->remap(
+            ['payload' => ['findings' => [[
+                'doc_type' => 'invoice',
+                'source_type' => 'imported',
+                'doc_id' => 7,
+            ]]]],
+            static fn (
+                CompanyBackupEmbeddedReference $embedded,
+                int|string $value,
+            ): int|string => $value,
+        );
+    }
+
     /** @return iterable<string,array{array<mixed>,list<string>}> */
     public static function invalidMetadata(): iterable
     {
         $valid = [
             'column' => 'payload',
+            'condition' => null,
             'path' => ['entries', '*', 'entry_id'],
             'target' => 'table:journal_entries',
             'target_columns' => ['id'],
@@ -191,6 +339,13 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
         yield 'invalid path segment' => [[...$valid, 'path' => ['entries', '**']], ['payload']];
         yield 'multiple target columns' => [[...$valid, 'target_columns' => ['tenant_id', 'id']], ['payload']];
         yield 'fallback outside actor mapping' => [[...$valid, 'fallbacks' => ['null']], ['payload']];
+        yield 'uncorrelated condition wildcard' => [[
+            ...$valid,
+            'condition' => [
+                'path' => ['groups', '*', 'entry_type'],
+                'equals' => 'entry',
+            ],
+        ], ['payload']];
         yield 'unknown field' => [[...$valid, 'comment' => 'unbound'], ['payload']];
     }
 
@@ -216,6 +371,7 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
     {
         return [
             'column' => 'payload',
+            'condition' => null,
             'path' => ['entries', '*', 'entry_id'],
             'target' => 'table:journal_entries',
             'target_columns' => ['id'],

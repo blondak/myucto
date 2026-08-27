@@ -33,6 +33,7 @@ final readonly class CompanyBackupEmbeddedReference
         public CompanyBackupReferenceMapping $mapping,
         public bool $nullable,
         array $fallbacks,
+        public ?CompanyBackupEmbeddedReferenceCondition $condition,
     ) {
         $this->path = $path;
         $this->targetColumns = $targetColumns;
@@ -48,6 +49,7 @@ final readonly class CompanyBackupEmbeddedReference
         sort($keys, SORT_STRING);
         if ($keys !== [
             'column',
+            'condition',
             'fallbacks',
             'mapping',
             'nullable',
@@ -81,6 +83,15 @@ final readonly class CompanyBackupEmbeddedReference
         ) {
             throw self::invalid($registryKey, is_string($column) ? $column : null);
         }
+        $conditionValue = $value['condition'];
+        $condition = $conditionValue === null
+            ? null
+            : CompanyBackupEmbeddedReferenceCondition::fromArray(
+                $conditionValue,
+                $registryKey,
+                $column,
+                $path,
+            );
 
         $validatedFallbacks = [];
         $seen = [];
@@ -114,6 +125,7 @@ final readonly class CompanyBackupEmbeddedReference
             $mapping,
             $nullable,
             $validatedFallbacks,
+            $condition,
         );
     }
 
@@ -124,13 +136,16 @@ final readonly class CompanyBackupEmbeddedReference
 
     public function signature(): string
     {
-        return $this->column
+        $signature = $this->column
             . ':'
             . implode('.', $this->path)
             . '->'
             . $this->targetTable()
             . ':'
             . implode(',', $this->targetColumns);
+        return $this->condition === null
+            ? $signature
+            : $signature . '?' . $this->condition->signature();
     }
 
     /** @return list<string> */

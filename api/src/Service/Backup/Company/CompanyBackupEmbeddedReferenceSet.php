@@ -38,6 +38,7 @@ final readonly class CompanyBackupEmbeddedReferenceSet
         $exported = array_fill_keys($dataColumns, true);
         $references = [];
         $signatures = [];
+        /** @var array<string,list<CompanyBackupEmbeddedReference>> $paths */
         $paths = [];
         foreach ($metadata as $item) {
             $reference = CompanyBackupEmbeddedReference::fromArray($item, $registryKey);
@@ -50,7 +51,7 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             }
             $signature = $reference->signature();
             $path = $reference->column . ':' . implode('.', $reference->path);
-            if (isset($signatures[$signature]) || isset($paths[$path])) {
+            if (isset($signatures[$signature])) {
                 throw new CompanyBackupDataSourceException(
                     'data_embedded_reference_duplicate',
                     $registryKey,
@@ -58,8 +59,26 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 );
             }
             $signatures[$signature] = true;
-            $paths[$path] = true;
+            $paths[$path][] = $reference;
             $references[] = $reference;
+        }
+        foreach ($paths as $claims) {
+            if (count($claims) < 2) {
+                continue;
+            }
+            $conditions = [];
+            foreach ($claims as $claim) {
+                if ($claim->condition === null
+                    || isset($conditions[$claim->condition->signature()])
+                ) {
+                    throw new CompanyBackupDataSourceException(
+                        'data_embedded_reference_duplicate',
+                        $registryKey,
+                        $claim->column,
+                    );
+                }
+                $conditions[$claim->condition->signature()] = true;
+            }
         }
         $ordered = $references;
         usort(
@@ -135,12 +154,13 @@ final readonly class CompanyBackupEmbeddedReferenceSet
      */
     public function remap(array $row, callable $mapper): array
     {
-        /** @var array<string,list<CompanyBackupEmbeddedReference>> $byColumn */
+        /** @var array<string,array<string,list<CompanyBackupEmbeddedReference>>> $byColumn */
         $byColumn = [];
         foreach ($this->references as $reference) {
-            $byColumn[$reference->column][] = $reference;
+            $path = implode('.', $reference->path);
+            $byColumn[$reference->column][$path][] = $reference;
         }
-        foreach ($byColumn as $column => $references) {
+        foreach ($byColumn as $column => $groups) {
             if (!array_key_exists($column, $row)) {
                 throw $this->valueError($column);
             }
@@ -161,8 +181,9 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             if (!is_array($value)) {
                 throw $this->valueError($column);
             }
-            foreach ($references as $reference) {
-                $this->remapPath($value, $reference, 0, $mapper);
+            $root =& $value;
+            foreach ($groups as $references) {
+                $this->remapPath($value, $root, $references, 0, [], $mapper);
             }
             if ($encoded) {
                 try {
@@ -179,18 +200,43 @@ final readonly class CompanyBackupEmbeddedReferenceSet
     }
 
     /**
+     * @param array<mixed> $root
+     * @param list<CompanyBackupEmbeddedReference> $references
+     * @param list<int|string> $wildcardBindings
      * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|null) $mapper
      */
     private function remapPath(
         mixed &$value,
-        CompanyBackupEmbeddedReference $reference,
+        array &$root,
+        array $references,
         int $index,
+        array $wildcardBindings,
         callable $mapper,
     ): void {
-        if ($index === count($reference->path)) {
-            if ($value === null && $reference->nullable) {
+        $prototype = $references[0];
+        if ($index === count($prototype->path)) {
+            if ($value === null) {
+                foreach ($references as $reference) {
+                    if (!$reference->nullable) {
+                        throw $this->valueError($reference->column);
+                    }
+                }
                 return;
             }
+            $matches = array_values(array_filter(
+                $references,
+                fn (CompanyBackupEmbeddedReference $reference): bool =>
+                    $reference->condition === null
+                    || $this->conditionMatches(
+                        $root,
+                        $reference->condition,
+                        $wildcardBindings,
+                    ),
+            ));
+            if (count($matches) !== 1) {
+                throw $this->valueError($prototype->column);
+            }
+            $reference = $matches[0];
             if (!$this->validSourceValue($value, $reference)) {
                 throw $this->valueError($reference->column);
             }
@@ -207,13 +253,21 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             return;
         }
         if (!is_array($value)) {
-            throw $this->valueError($reference->column);
+            throw $this->valueError($prototype->column);
         }
 
-        $segment = $reference->path[$index];
+        $segment = $prototype->path[$index];
         if ($segment === '*') {
-            foreach ($value as &$item) {
-                $this->remapPath($item, $reference, $index + 1, $mapper);
+            foreach ($value as $key => &$item) {
+                $bindings = [...$wildcardBindings, $key];
+                $this->remapPath(
+                    $item,
+                    $root,
+                    $references,
+                    $index + 1,
+                    $bindings,
+                    $mapper,
+                );
             }
             unset($item);
             return;
@@ -221,7 +275,42 @@ final readonly class CompanyBackupEmbeddedReferenceSet
         if (!array_key_exists($segment, $value)) {
             return;
         }
-        $this->remapPath($value[$segment], $reference, $index + 1, $mapper);
+        $this->remapPath(
+            $value[$segment],
+            $root,
+            $references,
+            $index + 1,
+            $wildcardBindings,
+            $mapper,
+        );
+    }
+
+    /**
+     * @param array<mixed> $root
+     * @param list<int|string> $wildcardBindings
+     */
+    private function conditionMatches(
+        array $root,
+        CompanyBackupEmbeddedReferenceCondition $condition,
+        array $wildcardBindings,
+    ): bool {
+        $value = $root;
+        $wildcard = 0;
+        foreach ($condition->path as $segment) {
+            $key = $segment;
+            if ($segment === '*') {
+                if (!array_key_exists($wildcard, $wildcardBindings)) {
+                    return false;
+                }
+                $key = $wildcardBindings[$wildcard];
+                $wildcard++;
+            }
+            if (!is_array($value) || !array_key_exists($key, $value)) {
+                return false;
+            }
+            $value = $value[$key];
+        }
+        return $value === $condition->equals;
     }
 
     private function validSourceValue(
