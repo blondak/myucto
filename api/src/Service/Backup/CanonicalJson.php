@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace MyInvoice\Service\Backup\Company;
+namespace MyInvoice\Service\Backup;
 
-/** Deterministický JSON pro manifest a jeho kontrolní součet. */
+/** Deterministický JSON pro manifesty, registry a jejich kontrolní součty. */
 final class CanonicalJson
 {
     public static function encode(mixed $value): string

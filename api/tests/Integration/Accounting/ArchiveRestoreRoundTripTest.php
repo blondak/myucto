@@ -171,6 +171,16 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         // odkaz při chybějícím remapu).
         $bankHash = bin2hex(random_bytes(32));
         $bankInvoiceId = $this->saleInvoice('FV-2097-2', $clientId, 5000.00);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices
+                SET approval_token = ?, approval_token_expires_at = ?, public_token = ?
+              WHERE id = ?'
+        )->execute([
+            str_repeat('a', 48),
+            self::YEAR . '-12-31 12:00:00',
+            str_repeat('b', 48),
+            $bankInvoiceId,
+        ]);
         $oldStatementId = $this->bankStatement($bankHash);
         $oldBtId = $this->bankTransaction($oldStatementId, $bankInvoiceId, 5000.00);
         $this->paymentMatch($oldBtId, $bankInvoiceId, 5000.00);
@@ -188,6 +198,27 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $zipPath = $this->archive->filePath($sid, $meta);
         $this->tempFiles[] = $zipPath;
         self::assertFileExists($zipPath);
+
+        $zip = new \ZipArchive();
+        self::assertTrue($zip->open($zipPath));
+        $invoiceJsonl = $zip->getFromName('invoices.jsonl');
+        self::assertNotFalse($invoiceJsonl);
+        $archivedBankInvoice = null;
+        foreach (explode("\n", trim($invoiceJsonl)) as $line) {
+            $row = json_decode($line, true);
+            if (is_array($row) && ($row['varsymbol'] ?? null) === 'FV-2097-2') {
+                $archivedBankInvoice = $row;
+                break;
+            }
+        }
+        $zip->close();
+        self::assertIsArray($archivedBankInvoice);
+        self::assertArrayNotHasKey('approval_token', $archivedBankInvoice);
+        self::assertArrayNotHasKey('public_token', $archivedBankInvoice);
+        self::assertSame(
+            self::YEAR . '-12-31 12:00:00',
+            $archivedBankInvoice['approval_token_expires_at'] ?? null,
+        );
 
         // Originální bank_statements řádek smaž PO exportu (cascade smaže i
         // bank_transactions/payment_matches originálu) — jinak by find-or-create dedup

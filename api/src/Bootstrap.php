@@ -134,6 +134,9 @@ final class Bootstrap
 
             ResponseFactory::class => fn () => new ResponseFactory(),
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Backup\Registry\TenantDataRegistry::class =>
+                static fn (): \MyInvoice\Service\Backup\Registry\TenantDataRegistry =>
+                    \MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory::draftV1(),
             \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,

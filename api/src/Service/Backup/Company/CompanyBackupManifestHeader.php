@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Company;
 
 use JsonException;
+use MyInvoice\Service\Backup\CanonicalJson;
 
 /**
  * Stabilní obálka manifestu, kterou lze ověřit před načtením business dat.
