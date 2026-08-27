@@ -254,7 +254,8 @@ Manifest obsahuje nejméně:
 - bezpečný identifikátor zálohy,
 - identitu a profil firmy,
 - čas konzistentního snapshotu a čas dokončení čitelné vrstvy,
-- verzi registru a jeho diagnostický hash,
+- kanonický snapshot úplného zdrojového registru včetně verze, profilu,
+  definic objektů a jejich ověřitelného fingerprintu,
 - zapnuté moduly a použité formátové capabilities,
 - tabulky a logické objekty s počtem řádků, pořadím a SHA-256,
 - soubory s velikostí, SHA-256, vlastnickou vazbou a cílovou oblastí,
@@ -288,6 +289,14 @@ Writer ukládá manifest jako kanonický JSON: klíče objektů jsou řazené, m
 capabilities jsou seřazené a jedna logická hodnota má jedinou bajtovou podobu.
 Parser nekanonickou variantu odmítne, aby se různé JSON parsery nemohly rozejít
 na hashi manifestu nebo duplicitních klíčích.
+
+Plný manifest vedle této časně čitelné obálky povinně nese objekt `registry`
+ve formátu `myucto-tenant-data-registry`. Obsahuje verzi registru, profil
+`company_backup`, seřazené úplné definice a SHA-256 fingerprint z jejich
+kanonické podoby. Cíl fingerprint přepočítá, takže nelze pod stejným hashem
+podstrčit jinou klasifikaci. Přesná shoda se současným cílovým fingerprintem
+není kompatibilitní brána: starší snapshot se před zápisem porovná a případně
+upcastuje podle explicitních pravidel.
 
 CHECKSUMS.txt pokrývá každou datovou a souborovou položku. Hash celého archivu
 je uložen mimo archiv v jobu a posílá se také jako hlavička při stažení.

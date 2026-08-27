@@ -128,7 +128,7 @@ final class CompanyBackupArchiveWriter
     }
 
     public function finish(
-        CompanyBackupManifestHeader $manifest,
+        CompanyBackupManifest $manifest,
         string $readme,
     ): CompanyBackupArchiveWriteResult {
         $this->assertOpen();
@@ -171,8 +171,8 @@ final class CompanyBackupArchiveWriter
                 ))->inspect(
                     $this->partialPath,
                     $this->password,
-                    $manifest->sourceAppVersion,
-                    $manifest->schemaRevision,
+                    $manifest->header->sourceAppVersion,
+                    $manifest->header->schemaRevision,
                 );
             } catch (CompanyBackupArchiveException $e) {
                 throw new CompanyBackupArchiveWriteException(

@@ -9,8 +9,13 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriteException;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
-use MyInvoice\Service\Backup\Company\CompanyBackupManifestHeader;
+use MyInvoice\Service\Backup\Company\CompanyBackupManifest;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
+use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupArchiveWriterTest extends TestCase
@@ -247,9 +252,20 @@ final class CompanyBackupArchiveWriterTest extends TestCase
         self::assertSame([], glob($archive . '.part-*') ?: []);
     }
 
-    private function manifest(CompanyBackupFormat $format): CompanyBackupManifestHeader
+    private function manifest(CompanyBackupFormat $format): CompanyBackupManifest
     {
-        return $format->parseManifestHeader($format->encodeManifest([
+        $registry = new TenantDataRegistry(
+            1,
+            [new TenantDataDefinition(
+                'table:supplier',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantRoot,
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+                ['ownership' => ['strategy' => 'selected_supplier', 'column' => 'id']],
+            )],
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+        );
+        return $format->parseManifest($format->encodeManifest([
             'product' => CompanyBackupFormat::PRODUCT,
             'format' => CompanyBackupFormat::FORMAT,
             'format_version' => ['major' => 1, 'minor' => 0],
@@ -259,6 +275,10 @@ final class CompanyBackupArchiveWriterTest extends TestCase
                 'schema_revision' => CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
             ],
             'capabilities' => ['required' => [], 'optional' => []],
+            'registry' => TenantDataRegistrySnapshot::fromRegistry(
+                $registry,
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            )->toArray(),
         ]));
     }
 

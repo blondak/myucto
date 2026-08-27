@@ -61,6 +61,36 @@ final class TenantDataRegistryTest extends TestCase
         );
     }
 
+    public function testOtherProfileMembershipDoesNotChangeCompanyFingerprint(): void
+    {
+        $companyOnly = $this->definition('supplier', TenantDataPolicy::TenantRoot);
+        $shared = new TenantDataDefinition(
+            'table:supplier',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRoot,
+            [
+                TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE,
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            ],
+            [],
+        );
+        $first = new TenantDataRegistry(
+            1,
+            [$companyOnly],
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+        );
+        $second = new TenantDataRegistry(
+            1,
+            [$shared],
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+        );
+
+        self::assertSame(
+            $first->fingerprintFor(TenantDataRegistry::COMPANY_BACKUP_PROFILE),
+            $second->fingerprintFor(TenantDataRegistry::COMPANY_BACKUP_PROFILE),
+        );
+    }
+
     public function testDraftProfileCannotProduceFingerprint(): void
     {
         $registry = new TenantDataRegistry(1, [

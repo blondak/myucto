@@ -81,6 +81,7 @@ final class CompanyBackupArchiveInspector
             if (!$compatibility->isCompatible()) {
                 throw new CompanyBackupArchiveCompatibilityException($compatibility);
             }
+            $completeManifest = CompanyBackupManifest::fromHeader($manifest);
 
             $checksumsRead = $this->readEntry(
                 $zip,
@@ -153,6 +154,7 @@ final class CompanyBackupArchiveInspector
 
         return new CompanyBackupArchiveInspection(
             $manifest,
+            $completeManifest->registry,
             $compatibility,
             $archiveSha256,
             count($entries),

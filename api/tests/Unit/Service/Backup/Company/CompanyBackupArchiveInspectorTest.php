@@ -10,6 +10,11 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveInspector;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
+use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use PHPUnit\Framework\TestCase;
 use ZipArchive;
 
@@ -42,6 +47,10 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         );
 
         self::assertSame('0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1', $inspection->manifest->backupId);
+        self::assertSame(
+            TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            $inspection->sourceRegistry->profile,
+        );
         self::assertTrue($inspection->compatibility->isCompatible());
         self::assertSame(hash_file('sha256', $archive), $inspection->archiveSha256);
         self::assertSame(4, $inspection->entryCount);
@@ -217,6 +226,29 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         }
     }
 
+    public function testCompatibilityGateRunsBeforeFullRegistryBodyIsParsed(): void
+    {
+        $archive = $this->archive($this->payload(
+            appVersion: '5.29.0',
+            includeRegistry: false,
+        ));
+
+        try {
+            $this->inspector()->inspect(
+                $archive,
+                self::PASSWORD,
+                '5.28.1',
+                CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+            );
+            self::fail('Novější zdroj musí skončit dřív než neúplné tělo manifestu.');
+        } catch (CompanyBackupArchiveCompatibilityException $e) {
+            self::assertSame(
+                ['source_application_newer'],
+                array_column($e->compatibility->toArray()['issues'], 'code'),
+            );
+        }
+    }
+
     private function inspector(?CompanyBackupArchiveLimits $limits = null): CompanyBackupArchiveInspector
     {
         return new CompanyBackupArchiveInspector(
@@ -235,21 +267,42 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
     }
 
     /** @return array<string,string> */
-    private function payload(string $appVersion = '5.28.1'): array
+    private function payload(
+        string $appVersion = '5.28.1',
+        bool $includeRegistry = true,
+    ): array
     {
         $format = new CompanyBackupFormat();
+        $registry = new TenantDataRegistry(
+            1,
+            [new TenantDataDefinition(
+                'table:supplier',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantRoot,
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+                ['ownership' => ['strategy' => 'selected_supplier', 'column' => 'id']],
+            )],
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+        );
+        $manifest = [
+            'product' => CompanyBackupFormat::PRODUCT,
+            'format' => CompanyBackupFormat::FORMAT,
+            'format_version' => ['major' => 1, 'minor' => 0],
+            'backup_id' => '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
+            'source' => [
+                'app_version' => $appVersion,
+                'schema_revision' => CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+            ],
+            'capabilities' => ['required' => [], 'optional' => []],
+        ];
+        if ($includeRegistry) {
+            $manifest['registry'] = TenantDataRegistrySnapshot::fromRegistry(
+                $registry,
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            )->toArray();
+        }
         return [
-            'manifest.json' => $format->encodeManifest([
-                'product' => CompanyBackupFormat::PRODUCT,
-                'format' => CompanyBackupFormat::FORMAT,
-                'format_version' => ['major' => 1, 'minor' => 0],
-                'backup_id' => '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
-                'source' => [
-                    'app_version' => $appVersion,
-                    'schema_revision' => CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
-                ],
-                'capabilities' => ['required' => [], 'optional' => []],
-            ]),
+            'manifest.json' => $format->encodeManifest($manifest),
             'CTI-MNE.txt' => "Syntetická záloha MyÚčta.\n",
             'data/table-invoices.jsonl' => "{\"id\":1}\n",
         ];

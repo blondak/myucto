@@ -1,0 +1,101 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Service\Backup\Company;
+
+use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
+use MyInvoice\Service\Backup\Company\CompanyBackupFormatException;
+use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
+use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
+use PHPUnit\Framework\TestCase;
+
+final class CompanyBackupManifestTest extends TestCase
+{
+    public function testParsesRegistryBoundCanonicalManifest(): void
+    {
+        $format = new CompanyBackupFormat();
+        $json = $format->encodeManifest($this->manifest());
+
+        $manifest = $format->parseManifest($json);
+
+        self::assertSame('0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1', $manifest->header->backupId);
+        self::assertSame(TenantDataRegistry::COMPANY_BACKUP_PROFILE, $manifest->registry->profile);
+        self::assertSame($json, $manifest->canonicalJson());
+        self::assertSame(hash('sha256', $json), $manifest->sha256());
+    }
+
+    public function testHeaderCanBeReadBeforeMissingRegistryIsRejected(): void
+    {
+        $format = new CompanyBackupFormat();
+        $manifest = $this->manifest();
+        unset($manifest['registry']);
+        $json = $format->encodeManifest($manifest);
+
+        self::assertSame(
+            '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
+            $format->parseManifestHeader($json)->backupId,
+        );
+
+        try {
+            $format->parseManifest($json);
+            self::fail('Obnovitelný manifest musí být svázaný se zdrojovým registrem.');
+        } catch (CompanyBackupFormatException $e) {
+            self::assertSame('manifest_registry_invalid', $e->errorCode);
+            self::assertSame('registry', $e->field);
+        }
+    }
+
+    public function testTamperedRegistryFingerprintHasStableManifestError(): void
+    {
+        $format = new CompanyBackupFormat();
+        $manifest = $this->manifest();
+        $manifest['registry']['fingerprint'] = 'sha256:' . str_repeat('f', 64);
+
+        try {
+            $format->parseManifest($format->encodeManifest($manifest));
+            self::fail('Manifest nesmí přijmout fingerprint jiné sady definic.');
+        } catch (CompanyBackupFormatException $e) {
+            self::assertSame('manifest_registry_invalid', $e->errorCode);
+            self::assertSame('registry', $e->field);
+            self::assertStringContainsString('fingerprint', $e->getMessage());
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function manifest(): array
+    {
+        $registry = new TenantDataRegistry(
+            1,
+            [new TenantDataDefinition(
+                'table:supplier',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantRoot,
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+                [
+                    'primary_key' => ['id'],
+                    'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
+                ],
+            )],
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+        );
+        return [
+            'product' => CompanyBackupFormat::PRODUCT,
+            'format' => CompanyBackupFormat::FORMAT,
+            'format_version' => ['major' => 1, 'minor' => 0],
+            'backup_id' => '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
+            'source' => [
+                'app_version' => '5.28.1',
+                'schema_revision' => CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+            ],
+            'capabilities' => ['required' => [], 'optional' => []],
+            'registry' => TenantDataRegistrySnapshot::fromRegistry(
+                $registry,
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            )->toArray(),
+        ];
+    }
+}

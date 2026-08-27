@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Company;
 
+use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
+
 /** Neměnný výsledek úspěšné technické validace bez rozbalení na disk. */
 final readonly class CompanyBackupArchiveInspection
 {
@@ -13,13 +16,15 @@ final readonly class CompanyBackupArchiveInspection
     /** @param array<string,string> $entryHashes */
     public function __construct(
         public CompanyBackupManifestHeader $manifest,
+        public TenantDataRegistrySnapshot $sourceRegistry,
         public CompanyBackupCompatibilityResult $compatibility,
         public string $archiveSha256,
         public int $entryCount,
         public int $expandedBytes,
         array $entryHashes,
     ) {
-        if (!$compatibility->isCompatible()
+        if ($sourceRegistry->profile !== TenantDataRegistry::COMPANY_BACKUP_PROFILE
+            || !$compatibility->isCompatible()
             || preg_match('/^[0-9a-f]{64}$/D', $archiveSha256) !== 1
             || $entryCount < 1
             || $expandedBytes < 0

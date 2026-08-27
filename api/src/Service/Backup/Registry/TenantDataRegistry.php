@@ -105,7 +105,8 @@ final class TenantDataRegistry
             'version' => $this->version,
             'profile' => $profile,
             'definitions' => array_map(
-                static fn (TenantDataDefinition $definition): array => $definition->toArray(),
+                static fn (TenantDataDefinition $definition): array => $definition
+                    ->toArrayForProfile($profile),
                 $this->definitionsFor($profile),
             ),
         ]);

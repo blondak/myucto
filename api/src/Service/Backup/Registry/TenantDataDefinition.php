@@ -92,6 +92,46 @@ final readonly class TenantDataDefinition
         return in_array($profile, $this->profiles, true);
     }
 
+    public static function fromArray(mixed $definition): self
+    {
+        if (!is_array($definition) || array_is_list($definition)) {
+            throw new \InvalidArgumentException(
+                'Definice tenantového registru musí být JSON objekt.',
+            );
+        }
+        $keys = array_keys($definition);
+        sort($keys, SORT_STRING);
+        if ($keys !== ['details', 'key', 'kind', 'policy', 'profiles']) {
+            throw new \InvalidArgumentException(
+                'Definice tenantového registru má neznámá nebo chybějící pole.',
+            );
+        }
+        $key = $definition['key'];
+        $kindValue = $definition['kind'];
+        $policyValue = $definition['policy'];
+        $profiles = $definition['profiles'];
+        $details = $definition['details'];
+        $kind = is_string($kindValue) ? TenantDataObjectKind::tryFrom($kindValue) : null;
+        $policy = is_string($policyValue) ? TenantDataPolicy::tryFrom($policyValue) : null;
+        if (!is_string($key)
+            || $kind === null
+            || $policy === null
+            || !is_array($profiles)
+            || !is_array($details)
+        ) {
+            throw new \InvalidArgumentException(
+                'Definice tenantového registru má neplatné typy polí.',
+            );
+        }
+        $result = new self($key, $kind, $policy, $profiles, $details);
+        if ($result->profiles !== $profiles) {
+            throw new \InvalidArgumentException(
+                'Profily definice tenantového registru nemají kanonické pořadí.',
+            );
+        }
+        return $result;
+    }
+
     public function name(): string
     {
         return substr($this->key, strlen($this->kind->keyPrefix()));
@@ -106,6 +146,20 @@ final readonly class TenantDataDefinition
             'policy' => $this->policy->value,
             'profiles' => $this->profiles,
             'details' => $this->details,
+        ];
+    }
+
+    /** @return array{key:string,kind:string,policy:string,profiles:list<string>,details:array<string,mixed>} */
+    public function toArrayForProfile(string $profile): array
+    {
+        if (!$this->hasProfile($profile)) {
+            throw new \InvalidArgumentException(
+                'Objekt tenantového registru nepatří do požadovaného profilu.',
+            );
+        }
+        return [
+            ...$this->toArray(),
+            'profiles' => [$profile],
         ];
     }
 

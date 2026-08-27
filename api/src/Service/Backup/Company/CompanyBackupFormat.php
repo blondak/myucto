@@ -70,6 +70,11 @@ final class CompanyBackupFormat
         return $header;
     }
 
+    public function parseManifest(string $json): CompanyBackupManifest
+    {
+        return CompanyBackupManifest::fromHeader($this->parseManifestHeader($json));
+    }
+
     public function checkCompatibility(
         CompanyBackupManifestHeader $source,
         string $targetAppVersion,
