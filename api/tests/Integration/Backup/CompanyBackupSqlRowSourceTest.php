@@ -290,6 +290,14 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionJournalEntryLinesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'journal_entry_lines',
+            ['entry_id', 'account_id', 'currency_code', 'cost_center', 'project_id', 'line_no'],
+        );
+    }
+
     /** @param list<string> $expectedColumns */
     private function assertProductionProjectionMatchesSchema(
         string $table,

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Backup\Registry;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 
@@ -17,6 +18,7 @@ final class TenantDataRegistryFactory
         'invoice_settlements' => 'accounting',
         'offset_agreements' => 'accounting',
         'payroll_run_revisions' => 'payroll',
+        'projects' => 'core',
     ];
 
     /** @var list<string> */
@@ -314,6 +316,8 @@ final class TenantDataRegistryFactory
             ];
             if ($table === 'chart_of_accounts') {
                 $details['natural_key'] = ['supplier_id', 'account_code'];
+            } elseif ($table === 'cost_centers') {
+                $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'bank_statements') {
                 $details['natural_key'] = ['file_hash'];
             } elseif ($table === 'exchange_rates') {
@@ -341,15 +345,21 @@ final class TenantDataRegistryFactory
             ],
         );
         foreach (self::COMPANY_BACKUP_ONLY_REFERENCE_TARGETS as $table => $featureGroup) {
+            $projects = $table === 'projects';
             $definitions[] = new TenantDataDefinition(
                 'table:' . $table,
                 TenantDataObjectKind::Table,
-                TenantDataPolicy::TenantOwned,
+                $projects
+                    ? TenantDataPolicy::TenantOwnedIndirect
+                    : TenantDataPolicy::TenantOwned,
                 [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
                 [
                     'primary_key' => ['id'],
                     'feature_group' => $featureGroup,
-                    'ownership' => [
+                    'ownership' => $projects ? self::foreignKeyPath(
+                        'client_id',
+                        'clients',
+                    ) : [
                         'strategy' => 'supplier_id',
                         'column' => 'supplier_id',
                     ],
@@ -484,6 +494,8 @@ final class TenantDataRegistryFactory
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::dataColumns(),
             'journal_entries' => CompanyBackupJournalEntriesProjection::dataColumns(),
+            'journal_entry_lines' =>
+                CompanyBackupJournalEntryLinesProjection::dataColumns(),
             default => self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null,
         };
         if ($columns === null) {
@@ -555,6 +567,7 @@ final class TenantDataRegistryFactory
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::references(),
             'journal_entries' => CompanyBackupJournalEntriesProjection::references(),
+            'journal_entry_lines' => CompanyBackupJournalEntryLinesProjection::references(),
             'accounting_document_series' => [
                 self::companyBackupTenantIdOrZeroReference(
                     'register_id',

@@ -556,6 +556,85 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testJournalEntryLinesDeclareDimensionsAndTenantReferences(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:journal_entry_lines');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'entry_id',
+            'supplier_id',
+            'account_id',
+            'side',
+            'amount',
+            'currency_code',
+            'fx_rate',
+            'amount_foreign',
+            'cost_center',
+            'project_id',
+            'line_no',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['currency_code', 'fx_rate', 'amount_foreign', 'cost_center', 'project_id'],
+            [
+                new CompanyBackupForeignKey(
+                    ['supplier_id', 'account_id'],
+                    'chart_of_accounts',
+                    ['supplier_id', 'id'],
+                ),
+                new CompanyBackupForeignKey(
+                    ['supplier_id', 'entry_id'],
+                    'journal_entries',
+                    ['supplier_id', 'id'],
+                ),
+                new CompanyBackupForeignKey(['project_id'], 'projects', ['id']),
+                new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+            ],
+        ));
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'project_id->projects:id',
+                'supplier_id,account_id->chart_of_accounts:supplier_id,id',
+                'supplier_id,cost_center->cost_centers:supplier_id,code',
+                'supplier_id,entry_id->journal_entries:supplier_id,id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        $costCenterReference = array_values(array_filter(
+            $projection->references->references,
+            static fn ($reference): bool =>
+                $reference->columns === ['supplier_id', 'cost_center'],
+        ))[0] ?? null;
+        self::assertNotNull($costCenterReference);
+        self::assertSame(
+            CompanyBackupReferenceMapping::TenantNaturalKey,
+            $costCenterReference->mapping,
+        );
+        self::assertSame(
+            CompanyBackupReferenceConstraint::Optional,
+            $costCenterReference->constraint,
+        );
+        foreach ($projection->references->references as $reference) {
+            self::assertNotContains('currency_code', $reference->columns);
+        }
+
+        $projects = $registry->definition('table:projects');
+        self::assertNotNull($projects);
+        self::assertSame(TenantDataPolicy::TenantOwnedIndirect, $projects->policy);
+        self::assertSame('foreign_key_path', $projects->details['ownership']['strategy'] ?? null);
+    }
+
     public function testAccountingClosingPayloadReferencesUseTheirDeclaredTargets(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition(
