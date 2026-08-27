@@ -209,6 +209,54 @@ final class CompanyBackupReferenceSetTest extends TestCase
         }
     }
 
+    public function testAcceptsTenantScopedCompositeIdForeignKey(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                [
+                    'columns' => ['supplier_id', 'period_id'],
+                    'target' => 'table:accounting_periods',
+                    'target_columns' => ['supplier_id', 'id'],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                    'nullable_columns' => [],
+                    'fallbacks' => [],
+                ],
+                $this->supplierReference(),
+            ],
+            'table:accounting_closing_steps',
+        );
+        $registry = new TenantDataRegistry(1, [
+            $this->definition('accounting_periods', TenantDataPolicy::TenantOwned),
+            $this->definition('supplier', TenantDataPolicy::TenantRoot),
+        ]);
+
+        $references->assertProjectionColumns(['id', 'supplier_id', 'period_id']);
+        $references->assertRegistryTargets($registry);
+        $references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            [],
+            [
+                new CompanyBackupForeignKey(
+                    ['supplier_id', 'period_id'],
+                    'accounting_periods',
+                    ['supplier_id', 'id'],
+                ),
+                new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+            ],
+        ));
+
+        self::assertSame(
+            [
+                'supplier_id,period_id->accounting_periods:supplier_id,id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $references->references,
+            ),
+        );
+    }
+
     public function testAcceptsExplicitZeroSentinelSoftReference(): void
     {
         $references = CompanyBackupReferenceSet::fromArray(

@@ -236,6 +236,14 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionAccountingClosingStepsProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'accounting_closing_steps',
+            ['period_id', 'payload', 'done_by', 'updated_at'],
+        );
+    }
+
     /** @param list<string> $expectedColumns */
     private function assertProductionProjectionMatchesSchema(
         string $table,
@@ -257,6 +265,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         $projection->references->assertRuntimeSchema(
             $schemaReader->readReferences($this->db->pdo(), $projection),
         );
+        $projection->embeddedReferences->assertRegistryTargets($registry);
         foreach ($expectedColumns as $column) {
             self::assertContains($column, $schema->columns);
         }

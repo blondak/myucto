@@ -147,10 +147,15 @@ final readonly class CompanyBackupReferenceSet
             }
             $primaryKey = $this->targetPrimaryKey($target, $reference);
             $naturalKey = $this->targetNaturalKey($target);
+            $tenantScopedPrimaryKey = $reference->mapping
+                === CompanyBackupReferenceMapping::TenantId
+                && $reference->columns[0] === 'supplier_id'
+                && $reference->targetColumns === ['supplier_id', ...$primaryKey];
             $targetsExpectedKey = match ($reference->mapping) {
                 CompanyBackupReferenceMapping::TenantNaturalKey =>
                     $naturalKey !== null && $reference->targetColumns === $naturalKey,
-                CompanyBackupReferenceMapping::TenantId,
+                CompanyBackupReferenceMapping::TenantId =>
+                    $reference->targetColumns === $primaryKey || $tenantScopedPrimaryKey,
                 CompanyBackupReferenceMapping::TenantIdOrZero,
                 CompanyBackupReferenceMapping::GlobalNaturalKey,
                 CompanyBackupReferenceMapping::Actor =>

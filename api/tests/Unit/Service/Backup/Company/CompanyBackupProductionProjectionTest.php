@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
-use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupForeignKey;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
@@ -326,18 +326,211 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
-    public function testRemainingProductionTableStillFailsClosedWithoutInventory(): void
+    public function testAccountingClosingStepsDeclareEveryPayloadReference(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:accounting_closing_steps',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'period_id',
+            'step_key',
+            'status',
+            'payload',
+            'note',
+            'done_at',
+            'done_by',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['payload', 'note', 'done_at', 'done_by'],
+            [
+                new CompanyBackupForeignKey(
+                    ['supplier_id', 'period_id'],
+                    'accounting_periods',
+                    ['supplier_id', 'id'],
+                ),
+                new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+            ],
+        ));
+        $projection->embeddedReferences->assertRegistryTargets($registry);
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'done_by->users:id',
+                'supplier_id,period_id->accounting_periods:supplier_id,id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            [
+                'payload:checks.*.value.documented.*.entry_id->journal_entries:id'
+                    . '?checks.*.key=transit_261_open',
+                'payload:checks.*.value.documented.*.pair_tx_id->bank_transactions:id'
+                    . '?checks.*.key=transit_261_open',
+                'payload:checks.*.value.documented.*.tx_id->bank_transactions:id'
+                    . '?checks.*.key=transit_261_open',
+                'payload:checks.*.value.findings.*.account_id->chart_of_accounts:id',
+                'payload:checks.*.value.findings.*.doc_id->assets:id'
+                    . '?checks.*.value.findings.*.doc_type=asset',
+                'payload:checks.*.value.findings.*.doc_id->cash_documents:id'
+                    . '?checks.*.value.findings.*.doc_type=cash',
+                'payload:checks.*.value.findings.*.doc_id->invoices:id'
+                    . '?checks.*.value.findings.*.doc_type=invoice',
+                'payload:checks.*.value.findings.*.doc_id->journal_entries:id'
+                    . '?checks.*.value.findings.*.doc_type=journal_entry',
+                'payload:checks.*.value.findings.*.doc_id->purchase_invoices:id'
+                    . '?checks.*.value.findings.*.doc_type=purchase_invoice',
+                'payload:checks.*.value.findings.*.entry_id->journal_entries:id',
+                'payload:detail.*.doc_id->invoices:id?detail.*.doc_type=invoice',
+                'payload:detail.*.doc_id->purchase_invoices:id'
+                    . '?detail.*.doc_type=purchase_invoice',
+                'payload:entries.*.entry_id->journal_entries:id',
+                'payload:entries.*.invoice_id->invoices:id',
+                'payload:entry_id->journal_entries:id',
+                'payload:entry_ids.*->journal_entries:id',
+                'payload:fx_reversal_entry_id->journal_entries:id',
+                'payload:next_period_id->accounting_periods:id',
+                'payload:prepaid_expense_accrual.entry_id->journal_entries:id',
+                'payload:prepaid_expense_release_entry_id->journal_entries:id',
+                'payload:reversed.*.entry_id->journal_entries:id',
+                'payload:reversed.*.reversal_entry_id->journal_entries:id',
+                'payload:saldo_lines.*.account_id->chart_of_accounts:id',
+                'payload:small_asset_accrual.entry_id->journal_entries:id',
+                'payload:small_asset_release_entry_id->journal_entries:id',
+                'payload:stock_release_entry_id->journal_entries:id',
+                'payload:unposted_override.invoice_ids.*->invoices:id',
+                'payload:unposted_override.overridden_by->users:id',
+                'payload:unposted_override.purchase_ids.*->purchase_invoices:id',
+                'payload:warnings.*.items.*.id->purchase_invoices:id'
+                    . '?warnings.*.key=stock_in_transit',
+                'payload:warnings.*.items.*.id->stock_documents:id'
+                    . '?warnings.*.key=stock_unbilled_receipts',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->embeddedReferences->references,
+            ),
+        );
+    }
+
+    public function testAccountingClosingPayloadReferencesUseTheirDeclaredTargets(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition(
             'table:accounting_closing_steps',
         );
         self::assertNotNull($definition);
+        $references = CompanyBackupTableProjection::fromDefinition($definition)
+            ->embeddedReferences;
+        $offsets = [
+            'table:assets' => 1000,
+            'table:bank_transactions' => 2000,
+            'table:chart_of_accounts' => 3000,
+            'table:cash_documents' => 4000,
+            'table:invoices' => 5000,
+            'table:journal_entries' => 6000,
+            'table:purchase_invoices' => 7000,
+            'table:accounting_periods' => 8000,
+            'table:users' => 9000,
+            'table:stock_documents' => 10000,
+        ];
+        $payload = [
+            'checks' => [[
+                'key' => 'transit_261_open',
+                'value' => [
+                    'documented' => [
+                        ['entry_id' => 1, 'tx_id' => 2, 'pair_tx_id' => null],
+                        ['entry_id' => 3, 'tx_id' => 4, 'pair_tx_id' => 5],
+                    ],
+                    'findings' => [
+                        ['account_id' => 6],
+                        ['doc_type' => 'asset', 'doc_id' => 7, 'entry_id' => 8],
+                        ['doc_type' => 'cash', 'doc_id' => 9],
+                        ['doc_type' => 'invoice', 'doc_id' => 10],
+                        ['doc_type' => 'journal_entry', 'doc_id' => 11],
+                        ['doc_type' => 'purchase_invoice', 'doc_id' => 12],
+                    ],
+                ],
+            ]],
+            'detail' => [
+                ['doc_type' => 'invoice', 'doc_id' => 13],
+                ['doc_type' => 'purchase_invoice', 'doc_id' => 14],
+            ],
+            'entries' => [['entry_id' => 15, 'invoice_id' => 16]],
+            'entry_id' => 17,
+            'entry_ids' => ['saldo' => 18, 'bank' => 19],
+            'fx_reversal_entry_id' => null,
+            'next_period_id' => 20,
+            'prepaid_expense_accrual' => ['entry_id' => 21],
+            'prepaid_expense_release_entry_id' => 22,
+            'reversed' => [['entry_id' => 23, 'reversal_entry_id' => 24]],
+            'saldo_lines' => [['account_id' => 25]],
+            'small_asset_accrual' => ['entry_id' => 26],
+            'small_asset_release_entry_id' => 27,
+            'stock_release_entry_id' => 28,
+            'unposted_override' => [
+                'invoice_ids' => [29, 30],
+                'overridden_by' => 31,
+                'purchase_ids' => [32],
+            ],
+            'warnings' => [
+                ['key' => 'stock_unbilled_receipts', 'items' => [['id' => 33]]],
+                ['key' => 'stock_in_transit', 'items' => [['id' => 34]]],
+            ],
+        ];
 
-        try {
-            CompanyBackupTableProjection::fromDefinition($definition);
-            self::fail('Dílčí inventura nesmí implicitně otevřít ostatní tabulky profilu.');
-        } catch (CompanyBackupDataSourceException $e) {
-            self::assertSame('data_projection_missing', $e->errorCode);
-        }
+        $restored = $references->remap(
+            ['payload' => $payload],
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ): int => (int) $value + $offsets[$reference->target],
+        )['payload'];
+
+        self::assertSame(6001, $restored['checks'][0]['value']['documented'][0]['entry_id']);
+        self::assertSame(2002, $restored['checks'][0]['value']['documented'][0]['tx_id']);
+        self::assertNull($restored['checks'][0]['value']['documented'][0]['pair_tx_id']);
+        self::assertSame(2005, $restored['checks'][0]['value']['documented'][1]['pair_tx_id']);
+        self::assertSame(3006, $restored['checks'][0]['value']['findings'][0]['account_id']);
+        self::assertSame(1007, $restored['checks'][0]['value']['findings'][1]['doc_id']);
+        self::assertSame(6008, $restored['checks'][0]['value']['findings'][1]['entry_id']);
+        self::assertSame(4009, $restored['checks'][0]['value']['findings'][2]['doc_id']);
+        self::assertSame(5010, $restored['checks'][0]['value']['findings'][3]['doc_id']);
+        self::assertSame(6011, $restored['checks'][0]['value']['findings'][4]['doc_id']);
+        self::assertSame(7012, $restored['checks'][0]['value']['findings'][5]['doc_id']);
+        self::assertSame(5013, $restored['detail'][0]['doc_id']);
+        self::assertSame(7014, $restored['detail'][1]['doc_id']);
+        self::assertSame(6015, $restored['entries'][0]['entry_id']);
+        self::assertSame(5016, $restored['entries'][0]['invoice_id']);
+        self::assertSame(6017, $restored['entry_id']);
+        self::assertSame(['saldo' => 6018, 'bank' => 6019], $restored['entry_ids']);
+        self::assertNull($restored['fx_reversal_entry_id']);
+        self::assertSame(8020, $restored['next_period_id']);
+        self::assertSame(6021, $restored['prepaid_expense_accrual']['entry_id']);
+        self::assertSame(6022, $restored['prepaid_expense_release_entry_id']);
+        self::assertSame(6023, $restored['reversed'][0]['entry_id']);
+        self::assertSame(6024, $restored['reversed'][0]['reversal_entry_id']);
+        self::assertSame(3025, $restored['saldo_lines'][0]['account_id']);
+        self::assertSame(6026, $restored['small_asset_accrual']['entry_id']);
+        self::assertSame(6027, $restored['small_asset_release_entry_id']);
+        self::assertSame(6028, $restored['stock_release_entry_id']);
+        self::assertSame([5029, 5030], $restored['unposted_override']['invoice_ids']);
+        self::assertSame(9031, $restored['unposted_override']['overridden_by']);
+        self::assertSame([7032], $restored['unposted_override']['purchase_ids']);
+        self::assertSame(10033, $restored['warnings'][0]['items'][0]['id']);
+        self::assertSame(7034, $restored['warnings'][1]['items'][0]['id']);
     }
 }

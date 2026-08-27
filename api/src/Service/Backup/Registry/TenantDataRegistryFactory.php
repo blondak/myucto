@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Registry;
 
+use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 
@@ -454,14 +455,18 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
-        $columns = self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null;
+        $columns = $table === 'accounting_closing_steps'
+            ? CompanyBackupAccountingClosingStepsProjection::dataColumns()
+            : (self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null);
         if ($columns === null) {
             return [];
         }
         return [
             'company_backup' => [
                 'data_columns' => $columns,
-                'embedded_references' => [],
+                'embedded_references' => $table === 'accounting_closing_steps'
+                    ? CompanyBackupAccountingClosingStepsProjection::embeddedReferences()
+                    : [],
                 'generated_columns' => [],
                 'omit_columns' => [],
                 'references' => self::companyBackupReferences($table),
@@ -502,6 +507,8 @@ final class TenantDataRegistryFactory
     private static function companyBackupReferences(string $table): array
     {
         return match ($table) {
+            'accounting_closing_steps' =>
+                CompanyBackupAccountingClosingStepsProjection::references(),
             'accounting_document_series' => [
                 self::companyBackupTenantIdOrZeroReference(
                     'register_id',
