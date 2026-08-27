@@ -121,6 +121,19 @@ final readonly class CompanyBackupDataInventory
         return $this->objectsByRegistryKey[$registryKey] ?? null;
     }
 
+    /** @return list<TenantDataDefinition> */
+    public static function payloadDefinitions(TenantDataRegistrySnapshot $snapshot): array
+    {
+        return array_values(array_filter(
+            $snapshot->registry->definitionsFor($snapshot->profile),
+            static fn (TenantDataDefinition $definition): bool => in_array(
+                $definition->kind,
+                [TenantDataObjectKind::Table, TenantDataObjectKind::LogicalObject],
+                true,
+            ) && $definition->policy->hasMachineDataPayload(),
+        ));
+    }
+
     /**
      * @param array<string,string> $entryHashes
      * @param array<string,int> $entryBytes
@@ -175,14 +188,8 @@ final readonly class CompanyBackupDataInventory
     private static function requiredDefinitions(TenantDataRegistrySnapshot $snapshot): array
     {
         $required = [];
-        foreach ($snapshot->registry->definitionsFor($snapshot->profile) as $definition) {
-            if (in_array(
-                $definition->kind,
-                [TenantDataObjectKind::Table, TenantDataObjectKind::LogicalObject],
-                true,
-            ) && $definition->policy->hasMachineDataPayload()) {
-                $required[$definition->key] = $definition;
-            }
+        foreach (self::payloadDefinitions($snapshot) as $definition) {
+            $required[$definition->key] = $definition;
         }
         return $required;
     }

@@ -37,6 +37,13 @@ final class CompanyBackupDataInventoryTest extends TestCase
             $inventory->object('table:invoices')?->path,
         );
         self::assertNull($inventory->object('table:derived_cache'));
+        self::assertSame(
+            ['table:invoices', 'table:supplier'],
+            array_map(
+                static fn (TenantDataDefinition $definition): string => $definition->key,
+                CompanyBackupDataInventory::payloadDefinitions($this->snapshot()),
+            ),
+        );
         self::assertSame($inventory->toArray(), CompanyBackupDataInventory::fromArray(
             $inventory->toArray(),
             $this->snapshot(),
