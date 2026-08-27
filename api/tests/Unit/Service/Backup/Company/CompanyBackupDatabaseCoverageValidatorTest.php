@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDatabaseCoverageValidator;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Registry\IncompleteTenantDataRegistryCoverage;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -26,6 +28,8 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
             [[], ['migrations', 'supplier'], PDO::FETCH_COLUMN],
             [['supplier'], $this->supplierColumns(), PDO::FETCH_ASSOC],
             [['supplier'], ['id'], PDO::FETCH_COLUMN],
+            [['supplier'], $this->supplierNullability(), PDO::FETCH_ASSOC],
+            [['supplier'], [], PDO::FETCH_ASSOC],
         ]);
 
         $report = (new CompanyBackupDatabaseCoverageValidator())->evaluate($pdo, $registry);
@@ -92,6 +96,8 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
             [[], ['supplier', 'unknown_table'], PDO::FETCH_COLUMN],
             [['supplier'], $this->supplierColumns(), PDO::FETCH_ASSOC],
             [['supplier'], ['id'], PDO::FETCH_COLUMN],
+            [['supplier'], $this->supplierNullability(), PDO::FETCH_ASSOC],
+            [['supplier'], [], PDO::FETCH_ASSOC],
         ]);
 
         try {
@@ -101,6 +107,62 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
             self::assertSame('object_unclassified', $e->report->issues[0]->code);
             self::assertSame('table:unknown_table', $e->report->issues[0]->object);
         }
+    }
+
+    public function testReportsMissingRequiredReferenceConstraint(): void
+    {
+        $registry = $this->registry([$this->definition(
+            'synthetic_records',
+            TenantDataPolicy::TenantRoot,
+            [
+                'primary_key' => ['id'],
+                'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
+                'secrets' => [],
+                'company_backup' => [
+                    'data_columns' => ['id', 'parent_id'],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' => [[
+                        'columns' => ['parent_id'],
+                        'target' => 'table:synthetic_records',
+                        'target_columns' => ['id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => ['parent_id'],
+                        'fallbacks' => [],
+                    ]],
+                ],
+            ],
+        )]);
+        $pdo = $this->pdo([
+            [[], ['synthetic_records'], PDO::FETCH_COLUMN],
+            [['synthetic_records'], [
+                [
+                    'COLUMN_NAME' => 'id',
+                    'EXTRA' => 'auto_increment',
+                    'GENERATION_EXPRESSION' => null,
+                    'TABLE_TYPE' => 'BASE TABLE',
+                ],
+                [
+                    'COLUMN_NAME' => 'parent_id',
+                    'EXTRA' => '',
+                    'GENERATION_EXPRESSION' => null,
+                    'TABLE_TYPE' => 'BASE TABLE',
+                ],
+            ], PDO::FETCH_ASSOC],
+            [['synthetic_records'], ['id'], PDO::FETCH_COLUMN],
+            [['synthetic_records'], [
+                ['COLUMN_NAME' => 'id', 'IS_NULLABLE' => 'NO'],
+                ['COLUMN_NAME' => 'parent_id', 'IS_NULLABLE' => 'YES'],
+            ], PDO::FETCH_ASSOC],
+            [['synthetic_records'], [], PDO::FETCH_ASSOC],
+        ]);
+
+        $report = (new CompanyBackupDatabaseCoverageValidator())->evaluate($pdo, $registry);
+
+        self::assertFalse($report->isSafe());
+        self::assertSame('data_reference_constraint_missing', $report->issues[0]->code);
+        self::assertStringContainsString('parent_id', $report->issues[0]->message);
     }
 
     /**
@@ -157,6 +219,15 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
         ];
     }
 
+    /** @return list<array{COLUMN_NAME:string,IS_NULLABLE:string}> */
+    private function supplierNullability(): array
+    {
+        return [
+            ['COLUMN_NAME' => 'id', 'IS_NULLABLE' => 'NO'],
+            ['COLUMN_NAME' => 'company_name', 'IS_NULLABLE' => 'NO'],
+        ];
+    }
+
     private function supplierDefinition(): TenantDataDefinition
     {
         return $this->definition('supplier', TenantDataPolicy::TenantRoot, [
@@ -167,6 +238,7 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
                 'data_columns' => ['id', 'company_name'],
                 'generated_columns' => [],
                 'omit_columns' => [],
+                'references' => [],
             ],
         ]);
     }

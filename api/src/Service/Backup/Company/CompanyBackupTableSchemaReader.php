@@ -8,7 +8,7 @@ use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use PDO;
 use PDOStatement;
 
-/** Jediná runtime interpretace tabulek, generovaných sloupců a primárních klíčů. */
+/** Jediná runtime interpretace tabulek, sloupců, klíčů a jejich referencí. */
 final class CompanyBackupTableSchemaReader
 {
     /** @return list<string> */
@@ -129,6 +129,127 @@ final class CompanyBackupTableSchemaReader
             $primaryKey[] = $column;
         }
         return new CompanyBackupTableSchema($columns, $generated, $primaryKey);
+    }
+
+    public function readReferences(
+        PDO $pdo,
+        CompanyBackupTableProjection $projection,
+    ): CompanyBackupTableReferenceSchema {
+        $columnRows = $this->fetchAll(
+            $pdo,
+            'SELECT `COLUMN_NAME`, `IS_NULLABLE`'
+                . ' FROM `information_schema`.`COLUMNS`'
+                . ' WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?'
+                . ' ORDER BY `ORDINAL_POSITION`',
+            [$projection->name],
+            PDO::FETCH_ASSOC,
+            $projection->registryKey,
+            'data_reference_schema_read_failed',
+        );
+        if ($columnRows === []) {
+            throw new CompanyBackupDataSourceException(
+                'data_table_missing',
+                $projection->registryKey,
+            );
+        }
+        $nullableColumns = [];
+        $seenColumns = [];
+        foreach ($columnRows as $row) {
+            if (!is_array($row) || array_is_list($row)) {
+                throw $this->invalidReferenceSchema($projection);
+            }
+            $column = $row['COLUMN_NAME'] ?? null;
+            $nullable = $row['IS_NULLABLE'] ?? null;
+            if (!is_string($column)
+                || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $column) !== 1
+                || !in_array($nullable, ['YES', 'NO'], true)
+                || isset($seenColumns[$column])
+            ) {
+                throw $this->invalidReferenceSchema($projection);
+            }
+            $seenColumns[$column] = true;
+            if ($nullable === 'YES') {
+                $nullableColumns[] = $column;
+            }
+        }
+
+        $foreignKeyRows = $this->fetchAll(
+            $pdo,
+            'SELECT `CONSTRAINT_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`,'
+                . ' `REFERENCED_TABLE_NAME`, `REFERENCED_COLUMN_NAME`'
+                . ' FROM `information_schema`.`KEY_COLUMN_USAGE`'
+                . ' WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?'
+                . ' AND `REFERENCED_TABLE_NAME` IS NOT NULL'
+                . ' ORDER BY `CONSTRAINT_NAME`, `ORDINAL_POSITION`',
+            [$projection->name],
+            PDO::FETCH_ASSOC,
+            $projection->registryKey,
+            'data_reference_schema_read_failed',
+        );
+        /** @var array<string,array{target:string,columns:list<string>,target_columns:list<string>}> $groups */
+        $groups = [];
+        foreach ($foreignKeyRows as $row) {
+            if (!is_array($row) || array_is_list($row)) {
+                throw $this->invalidReferenceSchema($projection);
+            }
+            $constraint = $row['CONSTRAINT_NAME'] ?? null;
+            $column = $row['COLUMN_NAME'] ?? null;
+            $ordinal = $row['ORDINAL_POSITION'] ?? null;
+            $target = $row['REFERENCED_TABLE_NAME'] ?? null;
+            $targetColumn = $row['REFERENCED_COLUMN_NAME'] ?? null;
+            $ordinalNumber = is_int($ordinal)
+                ? $ordinal
+                : (is_string($ordinal) && ctype_digit($ordinal) ? (int) $ordinal : 0);
+            if (!is_string($constraint)
+                || $constraint === ''
+                || strlen($constraint) > 64
+                || !is_string($column)
+                || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $column) !== 1
+                || !is_string($target)
+                || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $target) !== 1
+                || !is_string($targetColumn)
+                || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $targetColumn) !== 1
+                || $ordinalNumber < 1
+            ) {
+                throw $this->invalidReferenceSchema($projection);
+            }
+            $group = $groups[$constraint] ?? [
+                'target' => $target,
+                'columns' => [],
+                'target_columns' => [],
+            ];
+            if ($group['target'] !== $target
+                || $ordinalNumber !== count($group['columns']) + 1
+            ) {
+                throw $this->invalidReferenceSchema($projection);
+            }
+            $group['columns'][] = $column;
+            $group['target_columns'][] = $targetColumn;
+            $groups[$constraint] = $group;
+        }
+
+        $foreignKeys = [];
+        try {
+            foreach ($groups as $group) {
+                $foreignKeys[] = new CompanyBackupForeignKey(
+                    $group['columns'],
+                    $group['target'],
+                    $group['target_columns'],
+                );
+            }
+            return new CompanyBackupTableReferenceSchema($nullableColumns, $foreignKeys);
+        } catch (\InvalidArgumentException) {
+            throw $this->invalidReferenceSchema($projection);
+        }
+    }
+
+    private function invalidReferenceSchema(
+        CompanyBackupTableProjection $projection,
+    ): CompanyBackupDataSourceException {
+        return new CompanyBackupDataSourceException(
+            'data_reference_schema_invalid',
+            $projection->registryKey,
+        );
     }
 
     /**

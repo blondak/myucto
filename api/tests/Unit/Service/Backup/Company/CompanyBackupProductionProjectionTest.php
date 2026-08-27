@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use PHPUnit\Framework\TestCase;
@@ -40,6 +42,16 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         self::assertSame([], $projection->generatedColumns);
         self::assertSame([], $projection->omitColumns);
         self::assertNull($projection->requiredSecretEnvelopeColumn());
+        self::assertCount(1, $projection->references->references);
+        self::assertSame(
+            CompanyBackupReferenceMapping::TenantId,
+            $projection->references->references[0]->mapping,
+        );
+        self::assertSame(
+            CompanyBackupReferenceConstraint::Required,
+            $projection->references->references[0]->constraint,
+        );
+        $projection->references->assertRegistryTargets(TenantDataRegistryFactory::draftV1());
     }
 
     public function testRemainingProductionTableStillFailsClosedWithoutInventory(): void

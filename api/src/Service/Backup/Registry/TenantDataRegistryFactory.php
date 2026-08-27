@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Registry;
 
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
+
 /** Produkční sestavení registru; company_backup zůstává během inventury draft. */
 final class TenantDataRegistryFactory
 {
@@ -335,7 +338,16 @@ final class TenantDataRegistryFactory
      * @return array{company_backup:array{
      *   data_columns:list<string>,
      *   generated_columns:list<string>,
-     *   omit_columns:array<string,string>
+     *   omit_columns:array<string,string>,
+     *   references:list<array{
+     *     columns:list<string>,
+     *     target:string,
+     *     target_columns:list<string>,
+     *     mapping:string,
+     *     constraint:string,
+     *     nullable_columns:list<string>,
+     *     fallbacks:list<string>
+     *   }>
      * }}|array{}
      */
     private static function companyBackupProjection(string $table): array
@@ -349,8 +361,36 @@ final class TenantDataRegistryFactory
                 'data_columns' => $columns,
                 'generated_columns' => [],
                 'omit_columns' => [],
+                'references' => self::companyBackupReferences($table),
             ],
         ];
+    }
+
+    /**
+     * @return list<array{
+     *   columns:list<string>,
+     *   target:string,
+     *   target_columns:list<string>,
+     *   mapping:string,
+     *   constraint:string,
+     *   nullable_columns:list<string>,
+     *   fallbacks:list<string>
+     * }>
+     */
+    private static function companyBackupReferences(string $table): array
+    {
+        return match ($table) {
+            'currencies' => [[
+                'columns' => ['supplier_id'],
+                'target' => 'table:supplier',
+                'target_columns' => ['id'],
+                'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                'nullable_columns' => [],
+                'fallbacks' => [],
+            ]],
+            default => [],
+        };
     }
 
     /** @return list<string> */

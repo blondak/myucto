@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Integration\Backup;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
@@ -135,10 +137,12 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
 
     public function testProductionCurrenciesProjectionMatchesMigratedSchema(): void
     {
-        $definition = TenantDataRegistryFactory::draftV1()->definition('table:currencies');
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:currencies');
         self::assertNotNull($definition);
         $projection = CompanyBackupTableProjection::fromDefinition($definition);
-        $schema = (new CompanyBackupTableSchemaReader())->read($this->db->pdo(), $projection);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
 
         $projection->assertRuntimeSchema(
             $schema->columns,
@@ -148,6 +152,10 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
 
         self::assertContains('supplier_id', $schema->columns);
         self::assertSame(['id'], $schema->primaryKey);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
     }
 
     private function accountingPeriodsDefinition(PDO $pdo): TenantDataDefinition
@@ -195,9 +203,37 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
                     'data_columns' => $dataColumns,
                     'generated_columns' => $generatedColumns,
                     'omit_columns' => [],
+                    'references' => [
+                        $this->actorReference('approved_by'),
+                        $this->actorReference('closed_by'),
+                        $this->actorReference('reviewed_by'),
+                        [
+                            'columns' => ['supplier_id'],
+                            'target' => 'table:supplier',
+                            'target_columns' => ['id'],
+                            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                            'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                            'nullable_columns' => [],
+                            'fallbacks' => [],
+                        ],
+                    ],
                 ],
             ],
         );
+    }
+
+    /** @return array<string,mixed> */
+    private function actorReference(string $column): array
+    {
+        return [
+            'columns' => [$column],
+            'target' => 'table:users',
+            'target_columns' => ['id'],
+            'mapping' => CompanyBackupReferenceMapping::Actor->value,
+            'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+            'nullable_columns' => [$column],
+            'fallbacks' => ['null', 'restore_actor'],
+        ];
     }
 
     private function createSupplier(

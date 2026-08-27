@@ -56,6 +56,10 @@ final readonly class CompanyBackupDatabaseCoverageValidator implements CompanyBa
                     $schema->generatedColumns,
                     $schema->primaryKey,
                 );
+                $projection->references->assertRegistryTargets($registry);
+                $projection->references->assertRuntimeSchema(
+                    $this->schemaReader->readReferences($pdo, $projection),
+                );
             } catch (CompanyBackupDataSourceException $e) {
                 $issues[] = new TenantDataCoverageIssue(
                     $e->errorCode,

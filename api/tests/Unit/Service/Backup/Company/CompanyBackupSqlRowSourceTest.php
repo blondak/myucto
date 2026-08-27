@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -198,6 +200,15 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
                     'data_columns' => ['id', 'supplier_id', 'label'],
                     'generated_columns' => [],
                     'omit_columns' => [],
+                    'references' => [[
+                        'columns' => ['supplier_id'],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ]],
                 ],
             ],
         );

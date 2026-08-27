@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -86,6 +88,19 @@ final class CompanyBackupTableProjectionTest extends TestCase
         }
     }
 
+    public function testRejectsReferenceLikeColumnWithoutExplicitRemapPolicy(): void
+    {
+        try {
+            CompanyBackupTableProjection::fromDefinition($this->definition(
+                references: [],
+            ));
+            self::fail('Exportovaný supplier_id nesmí zůstat bez remap politiky.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_column_unclassified', $e->errorCode);
+            self::assertSame('supplier_id', $e->column);
+        }
+    }
+
     public function testRejectsPrimaryKeyAndGeneratedColumnDrift(): void
     {
         $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
@@ -146,12 +161,14 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param list<string> $dataColumns
      * @param list<string> $generatedColumns
      * @param array<string,string> $omitColumns
+     * @param list<array<string,mixed>>|null $references
      */
     private function definition(
         array $secrets = [],
         array $dataColumns = ['id', 'supplier_id', 'name'],
         array $generatedColumns = [],
         array $omitColumns = [],
+        ?array $references = null,
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:synthetic_records',
@@ -169,8 +186,23 @@ final class CompanyBackupTableProjectionTest extends TestCase
                     'data_columns' => $dataColumns,
                     'generated_columns' => $generatedColumns,
                     'omit_columns' => $omitColumns,
+                    'references' => $references ?? [$this->supplierReference()],
                 ],
             ],
         );
+    }
+
+    /** @return array<string,mixed> */
+    private function supplierReference(): array
+    {
+        return [
+            'columns' => ['supplier_id'],
+            'target' => 'table:supplier',
+            'target_columns' => ['id'],
+            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+            'constraint' => CompanyBackupReferenceConstraint::Required->value,
+            'nullable_columns' => [],
+            'fallbacks' => [],
+        ];
     }
 }

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTenantSqlSelector;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -176,8 +178,45 @@ final class CompanyBackupTenantSqlSelectorTest extends TestCase
                     'data_columns' => $dataColumns,
                     'generated_columns' => [],
                     'omit_columns' => [],
+                    'references' => $this->references($dataColumns),
                 ],
             ],
         ));
+    }
+
+    /**
+     * @param list<string> $dataColumns
+     * @return list<array<string,mixed>>
+     */
+    private function references(array $dataColumns): array
+    {
+        $references = [];
+        foreach ($dataColumns as $column) {
+            if ($column === 'id'
+                || !str_ends_with($column, '_id') && !str_ends_with($column, '_by')
+            ) {
+                continue;
+            }
+            $references[] = [
+                'columns' => [$column],
+                'target' => match ($column) {
+                    'invoice_id', 'matched_invoice_id' => 'table:invoices',
+                    default => 'table:supplier',
+                },
+                'target_columns' => ['id'],
+                'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+                'nullable_columns' => [],
+                'fallbacks' => [],
+            ];
+        }
+        usort(
+            $references,
+            static fn (array $left, array $right): int => strcmp(
+                (string) $left['columns'][0],
+                (string) $right['columns'][0],
+            ),
+        );
+        return $references;
     }
 }

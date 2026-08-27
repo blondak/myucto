@@ -32,6 +32,8 @@ final readonly class CompanyBackupTableProjection
     /** @var array<string,TenantSecretPolicy> */
     public array $secretPolicies;
 
+    public CompanyBackupReferenceSet $references;
+
     /**
      * @param list<string> $primaryKey
      * @param array<string,mixed> $ownership
@@ -50,6 +52,7 @@ final readonly class CompanyBackupTableProjection
         array $generatedColumns,
         array $omitColumns,
         array $secretPolicies,
+        CompanyBackupReferenceSet $references,
     ) {
         $this->primaryKey = $primaryKey;
         $this->ownership = $ownership;
@@ -57,6 +60,7 @@ final readonly class CompanyBackupTableProjection
         $this->generatedColumns = $generatedColumns;
         $this->omitColumns = $omitColumns;
         $this->secretPolicies = $secretPolicies;
+        $this->references = $references;
     }
 
     public static function fromDefinition(TenantDataDefinition $definition): self
@@ -102,7 +106,12 @@ final readonly class CompanyBackupTableProjection
         }
         $metadataKeys = array_keys($metadata);
         sort($metadataKeys, SORT_STRING);
-        if ($metadataKeys !== ['data_columns', 'generated_columns', 'omit_columns']) {
+        if ($metadataKeys !== [
+            'data_columns',
+            'generated_columns',
+            'omit_columns',
+            'references',
+        ]) {
             throw new CompanyBackupDataSourceException(
                 'data_projection_invalid',
                 $registryKey,
@@ -125,6 +134,11 @@ final readonly class CompanyBackupTableProjection
             $definition->details['secrets'] ?? null,
             $registryKey,
         );
+        $references = CompanyBackupReferenceSet::fromArray(
+            $metadata['references'],
+            $registryKey,
+        );
+        $references->assertProjectionColumns($dataColumns);
 
         $classified = [];
         foreach ($dataColumns as $column) {
@@ -181,6 +195,7 @@ final readonly class CompanyBackupTableProjection
             $generatedColumns,
             $omitColumns,
             $secretPolicies,
+            $references,
         );
     }
 
