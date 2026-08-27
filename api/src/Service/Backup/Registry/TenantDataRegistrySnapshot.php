@@ -28,7 +28,7 @@ final readonly class TenantDataRegistrySnapshot
                 $definition->kind,
                 $definition->policy,
                 [$profile],
-                $definition->details,
+                $definition->detailsForProfile($profile),
             ),
             $registry->definitionsFor($profile),
         );
@@ -87,6 +87,11 @@ final readonly class TenantDataRegistrySnapshot
             if ($definition->profiles !== [$profile]) {
                 throw new \InvalidArgumentException(
                     'Snapshot obsahuje definici mimo jediný deklarovaný profil.',
+                );
+            }
+            if ($definition->details !== $definition->detailsForProfile($profile)) {
+                throw new \InvalidArgumentException(
+                    'Snapshot obsahuje metadata jiného profilu.',
                 );
             }
             $definitions[] = $definition;

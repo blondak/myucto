@@ -138,6 +138,27 @@ final class TenantDataRegistryFactory
         'exchange_rates' => ['rate_date', 'currency_code'],
     ];
 
+    /** @var array<string,list<string>> */
+    private const COMPANY_BACKUP_DATA_COLUMNS = [
+        'currencies' => [
+            'id',
+            'supplier_id',
+            'code',
+            'label',
+            'symbol',
+            'name_cs',
+            'name_en',
+            'decimals',
+            'is_active',
+            'is_default',
+            'account_number',
+            'bank_code',
+            'bank_name',
+            'iban',
+            'bic',
+        ],
+    ];
+
     /** @var list<string> */
     private const STOCK_TABLES = [
         'warehouses',
@@ -189,6 +210,7 @@ final class TenantDataRegistryFactory
                     'soft_references' => self::softReferences($table),
                     ...self::archiveFeatureFlag($table),
                 ],
+                ...self::companyBackupProjection($table),
             ];
             if ($table === 'bank_statements') {
                 $details['natural_key'] = ['file_hash'];
@@ -304,6 +326,31 @@ final class TenantDataRegistryFactory
             'exchange_rates' => 'accounting_period_currency',
             default => 'ownership',
         };
+    }
+
+    /**
+     * Produkční company projekce se doplňují po ručně ověřených tabulkách.
+     * Absence metadata je záměrná fail-closed hranice, ne implicitní SELECT *.
+     *
+     * @return array{company_backup:array{
+     *   data_columns:list<string>,
+     *   generated_columns:list<string>,
+     *   omit_columns:array<string,string>
+     * }}|array{}
+     */
+    private static function companyBackupProjection(string $table): array
+    {
+        $columns = self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null;
+        if ($columns === null) {
+            return [];
+        }
+        return [
+            'company_backup' => [
+                'data_columns' => $columns,
+                'generated_columns' => [],
+                'omit_columns' => [],
+            ],
+        ];
     }
 
     /** @return list<string> */

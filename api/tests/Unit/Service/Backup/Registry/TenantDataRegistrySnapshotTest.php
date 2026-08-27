@@ -103,6 +103,45 @@ final class TenantDataRegistrySnapshotTest extends TestCase
         TenantDataRegistrySnapshot::fromArray($array);
     }
 
+    public function testSnapshotContainsOnlyMetadataOfSelectedProfile(): void
+    {
+        $definition = new TenantDataDefinition(
+            'table:supplier',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRoot,
+            [
+                TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE,
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            ],
+            [
+                'primary_key' => ['id'],
+                'accounting_archive' => ['marker' => 'archive-only'],
+                'company_backup' => ['marker' => 'company-only'],
+            ],
+        );
+        $registry = new TenantDataRegistry(
+            1,
+            [$definition],
+            [
+                TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE,
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            ],
+        );
+
+        $snapshot = TenantDataRegistrySnapshot::fromRegistry(
+            $registry,
+            TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+        )->toArray();
+
+        self::assertArrayHasKey('company_backup', $snapshot['definitions'][0]['details']);
+        self::assertArrayNotHasKey('accounting_archive', $snapshot['definitions'][0]['details']);
+
+        $snapshot['definitions'][0]['details']['accounting_archive'] = ['marker' => 'unbound'];
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('jiného profilu');
+        TenantDataRegistrySnapshot::fromArray($snapshot);
+    }
+
     /** @param array<mixed> $snapshot */
     #[DataProvider('malformedSnapshots')]
     public function testRejectsMalformedOrAmbiguousSnapshot(array $snapshot): void

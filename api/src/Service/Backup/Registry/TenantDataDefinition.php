@@ -137,6 +137,26 @@ final readonly class TenantDataDefinition
         return substr($this->key, strlen($this->kind->keyPrefix()));
     }
 
+    /** @return array<string,mixed> */
+    public function detailsForProfile(string $profile): array
+    {
+        if (!$this->hasProfile($profile)) {
+            throw new \InvalidArgumentException(
+                'Objekt tenantového registru nepatří do požadovaného profilu.',
+            );
+        }
+        $details = $this->details;
+        foreach ([
+            TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE,
+            TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+        ] as $profileMetadata) {
+            if ($profileMetadata !== $profile) {
+                unset($details[$profileMetadata]);
+            }
+        }
+        return $details;
+    }
+
     /** @return array{key:string,kind:string,policy:string,profiles:list<string>,details:array<string,mixed>} */
     public function toArray(): array
     {
@@ -158,8 +178,11 @@ final readonly class TenantDataDefinition
             );
         }
         return [
-            ...$this->toArray(),
+            'key' => $this->key,
+            'kind' => $this->kind->value,
+            'policy' => $this->policy->value,
             'profiles' => [$profile],
+            'details' => $this->detailsForProfile($profile),
         ];
     }
 

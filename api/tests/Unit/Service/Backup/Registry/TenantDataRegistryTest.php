@@ -91,6 +91,21 @@ final class TenantDataRegistryTest extends TestCase
         );
     }
 
+    public function testOtherProfileProjectionDoesNotChangeFingerprint(): void
+    {
+        $first = $this->registryWithProfileMetadata('company-v1');
+        $second = $this->registryWithProfileMetadata('company-v2');
+
+        self::assertSame(
+            $first->fingerprintFor(TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE),
+            $second->fingerprintFor(TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE),
+        );
+        self::assertNotSame(
+            $first->fingerprintFor(TenantDataRegistry::COMPANY_BACKUP_PROFILE),
+            $second->fingerprintFor(TenantDataRegistry::COMPANY_BACKUP_PROFILE),
+        );
+    }
+
     public function testDraftProfileCannotProduceFingerprint(): void
     {
         $registry = new TenantDataRegistry(1, [
@@ -145,6 +160,31 @@ final class TenantDataRegistryTest extends TestCase
             $policy,
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
             $details,
+        );
+    }
+
+    private function registryWithProfileMetadata(string $companyMarker): TenantDataRegistry
+    {
+        return new TenantDataRegistry(
+            1,
+            [new TenantDataDefinition(
+                'table:supplier',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantRoot,
+                [
+                    TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE,
+                    TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+                ],
+                [
+                    'primary_key' => ['id'],
+                    'accounting_archive' => ['marker' => 'archive-v1'],
+                    'company_backup' => ['marker' => $companyMarker],
+                ],
+            )],
+            [
+                TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE,
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            ],
         );
     }
 }

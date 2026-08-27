@@ -7,10 +7,13 @@ namespace MyInvoice\Tests\Integration\Backup;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Backup\Registry\TenantSecretColumnDetector;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -128,6 +131,23 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $unscoped,
             'Negativní kontrola musí bez tenantového filtru cizí řádek skutečně najít.',
         );
+    }
+
+    public function testProductionCurrenciesProjectionMatchesMigratedSchema(): void
+    {
+        $definition = TenantDataRegistryFactory::draftV1()->definition('table:currencies');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schema = (new CompanyBackupTableSchemaReader())->read($this->db->pdo(), $projection);
+
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+        );
+
+        self::assertContains('supplier_id', $schema->columns);
+        self::assertSame(['id'], $schema->primaryKey);
     }
 
     private function accountingPeriodsDefinition(PDO $pdo): TenantDataDefinition
