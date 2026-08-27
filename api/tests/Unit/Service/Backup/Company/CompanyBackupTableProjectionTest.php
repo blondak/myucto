@@ -187,6 +187,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
                     'generated_columns' => $generatedColumns,
                     'omit_columns' => $omitColumns,
                     'references' => $references ?? [$this->supplierReference()],
+                    'restore_overrides' => [],
                 ],
             ],
         );

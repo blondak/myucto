@@ -227,10 +227,66 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         self::assertCount(1, $projection->references->references);
     }
 
+    public function testAccountingSupplierSettingsDisableAutomationOnRestore(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:accounting_supplier_settings');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'supplier_id',
+            'avg_employees',
+            'statement_scope_override',
+            'updated_at',
+            'statutory_audit',
+            'manual_doc_series',
+            'fx_reversal_at_open',
+            'locked_until',
+            'fx_rate_mode',
+            'automation_level',
+            'automation_daily_limit_czk',
+            'automation_digest_enabled',
+            'automation_digest_hour',
+            'small_asset_accrual_mode',
+            'small_asset_accrual_pct',
+            'fuel_account_code',
+            'vehicle_repair_account_code',
+            'single_analytic_redirect',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['supplier_id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['fuel_account_code', 'vehicle_repair_account_code'],
+            [new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id'])],
+        ));
+        $restored = $projection->restoreOverrides->apply([
+            'supplier_id' => 9,
+            'automation_level' => 'full',
+            'automation_digest_enabled' => 1,
+        ]);
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame('off', $restored['automation_level']);
+        self::assertSame(0, $restored['automation_digest_enabled']);
+        self::assertSame(
+            [
+                'supplier_id,fuel_account_code->chart_of_accounts:supplier_id,account_code',
+                'supplier_id,vehicle_repair_account_code'
+                    . '->chart_of_accounts:supplier_id,account_code',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
     public function testRemainingProductionTableStillFailsClosedWithoutInventory(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition(
-            'table:accounting_supplier_settings',
+            'table:accounting_closing_steps',
         );
         self::assertNotNull($definition);
 

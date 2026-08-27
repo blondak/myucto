@@ -193,6 +193,7 @@ final class CompanyBackupTenantSqlSelectorTest extends TestCase
                     'generated_columns' => [],
                     'omit_columns' => [],
                     'references' => $this->references($dataColumns),
+                    'restore_overrides' => [],
                 ],
             ],
         ));

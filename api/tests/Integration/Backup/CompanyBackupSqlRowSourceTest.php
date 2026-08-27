@@ -220,6 +220,14 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionAccountingSupplierSettingsProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'accounting_supplier_settings',
+            ['automation_level', 'automation_digest_enabled', 'single_analytic_redirect'],
+        );
+    }
+
     /** @param list<string> $expectedColumns */
     private function assertProductionProjectionMatchesSchema(
         string $table,
@@ -305,6 +313,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
                             'fallbacks' => [],
                         ],
                     ],
+                    'restore_overrides' => [],
                 ],
             ],
         );

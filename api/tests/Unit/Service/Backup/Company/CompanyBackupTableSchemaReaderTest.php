@@ -68,6 +68,7 @@ final class CompanyBackupTableSchemaReaderTest extends TestCase
                         'nullable_columns' => [],
                         'fallbacks' => [],
                     ]],
+                    'restore_overrides' => [],
                 ],
             ],
         ));

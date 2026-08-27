@@ -34,6 +34,8 @@ final readonly class CompanyBackupTableProjection
 
     public CompanyBackupReferenceSet $references;
 
+    public CompanyBackupRestoreOverrideSet $restoreOverrides;
+
     /**
      * @param list<string> $primaryKey
      * @param array<string,mixed> $ownership
@@ -53,6 +55,7 @@ final readonly class CompanyBackupTableProjection
         array $omitColumns,
         array $secretPolicies,
         CompanyBackupReferenceSet $references,
+        CompanyBackupRestoreOverrideSet $restoreOverrides,
     ) {
         $this->primaryKey = $primaryKey;
         $this->ownership = $ownership;
@@ -61,6 +64,7 @@ final readonly class CompanyBackupTableProjection
         $this->omitColumns = $omitColumns;
         $this->secretPolicies = $secretPolicies;
         $this->references = $references;
+        $this->restoreOverrides = $restoreOverrides;
     }
 
     public static function fromDefinition(TenantDataDefinition $definition): self
@@ -111,6 +115,7 @@ final readonly class CompanyBackupTableProjection
             'generated_columns',
             'omit_columns',
             'references',
+            'restore_overrides',
         ]) {
             throw new CompanyBackupDataSourceException(
                 'data_projection_invalid',
@@ -139,6 +144,13 @@ final readonly class CompanyBackupTableProjection
             $registryKey,
         );
         $references->assertProjectionColumns($dataColumns);
+        $restoreOverrides = CompanyBackupRestoreOverrideSet::fromArray(
+            $metadata['restore_overrides'],
+            $registryKey,
+            $dataColumns,
+            $primaryKey,
+            $references,
+        );
 
         $classified = [];
         foreach ($dataColumns as $column) {
@@ -196,6 +208,7 @@ final readonly class CompanyBackupTableProjection
             $omitColumns,
             $secretPolicies,
             $references,
+            $restoreOverrides,
         );
     }
 

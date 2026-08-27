@@ -143,6 +143,26 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<string>> */
     private const COMPANY_BACKUP_DATA_COLUMNS = [
+        'accounting_supplier_settings' => [
+            'supplier_id',
+            'avg_employees',
+            'statement_scope_override',
+            'updated_at',
+            'statutory_audit',
+            'manual_doc_series',
+            'fx_reversal_at_open',
+            'locked_until',
+            'fx_rate_mode',
+            'automation_level',
+            'automation_daily_limit_czk',
+            'automation_digest_enabled',
+            'automation_digest_hour',
+            'small_asset_accrual_mode',
+            'small_asset_accrual_pct',
+            'fuel_account_code',
+            'vehicle_repair_account_code',
+            'single_analytic_redirect',
+        ],
         'accounting_periods' => [
             'id',
             'supplier_id',
@@ -407,6 +427,7 @@ final class TenantDataRegistryFactory
      *   data_columns:list<string>,
      *   generated_columns:list<string>,
      *   omit_columns:array<string,string>,
+     *   restore_overrides:array<string,array{value:string|int|bool|null,reason:string}>,
      *   references:list<array{
      *     columns:list<string>,
      *     target:string,
@@ -430,8 +451,27 @@ final class TenantDataRegistryFactory
                 'generated_columns' => [],
                 'omit_columns' => [],
                 'references' => self::companyBackupReferences($table),
+                'restore_overrides' => self::companyBackupRestoreOverrides($table),
             ],
         ];
+    }
+
+    /** @return array<string,array{value:string|int|bool|null,reason:string}> */
+    private static function companyBackupRestoreOverrides(string $table): array
+    {
+        return match ($table) {
+            'accounting_supplier_settings' => [
+                'automation_digest_enabled' => [
+                    'value' => 0,
+                    'reason' => 'disable_automation_after_restore',
+                ],
+                'automation_level' => [
+                    'value' => 'off',
+                    'reason' => 'disable_automation_after_restore',
+                ],
+            ],
+            default => [],
+        };
     }
 
     /**
@@ -448,6 +488,21 @@ final class TenantDataRegistryFactory
     private static function companyBackupReferences(string $table): array
     {
         return match ($table) {
+            'accounting_supplier_settings' => [
+                self::companyBackupTenantNaturalKeyReference(
+                    ['supplier_id', 'fuel_account_code'],
+                    'chart_of_accounts',
+                    ['supplier_id', 'account_code'],
+                    ['fuel_account_code'],
+                ),
+                self::companyBackupTenantNaturalKeyReference(
+                    ['supplier_id', 'vehicle_repair_account_code'],
+                    'chart_of_accounts',
+                    ['supplier_id', 'account_code'],
+                    ['vehicle_repair_account_code'],
+                ),
+                self::companyBackupSupplierReference(),
+            ],
             'accounting_periods' => [
                 self::companyBackupActorReference('approved_by'),
                 self::companyBackupActorReference('closed_by'),

@@ -209,6 +209,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
                         'nullable_columns' => [],
                         'fallbacks' => [],
                     ]],
+                    'restore_overrides' => [],
                 ],
             ],
         );

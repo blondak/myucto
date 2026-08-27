@@ -131,6 +131,7 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
                         'nullable_columns' => ['parent_id'],
                         'fallbacks' => [],
                     ]],
+                    'restore_overrides' => [],
                 ],
             ],
         )]);
@@ -239,6 +240,7 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
                 'generated_columns' => [],
                 'omit_columns' => [],
                 'references' => [],
+                'restore_overrides' => [],
             ],
         ]);
     }
