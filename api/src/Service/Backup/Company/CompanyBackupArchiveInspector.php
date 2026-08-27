@@ -13,10 +13,6 @@ use ZipArchive;
  */
 final class CompanyBackupArchiveInspector
 {
-    private const MANIFEST = 'manifest.json';
-    private const CHECKSUMS = 'CHECKSUMS.txt';
-    private const README = 'CTI-MNE.txt';
-
     public function __construct(
         private readonly CompanyBackupFormat $format,
         private readonly BackupUpcasterRegistry $upcasters,
@@ -58,7 +54,7 @@ final class CompanyBackupArchiveInspector
                 throw new CompanyBackupArchiveException('archive_unlock_failed');
             }
             [$entries, $expandedBytes] = $this->inspectCentralDirectory($zip);
-            foreach ([self::MANIFEST, self::CHECKSUMS, self::README] as $required) {
+            foreach (CompanyBackupArchiveLayout::REQUIRED_ENTRIES as $required) {
                 if (!isset($entries[$required]) || $entries[$required]['directory']) {
                     throw new CompanyBackupArchiveException('required_entry_missing', $required);
                 }
@@ -66,7 +62,7 @@ final class CompanyBackupArchiveInspector
 
             $manifestRead = $this->readEntry(
                 $zip,
-                $entries[self::MANIFEST],
+                $entries[CompanyBackupArchiveLayout::MANIFEST],
                 $this->limits->maxManifestBytes,
                 true,
                 true,
@@ -88,7 +84,7 @@ final class CompanyBackupArchiveInspector
 
             $checksumsRead = $this->readEntry(
                 $zip,
-                $entries[self::CHECKSUMS],
+                $entries[CompanyBackupArchiveLayout::CHECKSUMS],
                 $this->limits->maxChecksumsBytes,
                 true,
                 false,
@@ -101,7 +97,7 @@ final class CompanyBackupArchiveInspector
 
             $payloadPaths = [];
             foreach ($entries as $path => $entry) {
-                if (!$entry['directory'] && $path !== self::CHECKSUMS) {
+                if (!$entry['directory'] && $path !== CompanyBackupArchiveLayout::CHECKSUMS) {
                     $payloadPaths[] = $path;
                 }
             }
@@ -110,9 +106,9 @@ final class CompanyBackupArchiveInspector
                 throw new CompanyBackupArchiveException('checksums_scope_mismatch');
             }
 
-            $entryHashes = [self::MANIFEST => $manifestRead['sha256']];
+            $entryHashes = [CompanyBackupArchiveLayout::MANIFEST => $manifestRead['sha256']];
             foreach ($payloadPaths as $path) {
-                if ($path === self::MANIFEST) {
+                if ($path === CompanyBackupArchiveLayout::MANIFEST) {
                     continue;
                 }
                 $read = $this->readEntry(
@@ -182,7 +178,7 @@ final class CompanyBackupArchiveInspector
         }
 
         $entries = [];
-        $collisionPaths = [];
+        $paths = new CompanyBackupArchivePathSet();
         $expandedBytes = 0;
         $aes256 = ZipArchive::EM_AES_256;
         for ($index = 0; $index < $count; $index++) {
@@ -222,15 +218,7 @@ final class CompanyBackupArchiveInspector
                 throw new CompanyBackupArchiveException('entry_type_unsupported', $rawPath);
             }
             $directory = $nameDirectory;
-            $path = CompanyBackupArchivePath::normalize($rawPath, $directory);
-            $collisionKey = CompanyBackupArchivePath::collisionKey($path);
-            if (isset($collisionPaths[$collisionKey])) {
-                throw new CompanyBackupArchiveException(
-                    'entry_path_duplicate',
-                    $collisionPaths[$collisionKey],
-                );
-            }
-            $collisionPaths[$collisionKey] = $path;
+            $path = $paths->add($rawPath, $directory);
 
             if ($directory) {
                 if ($size !== 0) {
@@ -267,24 +255,6 @@ final class CompanyBackupArchiveInspector
             ];
         }
 
-        $filePaths = [];
-        foreach ($entries as $path => $entry) {
-            if (!$entry['directory']) {
-                $filePaths[CompanyBackupArchivePath::collisionKey($path)] = $path;
-            }
-        }
-        foreach ($filePaths as $path) {
-            $segments = explode('/', $path);
-            array_pop($segments);
-            $prefix = '';
-            foreach ($segments as $segment) {
-                $prefix = $prefix === '' ? $segment : $prefix . '/' . $segment;
-                $prefixKey = CompanyBackupArchivePath::collisionKey($prefix);
-                if (isset($filePaths[$prefixKey])) {
-                    throw new CompanyBackupArchiveException('entry_path_conflict', $path);
-                }
-            }
-        }
         return [$entries, $expandedBytes];
     }
 

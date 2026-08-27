@@ -34,6 +34,49 @@ final class CompanyBackupChecksumsTest extends TestCase
         );
     }
 
+    public function testBuildsCanonicalInventoryFromWriterMetadata(): void
+    {
+        $checksums = CompanyBackupChecksums::fromEntryHashes([
+            'manifest.json' => ['sha256' => str_repeat('a', 64), 'size' => 120],
+            'data/table.jsonl' => ['sha256' => str_repeat('b', 64), 'size' => 8],
+        ]);
+
+        self::assertSame(
+            str_repeat('b', 64) . "  data/table.jsonl\n"
+                . str_repeat('a', 64) . "  manifest.json\n",
+            $checksums->canonicalText(),
+        );
+    }
+
+    /** @param array<mixed> $entries */
+    #[DataProvider('invalidWriterEntries')]
+    public function testRejectsMalformedWriterMetadata(array $entries): void
+    {
+        $this->expectException(CompanyBackupArchiveException::class);
+        $this->expectExceptionMessage('checksums_invalid');
+
+        CompanyBackupChecksums::fromEntryHashes($entries);
+    }
+
+    /** @return iterable<string,array{array<mixed>}> */
+    public static function invalidWriterEntries(): iterable
+    {
+        $valid = ['sha256' => str_repeat('a', 64), 'size' => 1];
+
+        yield 'empty' => [[]];
+        yield 'numeric path' => [[0 => $valid]];
+        yield 'metadata is not object' => [['manifest.json' => null]];
+        yield 'missing hash' => [['manifest.json' => ['size' => 1]]];
+        yield 'negative size' => [[
+            'manifest.json' => ['sha256' => str_repeat('a', 64), 'size' => -1],
+        ]];
+        yield 'self checksum' => [['CHECKSUMS.txt' => $valid]];
+        yield 'case collision' => [[
+            'Manifest.json' => $valid,
+            'manifest.json' => ['sha256' => str_repeat('b', 64), 'size' => 1],
+        ]];
+    }
+
     #[DataProvider('invalidContents')]
     public function testRejectsAmbiguousOrUnsafeInventories(string $content, string $errorCode): void
     {

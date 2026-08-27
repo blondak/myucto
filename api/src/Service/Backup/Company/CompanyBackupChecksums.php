@@ -17,6 +17,39 @@ final readonly class CompanyBackupChecksums
         $this->hashes = $hashes;
     }
 
+    /** @param array<mixed> $entries */
+    public static function fromEntryHashes(array $entries): self
+    {
+        if ($entries === []) {
+            throw new CompanyBackupArchiveException('checksums_invalid');
+        }
+        $hashes = [];
+        $collisionKeys = [];
+        foreach ($entries as $rawPath => $entry) {
+            if (!is_string($rawPath) || !is_array($entry)) {
+                throw new CompanyBackupArchiveException('checksums_invalid');
+            }
+            $path = CompanyBackupArchivePath::normalize($rawPath, false);
+            $sha256 = $entry['sha256'] ?? null;
+            $size = $entry['size'] ?? null;
+            $collisionKey = CompanyBackupArchivePath::collisionKey($path);
+            if ($collisionKey === CompanyBackupArchivePath::collisionKey(
+                CompanyBackupArchiveLayout::CHECKSUMS,
+            )
+                || isset($collisionKeys[$collisionKey])
+                || !is_string($sha256)
+                || preg_match('/^[0-9a-f]{64}$/D', $sha256) !== 1
+                || !is_int($size)
+                || $size < 0
+            ) {
+                throw new CompanyBackupArchiveException('checksums_invalid', $path);
+            }
+            $collisionKeys[$collisionKey] = true;
+            $hashes[$path] = $sha256;
+        }
+        return new self($hashes);
+    }
+
     public static function parse(string $content): self
     {
         if ($content === '') {
@@ -35,7 +68,9 @@ final readonly class CompanyBackupChecksums
             }
             $path = CompanyBackupArchivePath::normalize($matches[2], false);
             $collisionKey = CompanyBackupArchivePath::collisionKey($path);
-            if ($collisionKey === CompanyBackupArchivePath::collisionKey('CHECKSUMS.txt')) {
+            if ($collisionKey === CompanyBackupArchivePath::collisionKey(
+                CompanyBackupArchiveLayout::CHECKSUMS,
+            )) {
                 throw new CompanyBackupArchiveException('checksums_invalid', $path);
             }
             if (isset($collisionKeys[$collisionKey])) {
