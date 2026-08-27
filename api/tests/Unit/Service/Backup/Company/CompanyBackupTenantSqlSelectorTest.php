@@ -190,6 +190,7 @@ final class CompanyBackupTenantSqlSelectorTest extends TestCase
                 'secrets' => [],
                 'company_backup' => [
                     'data_columns' => $dataColumns,
+                    'embedded_references' => [],
                     'generated_columns' => [],
                     'omit_columns' => [],
                     'references' => $this->references($dataColumns),

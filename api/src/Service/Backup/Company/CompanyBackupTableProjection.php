@@ -34,6 +34,8 @@ final readonly class CompanyBackupTableProjection
 
     public CompanyBackupReferenceSet $references;
 
+    public CompanyBackupEmbeddedReferenceSet $embeddedReferences;
+
     public CompanyBackupRestoreOverrideSet $restoreOverrides;
 
     /**
@@ -55,6 +57,7 @@ final readonly class CompanyBackupTableProjection
         array $omitColumns,
         array $secretPolicies,
         CompanyBackupReferenceSet $references,
+        CompanyBackupEmbeddedReferenceSet $embeddedReferences,
         CompanyBackupRestoreOverrideSet $restoreOverrides,
     ) {
         $this->primaryKey = $primaryKey;
@@ -64,6 +67,7 @@ final readonly class CompanyBackupTableProjection
         $this->omitColumns = $omitColumns;
         $this->secretPolicies = $secretPolicies;
         $this->references = $references;
+        $this->embeddedReferences = $embeddedReferences;
         $this->restoreOverrides = $restoreOverrides;
     }
 
@@ -112,6 +116,7 @@ final readonly class CompanyBackupTableProjection
         sort($metadataKeys, SORT_STRING);
         if ($metadataKeys !== [
             'data_columns',
+            'embedded_references',
             'generated_columns',
             'omit_columns',
             'references',
@@ -144,6 +149,11 @@ final readonly class CompanyBackupTableProjection
             $registryKey,
         );
         $references->assertProjectionColumns($dataColumns);
+        $embeddedReferences = CompanyBackupEmbeddedReferenceSet::fromArray(
+            $metadata['embedded_references'],
+            $registryKey,
+            $dataColumns,
+        );
         $restoreOverrides = CompanyBackupRestoreOverrideSet::fromArray(
             $metadata['restore_overrides'],
             $registryKey,
@@ -208,6 +218,7 @@ final readonly class CompanyBackupTableProjection
             $omitColumns,
             $secretPolicies,
             $references,
+            $embeddedReferences,
             $restoreOverrides,
         );
     }

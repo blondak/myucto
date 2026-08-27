@@ -120,6 +120,7 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
                 'secrets' => [],
                 'company_backup' => [
                     'data_columns' => ['id', 'parent_id'],
+                    'embedded_references' => [],
                     'generated_columns' => [],
                     'omit_columns' => [],
                     'references' => [[
@@ -237,6 +238,7 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
             'secrets' => [],
             'company_backup' => [
                 'data_columns' => ['id', 'company_name'],
+                'embedded_references' => [],
                 'generated_columns' => [],
                 'omit_columns' => [],
                 'references' => [],

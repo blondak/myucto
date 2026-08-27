@@ -198,6 +198,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
                 'secrets' => $secrets,
                 'company_backup' => [
                     'data_columns' => ['id', 'supplier_id', 'label'],
+                    'embedded_references' => [],
                     'generated_columns' => [],
                     'omit_columns' => [],
                     'references' => [[

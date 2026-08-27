@@ -57,6 +57,7 @@ final class CompanyBackupTableSchemaReaderTest extends TestCase
                 'secrets' => [],
                 'company_backup' => [
                     'data_columns' => ['id', 'supplier_id', 'parent_id'],
+                    'embedded_references' => [],
                     'generated_columns' => [],
                     'omit_columns' => [],
                     'references' => [[

@@ -425,6 +425,7 @@ final class TenantDataRegistryFactory
      *
      * @return array{company_backup:array{
      *   data_columns:list<string>,
+     *   embedded_references:list<array<string,mixed>>,
      *   generated_columns:list<string>,
      *   omit_columns:array<string,string>,
      *   restore_overrides:array<string,array{value:string|int|bool|null,reason:string}>,
@@ -448,6 +449,7 @@ final class TenantDataRegistryFactory
         return [
             'company_backup' => [
                 'data_columns' => $columns,
+                'embedded_references' => [],
                 'generated_columns' => [],
                 'omit_columns' => [],
                 'references' => self::companyBackupReferences($table),

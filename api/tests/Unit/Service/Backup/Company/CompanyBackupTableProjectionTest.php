@@ -51,6 +51,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
             ['id', 'supplier_id', 'name', 'approval_token_expires_at'],
             $projection->dataColumns,
         );
+        self::assertSame([], $projection->embeddedReferences->references);
         self::assertNull($projection->requiredSecretEnvelopeColumn());
     }
 
@@ -184,6 +185,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
                 'secrets' => $secrets,
                 'company_backup' => [
                     'data_columns' => $dataColumns,
+                    'embedded_references' => [],
                     'generated_columns' => $generatedColumns,
                     'omit_columns' => $omitColumns,
                     'references' => $references ?? [$this->supplierReference()],
