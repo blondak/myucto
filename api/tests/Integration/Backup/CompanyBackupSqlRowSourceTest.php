@@ -181,6 +181,71 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         self::assertContains('reviewed_by', $schema->columns);
     }
 
+    public function testProductionChartOfAccountsProjectionMatchesMigratedSchema(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:chart_of_accounts');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        self::assertContains('parent_id', $schema->columns);
+        self::assertContains('is_clearing', $schema->columns);
+    }
+
+    public function testProductionPostingRulesProjectionMatchesMigratedSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'posting_rules',
+            ['debit_account_code', 'credit_account_code'],
+        );
+    }
+
+    public function testProductionCostCentersProjectionMatchesMigratedSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'cost_centers',
+            ['supplier_id', 'updated_at'],
+        );
+    }
+
+    /** @param list<string> $expectedColumns */
+    private function assertProductionProjectionMatchesSchema(
+        string $table,
+        array $expectedColumns,
+    ): void {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:' . $table);
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+        foreach ($expectedColumns as $column) {
+            self::assertContains($column, $schema->columns);
+        }
+    }
+
     private function accountingPeriodsDefinition(PDO $pdo): TenantDataDefinition
     {
         $statement = $pdo->query(

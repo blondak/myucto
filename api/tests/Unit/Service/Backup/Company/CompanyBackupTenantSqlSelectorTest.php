@@ -13,6 +13,7 @@ use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupTenantSqlSelectorTest extends TestCase
@@ -151,6 +152,19 @@ final class CompanyBackupTenantSqlSelectorTest extends TestCase
                 );
             }
         }
+    }
+
+    public function testProductionPostingRulesExcludeGlobalSeedRows(): void
+    {
+        $definition = TenantDataRegistryFactory::draftV1()->definition('table:posting_rules');
+        self::assertNotNull($definition);
+        $selection = (new CompanyBackupTenantSqlSelector())->select(
+            CompanyBackupTableProjection::fromDefinition($definition),
+            19,
+        );
+
+        self::assertSame('`_company_source`.`supplier_id` = ?', $selection->where);
+        self::assertSame([19], $selection->params);
     }
 
     /**

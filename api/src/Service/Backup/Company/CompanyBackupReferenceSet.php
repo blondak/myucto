@@ -32,7 +32,8 @@ final readonly class CompanyBackupReferenceSet
         }
         $references = [];
         $signatures = [];
-        $claimedColumns = [];
+        /** @var array<string,list<CompanyBackupReference>> $columnClaims */
+        $columnClaims = [];
         foreach ($value as $item) {
             $reference = CompanyBackupReference::fromArray($item, $registryKey);
             $signature = $reference->signature();
@@ -43,18 +44,21 @@ final readonly class CompanyBackupReferenceSet
                     $reference->firstColumn(),
                 );
             }
-            foreach ($reference->columns as $column) {
-                if (isset($claimedColumns[$column])) {
-                    throw new CompanyBackupDataSourceException(
-                        'data_reference_duplicate',
-                        $registryKey,
-                        $column,
-                    );
-                }
-                $claimedColumns[$column] = true;
-            }
             $signatures[$signature] = true;
             $references[] = $reference;
+            foreach ($reference->columns as $column) {
+                $columnClaims[$column][] = $reference;
+            }
+        }
+        foreach ($columnClaims as $column => $claims) {
+            if (count($claims) < 2 || self::isSharedTenantContext($column, $claims)) {
+                continue;
+            }
+            throw new CompanyBackupDataSourceException(
+                'data_reference_duplicate',
+                $registryKey,
+                $column,
+            );
         }
         $ordered = $references;
         usort(
@@ -69,6 +73,34 @@ final readonly class CompanyBackupReferenceSet
             );
         }
         return new self($registryKey, $references);
+    }
+
+    /** @param list<CompanyBackupReference> $claims */
+    private static function isSharedTenantContext(string $column, array $claims): bool
+    {
+        if ($column !== 'supplier_id') {
+            return false;
+        }
+        foreach ($claims as $reference) {
+            $supplierRoot = $reference->mapping === CompanyBackupReferenceMapping::TenantId
+                && $reference->columns === ['supplier_id']
+                && $reference->target === 'table:supplier'
+                && $reference->targetColumns === ['id'];
+            $tenantScoped = in_array(
+                $reference->mapping,
+                [
+                    CompanyBackupReferenceMapping::TenantId,
+                    CompanyBackupReferenceMapping::TenantNaturalKey,
+                ],
+                true,
+            )
+                && $reference->columns[0] === 'supplier_id'
+                && $reference->targetColumns[0] === 'supplier_id';
+            if (!$supplierRoot && !$tenantScoped) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @param list<string> $dataColumns */
@@ -113,12 +145,22 @@ final readonly class CompanyBackupReferenceSet
                 throw $this->targetError($reference);
             }
             $primaryKey = $this->targetPrimaryKey($target, $reference);
-            if ($reference->targetColumns !== $primaryKey) {
+            $naturalKey = $this->targetNaturalKey($target);
+            $targetsExpectedKey = match ($reference->mapping) {
+                CompanyBackupReferenceMapping::TenantNaturalKey =>
+                    $naturalKey !== null && $reference->targetColumns === $naturalKey,
+                CompanyBackupReferenceMapping::TenantId,
+                CompanyBackupReferenceMapping::GlobalNaturalKey,
+                CompanyBackupReferenceMapping::Actor =>
+                    $reference->targetColumns === $primaryKey,
+            };
+            if (!$targetsExpectedKey) {
                 throw $this->targetError($reference);
             }
 
             $valid = match ($reference->mapping) {
-                CompanyBackupReferenceMapping::TenantId => in_array(
+                CompanyBackupReferenceMapping::TenantId,
+                CompanyBackupReferenceMapping::TenantNaturalKey => in_array(
                     $target->policy,
                     [
                         TenantDataPolicy::TenantRoot,
@@ -131,7 +173,7 @@ final readonly class CompanyBackupReferenceSet
                     $target->policy === TenantDataPolicy::InstanceOwned,
                 CompanyBackupReferenceMapping::GlobalNaturalKey =>
                     $target->policy === TenantDataPolicy::GlobalReference
-                    && $this->hasNaturalKey($target),
+                    && $naturalKey !== null,
             };
             if (!$valid) {
                 throw $this->targetError($reference);
@@ -217,22 +259,25 @@ final readonly class CompanyBackupReferenceSet
         return $result;
     }
 
-    private function hasNaturalKey(TenantDataDefinition $target): bool
+    /** @return list<string>|null */
+    private function targetNaturalKey(TenantDataDefinition $target): ?array
     {
         $value = $target->details['natural_key'] ?? null;
         if (!is_array($value) || !array_is_list($value) || $value === []) {
-            return false;
+            return null;
         }
         $seen = [];
+        $result = [];
         foreach ($value as $column) {
             if (!is_string($column)
                 || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $column) !== 1
                 || isset($seen[$column])
             ) {
-                return false;
+                return null;
             }
             $seen[$column] = true;
+            $result[] = $column;
         }
-        return true;
+        return $result;
     }
 }

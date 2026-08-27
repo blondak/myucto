@@ -165,6 +165,29 @@ final class TenantDataRegistryFactory
             'small_asset_accrual_pct',
             'small_asset_flat_pct_materiality_limit',
         ],
+        'chart_of_accounts' => [
+            'id',
+            'supplier_id',
+            'account_code',
+            'name',
+            'account_type',
+            'normal_side',
+            'is_synthetic',
+            'parent_id',
+            'is_active',
+            'created_at',
+            'tax_deductibility',
+            'is_clearing',
+        ],
+        'cost_centers' => [
+            'id',
+            'supplier_id',
+            'code',
+            'name',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ],
         'currencies' => [
             'id',
             'supplier_id',
@@ -181,6 +204,17 @@ final class TenantDataRegistryFactory
             'bank_name',
             'iban',
             'bic',
+        ],
+        'posting_rules' => [
+            'id',
+            'supplier_id',
+            'rule_key',
+            'description',
+            'debit_account_code',
+            'credit_account_code',
+            'priority',
+            'is_active',
+            'created_at',
         ],
     ];
 
@@ -237,7 +271,9 @@ final class TenantDataRegistryFactory
                 ],
                 ...self::companyBackupProjection($table),
             ];
-            if ($table === 'bank_statements') {
+            if ($table === 'chart_of_accounts') {
+                $details['natural_key'] = ['supplier_id', 'account_code'];
+            } elseif ($table === 'bank_statements') {
                 $details['natural_key'] = ['file_hash'];
             } elseif ($table === 'exchange_rates') {
                 $details['natural_key'] = ['rate_date', 'currency_code'];
@@ -418,7 +454,31 @@ final class TenantDataRegistryFactory
                 self::companyBackupActorReference('reviewed_by'),
                 self::companyBackupSupplierReference(),
             ],
+            'chart_of_accounts' => [
+                self::companyBackupTenantReference(
+                    'parent_id',
+                    'chart_of_accounts',
+                    nullable: true,
+                ),
+                self::companyBackupSupplierReference(),
+            ],
+            'cost_centers' => [self::companyBackupSupplierReference()],
             'currencies' => [self::companyBackupSupplierReference()],
+            'posting_rules' => [
+                self::companyBackupTenantNaturalKeyReference(
+                    ['supplier_id', 'credit_account_code'],
+                    'chart_of_accounts',
+                    ['supplier_id', 'account_code'],
+                    ['supplier_id', 'credit_account_code'],
+                ),
+                self::companyBackupTenantNaturalKeyReference(
+                    ['supplier_id', 'debit_account_code'],
+                    'chart_of_accounts',
+                    ['supplier_id', 'account_code'],
+                    ['supplier_id', 'debit_account_code'],
+                ),
+                self::companyBackupSupplierReference(nullable: true),
+            ],
             default => [],
         };
     }
@@ -434,15 +494,69 @@ final class TenantDataRegistryFactory
      *   fallbacks:list<string>
      * }
      */
-    private static function companyBackupSupplierReference(): array
+    private static function companyBackupSupplierReference(bool $nullable = false): array
     {
+        return self::companyBackupTenantReference(
+            'supplier_id',
+            'supplier',
+            $nullable,
+        );
+    }
+
+    /**
+     * @return array{
+     *   columns:list<string>,
+     *   target:string,
+     *   target_columns:list<string>,
+     *   mapping:string,
+     *   constraint:string,
+     *   nullable_columns:list<string>,
+     *   fallbacks:list<string>
+     * }
+     */
+    private static function companyBackupTenantReference(
+        string $column,
+        string $target,
+        bool $nullable = false,
+    ): array {
         return [
-            'columns' => ['supplier_id'],
-            'target' => 'table:supplier',
+            'columns' => [$column],
+            'target' => 'table:' . $target,
             'target_columns' => ['id'],
             'mapping' => CompanyBackupReferenceMapping::TenantId->value,
             'constraint' => CompanyBackupReferenceConstraint::Required->value,
-            'nullable_columns' => [],
+            'nullable_columns' => $nullable ? [$column] : [],
+            'fallbacks' => [],
+        ];
+    }
+
+    /**
+     * @param list<string> $columns
+     * @param list<string> $targetColumns
+     * @param list<string> $nullableColumns
+     * @return array{
+     *   columns:list<string>,
+     *   target:string,
+     *   target_columns:list<string>,
+     *   mapping:string,
+     *   constraint:string,
+     *   nullable_columns:list<string>,
+     *   fallbacks:list<string>
+     * }
+     */
+    private static function companyBackupTenantNaturalKeyReference(
+        array $columns,
+        string $target,
+        array $targetColumns,
+        array $nullableColumns,
+    ): array {
+        return [
+            'columns' => $columns,
+            'target' => 'table:' . $target,
+            'target_columns' => $targetColumns,
+            'mapping' => CompanyBackupReferenceMapping::TenantNaturalKey->value,
+            'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+            'nullable_columns' => $nullableColumns,
             'fallbacks' => [],
         ];
     }

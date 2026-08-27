@@ -8,6 +8,7 @@ namespace MyInvoice\Service\Backup\Company;
 enum CompanyBackupReferenceMapping: string
 {
     case TenantId = 'tenant_id';
+    case TenantNaturalKey = 'tenant_natural_key';
     case GlobalNaturalKey = 'global_natural_key';
     case Actor = 'actor';
 }

@@ -132,6 +132,83 @@ final class CompanyBackupReferenceSetTest extends TestCase
         }
     }
 
+    public function testAllowsSharedTenantColumnAcrossNaturalKeyReferences(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                $this->accountCodeReference('credit_account_code'),
+                $this->accountCodeReference('debit_account_code'),
+                [
+                    ...$this->supplierReference(),
+                    'nullable_columns' => ['supplier_id'],
+                ],
+            ],
+            'table:posting_rules',
+        );
+        $registry = new TenantDataRegistry(
+            1,
+            [
+                $this->definition(
+                    'chart_of_accounts',
+                    TenantDataPolicy::TenantOwned,
+                    ['natural_key' => ['supplier_id', 'account_code']],
+                ),
+                $this->definition('supplier', TenantDataPolicy::TenantRoot),
+            ],
+        );
+
+        $references->assertProjectionColumns([
+            'id',
+            'supplier_id',
+            'debit_account_code',
+            'credit_account_code',
+        ]);
+        $references->assertRegistryTargets($registry);
+        $references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['supplier_id', 'debit_account_code', 'credit_account_code'],
+            [new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id'])],
+        ));
+
+        self::assertCount(3, $references->references);
+        self::assertSame(
+            CompanyBackupReferenceMapping::TenantNaturalKey,
+            $references->references[0]->mapping,
+        );
+    }
+
+    public function testRejectsOverlappingBusinessReferenceColumns(): void
+    {
+        try {
+            CompanyBackupReferenceSet::fromArray(
+                [
+                    [
+                        'columns' => ['related_id', 'code'],
+                        'target' => 'table:chart_of_accounts',
+                        'target_columns' => ['supplier_id', 'account_code'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantNaturalKey->value,
+                        'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ],
+                    [
+                        'columns' => ['related_id'],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ],
+                ],
+                'table:synthetic_records',
+            );
+            self::fail('Sdílet mezi remapy se smí jen explicitní tenantový kontext.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_duplicate', $e->errorCode);
+            self::assertSame('related_id', $e->column);
+        }
+    }
+
     /** @return array<string,mixed> */
     private function supplierReference(): array
     {
@@ -160,6 +237,20 @@ final class CompanyBackupReferenceSetTest extends TestCase
         ];
     }
 
+    /** @return array<string,mixed> */
+    private function accountCodeReference(string $column): array
+    {
+        return [
+            'columns' => ['supplier_id', $column],
+            'target' => 'table:chart_of_accounts',
+            'target_columns' => ['supplier_id', 'account_code'],
+            'mapping' => CompanyBackupReferenceMapping::TenantNaturalKey->value,
+            'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+            'nullable_columns' => ['supplier_id', $column],
+            'fallbacks' => [],
+        ];
+    }
+
     private function targetRegistry(): TenantDataRegistry
     {
         return new TenantDataRegistry(
@@ -171,14 +262,18 @@ final class CompanyBackupReferenceSetTest extends TestCase
         );
     }
 
-    private function definition(string $table, TenantDataPolicy $policy): TenantDataDefinition
-    {
+    /** @param array<string,mixed> $details */
+    private function definition(
+        string $table,
+        TenantDataPolicy $policy,
+        array $details = [],
+    ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:' . $table,
             TenantDataObjectKind::Table,
             $policy,
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
-            ['primary_key' => ['id']],
+            ['primary_key' => ['id'], ...$details],
         );
     }
 }

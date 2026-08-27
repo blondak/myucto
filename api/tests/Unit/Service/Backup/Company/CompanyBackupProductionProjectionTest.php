@@ -112,9 +112,126 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         self::assertFalse($users->policy->hasMachineDataPayload());
     }
 
+    public function testChartOfAccountsDeclaresNullableSelfReference(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:chart_of_accounts');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'account_code',
+            'name',
+            'account_type',
+            'normal_side',
+            'is_synthetic',
+            'parent_id',
+            'is_active',
+            'created_at',
+            'tax_deductibility',
+            'is_clearing',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['parent_id'],
+            [
+                new CompanyBackupForeignKey(['parent_id'], 'chart_of_accounts', ['id']),
+                new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+            ],
+        ));
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['parent_id', 'supplier_id'],
+            array_map(
+                static fn ($reference): string => $reference->firstColumn(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['parent_id'],
+            $projection->references->references[0]->nullableColumns,
+        );
+    }
+
+    public function testPostingRulesDeclareTenantNaturalKeyReferences(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:posting_rules');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'rule_key',
+            'description',
+            'debit_account_code',
+            'credit_account_code',
+            'priority',
+            'is_active',
+            'created_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['supplier_id', 'debit_account_code', 'credit_account_code'],
+            [new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id'])],
+        ));
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'supplier_id,credit_account_code->chart_of_accounts:supplier_id,account_code',
+                'supplier_id,debit_account_code->chart_of_accounts:supplier_id,account_code',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            CompanyBackupReferenceMapping::TenantNaturalKey,
+            $projection->references->references[0]->mapping,
+        );
+    }
+
+    public function testCostCentersDeclareSupplierReference(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:cost_centers');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'code',
+            'name',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            [],
+            [new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id'])],
+        ));
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertCount(1, $projection->references->references);
+    }
+
     public function testRemainingProductionTableStillFailsClosedWithoutInventory(): void
     {
-        $definition = TenantDataRegistryFactory::draftV1()->definition('table:chart_of_accounts');
+        $definition = TenantDataRegistryFactory::draftV1()->definition(
+            'table:accounting_supplier_settings',
+        );
         self::assertNotNull($definition);
 
         try {
