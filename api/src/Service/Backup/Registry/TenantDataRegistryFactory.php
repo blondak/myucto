@@ -143,6 +143,18 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<string>> */
     private const COMPANY_BACKUP_DATA_COLUMNS = [
+        'accounting_document_series' => [
+            'id',
+            'supplier_id',
+            'series_code',
+            'register_id',
+            'fiscal_year',
+            'prefix',
+            'number_format',
+            'next_number',
+            'created_at',
+            'updated_at',
+        ],
         'accounting_supplier_settings' => [
             'supplier_id',
             'avg_employees',
@@ -490,6 +502,13 @@ final class TenantDataRegistryFactory
     private static function companyBackupReferences(string $table): array
     {
         return match ($table) {
+            'accounting_document_series' => [
+                self::companyBackupTenantIdOrZeroReference(
+                    'register_id',
+                    'cash_registers',
+                ),
+                self::companyBackupSupplierReference(),
+            ],
             'accounting_supplier_settings' => [
                 self::companyBackupTenantNaturalKeyReference(
                     ['supplier_id', 'fuel_account_code'],
@@ -583,6 +602,32 @@ final class TenantDataRegistryFactory
             'mapping' => CompanyBackupReferenceMapping::TenantId->value,
             'constraint' => CompanyBackupReferenceConstraint::Required->value,
             'nullable_columns' => $nullable ? [$column] : [],
+            'fallbacks' => [],
+        ];
+    }
+
+    /**
+     * @return array{
+     *   columns:list<string>,
+     *   target:string,
+     *   target_columns:list<string>,
+     *   mapping:string,
+     *   constraint:string,
+     *   nullable_columns:list<string>,
+     *   fallbacks:list<string>
+     * }
+     */
+    private static function companyBackupTenantIdOrZeroReference(
+        string $column,
+        string $target,
+    ): array {
+        return [
+            'columns' => [$column],
+            'target' => 'table:' . $target,
+            'target_columns' => ['id'],
+            'mapping' => CompanyBackupReferenceMapping::TenantIdOrZero->value,
+            'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+            'nullable_columns' => [],
             'fallbacks' => [],
         ];
     }

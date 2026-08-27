@@ -209,6 +209,63 @@ final class CompanyBackupReferenceSetTest extends TestCase
         }
     }
 
+    public function testAcceptsExplicitZeroSentinelSoftReference(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [[
+                'columns' => ['register_id'],
+                'target' => 'table:cash_registers',
+                'target_columns' => ['id'],
+                'mapping' => CompanyBackupReferenceMapping::TenantIdOrZero->value,
+                'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+                'nullable_columns' => [],
+                'fallbacks' => [],
+            ]],
+            'table:accounting_document_series',
+        );
+        $registry = new TenantDataRegistry(1, [
+            $this->definition('cash_registers', TenantDataPolicy::TenantOwned),
+        ]);
+
+        $references->assertProjectionColumns(['id', 'register_id']);
+        $references->assertRegistryTargets($registry);
+        $references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema([], []));
+
+        self::assertSame(
+            CompanyBackupReferenceMapping::TenantIdOrZero,
+            $references->references[0]->mapping,
+        );
+    }
+
+    public function testRejectsZeroSentinelThatPretendsToBeNullableOrPhysicalFk(): void
+    {
+        foreach (
+            [
+                ['constraint' => CompanyBackupReferenceConstraint::Required->value],
+                ['nullable_columns' => ['register_id']],
+            ] as $change
+        ) {
+            try {
+                CompanyBackupReferenceSet::fromArray(
+                    [[
+                        'columns' => ['register_id'],
+                        'target' => 'table:cash_registers',
+                        'target_columns' => ['id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantIdOrZero->value,
+                        'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                        ...$change,
+                    ]],
+                    'table:accounting_document_series',
+                );
+                self::fail('Nulový sentinel musí zůstat ne-nullable soft referencí.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_reference_metadata_invalid', $e->errorCode);
+            }
+        }
+    }
+
     /** @return array<string,mixed> */
     private function supplierReference(): array
     {

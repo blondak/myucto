@@ -228,6 +228,14 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionAccountingDocumentSeriesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'accounting_document_series',
+            ['series_code', 'register_id', 'number_format', 'next_number'],
+        );
+    }
+
     /** @param list<string> $expectedColumns */
     private function assertProductionProjectionMatchesSchema(
         string $table,

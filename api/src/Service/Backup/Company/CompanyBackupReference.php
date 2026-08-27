@@ -132,6 +132,14 @@ final readonly class CompanyBackupReference
         ) {
             throw self::invalid($registryKey);
         }
+        if ($mapping === CompanyBackupReferenceMapping::TenantIdOrZero
+            && (count($columns) !== 1
+                || $targetColumns !== ['id']
+                || $constraint !== CompanyBackupReferenceConstraint::Optional
+                || $nullableColumns !== [])
+        ) {
+            throw self::invalid($registryKey);
+        }
 
         return new self(
             $columns,

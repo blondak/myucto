@@ -90,6 +90,7 @@ final readonly class CompanyBackupReferenceSet
                 $reference->mapping,
                 [
                     CompanyBackupReferenceMapping::TenantId,
+                    CompanyBackupReferenceMapping::TenantIdOrZero,
                     CompanyBackupReferenceMapping::TenantNaturalKey,
                 ],
                 true,
@@ -150,6 +151,7 @@ final readonly class CompanyBackupReferenceSet
                 CompanyBackupReferenceMapping::TenantNaturalKey =>
                     $naturalKey !== null && $reference->targetColumns === $naturalKey,
                 CompanyBackupReferenceMapping::TenantId,
+                CompanyBackupReferenceMapping::TenantIdOrZero,
                 CompanyBackupReferenceMapping::GlobalNaturalKey,
                 CompanyBackupReferenceMapping::Actor =>
                     $reference->targetColumns === $primaryKey,
@@ -160,6 +162,7 @@ final readonly class CompanyBackupReferenceSet
 
             $valid = match ($reference->mapping) {
                 CompanyBackupReferenceMapping::TenantId,
+                CompanyBackupReferenceMapping::TenantIdOrZero,
                 CompanyBackupReferenceMapping::TenantNaturalKey => in_array(
                     $target->policy,
                     [

@@ -101,11 +101,13 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 CompanyBackupReferenceMapping::GlobalNaturalKey =>
                     $naturalKey !== null && $reference->targetColumns === $naturalKey,
                 CompanyBackupReferenceMapping::TenantId,
+                CompanyBackupReferenceMapping::TenantIdOrZero,
                 CompanyBackupReferenceMapping::Actor =>
                     $reference->targetColumns === $primaryKey,
             };
             $validPolicy = match ($reference->mapping) {
                 CompanyBackupReferenceMapping::TenantId,
+                CompanyBackupReferenceMapping::TenantIdOrZero,
                 CompanyBackupReferenceMapping::TenantNaturalKey => in_array(
                     $target->policy,
                     [
@@ -192,6 +194,11 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             if (!$this->validSourceValue($value, $reference)) {
                 throw $this->valueError($reference->column);
             }
+            if ($reference->mapping === CompanyBackupReferenceMapping::TenantIdOrZero
+                && $value === 0
+            ) {
+                return;
+            }
             $mapped = $mapper($reference, $value);
             if (!$this->validMappedValue($mapped, $reference)) {
                 throw $this->valueError($reference->column);
@@ -228,6 +235,9 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             || $reference->mapping === CompanyBackupReferenceMapping::Actor
         ) {
             return is_int($value) && $value > 0;
+        }
+        if ($reference->mapping === CompanyBackupReferenceMapping::TenantIdOrZero) {
+            return is_int($value) && $value >= 0;
         }
         return $value !== '';
     }

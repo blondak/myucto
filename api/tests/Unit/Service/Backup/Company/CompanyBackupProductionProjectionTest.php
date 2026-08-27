@@ -283,6 +283,49 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testAccountingDocumentSeriesDeclaresZeroSentinelRegister(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:accounting_document_series');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'series_code',
+            'register_id',
+            'fiscal_year',
+            'prefix',
+            'number_format',
+            'next_number',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['number_format'],
+            [new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id'])],
+        ));
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'register_id->cash_registers:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            CompanyBackupReferenceMapping::TenantIdOrZero,
+            $projection->references->references[0]->mapping,
+        );
+    }
+
     public function testRemainingProductionTableStillFailsClosedWithoutInventory(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition(
