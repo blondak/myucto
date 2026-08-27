@@ -41,6 +41,10 @@ final class CompanyBackupDataInventoryTest extends TestCase
             $inventory->toArray(),
             $this->snapshot(),
         )->toArray());
+        self::assertSame($inventory->toArray(), CompanyBackupDataInventory::fromObjects(
+            $inventory->objects,
+            $this->snapshot(),
+        )->toArray());
 
         $inventory->assertArchiveEntries(
             [

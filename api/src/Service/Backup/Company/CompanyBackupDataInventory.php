@@ -92,6 +92,30 @@ final readonly class CompanyBackupDataInventory
         return new self($objects, $objectsByRegistryKey, $registry->fingerprint);
     }
 
+    /** @param array<mixed> $objects */
+    public static function fromObjects(array $objects, TenantDataRegistrySnapshot $registry): self
+    {
+        if (!array_is_list($objects)) {
+            throw new \InvalidArgumentException(
+                'Objekty strojových dat musí být předané jako seznam.',
+            );
+        }
+        $values = [];
+        foreach ($objects as $object) {
+            if (!$object instanceof CompanyBackupDataObject) {
+                throw new \InvalidArgumentException(
+                    'Seznam strojových dat obsahuje neplatný objekt.',
+                );
+            }
+            $values[] = $object->toArray();
+        }
+        return self::fromArray([
+            'format' => self::FORMAT,
+            'version' => self::VERSION,
+            'objects' => $values,
+        ], $registry);
+    }
+
     public function object(string $registryKey): ?CompanyBackupDataObject
     {
         return $this->objectsByRegistryKey[$registryKey] ?? null;

@@ -9,7 +9,9 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriteException;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataObject;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
+use MyInvoice\Service\Backup\Company\CompanyBackupJsonlWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupManifest;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -39,18 +41,28 @@ final class CompanyBackupArchiveWriterTest extends TestCase
     {
         $archive = $this->unusedPath('zip');
         $source = $this->temporaryFile("{\"id\":2}\n");
+        $jsonl = $this->unusedPath('jsonl');
         $format = new CompanyBackupFormat();
+        $dataObject = (new CompanyBackupJsonlWriter($this->limits()))->write(
+            $this->supplierDefinition(),
+            1,
+            [['id' => 1]],
+            $jsonl,
+        );
         $writer = new CompanyBackupArchiveWriter(
             $archive,
             self::PASSWORD,
             $format,
             $this->limits(),
         );
-        $writer->addString('data/table-supplier.jsonl', "{\"id\":1}\n");
+        $writer->addFile($dataObject->path, $jsonl);
         $writer->addFile('files/invoice-pdf/00000001.pdf', $source);
 
         self::assertFileDoesNotExist($archive);
-        $result = $writer->finish($this->manifest($format), "Syntetická záloha.\n");
+        $result = $writer->finish(
+            $this->manifest($format, $dataObject),
+            "Syntetická záloha.\n",
+        );
 
         self::assertFileExists($archive);
         self::assertSame($archive, $result->archivePath);
@@ -253,17 +265,14 @@ final class CompanyBackupArchiveWriterTest extends TestCase
         self::assertSame([], glob($archive . '.part-*') ?: []);
     }
 
-    private function manifest(CompanyBackupFormat $format): CompanyBackupManifest
+    private function manifest(
+        CompanyBackupFormat $format,
+        ?CompanyBackupDataObject $dataObject = null,
+    ): CompanyBackupManifest
     {
         $registry = new TenantDataRegistry(
             1,
-            [new TenantDataDefinition(
-                'table:supplier',
-                TenantDataObjectKind::Table,
-                TenantDataPolicy::TenantRoot,
-                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
-                ['ownership' => ['strategy' => 'selected_supplier', 'column' => 'id']],
-            )],
+            [$this->supplierDefinition()],
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
         );
         $supplier = "{\"id\":1}\n";
@@ -284,7 +293,7 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             'data' => [
                 'format' => CompanyBackupDataInventory::FORMAT,
                 'version' => CompanyBackupDataInventory::VERSION,
-                'objects' => [[
+                'objects' => [$dataObject?->toArray() ?? [
                     'registry_key' => 'table:supplier',
                     'path' => 'data/table-supplier.jsonl',
                     'order' => 1,
@@ -294,6 +303,17 @@ final class CompanyBackupArchiveWriterTest extends TestCase
                 ]],
             ],
         ]));
+    }
+
+    private function supplierDefinition(): TenantDataDefinition
+    {
+        return new TenantDataDefinition(
+            'table:supplier',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRoot,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            ['ownership' => ['strategy' => 'selected_supplier', 'column' => 'id']],
+        );
     }
 
     private function limits(): CompanyBackupArchiveLimits

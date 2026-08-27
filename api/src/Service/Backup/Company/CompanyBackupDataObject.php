@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 
 /** Jedna registrovaná JSONL položka strojového snapshotu. */
 final readonly class CompanyBackupDataObject
@@ -64,6 +66,39 @@ final readonly class CompanyBackupDataObject
     public static function pathForRegistryKey(string $registryKey): string
     {
         return 'data/' . str_replace(':', '-', $registryKey) . '.jsonl';
+    }
+
+    public static function fromWrittenPayload(
+        TenantDataDefinition $definition,
+        int $order,
+        int $rows,
+        int $bytes,
+        string $sha256,
+    ): self {
+        if (!in_array(
+            $definition->kind,
+            [TenantDataObjectKind::Table, TenantDataObjectKind::LogicalObject],
+            true,
+        )
+            || !$definition->policy->hasMachineDataPayload()
+            || !$definition->hasProfile(TenantDataRegistry::COMPANY_BACKUP_PROFILE)
+            || $order < 1
+            || $rows < 0
+            || $bytes < 0
+            || preg_match('/^[0-9a-f]{64}$/D', $sha256) !== 1
+        ) {
+            throw new \InvalidArgumentException(
+                'Metadata zapsaného objektu strojových dat nejsou platná.',
+            );
+        }
+        return new self(
+            $definition->key,
+            self::pathForRegistryKey($definition->key),
+            $order,
+            $rows,
+            $bytes,
+            $sha256,
+        );
     }
 
     /** @return array{registry_key:string,path:string,order:int,rows:int,bytes:int,sha256:string} */
