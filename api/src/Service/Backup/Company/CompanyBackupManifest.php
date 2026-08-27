@@ -13,6 +13,7 @@ final readonly class CompanyBackupManifest
     private function __construct(
         public CompanyBackupManifestHeader $header,
         public TenantDataRegistrySnapshot $registry,
+        public CompanyBackupDataInventory $data,
     ) {}
 
     public static function fromHeader(CompanyBackupManifestHeader $header): self
@@ -34,7 +35,16 @@ final readonly class CompanyBackupManifest
                 'Manifest musí obsahovat úplný profil company_backup.',
             );
         }
-        return new self($header, $registry);
+        try {
+            $data = CompanyBackupDataInventory::fromArray($manifest['data'] ?? null, $registry);
+        } catch (\InvalidArgumentException $e) {
+            throw new CompanyBackupFormatException(
+                'manifest_data_invalid',
+                'data',
+                'Inventář strojových dat v manifestu není platný: ' . $e->getMessage(),
+            );
+        }
+        return new self($header, $registry, $data);
     }
 
     public function canonicalJson(): string

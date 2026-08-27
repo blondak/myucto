@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveException;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriteException;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupManifest;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
@@ -45,7 +46,7 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             $format,
             $this->limits(),
         );
-        $writer->addString('data/table-invoices.jsonl', "{\"id\":1}\n");
+        $writer->addString('data/table-supplier.jsonl', "{\"id\":1}\n");
         $writer->addFile('files/invoice-pdf/00000001.pdf', $source);
 
         self::assertFileDoesNotExist($archive);
@@ -70,8 +71,8 @@ final class CompanyBackupArchiveWriterTest extends TestCase
         self::assertSame($result->archiveSha256, $inspection->archiveSha256);
         self::assertSame(
             [
-                'CTI-MNE.txt',
-                'data/table-invoices.jsonl',
+                'README.txt',
+                'data/table-supplier.jsonl',
                 'files/invoice-pdf/00000001.pdf',
                 'manifest.json',
             ],
@@ -238,7 +239,7 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             $format,
             $this->limits(),
         );
-        $writer->addString('data/table.jsonl', "{\"id\":1}\n");
+        $writer->addString('data/table-supplier.jsonl', "{\"id\":1}\n");
         self::assertSame(12, file_put_contents($archive, 'racing-owner'));
 
         try {
@@ -265,6 +266,7 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             )],
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
         );
+        $supplier = "{\"id\":1}\n";
         return $format->parseManifest($format->encodeManifest([
             'product' => CompanyBackupFormat::PRODUCT,
             'format' => CompanyBackupFormat::FORMAT,
@@ -279,6 +281,18 @@ final class CompanyBackupArchiveWriterTest extends TestCase
                 $registry,
                 TenantDataRegistry::COMPANY_BACKUP_PROFILE,
             )->toArray(),
+            'data' => [
+                'format' => CompanyBackupDataInventory::FORMAT,
+                'version' => CompanyBackupDataInventory::VERSION,
+                'objects' => [[
+                    'registry_key' => 'table:supplier',
+                    'path' => 'data/table-supplier.jsonl',
+                    'order' => 1,
+                    'rows' => 1,
+                    'bytes' => strlen($supplier),
+                    'sha256' => hash('sha256', $supplier),
+                ]],
+            ],
         ]));
     }
 

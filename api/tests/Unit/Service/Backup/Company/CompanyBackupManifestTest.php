@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormatException;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
@@ -24,6 +25,7 @@ final class CompanyBackupManifestTest extends TestCase
 
         self::assertSame('0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1', $manifest->header->backupId);
         self::assertSame(TenantDataRegistry::COMPANY_BACKUP_PROFILE, $manifest->registry->profile);
+        self::assertSame('table:supplier', $manifest->data->objects[0]->registryKey);
         self::assertSame($json, $manifest->canonicalJson());
         self::assertSame(hash('sha256', $json), $manifest->sha256());
     }
@@ -65,6 +67,27 @@ final class CompanyBackupManifestTest extends TestCase
         }
     }
 
+    public function testHeaderCanBeReadBeforeMissingDataInventoryIsRejected(): void
+    {
+        $format = new CompanyBackupFormat();
+        $manifest = $this->manifest();
+        unset($manifest['data']);
+        $json = $format->encodeManifest($manifest);
+
+        self::assertSame(
+            '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
+            $format->parseManifestHeader($json)->backupId,
+        );
+
+        try {
+            $format->parseManifest($json);
+            self::fail('Obnovitelný manifest musí inventarizovat všechna strojová data.');
+        } catch (CompanyBackupFormatException $e) {
+            self::assertSame('manifest_data_invalid', $e->errorCode);
+            self::assertSame('data', $e->field);
+        }
+    }
+
     /** @return array<string,mixed> */
     private function manifest(): array
     {
@@ -82,6 +105,7 @@ final class CompanyBackupManifestTest extends TestCase
             )],
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
         );
+        $supplier = "{\"id\":1}\n";
         return [
             'product' => CompanyBackupFormat::PRODUCT,
             'format' => CompanyBackupFormat::FORMAT,
@@ -96,6 +120,18 @@ final class CompanyBackupManifestTest extends TestCase
                 $registry,
                 TenantDataRegistry::COMPANY_BACKUP_PROFILE,
             )->toArray(),
+            'data' => [
+                'format' => CompanyBackupDataInventory::FORMAT,
+                'version' => CompanyBackupDataInventory::VERSION,
+                'objects' => [[
+                    'registry_key' => 'table:supplier',
+                    'path' => 'data/table-supplier.jsonl',
+                    'order' => 1,
+                    'rows' => 1,
+                    'bytes' => strlen($supplier),
+                    'sha256' => hash('sha256', $supplier),
+                ]],
+            ],
         ];
     }
 }

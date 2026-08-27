@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveCompatibilityException;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveException;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveInspector;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -55,7 +56,7 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         self::assertSame(hash_file('sha256', $archive), $inspection->archiveSha256);
         self::assertSame(4, $inspection->entryCount);
         self::assertSame(
-            ['CTI-MNE.txt', 'data/table-invoices.jsonl', 'manifest.json'],
+            ['README.txt', 'data/table-supplier.jsonl', 'manifest.json'],
             array_keys($inspection->entryHashes),
         );
         foreach ($inspection->entryHashes as $path => $sha256) {
@@ -80,10 +81,10 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
     {
         $archive = $this->archive(
             $this->payload(),
-            unencrypted: ['data/table-invoices.jsonl'],
+            unencrypted: ['data/table-supplier.jsonl'],
         );
 
-        $this->expectArchiveError('entry_encryption_unsupported', 'data/table-invoices.jsonl');
+        $this->expectArchiveError('entry_encryption_unsupported', 'data/table-supplier.jsonl');
         $this->inspector()->inspect(
             $archive,
             self::PASSWORD,
@@ -143,10 +144,10 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
     public function testRejectsCompressionBombFromCentralDirectoryMetadata(): void
     {
         $payload = $this->payload();
-        $payload['data/table-invoices.jsonl'] = str_repeat('A', 10_000);
+        $payload['data/table-supplier.jsonl'] = str_repeat('A', 10_000);
         $archive = $this->archive($payload);
 
-        $this->expectArchiveError('archive_compression_ratio_exceeded', 'data/table-invoices.jsonl');
+        $this->expectArchiveError('archive_compression_ratio_exceeded', 'data/table-supplier.jsonl');
         $this->inspector(new CompanyBackupArchiveLimits(
             maxArchiveBytes: 1_000_000,
             maxEntries: 20,
@@ -168,7 +169,7 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         $payload = $this->payload();
         $checksums = $this->checksums(array_diff_key(
             $payload,
-            ['data/table-invoices.jsonl' => true],
+            ['data/table-supplier.jsonl' => true],
         ));
         $archive = $this->archive($payload, checksums: $checksums);
 
@@ -185,13 +186,46 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
     {
         $payload = $this->payload();
         $checksums = str_replace(
-            hash('sha256', $payload['data/table-invoices.jsonl']),
+            hash('sha256', $payload['data/table-supplier.jsonl']),
             str_repeat('f', 64),
             $this->checksums($payload),
         );
         $archive = $this->archive($payload, checksums: $checksums);
 
-        $this->expectArchiveError('entry_checksum_mismatch', 'data/table-invoices.jsonl');
+        $this->expectArchiveError('entry_checksum_mismatch', 'data/table-supplier.jsonl');
+        $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+    }
+
+    public function testManifestInventoryRejectsExtraChecksummedDataEntry(): void
+    {
+        $payload = $this->payload();
+        $payload['data/table-unregistered.jsonl'] = "{\"id\":99}\n";
+        $archive = $this->archive($payload);
+
+        $this->expectArchiveError('data_inventory_scope_mismatch');
+        $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+    }
+
+    public function testManifestInventoryDigestRejectsChangedChecksummedPayload(): void
+    {
+        $payload = $this->payload();
+        $payload['data/table-supplier.jsonl'] = "{\"id\":2}\n";
+        $archive = $this->archive($payload);
+
+        $this->expectArchiveError(
+            'data_entry_checksum_mismatch',
+            'data/table-supplier.jsonl',
+        );
         $this->inspector()->inspect(
             $archive,
             self::PASSWORD,
@@ -204,7 +238,7 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
     {
         $payload = $this->payload(appVersion: '5.29.0');
         $checksums = str_replace(
-            hash('sha256', $payload['data/table-invoices.jsonl']),
+            hash('sha256', $payload['data/table-supplier.jsonl']),
             str_repeat('f', 64),
             $this->checksums($payload),
         );
@@ -301,10 +335,23 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
                 TenantDataRegistry::COMPANY_BACKUP_PROFILE,
             )->toArray();
         }
+        $supplier = "{\"id\":1}\n";
+        $manifest['data'] = [
+            'format' => CompanyBackupDataInventory::FORMAT,
+            'version' => CompanyBackupDataInventory::VERSION,
+            'objects' => [[
+                'registry_key' => 'table:supplier',
+                'path' => 'data/table-supplier.jsonl',
+                'order' => 1,
+                'rows' => 1,
+                'bytes' => strlen($supplier),
+                'sha256' => hash('sha256', $supplier),
+            ]],
+        ];
         return [
             'manifest.json' => $format->encodeManifest($manifest),
-            'CTI-MNE.txt' => "Syntetická záloha MyÚčta.\n",
-            'data/table-invoices.jsonl' => "{\"id\":1}\n",
+            'README.txt' => "Syntetická záloha MyÚčta.\n",
+            'data/table-supplier.jsonl' => $supplier,
         ];
     }
 

@@ -18,4 +18,22 @@ enum TenantDataPolicy: string
     case PersonalSecretAttachment = 'personal_secret_attachment';
     case RuntimeDerived = 'runtime_derived';
     case Unsupported = 'unsupported';
+
+    /** Objekt má samostatný JSONL payload ve strojové vrstvě zálohy. */
+    public function hasMachineDataPayload(): bool
+    {
+        return match ($this) {
+            self::TenantRoot,
+            self::TenantOwned,
+            self::TenantOwnedIndirect,
+            self::GlobalReference => true,
+            self::TenantRelation,
+            self::InstanceOwned,
+            self::ProtectedDomainSecret,
+            self::OptionalCredential,
+            self::PersonalSecretAttachment,
+            self::RuntimeDerived,
+            self::Unsupported => false,
+        };
+    }
 }

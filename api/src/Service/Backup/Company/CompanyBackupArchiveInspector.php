@@ -108,6 +108,7 @@ final class CompanyBackupArchiveInspector
             }
 
             $entryHashes = [CompanyBackupArchiveLayout::MANIFEST => $manifestRead['sha256']];
+            $entryBytes = [CompanyBackupArchiveLayout::MANIFEST => $manifestRead['bytes']];
             foreach ($payloadPaths as $path) {
                 if ($path === CompanyBackupArchiveLayout::MANIFEST) {
                     continue;
@@ -120,6 +121,7 @@ final class CompanyBackupArchiveInspector
                     false,
                 );
                 $entryHashes[$path] = $read['sha256'];
+                $entryBytes[$path] = $read['bytes'];
             }
             foreach ($entryHashes as $path => $actualHash) {
                 $expectedHash = $checksums->hashFor($path);
@@ -127,6 +129,7 @@ final class CompanyBackupArchiveInspector
                     throw new CompanyBackupArchiveException('entry_checksum_mismatch', $path);
                 }
             }
+            $completeManifest->data->assertArchiveEntries($entryHashes, $entryBytes);
         } finally {
             $zip->close();
         }
@@ -155,6 +158,7 @@ final class CompanyBackupArchiveInspector
         return new CompanyBackupArchiveInspection(
             $manifest,
             $completeManifest->registry,
+            $completeManifest->data,
             $compatibility,
             $archiveSha256,
             count($entries),

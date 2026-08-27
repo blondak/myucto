@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveInspector;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriter;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidationException;
 use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidator;
@@ -166,6 +167,7 @@ final class CompanyBackupTechnicalValidatorTest extends TestCase
         $path .= '.zip';
         $this->archives[] = $path;
         $format = new CompanyBackupFormat();
+        $supplier = "{\"id\":1}\n";
         $manifest = $format->parseManifest($format->encodeManifest([
             'product' => CompanyBackupFormat::PRODUCT,
             'format' => CompanyBackupFormat::FORMAT,
@@ -180,6 +182,18 @@ final class CompanyBackupTechnicalValidatorTest extends TestCase
                 $registry,
                 TenantDataRegistry::COMPANY_BACKUP_PROFILE,
             )->toArray(),
+            'data' => [
+                'format' => CompanyBackupDataInventory::FORMAT,
+                'version' => CompanyBackupDataInventory::VERSION,
+                'objects' => [[
+                    'registry_key' => 'table:supplier',
+                    'path' => 'data/table-supplier.jsonl',
+                    'order' => 1,
+                    'rows' => 1,
+                    'bytes' => strlen($supplier),
+                    'sha256' => hash('sha256', $supplier),
+                ]],
+            ],
         ]));
         $writer = new CompanyBackupArchiveWriter(
             $path,
@@ -187,7 +201,7 @@ final class CompanyBackupTechnicalValidatorTest extends TestCase
             $format,
             $this->limits(),
         );
-        $writer->addString('data/table-supplier.jsonl', "{\"id\":1}\n");
+        $writer->addString('data/table-supplier.jsonl', $supplier);
         $writer->finish($manifest, "Syntetická záloha.\n");
         return $path;
     }

@@ -17,6 +17,7 @@ final readonly class CompanyBackupArchiveInspection
     public function __construct(
         public CompanyBackupManifestHeader $manifest,
         public TenantDataRegistrySnapshot $sourceRegistry,
+        public CompanyBackupDataInventory $dataInventory,
         public CompanyBackupCompatibilityResult $compatibility,
         public string $archiveSha256,
         public int $entryCount,
@@ -24,6 +25,7 @@ final readonly class CompanyBackupArchiveInspection
         array $entryHashes,
     ) {
         if ($sourceRegistry->profile !== TenantDataRegistry::COMPANY_BACKUP_PROFILE
+            || !hash_equals($sourceRegistry->fingerprint, $dataInventory->registryFingerprint)
             || !$compatibility->isCompatible()
             || preg_match('/^[0-9a-f]{64}$/D', $archiveSha256) !== 1
             || $entryCount < 1
