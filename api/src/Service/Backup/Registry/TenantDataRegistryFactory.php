@@ -143,6 +143,28 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<string>> */
     private const COMPANY_BACKUP_DATA_COLUMNS = [
+        'accounting_periods' => [
+            'id',
+            'supplier_id',
+            'fiscal_year',
+            'starts_on',
+            'ends_on',
+            'status',
+            'closed_at',
+            'row_version',
+            'closed_by',
+            'approved_at',
+            'approved_by',
+            'reviewed_at',
+            'reviewed_by',
+            'approval_body',
+            'approval_decision_ref',
+            'approval_document_hash',
+            'created_at',
+            'small_asset_accrual_mode',
+            'small_asset_accrual_pct',
+            'small_asset_flat_pct_materiality_limit',
+        ],
         'currencies' => [
             'id',
             'supplier_id',
@@ -231,6 +253,16 @@ final class TenantDataRegistryFactory
                 $details,
             );
         }
+        $definitions[] = new TenantDataDefinition(
+            'table:users',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::InstanceOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'feature_group' => 'identity',
+            ],
+        );
 
         return new TenantDataRegistry(
             1,
@@ -380,17 +412,63 @@ final class TenantDataRegistryFactory
     private static function companyBackupReferences(string $table): array
     {
         return match ($table) {
-            'currencies' => [[
-                'columns' => ['supplier_id'],
-                'target' => 'table:supplier',
-                'target_columns' => ['id'],
-                'mapping' => CompanyBackupReferenceMapping::TenantId->value,
-                'constraint' => CompanyBackupReferenceConstraint::Required->value,
-                'nullable_columns' => [],
-                'fallbacks' => [],
-            ]],
+            'accounting_periods' => [
+                self::companyBackupActorReference('approved_by'),
+                self::companyBackupActorReference('closed_by'),
+                self::companyBackupActorReference('reviewed_by'),
+                self::companyBackupSupplierReference(),
+            ],
+            'currencies' => [self::companyBackupSupplierReference()],
             default => [],
         };
+    }
+
+    /**
+     * @return array{
+     *   columns:list<string>,
+     *   target:string,
+     *   target_columns:list<string>,
+     *   mapping:string,
+     *   constraint:string,
+     *   nullable_columns:list<string>,
+     *   fallbacks:list<string>
+     * }
+     */
+    private static function companyBackupSupplierReference(): array
+    {
+        return [
+            'columns' => ['supplier_id'],
+            'target' => 'table:supplier',
+            'target_columns' => ['id'],
+            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+            'constraint' => CompanyBackupReferenceConstraint::Required->value,
+            'nullable_columns' => [],
+            'fallbacks' => [],
+        ];
+    }
+
+    /**
+     * @return array{
+     *   columns:list<string>,
+     *   target:string,
+     *   target_columns:list<string>,
+     *   mapping:string,
+     *   constraint:string,
+     *   nullable_columns:list<string>,
+     *   fallbacks:list<string>
+     * }
+     */
+    private static function companyBackupActorReference(string $column): array
+    {
+        return [
+            'columns' => [$column],
+            'target' => 'table:users',
+            'target_columns' => ['id'],
+            'mapping' => CompanyBackupReferenceMapping::Actor->value,
+            'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+            'nullable_columns' => [$column],
+            'fallbacks' => ['null', 'restore_actor'],
+        ];
     }
 
     /** @return list<string> */
