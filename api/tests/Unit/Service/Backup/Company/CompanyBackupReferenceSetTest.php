@@ -209,6 +209,142 @@ final class CompanyBackupReferenceSetTest extends TestCase
         }
     }
 
+    public function testAcceptsConditionallyDisjointPolymorphicSoftReferences(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                $this->sourceReference('invoice', 'invoices'),
+                $this->sourceReference('purchase_invoice', 'purchase_invoices'),
+                $this->supplierReference(),
+            ],
+            'table:journal_entries',
+        );
+        $registry = new TenantDataRegistry(1, [
+            $this->definition('invoices', TenantDataPolicy::TenantOwned),
+            $this->definition('purchase_invoices', TenantDataPolicy::TenantOwned),
+            $this->definition('supplier', TenantDataPolicy::TenantRoot),
+        ]);
+
+        $references->assertProjectionColumns([
+            'id',
+            'supplier_id',
+            'source_type',
+            'source_id',
+        ]);
+        $references->assertRegistryTargets($registry);
+        $references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['source_id'],
+            [new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id'])],
+        ));
+
+        self::assertSame(
+            [
+                'source_id->invoices:id?source_type=invoice',
+                'source_id->purchase_invoices:id?source_type=purchase_invoice',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $references->references,
+            ),
+        );
+    }
+
+    public function testRejectsAmbiguousConditionalReferenceClaims(): void
+    {
+        try {
+            CompanyBackupReferenceSet::fromArray(
+                [
+                    $this->sourceReference('invoice', 'invoices'),
+                    $this->sourceReference('invoice', 'purchase_invoices'),
+                ],
+                'table:journal_entries',
+            );
+            self::fail('Jeden diskriminátor nesmí vybrat dva cíle source_id.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_duplicate', $e->errorCode);
+            self::assertSame('source_id', $e->column);
+        }
+    }
+
+    public function testRejectsConditionalReferenceWithUnexportedDiscriminator(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [$this->sourceReference('invoice', 'invoices')],
+            'table:journal_entries',
+        );
+
+        try {
+            $references->assertProjectionColumns(['id', 'source_id']);
+            self::fail('Diskriminátor reference musí být součástí exportované projekce.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame(
+                'data_reference_condition_source_not_exported',
+                $e->errorCode,
+            );
+            self::assertSame('source_type', $e->column);
+        }
+    }
+
+    public function testRejectsConditionalReferenceThatPretendsToBePhysicalFk(): void
+    {
+        try {
+            CompanyBackupReferenceSet::fromArray(
+                [[
+                    ...$this->sourceReference('invoice', 'invoices'),
+                    'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                ]],
+                'table:journal_entries',
+            );
+            self::fail('Podmíněná polymorfní reference nesmí předstírat fyzický FK.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_metadata_invalid', $e->errorCode);
+        }
+    }
+
+    public function testRejectsConditionalClaimsWithDifferentDiscriminatorColumns(): void
+    {
+        try {
+            CompanyBackupReferenceSet::fromArray(
+                [
+                    $this->sourceReference('invoice', 'invoices'),
+                    [
+                        ...$this->sourceReference('purchase_invoice', 'purchase_invoices'),
+                        'condition' => [
+                            'column' => 'source_kind',
+                            'equals' => 'purchase_invoice',
+                        ],
+                    ],
+                ],
+                'table:journal_entries',
+            );
+            self::fail('Různé diskriminátory se mohou překrývat a nesmějí sdílet source_id.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_duplicate', $e->errorCode);
+            self::assertSame('source_id', $e->column);
+        }
+    }
+
+    public function testRejectsReferenceColumnAsItsOwnDiscriminator(): void
+    {
+        try {
+            CompanyBackupReferenceSet::fromArray(
+                [[
+                    ...$this->sourceReference('invoice', 'invoices'),
+                    'condition' => [
+                        'column' => 'source_id',
+                        'equals' => 'invoice',
+                    ],
+                ]],
+                'table:journal_entries',
+            );
+            self::fail('Reference se nesmí sama používat jako typový diskriminátor.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_metadata_invalid', $e->errorCode);
+            self::assertSame('source_id', $e->column);
+        }
+    }
+
     public function testAcceptsTenantScopedCompositeIdForeignKey(): void
     {
         $references = CompanyBackupReferenceSet::fromArray(
@@ -352,6 +488,24 @@ final class CompanyBackupReferenceSetTest extends TestCase
             'mapping' => CompanyBackupReferenceMapping::TenantNaturalKey->value,
             'constraint' => CompanyBackupReferenceConstraint::Optional->value,
             'nullable_columns' => ['supplier_id', $column],
+            'fallbacks' => [],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function sourceReference(string $sourceType, string $target): array
+    {
+        return [
+            'columns' => ['source_id'],
+            'condition' => [
+                'column' => 'source_type',
+                'equals' => $sourceType,
+            ],
+            'target' => 'table:' . $target,
+            'target_columns' => ['id'],
+            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+            'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+            'nullable_columns' => ['source_id'],
             'fallbacks' => [],
         ];
     }

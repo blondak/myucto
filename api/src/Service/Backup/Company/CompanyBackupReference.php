@@ -37,6 +37,7 @@ final readonly class CompanyBackupReference
         public CompanyBackupReferenceConstraint $constraint,
         array $nullableColumns,
         array $fallbacks,
+        public ?CompanyBackupReferenceCondition $condition,
     ) {
         $this->columns = $columns;
         $this->targetColumns = $targetColumns;
@@ -51,7 +52,7 @@ final readonly class CompanyBackupReference
         }
         $keys = array_keys($value);
         sort($keys, SORT_STRING);
-        if ($keys !== [
+        $baseKeys = [
             'columns',
             'constraint',
             'fallbacks',
@@ -59,7 +60,10 @@ final readonly class CompanyBackupReference
             'nullable_columns',
             'target',
             'target_columns',
-        ]) {
+        ];
+        $conditionalKeys = [...$baseKeys, 'condition'];
+        sort($conditionalKeys, SORT_STRING);
+        if ($keys !== $baseKeys && $keys !== $conditionalKeys) {
             throw self::invalid($registryKey);
         }
 
@@ -84,6 +88,14 @@ final readonly class CompanyBackupReference
         $constraint = is_string($constraintValue)
             ? CompanyBackupReferenceConstraint::tryFrom($constraintValue)
             : null;
+        $conditionValue = $value['condition'] ?? null;
+        $condition = $conditionValue === null
+            ? null
+            : CompanyBackupReferenceCondition::fromArray(
+                $conditionValue,
+                $registryKey,
+                $columns,
+            );
         if (!is_string($target)
             || !str_starts_with($target, 'table:')
             || !TenantDataDefinition::isValidKey($target)
@@ -92,6 +104,8 @@ final readonly class CompanyBackupReference
             || !is_array($fallbacks)
             || !array_is_list($fallbacks)
             || count($columns) !== count($targetColumns)
+            || ($condition !== null
+                && $constraint !== CompanyBackupReferenceConstraint::Optional)
         ) {
             throw self::invalid($registryKey);
         }
@@ -149,6 +163,7 @@ final readonly class CompanyBackupReference
             $constraint,
             $nullableColumns,
             $validatedFallbacks,
+            $condition,
         );
     }
 
@@ -159,11 +174,14 @@ final readonly class CompanyBackupReference
 
     public function signature(): string
     {
-        return implode(',', $this->columns)
+        $signature = implode(',', $this->columns)
             . '->'
             . $this->targetTable()
             . ':'
             . implode(',', $this->targetColumns);
+        return $this->condition === null
+            ? $signature
+            : $signature . '?' . $this->condition->signature();
     }
 
     public function firstColumn(): string

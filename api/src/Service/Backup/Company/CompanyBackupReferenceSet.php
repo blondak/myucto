@@ -51,7 +51,10 @@ final readonly class CompanyBackupReferenceSet
             }
         }
         foreach ($columnClaims as $column => $claims) {
-            if (count($claims) < 2 || self::isSharedTenantContext($column, $claims)) {
+            if (count($claims) < 2
+                || self::isSharedTenantContext($column, $claims)
+                || self::isConditionallyDisjoint($column, $claims)
+            ) {
                 continue;
             }
             throw new CompanyBackupDataSourceException(
@@ -73,6 +76,31 @@ final readonly class CompanyBackupReferenceSet
             );
         }
         return new self($registryKey, $references);
+    }
+
+    /** @param list<CompanyBackupReference> $claims */
+    private static function isConditionallyDisjoint(string $column, array $claims): bool
+    {
+        $first = $claims[0] ?? null;
+        if ($first === null || $first->condition === null) {
+            return false;
+        }
+        $columns = $first->columns;
+        $conditionColumn = $first->condition->column;
+        $values = [];
+        foreach ($claims as $claim) {
+            $condition = $claim->condition;
+            if ($claim->columns !== $columns
+                || !in_array($column, $columns, true)
+                || $condition === null
+                || $condition->column !== $conditionColumn
+                || isset($values[$condition->equals])
+            ) {
+                return false;
+            }
+            $values[$condition->equals] = true;
+        }
+        return true;
     }
 
     /** @param list<CompanyBackupReference> $claims */
@@ -110,6 +138,14 @@ final readonly class CompanyBackupReferenceSet
         $exported = array_fill_keys($dataColumns, true);
         $classified = [];
         foreach ($this->references as $reference) {
+            $conditionColumn = $reference->condition?->column;
+            if ($conditionColumn !== null && !isset($exported[$conditionColumn])) {
+                throw new CompanyBackupDataSourceException(
+                    'data_reference_condition_source_not_exported',
+                    $this->registryKey,
+                    $conditionColumn,
+                );
+            }
             foreach ($reference->columns as $column) {
                 if (!isset($exported[$column])) {
                     throw new CompanyBackupDataSourceException(
