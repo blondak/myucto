@@ -13,6 +13,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
     public function __construct(
         private CompanyBackupSnapshotTransaction $transaction = new CompanyBackupSnapshotTransaction(),
         private CompanyBackupJsonlWriter $jsonlWriter = new CompanyBackupJsonlWriter(),
+        private CompanyBackupDatabaseCoverageGate $databaseCoverage = new CompanyBackupDatabaseCoverageValidator(),
     ) {}
 
     public function export(
@@ -44,6 +45,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
                     $source,
                     &$createdFiles,
                 ): CompanyBackupMachineSnapshot {
+                    $this->databaseCoverage->assertSafe($snapshot, $registry->registry);
                     $objects = [];
                     $sourceFiles = [];
                     foreach (CompanyBackupDataInventory::payloadDefinitions($registry) as $index => $definition) {

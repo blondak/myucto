@@ -13,6 +13,7 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
 {
     public function __construct(
         private CompanyBackupTenantSqlSelector $selector = new CompanyBackupTenantSqlSelector(),
+        private CompanyBackupTableSchemaReader $schemaReader = new CompanyBackupTableSchemaReader(),
         private int $batchSize = 1_000,
     ) {
         if ($batchSize < 1 || $batchSize > 10_000) {
@@ -30,11 +31,12 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
             throw new \InvalidArgumentException('Firma datového zdroje musí mít kladné ID.');
         }
         $projection = CompanyBackupTableProjection::fromDefinition($definition);
-        [$columns, $generatedColumns, $primaryKey] = $this->runtimeSchema(
-            $snapshot,
-            $projection,
+        $schema = $this->schemaReader->read($snapshot, $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
         );
-        $projection->assertRuntimeSchema($columns, $generatedColumns, $primaryKey);
         $protectedColumn = $projection->requiredSecretEnvelopeColumn();
         if ($protectedColumn !== null) {
             throw new CompanyBackupDataSourceException(
@@ -63,94 +65,6 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
             }
             $offset += $count;
         }
-    }
-
-    /**
-     * @return array{0:list<string>,1:list<string>,2:list<string>}
-     */
-    private function runtimeSchema(
-        PDO $snapshot,
-        CompanyBackupTableProjection $projection,
-    ): array {
-        $columnsSql = 'SELECT `c`.`COLUMN_NAME`, `c`.`EXTRA`,'
-            . ' `c`.`GENERATION_EXPRESSION`, `t`.`TABLE_TYPE`'
-            . ' FROM `information_schema`.`COLUMNS` AS `c`'
-            . ' JOIN `information_schema`.`TABLES` AS `t`'
-            . ' ON `t`.`TABLE_SCHEMA` = `c`.`TABLE_SCHEMA`'
-            . ' AND `t`.`TABLE_NAME` = `c`.`TABLE_NAME`'
-            . ' WHERE `c`.`TABLE_SCHEMA` = DATABASE() AND `c`.`TABLE_NAME` = ?'
-            . ' ORDER BY `c`.`ORDINAL_POSITION`';
-        $rows = $this->fetchAll(
-            $snapshot,
-            $columnsSql,
-            [$projection->name],
-            PDO::FETCH_ASSOC,
-            $projection,
-            'data_schema_read_failed',
-        );
-        if ($rows === []) {
-            throw new CompanyBackupDataSourceException(
-                'data_table_missing',
-                $projection->registryKey,
-            );
-        }
-
-        $columns = [];
-        $generated = [];
-        foreach ($rows as $row) {
-            if (!is_array($row) || array_is_list($row)) {
-                throw new CompanyBackupDataSourceException(
-                    'data_schema_invalid',
-                    $projection->registryKey,
-                );
-            }
-            $column = $row['COLUMN_NAME'] ?? null;
-            $extra = $row['EXTRA'] ?? null;
-            $generation = $row['GENERATION_EXPRESSION'] ?? null;
-            $tableType = $row['TABLE_TYPE'] ?? null;
-            if (!is_string($column)
-                || !is_string($extra)
-                || !is_string($tableType)
-                || !is_string($generation) && $generation !== null
-                || !in_array($tableType, ['BASE TABLE', 'SYSTEM VERSIONED'], true)
-            ) {
-                throw new CompanyBackupDataSourceException(
-                    'data_schema_invalid',
-                    $projection->registryKey,
-                );
-            }
-            $columns[] = $column;
-            if (($generation !== null && $generation !== '')
-                || str_contains(strtoupper($extra), 'GENERATED')
-            ) {
-                $generated[] = $column;
-            }
-        }
-
-        $primarySql = 'SELECT `COLUMN_NAME`'
-            . ' FROM `information_schema`.`KEY_COLUMN_USAGE`'
-            . ' WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?'
-            . " AND `CONSTRAINT_NAME` = 'PRIMARY'"
-            . ' ORDER BY `ORDINAL_POSITION`';
-        $primaryRows = $this->fetchAll(
-            $snapshot,
-            $primarySql,
-            [$projection->name],
-            PDO::FETCH_COLUMN,
-            $projection,
-            'data_schema_read_failed',
-        );
-        $primaryKey = [];
-        foreach ($primaryRows as $column) {
-            if (!is_string($column)) {
-                throw new CompanyBackupDataSourceException(
-                    'data_schema_invalid',
-                    $projection->registryKey,
-                );
-            }
-            $primaryKey[] = $column;
-        }
-        return [$columns, $generated, $primaryKey];
     }
 
     /** @return list<array<string,mixed>> */

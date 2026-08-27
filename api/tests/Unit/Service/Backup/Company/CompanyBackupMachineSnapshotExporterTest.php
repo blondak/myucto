@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDataRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupDatabaseCoverageGate;
 use MyInvoice\Service\Backup\Company\CompanyBackupMachineSnapshotExporter;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -56,9 +57,12 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                 };
             }
         };
+        $coverage = $this->coverageGate();
         $directory = $this->workDirectory();
 
-        $snapshot = (new CompanyBackupMachineSnapshotExporter())->export(
+        $snapshot = (new CompanyBackupMachineSnapshotExporter(
+            databaseCoverage: $coverage,
+        ))->export(
             $pdo,
             $this->registrySnapshot(),
             7,
@@ -67,6 +71,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
         );
 
         self::assertSame(['table:invoices@7', 'table:supplier@7'], $source->calls);
+        self::assertSame([$pdo], $coverage->snapshots);
         self::assertSame(
             ['table:invoices', 'table:supplier'],
             array_map(
@@ -110,10 +115,13 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                 return [['id' => 20, 'supplier_id' => $supplierId]];
             }
         };
+        $coverage = $this->coverageGate();
         $directory = $this->workDirectory();
 
         try {
-            (new CompanyBackupMachineSnapshotExporter())->export(
+            (new CompanyBackupMachineSnapshotExporter(
+                databaseCoverage: $coverage,
+            ))->export(
                 $pdo,
                 $this->registrySnapshot(),
                 7,
@@ -125,6 +133,49 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
             self::assertSame('synthetic supplier source failure', $e->getMessage());
         }
 
+        self::assertSame([$pdo], $coverage->snapshots);
+        self::assertSame([], glob($directory . DIRECTORY_SEPARATOR . '*') ?: []);
+    }
+
+    public function testCoverageFailureRollsBackBeforeAnyBusinessRowIsRead(): void
+    {
+        $pdo = $this->transactionalPdo(commit: false);
+        $source = new class implements CompanyBackupDataRowSource {
+            public int $calls = 0;
+
+            public function rows(
+                PDO $snapshot,
+                int $supplierId,
+                TenantDataDefinition $definition,
+            ): iterable {
+                $this->calls++;
+                return [];
+            }
+        };
+        $coverage = new class implements CompanyBackupDatabaseCoverageGate {
+            public function assertSafe(PDO $pdo, TenantDataRegistry $registry): void
+            {
+                throw new \DomainException('synthetic coverage failure');
+            }
+        };
+        $directory = $this->workDirectory();
+
+        try {
+            (new CompanyBackupMachineSnapshotExporter(
+                databaseCoverage: $coverage,
+            ))->export(
+                $pdo,
+                $this->registrySnapshot(),
+                7,
+                $directory,
+                $source,
+            );
+            self::fail('Neúplná DB coverage nesmí pustit snapshot ke čtení řádků.');
+        } catch (\DomainException $e) {
+            self::assertSame('synthetic coverage failure', $e->getMessage());
+        }
+
+        self::assertSame(0, $source->calls);
         self::assertSame([], glob($directory . DIRECTORY_SEPARATOR . '*') ?: []);
     }
 
@@ -187,6 +238,11 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
         ), $profile);
     }
 
+    private function coverageGate(): RecordingCompanyBackupDatabaseCoverageGate
+    {
+        return new RecordingCompanyBackupDatabaseCoverageGate();
+    }
+
     private function workDirectory(): string
     {
         $directory = sys_get_temp_dir() . DIRECTORY_SEPARATOR
@@ -196,5 +252,19 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
         }
         $this->directories[] = $directory;
         return $directory;
+    }
+}
+
+final class RecordingCompanyBackupDatabaseCoverageGate implements CompanyBackupDatabaseCoverageGate
+{
+    /** @var list<PDO> */
+    public array $snapshots = [];
+
+    public function assertSafe(PDO $pdo, TenantDataRegistry $registry): void
+    {
+        $this->snapshots[] = $pdo;
+        if (!$registry->isComplete(TenantDataRegistry::COMPANY_BACKUP_PROFILE)) {
+            throw new \LogicException('Coverage dostala neúplný profil.');
+        }
     }
 }
