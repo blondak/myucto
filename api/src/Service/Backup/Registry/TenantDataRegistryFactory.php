@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjecti
 use MyInvoice\Service\Backup\Company\CompanyBackupClientsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupCountriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupExpenseCategoriesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupInvoiceSettlementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
@@ -22,7 +23,6 @@ final class TenantDataRegistryFactory
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
         'branding_profiles' => 'core',
-        'invoice_settlements' => 'accounting',
         'offset_agreements' => 'accounting',
         'payroll_run_revisions' => 'payroll',
     ];
@@ -424,6 +424,22 @@ final class TenantDataRegistryFactory
             ],
         );
         $definitions[] = new TenantDataDefinition(
+            'table:invoice_settlements',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'feature_group' => 'accounting',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('invoice_settlements'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
             'table:revenue_categories',
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantOwned,
@@ -601,6 +617,8 @@ final class TenantDataRegistryFactory
             'countries' => CompanyBackupCountriesProjection::dataColumns(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::dataColumns(),
+            'invoice_settlements' =>
+                CompanyBackupInvoiceSettlementsProjection::dataColumns(),
             'journal_entries' => CompanyBackupJournalEntriesProjection::dataColumns(),
             'journal_entry_lines' =>
                 CompanyBackupJournalEntryLinesProjection::dataColumns(),
@@ -695,6 +713,8 @@ final class TenantDataRegistryFactory
             'clients' => CompanyBackupClientsProjection::references(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::references(),
+            'invoice_settlements' =>
+                CompanyBackupInvoiceSettlementsProjection::references(),
             'journal_entries' => CompanyBackupJournalEntriesProjection::references(),
             'journal_entry_lines' => CompanyBackupJournalEntryLinesProjection::references(),
             'projects' => CompanyBackupProjectsProjection::references(),

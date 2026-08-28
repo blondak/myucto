@@ -367,6 +367,23 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionInvoiceSettlementsProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'invoice_settlements',
+            [
+                'supplier_id',
+                'doc_type',
+                'doc_id',
+                'account_id',
+                'journal_entry_id',
+                'reversal_entry_id',
+                'invoice_payment_id',
+                'created_by',
+            ],
+        );
+    }
+
     public function testStreamsOnlyClientsOfCompanyAndPreservesExternalIds(): void
     {
         $pdo = $this->db->pdo();
