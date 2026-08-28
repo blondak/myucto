@@ -9,6 +9,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveException;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveInspector;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -347,6 +348,11 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
                 'bytes' => strlen($supplier),
                 'sha256' => hash('sha256', $supplier),
             ]],
+        ];
+        $manifest['files'] = [
+            'format' => CompanyBackupFileInventory::FORMAT,
+            'version' => CompanyBackupFileInventory::VERSION,
+            'areas' => [],
         ];
         return [
             'manifest.json' => $format->encodeManifest($manifest),

@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveInspector;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidationException;
 use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidator;
@@ -193,6 +194,11 @@ final class CompanyBackupTechnicalValidatorTest extends TestCase
                     'bytes' => strlen($supplier),
                     'sha256' => hash('sha256', $supplier),
                 ]],
+            ],
+            'files' => [
+                'format' => CompanyBackupFileInventory::FORMAT,
+                'version' => CompanyBackupFileInventory::VERSION,
+                'areas' => [],
             ],
         ]));
         $writer = new CompanyBackupArchiveWriter(

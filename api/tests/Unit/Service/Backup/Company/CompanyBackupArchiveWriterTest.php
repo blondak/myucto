@@ -10,6 +10,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriteException;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataObject;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupJsonlWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupManifest;
@@ -40,7 +41,9 @@ final class CompanyBackupArchiveWriterTest extends TestCase
     public function testPublishesOnlyArchiveThatPassesTheIndependentInspector(): void
     {
         $archive = $this->unusedPath('zip');
-        $source = $this->temporaryFile("{\"id\":2}\n");
+        $fileContents = "\x89PNG\r\n";
+        $source = $this->temporaryFile($fileContents);
+        $filePath = $this->fileArchivePath($fileContents);
         $jsonl = $this->unusedPath('jsonl');
         $format = new CompanyBackupFormat();
         $dataObject = (new CompanyBackupJsonlWriter($this->limits()))->write(
@@ -56,11 +59,11 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             $this->limits(),
         );
         $writer->addFile($dataObject->path, $jsonl);
-        $writer->addFile('files/invoice-pdf/00000001.pdf', $source);
+        $writer->addFile($filePath, $source);
 
         self::assertFileDoesNotExist($archive);
         $result = $writer->finish(
-            $this->manifest($format, $dataObject),
+            $this->manifest($format, $dataObject, $fileContents),
             "Syntetická záloha.\n",
         );
 
@@ -85,7 +88,7 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             [
                 'README.txt',
                 'data/table-supplier.jsonl',
-                'files/invoice-pdf/00000001.pdf',
+                $filePath,
                 'manifest.json',
             ],
             array_keys($inspection->entryHashes),
@@ -268,11 +271,34 @@ final class CompanyBackupArchiveWriterTest extends TestCase
     private function manifest(
         CompanyBackupFormat $format,
         ?CompanyBackupDataObject $dataObject = null,
+        ?string $fileContents = null,
     ): CompanyBackupManifest
     {
+        $definitions = [$this->supplierDefinition()];
+        $areas = [];
+        if ($fileContents !== null) {
+            $definitions[] = $this->supplierLogosDefinition();
+            $sha256 = hash('sha256', $fileContents);
+            $areas[] = [
+                'registry_key' => 'file-area:supplier-logos',
+                'order' => 1,
+                'entries' => [[
+                    'source_path' => '00000001.png',
+                    'archive_path' => $this->fileArchivePath($fileContents),
+                    'state' => 'present',
+                    'bytes' => strlen($fileContents),
+                    'sha256' => $sha256,
+                    'owners' => [[
+                        'registry_key' => 'table:supplier',
+                        'primary_key' => ['id' => 1],
+                        'column' => 'logo_path',
+                    ]],
+                ]],
+            ];
+        }
         $registry = new TenantDataRegistry(
             1,
-            [$this->supplierDefinition()],
+            $definitions,
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
         );
         $supplier = "{\"id\":1}\n";
@@ -302,6 +328,11 @@ final class CompanyBackupArchiveWriterTest extends TestCase
                     'sha256' => hash('sha256', $supplier),
                 ]],
             ],
+            'files' => [
+                'format' => CompanyBackupFileInventory::FORMAT,
+                'version' => CompanyBackupFileInventory::VERSION,
+                'areas' => $areas,
+            ],
         ]));
     }
 
@@ -312,8 +343,30 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantRoot,
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
-            ['ownership' => ['strategy' => 'selected_supplier', 'column' => 'id']],
+            [
+                'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
+                'primary_key' => ['id'],
+            ],
         );
+    }
+
+    private function supplierLogosDefinition(): TenantDataDefinition
+    {
+        return new TenantDataDefinition(
+            'file-area:supplier-logos',
+            TenantDataObjectKind::FileArea,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'file_policy' => 'historical_optional',
+                'ownership' => ['strategy' => 'database_references'],
+            ],
+        );
+    }
+
+    private function fileArchivePath(string $contents): string
+    {
+        return 'files/supplier-logos/' . hash('sha256', $contents) . '.png';
     }
 
     private function limits(): CompanyBackupArchiveLimits

@@ -130,6 +130,7 @@ final class CompanyBackupArchiveInspector
                 }
             }
             $completeManifest->data->assertArchiveEntries($entryHashes, $entryBytes);
+            $completeManifest->files->assertArchiveEntries($entryHashes, $entryBytes);
         } finally {
             $zip->close();
         }
@@ -159,6 +160,7 @@ final class CompanyBackupArchiveInspector
             $manifest,
             $completeManifest->registry,
             $completeManifest->data,
+            $completeManifest->files,
             $compatibility,
             $archiveSha256,
             count($entries),
