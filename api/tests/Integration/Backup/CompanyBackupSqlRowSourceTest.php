@@ -350,6 +350,74 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         self::assertSame('synthetic-imap-ciphertext', $stored[0]['imap_password_enc']);
     }
 
+    public function testProductionSigningProfilesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'signing_profiles',
+            [
+                'supplier_id',
+                'owner_user_id',
+                'allowed_usages_json',
+                'default_backend',
+                'pdf_tsa_password_enc',
+                'is_active',
+                'created_by',
+            ],
+        );
+    }
+
+    public function testStreamsSigningProfilesWithoutTsaCredentialAndDisablesThem(): void
+    {
+        $pdo = $this->db->pdo();
+        $ownProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->supplierId,
+            'Vlastní podpisový profil',
+            'company-backup-owner-signing',
+        );
+        $foreignProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->foreignSupplierId,
+            'Cizí podpisový profil',
+            'company-backup-foreign-signing',
+        );
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:signing_profiles');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+            $pdo,
+            $this->supplierId,
+            $definition,
+        ));
+        $byId = [];
+        foreach ($rows as $row) {
+            $byId[(int) $row['id']] = $row;
+        }
+
+        self::assertArrayHasKey($ownProfileId, $byId);
+        self::assertArrayNotHasKey($foreignProfileId, $byId);
+        self::assertArrayNotHasKey('pdf_tsa_password_enc', $byId[$ownProfileId]);
+        $restored = $projection->restoreOverrides->apply($byId[$ownProfileId]);
+        self::assertSame(0, $restored['is_active']);
+
+        $unscoped = $pdo->prepare(
+            'SELECT id, pdf_tsa_password_enc FROM signing_profiles'
+            . ' WHERE id IN (?, ?) ORDER BY id',
+        );
+        $unscoped->execute([$ownProfileId, $foreignProfileId]);
+        $stored = [];
+        foreach ($unscoped->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $stored[(int) $row['id']] = $row;
+        }
+        self::assertArrayHasKey($foreignProfileId, $stored);
+        self::assertSame(
+            'synthetic-tsa-ciphertext',
+            $stored[$ownProfileId]['pdf_tsa_password_enc'],
+        );
+    }
+
     public function testProductionAccountingPeriodsProjectionMatchesMigratedSchema(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
@@ -943,6 +1011,27 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $code . '@example.test',
             'synthetic-smtp-ciphertext',
             'synthetic-imap-ciphertext',
+        ]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function createSigningProfile(
+        PDO $pdo,
+        int $supplierId,
+        string $name,
+        string $code,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO signing_profiles ('
+            . 'supplier_id, name, code, allowed_usages_json, default_backend,'
+            . ' pdf_tsa_password_enc, is_active'
+            . ") VALUES (?, ?, ?, '[\"pdf\"]', 'native', ?, 1)",
+        );
+        $statement->execute([
+            $supplierId,
+            $name,
+            $code,
+            'synthetic-tsa-ciphertext',
         ]);
         return (int) $pdo->lastInsertId();
     }

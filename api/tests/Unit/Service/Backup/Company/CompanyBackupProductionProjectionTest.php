@@ -293,7 +293,115 @@ final class CompanyBackupProductionProjectionTest extends TestCase
             ],
             $signingProfiles->details['secrets'] ?? null,
         );
-        self::assertArrayNotHasKey('company_backup', $signingProfiles->details);
+        self::assertArrayHasKey('company_backup', $signingProfiles->details);
+    }
+
+    public function testSigningProfilesKeepPersonalOwnershipAndDisableSigningOnRestore(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:signing_profiles');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $runtimeColumns = [
+            'id',
+            'supplier_id',
+            'owner_user_id',
+            'name',
+            'code',
+            'allowed_usages_json',
+            'default_backend',
+            'pdf_tsa_url',
+            'pdf_tsa_username',
+            'pdf_tsa_password_enc',
+            'pdf_reason',
+            'is_active',
+            'created_by',
+            'created_at',
+            'updated_at',
+            'deleted_at',
+        ];
+        $dataColumns = array_values(array_diff(
+            $runtimeColumns,
+            ['pdf_tsa_password_enc'],
+        ));
+
+        $projection->assertRuntimeSchema($runtimeColumns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [
+                    'owner_user_id',
+                    'pdf_tsa_url',
+                    'pdf_tsa_username',
+                    'pdf_tsa_password_enc',
+                    'pdf_reason',
+                    'created_by',
+                    'deleted_at',
+                ],
+                [
+                    new CompanyBackupForeignKey(
+                        ['created_by'],
+                        'users',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['owner_user_id'],
+                        'users',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($dataColumns, $projection->dataColumns);
+        self::assertSame(
+            ['supplier_id', 'code'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            TenantSecretPolicy::OptionalCredential,
+            $projection->secretPolicies['pdf_tsa_password_enc'] ?? null,
+        );
+        self::assertSame(
+            [
+                'created_by->users:id',
+                'owner_user_id->users:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['null', 'restore_actor'],
+            $projection->references->references[0]->fallbacks,
+        );
+        self::assertSame(
+            ['restore_actor'],
+            $projection->references->references[1]->fallbacks,
+        );
+        self::assertSame(
+            ['owner_user_id'],
+            $projection->references->references[1]->nullableColumns,
+        );
+        $restored = $projection->restoreOverrides->apply(['is_active' => 1]);
+        self::assertSame(0, $restored['is_active']);
+
+        $selection = (new CompanyBackupTenantSqlSelector())->select(
+            $projection,
+            37,
+        );
+        self::assertSame([37], $selection->params);
+        self::assertStringContainsString(
+            '`_company_source`.`supplier_id` = ?',
+            $selection->where,
+        );
     }
 
     public function testSupplierLogoAreaRegistersEveryCurrentAndHistoricalOwner(): void

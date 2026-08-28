@@ -19,6 +19,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupRevenueCategoriesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
 
 /** Produkční sestavení registru; company_backup zůstává během inventury draft. */
@@ -27,7 +28,6 @@ final class TenantDataRegistryFactory
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
         'payroll_run_revisions' => 'payroll',
-        'signing_profiles' => 'integrations',
     ];
 
     /** @var list<string> */
@@ -514,14 +514,6 @@ final class TenantDataRegistryFactory
                     'column' => 'supplier_id',
                 ],
             ];
-            if ($table === 'signing_profiles') {
-                $details['natural_key'] = ['supplier_id', 'code'];
-                $details['secrets'] = [
-                    'pdf_tsa_password_enc' => [
-                        'policy' => TenantSecretPolicy::OptionalCredential->value,
-                    ],
-                ];
-            }
             $definitions[] = new TenantDataDefinition(
                 'table:' . $table,
                 TenantDataObjectKind::Table,
@@ -530,6 +522,27 @@ final class TenantDataRegistryFactory
                 $details,
             );
         }
+        $definitions[] = new TenantDataDefinition(
+            'table:signing_profiles',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'natural_key' => ['supplier_id', 'code'],
+                'feature_group' => 'integrations',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [
+                    'pdf_tsa_password_enc' => [
+                        'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    ],
+                ],
+                ...self::companyBackupProjection('signing_profiles'),
+            ],
+        );
         $definitions[] = new TenantDataDefinition(
             'table:email_profiles',
             TenantDataObjectKind::Table,
@@ -759,6 +772,8 @@ final class TenantDataRegistryFactory
             'projects' => CompanyBackupProjectsProjection::dataColumns(),
             'revenue_categories' =>
                 CompanyBackupRevenueCategoriesProjection::dataColumns(),
+            'signing_profiles' =>
+                CompanyBackupSigningProfilesProjection::dataColumns(),
             'vat_rates' => CompanyBackupVatRatesProjection::dataColumns(),
             default => self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null,
         };
@@ -834,6 +849,12 @@ final class TenantDataRegistryFactory
                     'reason' => 'require_email_profile_reselection_after_restore',
                 ],
             ],
+            'signing_profiles' => [
+                'is_active' => [
+                    'value' => 0,
+                    'reason' => 'disable_document_signing_after_restore',
+                ],
+            ],
             default => [],
         };
     }
@@ -871,6 +892,8 @@ final class TenantDataRegistryFactory
             'projects' => CompanyBackupProjectsProjection::references(),
             'revenue_categories' =>
                 CompanyBackupRevenueCategoriesProjection::references(),
+            'signing_profiles' =>
+                CompanyBackupSigningProfilesProjection::references(),
             'accounting_document_series' => [
                 self::companyBackupTenantIdOrZeroReference(
                     'register_id',
