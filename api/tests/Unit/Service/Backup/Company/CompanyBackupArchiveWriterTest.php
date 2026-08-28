@@ -292,6 +292,7 @@ final class CompanyBackupArchiveWriterTest extends TestCase
                         'registry_key' => 'table:supplier',
                         'primary_key' => ['id' => 1],
                         'column' => 'logo_path',
+                        'path' => [],
                     ]],
                 ]],
             ];

@@ -14,6 +14,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
         private CompanyBackupSnapshotTransaction $transaction = new CompanyBackupSnapshotTransaction(),
         private CompanyBackupJsonlWriter $jsonlWriter = new CompanyBackupJsonlWriter(),
         private CompanyBackupDatabaseCoverageGate $databaseCoverage = new CompanyBackupDatabaseCoverageValidator(),
+        private CompanyBackupFileCollector $fileCollector = new CompanyBackupFileCollector(),
     ) {}
 
     public function export(
@@ -22,6 +23,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
         int $supplierId,
         string $workDirectory,
         CompanyBackupDataRowSource $source,
+        CompanyBackupFileReferenceSource $fileSource,
     ): CompanyBackupMachineSnapshot {
         if ($supplierId < 1) {
             throw new \InvalidArgumentException('Firma snapshotu musí mít kladné ID.');
@@ -43,6 +45,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
                     $supplierId,
                     $resolvedDirectory,
                     $source,
+                    $fileSource,
                     &$createdFiles,
                 ): CompanyBackupMachineSnapshot {
                     $this->databaseCoverage->assertSafe($snapshot, $registry->registry);
@@ -62,10 +65,25 @@ final readonly class CompanyBackupMachineSnapshotExporter
                         $sourceFiles[$object->path] = $filePath;
                     }
                     $inventory = CompanyBackupDataInventory::fromObjects($objects, $registry);
+                    $files = $this->fileCollector->collect(
+                        $snapshot,
+                        $registry,
+                        $supplierId,
+                        $fileSource,
+                    );
+                    foreach ($files->sourceFiles as $archivePath => $sourcePath) {
+                        if (isset($sourceFiles[$archivePath])) {
+                            throw new CompanyBackupSnapshotException(
+                                'snapshot_source_path_collision',
+                            );
+                        }
+                        $sourceFiles[$archivePath] = $sourcePath;
+                    }
                     return new CompanyBackupMachineSnapshot(
                         $supplierId,
                         $registry,
                         $inventory,
+                        $files->inventory,
                         $sourceFiles,
                     );
                 },

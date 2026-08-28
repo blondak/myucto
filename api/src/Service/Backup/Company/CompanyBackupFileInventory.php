@@ -135,6 +135,12 @@ final readonly class CompanyBackupFileInventory
         }
     }
 
+    /** @return array<string,array{sha256:string,bytes:int}> */
+    public function archiveFiles(): array
+    {
+        return $this->archiveFiles;
+    }
+
     /** @return array{format:string,version:int,areas:list<array<string,mixed>>} */
     public function toArray(): array
     {

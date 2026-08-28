@@ -136,6 +136,7 @@ final class CompanyBackupFileInventoryTest extends TestCase
                             'registry_key' => 'table:branding_profiles',
                             'primary_key' => ['id' => 12],
                             'column' => 'logo_path',
+                            'path' => [],
                         ]],
                     ],
                     [
@@ -149,6 +150,7 @@ final class CompanyBackupFileInventoryTest extends TestCase
                             'registry_key' => 'table:branding_profiles',
                             'primary_key' => ['id' => 11],
                             'column' => 'logo_path',
+                            'path' => [],
                         ]],
                     ],
                 ],

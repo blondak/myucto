@@ -13,13 +13,25 @@ use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 final readonly class CompanyBackupFileEntry
 {
     private const MAX_SOURCE_PATH_BYTES = 1_024;
-    private const MAX_OWNERS = 1_024;
+    public const MAX_OWNERS = 1_024;
 
-    /** @var list<array{registry_key:string,primary_key:array<string,int|string>,column:string}> */
+    /**
+     * @var list<array{
+     *   registry_key:string,
+     *   primary_key:array<string,int|string>,
+     *   column:string,
+     *   path:list<string>
+     * }>
+     */
     public array $owners;
 
     /**
-     * @param list<array{registry_key:string,primary_key:array<string,int|string>,column:string}> $owners
+     * @param list<array{
+     *   registry_key:string,
+     *   primary_key:array<string,int|string>,
+     *   column:string,
+     *   path:list<string>
+     * }> $owners
      */
     private function __construct(
         public string $sourcePath,
@@ -54,7 +66,7 @@ final readonly class CompanyBackupFileEntry
             throw self::invalid('entry');
         }
 
-        $sourcePath = self::sourcePath($value['source_path']);
+        $sourcePath = self::normalizeSourcePath($value['source_path']);
         $stateValue = $value['state'];
         $state = is_string($stateValue)
             ? CompanyBackupFileState::tryFrom($stateValue)
@@ -104,7 +116,8 @@ final readonly class CompanyBackupFileEntry
      *   owners:list<array{
      *     registry_key:string,
      *     primary_key:array<string,int|string>,
-     *     column:string
+     *     column:string,
+     *     path:list<string>
      *   }>
      * }
      */
@@ -120,7 +133,7 @@ final readonly class CompanyBackupFileEntry
         ];
     }
 
-    private static function sourcePath(mixed $value): string
+    public static function normalizeSourcePath(mixed $value): string
     {
         if (!is_string($value)
             || $value === ''
@@ -158,7 +171,12 @@ final readonly class CompanyBackupFileEntry
     }
 
     /**
-     * @return list<array{registry_key:string,primary_key:array<string,int|string>,column:string}>
+     * @return list<array{
+     *   registry_key:string,
+     *   primary_key:array<string,int|string>,
+     *   column:string,
+     *   path:list<string>
+     * }>
      */
     private static function owners(mixed $value, TenantDataRegistry $registry): array
     {
@@ -178,12 +196,13 @@ final readonly class CompanyBackupFileEntry
             }
             $keys = array_keys($owner);
             sort($keys, SORT_STRING);
-            if ($keys !== ['column', 'primary_key', 'registry_key']) {
+            if ($keys !== ['column', 'path', 'primary_key', 'registry_key']) {
                 throw self::invalid('owners');
             }
             $registryKey = $owner['registry_key'];
             $column = $owner['column'];
             $primaryKey = $owner['primary_key'];
+            $path = self::ownerPath($owner['path']);
             $definition = is_string($registryKey)
                 ? $registry->definition($registryKey)
                 : null;
@@ -228,9 +247,11 @@ final readonly class CompanyBackupFileEntry
                 'registry_key' => $definition->key,
                 'primary_key' => $normalizedKey,
                 'column' => $column,
+                'path' => $path,
             ];
             $signature = $definition->key . ':'
-                . CanonicalJson::encode($normalizedKey) . ':' . $column;
+                . CanonicalJson::encode($normalizedKey) . ':' . $column . ':'
+                . CanonicalJson::encode($path);
             if (isset($signatures[$signature])) {
                 throw self::invalid('owners');
             }
@@ -243,6 +264,24 @@ final readonly class CompanyBackupFileEntry
             throw self::invalid('owners');
         }
         return array_values($owners);
+    }
+
+    /** @return list<string> */
+    private static function ownerPath(mixed $value): array
+    {
+        if (!is_array($value) || !array_is_list($value) || count($value) > 32) {
+            throw self::invalid('owners');
+        }
+        $path = [];
+        foreach ($value as $segment) {
+            if (!is_string($segment)
+                || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $segment) !== 1
+            ) {
+                throw self::invalid('owners');
+            }
+            $path[] = $segment;
+        }
+        return $path;
     }
 
     private static function validKeyValue(mixed $value): bool

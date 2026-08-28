@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDataRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupDatabaseCoverageGate;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileReference;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileReferenceSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupMachineSnapshotExporter;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -58,6 +60,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
             }
         };
         $coverage = $this->coverageGate();
+        $fileSource = new RecordingEmptyFileReferenceSource();
         $directory = $this->workDirectory();
 
         $snapshot = (new CompanyBackupMachineSnapshotExporter(
@@ -68,10 +71,13 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
             7,
             $directory,
             $source,
+            $fileSource,
         );
 
         self::assertSame(['table:invoices@7', 'table:supplier@7'], $source->calls);
         self::assertSame([$pdo], $coverage->snapshots);
+        self::assertSame([$pdo], $fileSource->snapshots);
+        self::assertSame(['file-area:invoice-pdf@7'], $fileSource->calls);
         self::assertSame(
             ['table:invoices', 'table:supplier'],
             array_map(
@@ -83,6 +89,11 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
             ['data/table-invoices.jsonl', 'data/table-supplier.jsonl'],
             array_keys($snapshot->sourceFiles),
         );
+        self::assertSame(
+            'file-area:invoice-pdf',
+            $snapshot->fileInventory->areas[0]->registryKey,
+        );
+        self::assertSame([], $snapshot->fileInventory->areas[0]->entries);
         self::assertSame(
             "{\"id\":20,\"supplier_id\":7}\n{\"id\":21,\"supplier_id\":7}\n",
             file_get_contents($snapshot->sourceFiles['data/table-invoices.jsonl']),
@@ -116,6 +127,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
             }
         };
         $coverage = $this->coverageGate();
+        $fileSource = new RecordingEmptyFileReferenceSource();
         $directory = $this->workDirectory();
 
         try {
@@ -127,6 +139,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                 7,
                 $directory,
                 $source,
+                $fileSource,
             );
             self::fail('Neúplný snapshot se nesmí vrátit volajícímu.');
         } catch (\DomainException $e) {
@@ -134,6 +147,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
         }
 
         self::assertSame([$pdo], $coverage->snapshots);
+        self::assertSame([], $fileSource->calls);
         self::assertSame([], glob($directory . DIRECTORY_SEPARATOR . '*') ?: []);
     }
 
@@ -159,6 +173,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
             }
         };
         $directory = $this->workDirectory();
+        $fileSource = new RecordingEmptyFileReferenceSource();
 
         try {
             (new CompanyBackupMachineSnapshotExporter(
@@ -169,6 +184,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                 7,
                 $directory,
                 $source,
+                $fileSource,
             );
             self::fail('Neúplná DB coverage nesmí pustit snapshot ke čtení řádků.');
         } catch (\DomainException $e) {
@@ -176,6 +192,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
         }
 
         self::assertSame(0, $source->calls);
+        self::assertSame([], $fileSource->calls);
         self::assertSame([], glob($directory . DIRECTORY_SEPARATOR . '*') ?: []);
     }
 
@@ -231,7 +248,11 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                     TenantDataObjectKind::FileArea,
                     TenantDataPolicy::TenantOwned,
                     [$profile],
-                    ['ownership' => ['strategy' => 'invoice_reference']],
+                    [
+                        'file_policy' => 'historical_optional',
+                        'ownership' => ['strategy' => 'database_references'],
+                        'storage_subdirectory' => 'invoices',
+                    ],
                 ),
             ],
             [$profile],
@@ -252,6 +273,26 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
         }
         $this->directories[] = $directory;
         return $directory;
+    }
+}
+
+final class RecordingEmptyFileReferenceSource implements CompanyBackupFileReferenceSource
+{
+    /** @var list<string> */
+    public array $calls = [];
+
+    /** @var list<PDO> */
+    public array $snapshots = [];
+
+    /** @return iterable<CompanyBackupFileReference> */
+    public function references(
+        PDO $snapshot,
+        int $supplierId,
+        TenantDataDefinition $definition,
+    ): iterable {
+        $this->snapshots[] = $snapshot;
+        $this->calls[] = $definition->key . '@' . $supplierId;
+        return [];
     }
 }
 
