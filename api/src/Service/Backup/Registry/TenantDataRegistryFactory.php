@@ -11,6 +11,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupExpenseCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupInvoiceSettlementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
@@ -23,7 +25,6 @@ final class TenantDataRegistryFactory
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
         'branding_profiles' => 'core',
-        'offset_agreements' => 'accounting',
         'payroll_run_revisions' => 'payroll',
     ];
 
@@ -440,6 +441,39 @@ final class TenantDataRegistryFactory
             ],
         );
         $definitions[] = new TenantDataDefinition(
+            'table:offset_agreements',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'natural_key' => ['supplier_id', 'document_no'],
+                'feature_group' => 'accounting',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('offset_agreements'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
+            'table:offset_agreement_items',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'feature_group' => 'accounting',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('offset_agreement_items'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
             'table:revenue_categories',
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantOwned,
@@ -622,6 +656,10 @@ final class TenantDataRegistryFactory
             'journal_entries' => CompanyBackupJournalEntriesProjection::dataColumns(),
             'journal_entry_lines' =>
                 CompanyBackupJournalEntryLinesProjection::dataColumns(),
+            'offset_agreement_items' =>
+                CompanyBackupOffsetAgreementItemsProjection::dataColumns(),
+            'offset_agreements' =>
+                CompanyBackupOffsetAgreementsProjection::dataColumns(),
             'projects' => CompanyBackupProjectsProjection::dataColumns(),
             'revenue_categories' =>
                 CompanyBackupRevenueCategoriesProjection::dataColumns(),
@@ -717,6 +755,10 @@ final class TenantDataRegistryFactory
                 CompanyBackupInvoiceSettlementsProjection::references(),
             'journal_entries' => CompanyBackupJournalEntriesProjection::references(),
             'journal_entry_lines' => CompanyBackupJournalEntryLinesProjection::references(),
+            'offset_agreement_items' =>
+                CompanyBackupOffsetAgreementItemsProjection::references(),
+            'offset_agreements' =>
+                CompanyBackupOffsetAgreementsProjection::references(),
             'projects' => CompanyBackupProjectsProjection::references(),
             'revenue_categories' =>
                 CompanyBackupRevenueCategoriesProjection::references(),

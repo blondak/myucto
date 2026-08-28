@@ -1061,6 +1061,116 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testOffsetAgreementsDeclarePartnerPostingAndActor(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:offset_agreements');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'partner_id',
+            'agreement_date',
+            'document_no',
+            'total_amount',
+            'status',
+            'journal_entry_id',
+            'note',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['journal_entry_id', 'note', 'created_by'],
+            [
+                new CompanyBackupForeignKey(
+                    ['journal_entry_id'],
+                    'journal_entries',
+                    ['id'],
+                ),
+                new CompanyBackupForeignKey(['partner_id'], 'clients', ['id']),
+                new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+            ],
+        ));
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['supplier_id', 'document_no'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'created_by->users:id',
+                'journal_entry_id->journal_entries:id',
+                'partner_id->clients:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            CompanyBackupReferenceMapping::Actor,
+            $projection->references->references[0]->mapping,
+        );
+        self::assertSame(
+            ['null', 'restore_actor'],
+            $projection->references->references[0]->fallbacks,
+        );
+    }
+
+    public function testOffsetAgreementItemsDeclareAgreementDocumentsAndPayment(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:offset_agreement_items');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'agreement_id',
+            'supplier_id',
+            'doc_type',
+            'doc_id',
+            'amount',
+            'invoice_payment_id',
+            'created_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['invoice_payment_id'],
+            [
+                new CompanyBackupForeignKey(
+                    ['agreement_id'],
+                    'offset_agreements',
+                    ['id'],
+                ),
+                new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+            ],
+        ));
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'agreement_id->offset_agreements:id',
+                'doc_id->invoices:id?doc_type=invoice',
+                'doc_id->purchase_invoices:id?doc_type=purchase_invoice',
+                'invoice_payment_id->invoice_payments:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
     public function testAccountingClosingPayloadReferencesUseTheirDeclaredTargets(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition(

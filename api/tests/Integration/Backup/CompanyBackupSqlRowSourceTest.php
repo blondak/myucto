@@ -384,6 +384,34 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionOffsetAgreementsProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'offset_agreements',
+            [
+                'supplier_id',
+                'partner_id',
+                'document_no',
+                'journal_entry_id',
+                'created_by',
+            ],
+        );
+    }
+
+    public function testProductionOffsetAgreementItemsProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'offset_agreement_items',
+            [
+                'agreement_id',
+                'supplier_id',
+                'doc_type',
+                'doc_id',
+                'invoice_payment_id',
+            ],
+        );
+    }
+
     public function testStreamsOnlyClientsOfCompanyAndPreservesExternalIds(): void
     {
         $pdo = $this->db->pdo();
