@@ -845,6 +845,141 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         self::assertStringContainsString('`supplier`', $selection->where);
     }
 
+    public function testClientsDeclareGlobalTenantAndExternalIdentifiers(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:clients');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'company_name',
+            'first_name',
+            'last_name',
+            'ic',
+            'dic',
+            'tax_number',
+            'street',
+            'city',
+            'zip',
+            'country_id',
+            'main_email',
+            'phone',
+            'language',
+            'currency_default_id',
+            'vat_rate_default_id',
+            'reverse_charge',
+            'oss_mode',
+            'oss_default_supply_type',
+            'is_customer',
+            'is_vendor',
+            'is_fuel_station',
+            'idoklad_id',
+            'auto_send_reminders',
+            'payment_due_default',
+            'payment_due_unit',
+            'hourly_rate',
+            'note',
+            'default_expense_category_id',
+            'default_revenue_category_id',
+            'invoice_number_format',
+            'proforma_number_format',
+            'credit_note_number_format',
+            'invoice_number_period',
+            'default_branding_profile_id',
+            'archived_at',
+            'created_at',
+            'updated_at',
+            'fakturoid_id',
+            'is_vat_payer',
+            'default_payment_method',
+            'related_party',
+            'related_party_type',
+            'related_party_note',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            [
+                'first_name',
+                'last_name',
+                'ic',
+                'dic',
+                'tax_number',
+                'main_email',
+                'phone',
+                'vat_rate_default_id',
+                'oss_default_supply_type',
+                'idoklad_id',
+                'payment_due_default',
+                'payment_due_unit',
+                'note',
+                'default_expense_category_id',
+                'default_revenue_category_id',
+                'invoice_number_format',
+                'proforma_number_format',
+                'credit_note_number_format',
+                'invoice_number_period',
+                'default_branding_profile_id',
+                'archived_at',
+                'fakturoid_id',
+                'default_payment_method',
+                'related_party_type',
+                'related_party_note',
+            ],
+            [
+                new CompanyBackupForeignKey(
+                    ['default_branding_profile_id'],
+                    'branding_profiles',
+                    ['id'],
+                ),
+                new CompanyBackupForeignKey(['country_id'], 'countries', ['id']),
+                new CompanyBackupForeignKey(
+                    ['currency_default_id'],
+                    'currencies',
+                    ['id'],
+                ),
+                new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+                new CompanyBackupForeignKey(
+                    ['vat_rate_default_id'],
+                    'vat_rates',
+                    ['id'],
+                ),
+            ],
+        ));
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['fakturoid_id', 'idoklad_id'],
+            $projection->preservedIdentifiers->columns,
+        );
+        self::assertSame(
+            [
+                'country_id->countries:id',
+                'currency_default_id->currencies:id',
+                'default_branding_profile_id->branding_profiles:id',
+                'default_expense_category_id->expense_categories:id',
+                'default_revenue_category_id->revenue_categories:id',
+                'supplier_id->supplier:id',
+                'vat_rate_default_id->vat_rates:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            CompanyBackupReferenceMapping::GlobalNaturalKey,
+            $projection->references->references[0]->mapping,
+        );
+        self::assertSame(
+            CompanyBackupReferenceMapping::GlobalNaturalKey,
+            $projection->references->references[6]->mapping,
+        );
+    }
+
     public function testAccountingClosingPayloadReferencesUseTheirDeclaredTargets(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition(

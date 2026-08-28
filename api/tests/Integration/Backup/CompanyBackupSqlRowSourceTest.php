@@ -349,6 +349,73 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionClientsProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'clients',
+            [
+                'supplier_id',
+                'country_id',
+                'currency_default_id',
+                'vat_rate_default_id',
+                'idoklad_id',
+                'fakturoid_id',
+                'default_branding_profile_id',
+                'default_expense_category_id',
+                'default_revenue_category_id',
+            ],
+        );
+    }
+
+    public function testStreamsOnlyClientsOfCompanyAndPreservesExternalIds(): void
+    {
+        $pdo = $this->db->pdo();
+        $countryId = $this->scalarInt(
+            $pdo,
+            "SELECT id FROM countries WHERE iso2 = 'CZ' ORDER BY id LIMIT 1",
+        );
+        $currencyId = $this->scalarInt(
+            $pdo,
+            "SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1",
+        );
+        $ownClientId = $this->createClient(
+            $pdo,
+            $this->supplierId,
+            'Company backup SQL vlastní externí klient s.r.o.',
+            $countryId,
+            $currencyId,
+        );
+        $foreignClientId = $this->createClient(
+            $pdo,
+            $this->foreignSupplierId,
+            'Company backup SQL cizí externí klient s.r.o.',
+            $countryId,
+            $currencyId,
+        );
+        $statement = $pdo->prepare(
+            'UPDATE clients SET idoklad_id = ?, fakturoid_id = ? WHERE id = ?',
+        );
+        $statement->execute([910001, 910002, $ownClientId]);
+        $statement->execute([920001, 920002, $foreignClientId]);
+
+        $definition = TenantDataRegistryFactory::draftV1()->definition('table:clients');
+        self::assertNotNull($definition);
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+            $pdo,
+            $this->supplierId,
+            $definition,
+        ));
+        $byId = [];
+        foreach ($rows as $row) {
+            $byId[(int) $row['id']] = $row;
+        }
+
+        self::assertArrayHasKey($ownClientId, $byId);
+        self::assertArrayNotHasKey($foreignClientId, $byId);
+        self::assertSame(910001, (int) $byId[$ownClientId]['idoklad_id']);
+        self::assertSame(910002, (int) $byId[$ownClientId]['fakturoid_id']);
+    }
+
     public function testStreamsOnlyGlobalRowsReferencedBySelectedSupplier(): void
     {
         $pdo = $this->db->pdo();

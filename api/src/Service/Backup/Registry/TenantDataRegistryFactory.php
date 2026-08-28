@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Registry;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupClientsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupCountriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupExpenseCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
@@ -20,6 +21,7 @@ final class TenantDataRegistryFactory
 {
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
+        'branding_profiles' => 'core',
         'invoice_settlements' => 'accounting',
         'offset_agreements' => 'accounting',
         'payroll_run_revisions' => 'payroll',
@@ -577,6 +579,7 @@ final class TenantDataRegistryFactory
      *   generated_columns:list<string>,
      *   omit_columns:array<string,string>,
      *   polymorphic_references?:list<array<string,mixed>>,
+     *   preserved_identifiers?:list<string>,
      *   restore_overrides:array<string,array{value:string|int|bool|null,reason:string}>,
      *   references:list<array{
      *     columns:list<string>,
@@ -594,6 +597,7 @@ final class TenantDataRegistryFactory
         $columns = match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::dataColumns(),
+            'clients' => CompanyBackupClientsProjection::dataColumns(),
             'countries' => CompanyBackupCountriesProjection::dataColumns(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::dataColumns(),
@@ -623,6 +627,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'polymorphic_references' =>
                         CompanyBackupJournalEntriesProjection::polymorphicReferences(),
+                    'references' => $references,
+                    'restore_overrides' => $restoreOverrides,
+                ],
+            ];
+        }
+        if ($table === 'clients') {
+            return [
+                'company_backup' => [
+                    'data_columns' => $columns,
+                    'embedded_references' => $embeddedReferences,
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'preserved_identifiers' =>
+                        CompanyBackupClientsProjection::preservedIdentifiers(),
                     'references' => $references,
                     'restore_overrides' => $restoreOverrides,
                 ],
@@ -674,6 +692,7 @@ final class TenantDataRegistryFactory
         return match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::references(),
+            'clients' => CompanyBackupClientsProjection::references(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::references(),
             'journal_entries' => CompanyBackupJournalEntriesProjection::references(),
