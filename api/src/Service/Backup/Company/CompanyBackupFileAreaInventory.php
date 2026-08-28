@@ -46,6 +46,10 @@ final readonly class CompanyBackupFileAreaInventory
         }
 
         $policy = CompanyBackupFilePolicy::fromDefinition($definition);
+        $allowedOwners = CompanyBackupFileOwnerSet::fromDefinition(
+            $definition,
+            $registry,
+        );
         $entries = [];
         $seen = [];
         foreach ($value['entries'] as $entryValue) {
@@ -54,6 +58,7 @@ final readonly class CompanyBackupFileAreaInventory
                 $definition->name(),
                 $policy,
                 $registry,
+                $allowedOwners,
             );
             if (isset($seen[$entry->sourcePath])) {
                 throw self::invalid($definition->key);

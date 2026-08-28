@@ -49,6 +49,7 @@ final readonly class CompanyBackupFileEntry
         string $areaName,
         CompanyBackupFilePolicy $policy,
         TenantDataRegistry $registry,
+        CompanyBackupFileOwnerSet $allowedOwners,
     ): self {
         if (!is_array($value) || array_is_list($value)) {
             throw self::invalid('entry');
@@ -95,7 +96,7 @@ final readonly class CompanyBackupFileEntry
             throw self::invalid($policy->value);
         }
 
-        $owners = self::owners($value['owners'], $registry);
+        $owners = self::owners($value['owners'], $registry, $allowedOwners);
         return new self(
             $sourcePath,
             $archivePath,
@@ -178,8 +179,11 @@ final readonly class CompanyBackupFileEntry
      *   path:list<string>
      * }>
      */
-    private static function owners(mixed $value, TenantDataRegistry $registry): array
-    {
+    private static function owners(
+        mixed $value,
+        TenantDataRegistry $registry,
+        CompanyBackupFileOwnerSet $allowedOwners,
+    ): array {
         if (!is_array($value)
             || !array_is_list($value)
             || $value === []
@@ -249,6 +253,9 @@ final readonly class CompanyBackupFileEntry
                 'column' => $column,
                 'path' => $path,
             ];
+            if ($allowedOwners->owner($definition->key, $column, $path) === null) {
+                throw self::invalid('owners');
+            }
             $signature = $definition->key . ':'
                 . CanonicalJson::encode($normalizedKey) . ':' . $column . ':'
                 . CanonicalJson::encode($path);

@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlFileReferenceSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
@@ -132,6 +133,79 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $this->foreignPeriodId,
             $unscoped,
             'Negativní kontrola musí bez tenantového filtru cizí řádek skutečně najít.',
+        );
+    }
+
+    public function testStreamsOnlyFileReferencesOwnedBySelectedSupplier(): void
+    {
+        $pdo = $this->db->pdo();
+        $ownSupplierLogo = 'storage/supplier-logos/sup-'
+            . $this->supplierId . '.png';
+        $foreignSupplierLogo = 'storage/supplier-logos/sup-'
+            . $this->foreignSupplierId . '.png';
+        $statement = $pdo->prepare('UPDATE supplier SET logo_path = ? WHERE id = ?');
+        $statement->execute([$ownSupplierLogo, $this->supplierId]);
+        $statement->execute([$foreignSupplierLogo, $this->foreignSupplierId]);
+
+        $ownProfileId = $this->createBrandingProfile(
+            $pdo,
+            $this->supplierId,
+            'Company backup vlastní profil',
+        );
+        $foreignProfileId = $this->createBrandingProfile(
+            $pdo,
+            $this->foreignSupplierId,
+            'Company backup cizí profil',
+        );
+        $ownProfileLogo = 'storage/supplier-logos/sup-' . $this->supplierId
+            . '-brand-' . $ownProfileId . '-abcdef123456.png';
+        $foreignProfileLogo = 'storage/supplier-logos/sup-'
+            . $this->foreignSupplierId . '-brand-' . $foreignProfileId
+            . '-123456abcdef.png';
+        $statement = $pdo->prepare(
+            'UPDATE branding_profiles SET logo_path = ? WHERE id = ?',
+        );
+        $statement->execute([$ownProfileLogo, $ownProfileId]);
+        $statement->execute([$foreignProfileLogo, $foreignProfileId]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('file-area:supplier-logos');
+        self::assertNotNull($definition);
+        $references = iterator_to_array(
+            (new CompanyBackupSqlFileReferenceSource(batchSize: 1))->references(
+                $pdo,
+                $this->supplierId,
+                $definition,
+                $registry,
+            ),
+        );
+        $paths = array_column($references, 'sourcePath');
+
+        self::assertContains(
+            substr($ownProfileLogo, strlen('storage/supplier-logos/')),
+            $paths,
+        );
+        self::assertContains(
+            substr($ownSupplierLogo, strlen('storage/supplier-logos/')),
+            $paths,
+        );
+        self::assertNotContains(
+            substr($foreignProfileLogo, strlen('storage/supplier-logos/')),
+            $paths,
+        );
+        self::assertNotContains(
+            substr($foreignSupplierLogo, strlen('storage/supplier-logos/')),
+            $paths,
+        );
+
+        $unscoped = $pdo->prepare(
+            'SELECT logo_path FROM branding_profiles WHERE id IN (?, ?) ORDER BY id',
+        );
+        $unscoped->execute([$ownProfileId, $foreignProfileId]);
+        self::assertContains(
+            $foreignProfileLogo,
+            $unscoped->fetchAll(PDO::FETCH_COLUMN),
+            'Negativní kontrola musí bez tenantového filtru najít i cizí logo.',
         );
     }
 
@@ -718,6 +792,18 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $year . '-12-31',
             'open',
         ]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function createBrandingProfile(
+        PDO $pdo,
+        int $supplierId,
+        string $name,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO branding_profiles (supplier_id, name) VALUES (?, ?)',
+        );
+        $statement->execute([$supplierId, $name]);
         return (int) $pdo->lastInsertId();
     }
 

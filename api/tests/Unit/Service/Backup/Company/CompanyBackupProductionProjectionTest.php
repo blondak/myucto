@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileAreaProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupForeignKey;
 use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceTransform;
@@ -19,6 +20,33 @@ use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupProductionProjectionTest extends TestCase
 {
+    public function testSupplierLogoAreaRegistersEveryCurrentAndHistoricalOwner(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('file-area:supplier-logos');
+        self::assertNotNull($definition);
+
+        $area = CompanyBackupFileAreaProjection::fromDefinition(
+            $definition,
+            $registry,
+        );
+
+        self::assertSame('historical_optional', $area->policy->value);
+        self::assertSame('supplier_logo', $area->pathPolicy->value);
+        self::assertSame('supplier-logos', $area->storageSubdirectory);
+        self::assertSame(
+            [
+                'table:branding_profiles:logo_path:[]',
+                'table:invoices:supplier_snapshot:["logo_path"]',
+                'table:supplier:logo_path:[]',
+            ],
+            array_map(
+                static fn ($owner): string => $owner->signature(),
+                $area->owners->owners,
+            ),
+        );
+    }
+
     public function testCurrenciesHaveFirstExplicitProductionColumnProjection(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition('table:currencies');

@@ -33,10 +33,19 @@ final readonly class CompanyBackupFileCollector
         $sourcePaths = [];
         $expandedBytes = 0;
         foreach ($this->definitions($registry) as $index => $definition) {
-            $projection = CompanyBackupFileAreaProjection::fromDefinition($definition);
+            $projection = CompanyBackupFileAreaProjection::fromDefinition(
+                $definition,
+                $registry->registry,
+            );
             $references = $this->groupReferences(
-                $source->references($snapshot, $supplierId, $definition),
+                $source->references(
+                    $snapshot,
+                    $supplierId,
+                    $definition,
+                    $registry->registry,
+                ),
                 $projection,
+                $supplierId,
             );
             $entries = [];
             $root = $references === []
@@ -134,6 +143,7 @@ final readonly class CompanyBackupFileCollector
     private function groupReferences(
         iterable $references,
         CompanyBackupFileAreaProjection $projection,
+        int $supplierId,
     ): array {
         $grouped = [];
         $collisionPaths = [];
@@ -142,6 +152,16 @@ final readonly class CompanyBackupFileCollector
                 throw new CompanyBackupFileSourceException(
                     'file_source_reference_invalid',
                     $projection->registryKey,
+                );
+            }
+            if (!$projection->pathPolicy->accepts(
+                $reference->sourcePath,
+                $supplierId,
+            )) {
+                throw new CompanyBackupFileSourceException(
+                    'file_source_tenant_mismatch',
+                    $projection->registryKey,
+                    $reference->sourcePath,
                 );
             }
             $collisionKey = strtolower($reference->sourcePath);

@@ -519,6 +519,39 @@ final class TenantDataRegistryFactory
                 ],
             );
         }
+        $definitions[] = new TenantDataDefinition(
+            'file-area:supplier-logos',
+            TenantDataObjectKind::FileArea,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'feature_group' => 'core',
+                'file_policy' => 'historical_optional',
+                'path_policy' => 'supplier_logo',
+                'file_owners' => [
+                    [
+                        'registry_key' => 'table:branding_profiles',
+                        'column' => 'logo_path',
+                        'path' => [],
+                        'stored_prefix' => 'storage/supplier-logos/',
+                    ],
+                    [
+                        'registry_key' => 'table:invoices',
+                        'column' => 'supplier_snapshot',
+                        'path' => ['logo_path'],
+                        'stored_prefix' => 'storage/supplier-logos/',
+                    ],
+                    [
+                        'registry_key' => 'table:supplier',
+                        'column' => 'logo_path',
+                        'path' => [],
+                        'stored_prefix' => 'storage/supplier-logos/',
+                    ],
+                ],
+                'ownership' => ['strategy' => 'database_references'],
+                'storage_subdirectory' => 'supplier-logos',
+            ],
+        );
 
         return new TenantDataRegistry(
             1,

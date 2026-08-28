@@ -15,11 +15,15 @@ final readonly class CompanyBackupFileAreaProjection
         public string $registryKey,
         public string $name,
         public CompanyBackupFilePolicy $policy,
+        public CompanyBackupFilePathPolicy $pathPolicy,
         public string $storageSubdirectory,
+        public CompanyBackupFileOwnerSet $owners,
     ) {}
 
-    public static function fromDefinition(TenantDataDefinition $definition): self
-    {
+    public static function fromDefinition(
+        TenantDataDefinition $definition,
+        TenantDataRegistry $registry,
+    ): self {
         $subdirectory = $definition->details['storage_subdirectory'] ?? null;
         $ownership = $definition->details['ownership'] ?? null;
         if ($definition->kind !== TenantDataObjectKind::FileArea
@@ -38,6 +42,11 @@ final readonly class CompanyBackupFileAreaProjection
         }
         try {
             $policy = CompanyBackupFilePolicy::fromDefinition($definition);
+            $pathPolicy = CompanyBackupFilePathPolicy::fromDefinition($definition);
+            $owners = CompanyBackupFileOwnerSet::fromDefinition(
+                $definition,
+                $registry,
+            );
         } catch (\InvalidArgumentException $e) {
             throw new CompanyBackupFileSourceException(
                 'file_area_metadata_invalid',
@@ -49,7 +58,9 @@ final readonly class CompanyBackupFileAreaProjection
             $definition->key,
             $definition->name(),
             $policy,
+            $pathPolicy,
             $subdirectory,
+            $owners,
         );
     }
 

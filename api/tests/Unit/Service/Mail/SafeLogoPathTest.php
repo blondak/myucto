@@ -60,6 +60,18 @@ final class SafeLogoPathTest extends TestCase
         self::assertNull(SafeLogoPath::resolve('storage/supplier-logos/sup-1', 1)); // no extension
     }
 
+    public function testSourcePathShapeCanBeCheckedWithoutFilesystem(): void
+    {
+        self::assertTrue(SafeLogoPath::isAllowedSourcePath('sup-7.png', 7));
+        self::assertTrue(SafeLogoPath::isAllowedSourcePath(
+            'sup-7-brand-11-abcdef123456.svg',
+            7,
+        ));
+        self::assertFalse(SafeLogoPath::isAllowedSourcePath('sup-8.png', 7));
+        self::assertFalse(SafeLogoPath::isAllowedSourcePath('nested/sup-7.png', 7));
+        self::assertFalse(SafeLogoPath::isAllowedSourcePath('sup-7.php', 7));
+    }
+
     public function testMissingFileReturnsNull(): void
     {
         // Validní path tvar, ale soubor neexistuje → null (realpath returns false)

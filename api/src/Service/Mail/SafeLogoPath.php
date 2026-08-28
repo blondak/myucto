@@ -40,6 +40,31 @@ final class SafeLogoPath
     private const ALLOWED_EXT = ['png', 'jpg', 'jpeg', 'svg', 'webp'];
     private const SAFE_DIR    = 'storage/supplier-logos';
 
+    /** Ověří tenantovou identitu a tvar cesty relativní k SAFE_DIR. */
+    public static function isAllowedSourcePath(
+        string $sourcePath,
+        int $supplierId,
+    ): bool {
+        if ($sourcePath === ''
+            || $supplierId <= 0
+            || str_contains($sourcePath, "\0")
+            || str_contains($sourcePath, '/')
+            || str_contains($sourcePath, '\\')
+        ) {
+            return false;
+        }
+        $ext = strtolower((string) pathinfo($sourcePath, PATHINFO_EXTENSION));
+        if (!in_array($ext, self::ALLOWED_EXT, true)) {
+            return false;
+        }
+        return preg_match(
+            '/^sup-' . $supplierId
+            . '(?:-brand-[1-9][0-9]*-[a-f0-9]{12})?\.'
+            . preg_quote($ext, '/') . '$/D',
+            $sourcePath,
+        ) === 1;
+    }
+
     public static function resolve(?string $logoPath, int $supplierId): ?string
     {
         if ($logoPath === null || $logoPath === '' || $supplierId <= 0) return null;
@@ -53,16 +78,8 @@ final class SafeLogoPath
         $expectedPrefix = self::SAFE_DIR . '/';
         if (!str_starts_with($rel, $expectedPrefix)) return null;
 
-        // Extension allowlist
-        $ext = strtolower((string) pathinfo($rel, PATHINFO_EXTENSION));
-        if (!in_array($ext, self::ALLOWED_EXT, true)) return null;
-
-        // Basename validace — žádné víc-úrovňové cesty
-        $basename = basename($rel);
-        $quotedExt = preg_quote($ext, '/');
-        if (!preg_match('/^sup-' . $supplierId . '(?:-brand-[1-9][0-9]*-[a-f0-9]{12})?\.' . $quotedExt . '$/', $basename)) {
-            return null;
-        }
+        $sourcePath = substr($rel, strlen($expectedPrefix));
+        if (!self::isAllowedSourcePath($sourcePath, $supplierId)) return null;
 
         $rootDir = \MyInvoice\Infrastructure\Config\RuntimePaths::base();
         $abs = $rootDir . '/' . $rel;

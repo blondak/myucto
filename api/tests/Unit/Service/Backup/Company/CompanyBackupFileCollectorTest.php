@@ -127,6 +127,32 @@ final class CompanyBackupFileCollectorTest extends TestCase
         }
     }
 
+    public function testRejectsReferenceOutsideAreaTenantPathPolicy(): void
+    {
+        $storage = $this->directory();
+        $source = new ArrayFileReferenceSource([
+            new CompanyBackupFileReference(
+                'sup-999.png',
+                'table:supplier',
+                ['id' => 7],
+                'logo_path',
+            ),
+        ]);
+
+        try {
+            (new CompanyBackupFileCollector($this->roots($storage)))->collect(
+                $this->createStub(PDO::class),
+                $this->snapshot(pathPolicy: 'supplier_logo'),
+                7,
+                $source,
+            );
+            self::fail('Kolektor nesmí důvěřovat tenantově cizí cestě ze zdroje.');
+        } catch (CompanyBackupFileSourceException $e) {
+            self::assertSame('file_source_tenant_mismatch', $e->errorCode);
+            self::assertSame('sup-999.png', $e->sourcePath);
+        }
+    }
+
     public function testSymlinkIsRejectedEvenForHistoricalOptionalArea(): void
     {
         $storage = $this->directory();
@@ -225,6 +251,7 @@ final class CompanyBackupFileCollectorTest extends TestCase
 
     private function snapshot(
         string $filePolicy = 'historical_optional',
+        string $pathPolicy = 'relative',
     ): TenantDataRegistrySnapshot {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
@@ -258,6 +285,27 @@ final class CompanyBackupFileCollectorTest extends TestCase
                     [$profile],
                     [
                         'file_policy' => $filePolicy,
+                        'path_policy' => $pathPolicy,
+                        'file_owners' => [
+                            [
+                                'registry_key' => 'table:branding_profiles',
+                                'column' => 'logo_path',
+                                'path' => [],
+                                'stored_prefix' => 'storage/supplier-logos/',
+                            ],
+                            [
+                                'registry_key' => 'table:invoices',
+                                'column' => 'supplier_snapshot',
+                                'path' => ['logo_path'],
+                                'stored_prefix' => 'storage/supplier-logos/',
+                            ],
+                            [
+                                'registry_key' => 'table:supplier',
+                                'column' => 'logo_path',
+                                'path' => [],
+                                'stored_prefix' => 'storage/supplier-logos/',
+                            ],
+                        ],
                         'ownership' => ['strategy' => 'database_references'],
                         'storage_subdirectory' => 'supplier-logos',
                     ],
@@ -316,6 +364,7 @@ final class ArrayFileReferenceSource implements CompanyBackupFileReferenceSource
         PDO $snapshot,
         int $supplierId,
         TenantDataDefinition $definition,
+        TenantDataRegistry $registry,
     ): iterable {
         $this->calls[] = $definition->key . '@' . $supplierId;
         return $this->references;

@@ -227,14 +227,20 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                     TenantDataObjectKind::Table,
                     TenantDataPolicy::TenantRoot,
                     [$profile],
-                    ['ownership' => ['strategy' => 'selected_supplier', 'column' => 'id']],
+                    [
+                        'primary_key' => ['id'],
+                        'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
+                    ],
                 ),
                 new TenantDataDefinition(
                     'table:invoices',
                     TenantDataObjectKind::Table,
                     TenantDataPolicy::TenantOwned,
                     [$profile],
-                    ['ownership' => ['strategy' => 'supplier_id', 'column' => 'supplier_id']],
+                    [
+                        'primary_key' => ['id'],
+                        'ownership' => ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                    ],
                 ),
                 new TenantDataDefinition(
                     'table:derived_cache',
@@ -250,6 +256,13 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                     [$profile],
                     [
                         'file_policy' => 'historical_optional',
+                        'path_policy' => 'relative',
+                        'file_owners' => [[
+                            'registry_key' => 'table:invoices',
+                            'column' => 'pdf_path',
+                            'path' => [],
+                            'stored_prefix' => 'storage/invoices/',
+                        ]],
                         'ownership' => ['strategy' => 'database_references'],
                         'storage_subdirectory' => 'invoices',
                     ],
@@ -289,6 +302,7 @@ final class RecordingEmptyFileReferenceSource implements CompanyBackupFileRefere
         PDO $snapshot,
         int $supplierId,
         TenantDataDefinition $definition,
+        TenantDataRegistry $registry,
     ): iterable {
         $this->snapshots[] = $snapshot;
         $this->calls[] = $definition->key . '@' . $supplierId;

@@ -360,6 +360,13 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
             [
                 'file_policy' => 'historical_optional',
+                'path_policy' => 'relative',
+                'file_owners' => [[
+                    'registry_key' => 'table:supplier',
+                    'column' => 'logo_path',
+                    'path' => [],
+                    'stored_prefix' => 'storage/supplier-logos/',
+                ]],
                 'ownership' => ['strategy' => 'database_references'],
             ],
         );

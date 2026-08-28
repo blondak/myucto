@@ -80,6 +80,17 @@ final class CompanyBackupFileInventoryTest extends TestCase
         CompanyBackupFileInventory::fromArray($value, $this->snapshot());
     }
 
+    public function testRejectsOwnerOutsideAreaAllowlist(): void
+    {
+        $value = $this->inventory();
+        $value['areas'][0]['entries'][1]['owners'][0]['column'] = 'signature_path';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('owners');
+
+        CompanyBackupFileInventory::fromArray($value, $this->snapshot());
+    }
+
     public function testArchiveCoverageIncludesOnlyPresentFiles(): void
     {
         $inventory = CompanyBackupFileInventory::fromArray(
@@ -179,6 +190,13 @@ final class CompanyBackupFileInventoryTest extends TestCase
                     [$profile],
                     [
                         'file_policy' => $filePolicy,
+                        'path_policy' => 'relative',
+                        'file_owners' => [[
+                            'registry_key' => 'table:branding_profiles',
+                            'column' => 'logo_path',
+                            'path' => [],
+                            'stored_prefix' => 'storage/supplier-logos/',
+                        ]],
                         'ownership' => ['strategy' => 'database_references'],
                     ],
                 ),
