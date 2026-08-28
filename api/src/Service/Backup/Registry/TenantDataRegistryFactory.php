@@ -10,6 +10,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
+use MyInvoice\Service\Backup\Company\CompanyBackupRevenueCategoriesProjection;
 
 /** Produkční sestavení registru; company_backup zůstává během inventury draft. */
 final class TenantDataRegistryFactory
@@ -19,7 +20,6 @@ final class TenantDataRegistryFactory
         'invoice_settlements' => 'accounting',
         'offset_agreements' => 'accounting',
         'payroll_run_revisions' => 'payroll',
-        'revenue_categories' => 'core',
     ];
 
     /** @var list<string> */
@@ -346,6 +346,23 @@ final class TenantDataRegistryFactory
             ],
         );
         $definitions[] = new TenantDataDefinition(
+            'table:revenue_categories',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'natural_key' => ['supplier_id', 'code'],
+                'feature_group' => 'core',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('revenue_categories'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
             'table:projects',
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantOwnedIndirect,
@@ -505,6 +522,8 @@ final class TenantDataRegistryFactory
             'journal_entry_lines' =>
                 CompanyBackupJournalEntryLinesProjection::dataColumns(),
             'projects' => CompanyBackupProjectsProjection::dataColumns(),
+            'revenue_categories' =>
+                CompanyBackupRevenueCategoriesProjection::dataColumns(),
             default => self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null,
         };
         if ($columns === null) {
@@ -578,6 +597,8 @@ final class TenantDataRegistryFactory
             'journal_entries' => CompanyBackupJournalEntriesProjection::references(),
             'journal_entry_lines' => CompanyBackupJournalEntryLinesProjection::references(),
             'projects' => CompanyBackupProjectsProjection::references(),
+            'revenue_categories' =>
+                CompanyBackupRevenueCategoriesProjection::references(),
             'accounting_document_series' => [
                 self::companyBackupTenantIdOrZeroReference(
                     'register_id',

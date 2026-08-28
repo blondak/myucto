@@ -312,6 +312,19 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionRevenueCategoriesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'revenue_categories',
+            [
+                'supplier_id',
+                'code',
+                'invoice_number_format',
+                'invoice_number_period',
+            ],
+        );
+    }
+
     public function testStreamsOnlyProjectsOwnedThroughSelectedClient(): void
     {
         $pdo = $this->db->pdo();
