@@ -26,18 +26,21 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             [
                 [
                     'COLUMN_NAME' => 'id',
+                    'DATA_TYPE' => 'bigint',
                     'EXTRA' => 'auto_increment',
                     'GENERATION_EXPRESSION' => null,
                     'TABLE_TYPE' => 'BASE TABLE',
                 ],
                 [
                     'COLUMN_NAME' => 'supplier_id',
+                    'DATA_TYPE' => 'int',
                     'EXTRA' => '',
                     'GENERATION_EXPRESSION' => null,
                     'TABLE_TYPE' => 'BASE TABLE',
                 ],
                 [
                     'COLUMN_NAME' => 'label',
+                    'DATA_TYPE' => 'varchar',
                     'EXTRA' => '',
                     'GENERATION_EXPRESSION' => null,
                     'TABLE_TYPE' => 'BASE TABLE',
@@ -100,6 +103,62 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         self::assertStringEndsWith('LIMIT 2 OFFSET 2', $queries[3]);
     }
 
+    public function testEncodesBinaryColumnAsLowercaseHexBeforeYielding(): void
+    {
+        $schema = $this->statement(
+            [['synthetic_records']],
+            [
+                [
+                    'COLUMN_NAME' => 'id',
+                    'DATA_TYPE' => 'bigint',
+                    'EXTRA' => 'auto_increment',
+                    'GENERATION_EXPRESSION' => null,
+                    'TABLE_TYPE' => 'BASE TABLE',
+                ],
+                [
+                    'COLUMN_NAME' => 'supplier_id',
+                    'DATA_TYPE' => 'int',
+                    'EXTRA' => '',
+                    'GENERATION_EXPRESSION' => null,
+                    'TABLE_TYPE' => 'BASE TABLE',
+                ],
+                [
+                    'COLUMN_NAME' => 'label',
+                    'DATA_TYPE' => 'binary',
+                    'EXTRA' => '',
+                    'GENERATION_EXPRESSION' => null,
+                    'TABLE_TYPE' => 'BASE TABLE',
+                ],
+            ],
+            PDO::FETCH_ASSOC,
+        );
+        $primaryKey = $this->statement(
+            [['synthetic_records']],
+            ['id'],
+            PDO::FETCH_COLUMN,
+        );
+        $page = $this->statement(
+            [[7]],
+            [['id' => 1, 'supplier_id' => 7, 'label' => "\xB1\x31"]],
+            PDO::FETCH_ASSOC,
+        );
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::exactly(3))
+            ->method('prepare')
+            ->willReturnOnConsecutiveCalls($schema, $primaryKey, $page);
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $pdo,
+            7,
+            $this->definition(columnCodecs: ['label' => 'binary_hex']),
+        ));
+
+        self::assertSame(
+            [['id' => 1, 'supplier_id' => 7, 'label' => 'b131']],
+            $rows,
+        );
+    }
+
     public function testRefusesProtectedSecretBeforeReadingBusinessRows(): void
     {
         $schema = $this->statement(
@@ -107,24 +166,28 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             [
                 [
                     'COLUMN_NAME' => 'id',
+                    'DATA_TYPE' => 'bigint',
                     'EXTRA' => 'auto_increment',
                     'GENERATION_EXPRESSION' => null,
                     'TABLE_TYPE' => 'BASE TABLE',
                 ],
                 [
                     'COLUMN_NAME' => 'supplier_id',
+                    'DATA_TYPE' => 'int',
                     'EXTRA' => '',
                     'GENERATION_EXPRESSION' => null,
                     'TABLE_TYPE' => 'BASE TABLE',
                 ],
                 [
                     'COLUMN_NAME' => 'label',
+                    'DATA_TYPE' => 'varchar',
                     'EXTRA' => '',
                     'GENERATION_EXPRESSION' => null,
                     'TABLE_TYPE' => 'BASE TABLE',
                 ],
                 [
                     'COLUMN_NAME' => 'protected_value_enc',
+                    'DATA_TYPE' => 'longtext',
                     'EXTRA' => '',
                     'GENERATION_EXPRESSION' => null,
                     'TABLE_TYPE' => 'BASE TABLE',
@@ -177,7 +240,11 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         return $statement;
     }
 
-    private function definition(bool $protectedSecret = false): TenantDataDefinition
+    /** @param array<string,string> $columnCodecs */
+    private function definition(
+        bool $protectedSecret = false,
+        array $columnCodecs = [],
+    ): TenantDataDefinition
     {
         $secrets = $protectedSecret ? [
             'protected_value_enc' => [
@@ -197,6 +264,9 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
                 ],
                 'secrets' => $secrets,
                 'company_backup' => [
+                    ...($columnCodecs === [] ? [] : [
+                        'column_codecs' => $columnCodecs,
+                    ]),
                     'data_columns' => ['id', 'supplier_id', 'label'],
                     'embedded_references' => [],
                     'generated_columns' => [],

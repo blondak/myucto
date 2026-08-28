@@ -23,12 +23,21 @@ final class CompanyBackupTableSchemaReaderTest extends TestCase
         $columns = $this->statement([
             [
                 'COLUMN_NAME' => 'id',
+                'DATA_TYPE' => 'bigint',
                 'EXTRA' => 'auto_increment',
                 'GENERATION_EXPRESSION' => null,
                 'TABLE_TYPE' => 'SYSTEM VERSIONED',
             ],
             [
                 'COLUMN_NAME' => 'supplier_id',
+                'DATA_TYPE' => 'int',
+                'EXTRA' => '',
+                'GENERATION_EXPRESSION' => null,
+                'TABLE_TYPE' => 'SYSTEM VERSIONED',
+            ],
+            [
+                'COLUMN_NAME' => 'digest',
+                'DATA_TYPE' => 'binary',
                 'EXTRA' => '',
                 'GENERATION_EXPRESSION' => null,
                 'TABLE_TYPE' => 'SYSTEM VERSIONED',
@@ -50,7 +59,8 @@ final class CompanyBackupTableSchemaReaderTest extends TestCase
                 'ownership' => ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
                 'secrets' => [],
                 'company_backup' => [
-                    'data_columns' => ['id', 'supplier_id'],
+                    'column_codecs' => ['digest' => 'binary_hex'],
+                    'data_columns' => ['id', 'supplier_id', 'digest'],
                     'embedded_references' => [],
                     'generated_columns' => [],
                     'omit_columns' => [],
@@ -70,13 +80,15 @@ final class CompanyBackupTableSchemaReaderTest extends TestCase
 
         $schema = (new CompanyBackupTableSchemaReader())->read($pdo, $projection);
 
-        self::assertSame(['id', 'supplier_id'], $schema->columns);
+        self::assertSame(['id', 'supplier_id', 'digest'], $schema->columns);
+        self::assertSame(['digest'], $schema->binaryColumns);
         self::assertSame([], $schema->generatedColumns);
         self::assertSame(['id'], $schema->primaryKey);
         $projection->assertRuntimeSchema(
             $schema->columns,
             $schema->generatedColumns,
             $schema->primaryKey,
+            $schema->binaryColumns,
         );
     }
 

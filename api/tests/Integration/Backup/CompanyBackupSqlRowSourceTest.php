@@ -148,6 +148,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $schema->columns,
             $schema->generatedColumns,
             $schema->primaryKey,
+            $schema->binaryColumns,
         );
 
         self::assertContains('supplier_id', $schema->columns);
@@ -171,6 +172,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $schema->columns,
             $schema->generatedColumns,
             $schema->primaryKey,
+            $schema->binaryColumns,
         );
         $projection->references->assertRegistryTargets($registry);
         $projection->references->assertRuntimeSchema(
@@ -194,6 +196,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $schema->columns,
             $schema->generatedColumns,
             $schema->primaryKey,
+            $schema->binaryColumns,
         );
         $projection->references->assertRegistryTargets($registry);
         $projection->references->assertRuntimeSchema(
@@ -581,6 +584,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $schema->columns,
             $schema->generatedColumns,
             $schema->primaryKey,
+            $schema->binaryColumns,
         );
         $projection->references->assertRegistryTargets($registry);
         $projection->references->assertRuntimeSchema(

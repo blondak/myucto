@@ -328,6 +328,62 @@ final class CompanyBackupTableProjectionTest extends TestCase
         }
     }
 
+    public function testRequiresExplicitCodecForEveryBinaryDataColumn(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            columnCodecs: ['name' => 'binary_hex'],
+        ));
+
+        $projection->assertRuntimeSchema(
+            ['id', 'supplier_id', 'name'],
+            [],
+            ['id'],
+            ['name'],
+        );
+        self::assertSame(
+            'binary_hex',
+            $projection->columnCodecs['name']->value,
+        );
+
+        try {
+            $projection->assertRuntimeSchema(
+                ['id', 'supplier_id', 'name'],
+                [],
+                ['id'],
+                [],
+            );
+            self::fail('Kodek nesmí zůstat deklarovaný pro textový runtime sloupec.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_binary_columns_mismatch', $e->errorCode);
+        }
+
+        try {
+            CompanyBackupTableProjection::fromDefinition($this->definition())
+                ->assertRuntimeSchema(
+                    ['id', 'supplier_id', 'name'],
+                    [],
+                    ['id'],
+                    ['name'],
+                );
+            self::fail('Binární data bez explicitního kodeku nesmějí do JSONL.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_binary_columns_mismatch', $e->errorCode);
+        }
+    }
+
+    public function testRejectsUnknownColumnCodec(): void
+    {
+        try {
+            CompanyBackupTableProjection::fromDefinition($this->definition(
+                columnCodecs: ['name' => 'lossy_text'],
+            ));
+            self::fail('Neznámý sloupcový kodek nesmí změnit význam dat.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_projection_invalid', $e->errorCode);
+            self::assertSame('name', $e->column);
+        }
+    }
+
     public function testRequiresEnvelopeForProtectedDomainSecret(): void
     {
         $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
@@ -362,6 +418,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param list<array<string,mixed>>|null $references
      * @param list<array<string,mixed>> $polymorphicReferences
      * @param list<string> $preservedIdentifiers
+     * @param array<string,string> $columnCodecs
      */
     private function definition(
         array $secrets = [],
@@ -371,6 +428,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
         ?array $references = null,
         array $polymorphicReferences = [],
         array $preservedIdentifiers = [],
+        array $columnCodecs = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:synthetic_records',
@@ -386,6 +444,9 @@ final class CompanyBackupTableProjectionTest extends TestCase
                 'secrets' => $secrets,
                 'company_backup' => [
                     'data_columns' => $dataColumns,
+                    ...($columnCodecs === [] ? [] : [
+                        'column_codecs' => $columnCodecs,
+                    ]),
                     'embedded_references' => [],
                     'generated_columns' => $generatedColumns,
                     'omit_columns' => $omitColumns,

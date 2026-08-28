@@ -11,6 +11,16 @@ use PDOStatement;
 /** Jediná runtime interpretace tabulek, sloupců, klíčů a jejich referencí. */
 final class CompanyBackupTableSchemaReader
 {
+    /** @var list<string> */
+    private const BINARY_DATA_TYPES = [
+        'binary',
+        'varbinary',
+        'tinyblob',
+        'blob',
+        'mediumblob',
+        'longblob',
+    ];
+
     /** @return list<string> */
     public function tableNames(PDO $pdo): array
     {
@@ -48,7 +58,7 @@ final class CompanyBackupTableSchemaReader
         PDO $pdo,
         CompanyBackupTableProjection $projection,
     ): CompanyBackupTableSchema {
-        $columnsSql = 'SELECT `c`.`COLUMN_NAME`, `c`.`EXTRA`,'
+        $columnsSql = 'SELECT `c`.`COLUMN_NAME`, `c`.`DATA_TYPE`, `c`.`EXTRA`,'
             . ' `c`.`GENERATION_EXPRESSION`, `t`.`TABLE_TYPE`'
             . ' FROM `information_schema`.`COLUMNS` AS `c`'
             . ' JOIN `information_schema`.`TABLES` AS `t`'
@@ -73,6 +83,7 @@ final class CompanyBackupTableSchemaReader
 
         $columns = [];
         $generated = [];
+        $binary = [];
         $systemVersioned = null;
         foreach ($rows as $row) {
             if (!is_array($row) || array_is_list($row)) {
@@ -82,11 +93,14 @@ final class CompanyBackupTableSchemaReader
                 );
             }
             $column = $row['COLUMN_NAME'] ?? null;
+            $dataType = $row['DATA_TYPE'] ?? null;
             $extra = $row['EXTRA'] ?? null;
             $generation = $row['GENERATION_EXPRESSION'] ?? null;
             $tableType = $row['TABLE_TYPE'] ?? null;
             if (!is_string($column)
                 || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $column) !== 1
+                || !is_string($dataType)
+                || preg_match('/^[a-z][a-z0-9_]{0,31}$/D', $dataType) !== 1
                 || !is_string($extra)
                 || !is_string($tableType)
                 || !is_string($generation) && $generation !== null
@@ -106,6 +120,9 @@ final class CompanyBackupTableSchemaReader
             }
             $systemVersioned = $rowSystemVersioned;
             $columns[] = $column;
+            if (in_array($dataType, self::BINARY_DATA_TYPES, true)) {
+                $binary[] = $column;
+            }
             if (($generation !== null && $generation !== '')
                 || str_contains(strtoupper($extra), 'GENERATED')
             ) {
@@ -143,7 +160,7 @@ final class CompanyBackupTableSchemaReader
         ) {
             array_pop($primaryKey);
         }
-        return new CompanyBackupTableSchema($columns, $generated, $primaryKey);
+        return new CompanyBackupTableSchema($columns, $generated, $primaryKey, $binary);
     }
 
     public function readReferences(

@@ -32,6 +32,9 @@ final readonly class CompanyBackupTableProjection
     /** @var array<string,TenantSecretPolicy> */
     public array $secretPolicies;
 
+    /** @var array<string,CompanyBackupColumnCodec> */
+    public array $columnCodecs;
+
     public CompanyBackupReferenceSet $references;
 
     public CompanyBackupEmbeddedReferenceSet $embeddedReferences;
@@ -49,6 +52,7 @@ final readonly class CompanyBackupTableProjection
      * @param list<string> $generatedColumns
      * @param array<string,string> $omitColumns
      * @param array<string,TenantSecretPolicy> $secretPolicies
+     * @param array<string,CompanyBackupColumnCodec> $columnCodecs
      */
     private function __construct(
         public string $registryKey,
@@ -60,6 +64,7 @@ final readonly class CompanyBackupTableProjection
         array $generatedColumns,
         array $omitColumns,
         array $secretPolicies,
+        array $columnCodecs,
         CompanyBackupReferenceSet $references,
         CompanyBackupEmbeddedReferenceSet $embeddedReferences,
         CompanyBackupPolymorphicReferenceSet $polymorphicReferences,
@@ -72,6 +77,7 @@ final readonly class CompanyBackupTableProjection
         $this->generatedColumns = $generatedColumns;
         $this->omitColumns = $omitColumns;
         $this->secretPolicies = $secretPolicies;
+        $this->columnCodecs = $columnCodecs;
         $this->references = $references;
         $this->embeddedReferences = $embeddedReferences;
         $this->polymorphicReferences = $polymorphicReferences;
@@ -132,6 +138,7 @@ final readonly class CompanyBackupTableProjection
         ];
         $allowedMetadataKeys = [
             ...$baseMetadataKeys,
+            'column_codecs',
             'polymorphic_references',
             'preserved_identifiers',
         ];
@@ -159,6 +166,11 @@ final readonly class CompanyBackupTableProjection
         $omitColumns = self::omitColumns($metadata['omit_columns'], $registryKey);
         $secretPolicies = self::secretPolicies(
             $definition->details['secrets'] ?? null,
+            $registryKey,
+        );
+        $columnCodecs = self::columnCodecs(
+            $metadata['column_codecs'] ?? [],
+            $dataColumns,
             $registryKey,
         );
         $references = CompanyBackupReferenceSet::fromArray(
@@ -258,6 +270,7 @@ final readonly class CompanyBackupTableProjection
             $generatedColumns,
             $omitColumns,
             $secretPolicies,
+            $columnCodecs,
             $references,
             $embeddedReferences,
             $polymorphicReferences,
@@ -270,15 +283,18 @@ final readonly class CompanyBackupTableProjection
      * @param array<mixed> $columns
      * @param array<mixed> $generatedColumns
      * @param array<mixed> $primaryKey
+     * @param array<mixed> $binaryColumns
      */
     public function assertRuntimeSchema(
         array $columns,
         array $generatedColumns,
         array $primaryKey,
+        array $binaryColumns = [],
     ): void {
         $columns = $this->runtimeIdentifierList($columns);
         $generatedColumns = $this->runtimeIdentifierList($generatedColumns);
         $primaryKey = $this->runtimeIdentifierList($primaryKey);
+        $binaryColumns = $this->runtimeIdentifierList($binaryColumns);
 
         foreach ($columns as $column) {
             if (TenantSecretColumnDetector::matches($column)
@@ -336,6 +352,29 @@ final readonly class CompanyBackupTableProjection
             throw new CompanyBackupDataSourceException(
                 'data_primary_key_mismatch',
                 $this->registryKey,
+            );
+        }
+
+        $runtimeBinaryDataColumns = array_values(array_filter(
+            $binaryColumns,
+            fn (string $column): bool => $this->hasDataColumn($column),
+        ));
+        sort($runtimeBinaryDataColumns, SORT_STRING);
+        $declaredBinaryDataColumns = array_keys($this->columnCodecs);
+        sort($declaredBinaryDataColumns, SORT_STRING);
+        if ($runtimeBinaryDataColumns !== $declaredBinaryDataColumns) {
+            $missingCodec = array_values(array_diff(
+                $runtimeBinaryDataColumns,
+                $declaredBinaryDataColumns,
+            ));
+            $staleCodec = array_values(array_diff(
+                $declaredBinaryDataColumns,
+                $runtimeBinaryDataColumns,
+            ));
+            throw new CompanyBackupDataSourceException(
+                'data_binary_columns_mismatch',
+                $this->registryKey,
+                $missingCodec[0] ?? $staleCodec[0] ?? null,
             );
         }
     }
@@ -426,6 +465,44 @@ final readonly class CompanyBackupTableProjection
             }
             self::assertIdentifier($column, $registryKey);
             $result[$column] = $reason;
+        }
+        ksort($result, SORT_STRING);
+        return $result;
+    }
+
+    /**
+     * @param list<string> $dataColumns
+     * @return array<string,CompanyBackupColumnCodec>
+     */
+    private static function columnCodecs(
+        mixed $value,
+        array $dataColumns,
+        string $registryKey,
+    ): array {
+        if (!is_array($value) || array_is_list($value) && $value !== []) {
+            throw new CompanyBackupDataSourceException(
+                'data_projection_invalid',
+                $registryKey,
+            );
+        }
+        $result = [];
+        foreach ($value as $column => $codecValue) {
+            if (!is_string($column) || !is_string($codecValue)) {
+                throw new CompanyBackupDataSourceException(
+                    'data_projection_invalid',
+                    $registryKey,
+                );
+            }
+            self::assertIdentifier($column, $registryKey);
+            $codec = CompanyBackupColumnCodec::tryFrom($codecValue);
+            if ($codec === null || !in_array($column, $dataColumns, true)) {
+                throw new CompanyBackupDataSourceException(
+                    'data_projection_invalid',
+                    $registryKey,
+                    $column,
+                );
+            }
+            $result[$column] = $codec;
         }
         ksort($result, SORT_STRING);
         return $result;

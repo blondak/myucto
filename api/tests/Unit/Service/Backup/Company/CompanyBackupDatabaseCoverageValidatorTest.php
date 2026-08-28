@@ -71,6 +71,7 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
         $columns = $this->supplierColumns();
         $columns[] = [
             'COLUMN_NAME' => 'webhook_token',
+            'DATA_TYPE' => 'varchar',
             'EXTRA' => '',
             'GENERATION_EXPRESSION' => null,
             'TABLE_TYPE' => 'BASE TABLE',
@@ -141,12 +142,14 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
             [['synthetic_records'], [
                 [
                     'COLUMN_NAME' => 'id',
+                    'DATA_TYPE' => 'bigint',
                     'EXTRA' => 'auto_increment',
                     'GENERATION_EXPRESSION' => null,
                     'TABLE_TYPE' => 'BASE TABLE',
                 ],
                 [
                     'COLUMN_NAME' => 'parent_id',
+                    'DATA_TYPE' => 'bigint',
                     'EXTRA' => '',
                     'GENERATION_EXPRESSION' => null,
                     'TABLE_TYPE' => 'BASE TABLE',
@@ -208,12 +211,14 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
         return [
             [
                 'COLUMN_NAME' => 'id',
+                'DATA_TYPE' => 'int',
                 'EXTRA' => 'auto_increment',
                 'GENERATION_EXPRESSION' => null,
                 'TABLE_TYPE' => 'BASE TABLE',
             ],
             [
                 'COLUMN_NAME' => 'company_name',
+                'DATA_TYPE' => 'varchar',
                 'EXTRA' => '',
                 'GENERATION_EXPRESSION' => null,
                 'TABLE_TYPE' => 'BASE TABLE',

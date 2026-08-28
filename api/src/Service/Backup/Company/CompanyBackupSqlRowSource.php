@@ -36,6 +36,7 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
             $schema->columns,
             $schema->generatedColumns,
             $schema->primaryKey,
+            $schema->binaryColumns,
         );
         $protectedColumn = $projection->requiredSecretEnvelopeColumn();
         if ($protectedColumn !== null) {
@@ -116,9 +117,27 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
                     $projection->registryKey,
                 );
             }
-            $result[] = $row;
+            $result[] = $this->encodeColumns($row, $projection);
         }
         return $result;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function encodeColumns(
+        array $row,
+        CompanyBackupTableProjection $projection,
+    ): array {
+        foreach ($projection->columnCodecs as $column => $codec) {
+            $row[$column] = $codec->encode(
+                $row[$column],
+                $projection->registryKey,
+                $column,
+            );
+        }
+        return $row;
     }
 
     /**
