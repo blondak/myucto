@@ -129,6 +129,133 @@ final class CompanyBackupTableProjectionTest extends TestCase
         );
     }
 
+    public function testPreservedIdentifiersClassifyExternalIdsWithoutRemapping(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            dataColumns: [
+                'id',
+                'supplier_id',
+                'fakturoid_id',
+                'idoklad_id',
+            ],
+            preservedIdentifiers: ['fakturoid_id', 'idoklad_id'],
+        ));
+
+        self::assertSame(
+            ['fakturoid_id', 'idoklad_id'],
+            $projection->preservedIdentifiers->columns,
+        );
+    }
+
+    public function testRejectsPreservedIdentifierOutsideProjection(): void
+    {
+        try {
+            CompanyBackupTableProjection::fromDefinition($this->definition(
+                preservedIdentifiers: ['idoklad_id'],
+            ));
+            self::fail('Zachovaný externí identifikátor musí být exportovaným sloupcem.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame(
+                'data_preserved_identifier_source_not_exported',
+                $e->errorCode,
+            );
+            self::assertSame('idoklad_id', $e->column);
+        }
+    }
+
+    public function testRejectsNonCanonicalPreservedIdentifierMetadata(): void
+    {
+        foreach (
+            [
+                ['idoklad_id', 'fakturoid_id'],
+                ['external_reference'],
+                ['idoklad_id', 'idoklad_id'],
+            ] as $preservedIdentifiers
+        ) {
+            try {
+                CompanyBackupTableProjection::fromDefinition($this->definition(
+                    dataColumns: [
+                        'id',
+                        'supplier_id',
+                        'external_reference',
+                        'fakturoid_id',
+                        'idoklad_id',
+                    ],
+                    preservedIdentifiers: $preservedIdentifiers,
+                ));
+                self::fail(
+                    'Externí ID musí mít jednoznačný kanonický fingerprintovaný seznam.',
+                );
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame(
+                    'data_preserved_identifier_metadata_invalid',
+                    $e->errorCode,
+                );
+            }
+        }
+    }
+
+    public function testRejectsReferenceAndPreservedIdentifierClaimOfSameColumn(): void
+    {
+        try {
+            CompanyBackupTableProjection::fromDefinition($this->definition(
+                dataColumns: ['id', 'supplier_id', 'idoklad_id'],
+                references: [
+                    [
+                        'columns' => ['idoklad_id'],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ],
+                    $this->supplierReference(),
+                ],
+                preservedIdentifiers: ['idoklad_id'],
+            ));
+            self::fail('Externí ID nesmí být současně zachované a remapované.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame(
+                'data_reference_column_classification_duplicate',
+                $e->errorCode,
+            );
+            self::assertSame('idoklad_id', $e->column);
+        }
+    }
+
+    public function testRejectsPolymorphicAndPreservedIdentifierClaimOfSameColumn(): void
+    {
+        try {
+            CompanyBackupTableProjection::fromDefinition($this->definition(
+                dataColumns: ['id', 'supplier_id', 'source_type', 'source_id'],
+                polymorphicReferences: [[
+                    'column' => 'source_id',
+                    'discriminator_column' => 'source_type',
+                    'nullable' => true,
+                    'cases' => [[
+                        'base' => 0,
+                        'equals' => 'external',
+                        'mapping' => 'preserve',
+                        'multiplier' => 1,
+                        'slots' => [],
+                        'target' => null,
+                        'target_columns' => [],
+                        'transform' => 'identity',
+                    ]],
+                ]],
+                preservedIdentifiers: ['source_id'],
+            ));
+            self::fail('Externí ID nesmí mít současně polymorfní kontrakt.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame(
+                'data_reference_column_classification_duplicate',
+                $e->errorCode,
+            );
+            self::assertSame('source_id', $e->column);
+        }
+    }
+
     public function testRejectsOrdinaryAndPolymorphicClaimOfSameColumn(): void
     {
         try {
@@ -234,6 +361,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param array<string,string> $omitColumns
      * @param list<array<string,mixed>>|null $references
      * @param list<array<string,mixed>> $polymorphicReferences
+     * @param list<string> $preservedIdentifiers
      */
     private function definition(
         array $secrets = [],
@@ -242,6 +370,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
         array $omitColumns = [],
         ?array $references = null,
         array $polymorphicReferences = [],
+        array $preservedIdentifiers = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:synthetic_records',
@@ -262,6 +391,9 @@ final class CompanyBackupTableProjectionTest extends TestCase
                     'omit_columns' => $omitColumns,
                     ...($polymorphicReferences === [] ? [] : [
                         'polymorphic_references' => $polymorphicReferences,
+                    ]),
+                    ...($preservedIdentifiers === [] ? [] : [
+                        'preserved_identifiers' => $preservedIdentifiers,
                     ]),
                     'references' => $references ?? [$this->supplierReference()],
                     'restore_overrides' => [],

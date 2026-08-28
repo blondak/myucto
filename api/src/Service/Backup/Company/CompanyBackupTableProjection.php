@@ -38,6 +38,8 @@ final readonly class CompanyBackupTableProjection
 
     public CompanyBackupPolymorphicReferenceSet $polymorphicReferences;
 
+    public CompanyBackupPreservedIdentifierSet $preservedIdentifiers;
+
     public CompanyBackupRestoreOverrideSet $restoreOverrides;
 
     /**
@@ -61,6 +63,7 @@ final readonly class CompanyBackupTableProjection
         CompanyBackupReferenceSet $references,
         CompanyBackupEmbeddedReferenceSet $embeddedReferences,
         CompanyBackupPolymorphicReferenceSet $polymorphicReferences,
+        CompanyBackupPreservedIdentifierSet $preservedIdentifiers,
         CompanyBackupRestoreOverrideSet $restoreOverrides,
     ) {
         $this->primaryKey = $primaryKey;
@@ -72,6 +75,7 @@ final readonly class CompanyBackupTableProjection
         $this->references = $references;
         $this->embeddedReferences = $embeddedReferences;
         $this->polymorphicReferences = $polymorphicReferences;
+        $this->preservedIdentifiers = $preservedIdentifiers;
         $this->restoreOverrides = $restoreOverrides;
     }
 
@@ -126,10 +130,14 @@ final readonly class CompanyBackupTableProjection
             'references',
             'restore_overrides',
         ];
-        $polymorphicMetadataKeys = [...$baseMetadataKeys, 'polymorphic_references'];
-        sort($polymorphicMetadataKeys, SORT_STRING);
-        if ($metadataKeys !== $baseMetadataKeys
-            && $metadataKeys !== $polymorphicMetadataKeys
+        $allowedMetadataKeys = [
+            ...$baseMetadataKeys,
+            'polymorphic_references',
+            'preserved_identifiers',
+        ];
+        sort($allowedMetadataKeys, SORT_STRING);
+        if (array_diff($baseMetadataKeys, $metadataKeys) !== []
+            || array_diff($metadataKeys, $allowedMetadataKeys) !== []
         ) {
             throw new CompanyBackupDataSourceException(
                 'data_projection_invalid',
@@ -162,9 +170,25 @@ final readonly class CompanyBackupTableProjection
             $registryKey,
             $dataColumns,
         );
+        $preservedIdentifiers = CompanyBackupPreservedIdentifierSet::fromArray(
+            $metadata['preserved_identifiers'] ?? [],
+            $registryKey,
+            $dataColumns,
+        );
+        $additionalClassifiedColumns = $polymorphicReferences->classifiedColumns();
+        foreach ($preservedIdentifiers->columns as $column) {
+            if (in_array($column, $additionalClassifiedColumns, true)) {
+                throw new CompanyBackupDataSourceException(
+                    'data_reference_column_classification_duplicate',
+                    $registryKey,
+                    $column,
+                );
+            }
+            $additionalClassifiedColumns[] = $column;
+        }
         $references->assertProjectionColumns(
             $dataColumns,
-            $polymorphicReferences->classifiedColumns(),
+            $additionalClassifiedColumns,
         );
         $embeddedReferences = CompanyBackupEmbeddedReferenceSet::fromArray(
             $metadata['embedded_references'],
@@ -237,6 +261,7 @@ final readonly class CompanyBackupTableProjection
             $references,
             $embeddedReferences,
             $polymorphicReferences,
+            $preservedIdentifiers,
             $restoreOverrides,
         );
     }
