@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjecti
 use MyInvoice\Service\Backup\Company\CompanyBackupBrandingProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupClientsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupCountriesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupEmailProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupExpenseCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupInvoiceSettlementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
@@ -25,8 +26,8 @@ final class TenantDataRegistryFactory
 {
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
-        'email_profiles' => 'integrations',
         'payroll_run_revisions' => 'payroll',
+        'signing_profiles' => 'integrations',
     ];
 
     /** @var list<string> */
@@ -513,13 +514,10 @@ final class TenantDataRegistryFactory
                     'column' => 'supplier_id',
                 ],
             ];
-            if ($table === 'email_profiles') {
+            if ($table === 'signing_profiles') {
                 $details['natural_key'] = ['supplier_id', 'code'];
                 $details['secrets'] = [
-                    'imap_password_enc' => [
-                        'policy' => TenantSecretPolicy::OptionalCredential->value,
-                    ],
-                    'smtp_password_enc' => [
+                    'pdf_tsa_password_enc' => [
                         'policy' => TenantSecretPolicy::OptionalCredential->value,
                     ],
                 ];
@@ -532,6 +530,38 @@ final class TenantDataRegistryFactory
                 $details,
             );
         }
+        $definitions[] = new TenantDataDefinition(
+            'table:email_profiles',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'natural_key' => ['supplier_id', 'code'],
+                'feature_group' => 'integrations',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [
+                    'imap_encryption' => [
+                        'policy' => TenantSecretPolicy::NotSecret->value,
+                        'reason' => 'transport_encryption_mode_without_secret',
+                    ],
+                    'imap_password_enc' => [
+                        'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    ],
+                    'smtp_encryption' => [
+                        'policy' => TenantSecretPolicy::NotSecret->value,
+                        'reason' => 'transport_encryption_mode_without_secret',
+                    ],
+                    'smtp_password_enc' => [
+                        'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    ],
+                ],
+                ...self::companyBackupProjection('email_profiles'),
+            ],
+        );
         $definitions[] = new TenantDataDefinition(
             'table:branding_profiles',
             TenantDataObjectKind::Table,
@@ -714,6 +744,7 @@ final class TenantDataRegistryFactory
                 CompanyBackupBrandingProfilesProjection::dataColumns(),
             'clients' => CompanyBackupClientsProjection::dataColumns(),
             'countries' => CompanyBackupCountriesProjection::dataColumns(),
+            'email_profiles' => CompanyBackupEmailProfilesProjection::dataColumns(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::dataColumns(),
             'invoice_settlements' =>
@@ -793,6 +824,16 @@ final class TenantDataRegistryFactory
                     'reason' => 'disable_automation_after_restore',
                 ],
             ],
+            'email_profiles' => [
+                'is_active' => [
+                    'value' => 0,
+                    'reason' => 'disable_email_delivery_after_restore',
+                ],
+                'is_default' => [
+                    'value' => 0,
+                    'reason' => 'require_email_profile_reselection_after_restore',
+                ],
+            ],
             default => [],
         };
     }
@@ -816,6 +857,7 @@ final class TenantDataRegistryFactory
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::references(),
             'clients' => CompanyBackupClientsProjection::references(),
+            'email_profiles' => CompanyBackupEmailProfilesProjection::references(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::references(),
             'invoice_settlements' =>

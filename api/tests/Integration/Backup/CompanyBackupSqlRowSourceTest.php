@@ -285,6 +285,71 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionEmailProfilesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'email_profiles',
+            [
+                'supplier_id',
+                'signing_profile_id',
+                'smtp_password_enc',
+                'imap_password_enc',
+                'is_default',
+                'is_active',
+                'created_by',
+            ],
+        );
+    }
+
+    public function testStreamsEmailProfilesWithoutCredentialsAndDisablesThem(): void
+    {
+        $pdo = $this->db->pdo();
+        $ownProfileId = $this->createEmailProfile(
+            $pdo,
+            $this->supplierId,
+            'Vlastní odesílací profil',
+            'company-backup-owner-mail',
+        );
+        $foreignProfileId = $this->createEmailProfile(
+            $pdo,
+            $this->foreignSupplierId,
+            'Cizí odesílací profil',
+            'company-backup-foreign-mail',
+        );
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:email_profiles');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+            $pdo,
+            $this->supplierId,
+            $definition,
+        ));
+        $byId = [];
+        foreach ($rows as $row) {
+            $byId[(int) $row['id']] = $row;
+        }
+
+        self::assertArrayHasKey($ownProfileId, $byId);
+        self::assertArrayNotHasKey($foreignProfileId, $byId);
+        self::assertArrayNotHasKey('smtp_password_enc', $byId[$ownProfileId]);
+        self::assertArrayNotHasKey('imap_password_enc', $byId[$ownProfileId]);
+        $restored = $projection->restoreOverrides->apply($byId[$ownProfileId]);
+        self::assertSame(0, $restored['is_active']);
+        self::assertSame(0, $restored['is_default']);
+
+        $unscoped = $pdo->prepare(
+            'SELECT id, smtp_password_enc, imap_password_enc'
+            . ' FROM email_profiles WHERE id IN (?, ?) ORDER BY id',
+        );
+        $unscoped->execute([$ownProfileId, $foreignProfileId]);
+        $stored = $unscoped->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(2, $stored);
+        self::assertSame('synthetic-smtp-ciphertext', $stored[0]['smtp_password_enc']);
+        self::assertSame('synthetic-imap-ciphertext', $stored[0]['imap_password_enc']);
+    }
+
     public function testProductionAccountingPeriodsProjectionMatchesMigratedSchema(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
@@ -856,6 +921,29 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             'INSERT INTO branding_profiles (supplier_id, name) VALUES (?, ?)',
         );
         $statement->execute([$supplierId, $name]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function createEmailProfile(
+        PDO $pdo,
+        int $supplierId,
+        string $name,
+        string $code,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO email_profiles ('
+            . 'supplier_id, name, code, from_email, smtp_password_enc,'
+            . ' imap_password_enc, is_default, is_active'
+            . ') VALUES (?, ?, ?, ?, ?, ?, 1, 1)',
+        );
+        $statement->execute([
+            $supplierId,
+            $name,
+            $code,
+            $code . '@example.test',
+            'synthetic-smtp-ciphertext',
+            'synthetic-imap-ciphertext',
+        ]);
         return (int) $pdo->lastInsertId();
     }
 

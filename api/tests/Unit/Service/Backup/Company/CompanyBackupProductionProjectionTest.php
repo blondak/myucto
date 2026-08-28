@@ -107,8 +107,16 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
         self::assertSame(
             [
+                'imap_encryption' => [
+                    'policy' => TenantSecretPolicy::NotSecret->value,
+                    'reason' => 'transport_encryption_mode_without_secret',
+                ],
                 'imap_password_enc' => [
                     'policy' => TenantSecretPolicy::OptionalCredential->value,
+                ],
+                'smtp_encryption' => [
+                    'policy' => TenantSecretPolicy::NotSecret->value,
+                    'reason' => 'transport_encryption_mode_without_secret',
                 ],
                 'smtp_password_enc' => [
                     'policy' => TenantSecretPolicy::OptionalCredential->value,
@@ -116,7 +124,7 @@ final class CompanyBackupProductionProjectionTest extends TestCase
             ],
             $emailProfiles->details['secrets'] ?? null,
         );
-        self::assertArrayNotHasKey('company_backup', $emailProfiles->details);
+        self::assertArrayHasKey('company_backup', $emailProfiles->details);
 
         $selection = (new CompanyBackupTenantSqlSelector())->select(
             $projection,
@@ -127,6 +135,165 @@ final class CompanyBackupProductionProjectionTest extends TestCase
             '`_company_source`.`supplier_id` = ?',
             $selection->where,
         );
+    }
+
+    public function testEmailProfilesOmitCredentialsAndDisableDeliveryOnRestore(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:email_profiles');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $runtimeColumns = [
+            'id',
+            'supplier_id',
+            'name',
+            'code',
+            'from_email',
+            'from_name',
+            'reply_to_email',
+            'reply_to_name',
+            'reply_to_enabled',
+            'signing_profile_id',
+            'dkim_domain',
+            'dkim_selector',
+            'dkim_enabled',
+            'transport_type',
+            'smtp_host',
+            'smtp_port',
+            'smtp_encryption',
+            'smtp_auth_enabled',
+            'smtp_auth_type',
+            'smtp_username',
+            'smtp_password_enc',
+            'smtp_verify_peer',
+            'smtp_verify_peer_name',
+            'smtp_allow_self_signed',
+            'smtp_timeout',
+            'smtp_keepalive',
+            'sendmail_command',
+            'imap_sent_enabled',
+            'imap_host',
+            'imap_port',
+            'imap_encryption',
+            'imap_validate_cert',
+            'imap_username',
+            'imap_password_enc',
+            'imap_folder',
+            'imap_create_folder',
+            'imap_mark_seen',
+            'imap_timeout',
+            'imap_on_failure',
+            'is_default',
+            'is_active',
+            'created_by',
+            'created_at',
+            'updated_at',
+            'deleted_at',
+        ];
+        $dataColumns = array_values(array_diff(
+            $runtimeColumns,
+            ['imap_password_enc', 'smtp_password_enc'],
+        ));
+
+        $projection->assertRuntimeSchema($runtimeColumns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [
+                    'from_name',
+                    'reply_to_email',
+                    'reply_to_name',
+                    'signing_profile_id',
+                    'dkim_domain',
+                    'dkim_selector',
+                    'smtp_host',
+                    'smtp_port',
+                    'smtp_username',
+                    'smtp_password_enc',
+                    'smtp_timeout',
+                    'sendmail_command',
+                    'imap_host',
+                    'imap_port',
+                    'imap_username',
+                    'imap_password_enc',
+                    'imap_folder',
+                    'created_by',
+                    'deleted_at',
+                ],
+                [
+                    new CompanyBackupForeignKey(
+                        ['created_by'],
+                        'users',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['signing_profile_id'],
+                        'signing_profiles',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($dataColumns, $projection->dataColumns);
+        self::assertSame(
+            TenantSecretPolicy::OptionalCredential,
+            $projection->secretPolicies['imap_password_enc'] ?? null,
+        );
+        self::assertSame(
+            TenantSecretPolicy::OptionalCredential,
+            $projection->secretPolicies['smtp_password_enc'] ?? null,
+        );
+        self::assertSame(
+            TenantSecretPolicy::NotSecret,
+            $projection->secretPolicies['imap_encryption'] ?? null,
+        );
+        self::assertSame(
+            TenantSecretPolicy::NotSecret,
+            $projection->secretPolicies['smtp_encryption'] ?? null,
+        );
+        self::assertSame(
+            [
+                'created_by->users:id',
+                'signing_profile_id->signing_profiles:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['null', 'restore_actor'],
+            $projection->references->references[0]->fallbacks,
+        );
+        $restored = $projection->restoreOverrides->apply([
+            'is_active' => 1,
+            'is_default' => 1,
+        ]);
+        self::assertSame(0, $restored['is_active']);
+        self::assertSame(0, $restored['is_default']);
+
+        $signingProfiles = $registry->definition('table:signing_profiles');
+        self::assertNotNull($signingProfiles);
+        self::assertSame(
+            ['supplier_id', 'code'],
+            $signingProfiles->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'pdf_tsa_password_enc' => [
+                    'policy' => TenantSecretPolicy::OptionalCredential->value,
+                ],
+            ],
+            $signingProfiles->details['secrets'] ?? null,
+        );
+        self::assertArrayNotHasKey('company_backup', $signingProfiles->details);
     }
 
     public function testSupplierLogoAreaRegistersEveryCurrentAndHistoricalOwner(): void
