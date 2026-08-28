@@ -209,7 +209,8 @@ final readonly class CompanyBackupReferenceSet
                     $reference->targetColumns === $primaryKey || $tenantScopedPrimaryKey,
                 CompanyBackupReferenceMapping::TenantIdOrZero,
                 CompanyBackupReferenceMapping::GlobalNaturalKey,
-                CompanyBackupReferenceMapping::Actor =>
+                CompanyBackupReferenceMapping::Actor,
+                CompanyBackupReferenceMapping::CredentialDecision =>
                     $reference->targetColumns === $primaryKey,
             };
             if (!$targetsExpectedKey) {
@@ -233,6 +234,8 @@ final readonly class CompanyBackupReferenceSet
                 CompanyBackupReferenceMapping::GlobalNaturalKey =>
                     $target->policy === TenantDataPolicy::GlobalReference
                     && $naturalKey !== null,
+                CompanyBackupReferenceMapping::CredentialDecision =>
+                    $target->policy === TenantDataPolicy::PersonalSecretAttachment,
             };
             if (!$valid) {
                 throw $this->targetError($reference);

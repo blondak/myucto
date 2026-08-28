@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Integration\Backup;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Backup\Company\CompanyBackupCredentialTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlFileReferenceSource;
@@ -416,6 +418,66 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             'synthetic-tsa-ciphertext',
             $stored[$ownProfileId]['pdf_tsa_password_enc'],
         );
+    }
+
+    public function testSigningCredentialsMatchSchemaAndStayOutOfDefaultJsonl(): void
+    {
+        $pdo = $this->db->pdo();
+        $profileId = $this->createSigningProfile(
+            $pdo,
+            $this->supplierId,
+            'Profil s vynechaným credentialem',
+            'company-backup-omitted-credential',
+        );
+        $statement = $pdo->prepare(
+            'INSERT INTO signing_credentials ('
+            . 'profile_id, certificate_path, encrypted_passphrase, is_active'
+            . ') VALUES (?, ?, ?, 1)',
+        );
+        $statement->execute([
+            $profileId,
+            'signing/pdf/synthetic-company.p12',
+            'synthetic-passphrase-ciphertext',
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:signing_credentials');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupCredentialTableProjection::fromDefinition(
+            $definition,
+        );
+        $reader = new CompanyBackupTableSchemaReader();
+        $projection->assertRegistryTargets($registry);
+        $projection->assertRuntimeSchema(
+            $reader->readCredential($pdo, $projection),
+            $reader->readCredentialReferences($pdo, $projection),
+        );
+
+        self::assertSame(
+            TenantDataPolicy::OptionalCredential,
+            $definition->policy,
+        );
+        self::assertFalse($definition->policy->hasMachineDataPayload());
+        $count = $pdo->prepare(
+            'SELECT COUNT(*) FROM signing_credentials WHERE profile_id = ?',
+        );
+        $count->execute([$profileId]);
+        self::assertSame(
+            1,
+            (int) $count->fetchColumn(),
+            'Negativní kontrola musí prokázat existující zdrojový credential.',
+        );
+
+        try {
+            iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+                $pdo,
+                $this->supplierId,
+                $definition,
+            ));
+            self::fail('Nevybraný credential nesmí vytvořit prázdný JSONL řádek.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_object_kind_unsupported', $e->errorCode);
+        }
     }
 
     public function testProductionSigningSettingsProjectionMatchesSchema(): void

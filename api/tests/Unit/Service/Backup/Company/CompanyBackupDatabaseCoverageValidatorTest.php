@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 use MyInvoice\Service\Backup\Company\CompanyBackupDatabaseCoverageValidator;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
+use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Registry\IncompleteTenantDataRegistryCoverage;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -170,6 +171,94 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
         self::assertStringContainsString('parent_id', $report->issues[0]->message);
     }
 
+    public function testOptionalCredentialStillRequiresExactRuntimeSchema(): void
+    {
+        $registry = $this->registry([
+            new TenantDataDefinition(
+                'table:signing_credentials',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::OptionalCredential,
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+                [
+                    'primary_key' => ['id'],
+                    'ownership' =>
+                        CompanyBackupSigningCredentialsProjection::ownership(),
+                    'company_backup_credential' =>
+                        CompanyBackupSigningCredentialsProjection::metadata(),
+                ],
+            ),
+            $this->definition('signing_profiles', TenantDataPolicy::TenantOwned, [
+                'primary_key' => ['id'],
+            ]),
+            $this->definition(
+                'epo_signing_credentials',
+                TenantDataPolicy::PersonalSecretAttachment,
+                ['primary_key' => ['id']],
+            ),
+            $this->definition('users', TenantDataPolicy::InstanceOwned, [
+                'primary_key' => ['id'],
+            ]),
+        ]);
+        $columns = array_map(
+            static fn (string $column): array => [
+                'COLUMN_NAME' => $column,
+                'DATA_TYPE' => $column === 'id' ? 'bigint' : 'varchar',
+                'EXTRA' => $column === 'id' ? 'auto_increment' : '',
+                'GENERATION_EXPRESSION' => null,
+                'TABLE_TYPE' => 'BASE TABLE',
+            ],
+            CompanyBackupSigningCredentialsProjection::columns(),
+        );
+        $columns[] = [
+            'COLUMN_NAME' => 'future_secret',
+            'DATA_TYPE' => 'varchar',
+            'EXTRA' => '',
+            'GENERATION_EXPRESSION' => null,
+            'TABLE_TYPE' => 'BASE TABLE',
+        ];
+        $nullable = array_fill_keys(
+            CompanyBackupSigningCredentialsProjection::nullableColumns(),
+            true,
+        );
+        $nullability = array_map(
+            static fn (string $column): array => [
+                'COLUMN_NAME' => $column,
+                'IS_NULLABLE' => isset($nullable[$column]) ? 'YES' : 'NO',
+            ],
+            [...CompanyBackupSigningCredentialsProjection::columns(), 'future_secret'],
+        );
+        $pdo = $this->pdo([
+            [[], ['signing_credentials'], PDO::FETCH_COLUMN],
+            [['signing_credentials'], $columns, PDO::FETCH_ASSOC],
+            [['signing_credentials'], ['id'], PDO::FETCH_COLUMN],
+            [['signing_credentials'], $nullability, PDO::FETCH_ASSOC],
+            [['signing_credentials'], [
+                $this->foreignKeyRow('fk_created_by', 'created_by', 'users'),
+                $this->foreignKeyRow(
+                    'fk_profile',
+                    'profile_id',
+                    'signing_profiles',
+                ),
+                $this->foreignKeyRow(
+                    'fk_vault',
+                    'vault_credential_id',
+                    'epo_signing_credentials',
+                ),
+            ], PDO::FETCH_ASSOC],
+        ]);
+
+        $report = (new CompanyBackupDatabaseCoverageValidator())->evaluate(
+            $pdo,
+            $registry,
+        );
+
+        self::assertContains(
+            'credential_schema_columns_mismatch',
+            array_column($report->toArray()['issues'], 'code'),
+            'Non-payload credential nesmí obejít DB schema coverage.',
+        );
+    }
+
     /**
      * @param list<array{0:list<mixed>,1:list<mixed>,2:int}> $responses
      */
@@ -203,6 +292,21 @@ final class CompanyBackupDatabaseCoverageValidatorTest extends TestCase
             ->willReturn($rows);
         $statement->expects(self::once())->method('closeCursor')->willReturn(true);
         return $statement;
+    }
+
+    /** @return array<string,int|string> */
+    private function foreignKeyRow(
+        string $constraint,
+        string $column,
+        string $target,
+    ): array {
+        return [
+            'CONSTRAINT_NAME' => $constraint,
+            'COLUMN_NAME' => $column,
+            'ORDINAL_POSITION' => 1,
+            'REFERENCED_TABLE_NAME' => $target,
+            'REFERENCED_COLUMN_NAME' => 'id',
+        ];
     }
 
     /** @return list<array<string,mixed>> */

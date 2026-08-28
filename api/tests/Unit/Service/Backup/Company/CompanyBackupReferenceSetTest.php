@@ -455,6 +455,55 @@ final class CompanyBackupReferenceSetTest extends TestCase
         }
     }
 
+    public function testCredentialDecisionTargetsOnlyPersonalSecretAttachment(): void
+    {
+        $reference = [
+            'columns' => ['vault_credential_id'],
+            'target' => 'table:epo_signing_credentials',
+            'target_columns' => ['id'],
+            'mapping' => CompanyBackupReferenceMapping::CredentialDecision->value,
+            'constraint' => CompanyBackupReferenceConstraint::Required->value,
+            'nullable_columns' => ['vault_credential_id'],
+            'fallbacks' => [],
+        ];
+        $references = CompanyBackupReferenceSet::fromArray(
+            [$reference],
+            'table:signing_credentials',
+        );
+        $references->assertProjectionColumns(['id', 'vault_credential_id']);
+        $references->assertRegistryTargets(new TenantDataRegistry(1, [
+            $this->definition(
+                'epo_signing_credentials',
+                TenantDataPolicy::PersonalSecretAttachment,
+            ),
+        ]));
+        $references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['vault_credential_id'],
+            [new CompanyBackupForeignKey(
+                ['vault_credential_id'],
+                'epo_signing_credentials',
+                ['id'],
+            )],
+        ));
+
+        self::assertSame(
+            CompanyBackupReferenceMapping::CredentialDecision,
+            $references->references[0]->mapping,
+        );
+
+        try {
+            $references->assertRegistryTargets(new TenantDataRegistry(1, [
+                $this->definition(
+                    'epo_signing_credentials',
+                    TenantDataPolicy::InstanceOwned,
+                ),
+            ]));
+            self::fail('Credential decision nesmí mířit na obecná instanční data.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_target_invalid', $e->errorCode);
+        }
+    }
+
     public function testAcceptsExplicitZeroSentinelSoftReference(): void
     {
         $references = CompanyBackupReferenceSet::fromArray(

@@ -22,6 +22,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupRevenueCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSignatureDocumentOverridesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSignatureRoleProfilesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
@@ -527,6 +528,48 @@ final class TenantDataRegistryFactory
             );
         }
         $definitions[] = new TenantDataDefinition(
+            'table:epo_signing_credentials',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::PersonalSecretAttachment,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'feature_group' => 'integrations',
+                'ownership' => [
+                    'owner_column' => 'owner_user_id',
+                    'strategy' => 'personal_credential_owner',
+                ],
+                'reason' => 'select_individually_with_dual_consent',
+                'secrets' => [
+                    'passphrase_ciphertext' => [
+                        'policy' =>
+                            TenantSecretPolicy::PersonalWithDualConsent->value,
+                    ],
+                    'pfx_ciphertext' => [
+                        'policy' =>
+                            TenantSecretPolicy::PersonalWithDualConsent->value,
+                    ],
+                ],
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
+            'table:epo_signing_credential_suppliers',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRelation,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['credential_id', 'supplier_id'],
+                'feature_group' => 'integrations',
+                'ownership' => [
+                    'actor_column' => 'enabled_by',
+                    'credential_column' => 'credential_id',
+                    'strategy' => 'credential_consent_relation',
+                    'supplier_column' => 'supplier_id',
+                ],
+                'reason' => 'recreate_from_credential_consent_decisions',
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
             'table:signing_profiles',
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantOwned,
@@ -545,6 +588,21 @@ final class TenantDataRegistryFactory
                     ],
                 ],
                 ...self::companyBackupProjection('signing_profiles'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
+            'table:signing_credentials',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::OptionalCredential,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'feature_group' => 'integrations',
+                'ownership' =>
+                    CompanyBackupSigningCredentialsProjection::ownership(),
+                'reason' => 'omit_until_explicit_credential_selection',
+                'company_backup_credential' =>
+                    CompanyBackupSigningCredentialsProjection::metadata(),
             ],
         );
         $definitions[] = new TenantDataDefinition(

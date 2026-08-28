@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
+use MyInvoice\Service\Backup\Company\CompanyBackupCredentialTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupCredentialTransport;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileAreaProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupForeignKey;
@@ -401,6 +404,129 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         self::assertStringContainsString(
             '`_company_source`.`supplier_id` = ?',
             $selection->where,
+        );
+    }
+
+    public function testSigningCredentialsDefaultToOmissionAndSeparatePersonalConsent(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $credentials = $registry->definition('table:signing_credentials');
+        self::assertNotNull($credentials);
+        self::assertSame(TenantDataPolicy::OptionalCredential, $credentials->policy);
+        self::assertFalse($credentials->policy->hasMachineDataPayload());
+        self::assertSame(
+            'omit_row',
+            $credentials->details['company_backup_credential']['default_action']
+                ?? null,
+        );
+        self::assertSame(
+            [
+                [
+                    'name' => 'company_file',
+                    'owner' => 'company',
+                    'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    'source' => 'file',
+                ],
+                [
+                    'name' => 'personal_file',
+                    'owner' => 'personal',
+                    'policy' => TenantSecretPolicy::PersonalWithDualConsent->value,
+                    'source' => 'file',
+                ],
+                [
+                    'name' => 'personal_vault',
+                    'owner' => 'personal',
+                    'policy' => TenantSecretPolicy::PersonalWithDualConsent->value,
+                    'source' => 'vault',
+                ],
+            ],
+            $credentials->details['company_backup_credential']['variants'] ?? null,
+        );
+        $projection = CompanyBackupCredentialTableProjection::fromDefinition(
+            $credentials,
+        );
+        $projection->assertRegistryTargets($registry);
+        self::assertSame(
+            [
+                'certificate_path' =>
+                    CompanyBackupCredentialTransport::SecretAttachment,
+                'encrypted_passphrase' =>
+                    CompanyBackupCredentialTransport::SecretEnvelope,
+                'passphrase_profile_id' =>
+                    CompanyBackupCredentialTransport::ExternalReference,
+            ],
+            $projection->transportColumns,
+        );
+        self::assertSame(
+            [
+                CompanyBackupReferenceMapping::Actor,
+                CompanyBackupReferenceMapping::TenantId,
+                CompanyBackupReferenceMapping::CredentialDecision,
+            ],
+            array_map(
+                static fn ($reference): CompanyBackupReferenceMapping =>
+                    $reference->mapping,
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            TenantSecretPolicy::OptionalCredential,
+            $projection->policyFor(null, 'signing/pdf/synthetic.p12', null),
+        );
+        self::assertSame(
+            TenantSecretPolicy::PersonalWithDualConsent,
+            $projection->policyFor(41, 'signing/pdf/personal.p12', null),
+        );
+        self::assertSame(
+            TenantSecretPolicy::PersonalWithDualConsent,
+            $projection->policyFor(41, null, 73),
+        );
+        self::assertSame(
+            0,
+            $projection->restoreOverrides->apply(['is_active' => 1])['is_active'],
+        );
+
+        foreach (
+            [
+                [null, null, 73, 'credential_variant_unsupported'],
+                [41, 'signing/pdf/personal.p12', 73, 'credential_variant_ambiguous'],
+                [41, null, null, 'credential_variant_ambiguous'],
+            ] as [$owner, $path, $vaultId, $errorCode]
+        ) {
+            try {
+                $projection->policyFor($owner, $path, $vaultId);
+                self::fail('Neznámá credential varianta nesmí projít klasifikací.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame($errorCode, $e->errorCode);
+            }
+        }
+
+        try {
+            CompanyBackupTableProjection::fromDefinition($credentials);
+            self::fail('Výchozí vynechání nesmí vytvořit běžný JSONL řádek.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_object_kind_unsupported', $e->errorCode);
+        }
+
+        $vault = $registry->definition('table:epo_signing_credentials');
+        self::assertNotNull($vault);
+        self::assertSame(TenantDataPolicy::PersonalSecretAttachment, $vault->policy);
+        self::assertFalse($vault->policy->hasMachineDataPayload());
+
+        $supplierLinks = $registry->definition(
+            'table:epo_signing_credential_suppliers',
+        );
+        self::assertNotNull($supplierLinks);
+        self::assertSame(TenantDataPolicy::TenantRelation, $supplierLinks->policy);
+        self::assertFalse($supplierLinks->policy->hasMachineDataPayload());
+        self::assertSame(
+            [
+                'actor_column' => 'enabled_by',
+                'credential_column' => 'credential_id',
+                'strategy' => 'credential_consent_relation',
+                'supplier_column' => 'supplier_id',
+            ],
+            $supplierLinks->details['ownership'] ?? null,
         );
     }
 

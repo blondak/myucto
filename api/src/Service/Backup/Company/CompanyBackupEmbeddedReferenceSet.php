@@ -121,7 +121,8 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                     $naturalKey !== null && $reference->targetColumns === $naturalKey,
                 CompanyBackupReferenceMapping::TenantId,
                 CompanyBackupReferenceMapping::TenantIdOrZero,
-                CompanyBackupReferenceMapping::Actor =>
+                CompanyBackupReferenceMapping::Actor,
+                CompanyBackupReferenceMapping::CredentialDecision =>
                     $reference->targetColumns === $primaryKey,
             };
             $validPolicy = match ($reference->mapping) {
@@ -140,6 +141,7 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                     $target->policy === TenantDataPolicy::InstanceOwned,
                 CompanyBackupReferenceMapping::GlobalNaturalKey =>
                     $target->policy === TenantDataPolicy::GlobalReference,
+                CompanyBackupReferenceMapping::CredentialDecision => false,
             };
             if (!$targetsExpectedKey || !$validPolicy) {
                 throw $this->targetError($reference);

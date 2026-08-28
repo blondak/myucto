@@ -58,6 +58,21 @@ final class CompanyBackupTableSchemaReader
         PDO $pdo,
         CompanyBackupTableProjection $projection,
     ): CompanyBackupTableSchema {
+        return $this->readTable($pdo, $projection->name, $projection->registryKey);
+    }
+
+    public function readCredential(
+        PDO $pdo,
+        CompanyBackupCredentialTableProjection $projection,
+    ): CompanyBackupTableSchema {
+        return $this->readTable($pdo, $projection->name, $projection->registryKey);
+    }
+
+    private function readTable(
+        PDO $pdo,
+        string $table,
+        string $registryKey,
+    ): CompanyBackupTableSchema {
         $columnsSql = 'SELECT `c`.`COLUMN_NAME`, `c`.`DATA_TYPE`, `c`.`EXTRA`,'
             . ' `c`.`GENERATION_EXPRESSION`, `t`.`TABLE_TYPE`'
             . ' FROM `information_schema`.`COLUMNS` AS `c`'
@@ -69,15 +84,15 @@ final class CompanyBackupTableSchemaReader
         $rows = $this->fetchAll(
             $pdo,
             $columnsSql,
-            [$projection->name],
+            [$table],
             PDO::FETCH_ASSOC,
-            $projection->registryKey,
+            $registryKey,
             'data_schema_read_failed',
         );
         if ($rows === []) {
             throw new CompanyBackupDataSourceException(
                 'data_table_missing',
-                $projection->registryKey,
+                $registryKey,
             );
         }
 
@@ -89,7 +104,7 @@ final class CompanyBackupTableSchemaReader
             if (!is_array($row) || array_is_list($row)) {
                 throw new CompanyBackupDataSourceException(
                     'data_schema_invalid',
-                    $projection->registryKey,
+                    $registryKey,
                 );
             }
             $column = $row['COLUMN_NAME'] ?? null;
@@ -108,14 +123,14 @@ final class CompanyBackupTableSchemaReader
             ) {
                 throw new CompanyBackupDataSourceException(
                     'data_schema_invalid',
-                    $projection->registryKey,
+                    $registryKey,
                 );
             }
             $rowSystemVersioned = $tableType === 'SYSTEM VERSIONED';
             if ($systemVersioned !== null && $systemVersioned !== $rowSystemVersioned) {
                 throw new CompanyBackupDataSourceException(
                     'data_schema_invalid',
-                    $projection->registryKey,
+                    $registryKey,
                 );
             }
             $systemVersioned = $rowSystemVersioned;
@@ -137,9 +152,9 @@ final class CompanyBackupTableSchemaReader
             . ' WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?'
             . " AND `CONSTRAINT_NAME` = 'PRIMARY'"
             . ' ORDER BY `ORDINAL_POSITION`',
-            [$projection->name],
+            [$table],
             PDO::FETCH_COLUMN,
-            $projection->registryKey,
+            $registryKey,
             'data_schema_read_failed',
         );
         $primaryKey = [];
@@ -149,7 +164,7 @@ final class CompanyBackupTableSchemaReader
             ) {
                 throw new CompanyBackupDataSourceException(
                     'data_schema_invalid',
-                    $projection->registryKey,
+                    $registryKey,
                 );
             }
             $primaryKey[] = $column;
@@ -167,28 +182,51 @@ final class CompanyBackupTableSchemaReader
         PDO $pdo,
         CompanyBackupTableProjection $projection,
     ): CompanyBackupTableReferenceSchema {
+        return $this->readTableReferences(
+            $pdo,
+            $projection->name,
+            $projection->registryKey,
+        );
+    }
+
+    public function readCredentialReferences(
+        PDO $pdo,
+        CompanyBackupCredentialTableProjection $projection,
+    ): CompanyBackupTableReferenceSchema {
+        return $this->readTableReferences(
+            $pdo,
+            $projection->name,
+            $projection->registryKey,
+        );
+    }
+
+    private function readTableReferences(
+        PDO $pdo,
+        string $table,
+        string $registryKey,
+    ): CompanyBackupTableReferenceSchema {
         $columnRows = $this->fetchAll(
             $pdo,
             'SELECT `COLUMN_NAME`, `IS_NULLABLE`'
                 . ' FROM `information_schema`.`COLUMNS`'
                 . ' WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?'
                 . ' ORDER BY `ORDINAL_POSITION`',
-            [$projection->name],
+            [$table],
             PDO::FETCH_ASSOC,
-            $projection->registryKey,
+            $registryKey,
             'data_reference_schema_read_failed',
         );
         if ($columnRows === []) {
             throw new CompanyBackupDataSourceException(
                 'data_table_missing',
-                $projection->registryKey,
+                $registryKey,
             );
         }
         $nullableColumns = [];
         $seenColumns = [];
         foreach ($columnRows as $row) {
             if (!is_array($row) || array_is_list($row)) {
-                throw $this->invalidReferenceSchema($projection);
+                throw $this->invalidReferenceSchema($registryKey);
             }
             $column = $row['COLUMN_NAME'] ?? null;
             $nullable = $row['IS_NULLABLE'] ?? null;
@@ -197,7 +235,7 @@ final class CompanyBackupTableSchemaReader
                 || !in_array($nullable, ['YES', 'NO'], true)
                 || isset($seenColumns[$column])
             ) {
-                throw $this->invalidReferenceSchema($projection);
+                throw $this->invalidReferenceSchema($registryKey);
             }
             $seenColumns[$column] = true;
             if ($nullable === 'YES') {
@@ -213,16 +251,16 @@ final class CompanyBackupTableSchemaReader
                 . ' WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?'
                 . ' AND `REFERENCED_TABLE_NAME` IS NOT NULL'
                 . ' ORDER BY `CONSTRAINT_NAME`, `ORDINAL_POSITION`',
-            [$projection->name],
+            [$table],
             PDO::FETCH_ASSOC,
-            $projection->registryKey,
+            $registryKey,
             'data_reference_schema_read_failed',
         );
         /** @var array<string,array{target:string,columns:list<string>,target_columns:list<string>}> $groups */
         $groups = [];
         foreach ($foreignKeyRows as $row) {
             if (!is_array($row) || array_is_list($row)) {
-                throw $this->invalidReferenceSchema($projection);
+                throw $this->invalidReferenceSchema($registryKey);
             }
             $constraint = $row['CONSTRAINT_NAME'] ?? null;
             $column = $row['COLUMN_NAME'] ?? null;
@@ -243,7 +281,7 @@ final class CompanyBackupTableSchemaReader
                 || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $targetColumn) !== 1
                 || $ordinalNumber < 1
             ) {
-                throw $this->invalidReferenceSchema($projection);
+                throw $this->invalidReferenceSchema($registryKey);
             }
             $group = $groups[$constraint] ?? [
                 'target' => $target,
@@ -253,7 +291,7 @@ final class CompanyBackupTableSchemaReader
             if ($group['target'] !== $target
                 || $ordinalNumber !== count($group['columns']) + 1
             ) {
-                throw $this->invalidReferenceSchema($projection);
+                throw $this->invalidReferenceSchema($registryKey);
             }
             $group['columns'][] = $column;
             $group['target_columns'][] = $targetColumn;
@@ -271,16 +309,15 @@ final class CompanyBackupTableSchemaReader
             }
             return new CompanyBackupTableReferenceSchema($nullableColumns, $foreignKeys);
         } catch (\InvalidArgumentException) {
-            throw $this->invalidReferenceSchema($projection);
+            throw $this->invalidReferenceSchema($registryKey);
         }
     }
 
-    private function invalidReferenceSchema(
-        CompanyBackupTableProjection $projection,
-    ): CompanyBackupDataSourceException {
+    private function invalidReferenceSchema(string $registryKey): CompanyBackupDataSourceException
+    {
         return new CompanyBackupDataSourceException(
             'data_reference_schema_invalid',
-            $projection->registryKey,
+            $registryKey,
         );
     }
 

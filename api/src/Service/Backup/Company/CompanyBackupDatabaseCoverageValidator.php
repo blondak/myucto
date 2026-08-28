@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\Registry\IncompleteTenantDataRegistryCoverage;
 use MyInvoice\Service\Backup\Registry\TenantDataCoverageIssue;
 use MyInvoice\Service\Backup\Registry\TenantDataCoverageReport;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
+use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistryCoverageValidator;
 use PDO;
@@ -43,9 +44,34 @@ final readonly class CompanyBackupDatabaseCoverageValidator implements CompanyBa
         $runtimeTables = array_fill_keys($tableNames, true);
         foreach ($registry->definitionsFor($profile) as $definition) {
             if ($definition->kind !== TenantDataObjectKind::Table
-                || !$definition->policy->hasMachineDataPayload()
                 || !isset($runtimeTables[$definition->name()])
             ) {
+                continue;
+            }
+            if ($definition->policy === TenantDataPolicy::OptionalCredential) {
+                try {
+                    $credential = CompanyBackupCredentialTableProjection::fromDefinition(
+                        $definition,
+                    );
+                    $credential->assertRegistryTargets($registry);
+                    $credential->assertRuntimeSchema(
+                        $this->schemaReader->readCredential($pdo, $credential),
+                        $this->schemaReader->readCredentialReferences(
+                            $pdo,
+                            $credential,
+                        ),
+                    );
+                } catch (CompanyBackupDataSourceException $e) {
+                    $issues[] = new TenantDataCoverageIssue(
+                        $e->errorCode,
+                        $definition->key,
+                        'Credential projekce neodpovídá registru.'
+                        . ($e->column === null ? '' : ' Sloupec: ' . $e->column . '.'),
+                    );
+                }
+                continue;
+            }
+            if (!$definition->policy->hasMachineDataPayload()) {
                 continue;
             }
             try {

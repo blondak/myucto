@@ -12,4 +12,5 @@ enum CompanyBackupReferenceMapping: string
     case TenantNaturalKey = 'tenant_natural_key';
     case GlobalNaturalKey = 'global_natural_key';
     case Actor = 'actor';
+    case CredentialDecision = 'credential_decision';
 }

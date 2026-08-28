@@ -154,6 +154,14 @@ final readonly class CompanyBackupReference
         ) {
             throw self::invalid($registryKey);
         }
+        if ($mapping === CompanyBackupReferenceMapping::CredentialDecision
+            && (count($columns) !== 1
+                || $targetColumns !== ['id']
+                || $constraint !== CompanyBackupReferenceConstraint::Required
+                || $nullableColumns !== $columns)
+        ) {
+            throw self::invalid($registryKey);
+        }
 
         return new self(
             $columns,
