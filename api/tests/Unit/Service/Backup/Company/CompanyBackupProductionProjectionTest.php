@@ -635,6 +635,75 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         self::assertSame('foreign_key_path', $projects->details['ownership']['strategy'] ?? null);
     }
 
+    public function testProjectsDeclareIndirectOwnershipAndBusinessReferences(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:projects');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'client_id',
+            'name',
+            'payment_due_days',
+            'billing_emails_mode',
+            'payment_due_unit',
+            'project_number',
+            'contract_number',
+            'budget_total',
+            'budget_yearly',
+            'budget_monthly',
+            'hourly_rate',
+            'currency_id',
+            'status',
+            'requires_work_report_approval',
+            'note',
+            'default_revenue_category_id',
+            'archived_at',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            [
+                'payment_due_unit',
+                'project_number',
+                'contract_number',
+                'budget_total',
+                'budget_yearly',
+                'budget_monthly',
+                'note',
+                'default_revenue_category_id',
+                'archived_at',
+            ],
+            [
+                new CompanyBackupForeignKey(['client_id'], 'clients', ['id']),
+                new CompanyBackupForeignKey(['currency_id'], 'currencies', ['id']),
+            ],
+        ));
+
+        self::assertSame(TenantDataPolicy::TenantOwnedIndirect, $projection->policy);
+        self::assertSame('foreign_key_path', $projection->ownership['strategy'] ?? null);
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'client_id->clients:id',
+                'currency_id->currencies:id',
+                'default_revenue_category_id->revenue_categories:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            CompanyBackupReferenceConstraint::Optional,
+            $projection->references->references[2]->constraint,
+        );
+    }
+
     public function testAccountingClosingPayloadReferencesUseTheirDeclaredTargets(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition(

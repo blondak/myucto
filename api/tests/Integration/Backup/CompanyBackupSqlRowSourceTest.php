@@ -298,6 +298,86 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionProjectsProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'projects',
+            [
+                'client_id',
+                'currency_id',
+                'billing_emails_mode',
+                'payment_due_unit',
+                'default_revenue_category_id',
+            ],
+        );
+    }
+
+    public function testStreamsOnlyProjectsOwnedThroughSelectedClient(): void
+    {
+        $pdo = $this->db->pdo();
+        $countryId = $this->scalarInt(
+            $pdo,
+            "SELECT id FROM countries WHERE iso2 = 'CZ' ORDER BY id LIMIT 1",
+        );
+        $currencyId = $this->scalarInt(
+            $pdo,
+            "SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1",
+        );
+        $ownClientId = $this->createClient(
+            $pdo,
+            $this->supplierId,
+            'Company backup SQL vlastní klient s.r.o.',
+            $countryId,
+            $currencyId,
+        );
+        $foreignClientId = $this->createClient(
+            $pdo,
+            $this->foreignSupplierId,
+            'Company backup SQL cizí klient s.r.o.',
+            $countryId,
+            $currencyId,
+        );
+        $ownProjectId = $this->createProject(
+            $pdo,
+            $ownClientId,
+            'Company backup SQL vlastní zakázka',
+            $currencyId,
+        );
+        $foreignProjectId = $this->createProject(
+            $pdo,
+            $foreignClientId,
+            'Company backup SQL cizí zakázka',
+            $currencyId,
+        );
+
+        $definition = TenantDataRegistryFactory::draftV1()->definition('table:projects');
+        self::assertNotNull($definition);
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+            $pdo,
+            $this->supplierId,
+            $definition,
+        ));
+        $ids = array_map(static fn (array $row): int => (int) $row['id'], $rows);
+
+        self::assertContains($ownProjectId, $ids);
+        self::assertNotContains(
+            $foreignProjectId,
+            $ids,
+            'Nepřímý selector nesmí přes klienta propustit zakázku jiné firmy.',
+        );
+
+        $unscopedStatement = $pdo->prepare(
+            'SELECT id FROM projects WHERE id IN (?, ?) ORDER BY id',
+        );
+        $unscopedStatement->execute([$ownProjectId, $foreignProjectId]);
+        $unscoped = array_map('intval', $unscopedStatement->fetchAll(PDO::FETCH_COLUMN));
+        self::assertContains(
+            $foreignProjectId,
+            $unscoped,
+            'Negativní kontrola musí bez tenantového selectoru cizí zakázku najít.',
+        );
+    }
+
     /** @param list<string> $expectedColumns */
     private function assertProductionProjectionMatchesSchema(
         string $table,
@@ -447,6 +527,43 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $year . '-12-31',
             'open',
         ]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function createClient(
+        PDO $pdo,
+        int $supplierId,
+        string $name,
+        int $countryId,
+        int $currencyId,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO clients ('
+            . 'supplier_id, company_name, street, city, zip, country_id, currency_default_id'
+            . ') VALUES (?, ?, ?, ?, ?, ?, ?)',
+        );
+        $statement->execute([
+            $supplierId,
+            $name,
+            'Testovací 2',
+            'Brno',
+            '60200',
+            $countryId,
+            $currencyId,
+        ]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function createProject(
+        PDO $pdo,
+        int $clientId,
+        string $name,
+        int $currencyId,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO projects (client_id, name, currency_id) VALUES (?, ?, ?)',
+        );
+        $statement->execute([$clientId, $name, $currencyId]);
         return (int) $pdo->lastInsertId();
     }
 
