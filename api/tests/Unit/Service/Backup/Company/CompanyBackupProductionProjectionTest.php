@@ -12,6 +12,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableReferenceSchema;
+use MyInvoice\Service\Backup\Company\CompanyBackupTenantSqlSelector;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use PHPUnit\Framework\TestCase;
@@ -786,6 +787,62 @@ final class CompanyBackupProductionProjectionTest extends TestCase
                 $projection->references->references,
             ),
         );
+    }
+
+    public function testCountriesAreGlobalReferencesSelectedFromCompanyRows(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:countries');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = ['id', 'iso2', 'iso3', 'name_cs', 'name_en', 'is_eu'];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema([], []),
+        );
+        $selection = (new CompanyBackupTenantSqlSelector())->select($projection, 31);
+
+        self::assertSame(TenantDataPolicy::GlobalReference, $projection->policy);
+        self::assertSame(['iso2'], $definition->details['natural_key'] ?? null);
+        self::assertSame([31, 31], $selection->params);
+        self::assertStringContainsString('`clients`', $selection->where);
+        self::assertStringContainsString('`supplier`', $selection->where);
+    }
+
+    public function testVatRatesAreGlobalReferencesSelectedFromCompanyRows(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:vat_rates');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'code',
+            'rate_percent',
+            'country',
+            'label_cs',
+            'label_en',
+            'is_default',
+            'is_reverse_charge',
+            'valid_from',
+            'valid_to',
+            'display_order',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(['valid_to'], []),
+        );
+        $selection = (new CompanyBackupTenantSqlSelector())->select($projection, 37);
+
+        self::assertSame(TenantDataPolicy::GlobalReference, $projection->policy);
+        self::assertSame(['code'], $definition->details['natural_key'] ?? null);
+        self::assertSame([37, 37], $selection->params);
+        self::assertStringContainsString('`clients`', $selection->where);
+        self::assertStringContainsString('`supplier`', $selection->where);
     }
 
     public function testAccountingClosingPayloadReferencesUseTheirDeclaredTargets(): void

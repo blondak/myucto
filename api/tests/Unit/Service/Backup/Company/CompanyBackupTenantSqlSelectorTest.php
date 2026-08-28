@@ -107,6 +107,82 @@ final class CompanyBackupTenantSqlSelectorTest extends TestCase
         self::assertSame([13, 13, 13], $rates->params);
     }
 
+    public function testBuildsGlobalRowsReferencedBySelectedTenant(): void
+    {
+        $selection = (new CompanyBackupTenantSqlSelector())->select($this->projection(
+            'countries',
+            TenantDataPolicy::GlobalReference,
+            [
+                'strategy' => 'tenant_reference_sources',
+                'sources' => [
+                    [
+                        'table' => 'clients',
+                        'reference_column' => 'country_id',
+                        'supplier_column' => 'supplier_id',
+                    ],
+                    [
+                        'table' => 'supplier',
+                        'reference_column' => 'country_id',
+                        'supplier_column' => 'id',
+                    ],
+                ],
+            ],
+            ['id', 'iso2'],
+        ), 17);
+
+        self::assertSame(
+            '(`_company_source`.`id` IN (SELECT `_tenant_reference_0`.`country_id`'
+            . ' FROM `clients` AS `_tenant_reference_0`'
+            . ' WHERE `_tenant_reference_0`.`supplier_id` = ?'
+            . ' AND `_tenant_reference_0`.`country_id` IS NOT NULL) OR '
+            . '`_company_source`.`id` IN (SELECT `_tenant_reference_1`.`country_id`'
+            . ' FROM `supplier` AS `_tenant_reference_1`'
+            . ' WHERE `_tenant_reference_1`.`id` = ?'
+            . ' AND `_tenant_reference_1`.`country_id` IS NOT NULL))',
+            $selection->where,
+        );
+        self::assertSame([17, 17], $selection->params);
+    }
+
+    public function testRejectsUnsafeGlobalReferenceSources(): void
+    {
+        $validClient = [
+            'table' => 'clients',
+            'reference_column' => 'country_id',
+            'supplier_column' => 'supplier_id',
+        ];
+        $validSupplier = [
+            'table' => 'supplier',
+            'reference_column' => 'country_id',
+            'supplier_column' => 'id',
+        ];
+        foreach (
+            [
+                [$validSupplier, $validClient],
+                [[...$validClient, 'supplier_column' => 'id']],
+                [[...$validClient, 'reference_column' => 'country-id']],
+            ] as $sources
+        ) {
+            try {
+                (new CompanyBackupTenantSqlSelector())->select($this->projection(
+                    'countries',
+                    TenantDataPolicy::GlobalReference,
+                    [
+                        'strategy' => 'tenant_reference_sources',
+                        'sources' => $sources,
+                    ],
+                    ['id', 'iso2'],
+                ), 17);
+                self::fail('Globální referenční zdroje musí být bezpečné a kanonické.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame(
+                    'data_ownership_reference_sources_invalid',
+                    $e->errorCode,
+                );
+            }
+        }
+    }
+
     public function testRejectsPolicyAndStrategyCombinationOutsideAllowlist(): void
     {
         $projection = $this->projection(

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Registry;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupCountriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupExpenseCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
@@ -12,6 +13,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupRevenueCategoriesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
 
 /** Produkční sestavení registru; company_backup zůstává během inventury draft. */
 final class TenantDataRegistryFactory
@@ -347,6 +349,62 @@ final class TenantDataRegistryFactory
             ],
         );
         $definitions[] = new TenantDataDefinition(
+            'table:countries',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::GlobalReference,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'natural_key' => ['iso2'],
+                'feature_group' => 'core',
+                'ownership' => [
+                    'strategy' => 'tenant_reference_sources',
+                    'sources' => [
+                        [
+                            'table' => 'clients',
+                            'reference_column' => 'country_id',
+                            'supplier_column' => 'supplier_id',
+                        ],
+                        [
+                            'table' => 'supplier',
+                            'reference_column' => 'country_id',
+                            'supplier_column' => 'id',
+                        ],
+                    ],
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('countries'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
+            'table:vat_rates',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::GlobalReference,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'natural_key' => ['code'],
+                'feature_group' => 'tax',
+                'ownership' => [
+                    'strategy' => 'tenant_reference_sources',
+                    'sources' => [
+                        [
+                            'table' => 'clients',
+                            'reference_column' => 'vat_rate_default_id',
+                            'supplier_column' => 'supplier_id',
+                        ],
+                        [
+                            'table' => 'supplier',
+                            'reference_column' => 'default_vat_rate_id',
+                            'supplier_column' => 'id',
+                        ],
+                    ],
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('vat_rates'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
             'table:expense_categories',
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantOwned,
@@ -536,6 +594,7 @@ final class TenantDataRegistryFactory
         $columns = match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::dataColumns(),
+            'countries' => CompanyBackupCountriesProjection::dataColumns(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::dataColumns(),
             'journal_entries' => CompanyBackupJournalEntriesProjection::dataColumns(),
@@ -544,6 +603,7 @@ final class TenantDataRegistryFactory
             'projects' => CompanyBackupProjectsProjection::dataColumns(),
             'revenue_categories' =>
                 CompanyBackupRevenueCategoriesProjection::dataColumns(),
+            'vat_rates' => CompanyBackupVatRatesProjection::dataColumns(),
             default => self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null,
         };
         if ($columns === null) {

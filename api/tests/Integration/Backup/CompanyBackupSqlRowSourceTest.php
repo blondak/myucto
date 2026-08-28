@@ -333,6 +333,60 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionCountriesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'countries',
+            ['iso2', 'iso3', 'name_cs', 'name_en', 'is_eu'],
+        );
+    }
+
+    public function testProductionVatRatesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'vat_rates',
+            ['code', 'rate_percent', 'country', 'valid_from', 'valid_to'],
+        );
+    }
+
+    public function testStreamsOnlyGlobalRowsReferencedBySelectedSupplier(): void
+    {
+        $pdo = $this->db->pdo();
+        $ownCountryId = $this->createCountry($pdo, 'XQ', 'XQX', 'Vlastní testovací země');
+        $foreignCountryId = $this->createCountry($pdo, 'XR', 'XRX', 'Cizí testovací země');
+        $ownVatRateId = $this->createVatRate($pdo, 'backup_owner_vat');
+        $foreignVatRateId = $this->createVatRate($pdo, 'backup_foreign_vat');
+        $statement = $pdo->prepare(
+            'UPDATE supplier SET country_id = ?, default_vat_rate_id = ? WHERE id = ?',
+        );
+        $statement->execute([$ownCountryId, $ownVatRateId, $this->supplierId]);
+        $statement->execute([
+            $foreignCountryId,
+            $foreignVatRateId,
+            $this->foreignSupplierId,
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $countries = $registry->definition('table:countries');
+        $vatRates = $registry->definition('table:vat_rates');
+        self::assertNotNull($countries);
+        self::assertNotNull($vatRates);
+        $source = new CompanyBackupSqlRowSource(batchSize: 1);
+        $countryIds = array_map(
+            static fn (array $row): int => (int) $row['id'],
+            iterator_to_array($source->rows($pdo, $this->supplierId, $countries)),
+        );
+        $vatRateIds = array_map(
+            static fn (array $row): int => (int) $row['id'],
+            iterator_to_array($source->rows($pdo, $this->supplierId, $vatRates)),
+        );
+
+        self::assertContains($ownCountryId, $countryIds);
+        self::assertNotContains($foreignCountryId, $countryIds);
+        self::assertContains($ownVatRateId, $vatRateIds);
+        self::assertNotContains($foreignVatRateId, $vatRateIds);
+    }
+
     public function testStreamsOnlyProjectsOwnedThroughSelectedClient(): void
     {
         $pdo = $this->db->pdo();
@@ -585,6 +639,37 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             'INSERT INTO projects (client_id, name, currency_id) VALUES (?, ?, ?)',
         );
         $statement->execute([$clientId, $name, $currencyId]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function createCountry(
+        PDO $pdo,
+        string $iso2,
+        string $iso3,
+        string $name,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO countries (iso2, iso3, name_cs, name_en, is_eu)'
+            . ' VALUES (?, ?, ?, ?, 0)',
+        );
+        $statement->execute([$iso2, $iso3, $name, $name]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function createVatRate(PDO $pdo, string $code): int
+    {
+        $statement = $pdo->prepare(
+            'INSERT INTO vat_rates ('
+            . 'code, rate_percent, country, label_cs, label_en, valid_from'
+            . ') VALUES (?, 17.00, ?, ?, ?, ?)',
+        );
+        $statement->execute([
+            $code,
+            'CZ',
+            'Syntetická sazba 17 %',
+            'Synthetic rate 17%',
+            '2001-01-01',
+        ]);
         return (int) $pdo->lastInsertId();
     }
 

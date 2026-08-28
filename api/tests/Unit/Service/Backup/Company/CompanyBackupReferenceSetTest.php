@@ -393,6 +393,68 @@ final class CompanyBackupReferenceSetTest extends TestCase
         );
     }
 
+    public function testAcceptsGlobalIdResolvedThroughTargetNaturalKey(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [[
+                'columns' => ['country_id'],
+                'target' => 'table:countries',
+                'target_columns' => ['id'],
+                'mapping' => CompanyBackupReferenceMapping::GlobalNaturalKey->value,
+                'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                'nullable_columns' => [],
+                'fallbacks' => [],
+            ]],
+            'table:clients',
+        );
+        $registry = new TenantDataRegistry(1, [
+            $this->definition(
+                'countries',
+                TenantDataPolicy::GlobalReference,
+                ['natural_key' => ['iso2']],
+            ),
+        ]);
+
+        $references->assertProjectionColumns(['id', 'country_id']);
+        $references->assertRegistryTargets($registry);
+        $references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            [],
+            [new CompanyBackupForeignKey(['country_id'], 'countries', ['id'])],
+        ));
+
+        self::assertSame(
+            CompanyBackupReferenceMapping::GlobalNaturalKey,
+            $references->references[0]->mapping,
+        );
+    }
+
+    public function testRejectsGlobalIdTargetWithoutNaturalKey(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [[
+                'columns' => ['country_id'],
+                'target' => 'table:countries',
+                'target_columns' => ['id'],
+                'mapping' => CompanyBackupReferenceMapping::GlobalNaturalKey->value,
+                'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                'nullable_columns' => [],
+                'fallbacks' => [],
+            ]],
+            'table:clients',
+        );
+        $registry = new TenantDataRegistry(1, [
+            $this->definition('countries', TenantDataPolicy::GlobalReference),
+        ]);
+
+        try {
+            $references->assertRegistryTargets($registry);
+            self::fail('Globální ID musí mít natural key pro cílové rozlišení.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_target_invalid', $e->errorCode);
+            self::assertSame('country_id', $e->column);
+        }
+    }
+
     public function testAcceptsExplicitZeroSentinelSoftReference(): void
     {
         $references = CompanyBackupReferenceSet::fromArray(

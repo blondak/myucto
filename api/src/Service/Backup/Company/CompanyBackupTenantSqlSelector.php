@@ -11,6 +11,7 @@ final class CompanyBackupTenantSqlSelector
 {
     public const SOURCE_ALIAS = '_company_source';
     private const MAX_PATH_DEPTH = 16;
+    private const MAX_REFERENCE_SOURCES = 64;
 
     public function select(
         CompanyBackupTableProjection $table,
@@ -94,6 +95,11 @@ final class CompanyBackupTenantSqlSelector
                 . ' WHERE `supplier_id` = ?)',
                 [$supplierId, $supplierId, $supplierId],
             );
+        }
+        if ($table->policy === TenantDataPolicy::GlobalReference
+            && $strategy === 'tenant_reference_sources'
+        ) {
+            return $this->tenantReferenceSourcesSelection($table, $supplierId);
         }
 
         throw $this->error($table, 'data_ownership_unsupported');
@@ -185,6 +191,73 @@ final class CompanyBackupTenantSqlSelector
             . ' WHERE `supplier_id` = ? AND `last_bank_transaction_id` IS NOT NULL))';
     }
 
+    private function tenantReferenceSourcesSelection(
+        CompanyBackupTableProjection $table,
+        int $supplierId,
+    ): CompanyBackupSqlSelection {
+        $this->assertOwnershipKeys($table, ['sources', 'strategy']);
+        $sources = $table->ownership['sources'] ?? null;
+        if ($table->primaryKey !== ['id']
+            || !is_array($sources)
+            || !array_is_list($sources)
+            || $sources === []
+            || count($sources) > self::MAX_REFERENCE_SOURCES
+        ) {
+            throw $this->error($table, 'data_ownership_reference_sources_invalid');
+        }
+        $this->assertDataColumns($table, ['id']);
+
+        $conditions = [];
+        $params = [];
+        $previousSignature = null;
+        foreach ($sources as $index => $source) {
+            if (!is_array($source) || array_is_list($source)) {
+                throw $this->error($table, 'data_ownership_reference_sources_invalid');
+            }
+            $keys = array_keys($source);
+            sort($keys, SORT_STRING);
+            if ($keys !== ['reference_column', 'supplier_column', 'table']) {
+                throw $this->error($table, 'data_ownership_reference_sources_invalid');
+            }
+            $sourceTable = $this->referenceSourceIdentifier($table, $source, 'table');
+            $referenceColumn = $this->referenceSourceIdentifier(
+                $table,
+                $source,
+                'reference_column',
+            );
+            $supplierColumn = $this->referenceSourceIdentifier(
+                $table,
+                $source,
+                'supplier_column',
+            );
+            $expectedSupplierColumn = $sourceTable === 'supplier'
+                ? 'id'
+                : 'supplier_id';
+            $signature = $sourceTable . ':' . $referenceColumn . ':' . $supplierColumn;
+            if ($supplierColumn !== $expectedSupplierColumn
+                || ($previousSignature !== null
+                    && strcmp($previousSignature, $signature) >= 0)
+            ) {
+                throw $this->error($table, 'data_ownership_reference_sources_invalid');
+            }
+            $previousSignature = $signature;
+
+            $alias = '_tenant_reference_' . $index;
+            $conditions[] = self::column(self::SOURCE_ALIAS, 'id')
+                . ' IN (SELECT ' . self::column($alias, $referenceColumn)
+                . ' FROM ' . self::quoteIdentifier($sourceTable, $table->registryKey)
+                . ' AS ' . self::quoteIdentifier($alias, $table->registryKey)
+                . ' WHERE ' . self::column($alias, $supplierColumn) . ' = ?'
+                . ' AND ' . self::column($alias, $referenceColumn) . ' IS NOT NULL)';
+            $params[] = $supplierId;
+        }
+
+        return new CompanyBackupSqlSelection(
+            '(' . implode(' OR ', $conditions) . ')',
+            $params,
+        );
+    }
+
     /** @param list<string> $expected */
     private function assertOwnershipKeys(
         CompanyBackupTableProjection $table,
@@ -224,6 +297,21 @@ final class CompanyBackupTenantSqlSelector
             throw $this->error($table, 'data_ownership_path_invalid');
         }
         self::quoteIdentifier($value, $table->registryKey);
+        return $value;
+    }
+
+    /** @param array<mixed> $source */
+    private function referenceSourceIdentifier(
+        CompanyBackupTableProjection $table,
+        array $source,
+        string $field,
+    ): string {
+        $value = $source[$field] ?? null;
+        if (!is_string($value)
+            || preg_match('/^[a-z_][a-z0-9_]{0,63}$/D', $value) !== 1
+        ) {
+            throw $this->error($table, 'data_ownership_reference_sources_invalid');
+        }
         return $value;
     }
 
