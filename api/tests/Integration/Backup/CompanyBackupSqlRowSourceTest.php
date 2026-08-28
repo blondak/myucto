@@ -325,6 +325,14 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionExpenseCategoriesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'expense_categories',
+            ['supplier_id', 'code', 'fixed_or_var', 'archived'],
+        );
+    }
+
     public function testStreamsOnlyProjectsOwnedThroughSelectedClient(): void
     {
         $pdo = $this->db->pdo();
