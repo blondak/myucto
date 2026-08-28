@@ -418,6 +418,195 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionSigningSettingsProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'signing_settings',
+            ['supplier_id', 'accountant_profiles_enabled'],
+        );
+    }
+
+    public function testProductionSignatureOutputSettingsProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'pdf_signature_output_settings',
+            [
+                'supplier_id',
+                'usage',
+                'output_type',
+                'enabled',
+                'default_profile_id',
+                'signature_config_json',
+            ],
+        );
+    }
+
+    public function testProductionSignatureRoleProfilesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'signature_role_profiles',
+            ['supplier_id', 'usage', 'output_type', 'role', 'profile_id'],
+        );
+    }
+
+    public function testProductionSignatureDocumentOverridesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'signature_document_overrides',
+            [
+                'supplier_id',
+                'usage',
+                'entity_type',
+                'entity_id',
+                'admin_profile_id',
+                'created_by',
+            ],
+        );
+    }
+
+    public function testStreamsSigningConfigurationOnlyForSelectedSupplierAndDisablesIt(): void
+    {
+        $pdo = $this->db->pdo();
+        $currencyId = $this->scalarInt(
+            $pdo,
+            "SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1",
+        );
+        $countryId = $this->scalarInt(
+            $pdo,
+            "SELECT id FROM countries WHERE iso2 = 'CZ' ORDER BY id LIMIT 1",
+        );
+        $ownClientId = $this->createClient(
+            $pdo,
+            $this->supplierId,
+            'Company backup vlastní klient podpisu s.r.o.',
+            $countryId,
+            $currencyId,
+        );
+        $foreignClientId = $this->createClient(
+            $pdo,
+            $this->foreignSupplierId,
+            'Company backup cizí klient podpisu s.r.o.',
+            $countryId,
+            $currencyId,
+        );
+        $ownInvoiceId = $this->createInvoice(
+            $pdo,
+            $this->supplierId,
+            $ownClientId,
+            $currencyId,
+        );
+        $foreignInvoiceId = $this->createInvoice(
+            $pdo,
+            $this->foreignSupplierId,
+            $foreignClientId,
+            $currencyId,
+        );
+        $ownProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->supplierId,
+            'Vlastní profil konfigurace podpisu',
+            'company-backup-owner-signing-config',
+        );
+        $foreignProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->foreignSupplierId,
+            'Cizí profil konfigurace podpisu',
+            'company-backup-foreign-signing-config',
+        );
+
+        $settings = $pdo->prepare(
+            'INSERT INTO signing_settings (supplier_id, accountant_profiles_enabled)'
+            . ' VALUES (?, 1)',
+        );
+        $settings->execute([$this->supplierId]);
+        $settings->execute([$this->foreignSupplierId]);
+
+        $output = $pdo->prepare(
+            'INSERT INTO pdf_signature_output_settings ('
+            . 'supplier_id, `usage`, output_type, enabled, backend,'
+            . ' selection_source, user_profile_fallback, default_profile_id,'
+            . ' failure_policy, signature_config_json'
+            . ") VALUES (?, 'pdf', 'invoice', 1, 'native',"
+            . " 'admin_profile_settings', 'fallback_unsigned', ?,"
+            . " 'fallback_unsigned', '{\"appearance\":\"invisible\"}')",
+        );
+        $output->execute([$this->supplierId, $ownProfileId]);
+        $output->execute([$this->foreignSupplierId, $foreignProfileId]);
+
+        $role = $pdo->prepare(
+            'INSERT INTO signature_role_profiles ('
+            . 'supplier_id, `usage`, output_type, role, profile_id'
+            . ") VALUES (?, 'pdf', 'invoice', 'admin', ?)",
+        );
+        $role->execute([$this->supplierId, $ownProfileId]);
+        $role->execute([$this->foreignSupplierId, $foreignProfileId]);
+
+        $document = $pdo->prepare(
+            'INSERT INTO signature_document_overrides ('
+            . 'supplier_id, `usage`, entity_type, entity_id,'
+            . ' selection_source, admin_profile_id'
+            . ") VALUES (?, 'pdf', 'invoice', ?, 'admin_profile_settings', ?)",
+        );
+        $document->execute([$this->supplierId, $ownInvoiceId, $ownProfileId]);
+        $document->execute([
+            $this->foreignSupplierId,
+            $foreignInvoiceId,
+            $foreignProfileId,
+        ]);
+
+        $settingsRows = $this->companyRows($pdo, 'signing_settings');
+        self::assertCount(1, $settingsRows);
+        self::assertSame($this->supplierId, (int) $settingsRows[0]['supplier_id']);
+        $settingsDefinition = TenantDataRegistryFactory::draftV1()
+            ->definition('table:signing_settings');
+        self::assertNotNull($settingsDefinition);
+        $restoredSettings = CompanyBackupTableProjection::fromDefinition(
+            $settingsDefinition,
+        )->restoreOverrides->apply($settingsRows[0]);
+        self::assertSame(0, $restoredSettings['accountant_profiles_enabled']);
+
+        $outputRows = $this->companyRows($pdo, 'pdf_signature_output_settings');
+        self::assertCount(1, $outputRows);
+        self::assertSame($ownProfileId, (int) $outputRows[0]['default_profile_id']);
+        self::assertSame(
+            '{"appearance":"invisible"}',
+            $outputRows[0]['signature_config_json'],
+        );
+        $outputDefinition = TenantDataRegistryFactory::draftV1()
+            ->definition('table:pdf_signature_output_settings');
+        self::assertNotNull($outputDefinition);
+        $restoredOutput = CompanyBackupTableProjection::fromDefinition(
+            $outputDefinition,
+        )->restoreOverrides->apply($outputRows[0]);
+        self::assertSame(0, $restoredOutput['enabled']);
+
+        $roleRows = $this->companyRows($pdo, 'signature_role_profiles');
+        self::assertCount(1, $roleRows);
+        self::assertSame($ownProfileId, (int) $roleRows[0]['profile_id']);
+
+        $documentRows = $this->companyRows($pdo, 'signature_document_overrides');
+        self::assertCount(1, $documentRows);
+        self::assertSame($ownInvoiceId, (int) $documentRows[0]['entity_id']);
+        self::assertSame($ownProfileId, (int) $documentRows[0]['admin_profile_id']);
+
+        foreach ([
+            'pdf_signature_output_settings',
+            'signature_document_overrides',
+            'signature_role_profiles',
+            'signing_settings',
+        ] as $table) {
+            $statement = $pdo->prepare(
+                'SELECT COUNT(*) FROM `' . $table . '` WHERE supplier_id = ?',
+            );
+            $statement->execute([$this->foreignSupplierId]);
+            self::assertSame(
+                1,
+                (int) $statement->fetchColumn(),
+                'Negativní kontrola musí najít cizí podpisovou konfiguraci.',
+            );
+        }
+    }
+
     public function testProductionAccountingPeriodsProjectionMatchesMigratedSchema(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
@@ -1034,6 +1223,36 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             'synthetic-tsa-ciphertext',
         ]);
         return (int) $pdo->lastInsertId();
+    }
+
+    private function createInvoice(
+        PDO $pdo,
+        int $supplierId,
+        int $clientId,
+        int $currencyId,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO invoices ('
+            . 'supplier_id, invoice_type, client_id, issue_date, due_date,'
+            . ' currency_id, status'
+            . ") VALUES (?, 'invoice', ?, '2001-01-01', '2001-01-15', ?, 'draft')",
+        );
+        $statement->execute([$supplierId, $clientId, $currencyId]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function companyRows(PDO $pdo, string $table): array
+    {
+        $definition = TenantDataRegistryFactory::draftV1()->definition(
+            'table:' . $table,
+        );
+        self::assertNotNull($definition);
+        return array_values(iterator_to_array((new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+            $pdo,
+            $this->supplierId,
+            $definition,
+        )));
     }
 
     private function createClient(

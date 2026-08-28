@@ -404,6 +404,239 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testSigningSettingsDisablePersonalAccountantProfilesOnRestore(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:signing_settings');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'supplier_id',
+            'accountant_profiles_enabled',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['supplier_id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [],
+                [new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id'])],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['supplier_id->supplier:id'],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        $restored = $projection->restoreOverrides->apply([
+            'accountant_profiles_enabled' => 1,
+        ]);
+        self::assertSame(0, $restored['accountant_profiles_enabled']);
+    }
+
+    public function testSignatureOutputSettingsDisableEveryOutputOnRestore(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:pdf_signature_output_settings');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'supplier_id',
+            'usage',
+            'output_type',
+            'enabled',
+            'backend',
+            'selection_source',
+            'user_profile_fallback',
+            'default_profile_id',
+            'failure_policy',
+            'signature_config_json',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema(
+            $columns,
+            [],
+            ['supplier_id', 'output_type'],
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['default_profile_id', 'signature_config_json'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['supplier_id', 'default_profile_id'],
+                        'signing_profiles',
+                        ['supplier_id', 'id'],
+                    ),
+                    new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'supplier_id,default_profile_id->signing_profiles:supplier_id,id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['default_profile_id'],
+            $projection->references->references[0]->nullableColumns,
+        );
+        $restored = $projection->restoreOverrides->apply(['enabled' => 1]);
+        self::assertSame(0, $restored['enabled']);
+    }
+
+    public function testSignatureRoleProfilesKeepTenantProfileMapping(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:signature_role_profiles');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'supplier_id',
+            'usage',
+            'output_type',
+            'role',
+            'profile_id',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema(
+            $columns,
+            [],
+            ['supplier_id', 'usage', 'output_type', 'role'],
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [],
+                [
+                    new CompanyBackupForeignKey(
+                        ['supplier_id', 'profile_id'],
+                        'signing_profiles',
+                        ['supplier_id', 'id'],
+                    ),
+                    new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'supplier_id,profile_id->signing_profiles:supplier_id,id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
+    public function testSignatureDocumentOverridesRemapBothDocumentTypes(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:signature_document_overrides');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'supplier_id',
+            'usage',
+            'entity_type',
+            'entity_id',
+            'selection_source',
+            'admin_profile_id',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema(
+            $columns,
+            [],
+            ['supplier_id', 'usage', 'entity_type', 'entity_id'],
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['admin_profile_id', 'created_by'],
+                [
+                    new CompanyBackupForeignKey(['created_by'], 'users', ['id']),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id', 'admin_profile_id'],
+                        'signing_profiles',
+                        ['supplier_id', 'id'],
+                    ),
+                    new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+                ],
+            ),
+        );
+        $projection->polymorphicReferences->assertRegistryTargets($registry);
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'created_by->users:id',
+                'supplier_id,admin_profile_id->signing_profiles:supplier_id,id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['invoice', 'work_report'],
+            array_map(
+                static fn ($case): string => $case->equals,
+                $projection->polymorphicReferences->references[0]->cases,
+            ),
+        );
+        foreach (['invoice', 'work_report'] as $entityType) {
+            $restored = $projection->polymorphicReferences->remap(
+                ['entity_type' => $entityType, 'entity_id' => 41],
+                static fn ($case, int $value): int => $value + 100,
+            );
+            self::assertSame(141, $restored['entity_id']);
+        }
+    }
+
+    public function testSignatureUserProfilesAreRecreatedFromActorDecisions(): void
+    {
+        $definition = TenantDataRegistryFactory::draftV1()->definition(
+            'table:signature_user_profiles',
+        );
+        self::assertNotNull($definition);
+
+        self::assertSame(TenantDataPolicy::TenantRelation, $definition->policy);
+        self::assertFalse($definition->policy->hasMachineDataPayload());
+        self::assertSame(
+            [
+                'actor_column' => 'user_id',
+                'strategy' => 'restore_actor_relation',
+                'supplier_column' => 'supplier_id',
+            ],
+            $definition->details['ownership'] ?? null,
+        );
+        self::assertArrayNotHasKey('company_backup', $definition->details);
+    }
+
     public function testSupplierLogoAreaRegistersEveryCurrentAndHistoricalOwner(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();

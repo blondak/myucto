@@ -15,11 +15,15 @@ use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPdfSignatureOutputSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupRevenueCategoriesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSignatureDocumentOverridesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSignatureRoleProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
 
 /** Produkční sestavení registru; company_backup zůstává během inventury draft. */
@@ -544,6 +548,86 @@ final class TenantDataRegistryFactory
             ],
         );
         $definitions[] = new TenantDataDefinition(
+            'table:signing_settings',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['supplier_id'],
+                'feature_group' => 'integrations',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('signing_settings'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
+            'table:pdf_signature_output_settings',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['supplier_id', 'output_type'],
+                'feature_group' => 'integrations',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('pdf_signature_output_settings'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
+            'table:signature_role_profiles',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['supplier_id', 'usage', 'output_type', 'role'],
+                'feature_group' => 'integrations',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('signature_role_profiles'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
+            'table:signature_document_overrides',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['supplier_id', 'usage', 'entity_type', 'entity_id'],
+                'feature_group' => 'integrations',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('signature_document_overrides'),
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
+            'table:signature_user_profiles',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRelation,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['supplier_id', 'usage', 'output_type', 'user_id'],
+                'feature_group' => 'integrations',
+                'ownership' => [
+                    'actor_column' => 'user_id',
+                    'strategy' => 'restore_actor_relation',
+                    'supplier_column' => 'supplier_id',
+                ],
+                'reason' => 'recreate_after_explicit_actor_mapping',
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
             'table:email_profiles',
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantOwned,
@@ -769,11 +853,19 @@ final class TenantDataRegistryFactory
                 CompanyBackupOffsetAgreementItemsProjection::dataColumns(),
             'offset_agreements' =>
                 CompanyBackupOffsetAgreementsProjection::dataColumns(),
+            'pdf_signature_output_settings' =>
+                CompanyBackupPdfSignatureOutputSettingsProjection::dataColumns(),
             'projects' => CompanyBackupProjectsProjection::dataColumns(),
             'revenue_categories' =>
                 CompanyBackupRevenueCategoriesProjection::dataColumns(),
+            'signature_document_overrides' =>
+                CompanyBackupSignatureDocumentOverridesProjection::dataColumns(),
+            'signature_role_profiles' =>
+                CompanyBackupSignatureRoleProfilesProjection::dataColumns(),
             'signing_profiles' =>
                 CompanyBackupSigningProfilesProjection::dataColumns(),
+            'signing_settings' =>
+                CompanyBackupSigningSettingsProjection::dataColumns(),
             'vat_rates' => CompanyBackupVatRatesProjection::dataColumns(),
             default => self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null,
         };
@@ -785,15 +877,21 @@ final class TenantDataRegistryFactory
             : [];
         $references = self::companyBackupReferences($table);
         $restoreOverrides = self::companyBackupRestoreOverrides($table);
-        if ($table === 'journal_entries') {
+        $polymorphicReferences = match ($table) {
+            'journal_entries' =>
+                CompanyBackupJournalEntriesProjection::polymorphicReferences(),
+            'signature_document_overrides' =>
+                CompanyBackupSignatureDocumentOverridesProjection::polymorphicReferences(),
+            default => [],
+        };
+        if ($polymorphicReferences !== []) {
             return [
                 'company_backup' => [
                     'data_columns' => $columns,
                     'embedded_references' => $embeddedReferences,
                     'generated_columns' => [],
                     'omit_columns' => [],
-                    'polymorphic_references' =>
-                        CompanyBackupJournalEntriesProjection::polymorphicReferences(),
+                    'polymorphic_references' => $polymorphicReferences,
                     'references' => $references,
                     'restore_overrides' => $restoreOverrides,
                 ],
@@ -849,10 +947,22 @@ final class TenantDataRegistryFactory
                     'reason' => 'require_email_profile_reselection_after_restore',
                 ],
             ],
+            'pdf_signature_output_settings' => [
+                'enabled' => [
+                    'value' => 0,
+                    'reason' => 'disable_document_signing_after_restore',
+                ],
+            ],
             'signing_profiles' => [
                 'is_active' => [
                     'value' => 0,
                     'reason' => 'disable_document_signing_after_restore',
+                ],
+            ],
+            'signing_settings' => [
+                'accountant_profiles_enabled' => [
+                    'value' => 0,
+                    'reason' => 'disable_personal_signing_profiles_after_restore',
                 ],
             ],
             default => [],
@@ -889,11 +999,19 @@ final class TenantDataRegistryFactory
                 CompanyBackupOffsetAgreementItemsProjection::references(),
             'offset_agreements' =>
                 CompanyBackupOffsetAgreementsProjection::references(),
+            'pdf_signature_output_settings' =>
+                CompanyBackupPdfSignatureOutputSettingsProjection::references(),
             'projects' => CompanyBackupProjectsProjection::references(),
             'revenue_categories' =>
                 CompanyBackupRevenueCategoriesProjection::references(),
+            'signature_document_overrides' =>
+                CompanyBackupSignatureDocumentOverridesProjection::references(),
+            'signature_role_profiles' =>
+                CompanyBackupSignatureRoleProfilesProjection::references(),
             'signing_profiles' =>
                 CompanyBackupSigningProfilesProjection::references(),
+            'signing_settings' =>
+                CompanyBackupSigningSettingsProjection::references(),
             'accounting_document_series' => [
                 self::companyBackupTenantIdOrZeroReference(
                     'register_id',
