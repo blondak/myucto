@@ -10,6 +10,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidationException;
 use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidator;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
@@ -199,6 +200,11 @@ final class CompanyBackupTechnicalValidatorTest extends TestCase
                 'format' => CompanyBackupFileInventory::FORMAT,
                 'version' => CompanyBackupFileInventory::VERSION,
                 'areas' => [],
+            ],
+            'secrets' => [
+                'format' => CompanyBackupSecretInventory::FORMAT,
+                'version' => CompanyBackupSecretInventory::VERSION,
+                'omissions' => [],
             ],
         ]));
         $writer = new CompanyBackupArchiveWriter(

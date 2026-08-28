@@ -10,6 +10,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupCredentialTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventoryCollector;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlFileReferenceSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
@@ -19,6 +20,7 @@ use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use MyInvoice\Service\Backup\Registry\TenantSecretColumnDetector;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -478,6 +480,178 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         } catch (CompanyBackupDataSourceException $e) {
             self::assertSame('data_object_kind_unsupported', $e->errorCode);
         }
+    }
+
+    public function testCountsDefaultSecretOmissionsWithoutReadingTheirValues(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->createEmailProfile(
+            $pdo,
+            $this->supplierId,
+            'Vlastní inventarizovaný e-mail',
+            'company-backup-inventory-owner-mail',
+        );
+        $this->createEmailProfile(
+            $pdo,
+            $this->foreignSupplierId,
+            'Cizí inventarizovaný e-mail',
+            'company-backup-inventory-foreign-mail',
+        );
+        $ownProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->supplierId,
+            'Vlastní inventarizovaný podpis',
+            'company-backup-inventory-owner-signing',
+        );
+        $foreignProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->foreignSupplierId,
+            'Cizí inventarizovaný podpis',
+            'company-backup-inventory-foreign-signing',
+        );
+        $ownerUserId = $this->scalarInt(
+            $pdo,
+            'SELECT id FROM users ORDER BY id LIMIT 1',
+        );
+        if ($ownerUserId < 1) {
+            self::fail('Syntetická DB musí obsahovat vlastníka osobního credentialu.');
+        }
+        $ownPersonalCredentialId = $this->createPersonalSigningCredential(
+            $pdo,
+            $ownerUserId,
+            'Vlastní osobní inventarizovaný certifikát',
+        );
+        $foreignPersonalCredentialId = $this->createPersonalSigningCredential(
+            $pdo,
+            $ownerUserId,
+            'Cizí osobní inventarizovaný certifikát',
+        );
+        $personalScope = $pdo->prepare(
+            'INSERT INTO epo_signing_credential_suppliers ('
+            . 'credential_id, supplier_id, enabled_by'
+            . ') VALUES (?, ?, ?)',
+        );
+        $personalScope->execute([
+            $ownPersonalCredentialId,
+            $this->supplierId,
+            $ownerUserId,
+        ]);
+        $personalScope->execute([
+            $foreignPersonalCredentialId,
+            $this->foreignSupplierId,
+            $ownerUserId,
+        ]);
+
+        $personalFileProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->supplierId,
+            'Vlastní osobní PFX profil',
+            'company-backup-inventory-personal-file',
+        );
+        $personalVaultProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->supplierId,
+            'Vlastní osobní trezorový profil',
+            'company-backup-inventory-personal-vault',
+        );
+        $personalOwner = $pdo->prepare(
+            'UPDATE signing_profiles SET owner_user_id = ? WHERE id IN (?, ?)',
+        );
+        $personalOwner->execute([
+            $ownerUserId,
+            $personalFileProfileId,
+            $personalVaultProfileId,
+        ]);
+        $credential = $pdo->prepare(
+            'INSERT INTO signing_credentials ('
+            . 'profile_id, certificate_path, encrypted_passphrase, is_active'
+            . ') VALUES (?, ?, ?, 1)',
+        );
+        $credential->execute([
+            $ownProfileId,
+            'signing/pdf/synthetic-inventory-owner.p12',
+            'synthetic-owner-passphrase-ciphertext',
+        ]);
+        $credential->execute([
+            $foreignProfileId,
+            'signing/pdf/synthetic-inventory-foreign.p12',
+            'synthetic-foreign-passphrase-ciphertext',
+        ]);
+        $credential->execute([
+            $personalFileProfileId,
+            'signing/pdf/synthetic-inventory-personal.p12',
+            'synthetic-personal-passphrase-ciphertext',
+        ]);
+        $vaultCredential = $pdo->prepare(
+            'INSERT INTO signing_credentials ('
+            . 'profile_id, vault_credential_id, certificate_path, is_active'
+            . ') VALUES (?, ?, NULL, 1)',
+        );
+        $vaultCredential->execute([
+            $personalVaultProfileId,
+            $ownPersonalCredentialId,
+        ]);
+
+        $snapshot = $this->secretRegistrySnapshot();
+        $inventory = (new CompanyBackupSecretInventoryCollector())->collect(
+            $pdo,
+            $snapshot,
+            $this->supplierId,
+        );
+        $counts = [];
+        foreach ($inventory->omissions as $omission) {
+            $counts[$omission->registryKey . ':' . $omission->scope->value
+                . ':' . $omission->name] = $omission->count;
+        }
+
+        self::assertSame(1, $counts['table:email_profiles:column:smtp_password_enc']);
+        self::assertSame(1, $counts['table:email_profiles:column:imap_password_enc']);
+        self::assertSame(
+            3,
+            $counts['table:signing_profiles:column:pdf_tsa_password_enc'],
+        );
+        self::assertSame(
+            1,
+            $counts['table:signing_credentials:credential_variant:company_file'],
+        );
+        self::assertSame(
+            1,
+            $counts['table:signing_credentials:credential_variant:personal_file'],
+        );
+        self::assertSame(
+            1,
+            $counts['table:signing_credentials:credential_variant:personal_vault'],
+        );
+        self::assertSame(
+            1,
+            $counts['table:epo_signing_credentials:column:pfx_ciphertext'],
+        );
+        self::assertSame(
+            1,
+            $counts['table:epo_signing_credentials:column:passphrase_ciphertext'],
+        );
+
+        $unscoped = $pdo->prepare(
+            'SELECT COUNT(*) FROM signing_credentials WHERE profile_id IN (?, ?)',
+        );
+        $unscoped->execute([$ownProfileId, $foreignProfileId]);
+        self::assertSame(
+            2,
+            (int) $unscoped->fetchColumn(),
+            'Negativní kontrola musí bez tenantového filtru vidět oba firemní credentials.',
+        );
+        $unscopedPersonal = $pdo->prepare(
+            'SELECT COUNT(*) FROM epo_signing_credentials WHERE id IN (?, ?)',
+        );
+        $unscopedPersonal->execute([
+            $ownPersonalCredentialId,
+            $foreignPersonalCredentialId,
+        ]);
+        self::assertSame(
+            2,
+            (int) $unscopedPersonal->fetchColumn(),
+            'Negativní kontrola musí bez consent vazby vidět oba osobní credentials.',
+        );
     }
 
     public function testProductionSigningSettingsProjectionMatchesSchema(): void
@@ -1173,6 +1347,31 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    private function secretRegistrySnapshot(): TenantDataRegistrySnapshot
+    {
+        $source = TenantDataRegistryFactory::draftV1();
+        $definitions = [];
+        foreach ([
+            'table:email_profiles',
+            'table:epo_signing_credential_suppliers',
+            'table:epo_signing_credentials',
+            'table:signing_credentials',
+            'table:signing_profiles',
+        ] as $key) {
+            $definition = $source->definition($key);
+            if ($definition === null) {
+                throw new \LogicException('Testovací registr neobsahuje ' . $key . '.');
+            }
+            $definitions[] = $definition;
+        }
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
+            $source->version,
+            $definitions,
+            [$profile],
+        ), $profile);
+    }
+
     /** @return array<string,mixed> */
     private function actorReference(string $column): array
     {
@@ -1283,6 +1482,31 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             $name,
             $code,
             'synthetic-tsa-ciphertext',
+        ]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function createPersonalSigningCredential(
+        PDO $pdo,
+        int $ownerUserId,
+        string $label,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO epo_signing_credentials ('
+            . 'owner_user_id, label, pfx_ciphertext, passphrase_ciphertext,'
+            . ' fingerprint_sha256, subject_dn, issuer_dn, valid_from, valid_to'
+            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        $statement->execute([
+            $ownerUserId,
+            $label,
+            'synthetic-personal-pfx-ciphertext',
+            'synthetic-personal-passphrase-ciphertext',
+            hash('sha256', $label),
+            'CN=Synthetic personal backup certificate',
+            'CN=Synthetic backup test authority',
+            '2000-01-01 00:00:00',
+            '2099-12-31 23:59:59',
         ]);
         return (int) $pdo->lastInsertId();
     }

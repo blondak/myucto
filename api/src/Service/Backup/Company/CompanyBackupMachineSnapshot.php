@@ -18,6 +18,7 @@ final readonly class CompanyBackupMachineSnapshot
         public TenantDataRegistrySnapshot $registry,
         public CompanyBackupDataInventory $inventory,
         public CompanyBackupFileInventory $fileInventory,
+        public CompanyBackupSecretInventory $secretInventory,
         array $sourceFiles,
     ) {
         if ($supplierId < 1
@@ -25,6 +26,10 @@ final readonly class CompanyBackupMachineSnapshot
             || !hash_equals(
                 $registry->fingerprint,
                 $fileInventory->registryFingerprint,
+            )
+            || !hash_equals(
+                $registry->fingerprint,
+                $secretInventory->registryFingerprint,
             )
         ) {
             throw new \InvalidArgumentException('Strojový snapshot nemá platnou obálku.');

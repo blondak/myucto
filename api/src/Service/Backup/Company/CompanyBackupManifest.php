@@ -15,6 +15,7 @@ final readonly class CompanyBackupManifest
         public TenantDataRegistrySnapshot $registry,
         public CompanyBackupDataInventory $data,
         public CompanyBackupFileInventory $files,
+        public CompanyBackupSecretInventory $secrets,
     ) {}
 
     public static function fromHeader(CompanyBackupManifestHeader $header): self
@@ -57,7 +58,19 @@ final readonly class CompanyBackupManifest
                 'Inventář souborů v manifestu není platný: ' . $e->getMessage(),
             );
         }
-        return new self($header, $registry, $data, $files);
+        try {
+            $secrets = CompanyBackupSecretInventory::fromArray(
+                $manifest['secrets'] ?? null,
+                $registry,
+            );
+        } catch (\InvalidArgumentException $e) {
+            throw new CompanyBackupFormatException(
+                'manifest_secrets_invalid',
+                'secrets',
+                'Inventář secrets v manifestu není platný: ' . $e->getMessage(),
+            );
+        }
+        return new self($header, $registry, $data, $files, $secrets);
     }
 
     public function canonicalJson(): string

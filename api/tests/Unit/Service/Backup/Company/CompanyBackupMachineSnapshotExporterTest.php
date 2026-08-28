@@ -94,6 +94,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
             $snapshot->fileInventory->areas[0]->registryKey,
         );
         self::assertSame([], $snapshot->fileInventory->areas[0]->entries);
+        self::assertSame([], $snapshot->secretInventory->omissions);
         self::assertSame(
             "{\"id\":20,\"supplier_id\":7}\n{\"id\":21,\"supplier_id\":7}\n",
             file_get_contents($snapshot->sourceFiles['data/table-invoices.jsonl']),

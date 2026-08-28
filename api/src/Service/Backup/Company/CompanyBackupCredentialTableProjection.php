@@ -234,6 +234,19 @@ final readonly class CompanyBackupCredentialTableProjection
         ?string $certificatePath,
         ?int $vaultCredentialId,
     ): TenantSecretPolicy {
+        return $this->variantFor(
+            $ownerUserId,
+            $certificatePath,
+            $vaultCredentialId,
+        )['policy'];
+    }
+
+    /** @return array{name:string,owner:string,policy:TenantSecretPolicy,source:string} */
+    public function variantFor(
+        ?int $ownerUserId,
+        ?string $certificatePath,
+        ?int $vaultCredentialId,
+    ): array {
         if (($ownerUserId !== null && $ownerUserId < 1)
             || ($certificatePath !== null && trim($certificatePath) === '')
             || ($vaultCredentialId !== null && $vaultCredentialId < 1)
@@ -247,11 +260,16 @@ final readonly class CompanyBackupCredentialTableProjection
         }
         $owner = $ownerUserId === null ? 'company' : 'personal';
         $source = $hasFile ? 'file' : 'vault';
-        $policy = $this->variantPolicies[$owner . ':' . $source] ?? null;
-        if ($policy === null) {
+        $signature = $owner . ':' . $source;
+        if (!isset($this->variantPolicies[$signature])) {
             throw self::error('credential_variant_unsupported', $this->registryKey);
         }
-        return $policy;
+        foreach ($this->variants as $variant) {
+            if ($variant['owner'] === $owner && $variant['source'] === $source) {
+                return $variant;
+            }
+        }
+        throw new \LogicException('Credential varianta není v interním indexu.');
     }
 
     /** @return array<string,string> */

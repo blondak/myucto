@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormatException;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
@@ -28,6 +29,7 @@ final class CompanyBackupManifestTest extends TestCase
         self::assertSame(TenantDataRegistry::COMPANY_BACKUP_PROFILE, $manifest->registry->profile);
         self::assertSame('table:supplier', $manifest->data->objects[0]->registryKey);
         self::assertSame([], $manifest->files->areas);
+        self::assertSame([], $manifest->secrets->omissions);
         self::assertSame($json, $manifest->canonicalJson());
         self::assertSame(hash('sha256', $json), $manifest->sha256());
     }
@@ -111,6 +113,27 @@ final class CompanyBackupManifestTest extends TestCase
         }
     }
 
+    public function testHeaderCanBeReadBeforeMissingSecretInventoryIsRejected(): void
+    {
+        $format = new CompanyBackupFormat();
+        $manifest = $this->manifest();
+        unset($manifest['secrets']);
+        $json = $format->encodeManifest($manifest);
+
+        self::assertSame(
+            '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
+            $format->parseManifestHeader($json)->backupId,
+        );
+
+        try {
+            $format->parseManifest($json);
+            self::fail('Obnovitelný manifest musí inventarizovat vynechané secrets.');
+        } catch (CompanyBackupFormatException $e) {
+            self::assertSame('manifest_secrets_invalid', $e->errorCode);
+            self::assertSame('secrets', $e->field);
+        }
+    }
+
     /** @return array<string,mixed> */
     private function manifest(): array
     {
@@ -159,6 +182,11 @@ final class CompanyBackupManifestTest extends TestCase
                 'format' => CompanyBackupFileInventory::FORMAT,
                 'version' => CompanyBackupFileInventory::VERSION,
                 'areas' => [],
+            ],
+            'secrets' => [
+                'format' => CompanyBackupSecretInventory::FORMAT,
+                'version' => CompanyBackupSecretInventory::VERSION,
+                'omissions' => [],
             ],
         ];
     }

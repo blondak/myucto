@@ -19,6 +19,7 @@ final readonly class CompanyBackupArchiveInspection
         public TenantDataRegistrySnapshot $sourceRegistry,
         public CompanyBackupDataInventory $dataInventory,
         public CompanyBackupFileInventory $fileInventory,
+        public CompanyBackupSecretInventory $secretInventory,
         public CompanyBackupCompatibilityResult $compatibility,
         public string $archiveSha256,
         public int $entryCount,
@@ -28,6 +29,10 @@ final readonly class CompanyBackupArchiveInspection
         if ($sourceRegistry->profile !== TenantDataRegistry::COMPANY_BACKUP_PROFILE
             || !hash_equals($sourceRegistry->fingerprint, $dataInventory->registryFingerprint)
             || !hash_equals($sourceRegistry->fingerprint, $fileInventory->registryFingerprint)
+            || !hash_equals(
+                $sourceRegistry->fingerprint,
+                $secretInventory->registryFingerprint,
+            )
             || !$compatibility->isCompatible()
             || preg_match('/^[0-9a-f]{64}$/D', $archiveSha256) !== 1
             || $entryCount < 1

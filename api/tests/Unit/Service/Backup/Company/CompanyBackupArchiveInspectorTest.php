@@ -11,6 +11,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -54,6 +55,7 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
             $inspection->sourceRegistry->profile,
         );
         self::assertTrue($inspection->compatibility->isCompatible());
+        self::assertSame([], $inspection->secretInventory->omissions);
         self::assertSame(hash_file('sha256', $archive), $inspection->archiveSha256);
         self::assertSame(4, $inspection->entryCount);
         self::assertSame(
@@ -217,6 +219,24 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         );
     }
 
+    public function testOmissionInventoryRejectsUnregisteredSecretPayload(): void
+    {
+        $payload = $this->payload();
+        $payload['secrets/plaintext.txt'] = 'synthetic-secret-must-not-enter-archive';
+        $archive = $this->archive($payload);
+
+        $this->expectArchiveError(
+            'secret_inventory_scope_mismatch',
+            'secrets/plaintext.txt',
+        );
+        $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+    }
+
     public function testManifestInventoryDigestRejectsChangedChecksummedPayload(): void
     {
         $payload = $this->payload();
@@ -353,6 +373,11 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
             'format' => CompanyBackupFileInventory::FORMAT,
             'version' => CompanyBackupFileInventory::VERSION,
             'areas' => [],
+        ];
+        $manifest['secrets'] = [
+            'format' => CompanyBackupSecretInventory::FORMAT,
+            'version' => CompanyBackupSecretInventory::VERSION,
+            'omissions' => [],
         ];
         return [
             'manifest.json' => $format->encodeManifest($manifest),

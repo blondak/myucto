@@ -164,10 +164,10 @@ final readonly class CompanyBackupTableProjection
             $registryKey,
         );
         $omitColumns = self::omitColumns($metadata['omit_columns'], $registryKey);
-        $secretPolicies = self::secretPolicies(
+        $secretPolicies = CompanyBackupSecretColumnSet::fromArray(
             $definition->details['secrets'] ?? null,
             $registryKey,
-        );
+        )->policies;
         $columnCodecs = self::columnCodecs(
             $metadata['column_codecs'] ?? [],
             $dataColumns,
@@ -503,44 +503,6 @@ final readonly class CompanyBackupTableProjection
                 );
             }
             $result[$column] = $codec;
-        }
-        ksort($result, SORT_STRING);
-        return $result;
-    }
-
-    /** @return array<string,TenantSecretPolicy> */
-    private static function secretPolicies(mixed $value, string $registryKey): array
-    {
-        if (!is_array($value) || array_is_list($value) && $value !== []) {
-            throw new CompanyBackupDataSourceException(
-                'data_secret_registry_invalid',
-                $registryKey,
-            );
-        }
-        $result = [];
-        foreach ($value as $column => $declaration) {
-            if (!is_string($column)
-                || !is_array($declaration)
-                || array_is_list($declaration)
-            ) {
-                throw new CompanyBackupDataSourceException(
-                    'data_secret_registry_invalid',
-                    $registryKey,
-                );
-            }
-            self::assertIdentifier($column, $registryKey);
-            $policyValue = $declaration['policy'] ?? null;
-            $policy = is_string($policyValue)
-                ? TenantSecretPolicy::tryFrom($policyValue)
-                : null;
-            if ($policy === null) {
-                throw new CompanyBackupDataSourceException(
-                    'data_secret_registry_invalid',
-                    $registryKey,
-                    $column,
-                );
-            }
-            $result[$column] = $policy;
         }
         ksort($result, SORT_STRING);
         return $result;

@@ -15,6 +15,8 @@ final readonly class CompanyBackupMachineSnapshotExporter
         private CompanyBackupJsonlWriter $jsonlWriter = new CompanyBackupJsonlWriter(),
         private CompanyBackupDatabaseCoverageGate $databaseCoverage = new CompanyBackupDatabaseCoverageValidator(),
         private CompanyBackupFileCollector $fileCollector = new CompanyBackupFileCollector(),
+        private CompanyBackupSecretInventoryCollector $secretCollector =
+            new CompanyBackupSecretInventoryCollector(),
     ) {}
 
     public function export(
@@ -49,6 +51,11 @@ final readonly class CompanyBackupMachineSnapshotExporter
                     &$createdFiles,
                 ): CompanyBackupMachineSnapshot {
                     $this->databaseCoverage->assertSafe($snapshot, $registry->registry);
+                    $secrets = $this->secretCollector->collect(
+                        $snapshot,
+                        $registry,
+                        $supplierId,
+                    );
                     $objects = [];
                     $sourceFiles = [];
                     foreach (CompanyBackupDataInventory::payloadDefinitions($registry) as $index => $definition) {
@@ -84,6 +91,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
                         $registry,
                         $inventory,
                         $files->inventory,
+                        $secrets,
                         $sourceFiles,
                     );
                 },

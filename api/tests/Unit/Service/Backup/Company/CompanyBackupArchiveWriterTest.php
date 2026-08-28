@@ -14,6 +14,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupJsonlWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupManifest;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -333,6 +334,11 @@ final class CompanyBackupArchiveWriterTest extends TestCase
                 'format' => CompanyBackupFileInventory::FORMAT,
                 'version' => CompanyBackupFileInventory::VERSION,
                 'areas' => $areas,
+            ],
+            'secrets' => [
+                'format' => CompanyBackupSecretInventory::FORMAT,
+                'version' => CompanyBackupSecretInventory::VERSION,
+                'omissions' => [],
             ],
         ]));
     }
