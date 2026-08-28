@@ -239,19 +239,22 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 throw $this->valueError($prototype->column);
             }
             $reference = $matches[0];
-            if (!$this->validSourceValue($value, $reference)) {
+            $sourceValue = $this->sourceValue($value, $reference);
+            if ($sourceValue === null) {
                 throw $this->valueError($reference->column);
             }
             if ($reference->mapping === CompanyBackupReferenceMapping::TenantIdOrZero
-                && $value === 0
+                && $sourceValue === 0
             ) {
                 return;
             }
-            $mapped = $mapper($reference, $value);
+            $mapped = $mapper($reference, $sourceValue);
             if (!$this->validMappedValue($mapped, $reference)) {
                 throw $this->valueError($reference->column);
             }
-            $value = $mapped;
+            $value = $mapped === null || $reference->valuePrefix === null
+                ? $mapped
+                : $reference->valuePrefix . $mapped;
             return;
         }
         if (!is_array($value)) {
@@ -315,7 +318,40 @@ final readonly class CompanyBackupEmbeddedReferenceSet
         return $value === $condition->equals;
     }
 
-    private function validSourceValue(
+    private function sourceValue(
+        mixed $value,
+        CompanyBackupEmbeddedReference $reference,
+    ): int|string|null {
+        if ($reference->valuePrefix !== null) {
+            if (!is_string($value)) {
+                return null;
+            }
+            $digits = $reference->mapping
+                === CompanyBackupReferenceMapping::TenantIdOrZero
+                ? '(?:0|[1-9][0-9]*)'
+                : '[1-9][0-9]*';
+            if (preg_match(
+                '/^' . preg_quote($reference->valuePrefix, '/') . '(' . $digits . ')$/D',
+                $value,
+                $matches,
+            ) !== 1) {
+                return null;
+            }
+            $minimum = $reference->mapping
+                === CompanyBackupReferenceMapping::TenantIdOrZero
+                ? 0
+                : 1;
+            $identifier = filter_var(
+                $matches[1],
+                FILTER_VALIDATE_INT,
+                ['options' => ['min_range' => $minimum]],
+            );
+            return is_int($identifier) ? $identifier : null;
+        }
+        return $this->validIdentifierValue($value, $reference) ? $value : null;
+    }
+
+    private function validIdentifierValue(
         mixed $value,
         CompanyBackupEmbeddedReference $reference,
     ): bool {
@@ -340,7 +376,7 @@ final readonly class CompanyBackupEmbeddedReferenceSet
         if ($value === null) {
             return in_array('null', $reference->fallbacks, true);
         }
-        return $this->validSourceValue($value, $reference);
+        return $this->validIdentifierValue($value, $reference);
     }
 
     private function targetError(

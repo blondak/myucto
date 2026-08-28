@@ -34,6 +34,7 @@ final readonly class CompanyBackupEmbeddedReference
         public bool $nullable,
         array $fallbacks,
         public ?CompanyBackupEmbeddedReferenceCondition $condition,
+        public ?string $valuePrefix,
     ) {
         $this->path = $path;
         $this->targetColumns = $targetColumns;
@@ -47,7 +48,7 @@ final readonly class CompanyBackupEmbeddedReference
         }
         $keys = array_keys($value);
         sort($keys, SORT_STRING);
-        if ($keys !== [
+        $baseKeys = [
             'column',
             'condition',
             'fallbacks',
@@ -56,7 +57,9 @@ final readonly class CompanyBackupEmbeddedReference
             'path',
             'target',
             'target_columns',
-        ]) {
+        ];
+        $prefixedKeys = [...$baseKeys, 'value_prefix'];
+        if ($keys !== $baseKeys && $keys !== $prefixedKeys) {
             throw self::invalid($registryKey);
         }
 
@@ -70,6 +73,7 @@ final readonly class CompanyBackupEmbeddedReference
             : null;
         $nullable = $value['nullable'];
         $fallbacks = $value['fallbacks'];
+        $valuePrefix = $value['value_prefix'] ?? null;
         if (!is_string($column)
             || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $column) !== 1
             || !is_string($target)
@@ -81,6 +85,18 @@ final readonly class CompanyBackupEmbeddedReference
             || !is_bool($nullable)
             || !is_array($fallbacks)
             || !array_is_list($fallbacks)
+            || ($valuePrefix !== null
+                && (!is_string($valuePrefix)
+                    || preg_match('/^[a-z][a-z0-9_-]{0,31}:$/D', $valuePrefix) !== 1
+                    || !in_array(
+                        $mapping,
+                        [
+                            CompanyBackupReferenceMapping::TenantId,
+                            CompanyBackupReferenceMapping::TenantIdOrZero,
+                            CompanyBackupReferenceMapping::Actor,
+                        ],
+                        true,
+                    )))
         ) {
             throw self::invalid($registryKey, is_string($column) ? $column : null);
         }
@@ -127,6 +143,7 @@ final readonly class CompanyBackupEmbeddedReference
             $nullable,
             $validatedFallbacks,
             $condition,
+            $valuePrefix,
         );
     }
 
@@ -144,6 +161,9 @@ final readonly class CompanyBackupEmbeddedReference
             . $this->targetTable()
             . ':'
             . implode(',', $this->targetColumns);
+        if ($this->valuePrefix !== null) {
+            $signature .= '@' . $this->valuePrefix;
+        }
         return $this->condition === null
             ? $signature
             : $signature . '?' . $this->condition->signature();

@@ -90,6 +90,80 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
         self::assertSame(0, $calls);
     }
 
+    public function testRemapsPrefixedDecimalIdentityThroughNumericTargetId(): void
+    {
+        $metadata = [
+            ...$this->journalEntryReference(),
+            'path' => ['people', '*', 'person_reference'],
+            'target' => 'table:payroll_employees',
+            'value_prefix' => 'employee:',
+        ];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [$metadata],
+            'table:payroll_run_revisions',
+            ['payload'],
+        );
+        $references->assertRegistryTargets(new TenantDataRegistry(1, [
+            $this->definition('payroll_employees', TenantDataPolicy::TenantOwned),
+        ]));
+
+        $restored = $references->remap(
+            ['payload' => '{"people":[{"person_reference":"employee:17"}]}'],
+            static function (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $sourceValue,
+            ): int {
+                self::assertSame(17, $sourceValue);
+                return 117;
+            },
+        );
+
+        self::assertSame(
+            'employee:117',
+            json_decode(
+                (string) $restored['payload'],
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            )['people'][0]['person_reference'],
+        );
+        self::assertSame(
+            'payload:people.*.person_reference->payroll_employees:id@employee:',
+            $references->references[0]->signature(),
+        );
+    }
+
+    public function testRejectsMalformedPrefixedIdentityBeforeMapping(): void
+    {
+        $metadata = [
+            ...$this->journalEntryReference(),
+            'path' => ['person_reference'],
+            'target' => 'table:payroll_employees',
+            'value_prefix' => 'employee:',
+        ];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [$metadata],
+            'table:payroll_run_revisions',
+            ['payload'],
+        );
+
+        foreach (
+            ['employee:0', 'employee:01', 'employment:17', 'employee:999999999999999999999']
+            as $identity
+        ) {
+            try {
+                $references->remap(
+                    ['payload' => ['person_reference' => $identity]],
+                    static function (): never {
+                        self::fail('Neplatná řetězcová identita nesmí dojít k mapperu.');
+                    },
+                );
+                self::fail('Neplatná řetězcová identita nesmí projít obnovou.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_embedded_reference_value_invalid', $e->errorCode);
+            }
+        }
+    }
+
     public function testRejectsInvalidJsonAndInvalidReferencedValue(): void
     {
         $references = CompanyBackupEmbeddedReferenceSet::fromArray(
@@ -347,6 +421,12 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
             ],
         ], ['payload']];
         yield 'unknown field' => [[...$valid, 'comment' => 'unbound'], ['payload']];
+        yield 'invalid value prefix' => [[...$valid, 'value_prefix' => 'Employee:'], ['payload']];
+        yield 'prefix outside numeric mapping' => [[
+            ...$valid,
+            'mapping' => CompanyBackupReferenceMapping::TenantNaturalKey->value,
+            'value_prefix' => 'employee:',
+        ], ['payload']];
     }
 
     /**

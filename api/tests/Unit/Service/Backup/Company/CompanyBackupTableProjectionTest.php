@@ -55,6 +55,74 @@ final class CompanyBackupTableProjectionTest extends TestCase
         self::assertNull($projection->requiredSecretEnvelopeColumn());
     }
 
+    public function testBindsDerivedHashesToExportedColumns(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            dataColumns: ['id', 'supplier_id', 'payload_json', 'payload_hash'],
+            derivedHashes: [[
+                'algorithm' => 'sha256_canonical_json',
+                'hash_column' => 'payload_hash',
+                'nullable' => false,
+                'source_column' => 'payload_json',
+            ]],
+        ));
+
+        self::assertSame(
+            'payload_hash<-sha256_canonical_json:payload_json!',
+            $projection->derivedHashes->hashes[0]->signature(),
+        );
+    }
+
+    public function testRemapsEmbeddedIdentityAndRefreshesDerivedHashAtomically(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            dataColumns: ['id', 'supplier_id', 'payload_json', 'payload_hash'],
+            derivedHashes: [[
+                'algorithm' => 'sha256_canonical_json',
+                'hash_column' => 'payload_hash',
+                'nullable' => false,
+                'source_column' => 'payload_json',
+            ]],
+            embeddedReferences: [[
+                'column' => 'payload_json',
+                'condition' => null,
+                'fallbacks' => [],
+                'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                'nullable' => false,
+                'path' => ['people', '*', 'person_reference'],
+                'target' => 'table:synthetic_records',
+                'target_columns' => ['id'],
+                'value_prefix' => 'employee:',
+            ]],
+        ));
+        $json = \MyInvoice\Service\Backup\CanonicalJson::encode([
+            'people' => [['person_reference' => 'employee:17']],
+        ]);
+
+        $restored = $projection->remapEmbeddedReferences(
+            [
+                'id' => 3,
+                'supplier_id' => 7,
+                'payload_json' => $json,
+                'payload_hash' => hash('sha256', $json),
+            ],
+            static fn ($reference, int|string $value): int => (int) $value + 100,
+        );
+
+        self::assertSame(
+            'employee:117',
+            json_decode(
+                (string) $restored['payload_json'],
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            )['people'][0]['person_reference'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $restored['payload_json']),
+            $restored['payload_hash'],
+        );
+    }
+
     public function testRejectsNewRuntimeColumnInsteadOfExportingItImplicitly(): void
     {
         $projection = CompanyBackupTableProjection::fromDefinition($this->definition());
@@ -419,6 +487,8 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param list<array<string,mixed>> $polymorphicReferences
      * @param list<string> $preservedIdentifiers
      * @param array<string,string> $columnCodecs
+     * @param list<array<string,mixed>> $derivedHashes
+     * @param list<array<string,mixed>> $embeddedReferences
      */
     private function definition(
         array $secrets = [],
@@ -429,6 +499,8 @@ final class CompanyBackupTableProjectionTest extends TestCase
         array $polymorphicReferences = [],
         array $preservedIdentifiers = [],
         array $columnCodecs = [],
+        array $derivedHashes = [],
+        array $embeddedReferences = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:synthetic_records',
@@ -447,7 +519,10 @@ final class CompanyBackupTableProjectionTest extends TestCase
                     ...($columnCodecs === [] ? [] : [
                         'column_codecs' => $columnCodecs,
                     ]),
-                    'embedded_references' => [],
+                    ...($derivedHashes === [] ? [] : [
+                        'derived_hashes' => $derivedHashes,
+                    ]),
+                    'embedded_references' => $embeddedReferences,
                     'generated_columns' => $generatedColumns,
                     'omit_columns' => $omitColumns,
                     ...($polymorphicReferences === [] ? [] : [

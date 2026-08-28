@@ -873,6 +873,12 @@ final class TenantDataRegistryFactory
      *
      * @return array{company_backup:array{
      *   data_columns:list<string>,
+     *   derived_hashes?:list<array{
+     *     algorithm:string,
+     *     hash_column:string,
+     *     nullable:bool,
+     *     source_column:string
+     *   }>,
      *   embedded_references:list<array<string,mixed>>,
      *   generated_columns:list<string>,
      *   omit_columns:array<string,string>,

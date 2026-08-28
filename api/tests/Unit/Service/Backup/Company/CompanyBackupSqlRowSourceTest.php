@@ -218,6 +218,105 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         }
     }
 
+    public function testRejectsTamperedDerivedHashBeforeYieldingRow(): void
+    {
+        $schemaRows = [];
+        foreach (
+            [
+                'id' => 'bigint',
+                'supplier_id' => 'int',
+                'payload_json' => 'longtext',
+                'payload_hash' => 'char',
+            ] as $column => $type
+        ) {
+            $schemaRows[] = [
+                'COLUMN_NAME' => $column,
+                'DATA_TYPE' => $type,
+                'EXTRA' => $column === 'id' ? 'auto_increment' : '',
+                'GENERATION_EXPRESSION' => null,
+                'TABLE_TYPE' => 'BASE TABLE',
+            ];
+        }
+        $schema = $this->statement(
+            [['synthetic_records']],
+            $schemaRows,
+            PDO::FETCH_ASSOC,
+        );
+        $primaryKey = $this->statement(
+            [['synthetic_records']],
+            ['id'],
+            PDO::FETCH_COLUMN,
+        );
+        $page = $this->statement(
+            [[7]],
+            [[
+                'id' => 1,
+                'supplier_id' => 7,
+                'payload_json' => '{"employee_id":17}',
+                'payload_hash' => str_repeat('0', 64),
+            ]],
+            PDO::FETCH_ASSOC,
+        );
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::exactly(3))
+            ->method('prepare')
+            ->willReturnOnConsecutiveCalls($schema, $primaryKey, $page);
+
+        $definition = new TenantDataDefinition(
+            'table:synthetic_records',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                'company_backup' => [
+                    'data_columns' => [
+                        'id',
+                        'supplier_id',
+                        'payload_json',
+                        'payload_hash',
+                    ],
+                    'derived_hashes' => [[
+                        'algorithm' => 'sha256_canonical_json',
+                        'hash_column' => 'payload_hash',
+                        'nullable' => false,
+                        'source_column' => 'payload_json',
+                    ]],
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' => [[
+                        'columns' => ['supplier_id'],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ]],
+                    'restore_overrides' => [],
+                ],
+            ],
+        );
+
+        try {
+            iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+                $pdo,
+                7,
+                $definition,
+            ));
+            self::fail('Export nesmí vydat JSON s neplatnou odvozenou pečetí.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_derived_hash_value_invalid', $e->errorCode);
+            self::assertSame('payload_hash', $e->column);
+        }
+    }
+
     /**
      * @param list<list<mixed>> $executions
      * @param list<mixed> $rows
