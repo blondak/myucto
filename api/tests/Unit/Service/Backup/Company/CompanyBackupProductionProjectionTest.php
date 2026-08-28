@@ -16,10 +16,119 @@ use MyInvoice\Service\Backup\Company\CompanyBackupTableReferenceSchema;
 use MyInvoice\Service\Backup\Company\CompanyBackupTenantSqlSelector;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
+use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupProductionProjectionTest extends TestCase
 {
+    public function testBrandingProfilesDeclareSupplierEmailProfileAndLogo(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:branding_profiles');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'name',
+            'display_name',
+            'tagline',
+            'email',
+            'reply_to',
+            'email_profile_id',
+            'phone',
+            'web',
+            'email_footer',
+            'logo_path',
+            'accent_color',
+            'branding_enabled',
+            'pdf_logo_show_name',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [
+                    'display_name',
+                    'tagline',
+                    'email',
+                    'reply_to',
+                    'email_profile_id',
+                    'phone',
+                    'web',
+                    'email_footer',
+                    'logo_path',
+                ],
+                [
+                    new CompanyBackupForeignKey(
+                        ['supplier_id', 'email_profile_id'],
+                        'email_profiles',
+                        ['supplier_id', 'id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['supplier_id', 'name'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'supplier_id,email_profile_id->email_profiles:supplier_id,id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['email_profile_id'],
+            $projection->references->references[0]->nullableColumns,
+        );
+        self::assertSame([], $projection->restoreOverrides->overrides);
+
+        $emailProfiles = $registry->definition('table:email_profiles');
+        self::assertNotNull($emailProfiles);
+        self::assertSame(
+            ['supplier_id', 'code'],
+            $emailProfiles->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'imap_password_enc' => [
+                    'policy' => TenantSecretPolicy::OptionalCredential->value,
+                ],
+                'smtp_password_enc' => [
+                    'policy' => TenantSecretPolicy::OptionalCredential->value,
+                ],
+            ],
+            $emailProfiles->details['secrets'] ?? null,
+        );
+        self::assertArrayNotHasKey('company_backup', $emailProfiles->details);
+
+        $selection = (new CompanyBackupTenantSqlSelector())->select(
+            $projection,
+            37,
+        );
+        self::assertSame([37], $selection->params);
+        self::assertStringContainsString(
+            '`_company_source`.`supplier_id` = ?',
+            $selection->where,
+        );
+    }
+
     public function testSupplierLogoAreaRegistersEveryCurrentAndHistoricalOwner(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();

@@ -233,6 +233,58 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testProductionBrandingProfilesProjectionMatchesSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema(
+            'branding_profiles',
+            [
+                'supplier_id',
+                'email_profile_id',
+                'logo_path',
+                'branding_enabled',
+                'is_active',
+            ],
+        );
+    }
+
+    public function testStreamsOnlyBrandingProfilesOfSelectedSupplier(): void
+    {
+        $pdo = $this->db->pdo();
+        $ownProfileId = $this->createBrandingProfile(
+            $pdo,
+            $this->supplierId,
+            'Company backup vlastní stream profil',
+        );
+        $foreignProfileId = $this->createBrandingProfile(
+            $pdo,
+            $this->foreignSupplierId,
+            'Company backup cizí stream profil',
+        );
+        $definition = TenantDataRegistryFactory::draftV1()
+            ->definition('table:branding_profiles');
+        self::assertNotNull($definition);
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+            $pdo,
+            $this->supplierId,
+            $definition,
+        ));
+        $ids = array_map(static fn (array $row): int => (int) $row['id'], $rows);
+
+        self::assertContains($ownProfileId, $ids);
+        self::assertNotContains($foreignProfileId, $ids);
+
+        $unscoped = $pdo->prepare(
+            'SELECT id FROM branding_profiles WHERE id IN (?, ?) ORDER BY id',
+        );
+        $unscoped->execute([$ownProfileId, $foreignProfileId]);
+        self::assertContains(
+            $foreignProfileId,
+            array_map('intval', $unscoped->fetchAll(PDO::FETCH_COLUMN)),
+            'Negativní kontrola musí bez tenantového filtru najít cizí profil.',
+        );
+    }
+
     public function testProductionAccountingPeriodsProjectionMatchesMigratedSchema(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();

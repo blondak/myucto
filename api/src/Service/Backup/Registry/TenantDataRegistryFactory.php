@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Registry;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBrandingProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupClientsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupCountriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupExpenseCategoriesProjection;
@@ -24,7 +25,7 @@ final class TenantDataRegistryFactory
 {
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
-        'branding_profiles' => 'core',
+        'email_profiles' => 'integrations',
         'payroll_run_revisions' => 'payroll',
     ];
 
@@ -504,21 +505,50 @@ final class TenantDataRegistryFactory
             ],
         );
         foreach (self::COMPANY_BACKUP_ONLY_REFERENCE_TARGETS as $table => $featureGroup) {
+            $details = [
+                'primary_key' => ['id'],
+                'feature_group' => $featureGroup,
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+            ];
+            if ($table === 'email_profiles') {
+                $details['natural_key'] = ['supplier_id', 'code'];
+                $details['secrets'] = [
+                    'imap_password_enc' => [
+                        'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    ],
+                    'smtp_password_enc' => [
+                        'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    ],
+                ];
+            }
             $definitions[] = new TenantDataDefinition(
                 'table:' . $table,
                 TenantDataObjectKind::Table,
                 TenantDataPolicy::TenantOwned,
                 [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
-                [
-                    'primary_key' => ['id'],
-                    'feature_group' => $featureGroup,
-                    'ownership' => [
-                        'strategy' => 'supplier_id',
-                        'column' => 'supplier_id',
-                    ],
-                ],
+                $details,
             );
         }
+        $definitions[] = new TenantDataDefinition(
+            'table:branding_profiles',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'natural_key' => ['supplier_id', 'name'],
+                'feature_group' => 'core',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('branding_profiles'),
+            ],
+        );
         $definitions[] = new TenantDataDefinition(
             'file-area:supplier-logos',
             TenantDataObjectKind::FileArea,
@@ -680,6 +710,8 @@ final class TenantDataRegistryFactory
         $columns = match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::dataColumns(),
+            'branding_profiles' =>
+                CompanyBackupBrandingProfilesProjection::dataColumns(),
             'clients' => CompanyBackupClientsProjection::dataColumns(),
             'countries' => CompanyBackupCountriesProjection::dataColumns(),
             'expense_categories' =>
@@ -781,6 +813,8 @@ final class TenantDataRegistryFactory
         return match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::references(),
+            'branding_profiles' =>
+                CompanyBackupBrandingProfilesProjection::references(),
             'clients' => CompanyBackupClientsProjection::references(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::references(),
