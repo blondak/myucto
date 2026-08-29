@@ -210,26 +210,20 @@ final readonly class CompanyBackupEmbeddedHashSet
         foreach ($keys as $key) {
             $source = $sources[$key] ?? null;
             $seal = $seals[$key] ?? null;
-            if ($source === null
-                || $seal === null
-                || $source['present'] !== $seal['present']
-            ) {
+            $sourceEmpty = $source === null
+                || !$source['present']
+                || $source['value'] === null;
+            $sealEmpty = $seal === null
+                || !$seal['present']
+                || $seal['value'] === null;
+            if ($sourceEmpty || $sealEmpty) {
+                if ($hash->nullable && $sourceEmpty && $sealEmpty) {
+                    continue;
+                }
                 throw $this->valueError($hash);
             }
-            if (!$source['present']) {
-                if (!$hash->nullable) {
-                    throw $this->valueError($hash);
-                }
-                continue;
-            }
-            if (($source['value'] === null) !== ($seal['value'] === null)) {
+            if ($source['bindings'] !== $seal['bindings']) {
                 throw $this->valueError($hash);
-            }
-            if ($source['value'] === null) {
-                if (!$hash->nullable) {
-                    throw $this->valueError($hash);
-                }
-                continue;
             }
             $pairs[] = [
                 'bindings' => $source['bindings'],
