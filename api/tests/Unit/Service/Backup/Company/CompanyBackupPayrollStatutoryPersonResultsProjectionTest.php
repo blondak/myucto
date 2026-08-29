@@ -113,7 +113,7 @@ final class CompanyBackupPayrollStatutoryPersonResultsProjectionTest extends Tes
             static fn ($reference): string => $reference->signature(),
             $projection->embeddedReferences->references,
         );
-        self::assertCount(60, $embeddedSignatures);
+        self::assertCount(66, $embeddedSignatures);
         foreach (
             [
                 'input_snapshot_json:employments.*.time_month.'
@@ -131,6 +131,13 @@ final class CompanyBackupPayrollStatutoryPersonResultsProjectionTest extends Tes
                     . '->payroll_employees:id@employee:',
                 'result_snapshot_json:payer_reference'
                     . '->supplier:id@supplier:',
+                'result_snapshot_json:relationships.*.'
+                    . 'included_assessment_base_components.*'
+                    . '->payroll_inputs:id@input.~.',
+                'result_snapshot_json:relationships.*.relationship_id'
+                    . '->payroll_employments:id@employment:',
+                'result_snapshot_json:deductions.*.deduction_reference'
+                    . '->payroll_deduction_agreements:id@agreement:',
             ] as $signature
         ) {
             self::assertContains($signature, $embeddedSignatures);

@@ -4,10 +4,25 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Company;
 
-/** Hashový kontrakt připravované projekce payroll_run_revisions. */
+/**
+ * Hashový kontrakt připravované projekce payroll_run_revisions.
+ *
+ * @phpstan-import-type EmbeddedHash from CompanyBackupPayrollPersonSnapshotContract
+ * @phpstan-import-type EmbeddedHashReference from CompanyBackupPayrollPersonSnapshotContract
+ * @phpstan-type DerivedHash array{
+ *   algorithm:string,
+ *   dependencies?:list<array{
+ *     path:list<string>,
+ *     source_hash_column:string
+ *   }>,
+ *   hash_column:string,
+ *   nullable:bool,
+ *   source_column:string
+ * }
+ */
 final class CompanyBackupPayrollRunRevisionHashContract
 {
-    /** @return list<array<string,mixed>> */
+    /** @return list<DerivedHash> */
     public static function derivedHashes(): array
     {
         return [
@@ -30,7 +45,7 @@ final class CompanyBackupPayrollRunRevisionHashContract
         ];
     }
 
-    /** @return list<array<string,mixed>> */
+    /** @return list<EmbeddedHash> */
     public static function embeddedHashes(): array
     {
         return CompanyBackupPayrollPersonSnapshotContract::embeddedHashes([
@@ -39,7 +54,7 @@ final class CompanyBackupPayrollRunRevisionHashContract
         ]);
     }
 
-    /** @return list<array<string,mixed>> */
+    /** @return list<EmbeddedHashReference> */
     public static function embeddedHashReferences(): array
     {
         return CompanyBackupPayrollPersonSnapshotContract::embeddedHashReferences([

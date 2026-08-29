@@ -366,32 +366,7 @@ final class CompanyBackupPayrollPersonSnapshotContract
     /** @return list<array<string,mixed>> */
     public static function resultEmbeddedReferences(): array
     {
-        return self::sortReferences([
-            self::tenant(
-                'result_snapshot_json',
-                ['employee_reference'],
-                'payroll_employees',
-                valuePrefix: 'employee:',
-            ),
-            self::tenant(
-                'result_snapshot_json',
-                ['payer_reference'],
-                'supplier',
-                valuePrefix: 'supplier:',
-            ),
-            self::tenant(
-                'result_snapshot_json',
-                ['person_id'],
-                'payroll_employees',
-                valuePrefix: 'employee:',
-            ),
-            self::tenant(
-                'result_snapshot_json',
-                ['person_reference'],
-                'payroll_employees',
-                valuePrefix: 'employee:',
-            ),
-        ]);
+        return CompanyBackupPayrollStatutoryResultSnapshotContract::directEmbeddedReferences();
     }
 
     /**

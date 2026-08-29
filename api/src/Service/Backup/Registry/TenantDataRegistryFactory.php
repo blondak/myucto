@@ -15,6 +15,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPdfSignatureOutputSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
@@ -38,6 +39,7 @@ final class TenantDataRegistryFactory
         'payroll_component_definitions' => 'payroll',
         'payroll_deduction_agreements' => 'payroll',
         'payroll_employees' => 'payroll',
+        'payroll_employer_policies' => 'payroll',
         'payroll_employments' => 'payroll',
         'payroll_employment_terms' => 'payroll',
         'payroll_inputs' => 'payroll',
@@ -58,6 +60,7 @@ final class TenantDataRegistryFactory
         'payroll_person_tax_declarations' => 'payroll',
         'payroll_person_tax_residences' => 'payroll',
         'payroll_risky_savings_evidence' => 'payroll',
+        'payroll_runs' => 'payroll',
         'payroll_run_persons' => 'payroll',
         'payroll_run_revisions' => 'payroll',
         'payroll_statutory_accumulator_entries' => 'payroll',
@@ -73,6 +76,9 @@ final class TenantDataRegistryFactory
     private const COMPANY_BACKUP_REFERENCE_KEYS = [
         'payroll_run_persons' => [
             ['supplier_id', 'revision_id', 'employee_id'],
+        ],
+        'payroll_run_revisions' => [
+            ['supplier_id', 'id', 'run_id'],
         ],
         'payroll_statutory_person_results' => [[
             'supplier_id',
@@ -933,6 +939,7 @@ final class TenantDataRegistryFactory
      * Absence metadata je záměrná fail-closed hranice, ne implicitní SELECT *.
      *
      * @return array{company_backup:array{
+     *   column_codecs?:array<string,string>,
      *   data_columns:list<string>,
      *   derived_hashes?:list<array{
      *     algorithm:string,
@@ -985,6 +992,29 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'payroll_run_revisions') {
+            return [
+                'company_backup' => [
+                    'column_codecs' =>
+                        CompanyBackupPayrollRunRevisionsProjection::columnCodecs(),
+                    'data_columns' =>
+                        CompanyBackupPayrollRunRevisionsProjection::dataColumns(),
+                    'derived_hashes' =>
+                        CompanyBackupPayrollRunRevisionsProjection::derivedHashes(),
+                    'embedded_hash_references' =>
+                        CompanyBackupPayrollRunRevisionsProjection::embeddedHashReferences(),
+                    'embedded_hashes' =>
+                        CompanyBackupPayrollRunRevisionsProjection::embeddedHashes(),
+                    'embedded_references' =>
+                        CompanyBackupPayrollRunRevisionsProjection::embeddedReferences(),
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollRunRevisionsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
         if ($table === 'payroll_statutory_person_results') {
             return [
                 'company_backup' => [

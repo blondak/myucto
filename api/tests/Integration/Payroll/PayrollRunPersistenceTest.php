@@ -16,6 +16,10 @@ use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
@@ -1106,6 +1110,84 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->supplierId,
             (int) $approved->revision['id'],
         ]);
+    }
+
+    public function testCompanyBackupStreamsSealedRunRevisionWithBinaryKey(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE supplier
+                SET company_name = "Syntetický zaměstnavatel",
+                    display_name = "Syntetický zaměstnavatel",
+                    ic = "00000000"
+              WHERE id = ?'
+        )->execute([$this->supplierId]);
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'backup-live-lock',
+            $this->actors[0],
+        );
+        $this->service->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'backup-live-calculate',
+            $this->actors[0],
+        );
+        $lockedRevision = $locked->revision;
+        self::assertIsArray($lockedRevision);
+        self::assertArrayHasKey('id', $lockedRevision);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_run_revisions');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->embeddedReferences->assertRegistryTargets($registry);
+        $projection->embeddedHashReferences->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame((int) $lockedRevision['id'], (int) $row['id']);
+        self::assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/D',
+            (string) $row['idempotency_key_hash'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $row['input_snapshot_json']),
+            $row['input_snapshot_hash'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $row['result_snapshot_json']),
+            $row['result_snapshot_hash'],
+        );
+        $result = json_decode(
+            (string) $row['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            $row['input_snapshot_hash'],
+            $result['source_snapshot_hash'],
+        );
     }
 
     public function testApprovalRollsBackWhenAutomaticPostingFails(): void
