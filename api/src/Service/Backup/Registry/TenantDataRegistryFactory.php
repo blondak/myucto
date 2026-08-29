@@ -16,6 +16,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPdfSignatureOutputSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
@@ -992,6 +993,21 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'payroll_runs') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollRunsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' =>
+                        CompanyBackupPayrollRunsProjection::generatedColumns(),
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollRunsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
         if ($table === 'payroll_run_revisions') {
             return [
                 'company_backup' => [

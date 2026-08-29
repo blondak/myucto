@@ -1112,6 +1112,43 @@ final class PayrollRunPersistenceTest extends TestCase
         ]);
     }
 
+    public function testCompanyBackupStreamsRunWithoutGeneratedOfficeScope(): void
+    {
+        $run = $this->createRun();
+        self::assertArrayHasKey('id', $run);
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_runs');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame((int) $run['id'], (int) $row['id']);
+        self::assertSame($this->supplierId, (int) $row['supplier_id']);
+        self::assertNull($row['office_id']);
+        self::assertArrayNotHasKey('office_scope_id', $row);
+        self::assertSame('2026-07-15', $row['payment_date']);
+        self::assertSame('draft', $row['status']);
+        self::assertSame(0, (int) $row['current_revision_no']);
+    }
+
     public function testCompanyBackupStreamsSealedRunRevisionWithBinaryKey(): void
     {
         $this->db->pdo()->prepare(
