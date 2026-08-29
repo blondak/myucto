@@ -90,6 +90,38 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
         self::assertSame(0, $calls);
     }
 
+    public function testKeepsNullableAncestorAndRemapsPresentSibling(): void
+    {
+        $metadata = [
+            ...$this->journalEntryReference(),
+            'nullable' => true,
+            'path' => ['people', '*', 'state', 'employee_id'],
+            'target' => 'table:payroll_employees',
+        ];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [$metadata],
+            'table:payroll_run_revisions',
+            ['payload'],
+        );
+
+        $restored = $references->remap(
+            ['payload' => ['people' => [
+                ['state' => null],
+                ['state' => ['employee_id' => 17]],
+            ]]],
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $sourceValue,
+            ): int => (int) $sourceValue + 100,
+        );
+
+        self::assertNull($restored['payload']['people'][0]['state']);
+        self::assertSame(
+            117,
+            $restored['payload']['people'][1]['state']['employee_id'],
+        );
+    }
+
     public function testRemapsPrefixedDecimalIdentityThroughNumericTargetId(): void
     {
         $metadata = [

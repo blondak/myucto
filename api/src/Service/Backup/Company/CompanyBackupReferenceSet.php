@@ -53,6 +53,7 @@ final readonly class CompanyBackupReferenceSet
         foreach ($columnClaims as $column => $claims) {
             if (count($claims) < 2
                 || self::isSharedTenantContext($column, $claims)
+                || self::isSharedReferenceKeyCoordinate($column, $claims)
                 || self::isConditionallyDisjoint($column, $claims)
             ) {
                 continue;
@@ -127,6 +128,24 @@ final readonly class CompanyBackupReferenceSet
                 && $reference->columns[0] === 'supplier_id'
                 && $reference->targetColumns[0] === 'supplier_id';
             if (!$supplierRoot && !$tenantScoped) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** @param list<CompanyBackupReference> $claims */
+    private static function isSharedReferenceKeyCoordinate(
+        string $column,
+        array $claims,
+    ): bool {
+        foreach ($claims as $reference) {
+            $position = array_search($column, $reference->columns, true);
+            if ($reference->mapping
+                    !== CompanyBackupReferenceMapping::TenantReferenceKey
+                || !is_int($position)
+                || ($reference->targetColumns[$position] ?? null) !== $column
+            ) {
                 return false;
             }
         }

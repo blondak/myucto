@@ -349,15 +349,15 @@ final readonly class CompanyBackupEmbeddedReferenceSet
         callable $mapper,
     ): void {
         $prototype = $references[0];
-        if ($index === count($prototype->path)) {
-            if ($value === null) {
-                foreach ($references as $reference) {
-                    if (!$reference->nullable) {
-                        throw $this->valueError($reference->column);
-                    }
+        if ($value === null) {
+            foreach ($references as $reference) {
+                if (!$reference->nullable) {
+                    throw $this->valueError($reference->column);
                 }
-                return;
             }
+            return;
+        }
+        if ($index === count($prototype->path)) {
             $matches = array_values(array_filter(
                 $references,
                 fn (CompanyBackupEmbeddedReference $reference): bool =>

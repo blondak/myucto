@@ -7,6 +7,10 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Payroll\Calculation\MonthlyAdvanceTaxResult;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthCalculationStatus;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthEmploymentKind;
@@ -177,6 +181,69 @@ final class PayrollRunStatutoryResultPersisterTest extends TestCase
         self::assertSame('payroll-net-result.v1', $net['schema_version']);
         self::assertSame(PayrollNetPolicyV1::create()->id, $net['ruleset_id']);
         self::assertSame(80_000, $net['result_snapshot']['net_payable_minor_units']);
+    }
+
+    public function testCompanyBackupStreamsFourSealedPersonResults(): void
+    {
+        $this->persister->persist(
+            $this->supplierId,
+            $this->revisionId,
+            null,
+            $this->snapshot(),
+            $this->socialResult(),
+            $this->healthResult(),
+            [$this->employeeId => $this->taxResult()],
+            [$this->employeeId => $this->netResult()],
+        );
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_statutory_person_results',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->embeddedReferences->assertRegistryTargets($registry);
+        $projection->embeddedHashReferences->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(4, $rows);
+        self::assertSame(
+            [
+                'social_insurance',
+                'health_insurance',
+                'income_tax',
+                'net_pay',
+            ],
+            array_column($rows, 'calculation_kind'),
+        );
+        foreach ($rows as $row) {
+            self::assertSame($this->supplierId, (int) $row['supplier_id']);
+            self::assertSame($this->employeeId, (int) $row['employee_id']);
+            self::assertSame(
+                hash('sha256', (string) $row['input_snapshot_json']),
+                $row['input_snapshot_hash'],
+            );
+            self::assertSame(
+                hash('sha256', (string) $row['result_snapshot_json']),
+                $row['result_snapshot_hash'],
+            );
+        }
     }
 
     public function testRejectsForeignPersonBeforeWritingAnyResultSet(): void

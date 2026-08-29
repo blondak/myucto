@@ -15,6 +15,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPdfSignatureOutputSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
@@ -32,7 +33,61 @@ final class TenantDataRegistryFactory
 {
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
+        'payroll_absences' => 'payroll',
+        'payroll_average_earning_snapshots' => 'payroll',
+        'payroll_component_definitions' => 'payroll',
+        'payroll_deduction_agreements' => 'payroll',
+        'payroll_employees' => 'payroll',
+        'payroll_employments' => 'payroll',
+        'payroll_employment_terms' => 'payroll',
+        'payroll_inputs' => 'payroll',
+        'payroll_insolvency_payment_instructions' => 'payroll',
+        'payroll_institution_accounts' => 'payroll',
+        'payroll_jmhz_work_month_revisions' => 'payroll',
+        'payroll_offices' => 'payroll',
+        'payroll_payout_rules' => 'payroll',
+        'payroll_person_accounts' => 'payroll',
+        'payroll_person_health_coverage_history' => 'payroll',
+        'payroll_person_health_minimum_reductions' => 'payroll',
+        'payroll_person_health_month_evidence' => 'payroll',
+        'payroll_person_health_other_employer_bases' => 'payroll',
+        'payroll_person_social_discount_claims' => 'payroll',
+        'payroll_person_social_jurisdictions' => 'payroll',
+        'payroll_person_tax_child_claims' => 'payroll',
+        'payroll_person_tax_credit_claims' => 'payroll',
+        'payroll_person_tax_declarations' => 'payroll',
+        'payroll_person_tax_residences' => 'payroll',
+        'payroll_risky_savings_evidence' => 'payroll',
+        'payroll_run_persons' => 'payroll',
         'payroll_run_revisions' => 'payroll',
+        'payroll_statutory_accumulator_entries' => 'payroll',
+        'payroll_statutory_accumulator_openings' => 'payroll',
+        'payroll_statutory_person_results' => 'payroll',
+        'payroll_statutory_results' => 'payroll',
+        'payroll_time_entries' => 'payroll',
+        'payroll_time_months' => 'payroll',
+        'payroll_work_calendars' => 'payroll',
+    ];
+
+    /** @var array<string,list<list<string>>> */
+    private const COMPANY_BACKUP_REFERENCE_KEYS = [
+        'payroll_run_persons' => [
+            ['supplier_id', 'revision_id', 'employee_id'],
+        ],
+        'payroll_statutory_person_results' => [[
+            'supplier_id',
+            'id',
+            'statutory_result_id',
+            'revision_id',
+            'calculation_kind',
+            'employee_id',
+        ]],
+        'payroll_statutory_results' => [[
+            'supplier_id',
+            'id',
+            'revision_id',
+            'calculation_kind',
+        ]],
     ];
 
     /** @var list<string> */
@@ -511,6 +566,7 @@ final class TenantDataRegistryFactory
             ],
         );
         foreach (self::COMPANY_BACKUP_ONLY_REFERENCE_TARGETS as $table => $featureGroup) {
+            $projection = self::companyBackupProjection($table);
             $details = [
                 'primary_key' => ['id'],
                 'feature_group' => $featureGroup,
@@ -518,6 +574,11 @@ final class TenantDataRegistryFactory
                     'strategy' => 'supplier_id',
                     'column' => 'supplier_id',
                 ],
+                ...(isset(self::COMPANY_BACKUP_REFERENCE_KEYS[$table]) ? [
+                    'reference_keys' => self::COMPANY_BACKUP_REFERENCE_KEYS[$table],
+                ] : []),
+                ...($projection === [] ? [] : ['secrets' => []]),
+                ...$projection,
             ];
             $definitions[] = new TenantDataDefinition(
                 'table:' . $table,
@@ -883,6 +944,13 @@ final class TenantDataRegistryFactory
      *     nullable:bool,
      *     source_column:string
      *   }>,
+     *   embedded_hash_references?:list<array{
+     *     column:string,
+     *     nullable:bool,
+     *     path:list<string>,
+     *     target:string,
+     *     target_hash_column:string
+     *   }>,
      *   embedded_hashes?:list<array{
      *     algorithm:string,
      *     column:string,
@@ -917,6 +985,27 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'payroll_statutory_person_results') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollStatutoryPersonResultsProjection::dataColumns(),
+                    'derived_hashes' =>
+                        CompanyBackupPayrollStatutoryPersonResultsProjection::derivedHashes(),
+                    'embedded_hash_references' =>
+                        CompanyBackupPayrollStatutoryPersonResultsProjection::embeddedHashReferences(),
+                    'embedded_hashes' =>
+                        CompanyBackupPayrollStatutoryPersonResultsProjection::embeddedHashes(),
+                    'embedded_references' =>
+                        CompanyBackupPayrollStatutoryPersonResultsProjection::embeddedReferences(),
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollStatutoryPersonResultsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
         $columns = match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::dataColumns(),
