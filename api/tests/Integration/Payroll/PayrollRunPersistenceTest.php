@@ -1112,6 +1112,42 @@ final class PayrollRunPersistenceTest extends TestCase
         ]);
     }
 
+    public function testCompanyBackupStreamsEmploymentWithoutGeneratedOwnerKeys(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_employments');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($this->employmentId, (int) $row['id']);
+        self::assertSame($this->employeeId, (int) $row['employee_id']);
+        self::assertGreaterThan(0, (int) $row['office_id']);
+        self::assertSame('SYN-MZ09', $row['code']);
+        self::assertSame('active', $row['status']);
+        self::assertSame(1, (int) $row['is_primary']);
+        self::assertArrayNotHasKey('legacy_projection_key', $row);
+        self::assertArrayNotHasKey('primary_employee_key', $row);
+    }
+
     public function testCompanyBackupStreamsEmployeeWithSafeRestoreState(): void
     {
         $this->db->pdo()->prepare(

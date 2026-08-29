@@ -17,6 +17,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
@@ -78,6 +79,9 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<list<string>>> */
     private const COMPANY_BACKUP_REFERENCE_KEYS = [
+        'payroll_employments' => [
+            ['supplier_id', 'id', 'employee_id'],
+        ],
         'payroll_run_persons' => [
             ['supplier_id', 'revision_id', 'employee_id'],
         ],
@@ -1017,6 +1021,21 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollEmployeesProjection::references(),
                     'restore_overrides' =>
                         CompanyBackupPayrollEmployeesProjection::restoreOverrides(),
+                ],
+            ];
+        }
+        if ($table === 'payroll_employments') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollEmploymentsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' =>
+                        CompanyBackupPayrollEmploymentsProjection::generatedColumns(),
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollEmploymentsProjection::references(),
+                    'restore_overrides' => [],
                 ],
             ];
         }
