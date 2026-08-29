@@ -172,6 +172,92 @@ final class CompanyBackupEmbeddedHashSetTest extends TestCase
         self::addToAssertionCount(1);
     }
 
+    public function testRefreshesCanonicalProjectionFromAncestorAndEntry(): void
+    {
+        $hashes = CompanyBackupEmbeddedHashSet::fromArray(
+            [[
+                'algorithm' => 'sha256_canonical_projection',
+                'column' => 'payload_json',
+                'dependencies' => [],
+                'hash_path' => ['records', '*', 'record_hash'],
+                'name' => 'synthetic_record',
+                'nullable' => false,
+                'omit_paths' => [],
+                'projection' => [
+                    [
+                        'key' => 'record_id',
+                        'path' => ['records', '*', 'id'],
+                    ],
+                    [
+                        'key' => 'schema_version',
+                        'literal' => 'synthetic-record.v1',
+                    ],
+                    [
+                        'key' => 'supplier_id',
+                        'path' => ['supplier_id'],
+                    ],
+                    [
+                        'key' => 'values',
+                        'path' => ['records', '*', 'values'],
+                    ],
+                ],
+                'source_path' => ['records', '*'],
+            ]],
+            'table:payroll_run_revisions',
+            ['payload_json'],
+        );
+        $recordPayload = [
+            'record_id' => 17,
+            'schema_version' => 'synthetic-record.v1',
+            'supplier_id' => 7,
+            'values' => ['amount_minor' => 1500],
+        ];
+        $row = [
+            'payload_json' => CanonicalJson::encode([
+                'records' => [[
+                    'created_at' => '2026-06-01 10:00:00',
+                    'id' => 17,
+                    'record_hash' => hash(
+                        'sha256',
+                        CanonicalJson::encode($recordPayload),
+                    ),
+                    'values' => $recordPayload['values'],
+                ]],
+                'supplier_id' => 7,
+            ]),
+        ];
+
+        $hashes->assertSourceRow($row);
+        $restored = $hashes->transform(
+            $row,
+            static function (array $changed): array {
+                $payload = json_decode(
+                    (string) $changed['payload_json'],
+                    true,
+                    flags: JSON_THROW_ON_ERROR,
+                );
+                $payload['supplier_id'] = 107;
+                $payload['records'][0]['id'] = 117;
+                $changed['payload_json'] = CanonicalJson::encode($payload);
+                return $changed;
+            },
+        );
+
+        $payload = json_decode(
+            (string) $restored['payload_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            hash('sha256', CanonicalJson::encode([
+                ...$recordPayload,
+                'record_id' => 117,
+                'supplier_id' => 107,
+            ])),
+            $payload['records'][0]['record_hash'],
+        );
+    }
+
     public function testAllowsCompleteNullablePairsAndRejectsOrphanSeal(): void
     {
         $hashes = CompanyBackupEmbeddedHashSet::fromArray(
@@ -250,6 +336,68 @@ final class CompanyBackupEmbeddedHashSetTest extends TestCase
                 self::fail('Nekanonický nebo netypovaný zdroj pečeti nesmí projít.');
             } catch (CompanyBackupDataSourceException $e) {
                 self::assertSame('data_embedded_hash_value_invalid', $e->errorCode);
+            }
+        }
+    }
+
+    public function testRejectsAmbiguousCanonicalProjectionMetadata(): void
+    {
+        $valid = [
+            'algorithm' => 'sha256_canonical_projection',
+            'column' => 'payload_json',
+            'dependencies' => [],
+            'hash_path' => ['records', '*', 'record_hash'],
+            'name' => 'synthetic_record',
+            'nullable' => false,
+            'omit_paths' => [],
+            'projection' => [
+                [
+                    'key' => 'schema_version',
+                    'literal' => 'synthetic-record.v1',
+                ],
+                [
+                    'key' => 'supplier_id',
+                    'path' => ['supplier_id'],
+                ],
+            ],
+            'source_path' => ['records', '*'],
+        ];
+        $withoutProjection = $valid;
+        unset($withoutProjection['projection']);
+
+        foreach (
+            [
+                $withoutProjection,
+                [...$valid, 'algorithm' => 'sha256_canonical_json'],
+                [...$valid, 'omit_paths' => [['record_hash']]],
+                [...$valid, 'projection' => array_reverse($valid['projection'])],
+                [...$valid, 'projection' => [
+                    $valid['projection'][0],
+                    $valid['projection'][0],
+                ]],
+                [...$valid, 'projection' => [[
+                    'key' => 'record',
+                    'path' => ['records', '*'],
+                ]]],
+                [...$valid, 'projection' => [[
+                    'key' => 'foreign_id',
+                    'path' => ['other_records', '*', 'id'],
+                ]]],
+                [...$valid, 'projection' => [[
+                    'key' => 'schema_version',
+                    'literal' => ['synthetic-record.v1'],
+                ]]],
+            ] as $metadata
+        ) {
+            try {
+                CompanyBackupEmbeddedHashSet::fromArray(
+                    [$metadata],
+                    'table:payroll_run_revisions',
+                    ['payload_json'],
+                );
+                self::fail('Kanonická projekce musí mít přesný bezpečný kontrakt.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_embedded_hash_metadata_invalid', $e->errorCode);
             }
         }
     }

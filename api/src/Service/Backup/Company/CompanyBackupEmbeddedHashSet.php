@@ -82,7 +82,12 @@ final readonly class CompanyBackupEmbeddedHashSet
                 continue;
             }
             foreach ($this->pairs($document, $hash) as $pair) {
-                $expected = $this->digest($pair['source'], $hash);
+                $expected = $this->digest(
+                    $document,
+                    $pair['source'],
+                    $pair['bindings'],
+                    $hash,
+                );
                 if (!self::validDigest($pair['hash'])
                     || !hash_equals($expected, $pair['hash'])
                 ) {
@@ -124,7 +129,12 @@ final readonly class CompanyBackupEmbeddedHashSet
                     $document,
                     $hash->hashPath,
                     $pair['bindings'],
-                    $this->digest($pair['source'], $hash),
+                    $this->digest(
+                        $document,
+                        $pair['source'],
+                        $pair['bindings'],
+                        $hash,
+                    ),
                     $hash,
                 );
             }
@@ -321,14 +331,29 @@ final readonly class CompanyBackupEmbeddedHashSet
         );
     }
 
+    /**
+     * @param array<mixed> $document
+     * @param list<int|string> $bindings
+     */
     private function digest(
+        array $document,
         mixed $source,
+        array $bindings,
         CompanyBackupEmbeddedHash $hash,
     ): string {
         try {
             return match ($hash->algorithm) {
                 CompanyBackupEmbeddedHashAlgorithm::Sha256CanonicalJson =>
                     hash('sha256', $this->canonicalSource($source, $hash)),
+                CompanyBackupEmbeddedHashAlgorithm::Sha256CanonicalProjection =>
+                    hash('sha256', CanonicalJson::encode(
+                        $this->projectedSource(
+                            $document,
+                            $source,
+                            $bindings,
+                            $hash,
+                        ),
+                    )),
                 CompanyBackupEmbeddedHashAlgorithm::Sha256ExactString =>
                     is_string($source)
                         ? hash('sha256', $source)
@@ -341,6 +366,59 @@ final readonly class CompanyBackupEmbeddedHashSet
         } catch (\Throwable $e) {
             throw $this->valueError($hash, $e);
         }
+    }
+
+    /**
+     * @param array<mixed> $document
+     * @param list<int|string> $bindings
+     * @return array<string,mixed>
+     */
+    private function projectedSource(
+        array $document,
+        mixed $source,
+        array $bindings,
+        CompanyBackupEmbeddedHash $hash,
+    ): array {
+        if (!is_array($source)) {
+            throw $this->valueError($hash);
+        }
+        $result = [];
+        foreach ($hash->projection as $field) {
+            $result[$field->key] = $field->hasLiteral
+                ? $field->literal
+                : $this->pathValue($document, $field->path, $bindings, $hash);
+        }
+        return $result;
+    }
+
+    /**
+     * @param array<mixed> $document
+     * @param list<string> $path
+     * @param list<int|string> $bindings
+     */
+    private function pathValue(
+        array $document,
+        array $path,
+        array $bindings,
+        CompanyBackupEmbeddedHash $hash,
+    ): mixed {
+        $current = $document;
+        $wildcard = 0;
+        foreach ($path as $segment) {
+            $key = $segment;
+            if ($segment === '*') {
+                if (!array_key_exists($wildcard, $bindings)) {
+                    throw $this->valueError($hash);
+                }
+                $key = $bindings[$wildcard];
+                $wildcard++;
+            }
+            if (!is_array($current) || !array_key_exists($key, $current)) {
+                throw $this->valueError($hash);
+            }
+            $current = $current[$key];
+        }
+        return $current;
     }
 
     private function canonicalSource(

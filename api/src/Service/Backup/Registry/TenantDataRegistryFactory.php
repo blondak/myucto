@@ -891,6 +891,11 @@ final class TenantDataRegistryFactory
      *     name:string,
      *     nullable:bool,
      *     omit_paths:list<list<string>>,
+     *     projection?:list<array{
+     *       key:string,
+     *       literal?:string|int|bool|null,
+     *       path?:list<string>
+     *     }>,
      *     source_path:list<string>
      *   }>,
      *   embedded_references:list<array<string,mixed>>,

@@ -8,5 +8,6 @@ namespace MyInvoice\Service\Backup\Company;
 enum CompanyBackupEmbeddedHashAlgorithm: string
 {
     case Sha256CanonicalJson = 'sha256_canonical_json';
+    case Sha256CanonicalProjection = 'sha256_canonical_projection';
     case Sha256ExactString = 'sha256_exact_string';
 }
