@@ -239,22 +239,22 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 throw $this->valueError($prototype->column);
             }
             $reference = $matches[0];
-            $sourceValue = $this->sourceValue($value, $reference);
-            if ($sourceValue === null) {
+            $source = $this->sourceValue($value, $reference);
+            if ($source === null) {
                 throw $this->valueError($reference->column);
             }
             if ($reference->mapping === CompanyBackupReferenceMapping::TenantIdOrZero
-                && $sourceValue === 0
+                && $source['identifier'] === 0
             ) {
                 return;
             }
-            $mapped = $mapper($reference, $sourceValue);
+            $mapped = $mapper($reference, $source['identifier']);
             if (!$this->validMappedValue($mapped, $reference)) {
                 throw $this->valueError($reference->column);
             }
             $value = $mapped === null || $reference->valuePrefix === null
                 ? $mapped
-                : $reference->valuePrefix . $mapped;
+                : $reference->valuePrefix . $mapped . $source['suffix'];
             return;
         }
         if (!is_array($value)) {
@@ -318,10 +318,11 @@ final readonly class CompanyBackupEmbeddedReferenceSet
         return $value === $condition->equals;
     }
 
+    /** @return array{identifier:int|string,suffix:string}|null */
     private function sourceValue(
         mixed $value,
         CompanyBackupEmbeddedReference $reference,
-    ): int|string|null {
+    ): ?array {
         if ($reference->valuePrefix !== null) {
             if (!is_string($value)) {
                 return null;
@@ -330,8 +331,14 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 === CompanyBackupReferenceMapping::TenantIdOrZero
                 ? '(?:0|[1-9][0-9]*)'
                 : '[1-9][0-9]*';
+            $suffix = $reference->valueSuffixSeparator === null
+                ? ''
+                : '('
+                    . preg_quote($reference->valueSuffixSeparator, '/')
+                    . '[a-z0-9][a-z0-9_.-]{0,127})';
             if (preg_match(
-                '/^' . preg_quote($reference->valuePrefix, '/') . '(' . $digits . ')$/D',
+                '/^' . preg_quote($reference->valuePrefix, '/')
+                    . '(' . $digits . ')' . $suffix . '$/D',
                 $value,
                 $matches,
             ) !== 1) {
@@ -346,9 +353,16 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 FILTER_VALIDATE_INT,
                 ['options' => ['min_range' => $minimum]],
             );
-            return is_int($identifier) ? $identifier : null;
+            return is_int($identifier)
+                ? [
+                    'identifier' => $identifier,
+                    'suffix' => $matches[2] ?? '',
+                ]
+                : null;
         }
-        return $this->validIdentifierValue($value, $reference) ? $value : null;
+        return $this->validIdentifierValue($value, $reference)
+            ? ['identifier' => $value, 'suffix' => '']
+            : null;
     }
 
     private function validIdentifierValue(

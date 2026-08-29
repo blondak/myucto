@@ -132,6 +132,76 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
         );
     }
 
+    public function testRemapsPrefixedIdentityAndPreservesValidatedSuffix(): void
+    {
+        $metadata = [
+            ...$this->journalEntryReference(),
+            'path' => ['included_components', '*'],
+            'target' => 'table:payroll_inputs',
+            'value_prefix' => 'input.',
+            'value_suffix_separator' => '.',
+        ];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [$metadata],
+            'table:payroll_run_revisions',
+            ['payload'],
+        );
+        $references->assertRegistryTargets(new TenantDataRegistry(1, [
+            $this->definition('payroll_inputs', TenantDataPolicy::TenantOwned),
+        ]));
+
+        $restored = $references->remap(
+            ['payload' => ['included_components' => [
+                'input.17.base_wage',
+                'input.19.bonus_2026',
+            ]]],
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $sourceValue,
+            ): int => (int) $sourceValue + 100,
+        );
+
+        self::assertSame(
+            ['input.117.base_wage', 'input.119.bonus_2026'],
+            $restored['payload']['included_components'],
+        );
+        self::assertSame(
+            'payload:included_components.*->payroll_inputs:id@input.~.',
+            $references->references[0]->signature(),
+        );
+    }
+
+    public function testRemapsHyphenatedPayrollTraceIdentity(): void
+    {
+        $metadata = [
+            ...$this->journalEntryReference(),
+            'path' => ['trace', '*', 'id'],
+            'target' => 'table:payroll_employees',
+            'value_prefix' => 'revision-person-',
+            'value_suffix_separator' => '-',
+        ];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [$metadata],
+            'table:payroll_run_revisions',
+            ['payload'],
+        );
+
+        $restored = $references->remap(
+            ['payload' => ['trace' => [[
+                'id' => 'revision-person-17-garnishable',
+            ]]]],
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $sourceValue,
+            ): int => (int) $sourceValue + 100,
+        );
+
+        self::assertSame(
+            'revision-person-117-garnishable',
+            $restored['payload']['trace'][0]['id'],
+        );
+    }
+
     public function testRejectsMalformedPrefixedIdentityBeforeMapping(): void
     {
         $metadata = [
@@ -158,6 +228,44 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
                     },
                 );
                 self::fail('Neplatná řetězcová identita nesmí projít obnovou.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_embedded_reference_value_invalid', $e->errorCode);
+            }
+        }
+    }
+
+    public function testRejectsMalformedPreservedSuffixBeforeMapping(): void
+    {
+        $metadata = [
+            ...$this->journalEntryReference(),
+            'path' => ['component_reference'],
+            'target' => 'table:payroll_inputs',
+            'value_prefix' => 'input.',
+            'value_suffix_separator' => '.',
+        ];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [$metadata],
+            'table:payroll_run_revisions',
+            ['payload'],
+        );
+
+        foreach (
+            [
+                'input.0.base_wage',
+                'input.01.base_wage',
+                'input.17',
+                'input.17.BaseWage',
+                'input.17.base/wage',
+            ] as $identity
+        ) {
+            try {
+                $references->remap(
+                    ['payload' => ['component_reference' => $identity]],
+                    static function (): never {
+                        self::fail('Neplatný suffix nesmí dojít k mapperu.');
+                    },
+                );
+                self::fail('Neplatný suffix řetězcové identity nesmí projít.');
             } catch (CompanyBackupDataSourceException $e) {
                 self::assertSame('data_embedded_reference_value_invalid', $e->errorCode);
             }
@@ -422,6 +530,15 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
         ], ['payload']];
         yield 'unknown field' => [[...$valid, 'comment' => 'unbound'], ['payload']];
         yield 'invalid value prefix' => [[...$valid, 'value_prefix' => 'Employee:'], ['payload']];
+        yield 'suffix without prefix' => [[
+            ...$valid,
+            'value_suffix_separator' => '.',
+        ], ['payload']];
+        yield 'invalid suffix separator' => [[
+            ...$valid,
+            'value_prefix' => 'input.',
+            'value_suffix_separator' => '/',
+        ], ['payload']];
         yield 'prefix outside numeric mapping' => [[
             ...$valid,
             'mapping' => CompanyBackupReferenceMapping::TenantNaturalKey->value,

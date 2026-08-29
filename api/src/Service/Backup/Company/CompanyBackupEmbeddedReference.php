@@ -35,6 +35,7 @@ final readonly class CompanyBackupEmbeddedReference
         array $fallbacks,
         public ?CompanyBackupEmbeddedReferenceCondition $condition,
         public ?string $valuePrefix,
+        public ?string $valueSuffixSeparator,
     ) {
         $this->path = $path;
         $this->targetColumns = $targetColumns;
@@ -59,7 +60,14 @@ final readonly class CompanyBackupEmbeddedReference
             'target_columns',
         ];
         $prefixedKeys = [...$baseKeys, 'value_prefix'];
-        if ($keys !== $baseKeys && $keys !== $prefixedKeys) {
+        $suffixedKeys = [
+            ...$prefixedKeys,
+            'value_suffix_separator',
+        ];
+        if ($keys !== $baseKeys
+            && $keys !== $prefixedKeys
+            && $keys !== $suffixedKeys
+        ) {
             throw self::invalid($registryKey);
         }
 
@@ -74,6 +82,7 @@ final readonly class CompanyBackupEmbeddedReference
         $nullable = $value['nullable'];
         $fallbacks = $value['fallbacks'];
         $valuePrefix = $value['value_prefix'] ?? null;
+        $valueSuffixSeparator = $value['value_suffix_separator'] ?? null;
         if (!is_string($column)
             || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $column) !== 1
             || !is_string($target)
@@ -87,7 +96,7 @@ final readonly class CompanyBackupEmbeddedReference
             || !array_is_list($fallbacks)
             || ($valuePrefix !== null
                 && (!is_string($valuePrefix)
-                    || preg_match('/^[a-z][a-z0-9_-]{0,31}:$/D', $valuePrefix) !== 1
+                    || preg_match('/^[a-z][a-z0-9_-]{0,31}[:.-]$/D', $valuePrefix) !== 1
                     || !in_array(
                         $mapping,
                         [
@@ -97,6 +106,10 @@ final readonly class CompanyBackupEmbeddedReference
                         ],
                         true,
                     )))
+            || ($valueSuffixSeparator !== null
+                && (!is_string($valueSuffixSeparator)
+                    || !in_array($valueSuffixSeparator, ['.', '-'], true)
+                    || $valuePrefix === null))
         ) {
             throw self::invalid($registryKey, is_string($column) ? $column : null);
         }
@@ -144,6 +157,7 @@ final readonly class CompanyBackupEmbeddedReference
             $validatedFallbacks,
             $condition,
             $valuePrefix,
+            $valueSuffixSeparator,
         );
     }
 
@@ -163,6 +177,9 @@ final readonly class CompanyBackupEmbeddedReference
             . implode(',', $this->targetColumns);
         if ($this->valuePrefix !== null) {
             $signature .= '@' . $this->valuePrefix;
+            if ($this->valueSuffixSeparator !== null) {
+                $signature .= '~' . $this->valueSuffixSeparator;
+            }
         }
         return $this->condition === null
             ? $signature
