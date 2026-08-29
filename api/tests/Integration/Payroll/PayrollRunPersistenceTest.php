@@ -1112,6 +1112,37 @@ final class PayrollRunPersistenceTest extends TestCase
         ]);
     }
 
+    public function testCompanyBackupStreamsPayrollOffice(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_offices');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        self::assertSame($this->supplierId, (int) $rows[0]['supplier_id']);
+        self::assertSame('MZ09', $rows[0]['code']);
+        self::assertSame('Syntetická účtárna', $rows[0]['name']);
+        self::assertNull($rows[0]['social_security_variable_symbol']);
+    }
+
     public function testCompanyBackupStreamsRunWithoutGeneratedOfficeScope(): void
     {
         $run = $this->createRun();

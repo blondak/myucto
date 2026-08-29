@@ -15,6 +15,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
@@ -95,6 +96,11 @@ final class TenantDataRegistryFactory
             'revision_id',
             'calculation_kind',
         ]],
+    ];
+
+    /** @var array<string,list<string>> */
+    private const COMPANY_BACKUP_NATURAL_KEYS = [
+        'payroll_offices' => ['supplier_id', 'code'],
     ];
 
     /** @var list<string> */
@@ -576,6 +582,9 @@ final class TenantDataRegistryFactory
             $projection = self::companyBackupProjection($table);
             $details = [
                 'primary_key' => ['id'],
+                ...(isset(self::COMPANY_BACKUP_NATURAL_KEYS[$table]) ? [
+                    'natural_key' => self::COMPANY_BACKUP_NATURAL_KEYS[$table],
+                ] : []),
                 'feature_group' => $featureGroup,
                 'ownership' => [
                     'strategy' => 'supplier_id',
@@ -993,6 +1002,20 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'payroll_offices') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollOfficesProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollOfficesProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
         if ($table === 'payroll_runs') {
             return [
                 'company_backup' => [
