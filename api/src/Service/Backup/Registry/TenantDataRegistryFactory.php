@@ -883,6 +883,16 @@ final class TenantDataRegistryFactory
      *     nullable:bool,
      *     source_column:string
      *   }>,
+     *   embedded_hashes?:list<array{
+     *     algorithm:string,
+     *     column:string,
+     *     dependencies:list<string>,
+     *     hash_path:list<string>,
+     *     name:string,
+     *     nullable:bool,
+     *     omit_paths:list<list<string>>,
+     *     source_path:list<string>
+     *   }>,
      *   embedded_references:list<array<string,mixed>>,
      *   generated_columns:list<string>,
      *   omit_columns:array<string,string>,

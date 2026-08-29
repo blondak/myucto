@@ -123,6 +123,82 @@ final class CompanyBackupTableProjectionTest extends TestCase
         );
     }
 
+    public function testRefreshesNestedSealBeforeOuterSealAtomically(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            dataColumns: ['id', 'supplier_id', 'payload_json', 'payload_hash'],
+            derivedHashes: [[
+                'algorithm' => 'sha256_canonical_json',
+                'hash_column' => 'payload_hash',
+                'nullable' => false,
+                'source_column' => 'payload_json',
+            ]],
+            embeddedHashes: [[
+                'algorithm' => 'sha256_canonical_json',
+                'column' => 'payload_json',
+                'dependencies' => [],
+                'hash_path' => [
+                    'people', '*', 'inputs', '*', 'component_snapshot_hash',
+                ],
+                'name' => 'component_snapshot',
+                'nullable' => false,
+                'omit_paths' => [],
+                'source_path' => ['people', '*', 'inputs', '*', 'component'],
+            ]],
+            embeddedReferences: [[
+                'column' => 'payload_json',
+                'condition' => null,
+                'fallbacks' => [],
+                'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                'nullable' => false,
+                'path' => [
+                    'people', '*', 'inputs', '*', 'component', 'component_id',
+                ],
+                'target' => 'table:synthetic_records',
+                'target_columns' => ['id'],
+            ]],
+        ));
+        $component = ['code' => 'base_wage', 'component_id' => 17];
+        $json = \MyInvoice\Service\Backup\CanonicalJson::encode([
+            'people' => [['inputs' => [[
+                'component' => $component,
+                'component_snapshot_hash' => hash(
+                    'sha256',
+                    \MyInvoice\Service\Backup\CanonicalJson::encode($component),
+                ),
+            ]]]],
+        ]);
+
+        $restored = $projection->remapEmbeddedReferences(
+            [
+                'id' => 3,
+                'supplier_id' => 7,
+                'payload_json' => $json,
+                'payload_hash' => hash('sha256', $json),
+            ],
+            static fn ($reference, int|string $value): int => (int) $value + 100,
+        );
+
+        $payload = json_decode(
+            (string) $restored['payload_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $input = $payload['people'][0]['inputs'][0];
+        self::assertSame(117, $input['component']['component_id']);
+        self::assertSame(
+            hash(
+                'sha256',
+                \MyInvoice\Service\Backup\CanonicalJson::encode($input['component']),
+            ),
+            $input['component_snapshot_hash'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $restored['payload_json']),
+            $restored['payload_hash'],
+        );
+    }
+
     public function testRejectsNewRuntimeColumnInsteadOfExportingItImplicitly(): void
     {
         $projection = CompanyBackupTableProjection::fromDefinition($this->definition());
@@ -488,6 +564,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param list<string> $preservedIdentifiers
      * @param array<string,string> $columnCodecs
      * @param list<array<string,mixed>> $derivedHashes
+     * @param list<array<string,mixed>> $embeddedHashes
      * @param list<array<string,mixed>> $embeddedReferences
      */
     private function definition(
@@ -500,6 +577,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
         array $preservedIdentifiers = [],
         array $columnCodecs = [],
         array $derivedHashes = [],
+        array $embeddedHashes = [],
         array $embeddedReferences = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
@@ -521,6 +599,9 @@ final class CompanyBackupTableProjectionTest extends TestCase
                     ]),
                     ...($derivedHashes === [] ? [] : [
                         'derived_hashes' => $derivedHashes,
+                    ]),
+                    ...($embeddedHashes === [] ? [] : [
+                        'embedded_hashes' => $embeddedHashes,
                     ]),
                     'embedded_references' => $embeddedReferences,
                     'generated_columns' => $generatedColumns,

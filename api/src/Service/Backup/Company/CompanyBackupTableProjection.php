@@ -39,6 +39,8 @@ final readonly class CompanyBackupTableProjection
 
     public CompanyBackupEmbeddedReferenceSet $embeddedReferences;
 
+    public CompanyBackupEmbeddedHashSet $embeddedHashes;
+
     public CompanyBackupDerivedHashSet $derivedHashes;
 
     public CompanyBackupPolymorphicReferenceSet $polymorphicReferences;
@@ -69,6 +71,7 @@ final readonly class CompanyBackupTableProjection
         array $columnCodecs,
         CompanyBackupReferenceSet $references,
         CompanyBackupEmbeddedReferenceSet $embeddedReferences,
+        CompanyBackupEmbeddedHashSet $embeddedHashes,
         CompanyBackupDerivedHashSet $derivedHashes,
         CompanyBackupPolymorphicReferenceSet $polymorphicReferences,
         CompanyBackupPreservedIdentifierSet $preservedIdentifiers,
@@ -83,6 +86,7 @@ final readonly class CompanyBackupTableProjection
         $this->columnCodecs = $columnCodecs;
         $this->references = $references;
         $this->embeddedReferences = $embeddedReferences;
+        $this->embeddedHashes = $embeddedHashes;
         $this->derivedHashes = $derivedHashes;
         $this->polymorphicReferences = $polymorphicReferences;
         $this->preservedIdentifiers = $preservedIdentifiers;
@@ -144,6 +148,7 @@ final readonly class CompanyBackupTableProjection
             ...$baseMetadataKeys,
             'column_codecs',
             'derived_hashes',
+            'embedded_hashes',
             'polymorphic_references',
             'preserved_identifiers',
         ];
@@ -209,6 +214,11 @@ final readonly class CompanyBackupTableProjection
         );
         $embeddedReferences = CompanyBackupEmbeddedReferenceSet::fromArray(
             $metadata['embedded_references'],
+            $registryKey,
+            $dataColumns,
+        );
+        $embeddedHashes = CompanyBackupEmbeddedHashSet::fromArray(
+            $metadata['embedded_hashes'] ?? [],
             $registryKey,
             $dataColumns,
         );
@@ -283,6 +293,7 @@ final readonly class CompanyBackupTableProjection
             $columnCodecs,
             $references,
             $embeddedReferences,
+            $embeddedHashes,
             $derivedHashes,
             $polymorphicReferences,
             $preservedIdentifiers,
@@ -403,6 +414,7 @@ final readonly class CompanyBackupTableProjection
     /** @param array<string,mixed> $row */
     public function assertExportRow(array $row): void
     {
+        $this->embeddedHashes->assertSourceRow($row);
         $this->derivedHashes->assertSourceRow($row);
     }
 
@@ -418,7 +430,11 @@ final readonly class CompanyBackupTableProjection
         return $this->derivedHashes->transform(
             $row,
             fn (array $source): array =>
-                $this->embeddedReferences->remap($source, $mapper),
+                $this->embeddedHashes->transform(
+                    $source,
+                    fn (array $payload): array =>
+                        $this->embeddedReferences->remap($payload, $mapper),
+                ),
         );
     }
 
