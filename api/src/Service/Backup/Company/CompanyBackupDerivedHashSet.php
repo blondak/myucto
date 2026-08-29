@@ -12,12 +12,20 @@ final readonly class CompanyBackupDerivedHashSet
     /** @var list<CompanyBackupDerivedHash> */
     public array $hashes;
 
-    /** @param list<CompanyBackupDerivedHash> $hashes */
+    /** @var list<CompanyBackupDerivedHash> */
+    private array $refreshOrder;
+
+    /**
+     * @param list<CompanyBackupDerivedHash> $hashes
+     * @param list<CompanyBackupDerivedHash> $refreshOrder
+     */
     private function __construct(
         public string $registryKey,
         array $hashes,
+        array $refreshOrder,
     ) {
         $this->hashes = $hashes;
+        $this->refreshOrder = $refreshOrder;
     }
 
     /** @param list<string> $dataColumns */
@@ -54,7 +62,11 @@ final readonly class CompanyBackupDerivedHashSet
             throw self::metadataError($registryKey);
         }
 
-        return new self($registryKey, $hashes);
+        return new self(
+            $registryKey,
+            $hashes,
+            self::refreshOrder($hashes, $registryKey),
+        );
     }
 
     /** @param array<string,mixed> $row */
@@ -72,6 +84,24 @@ final readonly class CompanyBackupDerivedHashSet
                 || !hash_equals(hash('sha256', $canonical), $hash)
             ) {
                 throw $this->valueError($derivedHash);
+            }
+        }
+        foreach ($this->hashes as $derivedHash) {
+            [$source] = $this->pair($row, $derivedHash);
+            if ($source === null) {
+                continue;
+            }
+            $decoded = $this->decodedSource($source, $derivedHash);
+            foreach ($derivedHash->dependencies as $dependency) {
+                $dependencyHash = $row[$dependency->sourceHashColumn] ?? null;
+                $embeddedHash = $this->pathValue($decoded, $dependency->path);
+                if (!is_string($dependencyHash)
+                    || preg_match('/^[0-9a-f]{64}$/D', $dependencyHash) !== 1
+                    || !is_string($embeddedHash)
+                    || !hash_equals($dependencyHash, $embeddedHash)
+                ) {
+                    throw $this->valueError($derivedHash);
+                }
             }
         }
     }
@@ -95,7 +125,7 @@ final readonly class CompanyBackupDerivedHashSet
      */
     private function refresh(array $row): array
     {
-        foreach ($this->hashes as $derivedHash) {
+        foreach ($this->refreshOrder as $derivedHash) {
             [$source, $hash] = $this->pair($row, $derivedHash);
             if ($source === null && $hash === null && $derivedHash->nullable) {
                 continue;
@@ -105,7 +135,26 @@ final readonly class CompanyBackupDerivedHashSet
             ) {
                 throw $this->valueError($derivedHash);
             }
-            $canonical = $this->canonicalSource($source, $derivedHash);
+            $decoded = $this->decodedSource($source, $derivedHash);
+            foreach ($derivedHash->dependencies as $dependency) {
+                $dependencyHash = $row[$dependency->sourceHashColumn] ?? null;
+                if (!is_string($dependencyHash)
+                    || preg_match('/^[0-9a-f]{64}$/D', $dependencyHash) !== 1
+                ) {
+                    throw $this->valueError($derivedHash);
+                }
+                $this->replacePathValue(
+                    $decoded,
+                    $dependency->path,
+                    $dependencyHash,
+                    $derivedHash,
+                );
+            }
+            try {
+                $canonical = CanonicalJson::encode($decoded);
+            } catch (\Throwable $e) {
+                throw $this->valueError($derivedHash, $e);
+            }
             $row[$derivedHash->sourceColumn] = $canonical;
             $row[$derivedHash->hashColumn] = hash('sha256', $canonical);
         }
@@ -139,6 +188,20 @@ final readonly class CompanyBackupDerivedHashSet
         mixed $source,
         CompanyBackupDerivedHash $derivedHash,
     ): string {
+        try {
+            return CanonicalJson::encode($this->decodedSource($source, $derivedHash));
+        } catch (CompanyBackupDataSourceException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw $this->valueError($derivedHash, $e);
+        }
+    }
+
+    /** @return array<mixed> */
+    private function decodedSource(
+        mixed $source,
+        CompanyBackupDerivedHash $derivedHash,
+    ): array {
         if (!is_string($source)) {
             throw $this->valueError($derivedHash);
         }
@@ -150,12 +213,107 @@ final readonly class CompanyBackupDerivedHashSet
                 );
             }
             return match ($derivedHash->algorithm) {
-                CompanyBackupDerivedHashAlgorithm::Sha256CanonicalJson =>
-                    CanonicalJson::encode($decoded),
+                CompanyBackupDerivedHashAlgorithm::Sha256CanonicalJson => $decoded,
             };
         } catch (\Throwable $e) {
             throw $this->valueError($derivedHash, $e);
         }
+    }
+
+    /**
+     * @param array<mixed> $value
+     * @param list<string> $path
+     */
+    private function pathValue(array $value, array $path): mixed
+    {
+        $current = $value;
+        foreach ($path as $segment) {
+            if (!is_array($current) || !array_key_exists($segment, $current)) {
+                return null;
+            }
+            $current = $current[$segment];
+        }
+        return $current;
+    }
+
+    /**
+     * @param array<mixed> $value
+     * @param list<string> $path
+     */
+    private function replacePathValue(
+        array &$value,
+        array $path,
+        string $replacement,
+        CompanyBackupDerivedHash $derivedHash,
+    ): void {
+        $current =& $value;
+        $last = array_pop($path);
+        foreach ($path as $segment) {
+            if (!isset($current[$segment]) || !is_array($current[$segment])) {
+                throw $this->valueError($derivedHash);
+            }
+            $current =& $current[$segment];
+        }
+        if ($last === null
+            || !array_key_exists($last, $current)
+            || !is_string($current[$last])
+            || preg_match('/^[0-9a-f]{64}$/D', $current[$last]) !== 1
+        ) {
+            throw $this->valueError($derivedHash);
+        }
+        $current[$last] = $replacement;
+    }
+
+    /**
+     * @param list<CompanyBackupDerivedHash> $hashes
+     * @return list<CompanyBackupDerivedHash>
+     */
+    private static function refreshOrder(array $hashes, string $registryKey): array
+    {
+        $byHashColumn = [];
+        foreach ($hashes as $hash) {
+            $byHashColumn[$hash->hashColumn] = $hash;
+        }
+
+        /** @var array<string,list<string>> $dependants */
+        $dependants = [];
+        /** @var array<string,int> $incoming */
+        $incoming = [];
+        foreach ($hashes as $hash) {
+            $incoming[$hash->hashColumn] = 0;
+        }
+        foreach ($hashes as $hash) {
+            foreach ($hash->dependencies as $dependency) {
+                $source = $dependency->sourceHashColumn;
+                if (!isset($byHashColumn[$source]) || $source === $hash->hashColumn) {
+                    throw self::metadataError($registryKey, $source);
+                }
+                $dependants[$source][] = $hash->hashColumn;
+                $incoming[$hash->hashColumn]++;
+            }
+        }
+
+        $ready = array_keys(array_filter(
+            $incoming,
+            static fn (int $count): bool => $count === 0,
+        ));
+        sort($ready, SORT_STRING);
+        $ordered = [];
+        while ($ready !== []) {
+            $column = array_shift($ready);
+            $ordered[] = $byHashColumn[$column];
+            foreach ($dependants[$column] ?? [] as $dependant) {
+                $incoming[$dependant]--;
+                if ($incoming[$dependant] === 0) {
+                    $ready[] = $dependant;
+                    sort($ready, SORT_STRING);
+                }
+            }
+        }
+        if (count($ordered) !== count($hashes)) {
+            throw self::metadataError($registryKey);
+        }
+        return $ordered;
     }
 
     private function valueError(

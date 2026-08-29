@@ -57,6 +57,92 @@ final class CompanyBackupDerivedHashSetTest extends TestCase
         self::assertSame(hash('sha256', $json), $source['payload_hash']);
     }
 
+    public function testRefreshesCrossColumnHashDependencyInTopologicalOrder(): void
+    {
+        $hashes = CompanyBackupDerivedHashSet::fromArray(
+            [
+                [
+                    'algorithm' => 'sha256_canonical_json',
+                    'hash_column' => 'input_snapshot_hash',
+                    'nullable' => false,
+                    'source_column' => 'input_snapshot_json',
+                ],
+                [
+                    'algorithm' => 'sha256_canonical_json',
+                    'dependencies' => [[
+                        'path' => ['source_snapshot_hash'],
+                        'source_hash_column' => 'input_snapshot_hash',
+                    ]],
+                    'hash_column' => 'result_snapshot_hash',
+                    'nullable' => true,
+                    'source_column' => 'result_snapshot_json',
+                ],
+            ],
+            'table:payroll_run_revisions',
+            [
+                'input_snapshot_json',
+                'input_snapshot_hash',
+                'result_snapshot_json',
+                'result_snapshot_hash',
+            ],
+        );
+        $input = CanonicalJson::encode(['employee_id' => 17]);
+        $inputHash = hash('sha256', $input);
+        $result = CanonicalJson::encode([
+            'employee_id' => 17,
+            'source_snapshot_hash' => $inputHash,
+        ]);
+        $source = [
+            'input_snapshot_json' => $input,
+            'input_snapshot_hash' => $inputHash,
+            'result_snapshot_json' => $result,
+            'result_snapshot_hash' => hash('sha256', $result),
+        ];
+
+        $hashes->assertSourceRow($source);
+        $restored = $hashes->transform(
+            $source,
+            static function (array $changed): array {
+                $changed['input_snapshot_json'] = CanonicalJson::encode([
+                    'employee_id' => 117,
+                ]);
+                $changed['result_snapshot_json'] = CanonicalJson::encode([
+                    'employee_id' => 117,
+                    'source_snapshot_hash' => $changed['input_snapshot_hash'],
+                ]);
+                return $changed;
+            },
+        );
+
+        $newInputHash = hash('sha256', (string) $restored['input_snapshot_json']);
+        $decodedResult = json_decode(
+            (string) $restored['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame($newInputHash, $restored['input_snapshot_hash']);
+        self::assertSame($newInputHash, $decodedResult['source_snapshot_hash']);
+        self::assertSame(
+            hash('sha256', (string) $restored['result_snapshot_json']),
+            $restored['result_snapshot_hash'],
+        );
+
+        $tampered = $source;
+        $tamperedResult = CanonicalJson::encode([
+            'employee_id' => 17,
+            'source_snapshot_hash' => str_repeat('0', 64),
+        ]);
+        $tampered['result_snapshot_json'] = $tamperedResult;
+        $tampered['result_snapshot_hash'] = hash('sha256', $tamperedResult);
+        try {
+            $hashes->assertSourceRow($tampered);
+            self::fail('Platná lokální pečeť nesmí skrýt porušenou závislost.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_derived_hash_value_invalid', $e->errorCode);
+            self::assertSame('result_snapshot_hash', $e->column);
+        }
+    }
+
     public function testRejectsTamperedNonCanonicalAndHalfNullablePairs(): void
     {
         $required = CompanyBackupDerivedHashSet::fromArray(
@@ -139,6 +225,68 @@ final class CompanyBackupDerivedHashSetTest extends TestCase
                     $columns,
                 );
                 self::fail('Odvozený hash musí mít jednoznačný kanonický kontrakt.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_derived_hash_metadata_invalid', $e->errorCode);
+            }
+        }
+    }
+
+    public function testRejectsInvalidCrossColumnHashDependencyMetadata(): void
+    {
+        $input = [
+            'algorithm' => 'sha256_canonical_json',
+            'hash_column' => 'input_hash',
+            'nullable' => false,
+            'source_column' => 'input_json',
+        ];
+        $result = [
+            'algorithm' => 'sha256_canonical_json',
+            'dependencies' => [[
+                'path' => ['source_hash'],
+                'source_hash_column' => 'input_hash',
+            ]],
+            'hash_column' => 'result_hash',
+            'nullable' => false,
+            'source_column' => 'result_json',
+        ];
+        $columns = ['input_json', 'input_hash', 'result_json', 'result_hash'];
+
+        foreach (
+            [
+                [
+                    $input,
+                    [...$result, 'dependencies' => []],
+                ],
+                [
+                    $input,
+                    [...$result, 'dependencies' => [[
+                        'path' => ['source_hash'],
+                        'source_hash_column' => 'missing_hash',
+                    ]]],
+                ],
+                [
+                    $input,
+                    [...$result, 'dependencies' => [[
+                        'path' => ['source_hash'],
+                        'source_hash_column' => 'result_hash',
+                    ]]],
+                ],
+                [
+                    [...$input, 'dependencies' => [[
+                        'path' => ['source_hash'],
+                        'source_hash_column' => 'result_hash',
+                    ]]],
+                    $result,
+                ],
+            ] as $metadata
+        ) {
+            try {
+                CompanyBackupDerivedHashSet::fromArray(
+                    $metadata,
+                    'table:synthetic_snapshots',
+                    $columns,
+                );
+                self::fail('Závislosti odvozených hashů musí tvořit platný DAG.');
             } catch (CompanyBackupDataSourceException $e) {
                 self::assertSame('data_derived_hash_metadata_invalid', $e->errorCode);
             }

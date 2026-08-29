@@ -875,6 +875,10 @@ final class TenantDataRegistryFactory
      *   data_columns:list<string>,
      *   derived_hashes?:list<array{
      *     algorithm:string,
+     *     dependencies?:list<array{
+     *       path:list<string>,
+     *       source_hash_column:string
+     *     }>,
      *     hash_column:string,
      *     nullable:bool,
      *     source_column:string
