@@ -106,7 +106,14 @@ final readonly class CompanyBackupEmbeddedReference
             || !TenantDataDefinition::isValidKey($target)
             || count($targetColumns) !== 1
             || $mapping === null
-            || $mapping === CompanyBackupReferenceMapping::CredentialDecision
+            || in_array(
+                $mapping,
+                [
+                    CompanyBackupReferenceMapping::CredentialDecision,
+                    CompanyBackupReferenceMapping::TenantReferenceKey,
+                ],
+                true,
+            )
             || !is_bool($nullable)
             || !is_array($fallbacks)
             || !array_is_list($fallbacks)

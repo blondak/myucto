@@ -119,6 +119,7 @@ final readonly class CompanyBackupReferenceSet
                 [
                     CompanyBackupReferenceMapping::TenantId,
                     CompanyBackupReferenceMapping::TenantIdOrZero,
+                    CompanyBackupReferenceMapping::TenantReferenceKey,
                     CompanyBackupReferenceMapping::TenantNaturalKey,
                 ],
                 true,
@@ -198,6 +199,10 @@ final readonly class CompanyBackupReferenceSet
             }
             $primaryKey = $this->targetPrimaryKey($target, $reference);
             $naturalKey = $this->targetNaturalKey($target);
+            $referenceKeys = $reference->mapping
+                === CompanyBackupReferenceMapping::TenantReferenceKey
+                ? $this->targetReferenceKeys($target, $reference)
+                : [];
             $tenantScopedPrimaryKey = $reference->mapping
                 === CompanyBackupReferenceMapping::TenantId
                 && $reference->columns[0] === 'supplier_id'
@@ -212,6 +217,11 @@ final readonly class CompanyBackupReferenceSet
                 CompanyBackupReferenceMapping::Actor,
                 CompanyBackupReferenceMapping::CredentialDecision =>
                     $reference->targetColumns === $primaryKey,
+                CompanyBackupReferenceMapping::TenantReferenceKey => in_array(
+                    $reference->targetColumns,
+                    $referenceKeys,
+                    true,
+                ),
             };
             if (!$targetsExpectedKey) {
                 throw $this->targetError($reference);
@@ -220,6 +230,7 @@ final readonly class CompanyBackupReferenceSet
             $valid = match ($reference->mapping) {
                 CompanyBackupReferenceMapping::TenantId,
                 CompanyBackupReferenceMapping::TenantIdOrZero,
+                CompanyBackupReferenceMapping::TenantReferenceKey,
                 CompanyBackupReferenceMapping::TenantNaturalKey => in_array(
                     $target->policy,
                     [
@@ -341,5 +352,58 @@ final readonly class CompanyBackupReferenceSet
             $result[] = $column;
         }
         return $result;
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    private function targetReferenceKeys(
+        TenantDataDefinition $target,
+        CompanyBackupReference $reference,
+    ): array {
+        $value = $target->details['reference_keys'] ?? null;
+        if (!is_array($value) || !array_is_list($value) || $value === []) {
+            throw $this->targetError($reference);
+        }
+        $keys = [];
+        $signatures = [];
+        foreach ($value as $item) {
+            if (!is_array($item) || !array_is_list($item) || count($item) < 2) {
+                throw $this->targetError($reference);
+            }
+            $key = [];
+            $columns = [];
+            foreach ($item as $column) {
+                if (!is_string($column)
+                    || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $column) !== 1
+                    || isset($columns[$column])
+                ) {
+                    throw $this->targetError($reference);
+                }
+                $columns[$column] = true;
+                $key[] = $column;
+            }
+            if ($key[0] !== 'supplier_id') {
+                throw $this->targetError($reference);
+            }
+            $signature = implode(',', $key);
+            if (isset($signatures[$signature])) {
+                throw $this->targetError($reference);
+            }
+            $signatures[$signature] = true;
+            $keys[] = $key;
+        }
+        $ordered = $keys;
+        usort(
+            $ordered,
+            static fn (array $left, array $right): int => strcmp(
+                implode(',', $left),
+                implode(',', $right),
+            ),
+        );
+        if ($ordered !== $keys) {
+            throw $this->targetError($reference);
+        }
+        return $keys;
     }
 }

@@ -393,6 +393,72 @@ final class CompanyBackupReferenceSetTest extends TestCase
         );
     }
 
+    public function testAcceptsExplicitTenantReferenceKeyForeignKey(): void
+    {
+        $reference = [
+            'columns' => ['supplier_id', 'revision_id', 'employee_id'],
+            'target' => 'table:payroll_run_persons',
+            'target_columns' => ['supplier_id', 'revision_id', 'employee_id'],
+            'mapping' => CompanyBackupReferenceMapping::TenantReferenceKey->value,
+            'constraint' => CompanyBackupReferenceConstraint::Required->value,
+            'nullable_columns' => [],
+            'fallbacks' => [],
+        ];
+        $references = CompanyBackupReferenceSet::fromArray(
+            [$reference, $this->supplierReference()],
+            'table:payroll_statutory_person_results',
+        );
+        $registry = new TenantDataRegistry(1, [
+            $this->definition(
+                'payroll_run_persons',
+                TenantDataPolicy::TenantOwned,
+                ['reference_keys' => [[
+                    'supplier_id',
+                    'revision_id',
+                    'employee_id',
+                ]]],
+            ),
+            $this->definition('supplier', TenantDataPolicy::TenantRoot),
+        ]);
+
+        $references->assertProjectionColumns([
+            'id',
+            'supplier_id',
+            'revision_id',
+            'employee_id',
+        ]);
+        $references->assertRegistryTargets($registry);
+        $references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            [],
+            [
+                new CompanyBackupForeignKey(
+                    ['supplier_id', 'revision_id', 'employee_id'],
+                    'payroll_run_persons',
+                    ['supplier_id', 'revision_id', 'employee_id'],
+                ),
+                new CompanyBackupForeignKey(['supplier_id'], 'supplier', ['id']),
+            ],
+        ));
+        self::assertSame(
+            CompanyBackupReferenceMapping::TenantReferenceKey,
+            $references->references[0]->mapping,
+        );
+
+        try {
+            $references->assertRegistryTargets(new TenantDataRegistry(1, [
+                $this->definition(
+                    'payroll_run_persons',
+                    TenantDataPolicy::TenantOwned,
+                ),
+                $this->definition('supplier', TenantDataPolicy::TenantRoot),
+            ]));
+            self::fail('Složený FK musí mířit na explicitní cílový reference key.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_target_invalid', $e->errorCode);
+            self::assertSame('supplier_id', $e->column);
+        }
+    }
+
     public function testAcceptsGlobalIdResolvedThroughTargetNaturalKey(): void
     {
         $references = CompanyBackupReferenceSet::fromArray(
