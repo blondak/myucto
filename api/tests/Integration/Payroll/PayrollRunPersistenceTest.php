@@ -1156,6 +1156,62 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(1, (int) $row['is_active']);
     }
 
+    public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET weekly_hours = 37.50,
+                    leave_entitlement_weeks_override = 5,
+                    created_by = ?
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([
+            $this->actors[0],
+            $this->supplierId,
+            $this->employmentId,
+        ]);
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_employment_terms');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        $termId = (int) $this->scalar(
+            'SELECT id
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?',
+            [$this->supplierId, $this->employmentId],
+        );
+        self::assertSame($termId, (int) $row['id']);
+        self::assertSame($this->employmentId, (int) $row['employment_id']);
+        self::assertGreaterThan(0, (int) $row['office_id']);
+        self::assertSame('2026-01-01', $row['effective_from']);
+        self::assertNull($row['effective_to']);
+        self::assertSame('37.50', $row['weekly_hours']);
+        self::assertSame(5, (int) $row['leave_entitlement_weeks_override']);
+        self::assertSame('automatic', $row['social_insurance_participation']);
+        self::assertSame('ordinary', $row['social_employer_rate_category']);
+        self::assertSame($this->actors[0], (int) $row['created_by']);
+        self::assertSame(1, (int) $row['is_primary']);
+    }
+
     public function testCompanyBackupStreamsEmploymentWithoutGeneratedOwnerKeys(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
