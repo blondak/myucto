@@ -1112,6 +1112,50 @@ final class PayrollRunPersistenceTest extends TestCase
         ]);
     }
 
+    public function testCompanyBackupStreamsComponentDefinitionWithAccountCodes(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_component_definitions',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        $componentId = (int) $this->scalar(
+            'SELECT component_id
+               FROM payroll_inputs
+              WHERE supplier_id = ? AND id = ?',
+            [$this->supplierId, $this->inputId],
+        );
+        self::assertSame($componentId, (int) $row['id']);
+        self::assertSame('BASE', $row['code']);
+        self::assertSame('Synthetic BASE', $row['name']);
+        self::assertSame('521', $row['accounting_debit_code']);
+        self::assertSame('331', $row['accounting_credit_code']);
+        self::assertSame('2026-01-01', $row['valid_from']);
+        self::assertNull($row['valid_to']);
+        self::assertSame(1, (int) $row['is_active']);
+    }
+
     public function testCompanyBackupStreamsEmploymentWithoutGeneratedOwnerKeys(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
