@@ -1112,6 +1112,50 @@ final class PayrollRunPersistenceTest extends TestCase
         ]);
     }
 
+    public function testCompanyBackupStreamsEmployeeWithSafeRestoreState(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employees
+                SET monthly_gross = 75000,
+                    auto_post = 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employeeId]);
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_employees');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($this->employeeId, (int) $row['id']);
+        self::assertSame('Synthetic Payroll Run Person', $row['full_name']);
+        self::assertArrayHasKey('birth_number', $row);
+        self::assertSame(75_000, (int) $row['monthly_gross']);
+        self::assertSame(1, (int) $row['auto_post']);
+
+        $restored = $projection->restoreOverrides->apply($row);
+        self::assertSame(0, $restored['auto_post']);
+        self::assertSame(1, (int) $restored['is_active']);
+        self::assertSame(75_000, (int) $restored['monthly_gross']);
+    }
+
     public function testCompanyBackupStreamsEmployerPolicyInSafeRestoreState(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
