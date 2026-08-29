@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\CanonicalJson;
 use MyInvoice\Service\Backup\Company\CompanyBackupDerivedHashSet;
+use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedHashReference;
+use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedHashReferenceSet;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedHashSet;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionHashContract;
 use PHPUnit\Framework\TestCase;
@@ -16,6 +18,11 @@ final class CompanyBackupPayrollRunRevisionHashContractTest extends TestCase
     {
         $embedded = CompanyBackupEmbeddedHashSet::fromArray(
             CompanyBackupPayrollRunRevisionHashContract::embeddedHashes(),
+            'table:payroll_run_revisions',
+            ['input_snapshot_json'],
+        );
+        $hashReferences = CompanyBackupEmbeddedHashReferenceSet::fromArray(
+            CompanyBackupPayrollRunRevisionHashContract::embeddedHashReferences(),
             'table:payroll_run_revisions',
             ['input_snapshot_json'],
         );
@@ -92,12 +99,13 @@ final class CompanyBackupPayrollRunRevisionHashContractTest extends TestCase
             'result_snapshot_hash' => hash('sha256', $result),
         ];
 
+        $hashReferences->assertSourceRow($row);
         $embedded->assertSourceRow($row);
         $restored = $derived->transform(
             $row,
             fn (array $outer): array => $embedded->transform(
                 $outer,
-                static function (array $changed): array {
+                static function (array $changed) use ($hashReferences): array {
                     $snapshot = json_decode(
                         (string) $changed['input_snapshot_json'],
                         true,
@@ -124,10 +132,21 @@ final class CompanyBackupPayrollRunRevisionHashContractTest extends TestCase
                     $state['approved_results'][0]['id'] = 151;
                     $state['approved_results'][0]['revision_id'] = 129;
                     $state['approved_results'][0]['replaces_entry_id'] = 150;
-                    $state['approved_results'][0]['source_result_hash'] =
-                        str_repeat('d', 64);
                     $changed['input_snapshot_json'] = CanonicalJson::encode($snapshot);
-                    return $changed;
+                    return $hashReferences->remap(
+                        $changed,
+                        static function (
+                            CompanyBackupEmbeddedHashReference $reference,
+                            string $hash,
+                        ): string {
+                            self::assertSame(
+                                'table:payroll_statutory_person_results',
+                                $reference->target,
+                            );
+                            self::assertSame(str_repeat('c', 64), $hash);
+                            return str_repeat('d', 64);
+                        },
+                    );
                 },
             ),
         );
@@ -163,6 +182,10 @@ final class CompanyBackupPayrollRunRevisionHashContractTest extends TestCase
         $state = $restoredInput['people'][0]['statutory_accumulators']
             ['income_tax']['state'];
         self::assertSame(
+            str_repeat('d', 64),
+            $state['approved_results'][0]['source_result_hash'],
+        );
+        self::assertSame(
             $this->openingHash($state),
             $state['opening_balance']['record_hash'],
         );
@@ -193,6 +216,7 @@ final class CompanyBackupPayrollRunRevisionHashContractTest extends TestCase
             hash('sha256', (string) $restored['result_snapshot_json']),
             $restored['result_snapshot_hash'],
         );
+        $hashReferences->assertSourceRow($restored);
         $embedded->assertSourceRow($restored);
     }
 

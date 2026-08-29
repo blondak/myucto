@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedHashReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
@@ -192,6 +193,106 @@ final class CompanyBackupTableProjectionTest extends TestCase
                 \MyInvoice\Service\Backup\CanonicalJson::encode($input['component']),
             ),
             $input['component_snapshot_hash'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $restored['payload_json']),
+            $restored['payload_hash'],
+        );
+    }
+
+    public function testRemapsCrossRowHashBeforeNestedAndOuterSealAtomically(): void
+    {
+        $path = ['state', 'approved_results', '*'];
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            dataColumns: ['id', 'supplier_id', 'payload_json', 'payload_hash'],
+            derivedHashes: [[
+                'algorithm' => 'sha256_canonical_json',
+                'hash_column' => 'payload_hash',
+                'nullable' => false,
+                'source_column' => 'payload_json',
+            ]],
+            embeddedHashes: [[
+                'algorithm' => 'sha256_canonical_json',
+                'column' => 'payload_json',
+                'dependencies' => [],
+                'hash_path' => [...$path, 'record_hash'],
+                'name' => 'approved_record',
+                'nullable' => false,
+                'omit_paths' => [['record_hash']],
+                'source_path' => $path,
+            ]],
+            embeddedHashReferences: [[
+                'column' => 'payload_json',
+                'nullable' => false,
+                'path' => [...$path, 'source_result_hash'],
+                'target' => 'table:payroll_statutory_person_results',
+                'target_hash_column' => 'result_snapshot_hash',
+            ]],
+        ));
+        $sourceHash = str_repeat('a', 64);
+        $targetHash = str_repeat('b', 64);
+        $record = [
+            'amount_minor' => 4200,
+            'record_hash' => '',
+            'source_result_hash' => $sourceHash,
+        ];
+        $recordPayload = $record;
+        unset($recordPayload['record_hash']);
+        $record['record_hash'] = hash(
+            'sha256',
+            \MyInvoice\Service\Backup\CanonicalJson::encode($recordPayload),
+        );
+        $json = \MyInvoice\Service\Backup\CanonicalJson::encode([
+            'state' => ['approved_results' => [$record]],
+        ]);
+        $row = [
+            'id' => 3,
+            'supplier_id' => 7,
+            'payload_json' => $json,
+            'payload_hash' => hash('sha256', $json),
+        ];
+
+        try {
+            $projection->remapEmbeddedReferences(
+                $row,
+                static fn (): never => throw new \LogicException('Bez ID referencí.'),
+            );
+            self::fail('Projekce s hashovou referencí musí vyžadovat hashovou mapu.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame(
+                'data_embedded_hash_reference_mapper_missing',
+                $e->errorCode,
+            );
+        }
+
+        $restored = $projection->remapEmbeddedReferences(
+            $row,
+            static fn (): never => throw new \LogicException('Bez ID referencí.'),
+            static function (
+                CompanyBackupEmbeddedHashReference $reference,
+                string $hash,
+            ) use ($sourceHash, $targetHash): string {
+                self::assertSame('result_snapshot_hash', $reference->targetHashColumn);
+                self::assertSame($sourceHash, $hash);
+                return $targetHash;
+            },
+        );
+
+        $payload = json_decode(
+            (string) $restored['payload_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $record = $payload['state']['approved_results'][0];
+        self::assertSame($targetHash, $record['source_result_hash']);
+        $recordHash = $record['record_hash'];
+        unset($record['record_hash']);
+        self::assertSame(
+            hash(
+                'sha256',
+                \MyInvoice\Service\Backup\CanonicalJson::encode($record),
+            ),
+            $recordHash,
         );
         self::assertSame(
             hash('sha256', (string) $restored['payload_json']),
@@ -565,6 +666,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param array<string,string> $columnCodecs
      * @param list<array<string,mixed>> $derivedHashes
      * @param list<array<string,mixed>> $embeddedHashes
+     * @param list<array<string,mixed>> $embeddedHashReferences
      * @param list<array<string,mixed>> $embeddedReferences
      */
     private function definition(
@@ -578,6 +680,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
         array $columnCodecs = [],
         array $derivedHashes = [],
         array $embeddedHashes = [],
+        array $embeddedHashReferences = [],
         array $embeddedReferences = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
@@ -602,6 +705,9 @@ final class CompanyBackupTableProjectionTest extends TestCase
                     ]),
                     ...($embeddedHashes === [] ? [] : [
                         'embedded_hashes' => $embeddedHashes,
+                    ]),
+                    ...($embeddedHashReferences === [] ? [] : [
+                        'embedded_hash_references' => $embeddedHashReferences,
                     ]),
                     'embedded_references' => $embeddedReferences,
                     'generated_columns' => $generatedColumns,

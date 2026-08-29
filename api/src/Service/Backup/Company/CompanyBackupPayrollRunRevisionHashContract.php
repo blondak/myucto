@@ -92,6 +92,15 @@ final class CompanyBackupPayrollRunRevisionHashContract
     }
 
     /** @return list<array<string,mixed>> */
+    public static function embeddedHashReferences(): array
+    {
+        return [
+            self::accumulatorSourceHashReference('income_tax'),
+            self::accumulatorSourceHashReference('social_insurance'),
+        ];
+    }
+
+    /** @return list<array<string,mixed>> */
     private static function accumulatorHashes(string $kind): array
     {
         $prefix = 'input_' . $kind;
@@ -182,6 +191,21 @@ final class CompanyBackupPayrollRunRevisionHashContract
                 'omit_paths' => [['snapshot_hash']],
                 'source_path' => $state,
             ],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private static function accumulatorSourceHashReference(string $kind): array
+    {
+        return [
+            'column' => 'input_snapshot_json',
+            'nullable' => true,
+            'path' => [
+                'people', '*', 'statutory_accumulators', $kind, 'state',
+                'approved_results', '*', 'source_result_hash',
+            ],
+            'target' => 'table:payroll_statutory_person_results',
+            'target_hash_column' => 'result_snapshot_hash',
         ];
     }
 

@@ -39,6 +39,8 @@ final readonly class CompanyBackupTableProjection
 
     public CompanyBackupEmbeddedReferenceSet $embeddedReferences;
 
+    public CompanyBackupEmbeddedHashReferenceSet $embeddedHashReferences;
+
     public CompanyBackupEmbeddedHashSet $embeddedHashes;
 
     public CompanyBackupDerivedHashSet $derivedHashes;
@@ -71,6 +73,7 @@ final readonly class CompanyBackupTableProjection
         array $columnCodecs,
         CompanyBackupReferenceSet $references,
         CompanyBackupEmbeddedReferenceSet $embeddedReferences,
+        CompanyBackupEmbeddedHashReferenceSet $embeddedHashReferences,
         CompanyBackupEmbeddedHashSet $embeddedHashes,
         CompanyBackupDerivedHashSet $derivedHashes,
         CompanyBackupPolymorphicReferenceSet $polymorphicReferences,
@@ -86,6 +89,7 @@ final readonly class CompanyBackupTableProjection
         $this->columnCodecs = $columnCodecs;
         $this->references = $references;
         $this->embeddedReferences = $embeddedReferences;
+        $this->embeddedHashReferences = $embeddedHashReferences;
         $this->embeddedHashes = $embeddedHashes;
         $this->derivedHashes = $derivedHashes;
         $this->polymorphicReferences = $polymorphicReferences;
@@ -148,6 +152,7 @@ final readonly class CompanyBackupTableProjection
             ...$baseMetadataKeys,
             'column_codecs',
             'derived_hashes',
+            'embedded_hash_references',
             'embedded_hashes',
             'polymorphic_references',
             'preserved_identifiers',
@@ -214,6 +219,11 @@ final readonly class CompanyBackupTableProjection
         );
         $embeddedReferences = CompanyBackupEmbeddedReferenceSet::fromArray(
             $metadata['embedded_references'],
+            $registryKey,
+            $dataColumns,
+        );
+        $embeddedHashReferences = CompanyBackupEmbeddedHashReferenceSet::fromArray(
+            $metadata['embedded_hash_references'] ?? [],
             $registryKey,
             $dataColumns,
         );
@@ -293,6 +303,7 @@ final readonly class CompanyBackupTableProjection
             $columnCodecs,
             $references,
             $embeddedReferences,
+            $embeddedHashReferences,
             $embeddedHashes,
             $derivedHashes,
             $polymorphicReferences,
@@ -414,6 +425,7 @@ final readonly class CompanyBackupTableProjection
     /** @param array<string,mixed> $row */
     public function assertExportRow(array $row): void
     {
+        $this->embeddedHashReferences->assertSourceRow($row);
         $this->embeddedHashes->assertSourceRow($row);
         $this->derivedHashes->assertSourceRow($row);
     }
@@ -423,17 +435,34 @@ final readonly class CompanyBackupTableProjection
      *
      * @param array<string,mixed> $row
      * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|null) $mapper
+     * @param null|callable(CompanyBackupEmbeddedHashReference,string):mixed $hashMapper
      * @return array<string,mixed>
      */
-    public function remapEmbeddedReferences(array $row, callable $mapper): array
-    {
+    public function remapEmbeddedReferences(
+        array $row,
+        callable $mapper,
+        ?callable $hashMapper = null,
+    ): array {
+        if ($hashMapper === null && $this->embeddedHashReferences->references !== []) {
+            throw new CompanyBackupDataSourceException(
+                'data_embedded_hash_reference_mapper_missing',
+                $this->registryKey,
+                $this->embeddedHashReferences->references[0]->column,
+            );
+        }
+        $resolvedHashMapper = $hashMapper ?? static fn (): never => throw new \LogicException(
+            'Prázdná sada hashových referencí nesmí vyžádat mapování.',
+        );
         return $this->derivedHashes->transform(
             $row,
             fn (array $source): array =>
                 $this->embeddedHashes->transform(
                     $source,
                     fn (array $payload): array =>
-                        $this->embeddedReferences->remap($payload, $mapper),
+                        $this->embeddedHashReferences->remap(
+                            $this->embeddedReferences->remap($payload, $mapper),
+                            $resolvedHashMapper,
+                        ),
                 ),
         );
     }
