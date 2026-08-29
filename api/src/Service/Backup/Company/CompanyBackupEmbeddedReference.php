@@ -15,18 +15,24 @@ final readonly class CompanyBackupEmbeddedReference
     public array $path;
 
     /** @var list<string> */
+    public array $documentPath;
+
+    /** @var list<string> */
     public array $targetColumns;
 
     /** @var list<string> */
     public array $fallbacks;
 
     /**
+     * @param list<string> $documentPath
      * @param list<string> $path
      * @param list<string> $targetColumns
      * @param list<string> $fallbacks
      */
     private function __construct(
         public string $column,
+        array $documentPath,
+        public bool $documentNullable,
         array $path,
         public string $target,
         array $targetColumns,
@@ -37,6 +43,7 @@ final readonly class CompanyBackupEmbeddedReference
         public ?string $valuePrefix,
         public ?string $valueSuffixSeparator,
     ) {
+        $this->documentPath = $documentPath;
         $this->path = $path;
         $this->targetColumns = $targetColumns;
         $this->fallbacks = $fallbacks;
@@ -59,19 +66,26 @@ final readonly class CompanyBackupEmbeddedReference
             'target',
             'target_columns',
         ];
-        $prefixedKeys = [...$baseKeys, 'value_prefix'];
-        $suffixedKeys = [
-            ...$prefixedKeys,
+        $allowedKeys = [
+            ...$baseKeys,
+            'document_nullable',
+            'document_path',
+            'value_prefix',
             'value_suffix_separator',
         ];
-        if ($keys !== $baseKeys
-            && $keys !== $prefixedKeys
-            && $keys !== $suffixedKeys
+        if (array_diff($baseKeys, $keys) !== []
+            || array_diff($keys, $allowedKeys) !== []
         ) {
             throw self::invalid($registryKey);
         }
 
         $column = $value['column'];
+        $hasDocumentPath = array_key_exists('document_path', $value);
+        $hasDocumentNullable = array_key_exists('document_nullable', $value);
+        $documentPath = $hasDocumentPath
+            ? self::path($value['document_path'], $registryKey)
+            : [];
+        $documentNullable = $value['document_nullable'] ?? false;
         $path = self::path($value['path'], $registryKey);
         $target = $value['target'];
         $targetColumns = self::identifierList($value['target_columns'], $registryKey);
@@ -83,7 +97,9 @@ final readonly class CompanyBackupEmbeddedReference
         $fallbacks = $value['fallbacks'];
         $valuePrefix = $value['value_prefix'] ?? null;
         $valueSuffixSeparator = $value['value_suffix_separator'] ?? null;
-        if (!is_string($column)
+        if ($hasDocumentPath !== $hasDocumentNullable
+            || !is_bool($documentNullable)
+            || !is_string($column)
             || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $column) !== 1
             || !is_string($target)
             || !str_starts_with($target, 'table:')
@@ -149,6 +165,8 @@ final readonly class CompanyBackupEmbeddedReference
 
         return new self(
             $column,
+            $documentPath,
+            $documentNullable,
             $path,
             $target,
             $targetColumns,
@@ -168,9 +186,11 @@ final readonly class CompanyBackupEmbeddedReference
 
     public function signature(): string
     {
-        $signature = $this->column
-            . ':'
-            . implode('.', $this->path)
+        $signature = $this->column . ':';
+        if ($this->documentPath !== []) {
+            $signature .= implode('.', $this->documentPath) . '::';
+        }
+        $signature .= implode('.', $this->path)
             . '->'
             . $this->targetTable()
             . ':'

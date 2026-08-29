@@ -40,6 +40,8 @@ final readonly class CompanyBackupEmbeddedReferenceSet
         $signatures = [];
         /** @var array<string,list<CompanyBackupEmbeddedReference>> $paths */
         $paths = [];
+        /** @var array<string,bool> $documents */
+        $documents = [];
         foreach ($metadata as $item) {
             $reference = CompanyBackupEmbeddedReference::fromArray($item, $registryKey);
             if (!isset($exported[$reference->column])) {
@@ -50,7 +52,20 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 );
             }
             $signature = $reference->signature();
-            $path = $reference->column . ':' . implode('.', $reference->path);
+            $document = $reference->column
+                . ':'
+                . implode('.', $reference->documentPath);
+            if (isset($documents[$document])
+                && $documents[$document] !== $reference->documentNullable
+            ) {
+                throw new CompanyBackupDataSourceException(
+                    'data_embedded_reference_metadata_invalid',
+                    $registryKey,
+                    $reference->column,
+                );
+            }
+            $documents[$document] = $reference->documentNullable;
+            $path = $document . '::' . implode('.', $reference->path);
             if (isset($signatures[$signature])) {
                 throw new CompanyBackupDataSourceException(
                     'data_embedded_reference_duplicate',
@@ -156,13 +171,25 @@ final readonly class CompanyBackupEmbeddedReferenceSet
      */
     public function remap(array $row, callable $mapper): array
     {
-        /** @var array<string,array<string,list<CompanyBackupEmbeddedReference>>> $byColumn */
+        /**
+         * @var array<string,array<string,array{
+         *   path:list<string>,
+         *   nullable:bool,
+         *   groups:array<string,list<CompanyBackupEmbeddedReference>>
+         * }>> $byColumn
+         */
         $byColumn = [];
         foreach ($this->references as $reference) {
+            $document = implode('.', $reference->documentPath);
             $path = implode('.', $reference->path);
-            $byColumn[$reference->column][$path][] = $reference;
+            $byColumn[$reference->column][$document] ??= [
+                'path' => $reference->documentPath,
+                'nullable' => $reference->documentNullable,
+                'groups' => [],
+            ];
+            $byColumn[$reference->column][$document]['groups'][$path][] = $reference;
         }
-        foreach ($byColumn as $column => $groups) {
+        foreach ($byColumn as $column => $documents) {
             if (!array_key_exists($column, $row)) {
                 throw $this->valueError($column);
             }
@@ -183,9 +210,20 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             if (!is_array($value)) {
                 throw $this->valueError($column);
             }
-            $root =& $value;
-            foreach ($groups as $references) {
-                $this->remapPath($value, $root, $references, 0, [], $mapper);
+            foreach ($documents as $document) {
+                if ($document['path'] === []) {
+                    $this->remapGroups($value, $document['groups'], $mapper);
+                    continue;
+                }
+                $this->remapDocumentPath(
+                    $value,
+                    $document['path'],
+                    0,
+                    $document['nullable'],
+                    $document['groups'],
+                    $column,
+                    $mapper,
+                );
             }
             if ($encoded) {
                 try {
@@ -199,6 +237,99 @@ final readonly class CompanyBackupEmbeddedReferenceSet
         }
 
         return $row;
+    }
+
+    /**
+     * @param array<mixed> $value
+     * @param array<string,list<CompanyBackupEmbeddedReference>> $groups
+     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|null) $mapper
+     */
+    private function remapGroups(
+        array &$value,
+        array $groups,
+        callable $mapper,
+    ): void {
+        $root =& $value;
+        foreach ($groups as $references) {
+            $this->remapPath($value, $root, $references, 0, [], $mapper);
+        }
+    }
+
+    /**
+     * @param list<string> $documentPath
+     * @param array<string,list<CompanyBackupEmbeddedReference>> $groups
+     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|null) $mapper
+     */
+    private function remapDocumentPath(
+        mixed &$value,
+        array $documentPath,
+        int $index,
+        bool $nullable,
+        array $groups,
+        string $column,
+        callable $mapper,
+    ): void {
+        if ($value === null && $nullable) {
+            return;
+        }
+        if ($index === count($documentPath)) {
+            if (!is_string($value)) {
+                throw $this->valueError($column);
+            }
+            try {
+                $decoded = json_decode($value, true, flags: JSON_THROW_ON_ERROR);
+                if (!is_array($decoded)) {
+                    throw new \UnexpectedValueException(
+                        'Vnořený JSON dokument musí být objekt nebo seznam.',
+                    );
+                }
+                $canonical = CanonicalJson::encode($decoded);
+                if (!hash_equals($canonical, $value)) {
+                    throw new \UnexpectedValueException(
+                        'Vnořený JSON dokument není kanonický.',
+                    );
+                }
+                $this->remapGroups($decoded, $groups, $mapper);
+                $value = CanonicalJson::encode($decoded);
+                return;
+            } catch (CompanyBackupDataSourceException $e) {
+                throw $e;
+            } catch (\Throwable $e) {
+                throw $this->valueError($column, $e);
+            }
+        }
+        if (!is_array($value)) {
+            throw $this->valueError($column);
+        }
+
+        $segment = $documentPath[$index];
+        if ($segment === '*') {
+            foreach ($value as &$item) {
+                $this->remapDocumentPath(
+                    $item,
+                    $documentPath,
+                    $index + 1,
+                    $nullable,
+                    $groups,
+                    $column,
+                    $mapper,
+                );
+            }
+            unset($item);
+            return;
+        }
+        if (!array_key_exists($segment, $value)) {
+            return;
+        }
+        $this->remapDocumentPath(
+            $value[$segment],
+            $documentPath,
+            $index + 1,
+            $nullable,
+            $groups,
+            $column,
+            $mapper,
+        );
     }
 
     /**

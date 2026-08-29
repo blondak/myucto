@@ -202,6 +202,147 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
         );
     }
 
+    public function testRemapsReferencesInsideCanonicalNestedJsonDocument(): void
+    {
+        $document = [
+            'document_nullable' => true,
+            'document_path' => [
+                'people',
+                '*',
+                'work_summary',
+                'source_snapshot_json',
+            ],
+        ];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [
+                [
+                    ...$this->journalEntryReference(),
+                    ...$document,
+                    'path' => ['employment', 'id'],
+                    'target' => 'table:payroll_employments',
+                ],
+                [
+                    ...$this->journalEntryReference(),
+                    ...$document,
+                    'path' => ['supplier_id'],
+                    'target' => 'table:supplier',
+                ],
+            ],
+            'table:payroll_run_revisions',
+            ['payload'],
+        );
+        $references->assertRegistryTargets(new TenantDataRegistry(1, [
+            $this->definition('payroll_employments', TenantDataPolicy::TenantOwned),
+            $this->definition('supplier', TenantDataPolicy::TenantRoot),
+        ]));
+        $nested = \MyInvoice\Service\Backup\CanonicalJson::encode([
+            'employment' => ['id' => 17],
+            'supplier_id' => 7,
+        ]);
+        $payload = \MyInvoice\Service\Backup\CanonicalJson::encode([
+            'people' => [
+                ['work_summary' => ['source_snapshot_json' => $nested]],
+                ['work_summary' => ['source_snapshot_json' => null]],
+            ],
+        ]);
+
+        $restored = $references->remap(
+            ['payload' => $payload],
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $sourceValue,
+            ): int => (int) $sourceValue + match ($reference->target) {
+                'table:payroll_employments' => 100,
+                'table:supplier' => 200,
+                default => throw new \LogicException('Neočekávaný cíl reference.'),
+            },
+        );
+
+        $outer = json_decode(
+            (string) $restored['payload'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $inner = json_decode(
+            $outer['people'][0]['work_summary']['source_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(['employment' => ['id' => 117], 'supplier_id' => 207], $inner);
+        self::assertNull($outer['people'][1]['work_summary']['source_snapshot_json']);
+        self::assertSame(
+            'payload:people.*.work_summary.source_snapshot_json'
+                . '::employment.id->payroll_employments:id',
+            $references->references[0]->signature(),
+        );
+    }
+
+    public function testRejectsMalformedOrNonCanonicalNestedJsonDocument(): void
+    {
+        $metadata = [
+            ...$this->journalEntryReference(),
+            'document_nullable' => false,
+            'document_path' => ['source_snapshot_json'],
+            'path' => ['employment', 'id'],
+            'target' => 'table:payroll_employments',
+        ];
+        $references = CompanyBackupEmbeddedReferenceSet::fromArray(
+            [$metadata],
+            'table:payroll_run_revisions',
+            ['payload'],
+        );
+
+        foreach (
+            [
+                null,
+                '{',
+                '17',
+                '{"supplier_id":7,"employment":{"id":17}}',
+            ] as $document
+        ) {
+            try {
+                $references->remap(
+                    ['payload' => ['source_snapshot_json' => $document]],
+                    static function (): never {
+                        self::fail('Neplatný vnořený dokument nesmí dojít k mapperu.');
+                    },
+                );
+                self::fail('Poškozený vnořený dokument musí obnovu zastavit.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_embedded_reference_value_invalid', $e->errorCode);
+                self::assertSame('payload', $e->column);
+            }
+        }
+    }
+
+    public function testRejectsConflictingNestedDocumentNullability(): void
+    {
+        $first = [
+            ...$this->journalEntryReference(),
+            'document_nullable' => true,
+            'document_path' => ['source_snapshot_json'],
+            'path' => ['employment_id'],
+            'target' => 'table:payroll_employments',
+        ];
+        $second = [
+            ...$first,
+            'document_nullable' => false,
+            'path' => ['supplier_id'],
+            'target' => 'table:supplier',
+        ];
+
+        $this->expectExceptionObject(new CompanyBackupDataSourceException(
+            'data_embedded_reference_metadata_invalid',
+            'table:payroll_run_revisions',
+            'payload',
+        ));
+        CompanyBackupEmbeddedReferenceSet::fromArray(
+            [$first, $second],
+            'table:payroll_run_revisions',
+            ['payload'],
+        );
+    }
+
     public function testRejectsMalformedPrefixedIdentityBeforeMapping(): void
     {
         $metadata = [
@@ -529,6 +670,24 @@ final class CompanyBackupEmbeddedReferenceSetTest extends TestCase
             ],
         ], ['payload']];
         yield 'unknown field' => [[...$valid, 'comment' => 'unbound'], ['payload']];
+        yield 'document path without nullability' => [[
+            ...$valid,
+            'document_path' => ['source_json'],
+        ], ['payload']];
+        yield 'document nullability without path' => [[
+            ...$valid,
+            'document_nullable' => true,
+        ], ['payload']];
+        yield 'empty document path' => [[
+            ...$valid,
+            'document_nullable' => true,
+            'document_path' => [],
+        ], ['payload']];
+        yield 'invalid document path segment' => [[
+            ...$valid,
+            'document_nullable' => false,
+            'document_path' => ['source', '**'],
+        ], ['payload']];
         yield 'invalid value prefix' => [[...$valid, 'value_prefix' => 'Employee:'], ['payload']];
         yield 'suffix without prefix' => [[
             ...$valid,
