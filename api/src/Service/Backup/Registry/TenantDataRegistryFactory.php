@@ -15,6 +15,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
@@ -100,6 +101,7 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<string>> */
     private const COMPANY_BACKUP_NATURAL_KEYS = [
+        'payroll_employer_policies' => ['supplier_id', 'valid_from'],
         'payroll_offices' => ['supplier_id', 'code'],
     ];
 
@@ -1002,6 +1004,21 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'payroll_employer_policies') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollEmployerPoliciesProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollEmployerPoliciesProjection::references(),
+                    'restore_overrides' =>
+                        CompanyBackupPayrollEmployerPoliciesProjection::restoreOverrides(),
+                ],
+            ];
+        }
         if ($table === 'payroll_offices') {
             return [
                 'company_backup' => [

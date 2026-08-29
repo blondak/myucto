@@ -1112,6 +1112,47 @@ final class PayrollRunPersistenceTest extends TestCase
         ]);
     }
 
+    public function testCompanyBackupStreamsEmployerPolicyInSafeRestoreState(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_employer_policies');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($this->employerPolicyId, (int) $row['id']);
+        self::assertSame(1, (int) $row['automatic_calculation_enabled']);
+        self::assertSame(1, (int) $row['automatic_posting_enabled']);
+        self::assertSame(1, (int) $row['automatic_payments_enabled']);
+        self::assertSame($this->actors[0], (int) $row['created_by']);
+        self::assertSame($this->actors[0], (int) $row['updated_by']);
+
+        $restored = $projection->restoreOverrides->apply($row);
+        self::assertSame(0, $restored['automatic_calculation_enabled']);
+        self::assertSame(0, $restored['automatic_posting_enabled']);
+        self::assertSame(0, $restored['automatic_payments_enabled']);
+        self::assertSame('disabled', $restored['delivery_channel']);
+        self::assertNull($restored['delivery_verified_on']);
+    }
+
     public function testCompanyBackupStreamsPayrollOffice(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
