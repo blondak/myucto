@@ -16,6 +16,7 @@ use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\Backup\Company\CompanyBackupEncodedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
@@ -35,6 +36,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\Payroll\Travel\BusinessTripMaterializer;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use MyInvoice\Tests\Support\JmhzSpecPackageFixtureTrait;
 use PDO;
@@ -1717,6 +1719,87 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(
             hash('sha256', (string) $restored['component_snapshot_json']),
             $restored['component_snapshot_hash'],
+        );
+    }
+
+    public function testCompanyBackupStreamsTravelInputWithSynchronizedIdentityAndSnapshot(): void
+    {
+        $trip = $this->approvedBusinessTrip();
+        $materializer = $this->container->get(BusinessTripMaterializer::class);
+        self::assertInstanceOf(BusinessTripMaterializer::class, $materializer);
+        $result = $materializer->materialize(
+            $this->supplierId,
+            $trip['trip_id'],
+            $this->actors[0],
+        );
+        self::assertSame('materialized', $result['status']);
+        self::assertSame(1, $result['created_count']);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_inputs');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $projection->encodedReferences->assertRegistryTargets($registry);
+        $projection->embeddedReferences->assertRegistryTargets($registry);
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        $travelRows = array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => $row['source_kind'] === 'travel',
+        ));
+        self::assertCount(1, $travelRows);
+        $row = $travelRows[0];
+        self::assertSame(
+            'travel:' . $trip['trip_id'] . ':exempt',
+            $row['external_id'],
+        );
+        self::assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/D',
+            (string) $row['source_snapshot_hash'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $row['source_snapshot_json']),
+            $row['source_snapshot_hash'],
+        );
+        $source = json_decode(
+            (string) $row['source_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame($trip['trip_id'], $source['business_trip_id']);
+        self::assertSame('exempt', $source['classification']);
+
+        $restored = $projection->remapPayloadReferences(
+            $row,
+            static fn (
+                CompanyBackupEncodedReference|CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ): int => $reference->target === 'table:payroll_business_trips'
+                ? (int) $value + 1_000
+                : throw new \LogicException(
+                    'Test zachytil neočekávanou referenci.',
+                ),
+        );
+        self::assertSame(
+            'travel:' . ($trip['trip_id'] + 1_000) . ':exempt',
+            $restored['external_id'],
+        );
+        $restoredSource = json_decode(
+            (string) $restored['source_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            $trip['trip_id'] + 1_000,
+            $restoredSource['business_trip_id'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $restored['source_snapshot_json']),
+            $restored['source_snapshot_hash'],
         );
     }
 

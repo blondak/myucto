@@ -92,10 +92,22 @@ final class CompanyBackupPayrollInputsProjection
         ];
     }
 
-    /** @return list<string> */
-    public static function preservedIdentifiers(): array
+    /** @return list<array<string,mixed>> */
+    public static function encodedReferences(): array
     {
-        return ['external_id'];
+        return [[
+            'column' => 'external_id',
+            'condition' => [
+                'column' => 'source_kind',
+                'equals' => 'travel',
+            ],
+            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+            'nullable' => false,
+            'target' => 'table:payroll_business_trips',
+            'target_columns' => ['id'],
+            'value_prefix' => 'travel:',
+            'value_suffix_separator' => ':',
+        ]];
     }
 
     /** @return list<array<string,mixed>> */

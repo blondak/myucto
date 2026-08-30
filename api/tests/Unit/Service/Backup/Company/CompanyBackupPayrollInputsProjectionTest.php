@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\CanonicalJson;
 use MyInvoice\Service\Backup\Company\CompanyBackupColumnCodec;
+use MyInvoice\Service\Backup\Company\CompanyBackupEncodedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupForeignKey;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
@@ -155,7 +156,17 @@ final class CompanyBackupPayrollInputsProjectionTest extends TestCase
 
         self::assertSame(self::DATA_COLUMNS, $projection->dataColumns);
         self::assertSame(['external_dedupe_key'], $projection->generatedColumns);
-        self::assertSame(['external_id'], $projection->preservedIdentifiers->columns);
+        self::assertSame([], $projection->preservedIdentifiers->columns);
+        self::assertSame(
+            [
+                'external_id->payroll_business_trips:id'
+                    . '?source_kind=travel@travel:~:',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->encodedReferences->references,
+            ),
+        );
         self::assertSame(
             CompanyBackupColumnCodec::BinaryHex,
             $projection->columnCodecs['component_snapshot_hash'] ?? null,
@@ -252,6 +263,51 @@ final class CompanyBackupPayrollInputsProjectionTest extends TestCase
         self::assertSame(
             hash('sha256', (string) $restored['component_snapshot_json']),
             $restored['component_snapshot_hash'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $restored['source_snapshot_json']),
+            $restored['source_snapshot_hash'],
+        );
+    }
+
+    public function testRemapsTravelIdentityInExternalIdAndSealedSnapshot(): void
+    {
+        $definition = TenantDataRegistryFactory::draftV1()->definition(
+            'table:payroll_inputs',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $source = CanonicalJson::encode([
+            'business_trip_id' => 17,
+            'classification' => 'exempt',
+        ]);
+
+        $restored = $projection->remapPayloadReferences(
+            [
+                'source_kind' => 'travel',
+                'external_id' => 'travel:17:exempt',
+                'component_snapshot_json' => null,
+                'component_snapshot_hash' => null,
+                'source_snapshot_json' => $source,
+                'source_snapshot_hash' => hash('sha256', $source),
+            ],
+            static fn (
+                CompanyBackupEncodedReference|CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ): int => $reference->target === 'table:payroll_business_trips'
+                ? (int) $value + 100
+                : throw new \LogicException(
+                    'Test zachytil neočekávanou referenci.',
+                ),
+        );
+        self::assertSame('travel:117:exempt', $restored['external_id']);
+        self::assertSame(
+            117,
+            json_decode(
+                (string) $restored['source_snapshot_json'],
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            )['business_trip_id'],
         );
         self::assertSame(
             hash('sha256', (string) $restored['source_snapshot_json']),

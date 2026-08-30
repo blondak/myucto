@@ -37,6 +37,8 @@ final readonly class CompanyBackupTableProjection
 
     public CompanyBackupReferenceSet $references;
 
+    public CompanyBackupEncodedReferenceSet $encodedReferences;
+
     public CompanyBackupEmbeddedReferenceSet $embeddedReferences;
 
     public CompanyBackupEmbeddedHashReferenceSet $embeddedHashReferences;
@@ -72,6 +74,7 @@ final readonly class CompanyBackupTableProjection
         array $secretPolicies,
         array $columnCodecs,
         CompanyBackupReferenceSet $references,
+        CompanyBackupEncodedReferenceSet $encodedReferences,
         CompanyBackupEmbeddedReferenceSet $embeddedReferences,
         CompanyBackupEmbeddedHashReferenceSet $embeddedHashReferences,
         CompanyBackupEmbeddedHashSet $embeddedHashes,
@@ -88,6 +91,7 @@ final readonly class CompanyBackupTableProjection
         $this->secretPolicies = $secretPolicies;
         $this->columnCodecs = $columnCodecs;
         $this->references = $references;
+        $this->encodedReferences = $encodedReferences;
         $this->embeddedReferences = $embeddedReferences;
         $this->embeddedHashReferences = $embeddedHashReferences;
         $this->embeddedHashes = $embeddedHashes;
@@ -152,6 +156,7 @@ final readonly class CompanyBackupTableProjection
             ...$baseMetadataKeys,
             'column_codecs',
             'derived_hashes',
+            'encoded_references',
             'embedded_hash_references',
             'embedded_hashes',
             'polymorphic_references',
@@ -192,6 +197,11 @@ final readonly class CompanyBackupTableProjection
             $metadata['references'],
             $registryKey,
         );
+        $encodedReferences = CompanyBackupEncodedReferenceSet::fromArray(
+            $metadata['encoded_references'] ?? [],
+            $registryKey,
+            $dataColumns,
+        );
         $polymorphicReferences = CompanyBackupPolymorphicReferenceSet::fromArray(
             $metadata['polymorphic_references'] ?? [],
             $registryKey,
@@ -202,7 +212,17 @@ final readonly class CompanyBackupTableProjection
             $registryKey,
             $dataColumns,
         );
-        $additionalClassifiedColumns = $polymorphicReferences->classifiedColumns();
+        $additionalClassifiedColumns = $encodedReferences->classifiedColumns();
+        foreach ($polymorphicReferences->classifiedColumns() as $column) {
+            if (in_array($column, $additionalClassifiedColumns, true)) {
+                throw new CompanyBackupDataSourceException(
+                    'data_reference_column_classification_duplicate',
+                    $registryKey,
+                    $column,
+                );
+            }
+            $additionalClassifiedColumns[] = $column;
+        }
         foreach ($preservedIdentifiers->columns as $column) {
             if (in_array($column, $additionalClassifiedColumns, true)) {
                 throw new CompanyBackupDataSourceException(
@@ -302,6 +322,7 @@ final readonly class CompanyBackupTableProjection
             $secretPolicies,
             $columnCodecs,
             $references,
+            $encodedReferences,
             $embeddedReferences,
             $embeddedHashReferences,
             $embeddedHashes,
@@ -425,6 +446,7 @@ final readonly class CompanyBackupTableProjection
     /** @param array<string,mixed> $row */
     public function assertExportRow(array $row): void
     {
+        $this->encodedReferences->assertSourceRow($row);
         $this->embeddedHashReferences->assertSourceRow($row);
         $this->embeddedHashes->assertSourceRow($row);
         $this->derivedHashes->assertSourceRow($row);
@@ -464,6 +486,39 @@ final readonly class CompanyBackupTableProjection
                             $resolvedHashMapper,
                         ),
                 ),
+        );
+    }
+
+    /**
+     * Přemapuje skalární i strukturované payload reference jedním ID mapperem.
+     *
+     * @param array<string,mixed> $row
+     * @param callable(CompanyBackupEncodedReference|CompanyBackupEmbeddedReference,int|string):(int|string|null) $mapper
+     * @param null|callable(CompanyBackupEmbeddedHashReference,string):mixed $hashMapper
+     * @return array<string,mixed>
+     */
+    public function remapPayloadReferences(
+        array $row,
+        callable $mapper,
+        ?callable $hashMapper = null,
+    ): array {
+        $row = $this->encodedReferences->remap(
+            $row,
+            static function (
+                CompanyBackupEncodedReference $reference,
+                int $value,
+            ) use ($mapper): ?int {
+                $mapped = $mapper($reference, $value);
+                return is_int($mapped) ? $mapped : null;
+            },
+        );
+        return $this->remapEmbeddedReferences(
+            $row,
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ): int|string|null => $mapper($reference, $value),
+            $hashMapper,
         );
     }
 

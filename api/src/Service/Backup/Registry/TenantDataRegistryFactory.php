@@ -1055,6 +1055,7 @@ final class TenantDataRegistryFactory
      *     }>,
      *     source_path:list<string>
      *   }>,
+     *   encoded_references?:list<array<string,mixed>>,
      *   embedded_references:list<array<string,mixed>>,
      *   generated_columns:list<string>,
      *   omit_columns:array<string,string>,
@@ -1251,13 +1252,13 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollInputsProjection::dataColumns(),
                     'derived_hashes' =>
                         CompanyBackupPayrollInputsProjection::derivedHashes(),
+                    'encoded_references' =>
+                        CompanyBackupPayrollInputsProjection::encodedReferences(),
                     'embedded_references' =>
                         CompanyBackupPayrollInputsProjection::embeddedReferences(),
                     'generated_columns' =>
                         CompanyBackupPayrollInputsProjection::generatedColumns(),
                     'omit_columns' => [],
-                    'preserved_identifiers' =>
-                        CompanyBackupPayrollInputsProjection::preservedIdentifiers(),
                     'references' =>
                         CompanyBackupPayrollInputsProjection::references(),
                     'restore_overrides' => [],
