@@ -1803,6 +1803,84 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
+    public function testCompanyBackupStreamsTravelCompensationLinkWithSynchronizedIdentity(): void
+    {
+        $trip = $this->approvedBusinessTrip();
+        $materializer = $this->container->get(BusinessTripMaterializer::class);
+        self::assertInstanceOf(BusinessTripMaterializer::class, $materializer);
+        $result = $materializer->materialize(
+            $this->supplierId,
+            $trip['trip_id'],
+            $this->actors[0],
+        );
+        self::assertSame('materialized', $result['status']);
+        self::assertSame(1, $result['created_count']);
+        $created = $result['created'];
+        self::assertIsArray($created);
+        self::assertCount(1, $created);
+        self::assertIsArray($created[0]);
+        $inputId = (int) ($created[0]['input_id'] ?? 0);
+        self::assertGreaterThan(0, $inputId);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_travel_compensation_links',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->encodedReferences->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($inputId, (int) $row['input_id']);
+        self::assertSame($trip['trip_id'], (int) $row['trip_id']);
+        self::assertSame('payroll_business_trip', $row['source_system']);
+        self::assertSame(
+            'trip:' . $trip['trip_id'] . ':exempt',
+            $row['source_reference'],
+        );
+        self::assertSame('classified', $row['classification_status']);
+
+        $restored = $projection->remapPayloadReferences(
+            [
+                ...$row,
+                'input_id' => $inputId + 2_000,
+                'trip_id' => $trip['trip_id'] + 1_000,
+            ],
+            static fn (
+                CompanyBackupEncodedReference|CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ): int => $reference->target === 'table:payroll_business_trips'
+                ? (int) $value + 1_000
+                : throw new \LogicException(
+                    'Test zachytil neočekávanou referenci.',
+                ),
+        );
+        self::assertSame($inputId + 2_000, $restored['input_id']);
+        self::assertSame($trip['trip_id'] + 1_000, $restored['trip_id']);
+        self::assertSame(
+            'trip:' . ($trip['trip_id'] + 1_000) . ':exempt',
+            $restored['source_reference'],
+        );
+    }
+
     public function testCompanyBackupStreamsRecurringComponentDisabledForRestore(): void
     {
         $componentId = (int) $this->scalar(

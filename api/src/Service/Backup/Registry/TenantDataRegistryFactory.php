@@ -36,6 +36,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollShiftsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessCompensationSegmentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessEventsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTravelCompensationLinksProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollWorkCalendarsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPdfSignatureOutputSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
@@ -98,6 +99,7 @@ final class TenantDataRegistryFactory
         'payroll_statutory_results' => 'payroll',
         'payroll_time_entries' => 'payroll',
         'payroll_time_months' => 'payroll',
+        'payroll_travel_compensation_links' => 'payroll',
         'payroll_work_calendars' => 'payroll',
     ];
 
@@ -168,6 +170,11 @@ final class TenantDataRegistryFactory
         ],
         'payroll_shifts' => ['supplier_id', 'series_key', 'revision_no'],
         'payroll_sickness_events' => ['supplier_id', 'absence_id'],
+        'payroll_travel_compensation_links' => [
+            'supplier_id',
+            'source_system',
+            'source_reference',
+        ],
         'payroll_work_calendars' => [
             'supplier_id',
             'employment_id',
@@ -1151,6 +1158,22 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollBusinessTripItemsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_travel_compensation_links') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollTravelCompensationLinksProjection::dataColumns(),
+                    'encoded_references' =>
+                        CompanyBackupPayrollTravelCompensationLinksProjection::encodedReferences(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollTravelCompensationLinksProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
