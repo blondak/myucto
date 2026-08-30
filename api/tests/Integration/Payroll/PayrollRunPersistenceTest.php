@@ -1476,6 +1476,111 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-06-19 09:00:00', $row['approved_at']);
     }
 
+    public function testCompanyBackupStreamsBusinessTripExpenseItems(): void
+    {
+        $trip = $this->approvedBusinessTrip();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_business_trip_items
+                (supplier_id, trip_id, item_kind, spent_on, description,
+                 amount_minor, is_documented, document_reference, sort_order)
+             VALUES (?, ?, "transport", "2026-06-18",
+                     "Synthetic rail ticket", 12900, 1, "SYNTH-001", 0)'
+        )->execute([$this->supplierId, $trip['trip_id']]);
+        $transportId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_business_trip_items
+                (supplier_id, trip_id, item_kind, spent_on, description,
+                 amount_minor, is_documented, document_reference,
+                 vehicle_kind, distance_m, consumption_ml_per_100km,
+                 fuel_kind, documented_fuel_price_minor, sort_order)
+             VALUES (?, ?, "private_vehicle", "2026-06-18",
+                     "Synthetic private vehicle", NULL, 0, NULL,
+                     "car", 250000, 6500, "petrol_95", 3890, 1)'
+        )->execute([$this->supplierId, $trip['trip_id']]);
+        $vehicleId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_business_trip_items',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        self::assertSame($transportId, (int) $rows[0]['id']);
+        self::assertSame($trip['trip_id'], (int) $rows[0]['trip_id']);
+        self::assertSame('transport', $rows[0]['item_kind']);
+        self::assertSame(12_900, (int) $rows[0]['amount_minor']);
+        self::assertSame(1, (int) $rows[0]['is_documented']);
+        self::assertSame('SYNTH-001', $rows[0]['document_reference']);
+        self::assertSame($vehicleId, (int) $rows[1]['id']);
+        self::assertSame('private_vehicle', $rows[1]['item_kind']);
+        self::assertNull($rows[1]['amount_minor']);
+        self::assertSame('car', $rows[1]['vehicle_kind']);
+        self::assertSame(250_000, (int) $rows[1]['distance_m']);
+        self::assertSame(6_500, (int) $rows[1]['consumption_ml_per_100km']);
+        self::assertSame('petrol_95', $rows[1]['fuel_kind']);
+        self::assertSame(3_890, (int) $rows[1]['documented_fuel_price_minor']);
+        self::assertSame(1, (int) $rows[1]['sort_order']);
+    }
+
+    public function testCompanyBackupStreamsBusinessTripFreeMeal(): void
+    {
+        $trip = $this->approvedBusinessTrip();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_business_trip_free_meals
+                (supplier_id, trip_id, meal_date, meal_count)
+             VALUES (?, ?, "2026-06-18", 1)'
+        )->execute([$this->supplierId, $trip['trip_id']]);
+        $mealId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_business_trip_free_meals',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($mealId, (int) $row['id']);
+        self::assertSame($trip['trip_id'], (int) $row['trip_id']);
+        self::assertSame('2026-06-18', $row['meal_date']);
+        self::assertSame(1, (int) $row['meal_count']);
+    }
+
     public function testCompanyBackupStreamsInputImportWithBinaryHash(): void
     {
         $content = 'synthetic payroll input import';

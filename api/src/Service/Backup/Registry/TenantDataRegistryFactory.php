@@ -17,6 +17,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollAbsencesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollAverageEarningSnapshotsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollBusinessTripFreeMealsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollBusinessTripItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollBusinessTripsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollCalendarDaysProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollComponentDefinitionsProjection;
@@ -54,6 +56,8 @@ final class TenantDataRegistryFactory
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
         'payroll_absences' => 'payroll',
         'payroll_average_earning_snapshots' => 'payroll',
+        'payroll_business_trip_free_meals' => 'payroll',
+        'payroll_business_trip_items' => 'payroll',
         'payroll_business_trips' => 'payroll',
         'payroll_calendar_days' => 'payroll',
         'payroll_component_definitions' => 'payroll',
@@ -132,6 +136,11 @@ final class TenantDataRegistryFactory
             'applicable_year',
             'applicable_quarter',
             'revision_no',
+        ],
+        'payroll_business_trip_free_meals' => [
+            'supplier_id',
+            'trip_id',
+            'meal_date',
         ],
         'payroll_calendar_days' => [
             'supplier_id',
@@ -1113,6 +1122,34 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollBusinessTripsProjection::preservedIdentifiers(),
                     'references' =>
                         CompanyBackupPayrollBusinessTripsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_business_trip_free_meals') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollBusinessTripFreeMealsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollBusinessTripFreeMealsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_business_trip_items') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollBusinessTripItemsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollBusinessTripItemsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
