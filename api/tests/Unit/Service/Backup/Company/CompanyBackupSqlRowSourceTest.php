@@ -159,6 +159,60 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testEncodesBinaryDerivedHashBeforeIntegrityValidation(): void
+    {
+        $schemaRows = [];
+        foreach (
+            [
+                'id' => 'bigint',
+                'supplier_id' => 'int',
+                'payload_json' => 'longtext',
+                'payload_hash' => 'binary',
+            ] as $column => $type
+        ) {
+            $schemaRows[] = [
+                'COLUMN_NAME' => $column,
+                'DATA_TYPE' => $type,
+                'EXTRA' => $column === 'id' ? 'auto_increment' : '',
+                'GENERATION_EXPRESSION' => null,
+                'TABLE_TYPE' => 'BASE TABLE',
+            ];
+        }
+        $schema = $this->statement(
+            [['synthetic_records']],
+            $schemaRows,
+            PDO::FETCH_ASSOC,
+        );
+        $primaryKey = $this->statement(
+            [['synthetic_records']],
+            ['id'],
+            PDO::FETCH_COLUMN,
+        );
+        $json = '{"employee_id":17}';
+        $page = $this->statement(
+            [[7]],
+            [[
+                'id' => 1,
+                'supplier_id' => 7,
+                'payload_json' => $json,
+                'payload_hash' => hash('sha256', $json, true),
+            ]],
+            PDO::FETCH_ASSOC,
+        );
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::exactly(3))
+            ->method('prepare')
+            ->willReturnOnConsecutiveCalls($schema, $primaryKey, $page);
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $pdo,
+            7,
+            $this->derivedHashDefinition(binary: true),
+        ));
+
+        self::assertSame(hash('sha256', $json), $rows[0]['payload_hash']);
+    }
+
     public function testRefusesProtectedSecretBeforeReadingBusinessRows(): void
     {
         $schema = $this->statement(
@@ -262,7 +316,24 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             ->method('prepare')
             ->willReturnOnConsecutiveCalls($schema, $primaryKey, $page);
 
-        $definition = new TenantDataDefinition(
+        $definition = $this->derivedHashDefinition(binary: false);
+
+        try {
+            iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+                $pdo,
+                7,
+                $definition,
+            ));
+            self::fail('Export nesmí vydat JSON s neplatnou odvozenou pečetí.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_derived_hash_value_invalid', $e->errorCode);
+            self::assertSame('payload_hash', $e->column);
+        }
+    }
+
+    private function derivedHashDefinition(bool $binary): TenantDataDefinition
+    {
+        return new TenantDataDefinition(
             'table:synthetic_records',
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantOwned,
@@ -275,6 +346,9 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
                 ],
                 'secrets' => [],
                 'company_backup' => [
+                    ...($binary ? [
+                        'column_codecs' => ['payload_hash' => 'binary_hex'],
+                    ] : []),
                     'data_columns' => [
                         'id',
                         'supplier_id',
@@ -303,18 +377,6 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
                 ],
             ],
         );
-
-        try {
-            iterator_to_array((new CompanyBackupSqlRowSource())->rows(
-                $pdo,
-                7,
-                $definition,
-            ));
-            self::fail('Export nesmí vydat JSON s neplatnou odvozenou pečetí.');
-        } catch (CompanyBackupDataSourceException $e) {
-            self::assertSame('data_derived_hash_value_invalid', $e->errorCode);
-            self::assertSame('payload_hash', $e->column);
-        }
     }
 
     /**

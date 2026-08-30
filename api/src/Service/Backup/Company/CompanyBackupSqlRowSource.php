@@ -130,7 +130,6 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
         array $row,
         CompanyBackupTableProjection $projection,
     ): array {
-        $projection->assertExportRow($row);
         foreach ($projection->columnCodecs as $column => $codec) {
             $row[$column] = $codec->encode(
                 $row[$column],
@@ -138,6 +137,7 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
                 $column,
             );
         }
+        $projection->assertExportRow($row);
         return $row;
     }
 
