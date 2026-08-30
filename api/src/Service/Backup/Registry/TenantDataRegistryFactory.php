@@ -20,6 +20,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentTermsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRecurringComponentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
@@ -50,6 +51,7 @@ final class TenantDataRegistryFactory
         'payroll_employer_policies' => 'payroll',
         'payroll_employments' => 'payroll',
         'payroll_employment_terms' => 'payroll',
+        'payroll_input_imports' => 'payroll',
         'payroll_inputs' => 'payroll',
         'payroll_insolvency_payment_instructions' => 'payroll',
         'payroll_institution_accounts' => 'payroll',
@@ -117,6 +119,11 @@ final class TenantDataRegistryFactory
             'effective_from',
         ],
         'payroll_employer_policies' => ['supplier_id', 'valid_from'],
+        'payroll_input_imports' => [
+            'supplier_id',
+            'period_start',
+            'content_hash',
+        ],
         'payroll_offices' => ['supplier_id', 'code'],
         'payroll_recurring_components' => [
             'supplier_id',
@@ -1079,6 +1086,22 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollEmploymentTermsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_input_imports') {
+            return [
+                'company_backup' => [
+                    'column_codecs' =>
+                        CompanyBackupPayrollInputImportsProjection::columnCodecs(),
+                    'data_columns' =>
+                        CompanyBackupPayrollInputImportsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollInputImportsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

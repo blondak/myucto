@@ -1156,6 +1156,64 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(1, (int) $row['is_active']);
     }
 
+    public function testCompanyBackupStreamsInputImportWithBinaryHash(): void
+    {
+        $content = 'synthetic payroll input import';
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_input_imports
+                (supplier_id, period_start, source_kind, source_name,
+                 content_hash, status, row_count, accepted_count,
+                 rejected_count, duplicate_count, created_by, accepted_at)
+             VALUES (?, "2026-06-01", "csv", "synthetic-payroll.csv", ?,
+                     "accepted", 4, 2, 1, 1, ?, "2026-06-02 10:00:00")'
+        )->execute([
+            $this->supplierId,
+            hash('sha256', $content, true),
+            $this->actors[0],
+        ]);
+        $importId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_input_imports');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($importId, (int) $row['id']);
+        self::assertSame('2026-06-01', $row['period_start']);
+        self::assertSame('csv', $row['source_kind']);
+        self::assertSame('synthetic-payroll.csv', $row['source_name']);
+        self::assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/D',
+            (string) $row['content_hash'],
+        );
+        self::assertSame(hash('sha256', $content), $row['content_hash']);
+        self::assertSame('accepted', $row['status']);
+        self::assertSame(4, (int) $row['row_count']);
+        self::assertSame(2, (int) $row['accepted_count']);
+        self::assertSame(1, (int) $row['rejected_count']);
+        self::assertSame(1, (int) $row['duplicate_count']);
+        self::assertSame($this->actors[0], (int) $row['created_by']);
+        self::assertSame('2026-06-02 10:00:00', $row['accepted_at']);
+    }
+
     public function testCompanyBackupStreamsRecurringComponentDisabledForRestore(): void
     {
         $componentId = (int) $this->scalar(
