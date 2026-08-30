@@ -1156,6 +1156,74 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(1, (int) $row['is_active']);
     }
 
+    public function testCompanyBackupStreamsRecurringComponentDisabledForRestore(): void
+    {
+        $componentId = (int) $this->scalar(
+            'SELECT component_id
+               FROM payroll_inputs
+              WHERE supplier_id = ? AND id = ?',
+            [$this->supplierId, $this->inputId],
+        );
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_recurring_components
+                (supplier_id, employment_id, component_id, calculation_kind,
+                 amount_minor, valid_from, allocation_rule,
+                 maximum_amount_minor, note, is_active, created_by, updated_by)
+             VALUES (?, ?, ?, "fixed_amount", 42000, "2026-01-01",
+                     "working_days", 50000, "Synthetic recurring wage", 1,
+                     ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $componentId,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+        $recurringId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_recurring_components',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($recurringId, (int) $row['id']);
+        self::assertSame($this->employmentId, (int) $row['employment_id']);
+        self::assertSame($componentId, (int) $row['component_id']);
+        self::assertSame('fixed_amount', $row['calculation_kind']);
+        self::assertSame(42_000, (int) $row['amount_minor']);
+        self::assertSame('2026-01-01', $row['valid_from']);
+        self::assertSame('working_days', $row['allocation_rule']);
+        self::assertSame(50_000, (int) $row['maximum_amount_minor']);
+        self::assertSame('Synthetic recurring wage', $row['note']);
+        self::assertSame(1, (int) $row['is_active']);
+        self::assertSame($this->actors[0], (int) $row['created_by']);
+        self::assertSame($this->actors[1], (int) $row['updated_by']);
+
+        $restored = $projection->restoreOverrides->apply($row);
+        self::assertSame(0, $restored['is_active']);
+        self::assertSame(42_000, (int) $restored['amount_minor']);
+    }
+
     public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void
     {
         $this->db->pdo()->prepare(

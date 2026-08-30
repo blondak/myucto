@@ -21,6 +21,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProject
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentTermsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRecurringComponentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
@@ -66,6 +67,7 @@ final class TenantDataRegistryFactory
         'payroll_person_tax_credit_claims' => 'payroll',
         'payroll_person_tax_declarations' => 'payroll',
         'payroll_person_tax_residences' => 'payroll',
+        'payroll_recurring_components' => 'payroll',
         'payroll_risky_savings_evidence' => 'payroll',
         'payroll_runs' => 'payroll',
         'payroll_run_persons' => 'payroll',
@@ -116,6 +118,12 @@ final class TenantDataRegistryFactory
         ],
         'payroll_employer_policies' => ['supplier_id', 'valid_from'],
         'payroll_offices' => ['supplier_id', 'code'],
+        'payroll_recurring_components' => [
+            'supplier_id',
+            'employment_id',
+            'component_id',
+            'valid_from',
+        ],
     ];
 
     /** @var list<string> */
@@ -1101,6 +1109,21 @@ final class TenantDataRegistryFactory
                     'references' =>
                         CompanyBackupPayrollOfficesProjection::references(),
                     'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_recurring_components') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollRecurringComponentsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollRecurringComponentsProjection::references(),
+                    'restore_overrides' =>
+                        CompanyBackupPayrollRecurringComponentsProjection::restoreOverrides(),
                 ],
             ];
         }
