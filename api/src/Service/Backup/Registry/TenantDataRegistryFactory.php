@@ -17,6 +17,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollAbsencesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollAverageEarningSnapshotsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollBusinessTripsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollCalendarDaysProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollComponentDefinitionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
@@ -1092,6 +1093,26 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollAverageEarningSnapshotsProjection::preservedIdentifiers(),
                     'references' =>
                         CompanyBackupPayrollAverageEarningSnapshotsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_business_trips') {
+            return [
+                'company_backup' => [
+                    'column_codecs' =>
+                        CompanyBackupPayrollBusinessTripsProjection::columnCodecs(),
+                    'data_columns' =>
+                        CompanyBackupPayrollBusinessTripsProjection::dataColumns(),
+                    'derived_hashes' =>
+                        CompanyBackupPayrollBusinessTripsProjection::derivedHashes(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'preserved_identifiers' =>
+                        CompanyBackupPayrollBusinessTripsProjection::preservedIdentifiers(),
+                    'references' =>
+                        CompanyBackupPayrollBusinessTripsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

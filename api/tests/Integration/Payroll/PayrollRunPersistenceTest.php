@@ -1419,6 +1419,63 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame($shift['published_id'] + 1_000, $restoredTrace['shift_id']);
     }
 
+    public function testCompanyBackupStreamsSealedBusinessTrip(): void
+    {
+        $fixture = $this->approvedBusinessTrip();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_business_trips');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($fixture['trip_id'], (int) $row['id']);
+        self::assertSame($this->employeeId, (int) $row['employee_id']);
+        self::assertSame($this->employmentId, (int) $row['employment_id']);
+        self::assertSame('CZ', $row['country_code']);
+        self::assertSame('Europe/Prague', $row['timezone_name']);
+        self::assertSame('2026-06-18 05:30:00', $row['departure_at_utc']);
+        self::assertSame('2026-06-18 16:00:00', $row['arrival_at_utc']);
+        self::assertSame('public_transport', $row['transport_mode']);
+        self::assertSame(14_900, (int) $row['meal_rate_band_1_minor']);
+        self::assertSame(5_000, (int) $row['advance_minor']);
+        self::assertSame('approved', $row['status']);
+        self::assertSame(23_100, (int) $row['entitlement_total_minor']);
+        self::assertSame(23_100, (int) $row['exempt_total_minor']);
+        self::assertSame(0, (int) $row['taxable_total_minor']);
+        self::assertSame('synthetic-travel-v1', $row['ruleset_id']);
+        self::assertSame($fixture['calculation'], $row['calculation_json']);
+        self::assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/D',
+            (string) $row['calculation_hash'],
+        );
+        self::assertSame(
+            hash('sha256', $fixture['calculation']),
+            $row['calculation_hash'],
+        );
+        self::assertSame(2, (int) $row['row_version']);
+        self::assertSame($this->actors[0], (int) $row['created_by']);
+        self::assertSame($this->actors[1], (int) $row['approved_by']);
+        self::assertSame('2026-06-19 09:00:00', $row['approved_at']);
+    }
+
     public function testCompanyBackupStreamsInputImportWithBinaryHash(): void
     {
         $content = 'synthetic payroll input import';
@@ -2861,6 +2918,62 @@ final class PayrollRunPersistenceTest extends TestCase
             'UPDATE payroll_run_events SET reason = "tamper"
               WHERE supplier_id = ? AND id = ?'
         )->execute([$this->supplierId, $eventId]);
+    }
+
+    /** @return array{trip_id:int,calculation:string} */
+    private function approvedBusinessTrip(): array
+    {
+        $calculation = CanonicalJson::encode([
+            'advance_minor' => 5_000,
+            'blockers' => [],
+            'entitlement_total_minor' => 23_100,
+            'exempt_total_minor' => 23_100,
+            'items' => [],
+            'meal_days' => [[
+                'date' => '2026-06-18',
+                'entitlement_minor' => 23_100,
+                'exempt_minor' => 23_100,
+                'free_meals' => 1,
+                'minutes' => 630,
+            ]],
+            'ruleset_ids' => ['synthetic-travel-v1'],
+            'settlement_difference_minor' => 18_100,
+            'status' => 'supported',
+            'steps' => [],
+            'taxable_total_minor' => 0,
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_business_trips
+                (supplier_id, employee_id, employment_id, country_code,
+                 timezone_name, departure_at_utc, arrival_at_utc,
+                 origin_place, destination_place, purpose, transport_mode,
+                 meal_rate_band_1_minor, meal_rate_band_2_minor,
+                 meal_rate_band_3_minor, advance_minor,
+                 settlement_period_start, status, entitlement_total_minor,
+                 exempt_total_minor, taxable_total_minor, ruleset_id,
+                 calculation_json, calculation_hash, row_version,
+                 created_by, approved_by, approved_at)
+             VALUES (?, ?, ?, "CZ", "Europe/Prague",
+                     "2026-06-18 05:30:00", "2026-06-18 16:00:00",
+                     "Praha", "Brno", "Syntetické jednání",
+                     "public_transport", 14900, 22500, 35300, 5000,
+                     "2026-06-01", "approved", 23100, 23100, 0,
+                     "synthetic-travel-v1", ?, ?, 2, ?, ?,
+                     "2026-06-19 09:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            $calculation,
+            hash('sha256', $calculation, true),
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+
+        return [
+            'trip_id' => (int) $this->db->pdo()->lastInsertId(),
+            'calculation' => $calculation,
+        ];
     }
 
     /** @return array{calendar_id:int,week_pattern:string} */
