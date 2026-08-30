@@ -10,6 +10,7 @@ final class CompanyBackupArchiveLayout
     public const MANIFEST = 'manifest.json';
     public const CHECKSUMS = 'CHECKSUMS.txt';
     public const README = 'README.txt';
+    public const SECRET_ENVELOPE = 'secrets/tenant.sealed';
 
     /** @var list<string> */
     public const REQUIRED_ENTRIES = [self::MANIFEST, self::CHECKSUMS, self::README];

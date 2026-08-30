@@ -11,13 +11,17 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
+use MyInvoice\Service\Backup\Company\CompanyBackupFormatException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeDescriptor;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
+use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 use PHPUnit\Framework\TestCase;
 use ZipArchive;
 
@@ -237,6 +241,90 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         );
     }
 
+    public function testAuthenticatesRegisteredSecretEnvelopeWithoutExtraction(): void
+    {
+        $payload = $this->payload(withSecretEnvelope: true);
+        $archive = $this->archive($payload);
+
+        $inspection = $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+
+        self::assertNotNull($inspection->secretInventory->envelope);
+        self::assertSame(
+            'secrets/tenant.sealed',
+            $inspection->secretInventory->envelope->path,
+        );
+        self::assertArrayHasKey(
+            'secrets/tenant.sealed',
+            $inspection->entryHashes,
+        );
+        self::assertSame(5, $inspection->entryCount);
+    }
+
+    public function testProtectedDomainSecretWithoutEnvelopeIsRejected(): void
+    {
+        $archive = $this->archive($this->payload(protectedSecret: true));
+
+        $this->expectArchiveError('secret_envelope_required');
+        $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+    }
+
+    public function testEnvelopeRequiresMatchingRequiredCapability(): void
+    {
+        $payload = $this->payload(withSecretEnvelope: true);
+        $manifest = json_decode(
+            $payload['manifest.json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($manifest);
+        $manifest['capabilities']['required'] = [];
+        $payload['manifest.json'] = (new CompanyBackupFormat())->encodeManifest(
+            $manifest,
+        );
+        $archive = $this->archive($payload);
+
+        try {
+            $this->inspector()->inspect(
+                $archive,
+                self::PASSWORD,
+                '5.28.1',
+                CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+            );
+            self::fail('Envelope bez povinné capability nesmí projít manifestem.');
+        } catch (CompanyBackupFormatException $e) {
+            self::assertSame('manifest_secrets_invalid', $e->errorCode);
+            self::assertSame('secrets.envelope', $e->field);
+        }
+    }
+
+    public function testEnvelopeSizeIsRejectedBeforeCiphertextIsRead(): void
+    {
+        $payload = $this->payload(withSecretEnvelope: true);
+        $payload['secrets/tenant.sealed'] .= "\0";
+        $archive = $this->archive($payload);
+
+        $this->expectArchiveError(
+            'secret_envelope_size_mismatch',
+            'secrets/tenant.sealed',
+        );
+        $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+    }
+
     public function testManifestInventoryDigestRejectsChangedChecksummedPayload(): void
     {
         $payload = $this->payload();
@@ -307,7 +395,9 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
     private function inspector(?CompanyBackupArchiveLimits $limits = null): CompanyBackupArchiveInspector
     {
         return new CompanyBackupArchiveInspector(
-            new CompanyBackupFormat(),
+            new CompanyBackupFormat([
+                CompanyBackupSecretEnvelopeDescriptor::CAPABILITY,
+            ]),
             BackupUpcasterRegistry::empty(),
             $limits ?? new CompanyBackupArchiveLimits(
                 maxArchiveBytes: 1_000_000,
@@ -325,9 +415,12 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
     private function payload(
         string $appVersion = '5.28.1',
         bool $includeRegistry = true,
+        bool $protectedSecret = false,
+        bool $withSecretEnvelope = false,
     ): array
     {
         $format = new CompanyBackupFormat();
+        $protectedSecret = $protectedSecret || $withSecretEnvelope;
         $registry = new TenantDataRegistry(
             1,
             [new TenantDataDefinition(
@@ -335,7 +428,17 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
                 TenantDataObjectKind::Table,
                 TenantDataPolicy::TenantRoot,
                 [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
-                ['ownership' => ['strategy' => 'selected_supplier', 'column' => 'id']],
+                [
+                    'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
+                    ...($protectedSecret ? [
+                        'secrets' => [
+                            'domain_salt' => [
+                                'policy' =>
+                                    TenantSecretPolicy::ProtectedDomainSecret->value,
+                            ],
+                        ],
+                    ] : []),
+                ],
             )],
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
         );
@@ -348,7 +451,12 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
                 'app_version' => $appVersion,
                 'schema_revision' => CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
             ],
-            'capabilities' => ['required' => [], 'optional' => []],
+            'capabilities' => [
+                'required' => $withSecretEnvelope
+                    ? [CompanyBackupSecretEnvelopeDescriptor::CAPABILITY]
+                    : [],
+                'optional' => [],
+            ],
         ];
         if ($includeRegistry) {
             $manifest['registry'] = TenantDataRegistrySnapshot::fromRegistry(
@@ -374,16 +482,32 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
             'version' => CompanyBackupFileInventory::VERSION,
             'areas' => [],
         ];
-        $manifest['secrets'] = [
+        $secrets = [
             'format' => CompanyBackupSecretInventory::FORMAT,
             'version' => CompanyBackupSecretInventory::VERSION,
             'omissions' => [],
         ];
-        return [
-            'manifest.json' => $format->encodeManifest($manifest),
+        $payload = [
             'README.txt' => "Syntetická záloha MyÚčta.\n",
             'data/table-supplier.jsonl' => $supplier,
         ];
+        if ($withSecretEnvelope) {
+            $snapshot = TenantDataRegistrySnapshot::fromRegistry(
+                $registry,
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            );
+            $sealed = (new CompanyBackupSecretEnvelopeCipher())->seal(
+                '{"entries":[],"format":"synthetic-secret-payload","version":1}',
+                self::PASSWORD,
+                '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
+                $snapshot->fingerprint,
+            );
+            $secrets['envelope'] = $sealed->descriptor->toArray();
+            $payload[$sealed->descriptor->path] = $sealed->ciphertext;
+        }
+        $manifest['secrets'] = $secrets;
+        $payload['manifest.json'] = $format->encodeManifest($manifest);
+        return $payload;
     }
 
     /**

@@ -11,7 +11,8 @@ final readonly class CompanyBackupSecretEnvelopeDescriptor
 {
     public const FORMAT = 'myucto-company-secret-envelope';
     public const VERSION = 1;
-    public const PATH = 'secrets/tenant.sealed';
+    public const CAPABILITY = 'secret-envelope.v1';
+    public const PATH = CompanyBackupArchiveLayout::SECRET_ENVELOPE;
     public const KDF_ALGORITHM = 'argon2id13';
     public const KDF_OPSLIMIT = 2;
     public const KDF_MEMLIMIT = 67_108_864;
@@ -213,7 +214,7 @@ final readonly class CompanyBackupSecretEnvelopeDescriptor
                 . '-[0-9a-f]{12}$/D',
             $backupId,
         ) !== 1
-            || preg_match('/^[0-9a-f]{64}$/D', $registryFingerprint) !== 1
+            || preg_match('/^sha256:[0-9a-f]{64}$/D', $registryFingerprint) !== 1
         ) {
             throw new CompanyBackupSecretEnvelopeException(
                 'secret_envelope_context_invalid',

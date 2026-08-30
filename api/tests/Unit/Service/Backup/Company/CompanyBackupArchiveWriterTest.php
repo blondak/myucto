@@ -15,12 +15,16 @@ use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupJsonlWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupManifest;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
+use MyInvoice\Service\Backup\Company\CompanyBackupSealedSecretEnvelope;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeDescriptor;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
+use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupArchiveWriterTest extends TestCase
@@ -157,6 +161,63 @@ final class CompanyBackupArchiveWriterTest extends TestCase
         self::assertSame([], glob($archive . '.part-*') ?: []);
     }
 
+    public function testAddsTypedSecretEnvelopeAndSelfAuthenticatesIt(): void
+    {
+        $archive = $this->unusedPath('zip');
+        $format = new CompanyBackupFormat([
+            CompanyBackupSecretEnvelopeDescriptor::CAPABILITY,
+        ]);
+        $registry = $this->registry(protectedSecret: true);
+        $snapshot = TenantDataRegistrySnapshot::fromRegistry(
+            $registry,
+            TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+        );
+        $sealed = (new CompanyBackupSecretEnvelopeCipher())->seal(
+            '{"entries":[],"format":"synthetic-secret-payload","version":1}',
+            self::PASSWORD,
+            '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
+            $snapshot->fingerprint,
+        );
+        $writer = new CompanyBackupArchiveWriter(
+            $archive,
+            self::PASSWORD,
+            $format,
+            $this->limits(),
+        );
+        $writer->addString('data/table-supplier.jsonl', "{\"id\":1}\n");
+        $writer->addSecretEnvelope($sealed);
+
+        $result = $writer->finish(
+            $this->manifest($format, secretEnvelope: $sealed),
+            "Syntetická záloha.\n",
+        );
+
+        self::assertSame(5, $result->entryCount);
+        self::assertFileExists($archive);
+    }
+
+    public function testGenericPayloadCannotEnterSecretNamespace(): void
+    {
+        $archive = $this->unusedPath('zip');
+        $writer = new CompanyBackupArchiveWriter(
+            $archive,
+            self::PASSWORD,
+            new CompanyBackupFormat(),
+            $this->limits(),
+        );
+
+        try {
+            $writer->addString('secrets/plaintext.txt', 'synthetic-secret');
+            self::fail('Secret namespace smí plnit jen typovaný envelope.');
+        } catch (CompanyBackupArchiveWriteException $e) {
+            self::assertSame(
+                'archive_secret_entry_requires_envelope',
+                $e->errorCode,
+            );
+        }
+        self::assertFileDoesNotExist($archive);
+    }
+
     public function testSymlinkSourceIsNeverFollowedIntoArchive(): void
     {
         $archive = $this->unusedPath('zip');
@@ -273,9 +334,10 @@ final class CompanyBackupArchiveWriterTest extends TestCase
         CompanyBackupFormat $format,
         ?CompanyBackupDataObject $dataObject = null,
         ?string $fileContents = null,
+        ?CompanyBackupSealedSecretEnvelope $secretEnvelope = null,
     ): CompanyBackupManifest
     {
-        $definitions = [$this->supplierDefinition()];
+        $definitions = [$this->supplierDefinition($secretEnvelope !== null)];
         $areas = [];
         if ($fileContents !== null) {
             $definitions[] = $this->supplierLogosDefinition();
@@ -313,7 +375,12 @@ final class CompanyBackupArchiveWriterTest extends TestCase
                 'app_version' => '5.28.1',
                 'schema_revision' => CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
             ],
-            'capabilities' => ['required' => [], 'optional' => []],
+            'capabilities' => [
+                'required' => $secretEnvelope === null
+                    ? []
+                    : [CompanyBackupSecretEnvelopeDescriptor::CAPABILITY],
+                'optional' => [],
+            ],
             'registry' => TenantDataRegistrySnapshot::fromRegistry(
                 $registry,
                 TenantDataRegistry::COMPANY_BACKUP_PROFILE,
@@ -339,11 +406,16 @@ final class CompanyBackupArchiveWriterTest extends TestCase
                 'format' => CompanyBackupSecretInventory::FORMAT,
                 'version' => CompanyBackupSecretInventory::VERSION,
                 'omissions' => [],
+                ...($secretEnvelope === null ? [] : [
+                    'envelope' => $secretEnvelope->descriptor->toArray(),
+                ]),
             ],
         ]));
     }
 
-    private function supplierDefinition(): TenantDataDefinition
+    private function supplierDefinition(
+        bool $protectedSecret = false,
+    ): TenantDataDefinition
     {
         return new TenantDataDefinition(
             'table:supplier',
@@ -353,7 +425,24 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             [
                 'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
                 'primary_key' => ['id'],
+                ...($protectedSecret ? [
+                    'secrets' => [
+                        'domain_salt' => [
+                            'policy' =>
+                                TenantSecretPolicy::ProtectedDomainSecret->value,
+                        ],
+                    ],
+                ] : []),
             ],
+        );
+    }
+
+    private function registry(bool $protectedSecret = false): TenantDataRegistry
+    {
+        return new TenantDataRegistry(
+            1,
+            [$this->supplierDefinition($protectedSecret)],
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
         );
     }
 

@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Backup\Company;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
+use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 
 /** Úplný manifestový inventář bezpečně vynechaných secret hodnot. */
 final readonly class CompanyBackupSecretInventory
@@ -22,6 +23,9 @@ final readonly class CompanyBackupSecretInventory
     private function __construct(
         array $omissions,
         public string $registryFingerprint,
+        public ?CompanyBackupSecretEnvelopeDescriptor $envelope,
+        private bool $envelopeRequired,
+        private bool $envelopeAllowed,
     ) {
         $this->omissions = $omissions;
     }
@@ -35,7 +39,9 @@ final readonly class CompanyBackupSecretInventory
         }
         $keys = array_keys($inventory);
         sort($keys, SORT_STRING);
-        if ($keys !== ['format', 'omissions', 'version']
+        $baseKeys = ['format', 'omissions', 'version'];
+        $envelopeKeys = ['envelope', 'format', 'omissions', 'version'];
+        if ($keys !== $baseKeys && $keys !== $envelopeKeys
             || $inventory['format'] !== self::FORMAT
             || $inventory['version'] !== self::VERSION
             || !is_array($inventory['omissions'])
@@ -58,7 +64,32 @@ final readonly class CompanyBackupSecretInventory
                 $declaration,
             );
         }
-        return new self($omissions, $registry->fingerprint);
+        [$envelopeRequired, $envelopeAllowed] = self::envelopePolicy($registry);
+        try {
+            $envelope = array_key_exists('envelope', $inventory)
+                ? CompanyBackupSecretEnvelopeDescriptor::fromArray(
+                    $inventory['envelope'],
+                )
+                : null;
+        } catch (CompanyBackupSecretEnvelopeException $e) {
+            throw new \InvalidArgumentException(
+                'Inventář secrets má neplatný envelope descriptor.',
+                0,
+                $e,
+            );
+        }
+        if ($envelope !== null && !$envelopeAllowed) {
+            throw new \InvalidArgumentException(
+                'Inventář secrets deklaruje envelope bez přenositelného secretu.',
+            );
+        }
+        return new self(
+            $omissions,
+            $registry->fingerprint,
+            $envelope,
+            $envelopeRequired,
+            $envelopeAllowed,
+        );
     }
 
     /**
@@ -160,10 +191,17 @@ final readonly class CompanyBackupSecretInventory
         return array_values($declarations);
     }
 
-    /** @return array{format:string,version:int,omissions:list<array<string,mixed>>} */
+    /**
+     * @return array{
+     *   format:string,
+     *   version:int,
+     *   omissions:list<array<string,mixed>>,
+     *   envelope?:array<string,mixed>
+     * }
+     */
     public function toArray(): array
     {
-        return [
+        $result = [
             'format' => self::FORMAT,
             'version' => self::VERSION,
             'omissions' => array_map(
@@ -172,19 +210,133 @@ final readonly class CompanyBackupSecretInventory
                 $this->omissions,
             ),
         ];
+        if ($this->envelope !== null) {
+            $result['envelope'] = $this->envelope->toArray();
+        }
+        return $result;
     }
 
-    /** @param array<string,string> $entryHashes */
-    public function assertArchiveEntries(array $entryHashes): void
+    public function withEnvelope(
+        CompanyBackupSecretEnvelopeDescriptor $envelope,
+    ): self {
+        if (!$this->envelopeAllowed) {
+            throw new \InvalidArgumentException(
+                'Registry nemá secret, který smí vstoupit do envelope.',
+            );
+        }
+        return new self(
+            $this->omissions,
+            $this->registryFingerprint,
+            $envelope,
+            $this->envelopeRequired,
+            $this->envelopeAllowed,
+        );
+    }
+
+    /**
+     * @param array<string,string> $entryHashes
+     * @param array<string,int> $entryBytes
+     */
+    public function assertArchiveEntries(
+        array $entryHashes,
+        array $entryBytes = [],
+    ): void
     {
-        foreach (array_keys($entryHashes) as $path) {
-            if (str_starts_with($path, 'secrets/')) {
+        $secretPaths = array_values(array_filter(
+            array_keys($entryHashes),
+            static fn (string $path): bool => str_starts_with($path, 'secrets/'),
+        ));
+        sort($secretPaths, SORT_STRING);
+        if ($this->envelope === null) {
+            if ($this->envelopeRequired) {
                 throw new CompanyBackupArchiveException(
-                    'secret_inventory_scope_mismatch',
-                    $path,
+                    'secret_envelope_required',
                 );
             }
+            if ($secretPaths !== []) {
+                throw new CompanyBackupArchiveException(
+                    'secret_inventory_scope_mismatch',
+                    $secretPaths[0],
+                );
+            }
+            return;
         }
+
+        $path = $this->envelope->path;
+        if (!isset($entryHashes[$path])) {
+            throw new CompanyBackupArchiveException(
+                'secret_envelope_entry_missing',
+                $path,
+            );
+        }
+        if ($secretPaths !== [$path]) {
+            $unexpected = array_values(array_diff($secretPaths, [$path]));
+            throw new CompanyBackupArchiveException(
+                'secret_inventory_scope_mismatch',
+                $unexpected[0] ?? $path,
+            );
+        }
+        if (!hash_equals($this->envelope->sha256, $entryHashes[$path])) {
+            throw new CompanyBackupArchiveException(
+                'secret_envelope_checksum_mismatch',
+                $path,
+            );
+        }
+        if ($entryBytes !== []
+            && ($entryBytes[$path] ?? null) !== $this->envelope->bytes
+        ) {
+            throw new CompanyBackupArchiveException(
+                'secret_envelope_size_mismatch',
+                $path,
+            );
+        }
+    }
+
+    /** @return array{bool,bool} required, allowed */
+    private static function envelopePolicy(
+        TenantDataRegistrySnapshot $registry,
+    ): array {
+        $required = false;
+        $allowed = false;
+        foreach ($registry->registry->definitionsFor($registry->profile) as $definition) {
+            if ($definition->policy === TenantDataPolicy::ProtectedDomainSecret) {
+                $required = true;
+                $allowed = true;
+            }
+            if (array_key_exists('secrets', $definition->details)) {
+                $policies = CompanyBackupSecretColumnSet::fromArray(
+                    $definition->details['secrets'],
+                    $definition->key,
+                )->policies;
+                foreach ($policies as $policy) {
+                    if ($policy === TenantSecretPolicy::ProtectedDomainSecret) {
+                        $required = true;
+                        $allowed = true;
+                    } elseif (in_array($policy, [
+                        TenantSecretPolicy::OptionalCredential,
+                        TenantSecretPolicy::PersonalWithDualConsent,
+                    ], true)) {
+                        $allowed = true;
+                    }
+                }
+            }
+            if ($definition->policy === TenantDataPolicy::OptionalCredential
+                || array_key_exists('company_backup_credential', $definition->details)
+            ) {
+                $credential = CompanyBackupCredentialTableProjection::fromDefinition(
+                    $definition,
+                );
+                foreach ($credential->variants as $variant) {
+                    if (in_array($variant['policy'], [
+                        TenantSecretPolicy::OptionalCredential,
+                        TenantSecretPolicy::PersonalWithDualConsent,
+                    ], true)) {
+                        $allowed = true;
+                    }
+                }
+            }
+        }
+        return [$required, $allowed];
     }
 
     /** @return list<CompanyBackupSecretDeclaration> */

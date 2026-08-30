@@ -70,6 +70,18 @@ final readonly class CompanyBackupManifest
                 'Inventář secrets v manifestu není platný: ' . $e->getMessage(),
             );
         }
+        $declaresEnvelope = in_array(
+            CompanyBackupSecretEnvelopeDescriptor::CAPABILITY,
+            $header->requiredCapabilities,
+            true,
+        );
+        if (($secrets->envelope !== null) !== $declaresEnvelope) {
+            throw new CompanyBackupFormatException(
+                'manifest_secrets_invalid',
+                'secrets.envelope',
+                'Secret envelope a jeho povinná capability se musí deklarovat společně.',
+            );
+        }
         return new self($header, $registry, $data, $files, $secrets);
     }
 

@@ -109,19 +109,37 @@ final class CompanyBackupArchiveInspector
 
             $entryHashes = [CompanyBackupArchiveLayout::MANIFEST => $manifestRead['sha256']];
             $entryBytes = [CompanyBackupArchiveLayout::MANIFEST => $manifestRead['bytes']];
+            $secretEnvelopePath = $completeManifest->secrets->envelope?->path;
+            $secretEnvelopeCiphertext = null;
             foreach ($payloadPaths as $path) {
                 if ($path === CompanyBackupArchiveLayout::MANIFEST) {
                     continue;
                 }
+                $secretEntry = $path === $secretEnvelopePath;
+                if ($secretEntry
+                    && $entries[$path]['size']
+                        !== $completeManifest->secrets->envelope->bytes
+                ) {
+                    throw new CompanyBackupArchiveException(
+                        'secret_envelope_size_mismatch',
+                        $path,
+                    );
+                }
                 $read = $this->readEntry(
                     $zip,
                     $entries[$path],
-                    $this->limits->maxEntryBytes,
-                    false,
+                    $secretEntry
+                        ? CompanyBackupSecretEnvelopeDescriptor::MAX_PLAINTEXT_BYTES
+                            + CompanyBackupSecretEnvelopeDescriptor::CIPHER_TAG_BYTES
+                        : $this->limits->maxEntryBytes,
+                    $secretEntry,
                     false,
                 );
                 $entryHashes[$path] = $read['sha256'];
                 $entryBytes[$path] = $read['bytes'];
+                if ($path === $secretEnvelopePath) {
+                    $secretEnvelopeCiphertext = $read['content'];
+                }
             }
             foreach ($entryHashes as $path => $actualHash) {
                 $expectedHash = $checksums->hashFor($path);
@@ -131,7 +149,37 @@ final class CompanyBackupArchiveInspector
             }
             $completeManifest->data->assertArchiveEntries($entryHashes, $entryBytes);
             $completeManifest->files->assertArchiveEntries($entryHashes, $entryBytes);
-            $completeManifest->secrets->assertArchiveEntries($entryHashes);
+            $completeManifest->secrets->assertArchiveEntries(
+                $entryHashes,
+                $entryBytes,
+            );
+            $secretEnvelope = $completeManifest->secrets->envelope;
+            if ($secretEnvelope !== null) {
+                if (!is_string($secretEnvelopeCiphertext)) {
+                    throw new \LogicException(
+                        'Čtení secret envelope nevrátilo ciphertext.',
+                    );
+                }
+                try {
+                    $sealed = CompanyBackupSealedSecretEnvelope::fromArray(
+                        $secretEnvelope->toArray(),
+                        $secretEnvelopeCiphertext,
+                    );
+                    $plaintext = (new CompanyBackupSecretEnvelopeCipher())->open(
+                        $sealed,
+                        $password,
+                        $manifest->backupId,
+                        $completeManifest->registry->fingerprint,
+                    );
+                    self::wipe($plaintext);
+                } catch (CompanyBackupSecretEnvelopeException $e) {
+                    throw new CompanyBackupArchiveException(
+                        $e->errorCode,
+                        $secretEnvelope->path,
+                        $e,
+                    );
+                }
+            }
         } finally {
             $zip->close();
         }
@@ -323,5 +371,14 @@ final class CompanyBackupArchiveInspector
             'sha256' => hash_final($hash),
             'bytes' => $bytes,
         ];
+    }
+
+    private static function wipe(string &$value): void
+    {
+        $sensitive = $value;
+        $value = '';
+        if ($sensitive !== '' && function_exists('sodium_memzero')) {
+            sodium_memzero($sensitive);
+        }
     }
 }

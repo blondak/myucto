@@ -90,14 +90,23 @@ final class CompanyBackupArchiveWriter
     {
         $this->assertOpen();
         try {
-            $path = $this->registerPayload($entryPath, strlen($contents));
-            $zip = $this->requireZip();
-            if (!$zip->addFromString($path, $contents)) {
-                throw new CompanyBackupArchiveWriteException('archive_entry_add_failed', $path);
-            }
-            $this->encryptEntry($zip, $path);
-            $this->recordEntry($path, hash('sha256', $contents), strlen($contents));
-            $this->flushIfNeeded();
+            $this->addStringPayload($entryPath, $contents, false);
+        } catch (\Throwable $e) {
+            $this->abort();
+            throw $e;
+        }
+    }
+
+    public function addSecretEnvelope(
+        CompanyBackupSealedSecretEnvelope $envelope,
+    ): void {
+        $this->assertOpen();
+        try {
+            $this->addStringPayload(
+                $envelope->descriptor->path,
+                $envelope->ciphertext,
+                true,
+            );
         } catch (\Throwable $e) {
             $this->abort();
             throw $e;
@@ -108,6 +117,7 @@ final class CompanyBackupArchiveWriter
     {
         $this->assertOpen();
         try {
+            $this->assertGenericPayloadNamespace($entryPath);
             $source = $this->fingerprintSource($sourcePath, $entryPath);
             $path = $this->registerPayload($entryPath, $source['size']);
             $zip = $this->requireZip();
@@ -266,7 +276,11 @@ final class CompanyBackupArchiveWriter
         return ['size' => $size, 'mtime' => $before['mtime'], 'sha256' => $sha256];
     }
 
-    private function registerPayload(string $rawPath, int $size): string
+    private function registerPayload(
+        string $rawPath,
+        int $size,
+        bool $secretEnvelope = false,
+    ): string
     {
         if ($size < 0 || $size > $this->limits->maxEntryBytes) {
             throw new CompanyBackupArchiveWriteException('entry_size_exceeded', $rawPath);
@@ -278,10 +292,59 @@ final class CompanyBackupArchiveWriter
             );
         }
         $path = $this->paths->add($rawPath, false);
+        if (str_starts_with($path, 'secrets/')
+            && (!$secretEnvelope
+                || $path !== CompanyBackupSecretEnvelopeDescriptor::PATH)
+        ) {
+            throw new CompanyBackupArchiveWriteException(
+                'archive_secret_entry_requires_envelope',
+                $path,
+            );
+        }
         if (count($this->paths->paths()) > $this->limits->maxEntries) {
             throw new CompanyBackupArchiveWriteException('archive_entry_count_exceeded');
         }
         return $path;
+    }
+
+    private function addStringPayload(
+        string $entryPath,
+        string $contents,
+        bool $secretEnvelope,
+    ): void {
+        if (!$secretEnvelope) {
+            $this->assertGenericPayloadNamespace($entryPath);
+        }
+        $path = $this->registerPayload(
+            $entryPath,
+            strlen($contents),
+            $secretEnvelope,
+        );
+        $zip = $this->requireZip();
+        if (!$zip->addFromString($path, $contents)) {
+            throw new CompanyBackupArchiveWriteException(
+                'archive_entry_add_failed',
+                $path,
+            );
+        }
+        $this->encryptEntry($zip, $path);
+        $this->recordEntry(
+            $path,
+            hash('sha256', $contents),
+            strlen($contents),
+        );
+        $this->flushIfNeeded();
+    }
+
+    private function assertGenericPayloadNamespace(string $rawPath): void
+    {
+        $path = CompanyBackupArchivePath::normalize($rawPath, false);
+        if (str_starts_with($path, 'secrets/')) {
+            throw new CompanyBackupArchiveWriteException(
+                'archive_secret_entry_requires_envelope',
+                $path,
+            );
+        }
     }
 
     private function addReservedString(string $path, string $contents, bool $hashed): void

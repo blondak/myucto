@@ -16,7 +16,7 @@ final class CompanyBackupSecretEnvelopeCipherTest extends TestCase
     private const PASSWORD = 'synthetic-backup-password-42';
     private const BACKUP_ID = '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1';
     private const REGISTRY_FINGERPRINT =
-        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+        'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
     public function testRoundTripsWithVersionedArgonAndXChaChaDescriptor(): void
     {
@@ -127,7 +127,7 @@ final class CompanyBackupSecretEnvelopeCipherTest extends TestCase
                 $sealed,
                 self::PASSWORD,
                 self::BACKUP_ID,
-                str_repeat('f', 64),
+                'sha256:' . str_repeat('f', 64),
             ],
         ] as $case) {
             try {
