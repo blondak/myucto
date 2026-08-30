@@ -1866,6 +1866,55 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame($this->actors[1], (int) $row['created_by']);
     }
 
+    public function testCompanyBackupStreamsVersionedPublishedShift(): void
+    {
+        $fixture = $this->versionedPublishedShift();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_shifts');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $original = $rows[0];
+        $published = $rows[1];
+        self::assertSame($fixture['original_id'], (int) $original['id']);
+        self::assertSame('superseded', $original['status']);
+        self::assertNull($original['supersedes_id']);
+        self::assertSame($fixture['published_id'], (int) $published['id']);
+        self::assertSame($this->employmentId, (int) $published['employment_id']);
+        self::assertSame($fixture['calendar_id'], (int) $published['calendar_id']);
+        self::assertSame($fixture['series_key'], $published['series_key']);
+        self::assertSame(2, (int) $published['revision_no']);
+        self::assertSame($fixture['original_id'], (int) $published['supersedes_id']);
+        self::assertSame('2026-06-15 06:00:00', $published['starts_at_utc']);
+        self::assertSame('2026-06-15 14:30:00', $published['ends_at_utc']);
+        self::assertSame('Europe/Prague', $published['timezone_name']);
+        self::assertSame(30, (int) $published['break_minutes']);
+        self::assertSame(1, (int) $published['remote_work']);
+        self::assertSame(60, (int) $published['standby_minutes']);
+        self::assertSame('published', $published['status']);
+        self::assertSame($this->actors[0], (int) $published['created_by']);
+        self::assertSame($this->actors[1], (int) $published['published_by']);
+        self::assertSame('2026-06-01 08:00:00', $published['published_at']);
+    }
+
     public function testCompanyBackupStreamsRunWithoutGeneratedOfficeScope(): void
     {
         $run = $this->createRun();
@@ -2786,6 +2835,63 @@ final class PayrollRunPersistenceTest extends TestCase
         return [
             'calendar_id' => (int) $this->db->pdo()->lastInsertId(),
             'week_pattern' => $weekPattern,
+        ];
+    }
+
+    /**
+     * @return array{
+     *   calendar_id:int,
+     *   original_id:int,
+     *   published_id:int,
+     *   series_key:string
+     * }
+     */
+    private function versionedPublishedShift(): array
+    {
+        $calendar = $this->effectiveWorkCalendar();
+        $seriesKey = str_repeat('d', 32);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_shifts
+                (supplier_id, employment_id, calendar_id, series_key,
+                 revision_no, starts_at_utc, ends_at_utc, timezone_name,
+                 break_minutes, remote_work, standby_minutes, status,
+                 created_by, published_by, published_at)
+             VALUES (?, ?, ?, ?, 1, "2026-06-15 06:00:00",
+                     "2026-06-15 14:00:00", "Europe/Prague", 30, 0, 0,
+                     "superseded", ?, ?, "2026-05-31 08:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $calendar['calendar_id'],
+            $seriesKey,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+        $originalId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_shifts
+                (supplier_id, employment_id, calendar_id, series_key,
+                 revision_no, supersedes_id, starts_at_utc, ends_at_utc,
+                 timezone_name, break_minutes, remote_work, standby_minutes,
+                 status, created_by, published_by, published_at)
+             VALUES (?, ?, ?, ?, 2, ?, "2026-06-15 06:00:00",
+                     "2026-06-15 14:30:00", "Europe/Prague", 30, 1, 60,
+                     "published", ?, ?, "2026-06-01 08:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $calendar['calendar_id'],
+            $seriesKey,
+            $originalId,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+
+        return [
+            'calendar_id' => $calendar['calendar_id'],
+            'original_id' => $originalId,
+            'published_id' => (int) $this->db->pdo()->lastInsertId(),
+            'series_key' => $seriesKey,
         ];
     }
 
