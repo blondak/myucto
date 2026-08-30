@@ -1777,6 +1777,67 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertNull($rows[0]['social_security_variable_symbol']);
     }
 
+    public function testCompanyBackupStreamsEffectiveWorkCalendar(): void
+    {
+        $weekPattern = json_encode([
+            1 => 480,
+            2 => 480,
+            3 => 480,
+            4 => 480,
+            5 => 480,
+            6 => 0,
+            7 => 0,
+        ], JSON_THROW_ON_ERROR);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_work_calendars
+                (supplier_id, employment_id, name, timezone_name,
+                 schedule_type, week_pattern, weekly_minutes, valid_from,
+                 created_by)
+             VALUES (?, ?, "Synthetic regular calendar", "Europe/Prague",
+                     "regular", ?, 2400, "2026-01-01", ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $weekPattern,
+            $this->actors[0],
+        ]);
+        $calendarId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_work_calendars');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($calendarId, (int) $row['id']);
+        self::assertSame($this->employmentId, (int) $row['employment_id']);
+        self::assertSame('Synthetic regular calendar', $row['name']);
+        self::assertSame('Europe/Prague', $row['timezone_name']);
+        self::assertSame('regular', $row['schedule_type']);
+        self::assertSame($weekPattern, $row['week_pattern']);
+        self::assertSame(2_400, (int) $row['weekly_minutes']);
+        self::assertSame('2026-01-01', $row['valid_from']);
+        self::assertNull($row['valid_to']);
+        self::assertSame($this->actors[0], (int) $row['created_by']);
+    }
+
     public function testCompanyBackupStreamsRunWithoutGeneratedOfficeScope(): void
     {
         $run = $this->createRun();

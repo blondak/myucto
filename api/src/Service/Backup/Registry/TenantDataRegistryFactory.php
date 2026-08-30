@@ -30,6 +30,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessEventsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollWorkCalendarsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPdfSignatureOutputSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
@@ -145,6 +146,11 @@ final class TenantDataRegistryFactory
             'valid_from',
         ],
         'payroll_sickness_events' => ['supplier_id', 'absence_id'],
+        'payroll_work_calendars' => [
+            'supplier_id',
+            'employment_id',
+            'valid_from',
+        ],
     ];
 
     /** @var list<string> */
@@ -1245,6 +1251,20 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollSicknessEventsProjection::preservedIdentifiers(),
                     'references' =>
                         CompanyBackupPayrollSicknessEventsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_work_calendars') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollWorkCalendarsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollWorkCalendarsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
