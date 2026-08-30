@@ -30,6 +30,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRecurringComponentsProj
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollShiftsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessCompensationSegmentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessEventsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollWorkCalendarsProjection;
@@ -84,6 +85,7 @@ final class TenantDataRegistryFactory
         'payroll_run_persons' => 'payroll',
         'payroll_run_revisions' => 'payroll',
         'payroll_shifts' => 'payroll',
+        'payroll_sickness_compensation_segments' => 'payroll',
         'payroll_sickness_events' => 'payroll',
         'payroll_statutory_accumulator_entries' => 'payroll',
         'payroll_statutory_accumulator_openings' => 'payroll',
@@ -1275,6 +1277,21 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollSicknessEventsProjection::preservedIdentifiers(),
                     'references' =>
                         CompanyBackupPayrollSicknessEventsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_sickness_compensation_segments') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollSicknessCompensationSegmentsProjection::dataColumns(),
+                    'embedded_references' =>
+                        CompanyBackupPayrollSicknessCompensationSegmentsProjection::embeddedReferences(),
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollSicknessCompensationSegmentsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

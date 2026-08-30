@@ -1290,34 +1290,7 @@ final class PayrollRunPersistenceTest extends TestCase
 
     public function testCompanyBackupStreamsSicknessEventWithRulesetTrace(): void
     {
-        $fixture = $this->approvedAbsenceWithAverage('dpn');
-        $trace = CanonicalJson::encode([
-            'average_hourly_minor' => 7_500,
-            'compensation_basis_points' => 6_000,
-            'compensation_minor' => 18_000,
-            'segment_count' => 1,
-            'support_status' => 'supported',
-            'window_calendar_days' => 14,
-        ]);
-        $this->db->pdo()->prepare(
-            'INSERT INTO payroll_sickness_events
-                (supplier_id, absence_id, first_day_fully_worked,
-                 insurance_eligibility_confirmed, conflicting_benefit_excluded,
-                 average_snapshot_id, compensation_window_from,
-                 compensation_window_to, reduced_hourly_minor,
-                 compensation_minor, support_status, ruleset_id, ruleset_hash,
-                 calculation_trace, calculated_by)
-             VALUES (?, ?, 1, 1, 1, ?, "2026-06-16", "2026-06-16", 4500,
-                     18000, "supported", "synthetic-sickness-v1", ?, ?, ?)'
-        )->execute([
-            $this->supplierId,
-            $fixture['absence_id'],
-            $fixture['average_id'],
-            str_repeat('c', 64),
-            $trace,
-            $this->actors[1],
-        ]);
-        $eventId = (int) $this->db->pdo()->lastInsertId();
+        $fixture = $this->sicknessEvent();
         $registry = TenantDataRegistryFactory::draftV1();
         $definition = $registry->definition('table:payroll_sickness_events');
         self::assertNotNull($definition);
@@ -1342,24 +1315,108 @@ final class PayrollRunPersistenceTest extends TestCase
         ));
         self::assertCount(1, $rows);
         $row = $rows[0];
-        self::assertSame($eventId, (int) $row['id']);
+        self::assertSame($fixture['event_id'], (int) $row['id']);
         self::assertSame($fixture['absence_id'], (int) $row['absence_id']);
         self::assertSame(
             $fixture['average_id'],
             (int) $row['average_snapshot_id'],
         );
-        self::assertSame(1, (int) $row['first_day_fully_worked']);
+        self::assertSame(0, (int) $row['first_day_fully_worked']);
         self::assertSame(1, (int) $row['insurance_eligibility_confirmed']);
         self::assertSame(1, (int) $row['conflicting_benefit_excluded']);
-        self::assertSame('2026-06-16', $row['compensation_window_from']);
+        self::assertSame('2026-06-15', $row['compensation_window_from']);
         self::assertSame('2026-06-16', $row['compensation_window_to']);
         self::assertSame(4_500, (int) $row['reduced_hourly_minor']);
-        self::assertSame(18_000, (int) $row['compensation_minor']);
+        self::assertSame(10_800, (int) $row['compensation_minor']);
         self::assertSame('supported', $row['support_status']);
         self::assertSame('synthetic-sickness-v1', $row['ruleset_id']);
         self::assertSame(str_repeat('c', 64), $row['ruleset_hash']);
-        self::assertSame($trace, $row['calculation_trace']);
+        self::assertSame($fixture['trace'], $row['calculation_trace']);
         self::assertSame($this->actors[1], (int) $row['calculated_by']);
+    }
+
+    public function testCompanyBackupStreamsSicknessSegmentWithRemappableShiftTrace(): void
+    {
+        $sickness = $this->sicknessEvent();
+        $shift = $this->versionedPublishedShift();
+        $trace = CanonicalJson::encode([
+            'compensation_minor' => 10_800,
+            'eligible_minutes' => 240,
+            'hourly_average_minor' => 7_500,
+            'local_date' => '2026-06-15',
+            'planned_minutes' => 480,
+            'reduced_hourly_minor' => 4_500,
+            'rounding' => 'half-up-to-minor-unit',
+            'shift_id' => $shift['published_id'],
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_sickness_compensation_segments
+                (supplier_id, sickness_event_id, shift_id, local_date,
+                 planned_minutes, eligible_minutes, hourly_average_minor,
+                 reduced_hourly_minor, compensation_minor, trace)
+             VALUES (?, ?, ?, "2026-06-15", 480, 240, 7500, 4500, 10800, ?)'
+        )->execute([
+            $this->supplierId,
+            $sickness['event_id'],
+            $shift['published_id'],
+            $trace,
+        ]);
+        $segmentId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_sickness_compensation_segments',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->embeddedReferences->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($segmentId, (int) $row['id']);
+        self::assertSame($sickness['event_id'], (int) $row['sickness_event_id']);
+        self::assertSame($shift['published_id'], (int) $row['shift_id']);
+        self::assertSame('2026-06-15', $row['local_date']);
+        self::assertSame(480, (int) $row['planned_minutes']);
+        self::assertSame(240, (int) $row['eligible_minutes']);
+        self::assertSame(7_500, (int) $row['hourly_average_minor']);
+        self::assertSame(4_500, (int) $row['reduced_hourly_minor']);
+        self::assertSame(10_800, (int) $row['compensation_minor']);
+        self::assertSame($trace, $row['trace']);
+
+        $restored = $projection->remapEmbeddedReferences(
+            $row,
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ): int => $reference->target === 'table:payroll_shifts'
+                ? (int) $value + 1_000
+                : throw new \LogicException(
+                    'Test zachytil neočekávanou referenci.',
+                ),
+        );
+        $restoredTrace = json_decode(
+            (string) $restored['trace'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame($shift['published_id'] + 1_000, $restoredTrace['shift_id']);
     }
 
     public function testCompanyBackupStreamsInputImportWithBinaryHash(): void
@@ -2962,6 +3019,45 @@ final class PayrollRunPersistenceTest extends TestCase
         return [
             'average_id' => $averageId,
             'absence_id' => (int) $this->db->pdo()->lastInsertId(),
+        ];
+    }
+
+    /** @return array{average_id:int,absence_id:int,event_id:int,trace:string} */
+    private function sicknessEvent(): array
+    {
+        $absence = $this->approvedAbsenceWithAverage('dpn');
+        $trace = CanonicalJson::encode([
+            'average_hourly_minor' => 7_500,
+            'compensation_basis_points' => 6_000,
+            'compensation_minor' => 10_800,
+            'segment_count' => 1,
+            'support_status' => 'supported',
+            'window_calendar_days' => 14,
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_sickness_events
+                (supplier_id, absence_id, first_day_fully_worked,
+                 insurance_eligibility_confirmed, conflicting_benefit_excluded,
+                 average_snapshot_id, compensation_window_from,
+                 compensation_window_to, reduced_hourly_minor,
+                 compensation_minor, support_status, ruleset_id, ruleset_hash,
+                 calculation_trace, calculated_by)
+             VALUES (?, ?, 0, 1, 1, ?, "2026-06-15", "2026-06-16", 4500,
+                     10800, "supported", "synthetic-sickness-v1", ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $absence['absence_id'],
+            $absence['average_id'],
+            str_repeat('c', 64),
+            $trace,
+            $this->actors[1],
+        ]);
+
+        return [
+            'average_id' => $absence['average_id'],
+            'absence_id' => $absence['absence_id'],
+            'event_id' => (int) $this->db->pdo()->lastInsertId(),
+            'trace' => $trace,
         ];
     }
 
