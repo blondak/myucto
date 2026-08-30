@@ -15,6 +15,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollAverageEarningSnapshotsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollComponentDefinitionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
@@ -114,6 +115,13 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<string>> */
     private const COMPANY_BACKUP_NATURAL_KEYS = [
+        'payroll_average_earning_snapshots' => [
+            'supplier_id',
+            'employment_id',
+            'applicable_year',
+            'applicable_quarter',
+            'revision_no',
+        ],
         'payroll_component_definitions' => ['supplier_id', 'code', 'valid_from'],
         'payroll_employment_terms' => [
             'supplier_id',
@@ -1034,6 +1042,24 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'payroll_average_earning_snapshots') {
+            return [
+                'company_backup' => [
+                    'column_codecs' =>
+                        CompanyBackupPayrollAverageEarningSnapshotsProjection::columnCodecs(),
+                    'data_columns' =>
+                        CompanyBackupPayrollAverageEarningSnapshotsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'preserved_identifiers' =>
+                        CompanyBackupPayrollAverageEarningSnapshotsProjection::preservedIdentifiers(),
+                    'references' =>
+                        CompanyBackupPayrollAverageEarningSnapshotsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
         if ($table === 'payroll_component_definitions') {
             return [
                 'company_backup' => [

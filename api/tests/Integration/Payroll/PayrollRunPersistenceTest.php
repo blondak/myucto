@@ -1157,6 +1157,90 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(1, (int) $row['is_active']);
     }
 
+    public function testCompanyBackupStreamsAverageEarningSnapshotWithBinaryInputHash(): void
+    {
+        $input = CanonicalJson::encode([
+            'allocated_minor' => 125_000,
+            'decisive_from' => '2026-01-01',
+            'decisive_to' => '2026-03-31',
+            'gross_minor' => 1_200_000,
+            'rationale' => null,
+            'worked_days' => 60,
+            'worked_minutes' => 9_600,
+        ]);
+        $trace = CanonicalJson::encode([
+            'average_hourly_minor' => 8_281,
+            'rule' => 'gross-earnings-divided-by-worked-time',
+            'rounding' => 'half-up-to-minor-unit',
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_average_earning_snapshots
+                (supplier_id, employment_id, applicable_year,
+                 applicable_quarter, revision_no, source_kind,
+                 decisive_from, decisive_to, gross_earnings_minor,
+                 longer_period_allocated_minor, worked_minutes, worked_days,
+                 average_hourly_minor, support_status, status, ruleset_id,
+                 ruleset_hash, input_hash, input_trace, created_by,
+                 approved_by, approved_at)
+             VALUES (?, ?, 2026, 2, 3, "actual", "2026-01-01",
+                     "2026-03-31", 1200000, 125000, 9600, 60, 8281,
+                     "supported", "approved", "synthetic-average-v1", ?, ?,
+                     ?, ?, ?, "2026-04-02 10:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            str_repeat('a', 64),
+            hash('sha256', $input, true),
+            $trace,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+        $snapshotId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_average_earning_snapshots',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($snapshotId, (int) $row['id']);
+        self::assertSame($this->employmentId, (int) $row['employment_id']);
+        self::assertSame(2026, (int) $row['applicable_year']);
+        self::assertSame(2, (int) $row['applicable_quarter']);
+        self::assertSame(3, (int) $row['revision_no']);
+        self::assertSame('actual', $row['source_kind']);
+        self::assertSame('synthetic-average-v1', $row['ruleset_id']);
+        self::assertSame(str_repeat('a', 64), $row['ruleset_hash']);
+        self::assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/D',
+            (string) $row['input_hash'],
+        );
+        self::assertSame(hash('sha256', $input), $row['input_hash']);
+        self::assertSame($trace, $row['input_trace']);
+        self::assertSame($this->actors[0], (int) $row['created_by']);
+        self::assertSame($this->actors[1], (int) $row['approved_by']);
+        self::assertSame('2026-04-02 10:00:00', $row['approved_at']);
+    }
+
     public function testCompanyBackupStreamsInputImportWithBinaryHash(): void
     {
         $content = 'synthetic payroll input import';
