@@ -1241,6 +1241,105 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-04-02 10:00:00', $row['approved_at']);
     }
 
+    public function testCompanyBackupStreamsApprovedAbsenceWithAverageReference(): void
+    {
+        $averageInput = CanonicalJson::encode([
+            'allocated_minor' => 0,
+            'decisive_from' => '2026-01-01',
+            'decisive_to' => '2026-03-31',
+            'gross_minor' => 1_200_000,
+            'rationale' => null,
+            'worked_days' => 60,
+            'worked_minutes' => 9_600,
+        ]);
+        $averageTrace = CanonicalJson::encode([
+            'average_hourly_minor' => 7_500,
+            'rule' => 'gross-earnings-divided-by-worked-time',
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_average_earning_snapshots
+                (supplier_id, employment_id, applicable_year,
+                 applicable_quarter, revision_no, source_kind,
+                 decisive_from, decisive_to, gross_earnings_minor,
+                 longer_period_allocated_minor, worked_minutes, worked_days,
+                 average_hourly_minor, support_status, status, ruleset_id,
+                 ruleset_hash, input_hash, input_trace, created_by,
+                 approved_by, approved_at)
+             VALUES (?, ?, 2026, 2, 1, "actual", "2026-01-01",
+                     "2026-03-31", 1200000, 0, 9600, 60, 7500,
+                     "supported", "approved", "synthetic-average-v1", ?, ?,
+                     ?, ?, ?, "2026-04-02 10:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            str_repeat('b', 64),
+            hash('sha256', $averageInput, true),
+            $averageTrace,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+        $averageId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to,
+                 timezone_name, partial_first_minutes, partial_last_minutes,
+                 note, compensation_policy, compensation_rate_basis_points,
+                 average_snapshot_id, support_status, status, requested_by,
+                 decided_by, decided_at)
+             VALUES (?, ?, "vacation", "2026-06-15", "2026-06-16",
+                     "Europe/Prague", 240, 180, "Synthetic approved leave",
+                     "average_100", 10000, ?, "supported", "approved", ?, ?,
+                     "2026-06-01 09:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $averageId,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+        $absenceId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_absences');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($absenceId, (int) $row['id']);
+        self::assertSame($this->employmentId, (int) $row['employment_id']);
+        self::assertSame('vacation', $row['absence_type']);
+        self::assertSame('2026-06-15', $row['date_from']);
+        self::assertSame('2026-06-16', $row['date_to']);
+        self::assertSame(240, (int) $row['partial_first_minutes']);
+        self::assertSame(180, (int) $row['partial_last_minutes']);
+        self::assertSame('average_100', $row['compensation_policy']);
+        self::assertSame(10_000, (int) $row['compensation_rate_basis_points']);
+        self::assertSame($averageId, (int) $row['average_snapshot_id']);
+        self::assertSame('supported', $row['support_status']);
+        self::assertSame('approved', $row['status']);
+        self::assertSame(0, (int) $row['correction_pending']);
+        self::assertSame($this->actors[0], (int) $row['requested_by']);
+        self::assertSame($this->actors[1], (int) $row['decided_by']);
+        self::assertSame('2026-06-01 09:00:00', $row['decided_at']);
+    }
+
     public function testCompanyBackupStreamsInputImportWithBinaryHash(): void
     {
         $content = 'synthetic payroll input import';
