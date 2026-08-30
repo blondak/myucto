@@ -1243,61 +1243,9 @@ final class PayrollRunPersistenceTest extends TestCase
 
     public function testCompanyBackupStreamsApprovedAbsenceWithAverageReference(): void
     {
-        $averageInput = CanonicalJson::encode([
-            'allocated_minor' => 0,
-            'decisive_from' => '2026-01-01',
-            'decisive_to' => '2026-03-31',
-            'gross_minor' => 1_200_000,
-            'rationale' => null,
-            'worked_days' => 60,
-            'worked_minutes' => 9_600,
-        ]);
-        $averageTrace = CanonicalJson::encode([
-            'average_hourly_minor' => 7_500,
-            'rule' => 'gross-earnings-divided-by-worked-time',
-        ]);
-        $this->db->pdo()->prepare(
-            'INSERT INTO payroll_average_earning_snapshots
-                (supplier_id, employment_id, applicable_year,
-                 applicable_quarter, revision_no, source_kind,
-                 decisive_from, decisive_to, gross_earnings_minor,
-                 longer_period_allocated_minor, worked_minutes, worked_days,
-                 average_hourly_minor, support_status, status, ruleset_id,
-                 ruleset_hash, input_hash, input_trace, created_by,
-                 approved_by, approved_at)
-             VALUES (?, ?, 2026, 2, 1, "actual", "2026-01-01",
-                     "2026-03-31", 1200000, 0, 9600, 60, 7500,
-                     "supported", "approved", "synthetic-average-v1", ?, ?,
-                     ?, ?, ?, "2026-04-02 10:00:00")'
-        )->execute([
-            $this->supplierId,
-            $this->employmentId,
-            str_repeat('b', 64),
-            hash('sha256', $averageInput, true),
-            $averageTrace,
-            $this->actors[0],
-            $this->actors[1],
-        ]);
-        $averageId = (int) $this->db->pdo()->lastInsertId();
-        $this->db->pdo()->prepare(
-            'INSERT INTO payroll_absences
-                (supplier_id, employment_id, absence_type, date_from, date_to,
-                 timezone_name, partial_first_minutes, partial_last_minutes,
-                 note, compensation_policy, compensation_rate_basis_points,
-                 average_snapshot_id, support_status, status, requested_by,
-                 decided_by, decided_at)
-             VALUES (?, ?, "vacation", "2026-06-15", "2026-06-16",
-                     "Europe/Prague", 240, 180, "Synthetic approved leave",
-                     "average_100", 10000, ?, "supported", "approved", ?, ?,
-                     "2026-06-01 09:00:00")'
-        )->execute([
-            $this->supplierId,
-            $this->employmentId,
-            $averageId,
-            $this->actors[0],
-            $this->actors[1],
-        ]);
-        $absenceId = (int) $this->db->pdo()->lastInsertId();
+        $fixture = $this->approvedAbsenceWithAverage();
+        $averageId = $fixture['average_id'];
+        $absenceId = $fixture['absence_id'];
         $registry = TenantDataRegistryFactory::draftV1();
         $definition = $registry->definition('table:payroll_absences');
         self::assertNotNull($definition);
@@ -1338,6 +1286,80 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame($this->actors[0], (int) $row['requested_by']);
         self::assertSame($this->actors[1], (int) $row['decided_by']);
         self::assertSame('2026-06-01 09:00:00', $row['decided_at']);
+    }
+
+    public function testCompanyBackupStreamsSicknessEventWithRulesetTrace(): void
+    {
+        $fixture = $this->approvedAbsenceWithAverage('dpn');
+        $trace = CanonicalJson::encode([
+            'average_hourly_minor' => 7_500,
+            'compensation_basis_points' => 6_000,
+            'compensation_minor' => 18_000,
+            'segment_count' => 1,
+            'support_status' => 'supported',
+            'window_calendar_days' => 14,
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_sickness_events
+                (supplier_id, absence_id, first_day_fully_worked,
+                 insurance_eligibility_confirmed, conflicting_benefit_excluded,
+                 average_snapshot_id, compensation_window_from,
+                 compensation_window_to, reduced_hourly_minor,
+                 compensation_minor, support_status, ruleset_id, ruleset_hash,
+                 calculation_trace, calculated_by)
+             VALUES (?, ?, 1, 1, 1, ?, "2026-06-16", "2026-06-16", 4500,
+                     18000, "supported", "synthetic-sickness-v1", ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $fixture['absence_id'],
+            $fixture['average_id'],
+            str_repeat('c', 64),
+            $trace,
+            $this->actors[1],
+        ]);
+        $eventId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_sickness_events');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($eventId, (int) $row['id']);
+        self::assertSame($fixture['absence_id'], (int) $row['absence_id']);
+        self::assertSame(
+            $fixture['average_id'],
+            (int) $row['average_snapshot_id'],
+        );
+        self::assertSame(1, (int) $row['first_day_fully_worked']);
+        self::assertSame(1, (int) $row['insurance_eligibility_confirmed']);
+        self::assertSame(1, (int) $row['conflicting_benefit_excluded']);
+        self::assertSame('2026-06-16', $row['compensation_window_from']);
+        self::assertSame('2026-06-16', $row['compensation_window_to']);
+        self::assertSame(4_500, (int) $row['reduced_hourly_minor']);
+        self::assertSame(18_000, (int) $row['compensation_minor']);
+        self::assertSame('supported', $row['support_status']);
+        self::assertSame('synthetic-sickness-v1', $row['ruleset_id']);
+        self::assertSame(str_repeat('c', 64), $row['ruleset_hash']);
+        self::assertSame($trace, $row['calculation_trace']);
+        self::assertSame($this->actors[1], (int) $row['calculated_by']);
     }
 
     public function testCompanyBackupStreamsInputImportWithBinaryHash(): void
@@ -2644,6 +2666,76 @@ final class PayrollRunPersistenceTest extends TestCase
             'UPDATE payroll_run_events SET reason = "tamper"
               WHERE supplier_id = ? AND id = ?'
         )->execute([$this->supplierId, $eventId]);
+    }
+
+    /** @return array{average_id:int,absence_id:int} */
+    private function approvedAbsenceWithAverage(
+        string $absenceType = 'vacation',
+    ): array {
+        $compensationPolicy = $absenceType === 'dpn' ? 'dpn' : 'average_100';
+        $compensationRate = $absenceType === 'dpn' ? 6_000 : 10_000;
+        $averageInput = CanonicalJson::encode([
+            'allocated_minor' => 0,
+            'decisive_from' => '2026-01-01',
+            'decisive_to' => '2026-03-31',
+            'gross_minor' => 1_200_000,
+            'rationale' => null,
+            'worked_days' => 60,
+            'worked_minutes' => 9_600,
+        ]);
+        $averageTrace = CanonicalJson::encode([
+            'average_hourly_minor' => 7_500,
+            'rule' => 'gross-earnings-divided-by-worked-time',
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_average_earning_snapshots
+                (supplier_id, employment_id, applicable_year,
+                 applicable_quarter, revision_no, source_kind,
+                 decisive_from, decisive_to, gross_earnings_minor,
+                 longer_period_allocated_minor, worked_minutes, worked_days,
+                 average_hourly_minor, support_status, status, ruleset_id,
+                 ruleset_hash, input_hash, input_trace, created_by,
+                 approved_by, approved_at)
+             VALUES (?, ?, 2026, 2, 1, "actual", "2026-01-01",
+                     "2026-03-31", 1200000, 0, 9600, 60, 7500,
+                     "supported", "approved", "synthetic-average-v1", ?, ?,
+                     ?, ?, ?, "2026-04-02 10:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            str_repeat('b', 64),
+            hash('sha256', $averageInput, true),
+            $averageTrace,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+        $averageId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to,
+                 timezone_name, partial_first_minutes, partial_last_minutes,
+                 note, compensation_policy, compensation_rate_basis_points,
+                 average_snapshot_id, support_status, status, requested_by,
+                 decided_by, decided_at)
+             VALUES (?, ?, ?, "2026-06-15", "2026-06-16",
+                     "Europe/Prague", 240, 180, "Synthetic approved leave",
+                     ?, ?, ?, "supported", "approved", ?, ?,
+                     "2026-06-01 09:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $absenceType,
+            $compensationPolicy,
+            $compensationRate,
+            $averageId,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+
+        return [
+            'average_id' => $averageId,
+            'absence_id' => (int) $this->db->pdo()->lastInsertId(),
+        ];
     }
 
     private function createRun(): array

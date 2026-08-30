@@ -28,6 +28,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRecurringComponentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessEventsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPdfSignatureOutputSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
@@ -78,6 +79,7 @@ final class TenantDataRegistryFactory
         'payroll_runs' => 'payroll',
         'payroll_run_persons' => 'payroll',
         'payroll_run_revisions' => 'payroll',
+        'payroll_sickness_events' => 'payroll',
         'payroll_statutory_accumulator_entries' => 'payroll',
         'payroll_statutory_accumulator_openings' => 'payroll',
         'payroll_statutory_person_results' => 'payroll',
@@ -142,6 +144,7 @@ final class TenantDataRegistryFactory
             'component_id',
             'valid_from',
         ],
+        'payroll_sickness_events' => ['supplier_id', 'absence_id'],
     ];
 
     /** @var list<string> */
@@ -1226,6 +1229,22 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollRunsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_sickness_events') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollSicknessEventsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'preserved_identifiers' =>
+                        CompanyBackupPayrollSicknessEventsProjection::preservedIdentifiers(),
+                    'references' =>
+                        CompanyBackupPayrollSicknessEventsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
