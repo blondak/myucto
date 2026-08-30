@@ -1779,29 +1779,7 @@ final class PayrollRunPersistenceTest extends TestCase
 
     public function testCompanyBackupStreamsEffectiveWorkCalendar(): void
     {
-        $weekPattern = json_encode([
-            1 => 480,
-            2 => 480,
-            3 => 480,
-            4 => 480,
-            5 => 480,
-            6 => 0,
-            7 => 0,
-        ], JSON_THROW_ON_ERROR);
-        $this->db->pdo()->prepare(
-            'INSERT INTO payroll_work_calendars
-                (supplier_id, employment_id, name, timezone_name,
-                 schedule_type, week_pattern, weekly_minutes, valid_from,
-                 created_by)
-             VALUES (?, ?, "Synthetic regular calendar", "Europe/Prague",
-                     "regular", ?, 2400, "2026-01-01", ?)'
-        )->execute([
-            $this->supplierId,
-            $this->employmentId,
-            $weekPattern,
-            $this->actors[0],
-        ]);
-        $calendarId = (int) $this->db->pdo()->lastInsertId();
+        $fixture = $this->effectiveWorkCalendar();
         $registry = TenantDataRegistryFactory::draftV1();
         $definition = $registry->definition('table:payroll_work_calendars');
         self::assertNotNull($definition);
@@ -1826,16 +1804,66 @@ final class PayrollRunPersistenceTest extends TestCase
         ));
         self::assertCount(1, $rows);
         $row = $rows[0];
-        self::assertSame($calendarId, (int) $row['id']);
+        self::assertSame($fixture['calendar_id'], (int) $row['id']);
         self::assertSame($this->employmentId, (int) $row['employment_id']);
         self::assertSame('Synthetic regular calendar', $row['name']);
         self::assertSame('Europe/Prague', $row['timezone_name']);
         self::assertSame('regular', $row['schedule_type']);
-        self::assertSame($weekPattern, $row['week_pattern']);
+        self::assertSame($fixture['week_pattern'], $row['week_pattern']);
         self::assertSame(2_400, (int) $row['weekly_minutes']);
         self::assertSame('2026-01-01', $row['valid_from']);
         self::assertNull($row['valid_to']);
         self::assertSame($this->actors[0], (int) $row['created_by']);
+    }
+
+    public function testCompanyBackupStreamsCalendarDayException(): void
+    {
+        $calendar = $this->effectiveWorkCalendar();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_calendar_days
+                (supplier_id, calendar_id, day_date, day_kind,
+                 planned_minutes, holiday_code, holiday_name, note, created_by)
+             VALUES (?, ?, "2026-07-05", "holiday", 0, "SYN-HOLIDAY",
+                     "Synthetic public holiday", "Synthetic calendar exception", ?)'
+        )->execute([
+            $this->supplierId,
+            $calendar['calendar_id'],
+            $this->actors[1],
+        ]);
+        $dayId = (int) $this->db->pdo()->lastInsertId();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_calendar_days');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($dayId, (int) $row['id']);
+        self::assertSame($calendar['calendar_id'], (int) $row['calendar_id']);
+        self::assertSame('2026-07-05', $row['day_date']);
+        self::assertSame('holiday', $row['day_kind']);
+        self::assertSame(0, (int) $row['planned_minutes']);
+        self::assertSame('SYN-HOLIDAY', $row['holiday_code']);
+        self::assertSame('Synthetic public holiday', $row['holiday_name']);
+        self::assertSame('Synthetic calendar exception', $row['note']);
+        self::assertSame($this->actors[1], (int) $row['created_by']);
     }
 
     public function testCompanyBackupStreamsRunWithoutGeneratedOfficeScope(): void
@@ -2727,6 +2755,38 @@ final class PayrollRunPersistenceTest extends TestCase
             'UPDATE payroll_run_events SET reason = "tamper"
               WHERE supplier_id = ? AND id = ?'
         )->execute([$this->supplierId, $eventId]);
+    }
+
+    /** @return array{calendar_id:int,week_pattern:string} */
+    private function effectiveWorkCalendar(): array
+    {
+        $weekPattern = json_encode([
+            1 => 480,
+            2 => 480,
+            3 => 480,
+            4 => 480,
+            5 => 480,
+            6 => 0,
+            7 => 0,
+        ], JSON_THROW_ON_ERROR);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_work_calendars
+                (supplier_id, employment_id, name, timezone_name,
+                 schedule_type, week_pattern, weekly_minutes, valid_from,
+                 created_by)
+             VALUES (?, ?, "Synthetic regular calendar", "Europe/Prague",
+                     "regular", ?, 2400, "2026-01-01", ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $weekPattern,
+            $this->actors[0],
+        ]);
+
+        return [
+            'calendar_id' => (int) $this->db->pdo()->lastInsertId(),
+            'week_pattern' => $weekPattern,
+        ];
     }
 
     /** @return array{average_id:int,absence_id:int} */

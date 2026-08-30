@@ -17,6 +17,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollAbsencesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollAverageEarningSnapshotsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollCalendarDaysProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollComponentDefinitionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
@@ -51,6 +52,7 @@ final class TenantDataRegistryFactory
         'payroll_absences' => 'payroll',
         'payroll_average_earning_snapshots' => 'payroll',
         'payroll_business_trips' => 'payroll',
+        'payroll_calendar_days' => 'payroll',
         'payroll_component_definitions' => 'payroll',
         'payroll_deduction_agreements' => 'payroll',
         'payroll_employees' => 'payroll',
@@ -125,6 +127,11 @@ final class TenantDataRegistryFactory
             'applicable_year',
             'applicable_quarter',
             'revision_no',
+        ],
+        'payroll_calendar_days' => [
+            'supplier_id',
+            'calendar_id',
+            'day_date',
         ],
         'payroll_component_definitions' => ['supplier_id', 'code', 'valid_from'],
         'payroll_employment_terms' => [
@@ -1080,6 +1087,20 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollAverageEarningSnapshotsProjection::preservedIdentifiers(),
                     'references' =>
                         CompanyBackupPayrollAverageEarningSnapshotsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_calendar_days') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollCalendarDaysProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollCalendarDaysProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
