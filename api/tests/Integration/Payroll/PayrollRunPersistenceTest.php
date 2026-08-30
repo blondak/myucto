@@ -16,6 +16,7 @@ use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
@@ -1212,6 +1213,87 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(1, (int) $row['duplicate_count']);
         self::assertSame($this->actors[0], (int) $row['created_by']);
         self::assertSame('2026-06-02 10:00:00', $row['accepted_at']);
+    }
+
+    public function testCompanyBackupStreamsApprovedInputWithResealableSnapshot(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_inputs');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->embeddedReferences->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($this->inputId, (int) $row['id']);
+        self::assertSame($this->employeeId, (int) $row['employee_id']);
+        self::assertSame($this->employmentId, (int) $row['employment_id']);
+        self::assertSame('manual', $row['source_kind']);
+        self::assertSame('approved', $row['status']);
+        self::assertNull($row['external_id']);
+        self::assertNull($row['import_id']);
+        self::assertNull($row['recurring_component_id']);
+        self::assertNull($row['source_snapshot_json']);
+        self::assertNull($row['source_snapshot_hash']);
+        self::assertArrayNotHasKey('external_dedupe_key', $row);
+        self::assertSame($this->actors[0], (int) $row['approved_by']);
+        self::assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/D',
+            (string) $row['component_snapshot_hash'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $row['component_snapshot_json']),
+            $row['component_snapshot_hash'],
+        );
+        $component = json_decode(
+            (string) $row['component_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame((int) $row['component_id'], $component['component_id']);
+        self::assertSame('BASE', $component['code']);
+
+        $restored = $projection->remapEmbeddedReferences(
+            $row,
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ): int => $reference->target === 'table:payroll_component_definitions'
+                ? (int) $value + 1_000
+                : throw new \LogicException(
+                    'Test zachytil neočekávanou referenci.',
+                ),
+        );
+        $restoredComponent = json_decode(
+            (string) $restored['component_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            (int) $row['component_id'] + 1_000,
+            $restoredComponent['component_id'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $restored['component_snapshot_json']),
+            $restored['component_snapshot_hash'],
+        );
     }
 
     public function testCompanyBackupStreamsRecurringComponentDisabledForRestore(): void
