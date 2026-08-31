@@ -11,58 +11,7 @@ final class CompanyBackupPayrollRunResultSnapshotContract
     public static function embeddedReferences(): array
     {
         $references = [
-            self::tenant(
-                ['people', '*', 'employee_id'],
-                'payroll_employees',
-            ),
-            self::tenant(
-                ['people', '*', 'employments', '*', 'employment_id'],
-                'payroll_employments',
-            ),
-            self::tenant(
-                [
-                    'people',
-                    '*',
-                    'employments',
-                    '*',
-                    'inputs',
-                    '*',
-                    'input_id',
-                ],
-                'payroll_inputs',
-            ),
-            self::tenant(
-                [
-                    'people',
-                    '*',
-                    'enforcement',
-                    'input',
-                    'income',
-                    'trace',
-                    '*',
-                    'id',
-                ],
-                'payroll_employees',
-                valuePrefix: 'revision-person-',
-                valueSuffixSeparator: '-',
-            ),
-            self::tenant(
-                [
-                    'people',
-                    '*',
-                    'enforcement',
-                    'input',
-                    'income',
-                    'trace',
-                    '*',
-                    'payer_id',
-                ],
-                'supplier',
-                valuePrefix: 'supplier-',
-            ),
-            ...CompanyBackupPayrollStatutoryResultSnapshotContract::personEnvelopeEmbeddedReferences(
-                ['people', '*', 'statutory'],
-            ),
+            ...self::personEmbeddedReferences(['people', '*']),
             ...CompanyBackupPayrollStatutoryResultSnapshotContract::personEnvelopeEmbeddedReferences(
                 ['statutory', 'people', '*'],
             ),
@@ -86,6 +35,116 @@ final class CompanyBackupPayrollRunResultSnapshotContract
             ),
         ];
 
+        return self::sortReferences($references);
+    }
+
+    /**
+     * @param list<string> $personPath
+     * @return list<array<string,mixed>>
+     */
+    public static function personEmbeddedReferences(
+        array $personPath = [],
+        string $column = 'result_snapshot_json',
+    ): array {
+        $references = [
+            self::tenant(
+                [...$personPath, 'employee_id'],
+                'payroll_employees',
+                column: $column,
+            ),
+            self::tenant(
+                [...$personPath, 'employments', '*', 'employment_id'],
+                'payroll_employments',
+                column: $column,
+            ),
+            self::tenant(
+                [
+                    ...$personPath,
+                    'employments',
+                    '*',
+                    'inputs',
+                    '*',
+                    'input_id',
+                ],
+                'payroll_inputs',
+                column: $column,
+            ),
+            self::tenant(
+                [
+                    ...$personPath,
+                    'enforcement',
+                    'input',
+                    'income',
+                    'trace',
+                    '*',
+                    'id',
+                ],
+                'payroll_employees',
+                valuePrefix: 'revision-person-',
+                valueSuffixSeparator: '-',
+                column: $column,
+            ),
+            self::tenant(
+                [
+                    ...$personPath,
+                    'enforcement',
+                    'input',
+                    'income',
+                    'trace',
+                    '*',
+                    'payer_id',
+                ],
+                'supplier',
+                valuePrefix: 'supplier-',
+                column: $column,
+            ),
+        ];
+        foreach (
+            CompanyBackupPayrollStatutoryResultSnapshotContract::personEnvelopeEmbeddedReferences(
+                [...$personPath, 'statutory'],
+            ) as $reference
+        ) {
+            $reference['column'] = $column;
+            $references[] = $reference;
+        }
+
+        return self::sortReferences($references);
+    }
+
+    /**
+     * @param list<string> $path
+     * @return array<string,mixed>
+     */
+    private static function tenant(
+        array $path,
+        string $target,
+        bool $nullable = false,
+        ?string $valuePrefix = null,
+        ?string $valueSuffixSeparator = null,
+        string $column = 'result_snapshot_json',
+    ): array {
+        return [
+            'column' => $column,
+            'condition' => null,
+            'fallbacks' => [],
+            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+            'nullable' => $nullable,
+            'path' => $path,
+            'target' => 'table:' . $target,
+            'target_columns' => ['id'],
+            ...($valuePrefix === null ? [] : ['value_prefix' => $valuePrefix]),
+            ...($valueSuffixSeparator === null ? [] : [
+                'value_suffix_separator' => $valueSuffixSeparator,
+            ]),
+        ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $references
+     * @return list<array<string,mixed>>
+     */
+    private static function sortReferences(array $references): array
+    {
         usort(
             $references,
             static fn (array $left, array $right): int => strcmp(
@@ -100,32 +159,5 @@ final class CompanyBackupPayrollRunResultSnapshotContract
             ),
         );
         return $references;
-    }
-
-    /**
-     * @param list<string> $path
-     * @return array<string,mixed>
-     */
-    private static function tenant(
-        array $path,
-        string $target,
-        bool $nullable = false,
-        ?string $valuePrefix = null,
-        ?string $valueSuffixSeparator = null,
-    ): array {
-        return [
-            'column' => 'result_snapshot_json',
-            'condition' => null,
-            'fallbacks' => [],
-            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
-            'nullable' => $nullable,
-            'path' => $path,
-            'target' => 'table:' . $target,
-            'target_columns' => ['id'],
-            ...($valuePrefix === null ? [] : ['value_prefix' => $valuePrefix]),
-            ...($valueSuffixSeparator === null ? [] : [
-                'value_suffix_separator' => $valueSuffixSeparator,
-            ]),
-        ];
     }
 }

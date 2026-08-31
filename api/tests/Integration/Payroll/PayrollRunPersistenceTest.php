@@ -2699,6 +2699,80 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
+    public function testCompanyBackupStreamsSealedRunPerson(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE supplier
+                SET company_name = "Syntetický zaměstnavatel",
+                    display_name = "Syntetický zaměstnavatel",
+                    ic = "00000000"
+              WHERE id = ?'
+        )->execute([$this->supplierId]);
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'backup-live-person-lock',
+            $this->actors[0],
+        );
+        $this->service->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'backup-live-person-calculate',
+            $this->actors[0],
+        );
+        $revisionId = (int) $locked->revision['id'];
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_run_persons');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->embeddedReferences->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame($revisionId, (int) $row['revision_id']);
+        self::assertSame($this->employeeId, (int) $row['employee_id']);
+        self::assertSame('calculated', $row['status']);
+        self::assertSame(
+            hash('sha256', (string) $row['result_json']),
+            $row['result_hash'],
+        );
+        $result = json_decode(
+            (string) $row['result_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame($this->employeeId, $result['employee_id']);
+        self::assertSame(
+            $this->employmentId,
+            $result['employments'][0]['employment_id'],
+        );
+        self::assertSame(
+            $this->inputId,
+            $result['employments'][0]['inputs'][0]['input_id'],
+        );
+    }
+
     public function testApprovalRollsBackWhenAutomaticPostingFails(): void
     {
         $run = $this->createRun();

@@ -30,6 +30,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRecurringComponentsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunPersonsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollShiftsProjection;
@@ -170,6 +171,11 @@ final class TenantDataRegistryFactory
             'employment_id',
             'component_id',
             'valid_from',
+        ],
+        'payroll_run_persons' => [
+            'supplier_id',
+            'revision_id',
+            'employee_id',
         ],
         'payroll_shifts' => ['supplier_id', 'series_key', 'revision_no'],
         'payroll_sickness_events' => ['supplier_id', 'absence_id'],
@@ -1358,6 +1364,23 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollRunsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_run_persons') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollRunPersonsProjection::dataColumns(),
+                    'derived_hashes' =>
+                        CompanyBackupPayrollRunPersonsProjection::derivedHashes(),
+                    'embedded_references' =>
+                        CompanyBackupPayrollRunPersonsProjection::embeddedReferences(),
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollRunPersonsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
