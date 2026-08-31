@@ -459,6 +459,94 @@ final class CompanyBackupReferenceSetTest extends TestCase
         }
     }
 
+    public function testAcceptsNullableBusinessPartOfTenantReferenceKey(): void
+    {
+        $reference = [
+            'columns' => ['supplier_id', 'agreement_id', 'employee_id'],
+            'target' => 'table:payroll_deduction_agreements',
+            'target_columns' => ['supplier_id', 'id', 'employee_id'],
+            'mapping' => CompanyBackupReferenceMapping::TenantReferenceKey->value,
+            'constraint' => CompanyBackupReferenceConstraint::Required->value,
+            'nullable_columns' => ['agreement_id'],
+            'fallbacks' => [],
+        ];
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                $reference,
+                [
+                    'columns' => ['supplier_id', 'employee_id'],
+                    'target' => 'table:payroll_employees',
+                    'target_columns' => ['supplier_id', 'id'],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                    'nullable_columns' => [],
+                    'fallbacks' => [],
+                ],
+            ],
+            'table:payroll_deduction_ledger',
+        );
+        $registry = new TenantDataRegistry(1, [
+            $this->definition(
+                'payroll_deduction_agreements',
+                TenantDataPolicy::TenantOwned,
+                ['reference_keys' => [[
+                    'supplier_id',
+                    'id',
+                    'employee_id',
+                ]]],
+            ),
+            $this->definition(
+                'payroll_employees',
+                TenantDataPolicy::TenantOwned,
+            ),
+        ]);
+
+        $references->assertProjectionColumns([
+            'id',
+            'supplier_id',
+            'agreement_id',
+            'employee_id',
+        ]);
+        $references->assertRegistryTargets($registry);
+        $references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['agreement_id'],
+            [
+                new CompanyBackupForeignKey(
+                    ['supplier_id', 'agreement_id', 'employee_id'],
+                    'payroll_deduction_agreements',
+                    ['supplier_id', 'id', 'employee_id'],
+                ),
+                new CompanyBackupForeignKey(
+                    ['supplier_id', 'employee_id'],
+                    'payroll_employees',
+                    ['supplier_id', 'id'],
+                ),
+            ],
+        ));
+
+        self::assertSame(
+            ['agreement_id'],
+            $references->references[0]->nullableColumns,
+        );
+    }
+
+    public function testRejectsNullableTenantScopeInReferenceKey(): void
+    {
+        $this->expectException(CompanyBackupDataSourceException::class);
+        CompanyBackupReferenceSet::fromArray(
+            [[
+                'columns' => ['supplier_id', 'agreement_id', 'employee_id'],
+                'target' => 'table:payroll_deduction_agreements',
+                'target_columns' => ['supplier_id', 'id', 'employee_id'],
+                'mapping' => CompanyBackupReferenceMapping::TenantReferenceKey->value,
+                'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                'nullable_columns' => ['supplier_id', 'agreement_id'],
+                'fallbacks' => [],
+            ]],
+            'table:payroll_deduction_ledger',
+        );
+    }
+
     public function testAcceptsGlobalIdResolvedThroughTargetNaturalKey(): void
     {
         $references = CompanyBackupReferenceSet::fromArray(

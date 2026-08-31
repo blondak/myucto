@@ -11,6 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollDeductionAgreementRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Repository\Payroll\PayrollNetRepository;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
@@ -2214,6 +2215,141 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('Syntetická kontrola dohody', $updated['reason']);
         self::assertSame($this->actors[1], (int) $updated['actor_user_id']);
         self::assertNotSame('', (string) $updated['created_at']);
+    }
+
+    public function testCompanyBackupStreamsAppendOnlyDeductionLedger(): void
+    {
+        $agreement = $this->createVersionedDeductionAgreement();
+        $this->db->pdo()->prepare(
+            'UPDATE supplier
+                SET company_name = "Syntetický zaměstnavatel",
+                    display_name = "Syntetický zaměstnavatel",
+                    ic = "00000000"
+              WHERE id = ?'
+        )->execute([$this->supplierId]);
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'backup-deduction-ledger-lock',
+            $this->actors[0],
+        );
+        $revisionId = (int) $locked->revision['id'];
+        $agreementId = (int) $agreement['id'];
+        $repository = $this->container->get(PayrollNetRepository::class);
+        self::assertInstanceOf(PayrollNetRepository::class, $repository);
+        $withholdingKey = 'payroll-run-deduction:v1:revision:' . $revisionId
+            . ':agreement:' . $agreementId . ':withheld';
+        $withholdingMetadata = [
+            'current_target_minor' => 2_500,
+            'delta_minor' => 2_500,
+            'previous_target_minor' => 0,
+            'source' => 'approved_payroll_revision',
+        ];
+        $withholdingId = $repository->appendLedgerMovement(
+            $this->supplierId,
+            $agreementId,
+            $revisionId,
+            $this->employeeId,
+            'withheld',
+            2_500,
+            $withholdingKey,
+            null,
+            $withholdingMetadata,
+            $this->actors[0],
+        );
+        $reversalKey = 'payroll-run-deduction:v1:revision:' . $revisionId
+            . ':agreement:' . $agreementId . ':source:' . $withholdingId
+            . ':reversed';
+        $reversalMetadata = [
+            'current_target_minor' => 2_000,
+            'delta_minor' => -500,
+            'previous_target_minor' => 2_500,
+            'source' => 'approved_payroll_correction',
+        ];
+        $reversalId = $repository->appendLedgerMovement(
+            $this->supplierId,
+            $agreementId,
+            $revisionId,
+            $this->employeeId,
+            'reversed',
+            -500,
+            $reversalKey,
+            $withholdingId,
+            $reversalMetadata,
+            $this->actors[1],
+        );
+        self::assertSame(
+            2_000,
+            (int) $this->scalar(
+                'SELECT withheld_total_minor
+                   FROM payroll_deduction_agreements
+                  WHERE supplier_id = ? AND id = ?',
+                [$this->supplierId, $agreementId],
+            ),
+        );
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_deduction_ledger');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $withholding = $rows[0];
+        $reversal = $rows[1];
+        self::assertSame($withholdingId, (int) $withholding['id']);
+        self::assertSame($this->supplierId, (int) $withholding['supplier_id']);
+        self::assertSame($agreementId, (int) $withholding['agreement_id']);
+        self::assertSame($revisionId, (int) $withholding['revision_id']);
+        self::assertSame($this->employeeId, (int) $withholding['employee_id']);
+        self::assertSame('withheld', $withholding['event_kind']);
+        self::assertSame(2_500, (int) $withholding['amount_minor']);
+        self::assertSame(
+            hash('sha256', $withholdingKey),
+            $withholding['event_key_hash'],
+        );
+        self::assertNull($withholding['source_ledger_id']);
+        self::assertSame(
+            CanonicalJson::encode($withholdingMetadata),
+            $withholding['metadata_json'],
+        );
+        self::assertSame($this->actors[0], (int) $withholding['actor_user_id']);
+        self::assertNotSame('', (string) $withholding['created_at']);
+
+        self::assertSame($reversalId, (int) $reversal['id']);
+        self::assertSame($agreementId, (int) $reversal['agreement_id']);
+        self::assertSame($revisionId, (int) $reversal['revision_id']);
+        self::assertSame('reversed', $reversal['event_kind']);
+        self::assertSame(-500, (int) $reversal['amount_minor']);
+        self::assertSame(
+            hash('sha256', $reversalKey),
+            $reversal['event_key_hash'],
+        );
+        self::assertSame($withholdingId, (int) $reversal['source_ledger_id']);
+        self::assertSame(
+            CanonicalJson::encode($reversalMetadata),
+            $reversal['metadata_json'],
+        );
+        self::assertSame($this->actors[1], (int) $reversal['actor_user_id']);
+        self::assertNotSame('', (string) $reversal['created_at']);
     }
 
     public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void

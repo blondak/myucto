@@ -159,7 +159,7 @@ final readonly class CompanyBackupReference
                 || $columns[0] !== 'supplier_id'
                 || $targetColumns[0] !== 'supplier_id'
                 || $constraint !== CompanyBackupReferenceConstraint::Required
-                || $nullableColumns !== [])
+                || in_array('supplier_id', $nullableColumns, true))
         ) {
             throw self::invalid($registryKey);
         }

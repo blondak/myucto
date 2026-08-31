@@ -24,6 +24,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollCalendarDaysProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollComponentDefinitionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionAgreementVersionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionAgreementsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionLedgerProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
@@ -70,6 +71,7 @@ final class TenantDataRegistryFactory
         'payroll_component_definitions' => 'payroll',
         'payroll_deduction_agreement_versions' => 'payroll',
         'payroll_deduction_agreements' => 'payroll',
+        'payroll_deduction_ledger' => 'payroll',
         'payroll_employees' => 'payroll',
         'payroll_employer_policies' => 'payroll',
         'payroll_employments' => 'payroll',
@@ -170,6 +172,7 @@ final class TenantDataRegistryFactory
             'employee_id',
             'agreement_reference',
         ],
+        'payroll_deduction_ledger' => ['supplier_id', 'event_key_hash'],
         'payroll_employment_terms' => [
             'supplier_id',
             'employment_id',
@@ -1267,6 +1270,22 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollDeductionAgreementsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_deduction_ledger') {
+            return [
+                'company_backup' => [
+                    'column_codecs' =>
+                        CompanyBackupPayrollDeductionLedgerProjection::columnCodecs(),
+                    'data_columns' =>
+                        CompanyBackupPayrollDeductionLedgerProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollDeductionLedgerProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

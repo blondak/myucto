@@ -139,17 +139,29 @@ final readonly class CompanyBackupReferenceSet
         string $column,
         array $claims,
     ): bool {
+        $hasReferenceKey = false;
         foreach ($claims as $reference) {
             $position = array_search($column, $reference->columns, true);
+            if (!is_int($position)) {
+                return false;
+            }
             if ($reference->mapping
-                    !== CompanyBackupReferenceMapping::TenantReferenceKey
-                || !is_int($position)
-                || ($reference->targetColumns[$position] ?? null) !== $column
+                === CompanyBackupReferenceMapping::TenantReferenceKey
+            ) {
+                if (($reference->targetColumns[$position] ?? null) !== $column) {
+                    return false;
+                }
+                $hasReferenceKey = true;
+                continue;
+            }
+            if ($reference->mapping !== CompanyBackupReferenceMapping::TenantId
+                || $reference->columns !== ['supplier_id', $column]
+                || $reference->targetColumns !== ['supplier_id', 'id']
             ) {
                 return false;
             }
         }
-        return true;
+        return $hasReferenceKey;
     }
 
     /**
