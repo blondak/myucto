@@ -2352,6 +2352,133 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertNotSame('', (string) $reversal['created_at']);
     }
 
+    public function testCompanyBackupStreamsTaxDeclarationHistory(): void
+    {
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_declarations
+                (supplier_id, employee_id, status, effective_from, effective_to,
+                 evidence_reference, evidence_note, created_by, updated_by,
+                 row_version, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'signed',
+            '2026-01-01',
+            '2026-05-31',
+            'document:synthetic-tax-declaration',
+            'Syntetické podepsané prohlášení',
+            $this->actors[0],
+            $this->actors[1],
+            3,
+            '2026-01-02 08:00:00',
+            '2026-05-31 16:30:00',
+        ]);
+        $signedId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'not-signed',
+            '2026-06-01',
+            null,
+            'document:synthetic-tax-declaration-revocation',
+            'Syntetické odvolání prohlášení',
+            $this->actors[1],
+            null,
+            1,
+            '2026-06-01 09:00:00',
+            '2026-06-01 09:00:00',
+        ]);
+        $revokedId = (int) $this->db->pdo()->lastInsertId();
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Synthetic Foreign Payroll Person", "employee", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherEmployeeId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->otherSupplierId,
+            $otherEmployeeId,
+            'signed',
+            '2026-01-01',
+            null,
+            'document:foreign-synthetic-tax-declaration',
+            null,
+            $this->actors[0],
+            null,
+            1,
+            '2026-01-02 08:00:00',
+            '2026-01-02 08:00:00',
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_person_tax_declarations',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $signed = $rows[0];
+        $revoked = $rows[1];
+        self::assertSame($signedId, (int) $signed['id']);
+        self::assertSame($this->supplierId, (int) $signed['supplier_id']);
+        self::assertSame($this->employeeId, (int) $signed['employee_id']);
+        self::assertSame('signed', $signed['status']);
+        self::assertSame('2026-01-01', $signed['effective_from']);
+        self::assertSame('2026-05-31', $signed['effective_to']);
+        self::assertSame(
+            'document:synthetic-tax-declaration',
+            $signed['evidence_reference'],
+        );
+        self::assertSame(
+            'Syntetické podepsané prohlášení',
+            $signed['evidence_note'],
+        );
+        self::assertSame($this->actors[0], (int) $signed['created_by']);
+        self::assertSame($this->actors[1], (int) $signed['updated_by']);
+        self::assertSame(3, (int) $signed['row_version']);
+        self::assertSame('2026-01-02 08:00:00', $signed['created_at']);
+        self::assertSame('2026-05-31 16:30:00', $signed['updated_at']);
+
+        self::assertSame($revokedId, (int) $revoked['id']);
+        self::assertSame('not-signed', $revoked['status']);
+        self::assertSame('2026-06-01', $revoked['effective_from']);
+        self::assertNull($revoked['effective_to']);
+        self::assertSame(
+            'document:synthetic-tax-declaration-revocation',
+            $revoked['evidence_reference'],
+        );
+        self::assertSame(
+            'Syntetické odvolání prohlášení',
+            $revoked['evidence_note'],
+        );
+        self::assertSame($this->actors[1], (int) $revoked['created_by']);
+        self::assertNull($revoked['updated_by']);
+        self::assertSame(1, (int) $revoked['row_version']);
+        self::assertSame('2026-06-01 09:00:00', $revoked['created_at']);
+        self::assertSame('2026-06-01 09:00:00', $revoked['updated_at']);
+    }
+
     public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void
     {
         $this->db->pdo()->prepare(
