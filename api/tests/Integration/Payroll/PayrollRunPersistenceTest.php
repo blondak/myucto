@@ -9,6 +9,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollDeductionAgreementRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
@@ -33,6 +34,8 @@ use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
+use MyInvoice\Service\Payroll\Net\DeductionAgreementStatus;
+use MyInvoice\Service\Payroll\Net\DeductionAgreementTerms;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline;
@@ -2070,6 +2073,116 @@ final class PayrollRunPersistenceTest extends TestCase
         $restored = $projection->restoreOverrides->apply($row);
         self::assertSame(0, $restored['is_active']);
         self::assertSame(42_000, (int) $restored['amount_minor']);
+    }
+
+    public function testCompanyBackupStreamsVersionedDeductionAgreement(): void
+    {
+        $repository = $this->container->get(
+            PayrollDeductionAgreementRepository::class,
+        );
+        self::assertInstanceOf(
+            PayrollDeductionAgreementRepository::class,
+            $repository,
+        );
+        $terms = DeductionAgreementTerms::fromRequest([
+            'agreement_reference' => 'SYNTHETIC-BACKUP-DEDUCTION',
+            'title' => 'Syntetická procentní srážka',
+            'deduction_kind' => 'contribution',
+            'priority_no' => 40,
+            'basis_points' => 1250,
+            'basis_amount_minor' => 30_000,
+            'total_limit_minor' => 20_000,
+            'valid_from' => '2026-01-01',
+            'recipient_reference' => 'SYNTHETIC-RECIPIENT',
+            'note' => 'Syntetická dohoda pro zálohu',
+        ]);
+        $created = $repository->create(
+            $this->supplierId,
+            $this->employeeId,
+            $terms,
+            DeductionAgreementStatus::Active,
+            $this->actors[0],
+        );
+        $updated = $repository->update(
+            $this->supplierId,
+            (int) $created['id'],
+            DeductionAgreementTerms::fromRequest([
+                'agreement_reference' => 'SYNTHETIC-BACKUP-DEDUCTION',
+                'title' => 'Syntetická procentní srážka po kontrole',
+                'deduction_kind' => 'contribution',
+                'priority_no' => 40,
+                'basis_points' => 1250,
+                'basis_amount_minor' => 30_000,
+                'total_limit_minor' => 20_000,
+                'valid_from' => '2026-01-01',
+                'recipient_reference' => 'SYNTHETIC-RECIPIENT',
+                'note' => 'Syntetická dohoda po kontrole',
+            ]),
+            (int) $created['row_version'],
+            '2026-02-01',
+            'Syntetická kontrola dohody',
+            $this->actors[1],
+        );
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_deduction_agreements',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+        self::assertSame((int) $updated['id'], (int) $row['id']);
+        self::assertSame($this->supplierId, (int) $row['supplier_id']);
+        self::assertSame($this->employeeId, (int) $row['employee_id']);
+        self::assertSame(
+            'SYNTHETIC-BACKUP-DEDUCTION',
+            $row['agreement_reference'],
+        );
+        self::assertSame(
+            'Syntetická procentní srážka po kontrole',
+            $row['title'],
+        );
+        self::assertSame('contribution', $row['deduction_kind']);
+        self::assertSame('active', $row['status']);
+        self::assertSame(40, (int) $row['priority_no']);
+        self::assertSame(3_750, (int) $row['requested_minor']);
+        self::assertSame(1_250, (int) $row['basis_points']);
+        self::assertSame(30_000, (int) $row['basis_amount_minor']);
+        self::assertSame(20_000, (int) $row['total_limit_minor']);
+        self::assertSame(0, (int) $row['withheld_total_minor']);
+        self::assertSame('2026-01-01', $row['valid_from']);
+        self::assertNull($row['valid_to']);
+        self::assertSame('SYNTHETIC-RECIPIENT', $row['recipient_reference']);
+        self::assertSame('Syntetická dohoda po kontrole', $row['note']);
+        self::assertSame(2, (int) $row['row_version']);
+        self::assertSame(2, (int) $row['version_no']);
+        self::assertSame($this->actors[0], (int) $row['created_by']);
+        self::assertSame($this->actors[1], (int) $row['updated_by']);
+        self::assertNotSame('', (string) $row['created_at']);
+        self::assertNotSame('', (string) $row['updated_at']);
+
+        $restored = $projection->restoreOverrides->apply($row);
+        self::assertSame('active', $restored['status']);
+        self::assertSame(2, (int) $restored['version_no']);
     }
 
     public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void

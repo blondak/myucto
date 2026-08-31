@@ -22,6 +22,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollBusinessTripItemsProjec
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollBusinessTripsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollCalendarDaysProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollComponentDefinitionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
@@ -109,6 +110,9 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<list<string>>> */
     private const COMPANY_BACKUP_REFERENCE_KEYS = [
+        'payroll_deduction_agreements' => [
+            ['supplier_id', 'id', 'employee_id'],
+        ],
         'payroll_employments' => [
             ['supplier_id', 'id', 'employee_id'],
         ],
@@ -154,6 +158,11 @@ final class TenantDataRegistryFactory
             'day_date',
         ],
         'payroll_component_definitions' => ['supplier_id', 'code', 'valid_from'],
+        'payroll_deduction_agreements' => [
+            'supplier_id',
+            'employee_id',
+            'agreement_reference',
+        ],
         'payroll_employment_terms' => [
             'supplier_id',
             'employment_id',
@@ -1223,6 +1232,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollComponentDefinitionsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_deduction_agreements') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollDeductionAgreementsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollDeductionAgreementsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
