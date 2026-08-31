@@ -742,6 +742,8 @@ final class TenantDataRegistryFactory
                 'secrets' => [
                     'pdf_tsa_password_enc' => [
                         'policy' => TenantSecretPolicy::OptionalCredential->value,
+                        'storage' =>
+                            CompanyBackupSecretStorage::ApplicationEncrypted->value,
                     ],
                 ],
                 ...self::companyBackupProjection('signing_profiles'),
@@ -862,6 +864,8 @@ final class TenantDataRegistryFactory
                     ],
                     'imap_password_enc' => [
                         'policy' => TenantSecretPolicy::OptionalCredential->value,
+                        'storage' =>
+                            CompanyBackupSecretStorage::ApplicationEncrypted->value,
                     ],
                     'smtp_encryption' => [
                         'policy' => TenantSecretPolicy::NotSecret->value,
@@ -869,6 +873,8 @@ final class TenantDataRegistryFactory
                     ],
                     'smtp_password_enc' => [
                         'policy' => TenantSecretPolicy::OptionalCredential->value,
+                        'storage' =>
+                            CompanyBackupSecretStorage::ApplicationEncrypted->value,
                     ],
                 ],
                 ...self::companyBackupProjection('email_profiles'),
@@ -1872,19 +1878,46 @@ final class TenantDataRegistryFactory
         $optional = TenantSecretPolicy::OptionalCredential->value;
         $omit = TenantSecretPolicy::OmitAndReconfigure->value;
         return [
-            'idoklad_client_id' => ['policy' => $optional],
-            'idoklad_client_secret_enc' => ['policy' => $optional],
+            'idoklad_client_id' => [
+                'policy' => $optional,
+                'storage' => CompanyBackupSecretStorage::Raw->value,
+            ],
+            'idoklad_client_secret_enc' => [
+                'policy' => $optional,
+                'storage' => CompanyBackupSecretStorage::ApplicationEncrypted->value,
+            ],
             'idoklad_access_token' => ['policy' => $omit],
             'idoklad_token_expires_at' => ['policy' => $omit],
-            'fakturoid_api_key_enc' => ['policy' => $optional],
-            'anthropic_api_key_enc' => ['policy' => $optional],
-            'fakturoid_client_id' => ['policy' => $optional],
-            'fakturoid_client_secret_enc' => ['policy' => $optional],
+            'fakturoid_api_key_enc' => [
+                'policy' => $optional,
+                'storage' => CompanyBackupSecretStorage::ApplicationEncrypted->value,
+            ],
+            'anthropic_api_key_enc' => [
+                'policy' => $optional,
+                'storage' => CompanyBackupSecretStorage::ApplicationEncrypted->value,
+            ],
+            'fakturoid_client_id' => [
+                'policy' => $optional,
+                'storage' => CompanyBackupSecretStorage::Raw->value,
+            ],
+            'fakturoid_client_secret_enc' => [
+                'policy' => $optional,
+                'storage' => CompanyBackupSecretStorage::ApplicationEncrypted->value,
+            ],
             'fakturoid_access_token_enc' => ['policy' => $omit],
             'fakturoid_access_token_expires_at' => ['policy' => $omit],
-            'azure_openai_api_key_enc' => ['policy' => $optional],
-            'openai_api_key_enc' => ['policy' => $optional],
-            'gemini_api_key_enc' => ['policy' => $optional],
+            'azure_openai_api_key_enc' => [
+                'policy' => $optional,
+                'storage' => CompanyBackupSecretStorage::ApplicationEncrypted->value,
+            ],
+            'openai_api_key_enc' => [
+                'policy' => $optional,
+                'storage' => CompanyBackupSecretStorage::ApplicationEncrypted->value,
+            ],
+            'gemini_api_key_enc' => [
+                'policy' => $optional,
+                'storage' => CompanyBackupSecretStorage::ApplicationEncrypted->value,
+            ],
             'ai_pseudo_salt' => [
                 'policy' => TenantSecretPolicy::ProtectedDomainSecret->value,
                 'storage' => CompanyBackupSecretStorage::Raw->value,

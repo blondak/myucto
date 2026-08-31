@@ -17,14 +17,20 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
 use MyInvoice\Service\Backup\Company\CompanyBackupEncodedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
+use MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretSelection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlOptionalSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlProtectedSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
@@ -1196,6 +1202,84 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(['id' => $this->supplierId], $values[0]->primaryKey);
         self::assertSame($salt, $values[0]->plaintext());
         self::assertNotSame($foreignSalt, $values[0]->plaintext());
+    }
+
+    public function testCompanyBackupStreamsOnlyExplicitSupplierCredential(): void
+    {
+        $encryption = $this->container->get(SecretEncryption::class);
+        self::assertInstanceOf(SecretEncryption::class, $encryption);
+        $plaintext = 'synthetic-selected-api-key-company-a';
+        $foreignPlaintext = 'synthetic-selected-api-key-company-b';
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET openai_api_key_enc = ? WHERE id = ?'
+        )->execute([$encryption->encrypt($plaintext), $this->supplierId]);
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET openai_api_key_enc = ? WHERE id = ?'
+        )->execute([
+            $encryption->encrypt($foreignPlaintext),
+            $this->otherSupplierId,
+        ]);
+
+        $draft = TenantDataRegistryFactory::draftV1();
+        $definition = $draft->definition('table:supplier');
+        self::assertNotNull($definition);
+        $registry = TenantDataRegistrySnapshot::fromRegistry(
+            new TenantDataRegistry(
+                $draft->version,
+                [$definition],
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            ),
+            TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+        );
+        $selection = CompanyBackupSecretSelection::fromArray([
+            'registry_fingerprint' => $registry->fingerprint,
+            'entries' => [[
+                'registry_key' => $definition->key,
+                'scope' => 'column',
+                'name' => 'openai_api_key_enc',
+                'primary_key' => ['id' => $this->supplierId],
+            ]],
+        ], $registry);
+        $source = new CompanyBackupSqlOptionalSecretSource($encryption);
+        $values = iterator_to_array($source->values(
+            $this->db->pdo(),
+            $this->supplierId,
+            CompanyBackupOptionalSecretProjection::fromSelection(
+                $definition,
+                $selection->entries(),
+            ),
+        ), false);
+
+        self::assertCount(1, $values);
+        self::assertSame('table:supplier', $values[0]->registryKey);
+        self::assertSame('openai_api_key_enc', $values[0]->name);
+        self::assertSame(['id' => $this->supplierId], $values[0]->primaryKey);
+        self::assertSame($plaintext, $values[0]->plaintext());
+        self::assertNotSame($foreignPlaintext, $values[0]->plaintext());
+
+        $foreignSelection = CompanyBackupSecretSelection::fromArray([
+            'registry_fingerprint' => $registry->fingerprint,
+            'entries' => [[
+                'registry_key' => $definition->key,
+                'scope' => 'column',
+                'name' => 'openai_api_key_enc',
+                'primary_key' => ['id' => $this->otherSupplierId],
+            ]],
+        ], $registry);
+        try {
+            iterator_to_array($source->values(
+                $this->db->pdo(),
+                $this->supplierId,
+                CompanyBackupOptionalSecretProjection::fromSelection(
+                    $definition,
+                    $foreignSelection->entries(),
+                ),
+            ));
+            self::fail('Credential jiné firmy nesmí projít tenantovým guardem.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('secret_selection_tenant_mismatch', $e->errorCode);
+            self::assertSame('openai_api_key_enc', $e->column);
+        }
     }
 
     public function testCompanyBackupStreamsAverageEarningSnapshotWithBinaryInputHash(): void

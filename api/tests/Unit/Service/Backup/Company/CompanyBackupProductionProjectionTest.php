@@ -14,6 +14,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceTransform;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretStorage;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableReferenceSchema;
 use MyInvoice\Service\Backup\Company\CompanyBackupTenantSqlSelector;
@@ -116,6 +117,8 @@ final class CompanyBackupProductionProjectionTest extends TestCase
                 ],
                 'imap_password_enc' => [
                     'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    'storage' =>
+                        CompanyBackupSecretStorage::ApplicationEncrypted->value,
                 ],
                 'smtp_encryption' => [
                     'policy' => TenantSecretPolicy::NotSecret->value,
@@ -123,6 +126,8 @@ final class CompanyBackupProductionProjectionTest extends TestCase
                 ],
                 'smtp_password_enc' => [
                     'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    'storage' =>
+                        CompanyBackupSecretStorage::ApplicationEncrypted->value,
                 ],
             ],
             $emailProfiles->details['secrets'] ?? null,
@@ -292,6 +297,8 @@ final class CompanyBackupProductionProjectionTest extends TestCase
             [
                 'pdf_tsa_password_enc' => [
                     'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    'storage' =>
+                        CompanyBackupSecretStorage::ApplicationEncrypted->value,
                 ],
             ],
             $signingProfiles->details['secrets'] ?? null,

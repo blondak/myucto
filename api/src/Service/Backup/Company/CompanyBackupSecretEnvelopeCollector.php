@@ -15,6 +15,7 @@ final readonly class CompanyBackupSecretEnvelopeCollector
         private CompanyBackupProtectedSecretSource $source,
         private CompanyBackupSecretEnvelopeCipher $cipher =
             new CompanyBackupSecretEnvelopeCipher(),
+        private ?CompanyBackupOptionalSecretSource $optionalSource = null,
     ) {}
 
     public function collect(
@@ -23,10 +24,21 @@ final readonly class CompanyBackupSecretEnvelopeCollector
         int $supplierId,
         #[\SensitiveParameter] string $password,
         string $backupId,
+        ?CompanyBackupSecretSelection $selection = null,
     ): CompanyBackupSealedSecretEnvelope {
         if ($supplierId < 1) {
             throw new \InvalidArgumentException(
                 'Firma secret envelope musí mít kladné ID.',
+            );
+        }
+
+        $selection ??= CompanyBackupSecretSelection::none($registry);
+        if (!hash_equals(
+            $registry->fingerprint,
+            $selection->registryFingerprint,
+        )) {
+            throw new CompanyBackupSecretEnvelopeException(
+                'secret_selection_registry_mismatch',
             );
         }
 
@@ -75,7 +87,62 @@ final readonly class CompanyBackupSecretEnvelopeCollector
                 $values[] = $value;
             }
         }
-        if (!$hasRequiredProjection) {
+        if (!$selection->isEmpty()) {
+            if ($this->optionalSource === null) {
+                throw new CompanyBackupSecretEnvelopeException(
+                    'secret_selection_source_required',
+                );
+            }
+            $selectedByRegistryKey = [];
+            foreach ($selection->entries() as $entry) {
+                $selectedByRegistryKey[$entry->registryKey][] = $entry;
+            }
+            foreach ($selectedByRegistryKey as $registryKey => $entries) {
+                $definition = $registry->registry->definition($registryKey);
+                if ($definition === null) {
+                    throw new \LogicException(
+                        'Secret selection ztratila registry objekt.',
+                    );
+                }
+                $projection = CompanyBackupOptionalSecretProjection::fromSelection(
+                    $definition,
+                    $entries,
+                );
+                $expected = [];
+                foreach ($projection->entries as $entry) {
+                    $expected[$entry->valueSignature()] = true;
+                }
+                $seen = [];
+                foreach ($this->optionalSource->values(
+                    $snapshot,
+                    $supplierId,
+                    $projection,
+                ) as $value) {
+                    if (!$value instanceof CompanyBackupSecretValue) {
+                        throw new CompanyBackupDataSourceException(
+                            'secret_source_value_invalid',
+                            $projection->registryKey,
+                        );
+                    }
+                    $signature = $value->declarationSignature() . ':'
+                        . $value->primaryKeySignature();
+                    if (!isset($expected[$signature]) || isset($seen[$signature])) {
+                        throw new CompanyBackupSecretPayloadException(
+                            'secret_payload_scope_mismatch',
+                        );
+                    }
+                    $seen[$signature] = true;
+                    $values[] = $value;
+                }
+                if (array_keys($seen) !== array_keys($expected)) {
+                    throw new CompanyBackupDataSourceException(
+                        'secret_selected_value_missing',
+                        $projection->registryKey,
+                    );
+                }
+            }
+        }
+        if (!$hasRequiredProjection && $selection->isEmpty()) {
             throw new CompanyBackupSecretEnvelopeException(
                 'secret_envelope_not_required',
             );

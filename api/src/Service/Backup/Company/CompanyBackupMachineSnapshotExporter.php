@@ -29,6 +29,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
         CompanyBackupFileReferenceSource $fileSource,
         string $backupId,
         #[\SensitiveParameter] ?string $backupPassword = null,
+        ?CompanyBackupSecretSelection $secretSelection = null,
     ): CompanyBackupMachineSnapshot {
         if ($supplierId < 1) {
             throw new \InvalidArgumentException('Firma snapshotu musí mít kladné ID.');
@@ -36,6 +37,15 @@ final readonly class CompanyBackupMachineSnapshotExporter
         if (!CompanyBackupManifestHeader::isCanonicalBackupId($backupId)) {
             throw new \InvalidArgumentException(
                 'Identifikátor snapshotu musí být kanonické UUID.',
+            );
+        }
+        $secretSelection ??= CompanyBackupSecretSelection::none($registry);
+        if (!hash_equals(
+            $registry->fingerprint,
+            $secretSelection->registryFingerprint,
+        )) {
+            throw new \InvalidArgumentException(
+                'Výběr credentials patří jinému tenantovému registru.',
             );
         }
         $resolvedDirectory = realpath($workDirectory);
@@ -58,6 +68,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
                     $fileSource,
                     $backupPassword,
                     $backupId,
+                    $secretSelection,
                     &$createdFiles,
                 ): CompanyBackupMachineSnapshot {
                     $this->databaseCoverage->assertSafe($snapshot, $registry->registry);
@@ -67,7 +78,9 @@ final readonly class CompanyBackupMachineSnapshotExporter
                         $supplierId,
                     );
                     $secretEnvelope = null;
-                    if ($secrets->requiresEnvelope()) {
+                    if ($secrets->requiresEnvelope()
+                        || !$secretSelection->isEmpty()
+                    ) {
                         if ($this->secretEnvelopeCollector === null
                             || $backupPassword === null
                         ) {
@@ -81,10 +94,11 @@ final readonly class CompanyBackupMachineSnapshotExporter
                             $supplierId,
                             $backupPassword,
                             $backupId,
+                            $secretSelection,
                         );
-                        $secrets = $secrets->withEnvelope(
-                            $secretEnvelope->descriptor,
-                        );
+                        $secrets = $secrets
+                            ->withSelection($secretSelection)
+                            ->withEnvelope($secretEnvelope->descriptor);
                     }
                     $objects = [];
                     $sourceFiles = [];

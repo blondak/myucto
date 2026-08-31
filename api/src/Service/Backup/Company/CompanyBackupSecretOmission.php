@@ -67,6 +67,23 @@ final readonly class CompanyBackupSecretOmission
         ];
     }
 
+    public function withCount(int $count): self
+    {
+        if ($count < 0) {
+            throw self::invalid(
+                $this->registryKey . ':' . $this->scope->value . ':' . $this->name,
+            );
+        }
+        return new self(
+            $this->registryKey,
+            $this->scope,
+            $this->name,
+            $this->policy,
+            $this->reason,
+            $count,
+        );
+    }
+
     private static function invalid(string $signature): \InvalidArgumentException
     {
         return new \InvalidArgumentException(

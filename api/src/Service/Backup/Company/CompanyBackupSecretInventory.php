@@ -233,6 +233,48 @@ final readonly class CompanyBackupSecretInventory
         );
     }
 
+    public function withSelection(CompanyBackupSecretSelection $selection): self
+    {
+        if (!hash_equals(
+            $this->registryFingerprint,
+            $selection->registryFingerprint,
+        )) {
+            throw new \InvalidArgumentException(
+                'Výběr credentials patří jinému tenantovému registru.',
+            );
+        }
+        if ($selection->isEmpty()) {
+            return $this;
+        }
+
+        $selectedCounts = $selection->countsByDeclaration();
+        $omissions = [];
+        foreach ($this->omissions as $omission) {
+            $signature = $omission->registryKey . ':' . $omission->scope->value
+                . ':' . $omission->name;
+            $selected = $selectedCounts[$signature] ?? 0;
+            if ($selected > $omission->count) {
+                throw new \InvalidArgumentException(
+                    'Výběr credentials převyšuje ověřený počet zdrojových hodnot.',
+                );
+            }
+            unset($selectedCounts[$signature]);
+            $omissions[] = $omission->withCount($omission->count - $selected);
+        }
+        if ($selectedCounts !== []) {
+            throw new \InvalidArgumentException(
+                'Výběr credentials nemá odpovídající položku inventáře.',
+            );
+        }
+        return new self(
+            $omissions,
+            $this->registryFingerprint,
+            $this->envelope,
+            $this->envelopeRequired,
+            $this->envelopeAllowed,
+        );
+    }
+
     public function requiresEnvelope(): bool
     {
         return $this->envelopeRequired;

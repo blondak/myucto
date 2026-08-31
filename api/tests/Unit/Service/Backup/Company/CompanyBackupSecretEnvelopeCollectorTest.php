@@ -6,10 +6,14 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCollector;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayloadException;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretSelection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretScope;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretValue;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -178,6 +182,132 @@ final class CompanyBackupSecretEnvelopeCollectorTest extends TestCase
         }
     }
 
+    public function testAddsOnlyExplicitOptionalValueToRequiredPayload(): void
+    {
+        $pdo = $this->createStub(PDO::class);
+        $protected = new class implements CompanyBackupProtectedSecretSource {
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupProtectedSecretProjection $projection,
+            ): iterable {
+                yield CompanyBackupSecretValue::fromPlaintext(
+                    $projection->registryKey,
+                    CompanyBackupSecretScope::Column,
+                    'domain_salt',
+                    ['id' => $supplierId],
+                    'synthetic-domain-salt',
+                );
+            }
+        };
+        $optional = new class implements CompanyBackupOptionalSecretSource {
+            /** @var list<PDO> */
+            public array $snapshots = [];
+
+            /** @var list<string> */
+            public array $selected = [];
+
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupOptionalSecretProjection $projection,
+            ): iterable {
+                $this->snapshots[] = $snapshot;
+                $this->selected = array_map(
+                    static fn ($entry): string => $entry->name,
+                    $projection->entries,
+                );
+                yield CompanyBackupSecretValue::fromPlaintext(
+                    $projection->registryKey,
+                    CompanyBackupSecretScope::Column,
+                    'api_key_enc',
+                    ['id' => $supplierId],
+                    'synthetic-selected-api-key',
+                );
+            }
+        };
+        $registry = $this->singleRegistry();
+        $selection = CompanyBackupSecretSelection::fromArray([
+            'registry_fingerprint' => $registry->fingerprint,
+            'entries' => [[
+                'registry_key' => 'table:supplier',
+                'scope' => 'column',
+                'name' => 'api_key_enc',
+                'primary_key' => ['id' => 7],
+            ]],
+        ], $registry);
+
+        $sealed = (new CompanyBackupSecretEnvelopeCollector(
+            $protected,
+            optionalSource: $optional,
+        ))->collect(
+            $pdo,
+            $registry,
+            7,
+            self::PASSWORD,
+            self::BACKUP_ID,
+            $selection,
+        );
+        $plaintext = (new CompanyBackupSecretEnvelopeCipher())->open(
+            $sealed,
+            self::PASSWORD,
+            self::BACKUP_ID,
+            $registry->fingerprint,
+        );
+        $payload = CompanyBackupSecretPayload::fromJson($plaintext, $registry);
+
+        self::assertSame([$pdo], $optional->snapshots);
+        self::assertSame(['api_key_enc'], $optional->selected);
+        self::assertSame(
+            ['synthetic-selected-api-key', 'synthetic-domain-salt'],
+            array_map(
+                static fn (CompanyBackupSecretValue $value): string =>
+                    $value->plaintext(),
+                $payload->values(),
+            ),
+        );
+    }
+
+    public function testSelectedOptionalValueRequiresDedicatedSource(): void
+    {
+        $source = new class implements CompanyBackupProtectedSecretSource {
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupProtectedSecretProjection $projection,
+            ): iterable {
+                return [];
+            }
+        };
+        $registry = $this->singleRegistry();
+        $selection = CompanyBackupSecretSelection::fromArray([
+            'registry_fingerprint' => $registry->fingerprint,
+            'entries' => [[
+                'registry_key' => 'table:supplier',
+                'scope' => 'column',
+                'name' => 'api_key_enc',
+                'primary_key' => ['id' => 7],
+            ]],
+        ], $registry);
+
+        try {
+            (new CompanyBackupSecretEnvelopeCollector($source))->collect(
+                $this->createStub(PDO::class),
+                $registry,
+                7,
+                self::PASSWORD,
+                self::BACKUP_ID,
+                $selection,
+            );
+            self::fail('Optional credential nesmí číst obecný protected zdroj.');
+        } catch (CompanyBackupSecretEnvelopeException $e) {
+            self::assertSame('secret_selection_source_required', $e->errorCode);
+        }
+    }
+
     private function singleRegistry(): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
@@ -234,6 +364,10 @@ final class CompanyBackupSecretEnvelopeCollectorTest extends TestCase
                     'column' => 'id',
                 ],
                 'secrets' => [
+                    'api_key_enc' => [
+                        'policy' => TenantSecretPolicy::OptionalCredential->value,
+                        'storage' => 'application_encrypted',
+                    ],
                     'domain_salt' => [
                         'policy' => TenantSecretPolicy::ProtectedDomainSecret->value,
                         'storage' => 'raw',

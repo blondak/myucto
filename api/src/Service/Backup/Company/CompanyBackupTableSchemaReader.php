@@ -75,6 +75,13 @@ final class CompanyBackupTableSchemaReader
         return $this->readTable($pdo, $projection->name, $projection->registryKey);
     }
 
+    public function readOptionalSecrets(
+        PDO $pdo,
+        CompanyBackupOptionalSecretProjection $projection,
+    ): CompanyBackupTableSchema {
+        return $this->readTable($pdo, $projection->name, $projection->registryKey);
+    }
+
     private function readTable(
         PDO $pdo,
         string $table,

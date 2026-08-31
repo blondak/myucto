@@ -9,6 +9,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventoryCollector;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretOmissionCountSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretSelection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretDeclaration;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -208,6 +209,36 @@ final class CompanyBackupSecretInventoryTest extends TestCase
             $this->registry(),
             7,
         );
+    }
+
+    public function testSelectedCredentialIsRemovedFromVerifiedOmissionCount(): void
+    {
+        $registry = $this->registry();
+        $counts = [];
+        foreach (CompanyBackupSecretInventory::requiredDeclarations($registry) as $item) {
+            $counts[$item->signature()] = $item->name === 'api_key_enc' ? 2 : 0;
+        }
+        $selection = CompanyBackupSecretSelection::fromArray([
+            'registry_fingerprint' => $registry->fingerprint,
+            'entries' => [[
+                'registry_key' => 'table:supplier',
+                'scope' => 'column',
+                'name' => 'api_key_enc',
+                'primary_key' => ['id' => 7],
+            ]],
+        ], $registry);
+
+        $selected = CompanyBackupSecretInventory::fromCounts($counts, $registry)
+            ->withSelection($selection);
+
+        self::assertSame(1, $selected->omissions[5]->count);
+        self::assertSame('credential_not_selected', $selected->omissions[5]->reason->value);
+
+        $counts['table:supplier:column:api_key_enc'] = 0;
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('převyšuje ověřený počet');
+        CompanyBackupSecretInventory::fromCounts($counts, $registry)
+            ->withSelection($selection);
     }
 
     public function testRejectsOptionalCredentialWithoutExecutableInventoryContract(): void

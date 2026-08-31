@@ -9,11 +9,17 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDatabaseCoverageGate;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileReferenceSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupMachineSnapshotExporter;
+use MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretDeclaration;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCollector;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventoryCollector;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretOmissionCountSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretSelection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretScope;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretValue;
 use MyInvoice\Service\Backup\Company\CompanyBackupSnapshotException;
@@ -282,6 +288,130 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
         self::assertSame([], glob($directory . DIRECTORY_SEPARATOR . '*') ?: []);
     }
 
+    public function testSelectedOptionalCredentialJoinsEnvelopeAndOmissionInventory(): void
+    {
+        $pdo = $this->transactionalPdo();
+        $registry = $this->registrySnapshot(
+            protectedSecret: true,
+            optionalSecret: true,
+        );
+        $selection = CompanyBackupSecretSelection::fromArray([
+            'registry_fingerprint' => $registry->fingerprint,
+            'entries' => [[
+                'registry_key' => 'table:supplier',
+                'scope' => 'column',
+                'name' => 'api_key_enc',
+                'primary_key' => ['id' => 7],
+            ]],
+        ], $registry);
+        $protected = new class implements CompanyBackupProtectedSecretSource {
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupProtectedSecretProjection $projection,
+            ): iterable {
+                yield CompanyBackupSecretValue::fromPlaintext(
+                    $projection->registryKey,
+                    CompanyBackupSecretScope::Column,
+                    'domain_salt',
+                    ['id' => $supplierId],
+                    'synthetic-domain-salt',
+                );
+            }
+        };
+        $optional = new class implements CompanyBackupOptionalSecretSource {
+            /** @var list<PDO> */
+            public array $snapshots = [];
+
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupOptionalSecretProjection $projection,
+            ): iterable {
+                $this->snapshots[] = $snapshot;
+                yield CompanyBackupSecretValue::fromPlaintext(
+                    $projection->registryKey,
+                    CompanyBackupSecretScope::Column,
+                    'api_key_enc',
+                    ['id' => $supplierId],
+                    'synthetic-api-key',
+                );
+            }
+        };
+        $counts = new class implements CompanyBackupSecretOmissionCountSource {
+            /**
+             * @param list<CompanyBackupSecretDeclaration> $declarations
+             * @return array<string,int>
+             */
+            public function counts(
+                PDO $snapshot,
+                int $supplierId,
+                TenantDataDefinition $definition,
+                array $declarations,
+                TenantDataRegistry $registry,
+            ): array {
+                $result = [];
+                foreach ($declarations as $declaration) {
+                    $result[$declaration->signature()] = 1;
+                }
+                return $result;
+            }
+        };
+        $rowSource = new class implements CompanyBackupDataRowSource {
+            public function rows(
+                PDO $snapshot,
+                int $supplierId,
+                TenantDataDefinition $definition,
+            ): iterable {
+                return $definition->key === 'table:supplier'
+                    ? [['id' => $supplierId, 'name' => 'Synthetic s.r.o.']]
+                    : [];
+            }
+        };
+
+        $snapshot = (new CompanyBackupMachineSnapshotExporter(
+            databaseCoverage: $this->coverageGate(),
+            secretCollector: new CompanyBackupSecretInventoryCollector($counts),
+            secretEnvelopeCollector: new CompanyBackupSecretEnvelopeCollector(
+                $protected,
+                optionalSource: $optional,
+            ),
+        ))->export(
+            $pdo,
+            $registry,
+            7,
+            $this->workDirectory(),
+            $rowSource,
+            new RecordingEmptyFileReferenceSource(),
+            backupId: self::BACKUP_ID,
+            backupPassword: self::PASSWORD,
+            secretSelection: $selection,
+        );
+
+        self::assertSame([$pdo], $optional->snapshots);
+        self::assertSame(0, $snapshot->secretInventory->omissions[0]->count);
+        self::assertNotNull($snapshot->secretEnvelope);
+        $plaintext = (new CompanyBackupSecretEnvelopeCipher())->open(
+            $snapshot->secretEnvelope,
+            self::PASSWORD,
+            self::BACKUP_ID,
+            $registry->fingerprint,
+        );
+        self::assertSame(
+            ['synthetic-api-key', 'synthetic-domain-salt'],
+            array_map(
+                static fn (CompanyBackupSecretValue $value): string =>
+                    $value->plaintext(),
+                CompanyBackupSecretPayload::fromJson(
+                    $plaintext,
+                    $registry,
+                )->values(),
+            ),
+        );
+    }
+
     public function testCoverageFailureRollsBackBeforeAnyBusinessRowIsRead(): void
     {
         $pdo = $this->transactionalPdo(commit: false);
@@ -350,6 +480,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
 
     private function registrySnapshot(
         bool $protectedSecret = false,
+        bool $optionalSecret = false,
     ): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
@@ -364,13 +495,22 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                     [
                         'primary_key' => ['id'],
                         'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
-                        ...($protectedSecret ? [
+                        ...($protectedSecret || $optionalSecret ? [
                             'secrets' => [
-                                'domain_salt' => [
-                                    'policy' =>
-                                        TenantSecretPolicy::ProtectedDomainSecret->value,
-                                    'storage' => 'raw',
-                                ],
+                                ...($optionalSecret ? [
+                                    'api_key_enc' => [
+                                        'policy' =>
+                                            TenantSecretPolicy::OptionalCredential->value,
+                                        'storage' => 'application_encrypted',
+                                    ],
+                                ] : []),
+                                ...($protectedSecret ? [
+                                    'domain_salt' => [
+                                        'policy' =>
+                                            TenantSecretPolicy::ProtectedDomainSecret->value,
+                                        'storage' => 'raw',
+                                    ],
+                                ] : []),
                             ],
                         ] : []),
                     ],
