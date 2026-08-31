@@ -16,8 +16,11 @@ use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Backup\Company\CompanyBackupEncodedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlProtectedSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
@@ -1157,6 +1160,42 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-01-01', $row['valid_from']);
         self::assertNull($row['valid_to']);
         self::assertSame(1, (int) $row['is_active']);
+    }
+
+    public function testCompanyBackupStreamsOnlySelectedSupplierAiSalt(): void
+    {
+        $salt = hash('sha256', 'synthetic-company-backup-salt', true);
+        $foreignSalt = hash('sha256', 'synthetic-foreign-backup-salt', true);
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET ai_pseudo_salt = ? WHERE id = ?'
+        )->execute([$salt, $this->supplierId]);
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET ai_pseudo_salt = ? WHERE id = ?'
+        )->execute([$foreignSalt, $this->otherSupplierId]);
+
+        $definition = TenantDataRegistryFactory::draftV1()->definition(
+            'table:supplier',
+        );
+        self::assertNotNull($definition);
+        $encryption = $this->container->get(SecretEncryption::class);
+        self::assertInstanceOf(SecretEncryption::class, $encryption);
+        $values = iterator_to_array(
+            (new CompanyBackupSqlProtectedSecretSource($encryption))->values(
+                $this->db->pdo(),
+                $this->supplierId,
+                CompanyBackupProtectedSecretProjection::fromDefinition(
+                    $definition,
+                ),
+            ),
+            false,
+        );
+
+        self::assertCount(1, $values);
+        self::assertSame('table:supplier', $values[0]->registryKey);
+        self::assertSame('ai_pseudo_salt', $values[0]->name);
+        self::assertSame(['id' => $this->supplierId], $values[0]->primaryKey);
+        self::assertSame($salt, $values[0]->plaintext());
+        self::assertNotSame($foreignSalt, $values[0]->plaintext());
     }
 
     public function testCompanyBackupStreamsAverageEarningSnapshotWithBinaryInputHash(): void

@@ -45,6 +45,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupRevenueCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSignatureDocumentOverridesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSignatureRoleProfilesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretStorage;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
@@ -1884,7 +1885,10 @@ final class TenantDataRegistryFactory
             'azure_openai_api_key_enc' => ['policy' => $optional],
             'openai_api_key_enc' => ['policy' => $optional],
             'gemini_api_key_enc' => ['policy' => $optional],
-            'ai_pseudo_salt' => ['policy' => TenantSecretPolicy::ProtectedDomainSecret->value],
+            'ai_pseudo_salt' => [
+                'policy' => TenantSecretPolicy::ProtectedDomainSecret->value,
+                'storage' => CompanyBackupSecretStorage::Raw->value,
+            ],
         ];
     }
 }

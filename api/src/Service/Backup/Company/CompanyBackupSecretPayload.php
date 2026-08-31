@@ -319,6 +319,15 @@ final readonly class CompanyBackupSecretPayload
                         $definition->details['secrets'],
                         $definition->key,
                     )->policies;
+                    if (in_array(
+                        TenantSecretPolicy::ProtectedDomainSecret,
+                        $policies,
+                        true,
+                    )) {
+                        CompanyBackupProtectedSecretProjection::fromDefinition(
+                            $definition,
+                        );
+                    }
                     $primaryKey = null;
                     foreach ($policies as $name => $policy) {
                         if (!self::transferable($policy)) {

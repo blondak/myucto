@@ -203,6 +203,31 @@ final class CompanyBackupSecretPayloadTest extends TestCase
         );
     }
 
+    public function testRejectsProtectedDeclarationWithoutAtRestContract(): void
+    {
+        $registry = $this->registry();
+        $definition = $registry->registry->definition('table:supplier');
+        self::assertNotNull($definition);
+        $details = $definition->details;
+        unset($details['secrets']['domain_salt']['storage']);
+        $invalid = TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
+            1,
+            [new TenantDataDefinition(
+                $definition->key,
+                $definition->kind,
+                $definition->policy,
+                $definition->profiles,
+                $details,
+            )],
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+        ), TenantDataRegistry::COMPANY_BACKUP_PROFILE);
+
+        $this->assertPayloadError(
+            'secret_payload_scope_mismatch',
+            static fn () => CompanyBackupSecretPayload::fromValues([], $invalid),
+        );
+    }
+
     /** @param callable():mixed $operation */
     private function assertPayloadError(string $code, callable $operation): void
     {
@@ -244,6 +269,7 @@ final class CompanyBackupSecretPayloadTest extends TestCase
                             ],
                             'domain_salt' => [
                                 'policy' => TenantSecretPolicy::ProtectedDomainSecret->value,
+                                'storage' => 'raw',
                             ],
                             'runtime_token' => [
                                 'policy' => TenantSecretPolicy::OmitAndReconfigure->value,

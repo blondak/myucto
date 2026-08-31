@@ -457,6 +457,7 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
                             'domain_salt' => [
                                 'policy' =>
                                     TenantSecretPolicy::ProtectedDomainSecret->value,
+                                'storage' => 'raw',
                             ],
                         ],
                     ] : []),
