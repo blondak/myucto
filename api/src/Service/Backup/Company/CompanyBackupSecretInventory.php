@@ -233,6 +233,11 @@ final readonly class CompanyBackupSecretInventory
         );
     }
 
+    public function requiresEnvelope(): bool
+    {
+        return $this->envelopeRequired;
+    }
+
     /**
      * @param array<string,string> $entryHashes
      * @param array<string,int> $entryBytes

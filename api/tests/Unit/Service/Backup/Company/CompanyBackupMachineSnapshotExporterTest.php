@@ -9,16 +9,28 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDatabaseCoverageGate;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileReferenceSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupMachineSnapshotExporter;
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCollector;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretScope;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretValue;
+use MyInvoice\Service\Backup\Company\CompanyBackupSnapshotException;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
+use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 use PDO;
 use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupMachineSnapshotExporterTest extends TestCase
 {
+    private const PASSWORD = 'synthetic-backup-password-42';
+    private const BACKUP_ID = '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1';
+
     /** @var list<string> */
     private array $directories = [];
 
@@ -152,6 +164,120 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
         self::assertSame([], glob($directory . DIRECTORY_SEPARATOR . '*') ?: []);
     }
 
+    public function testSealsProtectedValuesInsideTheSameSnapshot(): void
+    {
+        $pdo = $this->transactionalPdo();
+        $rowSource = new class implements CompanyBackupDataRowSource {
+            public function rows(
+                PDO $snapshot,
+                int $supplierId,
+                TenantDataDefinition $definition,
+            ): iterable {
+                return $definition->key === 'table:supplier'
+                    ? [['id' => $supplierId, 'name' => 'Synthetic s.r.o.']]
+                    : [];
+            }
+        };
+        $secretSource = new class implements CompanyBackupProtectedSecretSource {
+            /** @var list<PDO> */
+            public array $snapshots = [];
+
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupProtectedSecretProjection $projection,
+            ): iterable {
+                $this->snapshots[] = $snapshot;
+                yield CompanyBackupSecretValue::fromPlaintext(
+                    $projection->registryKey,
+                    CompanyBackupSecretScope::Column,
+                    'domain_salt',
+                    ['id' => $supplierId],
+                    "synthetic-domain\0salt",
+                );
+            }
+        };
+        $registry = $this->registrySnapshot(protectedSecret: true);
+        $directory = $this->workDirectory();
+        $snapshot = (new CompanyBackupMachineSnapshotExporter(
+            databaseCoverage: $this->coverageGate(),
+            secretEnvelopeCollector: new CompanyBackupSecretEnvelopeCollector(
+                $secretSource,
+            ),
+        ))->export(
+            $pdo,
+            $registry,
+            7,
+            $directory,
+            $rowSource,
+            new RecordingEmptyFileReferenceSource(),
+            backupPassword: self::PASSWORD,
+            backupId: self::BACKUP_ID,
+        );
+
+        self::assertSame([$pdo], $secretSource->snapshots);
+        self::assertNotNull($snapshot->secretEnvelope);
+        self::assertSame(
+            $snapshot->secretEnvelope->descriptor->toArray(),
+            $snapshot->secretInventory->envelope?->toArray(),
+        );
+        self::assertArrayNotHasKey(
+            'secrets/tenant.sealed',
+            $snapshot->sourceFiles,
+        );
+        $plaintext = (new CompanyBackupSecretEnvelopeCipher())->open(
+            $snapshot->secretEnvelope,
+            self::PASSWORD,
+            self::BACKUP_ID,
+            $registry->fingerprint,
+        );
+        self::assertSame(
+            "synthetic-domain\0salt",
+            CompanyBackupSecretPayload::fromJson(
+                $plaintext,
+                $registry,
+            )->values()[0]->plaintext(),
+        );
+    }
+
+    public function testProtectedRegistryFailsBeforeRowsWithoutEnvelopeCollector(): void
+    {
+        $pdo = $this->transactionalPdo(commit: false);
+        $source = new class implements CompanyBackupDataRowSource {
+            public int $calls = 0;
+
+            public function rows(
+                PDO $snapshot,
+                int $supplierId,
+                TenantDataDefinition $definition,
+            ): iterable {
+                $this->calls++;
+                return [];
+            }
+        };
+        $directory = $this->workDirectory();
+
+        try {
+            (new CompanyBackupMachineSnapshotExporter(
+                databaseCoverage: $this->coverageGate(),
+            ))->export(
+                $pdo,
+                $this->registrySnapshot(protectedSecret: true),
+                7,
+                $directory,
+                $source,
+                new RecordingEmptyFileReferenceSource(),
+            );
+            self::fail('Protected registry nesmí vytvořit snapshot bez envelope.');
+        } catch (CompanyBackupSnapshotException $e) {
+            self::assertSame('snapshot_secret_envelope_required', $e->errorCode);
+        }
+
+        self::assertSame(0, $source->calls);
+        self::assertSame([], glob($directory . DIRECTORY_SEPARATOR . '*') ?: []);
+    }
+
     public function testCoverageFailureRollsBackBeforeAnyBusinessRowIsRead(): void
     {
         $pdo = $this->transactionalPdo(commit: false);
@@ -217,7 +343,9 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
         return $pdo;
     }
 
-    private function registrySnapshot(): TenantDataRegistrySnapshot
+    private function registrySnapshot(
+        bool $protectedSecret = false,
+    ): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
@@ -231,6 +359,15 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                     [
                         'primary_key' => ['id'],
                         'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
+                        ...($protectedSecret ? [
+                            'secrets' => [
+                                'domain_salt' => [
+                                    'policy' =>
+                                        TenantSecretPolicy::ProtectedDomainSecret->value,
+                                    'storage' => 'raw',
+                                ],
+                            ],
+                        ] : []),
                     ],
                 ),
                 new TenantDataDefinition(

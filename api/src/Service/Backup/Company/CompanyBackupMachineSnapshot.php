@@ -19,6 +19,7 @@ final readonly class CompanyBackupMachineSnapshot
         public CompanyBackupDataInventory $inventory,
         public CompanyBackupFileInventory $fileInventory,
         public CompanyBackupSecretInventory $secretInventory,
+        public ?CompanyBackupSealedSecretEnvelope $secretEnvelope,
         array $sourceFiles,
     ) {
         if ($supplierId < 1
@@ -31,6 +32,11 @@ final readonly class CompanyBackupMachineSnapshot
                 $registry->fingerprint,
                 $secretInventory->registryFingerprint,
             )
+            || ($secretEnvelope === null) !== ($secretInventory->envelope === null)
+            || ($secretEnvelope !== null
+                && $secretInventory->envelope !== null
+                && $secretEnvelope->descriptor->toArray()
+                    !== $secretInventory->envelope->toArray())
         ) {
             throw new \InvalidArgumentException('Strojový snapshot nemá platnou obálku.');
         }

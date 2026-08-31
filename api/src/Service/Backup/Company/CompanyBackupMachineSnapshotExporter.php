@@ -17,6 +17,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
         private CompanyBackupFileCollector $fileCollector = new CompanyBackupFileCollector(),
         private CompanyBackupSecretInventoryCollector $secretCollector =
             new CompanyBackupSecretInventoryCollector(),
+        private ?CompanyBackupSecretEnvelopeCollector $secretEnvelopeCollector = null,
     ) {}
 
     public function export(
@@ -26,6 +27,8 @@ final readonly class CompanyBackupMachineSnapshotExporter
         string $workDirectory,
         CompanyBackupDataRowSource $source,
         CompanyBackupFileReferenceSource $fileSource,
+        #[\SensitiveParameter] ?string $backupPassword = null,
+        ?string $backupId = null,
     ): CompanyBackupMachineSnapshot {
         if ($supplierId < 1) {
             throw new \InvalidArgumentException('Firma snapshotu musí mít kladné ID.');
@@ -48,6 +51,8 @@ final readonly class CompanyBackupMachineSnapshotExporter
                     $resolvedDirectory,
                     $source,
                     $fileSource,
+                    $backupPassword,
+                    $backupId,
                     &$createdFiles,
                 ): CompanyBackupMachineSnapshot {
                     $this->databaseCoverage->assertSafe($snapshot, $registry->registry);
@@ -56,6 +61,27 @@ final readonly class CompanyBackupMachineSnapshotExporter
                         $registry,
                         $supplierId,
                     );
+                    $secretEnvelope = null;
+                    if ($secrets->requiresEnvelope()) {
+                        if ($this->secretEnvelopeCollector === null
+                            || $backupPassword === null
+                            || $backupId === null
+                        ) {
+                            throw new CompanyBackupSnapshotException(
+                                'snapshot_secret_envelope_required',
+                            );
+                        }
+                        $secretEnvelope = $this->secretEnvelopeCollector->collect(
+                            $snapshot,
+                            $registry,
+                            $supplierId,
+                            $backupPassword,
+                            $backupId,
+                        );
+                        $secrets = $secrets->withEnvelope(
+                            $secretEnvelope->descriptor,
+                        );
+                    }
                     $objects = [];
                     $sourceFiles = [];
                     foreach (CompanyBackupDataInventory::payloadDefinitions($registry) as $index => $definition) {
@@ -92,6 +118,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
                         $inventory,
                         $files->inventory,
                         $secrets,
+                        $secretEnvelope,
                         $sourceFiles,
                     );
                 },

@@ -1,0 +1,245 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Service\Backup\Company;
+
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCollector;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayloadException;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretScope;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretValue;
+use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
+use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
+use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
+use PDO;
+use PHPUnit\Framework\TestCase;
+
+final class CompanyBackupSecretEnvelopeCollectorTest extends TestCase
+{
+    private const PASSWORD = 'synthetic-backup-password-42';
+    private const BACKUP_ID = '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1';
+
+    public function testCollectsEveryProtectedProjectionInsideSameSnapshot(): void
+    {
+        $pdo = $this->createStub(PDO::class);
+        $source = new class implements CompanyBackupProtectedSecretSource {
+            /** @var list<PDO> */
+            public array $snapshots = [];
+
+            /** @var list<string> */
+            public array $calls = [];
+
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupProtectedSecretProjection $projection,
+            ): iterable {
+                $this->snapshots[] = $snapshot;
+                $this->calls[] = $projection->registryKey . '@' . $supplierId;
+                if ($projection->registryKey === 'table:supplier') {
+                    yield CompanyBackupSecretValue::fromPlaintext(
+                        $projection->registryKey,
+                        CompanyBackupSecretScope::Column,
+                        'domain_salt',
+                        ['id' => $supplierId],
+                        "synthetic-domain\0salt",
+                    );
+                    return;
+                }
+                yield CompanyBackupSecretValue::fromPlaintext(
+                    $projection->registryKey,
+                    CompanyBackupSecretScope::Column,
+                    'sealed_payload',
+                    ['id' => 91],
+                    'synthetic-ledger-secret',
+                );
+            }
+        };
+        $registry = $this->registry();
+
+        $sealed = (new CompanyBackupSecretEnvelopeCollector($source))->collect(
+            $pdo,
+            $registry,
+            7,
+            self::PASSWORD,
+            self::BACKUP_ID,
+        );
+
+        self::assertSame([$pdo, $pdo], $source->snapshots);
+        self::assertSame([
+            'table:protected_ledger@7',
+            'table:supplier@7',
+        ], $source->calls);
+        self::assertStringNotContainsString(
+            'synthetic-ledger-secret',
+            $sealed->ciphertext,
+        );
+        $plaintext = (new CompanyBackupSecretEnvelopeCipher())->open(
+            $sealed,
+            self::PASSWORD,
+            self::BACKUP_ID,
+            $registry->fingerprint,
+        );
+        $payload = CompanyBackupSecretPayload::fromJson($plaintext, $registry);
+        self::assertSame(
+            ['synthetic-ledger-secret', "synthetic-domain\0salt"],
+            array_map(
+                static fn (CompanyBackupSecretValue $value): string =>
+                    $value->plaintext(),
+                $payload->values(),
+            ),
+        );
+    }
+
+    public function testSealsRequiredEmptyDeclarationInsteadOfDroppingIt(): void
+    {
+        $source = new class implements CompanyBackupProtectedSecretSource {
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupProtectedSecretProjection $projection,
+            ): iterable {
+                return [];
+            }
+        };
+        $registry = $this->singleRegistry();
+        $sealed = (new CompanyBackupSecretEnvelopeCollector($source))->collect(
+            $this->createStub(PDO::class),
+            $registry,
+            7,
+            self::PASSWORD,
+            self::BACKUP_ID,
+        );
+        $plaintext = (new CompanyBackupSecretEnvelopeCipher())->open(
+            $sealed,
+            self::PASSWORD,
+            self::BACKUP_ID,
+            $registry->fingerprint,
+        );
+
+        $payload = CompanyBackupSecretPayload::fromJson(
+            $plaintext,
+            $registry,
+        );
+        self::assertSame([], $payload->values());
+        self::assertSame(
+            'protected_domain_secret',
+            $payload->toArray()['declarations'][0]['policy'] ?? null,
+        );
+        self::assertSame(
+            [],
+            $payload->toArray()['declarations'][0]['values'] ?? null,
+        );
+    }
+
+    public function testRejectsValueOutsideProjectionBeforeSealing(): void
+    {
+        $source = new class implements CompanyBackupProtectedSecretSource {
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupProtectedSecretProjection $projection,
+            ): iterable {
+                yield CompanyBackupSecretValue::fromPlaintext(
+                    'table:foreign_supplier',
+                    CompanyBackupSecretScope::Column,
+                    'domain_salt',
+                    ['id' => $supplierId],
+                    'must-not-be-sealed',
+                );
+            }
+        };
+
+        try {
+            (new CompanyBackupSecretEnvelopeCollector($source))->collect(
+                $this->createStub(PDO::class),
+                $this->singleRegistry(),
+                7,
+                self::PASSWORD,
+                self::BACKUP_ID,
+            );
+            self::fail('Cizí registry deklarace nesmí vstoupit do envelope.');
+        } catch (CompanyBackupSecretPayloadException $e) {
+            self::assertSame('secret_payload_scope_mismatch', $e->errorCode);
+            self::assertStringNotContainsString(
+                'must-not-be-sealed',
+                $e->getMessage(),
+            );
+        }
+    }
+
+    private function singleRegistry(): TenantDataRegistrySnapshot
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
+            1,
+            [$this->supplierDefinition($profile)],
+            [$profile],
+        ), $profile);
+    }
+
+    private function registry(): TenantDataRegistrySnapshot
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
+            1,
+            [
+                new TenantDataDefinition(
+                    'table:protected_ledger',
+                    TenantDataObjectKind::Table,
+                    TenantDataPolicy::TenantOwned,
+                    [$profile],
+                    [
+                        'primary_key' => ['id'],
+                        'ownership' => [
+                            'strategy' => 'supplier_id',
+                            'column' => 'supplier_id',
+                        ],
+                        'secrets' => [
+                            'sealed_payload' => [
+                                'policy' =>
+                                    TenantSecretPolicy::ProtectedDomainSecret->value,
+                                'storage' => 'application_encrypted',
+                            ],
+                        ],
+                    ],
+                ),
+                $this->supplierDefinition($profile),
+            ],
+            [$profile],
+        ), $profile);
+    }
+
+    private function supplierDefinition(string $profile): TenantDataDefinition
+    {
+        return new TenantDataDefinition(
+            'table:supplier',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRoot,
+            [$profile],
+            [
+                'primary_key' => ['id'],
+                'ownership' => [
+                    'strategy' => 'selected_supplier',
+                    'column' => 'id',
+                ],
+                'secrets' => [
+                    'domain_salt' => [
+                        'policy' => TenantSecretPolicy::ProtectedDomainSecret->value,
+                        'storage' => 'raw',
+                    ],
+                ],
+            ],
+        );
+    }
+}

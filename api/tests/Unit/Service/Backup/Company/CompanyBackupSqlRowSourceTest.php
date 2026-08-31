@@ -213,7 +213,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         self::assertSame(hash('sha256', $json), $rows[0]['payload_hash']);
     }
 
-    public function testRefusesProtectedSecretBeforeReadingBusinessRows(): void
+    public function testStreamsOnlyNonSecretColumnsAfterEnvelopeIsOrchestrated(): void
     {
         $schema = $this->statement(
             [['synthetic_records']],
@@ -254,22 +254,24 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             ['id'],
             PDO::FETCH_COLUMN,
         );
+        $page = $this->statement(
+            [[7]],
+            [['id' => 1, 'supplier_id' => 7, 'label' => 'Synthetic']],
+            PDO::FETCH_ASSOC,
+        );
         $pdo = $this->createMock(PDO::class);
-        $pdo->expects(self::exactly(2))
+        $pdo->expects(self::exactly(3))
             ->method('prepare')
-            ->willReturnOnConsecutiveCalls($schema, $primaryKey);
+            ->willReturnOnConsecutiveCalls($schema, $primaryKey, $page);
 
-        try {
+        self::assertSame(
+            [['id' => 1, 'supplier_id' => 7, 'label' => 'Synthetic']],
             iterator_to_array((new CompanyBackupSqlRowSource())->rows(
                 $pdo,
                 7,
                 $this->definition(protectedSecret: true),
-            ));
-            self::fail('Povinný chráněný secret se nesmí ztratit vynecháním z JSONL.');
-        } catch (CompanyBackupDataSourceException $e) {
-            self::assertSame('data_secret_envelope_required', $e->errorCode);
-            self::assertSame('protected_value_enc', $e->column);
-        }
+            )),
+        );
     }
 
     public function testRejectsTamperedDerivedHashBeforeYieldingRow(): void
@@ -410,6 +412,7 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         $secrets = $protectedSecret ? [
             'protected_value_enc' => [
                 'policy' => TenantSecretPolicy::ProtectedDomainSecret->value,
+                'storage' => 'application_encrypted',
             ],
         ] : [];
         return new TenantDataDefinition(

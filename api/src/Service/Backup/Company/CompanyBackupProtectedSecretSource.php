@@ -9,7 +9,7 @@ use PDO;
 /** Zdroj povinných plaintext hodnot uvnitř jednoho konzistentního DB read view. */
 interface CompanyBackupProtectedSecretSource
 {
-    /** @return iterable<CompanyBackupSecretValue> */
+    /** @return iterable<mixed> */
     public function values(
         PDO $snapshot,
         int $supplierId,

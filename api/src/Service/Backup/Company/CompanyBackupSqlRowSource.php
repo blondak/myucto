@@ -38,14 +38,6 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
             $schema->primaryKey,
             $schema->binaryColumns,
         );
-        $protectedColumn = $projection->requiredSecretEnvelopeColumn();
-        if ($protectedColumn !== null) {
-            throw new CompanyBackupDataSourceException(
-                'data_secret_envelope_required',
-                $projection->registryKey,
-                $protectedColumn,
-            );
-        }
         $selection = $this->selector->select($projection, $supplierId);
 
         $offset = 0;
