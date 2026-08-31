@@ -33,6 +33,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthCoverageProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMinimumReductionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialDiscountClaimsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialJurisdictionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonTaxCreditClaimsProjection;
@@ -194,6 +195,12 @@ final class TenantDataRegistryFactory
         'payroll_person_health_coverage_history' => [
             'supplier_id',
             'employee_id',
+            'effective_from',
+        ],
+        'payroll_person_health_minimum_reductions' => [
+            'supplier_id',
+            'employee_id',
+            'reason',
             'effective_from',
         ],
         'payroll_person_social_discount_claims' => [
@@ -1462,6 +1469,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollPersonHealthCoverageProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_person_health_minimum_reductions') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonHealthMinimumReductionsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollPersonHealthMinimumReductionsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

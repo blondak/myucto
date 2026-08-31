@@ -3164,6 +3164,130 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-06-01 14:00:00', $foreign['updated_at']);
     }
 
+    public function testCompanyBackupStreamsHealthMinimumReductionHistory(): void
+    {
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_health_minimum_reductions
+                (supplier_id, employee_id, reason, evidence_reference,
+                 effective_from, effective_to, evidence_note, created_by,
+                 updated_by, row_version, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'state_insured',
+            'document:synthetic-state-insured',
+            '2026-01-01',
+            '2026-05-31',
+            'Synteticky doložený státní pojištěnec',
+            $this->actors[0],
+            $this->actors[1],
+            9,
+            '2026-01-08 08:00:00',
+            '2026-05-31 19:30:00',
+        ]);
+        $verifiedId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'unverified',
+            null,
+            '2026-06-01',
+            null,
+            'Synteticky neověřený důvod snížení minima',
+            $this->actors[1],
+            null,
+            1,
+            '2026-06-01 15:00:00',
+            '2026-06-01 15:00:00',
+        ]);
+        $unverifiedId = (int) $this->db->pdo()->lastInsertId();
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Synthetic Foreign Minimum Person", "employee", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherEmployeeId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->otherSupplierId,
+            $otherEmployeeId,
+            'ztp_or_ztp_p',
+            'document:foreign-synthetic-minimum-reduction',
+            '2026-01-01',
+            null,
+            null,
+            $this->actors[0],
+            null,
+            1,
+            '2026-01-08 08:00:00',
+            '2026-01-08 08:00:00',
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_person_health_minimum_reductions',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $verified = $rows[0];
+        $unverified = $rows[1];
+        self::assertSame($verifiedId, (int) $verified['id']);
+        self::assertSame($this->supplierId, (int) $verified['supplier_id']);
+        self::assertSame($this->employeeId, (int) $verified['employee_id']);
+        self::assertSame('state_insured', $verified['reason']);
+        self::assertSame(
+            'document:synthetic-state-insured',
+            $verified['evidence_reference'],
+        );
+        self::assertSame('2026-01-01', $verified['effective_from']);
+        self::assertSame('2026-05-31', $verified['effective_to']);
+        self::assertSame(
+            'Synteticky doložený státní pojištěnec',
+            $verified['evidence_note'],
+        );
+        self::assertSame($this->actors[0], (int) $verified['created_by']);
+        self::assertSame($this->actors[1], (int) $verified['updated_by']);
+        self::assertSame(9, (int) $verified['row_version']);
+        self::assertSame('2026-01-08 08:00:00', $verified['created_at']);
+        self::assertSame('2026-05-31 19:30:00', $verified['updated_at']);
+
+        self::assertSame($unverifiedId, (int) $unverified['id']);
+        self::assertSame('unverified', $unverified['reason']);
+        self::assertNull($unverified['evidence_reference']);
+        self::assertSame('2026-06-01', $unverified['effective_from']);
+        self::assertNull($unverified['effective_to']);
+        self::assertSame(
+            'Synteticky neověřený důvod snížení minima',
+            $unverified['evidence_note'],
+        );
+        self::assertSame($this->actors[1], (int) $unverified['created_by']);
+        self::assertNull($unverified['updated_by']);
+        self::assertSame(1, (int) $unverified['row_version']);
+        self::assertSame('2026-06-01 15:00:00', $unverified['created_at']);
+        self::assertSame('2026-06-01 15:00:00', $unverified['updated_at']);
+    }
+
     public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void
     {
         $this->db->pdo()->prepare(
