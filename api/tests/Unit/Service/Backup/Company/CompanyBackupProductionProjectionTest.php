@@ -466,6 +466,33 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
         self::assertSame(
             [
+                'certificate_path' => [
+                    'max_bytes' => 128 * 1024,
+                    'path_template' =>
+                        'signing/profiles/supplier-{supplier_id}'
+                        . '/profile-{profile_id}/profile.p12',
+                    'storage_subdirectory' => 'signing/profiles',
+                ],
+            ],
+            $projection->attachmentSources,
+        );
+        self::assertSame(
+            [
+                'encrypted_passphrase' =>
+                    CompanyBackupSecretStorage::ApplicationEncrypted,
+            ],
+            $projection->secretStorage,
+        );
+        self::assertSame(
+            'signing/profiles/supplier-37/profile-41/profile.p12',
+            $projection->attachmentPath(
+                'certificate_path',
+                37,
+                ['profile_id' => 41],
+            ),
+        );
+        self::assertSame(
+            [
                 CompanyBackupReferenceMapping::Actor,
                 CompanyBackupReferenceMapping::TenantId,
                 CompanyBackupReferenceMapping::CredentialDecision,

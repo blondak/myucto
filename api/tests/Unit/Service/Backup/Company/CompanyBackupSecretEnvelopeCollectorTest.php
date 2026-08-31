@@ -6,6 +6,9 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupCredentialSecretBundle;
+use MyInvoice\Service\Backup\Company\CompanyBackupCredentialSecretSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupCredentialTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
@@ -16,6 +19,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayloadException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretSelection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretScope;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretValue;
+use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
@@ -308,12 +312,146 @@ final class CompanyBackupSecretEnvelopeCollectorTest extends TestCase
         }
     }
 
+    public function testAddsSelectedCompanyCredentialThroughDedicatedSource(): void
+    {
+        $pdo = $this->createStub(PDO::class);
+        $protected = new class implements CompanyBackupProtectedSecretSource {
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupProtectedSecretProjection $projection,
+            ): iterable {
+                return [];
+            }
+        };
+        $credential = new class implements CompanyBackupCredentialSecretSource {
+            /** @var list<PDO> */
+            public array $snapshots = [];
+
+            /** @return iterable<CompanyBackupSecretValue> */
+            public function values(
+                PDO $snapshot,
+                int $supplierId,
+                CompanyBackupCredentialTableProjection $projection,
+                array $entries,
+            ): iterable {
+                $this->snapshots[] = $snapshot;
+                $row = [
+                    'id' => 11,
+                    'profile_id' => 41,
+                    'vault_credential_id' => null,
+                    'certificate_path' =>
+                        'signing/profiles/supplier-7/profile-41/profile.p12',
+                    'certificate_fingerprint' => str_repeat('a', 64),
+                    'certificate_subject' => 'CN=Synthetic company',
+                    'certificate_email' => null,
+                    'certificate_valid_from' => '2026-01-01 00:00:00',
+                    'certificate_valid_to' => '2028-01-01 00:00:00',
+                    'certificate_usage_json' => null,
+                    'passphrase_policy' => 'encrypted_store',
+                    'passphrase_profile_id' => null,
+                    'encrypted_passphrase' => 'source-ciphertext',
+                    'is_active' => 1,
+                    'created_by' => null,
+                    'created_at' => '2026-01-01 00:00:00',
+                    'updated_at' => '2026-01-02 00:00:00',
+                    'deleted_at' => null,
+                ];
+                $bundle = CompanyBackupCredentialSecretBundle::fromExportRow(
+                    $projection,
+                    'company_file',
+                    null,
+                    $row,
+                    ['certificate_path' => 'synthetic-pfx'],
+                    ['encrypted_passphrase' => 'synthetic-passphrase'],
+                );
+                yield CompanyBackupSecretValue::fromPlaintext(
+                    $projection->registryKey,
+                    CompanyBackupSecretScope::CredentialVariant,
+                    'company_file',
+                    ['id' => 11],
+                    $bundle->toJson(),
+                );
+            }
+        };
+        $registry = $this->credentialRegistry();
+        $selection = CompanyBackupSecretSelection::fromArray([
+            'registry_fingerprint' => $registry->fingerprint,
+            'entries' => [[
+                'registry_key' => 'table:signing_credentials',
+                'scope' => 'credential_variant',
+                'name' => 'company_file',
+                'primary_key' => ['id' => 11],
+            ]],
+        ], $registry);
+
+        $sealed = (new CompanyBackupSecretEnvelopeCollector(
+            $protected,
+            credentialSource: $credential,
+        ))->collect(
+            $pdo,
+            $registry,
+            7,
+            self::PASSWORD,
+            self::BACKUP_ID,
+            $selection,
+        );
+        $plaintext = (new CompanyBackupSecretEnvelopeCipher())->open(
+            $sealed,
+            self::PASSWORD,
+            self::BACKUP_ID,
+            $registry->fingerprint,
+        );
+        $values = CompanyBackupSecretPayload::fromJson(
+            $plaintext,
+            $registry,
+        )->values();
+
+        self::assertSame([$pdo], $credential->snapshots);
+        self::assertCount(1, $values);
+        self::assertSame('company_file', $values[0]->name);
+        self::assertSame(
+            'synthetic-pfx',
+            CompanyBackupCredentialSecretBundle::fromJson(
+                $values[0]->plaintext(),
+                CompanyBackupCredentialTableProjection::fromDefinition(
+                    $registry->registry->definition('table:signing_credentials')
+                        ?? throw new \LogicException('Chybí testovací credential.'),
+                ),
+                'company_file',
+                ['id' => 11],
+            )->attachment('certificate_path'),
+        );
+    }
+
     private function singleRegistry(): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
             1,
             [$this->supplierDefinition($profile)],
+            [$profile],
+        ), $profile);
+    }
+
+    private function credentialRegistry(): TenantDataRegistrySnapshot
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
+            1,
+            [new TenantDataDefinition(
+                'table:signing_credentials',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::OptionalCredential,
+                [$profile],
+                [
+                    'primary_key' => ['id'],
+                    'ownership' =>
+                        CompanyBackupSigningCredentialsProjection::ownership(),
+                    'company_backup_credential' =>
+                        CompanyBackupSigningCredentialsProjection::metadata(),
+                ],
+            )],
             [$profile],
         ), $profile);
     }

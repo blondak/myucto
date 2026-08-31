@@ -16,6 +16,7 @@ final readonly class CompanyBackupSecretEnvelopeCollector
         private CompanyBackupSecretEnvelopeCipher $cipher =
             new CompanyBackupSecretEnvelopeCipher(),
         private ?CompanyBackupOptionalSecretSource $optionalSource = null,
+        private ?CompanyBackupCredentialSecretSource $credentialSource = null,
     ) {}
 
     public function collect(
@@ -88,16 +89,29 @@ final readonly class CompanyBackupSecretEnvelopeCollector
             }
         }
         if (!$selection->isEmpty()) {
-            if ($this->optionalSource === null) {
+            $optionalByRegistryKey = [];
+            $credentialByRegistryKey = [];
+            foreach ($selection->entries() as $entry) {
+                if ($entry->scope === CompanyBackupSecretScope::Column) {
+                    $optionalByRegistryKey[$entry->registryKey][] = $entry;
+                } elseif ($entry->scope
+                    === CompanyBackupSecretScope::CredentialVariant
+                ) {
+                    $credentialByRegistryKey[$entry->registryKey][] = $entry;
+                } else {
+                    throw new CompanyBackupSecretPayloadException(
+                        'secret_payload_scope_mismatch',
+                    );
+                }
+            }
+            if ($optionalByRegistryKey !== [] && $this->optionalSource === null
+                || $credentialByRegistryKey !== [] && $this->credentialSource === null
+            ) {
                 throw new CompanyBackupSecretEnvelopeException(
                     'secret_selection_source_required',
                 );
             }
-            $selectedByRegistryKey = [];
-            foreach ($selection->entries() as $entry) {
-                $selectedByRegistryKey[$entry->registryKey][] = $entry;
-            }
-            foreach ($selectedByRegistryKey as $registryKey => $entries) {
+            foreach ($optionalByRegistryKey as $registryKey => $entries) {
                 $definition = $registry->registry->definition($registryKey);
                 if ($definition === null) {
                     throw new \LogicException(
@@ -117,6 +131,52 @@ final readonly class CompanyBackupSecretEnvelopeCollector
                     $snapshot,
                     $supplierId,
                     $projection,
+                ) as $value) {
+                    if (!$value instanceof CompanyBackupSecretValue) {
+                        throw new CompanyBackupDataSourceException(
+                            'secret_source_value_invalid',
+                            $projection->registryKey,
+                        );
+                    }
+                    $signature = $value->declarationSignature() . ':'
+                        . $value->primaryKeySignature();
+                    if (!isset($expected[$signature]) || isset($seen[$signature])) {
+                        throw new CompanyBackupSecretPayloadException(
+                            'secret_payload_scope_mismatch',
+                        );
+                    }
+                    $seen[$signature] = true;
+                    $values[] = $value;
+                }
+                if (array_keys($seen) !== array_keys($expected)) {
+                    throw new CompanyBackupDataSourceException(
+                        'secret_selected_value_missing',
+                        $projection->registryKey,
+                    );
+                }
+            }
+            foreach ($credentialByRegistryKey as $registryKey => $entries) {
+                $definition = $registry->registry->definition($registryKey);
+                if ($definition === null) {
+                    throw new \LogicException(
+                        'Credential selection ztratila registry objekt.',
+                    );
+                }
+                $projection = CompanyBackupCredentialTableProjection::fromDefinition(
+                    $definition,
+                );
+                $expected = [];
+                foreach ($entries as $entry) {
+                    $expected[$entry->valueSignature()] = true;
+                }
+                $seen = [];
+                foreach (($this->credentialSource ?? throw new \LogicException(
+                    'Ověřený credential source nesmí chybět.',
+                ))->values(
+                    $snapshot,
+                    $supplierId,
+                    $projection,
+                    $entries,
                 ) as $value) {
                     if (!$value instanceof CompanyBackupSecretValue) {
                         throw new CompanyBackupDataSourceException(

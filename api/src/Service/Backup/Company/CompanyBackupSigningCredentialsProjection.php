@@ -9,6 +9,8 @@ use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 /** Registry metadata smíšených firemních a osobních podpisových credentialů. */
 final class CompanyBackupSigningCredentialsProjection
 {
+    public const MAX_CERTIFICATE_BYTES = 128 * 1024;
+
     /** @return list<string> */
     public static function columns(): array
     {
@@ -116,6 +118,19 @@ final class CompanyBackupSigningCredentialsProjection
             'source_columns' => [
                 'file' => 'certificate_path',
                 'vault' => 'vault_credential_id',
+            ],
+            'attachment_sources' => [
+                'certificate_path' => [
+                    'max_bytes' => self::MAX_CERTIFICATE_BYTES,
+                    'path_template' =>
+                        'signing/profiles/supplier-{supplier_id}'
+                        . '/profile-{profile_id}/profile.p12',
+                    'storage_subdirectory' => 'signing/profiles',
+                ],
+            ],
+            'secret_storage' => [
+                'encrypted_passphrase' =>
+                    CompanyBackupSecretStorage::ApplicationEncrypted->value,
             ],
             'transport_columns' => [
                 'certificate_path' =>

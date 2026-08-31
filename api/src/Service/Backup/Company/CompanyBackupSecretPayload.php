@@ -224,6 +224,33 @@ final readonly class CompanyBackupSecretPayload
                     $name,
                     $definition['primary_key'],
                 );
+                if ($scope === CompanyBackupSecretScope::CredentialVariant) {
+                    $credentialDefinition = $registry->registry->definition(
+                        $registryKey,
+                    );
+                    if ($credentialDefinition === null) {
+                        throw new CompanyBackupSecretPayloadException(
+                            'secret_payload_scope_mismatch',
+                        );
+                    }
+                    try {
+                        $credentialProjection =
+                            CompanyBackupCredentialTableProjection::fromDefinition(
+                                $credentialDefinition,
+                            );
+                    } catch (\Throwable $e) {
+                        throw new CompanyBackupSecretPayloadException(
+                            'secret_payload_scope_mismatch',
+                            $e,
+                        );
+                    }
+                    CompanyBackupCredentialSecretBundle::fromJson(
+                        $value->plaintext(),
+                        $credentialProjection,
+                        $name,
+                        $value->primaryKey,
+                    );
+                }
                 $valueSignature = $value->primaryKeySignature();
                 if (isset($valueSignatures[$valueSignature])) {
                     throw self::invalid();

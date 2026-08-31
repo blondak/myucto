@@ -216,21 +216,34 @@ final class CompanyBackupSecretInventoryTest extends TestCase
         $registry = $this->registry();
         $counts = [];
         foreach (CompanyBackupSecretInventory::requiredDeclarations($registry) as $item) {
-            $counts[$item->signature()] = $item->name === 'api_key_enc' ? 2 : 0;
+            $counts[$item->signature()] = in_array(
+                $item->name,
+                ['api_key_enc', 'company_file'],
+                true,
+            ) ? 2 : 0;
         }
         $selection = CompanyBackupSecretSelection::fromArray([
             'registry_fingerprint' => $registry->fingerprint,
-            'entries' => [[
-                'registry_key' => 'table:supplier',
-                'scope' => 'column',
-                'name' => 'api_key_enc',
-                'primary_key' => ['id' => 7],
-            ]],
+            'entries' => [
+                [
+                    'registry_key' => 'table:supplier',
+                    'scope' => 'column',
+                    'name' => 'api_key_enc',
+                    'primary_key' => ['id' => 7],
+                ],
+                [
+                    'registry_key' => 'table:signing_credentials',
+                    'scope' => 'credential_variant',
+                    'name' => 'company_file',
+                    'primary_key' => ['id' => 11],
+                ],
+            ],
         ], $registry);
 
         $selected = CompanyBackupSecretInventory::fromCounts($counts, $registry)
             ->withSelection($selection);
 
+        self::assertSame(1, $selected->omissions[2]->count);
         self::assertSame(1, $selected->omissions[5]->count);
         self::assertSame('credential_not_selected', $selected->omissions[5]->reason->value);
 

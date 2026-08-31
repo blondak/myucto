@@ -35,6 +35,18 @@ final readonly class CompanyBackupCredentialTableProjection
     /** @var array<string,CompanyBackupCredentialTransport> */
     public array $transportColumns;
 
+    /**
+     * @var array<string,array{
+     *   max_bytes:int,
+     *   path_template:string,
+     *   storage_subdirectory:string
+     * }>
+     */
+    public array $attachmentSources;
+
+    /** @var array<string,CompanyBackupSecretStorage> */
+    public array $secretStorage;
+
     /** @var list<array{name:string,owner:string,policy:TenantSecretPolicy,source:string}> */
     public array $variants;
 
@@ -48,6 +60,12 @@ final readonly class CompanyBackupCredentialTableProjection
      * @param list<string> $nullableColumns
      * @param array{file:string,vault:string} $sourceColumns
      * @param array<string,CompanyBackupCredentialTransport> $transportColumns
+     * @param array<string,array{
+     *   max_bytes:int,
+     *   path_template:string,
+     *   storage_subdirectory:string
+     * }> $attachmentSources
+     * @param array<string,CompanyBackupSecretStorage> $secretStorage
      * @param list<array{name:string,owner:string,policy:TenantSecretPolicy,source:string}> $variants
      * @param array<string,TenantSecretPolicy> $variantPolicies
      */
@@ -60,6 +78,8 @@ final readonly class CompanyBackupCredentialTableProjection
         array $nullableColumns,
         array $sourceColumns,
         array $transportColumns,
+        array $attachmentSources,
+        array $secretStorage,
         array $variants,
         array $variantPolicies,
         public CompanyBackupReferenceSet $references,
@@ -71,6 +91,8 @@ final readonly class CompanyBackupCredentialTableProjection
         $this->nullableColumns = $nullableColumns;
         $this->sourceColumns = $sourceColumns;
         $this->transportColumns = $transportColumns;
+        $this->attachmentSources = $attachmentSources;
+        $this->secretStorage = $secretStorage;
         $this->variants = $variants;
         $this->variantPolicies = $variantPolicies;
     }
@@ -103,11 +125,13 @@ final readonly class CompanyBackupCredentialTableProjection
         $keys = array_keys($metadata);
         sort($keys, SORT_STRING);
         if ($keys !== [
+            'attachment_sources',
             'columns',
             'default_action',
             'nullable_columns',
             'references',
             'restore_overrides',
+            'secret_storage',
             'source_columns',
             'transport_columns',
             'variants',
@@ -147,6 +171,18 @@ final readonly class CompanyBackupCredentialTableProjection
         ) {
             throw self::error('credential_transport_invalid', $registryKey);
         }
+        $attachmentSources = self::attachmentSources(
+            $metadata['attachment_sources'],
+            $transportColumns,
+            $ownership,
+            $columns,
+            $registryKey,
+        );
+        $secretStorage = self::secretStorage(
+            $metadata['secret_storage'],
+            $transportColumns,
+            $registryKey,
+        );
 
         $references = CompanyBackupReferenceSet::fromArray(
             $metadata['references'],
@@ -198,6 +234,8 @@ final readonly class CompanyBackupCredentialTableProjection
             $nullableColumns,
             $sourceColumns,
             $transportColumns,
+            $attachmentSources,
+            $secretStorage,
             $variants,
             $variantPolicies,
             $references,
@@ -239,6 +277,83 @@ final readonly class CompanyBackupCredentialTableProjection
             $certificatePath,
             $vaultCredentialId,
         )['policy'];
+    }
+
+    /** @return list<string> */
+    public function recordColumns(): array
+    {
+        return array_values(array_filter(
+            $this->columns,
+            fn (string $column): bool => !isset($this->transportColumns[$column]),
+        ));
+    }
+
+    /** @return array{name:string,owner:string,policy:TenantSecretPolicy,source:string} */
+    public function variantNamed(string $name): array
+    {
+        foreach ($this->variants as $variant) {
+            if ($variant['name'] === $name) {
+                return $variant;
+            }
+        }
+        throw self::error('credential_variant_unsupported', $this->registryKey);
+    }
+
+    /** @param array<string,mixed> $row */
+    public function attachmentPath(
+        string $column,
+        int $supplierId,
+        array $row,
+    ): string {
+        $source = $this->attachmentSources[$column] ?? null;
+        if ($source === null || $supplierId < 1) {
+            throw self::error(
+                'credential_attachment_contract_invalid',
+                $this->registryKey,
+                $column,
+            );
+        }
+        $path = preg_replace_callback(
+            '/\{([a-z][a-z0-9_]{0,63})\}/D',
+            function (array $match) use ($supplierId, $row, $column): string {
+                $value = $match[1] === 'supplier_id'
+                    ? $supplierId
+                    : ($row[$match[1]] ?? null);
+                if (is_string($value)
+                    && preg_match('/^[1-9][0-9]*$/D', $value) === 1
+                    && strlen($value) <= strlen((string) PHP_INT_MAX)
+                    && (strlen($value) < strlen((string) PHP_INT_MAX)
+                        || strcmp($value, (string) PHP_INT_MAX) <= 0)
+                ) {
+                    $value = (int) $value;
+                }
+                if (!is_int($value) || $value < 1) {
+                    throw self::error(
+                        'credential_attachment_path_invalid',
+                        $this->registryKey,
+                        $column,
+                    );
+                }
+                return (string) $value;
+            },
+            $source['path_template'],
+        );
+        if (!is_string($path)) {
+            throw self::error('credential_attachment_path_invalid', $this->registryKey, $column);
+        }
+        return $path;
+    }
+
+    public function attachmentRelativePath(string $column, string $path): string
+    {
+        $source = $this->attachmentSources[$column] ?? null;
+        $prefix = $source === null
+            ? null
+            : $source['storage_subdirectory'] . '/';
+        if ($prefix === null || !str_starts_with($path, $prefix)) {
+            throw self::error('credential_attachment_path_invalid', $this->registryKey, $column);
+        }
+        return substr($path, strlen($prefix));
     }
 
     /** @return array{name:string,owner:string,policy:TenantSecretPolicy,source:string} */
@@ -353,6 +468,174 @@ final readonly class CompanyBackupCredentialTableProjection
             throw self::error('credential_source_columns_invalid', $registryKey);
         }
         return ['file' => $file, 'vault' => $vault];
+    }
+
+    /**
+     * @param array<string,CompanyBackupCredentialTransport> $transportColumns
+     * @param array<string,string> $ownership
+     * @param list<string> $columns
+     * @return array<string,array{
+     *   max_bytes:int,
+     *   path_template:string,
+     *   storage_subdirectory:string
+     * }>
+     */
+    private static function attachmentSources(
+        mixed $value,
+        array $transportColumns,
+        array $ownership,
+        array $columns,
+        string $registryKey,
+    ): array {
+        if (!is_array($value) || array_is_list($value) && $value !== []) {
+            throw self::error('credential_attachment_contract_invalid', $registryKey);
+        }
+        $expected = [];
+        foreach ($transportColumns as $column => $transport) {
+            if ($transport === CompanyBackupCredentialTransport::SecretAttachment) {
+                $expected[] = $column;
+            }
+        }
+        $result = [];
+        foreach ($value as $column => $source) {
+            if (!is_string($column)
+                || !in_array($column, $expected, true)
+                || !is_array($source)
+                || array_is_list($source)
+            ) {
+                throw self::error(
+                    'credential_attachment_contract_invalid',
+                    $registryKey,
+                    is_string($column) ? $column : null,
+                );
+            }
+            $keys = array_keys($source);
+            sort($keys, SORT_STRING);
+            $maxBytes = $source['max_bytes'] ?? null;
+            $pathTemplate = $source['path_template'] ?? null;
+            $subdirectory = $source['storage_subdirectory'] ?? null;
+            if ($keys !== ['max_bytes', 'path_template', 'storage_subdirectory']
+                || !is_int($maxBytes)
+                || $maxBytes < 1
+                || $maxBytes > CompanyBackupSecretValue::MAX_VALUE_BYTES
+                || !is_string($pathTemplate)
+                || !is_string($subdirectory)
+                || !self::validRelativePath($subdirectory, false)
+                || !self::validRelativePath($pathTemplate, true)
+                || !str_starts_with($pathTemplate, $subdirectory . '/')
+            ) {
+                throw self::error(
+                    'credential_attachment_contract_invalid',
+                    $registryKey,
+                    $column,
+                );
+            }
+            preg_match_all(
+                '/\{([a-z][a-z0-9_]{0,63})\}/',
+                $pathTemplate,
+                $matches,
+            );
+            $placeholders = $matches[1];
+            sort($placeholders, SORT_STRING);
+            $expectedPlaceholders = [
+                $ownership['profile_column'],
+                'supplier_id',
+            ];
+            sort($expectedPlaceholders, SORT_STRING);
+            if ($placeholders !== $expectedPlaceholders
+                || !in_array($ownership['profile_column'], $columns, true)
+                || str_contains(
+                    preg_replace('/\{[a-z][a-z0-9_]{0,63}\}/', '1', $pathTemplate)
+                        ?? '',
+                    '{',
+                )
+            ) {
+                throw self::error(
+                    'credential_attachment_contract_invalid',
+                    $registryKey,
+                    $column,
+                );
+            }
+            $result[$column] = [
+                'max_bytes' => $maxBytes,
+                'path_template' => $pathTemplate,
+                'storage_subdirectory' => $subdirectory,
+            ];
+        }
+        if (array_keys($result) !== $expected) {
+            throw self::error('credential_attachment_contract_invalid', $registryKey);
+        }
+        return $result;
+    }
+
+    /**
+     * @param array<string,CompanyBackupCredentialTransport> $transportColumns
+     * @return array<string,CompanyBackupSecretStorage>
+     */
+    private static function secretStorage(
+        mixed $value,
+        array $transportColumns,
+        string $registryKey,
+    ): array {
+        if (!is_array($value) || array_is_list($value) && $value !== []) {
+            throw self::error('credential_secret_storage_invalid', $registryKey);
+        }
+        $expected = [];
+        foreach ($transportColumns as $column => $transport) {
+            if ($transport === CompanyBackupCredentialTransport::SecretEnvelope) {
+                $expected[] = $column;
+            }
+        }
+        $result = [];
+        foreach ($value as $column => $storageValue) {
+            $storage = is_string($storageValue)
+                ? CompanyBackupSecretStorage::tryFrom($storageValue)
+                : null;
+            if (!is_string($column)
+                || !in_array($column, $expected, true)
+                || $storage === null
+                || $storage === CompanyBackupSecretStorage::ApplicationEncryptedContext
+            ) {
+                throw self::error(
+                    'credential_secret_storage_invalid',
+                    $registryKey,
+                    is_string($column) ? $column : null,
+                );
+            }
+            $result[$column] = $storage;
+        }
+        if (array_keys($result) !== $expected) {
+            throw self::error('credential_secret_storage_invalid', $registryKey);
+        }
+        return $result;
+    }
+
+    private static function validRelativePath(string $value, bool $template): bool
+    {
+        if ($value === ''
+            || strlen($value) > 512
+            || str_starts_with($value, '/')
+            || str_ends_with($value, '/')
+            || str_contains($value, '\\')
+            || str_contains($value, "\0")
+            || preg_match('/\A[A-Za-z]:/', $value) === 1
+        ) {
+            return false;
+        }
+        foreach (explode('/', $value) as $segment) {
+            $pattern = $template
+                ? '/^[a-z0-9][a-z0-9._{}-]{0,127}$/D'
+                : '/^[a-z0-9][a-z0-9._-]{0,63}$/D';
+            if ($segment === '.'
+                || $segment === '..'
+                || preg_match($pattern, $segment) !== 1
+                || str_ends_with($segment, '.')
+                || str_ends_with($segment, ' ')
+            ) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

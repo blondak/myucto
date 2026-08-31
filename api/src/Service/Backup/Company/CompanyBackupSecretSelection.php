@@ -68,9 +68,13 @@ final readonly class CompanyBackupSecretSelection
             if ($policy !== TenantSecretPolicy::OptionalCredential) {
                 throw self::error('secret_selection_policy_forbidden');
             }
-            if ($scope !== CompanyBackupSecretScope::Column
-                || !$definition->policy->hasMachineDataPayload()
-            ) {
+            $supportedColumn = $scope === CompanyBackupSecretScope::Column
+                && $definition->policy->hasMachineDataPayload();
+            $supportedCredential = $scope
+                    === CompanyBackupSecretScope::CredentialVariant
+                && $definition->policy === TenantDataPolicy::OptionalCredential
+                && !$definition->policy->hasMachineDataPayload();
+            if (!$supportedColumn && !$supportedCredential) {
                 throw self::error('secret_selection_scope_unsupported');
             }
             $primaryKey = self::primaryKey($definition);

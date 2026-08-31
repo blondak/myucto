@@ -122,7 +122,7 @@ final class CompanyBackupSecretSelectionTest extends TestCase
         );
     }
 
-    public function testRejectsProtectedPersonalAndCredentialVariantSelections(): void
+    public function testAcceptsCompanyCredentialButRejectsProtectedAndPersonalSelections(): void
     {
         $registry = $this->registry();
         $this->assertSelectionError(
@@ -143,15 +143,27 @@ final class CompanyBackupSecretSelectionTest extends TestCase
                 'primary_key' => ['id' => 9],
             ]),
         );
-        $this->assertSelectionError(
-            'secret_selection_scope_unsupported',
-            fn () => $this->selection($registry, [
+        $selection = $this->selection($registry, [
+            'registry_key' => 'table:signing_credentials',
+            'scope' => 'credential_variant',
+            'name' => 'company_file',
+            'primary_key' => ['id' => 11],
+        ]);
+        self::assertSame([
+            'table:signing_credentials:credential_variant:company_file' => 1,
+        ], $selection->countsByDeclaration());
+
+        foreach (['personal_file', 'personal_vault'] as $variant) {
+            $this->assertSelectionError(
+                'secret_selection_consent_required',
+                fn () => $this->selection($registry, [
                 'registry_key' => 'table:signing_credentials',
                 'scope' => 'credential_variant',
-                'name' => 'company_file',
+                'name' => $variant,
                 'primary_key' => ['id' => 11],
-            ]),
-        );
+                ]),
+            );
+        }
     }
 
     /** @param array<string,mixed> $entry */

@@ -5,12 +5,18 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Backup;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Backup\Company\CompanyBackupCredentialSecretBundle;
 use MyInvoice\Service\Backup\Company\CompanyBackupCredentialTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileAreaRootResolver;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventoryCollector;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretSelection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlCredentialSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlFileReferenceSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
@@ -479,6 +485,169 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             self::fail('Nevybraný credential nesmí vytvořit prázdný JSONL řádek.');
         } catch (CompanyBackupDataSourceException $e) {
             self::assertSame('data_object_kind_unsupported', $e->errorCode);
+        }
+    }
+
+    public function testSelectedCompanyPfxUsesTenantJoinAndPortableEnvelope(): void
+    {
+        $pdo = $this->db->pdo();
+        $ownProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->supplierId,
+            'Vlastní přenositelný podpis',
+            'company-backup-selected-company-pfx',
+        );
+        $foreignProfileId = $this->createSigningProfile(
+            $pdo,
+            $this->foreignSupplierId,
+            'Cizí nepřenositelný podpis',
+            'company-backup-foreign-company-pfx',
+        );
+        $encryption = new SecretEncryption(new Config([
+            'app' => [
+                'secret_encryption_key' => base64_encode(str_repeat('q', 32)),
+            ],
+        ]));
+        $ownPassphrase = 'synthetic-selected-pfx-passphrase';
+        $foreignPassphrase = 'synthetic-foreign-pfx-passphrase';
+        $credential = $pdo->prepare(
+            'INSERT INTO signing_credentials ('
+            . 'profile_id, certificate_path, encrypted_passphrase, is_active'
+            . ') VALUES (?, ?, ?, 1)',
+        );
+        $ownPath = 'signing/profiles/supplier-' . $this->supplierId
+            . '/profile-' . $ownProfileId . '/profile.p12';
+        $foreignPath = 'signing/profiles/supplier-' . $this->foreignSupplierId
+            . '/profile-' . $foreignProfileId . '/profile.p12';
+        $credential->execute([
+            $ownProfileId,
+            $ownPath,
+            $encryption->encrypt($ownPassphrase),
+        ]);
+        $ownCredentialId = (int) $pdo->lastInsertId();
+        $credential->execute([
+            $foreignProfileId,
+            $foreignPath,
+            $encryption->encrypt($foreignPassphrase),
+        ]);
+        $foreignCredentialId = (int) $pdo->lastInsertId();
+
+        $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR
+            . 'company-backup-pfx-' . bin2hex(random_bytes(8));
+        $ownFile = $root . DIRECTORY_SEPARATOR . 'supplier-' . $this->supplierId
+            . DIRECTORY_SEPARATOR . 'profile-' . $ownProfileId
+            . DIRECTORY_SEPARATOR . 'profile.p12';
+        $foreignFile = $root . DIRECTORY_SEPARATOR
+            . 'supplier-' . $this->foreignSupplierId
+            . DIRECTORY_SEPARATOR . 'profile-' . $foreignProfileId
+            . DIRECTORY_SEPARATOR . 'profile.p12';
+        self::assertTrue(mkdir(dirname($ownFile), 0700, true));
+        self::assertTrue(mkdir(dirname($foreignFile), 0700, true));
+        $ownPfx = "synthetic-selected-company-pfx\0bytes";
+        $foreignPfx = "synthetic-foreign-company-pfx\0bytes";
+        self::assertSame(strlen($ownPfx), file_put_contents($ownFile, $ownPfx));
+        self::assertSame(
+            strlen($foreignPfx),
+            file_put_contents($foreignFile, $foreignPfx),
+        );
+
+        try {
+            $draft = TenantDataRegistryFactory::draftV1();
+            $definition = $draft->definition('table:signing_credentials');
+            self::assertNotNull($definition);
+            $registry = TenantDataRegistrySnapshot::fromRegistry(
+                new TenantDataRegistry(
+                    $draft->version,
+                    [$definition],
+                    [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+                ),
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            );
+            $selection = CompanyBackupSecretSelection::fromArray([
+                'registry_fingerprint' => $registry->fingerprint,
+                'entries' => [[
+                    'registry_key' => $definition->key,
+                    'scope' => 'credential_variant',
+                    'name' => 'company_file',
+                    'primary_key' => ['id' => $ownCredentialId],
+                ]],
+            ], $registry);
+            $roots = new class($root) implements CompanyBackupFileAreaRootResolver {
+                public function __construct(private readonly string $root) {}
+
+                public function resolve(string $storageSubdirectory): string
+                {
+                    TestCase::assertSame('signing/profiles', $storageSubdirectory);
+                    return $this->root;
+                }
+            };
+            $projection = CompanyBackupCredentialTableProjection::fromDefinition(
+                $definition,
+            );
+            $source = new CompanyBackupSqlCredentialSecretSource(
+                $encryption,
+                $roots,
+            );
+            $values = iterator_to_array($source->values(
+                $pdo,
+                $this->supplierId,
+                $projection,
+                $selection->entries(),
+            ), false);
+
+            self::assertCount(1, $values);
+            self::assertSame(
+                ['id' => $ownCredentialId],
+                $values[0]->primaryKey,
+            );
+            $bundle = CompanyBackupCredentialSecretBundle::fromJson(
+                $values[0]->plaintext(),
+                $projection,
+                'company_file',
+                ['id' => $ownCredentialId],
+            );
+            self::assertSame($ownPfx, $bundle->attachment('certificate_path'));
+            self::assertSame(
+                $ownPassphrase,
+                $bundle->secret('encrypted_passphrase'),
+            );
+            self::assertNotSame(
+                $foreignPfx,
+                $bundle->attachment('certificate_path'),
+            );
+            self::assertNotSame(
+                $foreignPassphrase,
+                $bundle->secret('encrypted_passphrase'),
+            );
+
+            $foreignSelection = CompanyBackupSecretSelection::fromArray([
+                'registry_fingerprint' => $registry->fingerprint,
+                'entries' => [[
+                    'registry_key' => $definition->key,
+                    'scope' => 'credential_variant',
+                    'name' => 'company_file',
+                    'primary_key' => ['id' => $foreignCredentialId],
+                ]],
+            ], $registry);
+            try {
+                iterator_to_array($source->values(
+                    $pdo,
+                    $this->supplierId,
+                    $projection,
+                    $foreignSelection->entries(),
+                ));
+                self::fail('PFX jiné firmy nesmí projít tenantovým joinem.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('secret_selected_value_missing', $e->errorCode);
+            }
+        } finally {
+            @unlink($ownFile);
+            @unlink($foreignFile);
+            @rmdir(dirname($ownFile));
+            @rmdir(dirname($foreignFile));
+            @rmdir(dirname(dirname($ownFile)));
+            @rmdir(dirname(dirname($foreignFile)));
+            @rmdir($root);
         }
     }
 
