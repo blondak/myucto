@@ -36,6 +36,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollShiftsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessCompensationSegmentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessEventsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTimeEntriesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTimeMonthsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTravelCompensationLinksProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollWorkCalendarsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPdfSignatureOutputSettingsProjection;
@@ -171,6 +173,12 @@ final class TenantDataRegistryFactory
         ],
         'payroll_shifts' => ['supplier_id', 'series_key', 'revision_no'],
         'payroll_sickness_events' => ['supplier_id', 'absence_id'],
+        'payroll_time_entries' => ['supplier_id', 'series_key', 'revision_no'],
+        'payroll_time_months' => [
+            'supplier_id',
+            'employment_id',
+            'period_start',
+        ],
         'payroll_travel_compensation_links' => [
             'supplier_id',
             'source_system',
@@ -1395,6 +1403,36 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollShiftsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_time_entries') {
+            return [
+                'company_backup' => [
+                    'column_codecs' =>
+                        CompanyBackupPayrollTimeEntriesProjection::columnCodecs(),
+                    'data_columns' =>
+                        CompanyBackupPayrollTimeEntriesProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollTimeEntriesProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_time_months') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollTimeMonthsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollTimeMonthsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

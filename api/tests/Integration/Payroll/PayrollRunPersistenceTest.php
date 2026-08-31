@@ -2418,6 +2418,172 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-06-01 08:00:00', $published['published_at']);
     }
 
+    public function testCompanyBackupStreamsVersionedApprovedTimeEntry(): void
+    {
+        $seriesKey = str_repeat('e', 32);
+        $originalHash = hash('sha256', 'synthetic-time-entry-original', true);
+        $approvedHash = hash('sha256', 'synthetic-time-entry-approved', true);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_time_entries
+                (supplier_id, employment_id, series_key, revision_no,
+                 category, starts_at_utc, ends_at_utc, timezone_name,
+                 break_minutes, source_kind, source_hash, status, created_by)
+             VALUES (?, ?, ?, 1, "regular", "2026-06-16 06:00:00",
+                     "2026-06-16 14:00:00", "Europe/Prague", 30,
+                     "manual", ?, "superseded", ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $seriesKey,
+            $originalHash,
+            $this->actors[0],
+        ]);
+        $originalId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_time_entries
+                (supplier_id, employment_id, series_key, revision_no,
+                 supersedes_id, category, starts_at_utc, ends_at_utc,
+                 timezone_name, break_minutes, source_kind, source_reference,
+                 source_hash, status, created_by, approved_by, approved_at)
+             VALUES (?, ?, ?, 2, ?, "overtime", "2026-06-16 06:00:00",
+                     "2026-06-16 15:00:00", "Europe/Prague", 30, "import",
+                     "synthetic-row-42", ?, "approved", ?, ?,
+                     "2026-06-30 12:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $seriesKey,
+            $originalId,
+            $approvedHash,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+        $approvedId = (int) $this->db->pdo()->lastInsertId();
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_time_entries');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $original = $rows[0];
+        $approved = $rows[1];
+        self::assertSame($originalId, (int) $original['id']);
+        self::assertSame('superseded', $original['status']);
+        self::assertSame(bin2hex($originalHash), $original['source_hash']);
+        self::assertSame($approvedId, (int) $approved['id']);
+        self::assertSame($this->employmentId, (int) $approved['employment_id']);
+        self::assertSame($seriesKey, $approved['series_key']);
+        self::assertSame(2, (int) $approved['revision_no']);
+        self::assertSame($originalId, (int) $approved['supersedes_id']);
+        self::assertSame('overtime', $approved['category']);
+        self::assertSame('2026-06-16 06:00:00', $approved['starts_at_utc']);
+        self::assertSame('2026-06-16 15:00:00', $approved['ends_at_utc']);
+        self::assertSame('Europe/Prague', $approved['timezone_name']);
+        self::assertSame(30, (int) $approved['break_minutes']);
+        self::assertSame('import', $approved['source_kind']);
+        self::assertSame('synthetic-row-42', $approved['source_reference']);
+        self::assertSame(bin2hex($approvedHash), $approved['source_hash']);
+        self::assertSame('approved', $approved['status']);
+        self::assertSame($this->actors[0], (int) $approved['created_by']);
+        self::assertSame($this->actors[1], (int) $approved['approved_by']);
+        self::assertSame('2026-06-30 12:00:00', $approved['approved_at']);
+    }
+
+    public function testCompanyBackupStreamsApprovedAndReopenedTimeMonths(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_time_months
+                (supplier_id, employment_id, period_start, status, revision_no,
+                 row_version, last_changed_by, approved_by, approved_at)
+             VALUES (?, ?, "2026-06-01", "approved", 1, 4, ?, ?,
+                     "2026-06-30 12:00:00")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $this->actors[0],
+            $this->actors[1],
+        ]);
+        $approvedId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_time_months
+                (supplier_id, employment_id, period_start, status, revision_no,
+                 row_version, last_changed_by, reopened_by, reopened_at,
+                 reopen_reason)
+             VALUES (?, ?, "2026-07-01", "open", 2, 7, ?, ?,
+                     "2026-08-01 09:00:00", "Synthetic correction")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $this->actors[2],
+            $this->actors[2],
+        ]);
+        $reopenedId = (int) $this->db->pdo()->lastInsertId();
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_time_months');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $approved = $rows[0];
+        $reopened = $rows[1];
+        self::assertSame($approvedId, (int) $approved['id']);
+        self::assertSame($this->employmentId, (int) $approved['employment_id']);
+        self::assertSame('2026-06-01', $approved['period_start']);
+        self::assertSame('approved', $approved['status']);
+        self::assertSame(1, (int) $approved['revision_no']);
+        self::assertSame(4, (int) $approved['row_version']);
+        self::assertSame($this->actors[0], (int) $approved['last_changed_by']);
+        self::assertSame($this->actors[1], (int) $approved['approved_by']);
+        self::assertSame('2026-06-30 12:00:00', $approved['approved_at']);
+        self::assertNull($approved['reopened_by']);
+        self::assertSame($reopenedId, (int) $reopened['id']);
+        self::assertSame('2026-07-01', $reopened['period_start']);
+        self::assertSame('open', $reopened['status']);
+        self::assertSame(2, (int) $reopened['revision_no']);
+        self::assertSame(7, (int) $reopened['row_version']);
+        self::assertNull($reopened['approved_by']);
+        self::assertSame($this->actors[2], (int) $reopened['last_changed_by']);
+        self::assertSame($this->actors[2], (int) $reopened['reopened_by']);
+        self::assertSame('2026-08-01 09:00:00', $reopened['reopened_at']);
+        self::assertSame('Synthetic correction', $reopened['reopen_reason']);
+    }
+
     public function testCompanyBackupStreamsRunWithoutGeneratedOfficeScope(): void
     {
         $run = $this->createRun();
