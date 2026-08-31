@@ -15,6 +15,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupFormatException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeDescriptor;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -265,6 +266,25 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         self::assertSame(5, $inspection->entryCount);
     }
 
+    public function testAuthenticatedEnvelopeStillRequiresRegistryBoundPayload(): void
+    {
+        $archive = $this->archive($this->payload(
+            withSecretEnvelope: true,
+            invalidSecretPayload: true,
+        ));
+
+        $this->expectArchiveError(
+            'secret_payload_invalid',
+            'secrets/tenant.sealed',
+        );
+        $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+    }
+
     public function testProtectedDomainSecretWithoutEnvelopeIsRejected(): void
     {
         $archive = $this->archive($this->payload(protectedSecret: true));
@@ -417,6 +437,7 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         bool $includeRegistry = true,
         bool $protectedSecret = false,
         bool $withSecretEnvelope = false,
+        bool $invalidSecretPayload = false,
     ): array
     {
         $format = new CompanyBackupFormat();
@@ -429,6 +450,7 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
                 TenantDataPolicy::TenantRoot,
                 [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
                 [
+                    'primary_key' => ['id'],
                     'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
                     ...($protectedSecret ? [
                         'secrets' => [
@@ -497,7 +519,9 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
                 TenantDataRegistry::COMPANY_BACKUP_PROFILE,
             );
             $sealed = (new CompanyBackupSecretEnvelopeCipher())->seal(
-                '{"entries":[],"format":"synthetic-secret-payload","version":1}',
+                $invalidSecretPayload
+                    ? '{"synthetic":true}'
+                    : CompanyBackupSecretPayload::fromValues([], $snapshot)->toJson(),
                 self::PASSWORD,
                 '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
                 $snapshot->fingerprint,

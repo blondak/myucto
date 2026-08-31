@@ -18,6 +18,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupSealedSecretEnvelope;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeDescriptor;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -173,7 +174,7 @@ final class CompanyBackupArchiveWriterTest extends TestCase
             TenantDataRegistry::COMPANY_BACKUP_PROFILE,
         );
         $sealed = (new CompanyBackupSecretEnvelopeCipher())->seal(
-            '{"entries":[],"format":"synthetic-secret-payload","version":1}',
+            CompanyBackupSecretPayload::fromValues([], $snapshot)->toJson(),
             self::PASSWORD,
             '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
             $snapshot->fingerprint,

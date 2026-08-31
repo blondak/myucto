@@ -171,8 +171,18 @@ final class CompanyBackupArchiveInspector
                         $manifest->backupId,
                         $completeManifest->registry->fingerprint,
                     );
-                    self::wipe($plaintext);
-                } catch (CompanyBackupSecretEnvelopeException $e) {
+                    try {
+                        CompanyBackupSecretPayload::fromJson(
+                            $plaintext,
+                            $completeManifest->registry,
+                        );
+                    } finally {
+                        self::wipe($plaintext);
+                    }
+                } catch (
+                    CompanyBackupSecretEnvelopeException
+                    | CompanyBackupSecretPayloadException $e
+                ) {
                     throw new CompanyBackupArchiveException(
                         $e->errorCode,
                         $secretEnvelope->path,
