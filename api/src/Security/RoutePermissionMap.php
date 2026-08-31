@@ -19,6 +19,11 @@ final class RoutePermissionMap
         '/api/auth/webauthn/login/options', '/api/auth/webauthn/login/verify',
         '/api/auth/forgot', '/api/auth/reset', '/api/auth/domain-context',
         '/api/auth/domain-login/start', '/api/auth/domain-login/exchange', '/api/csrf-token',
+        // ⚠️ „Public" jen ve smyslu BEZ SESSION. Doručení licence do spravované
+        // instalace volá licenční server, který se sem přihlásit nemá čím;
+        // autentizace je Ed25519 podpis obálky ověřený zabudovaným veřejným
+        // klíčem (ManagedLicenseAction), takže bez podpisu endpoint neudělá nic.
+        '/api/managed/license',
     ];
 
     /** @var list<string> */
@@ -32,6 +37,9 @@ final class RoutePermissionMap
         // Vlastní záložní kódy spravuje jen jejich majitel — generování si navíc
         // vynucuje čerstvý step-up skutečným faktorem (MfaRecoveryCodeAction).
         '/api/auth/mfa/recovery-codes',
+        // Odmítnutí dobrovolné nabídky MFA je rozhodnutí o vlastním účtu — žádné
+        // oprávnění k němu neexistuje a existovat nemá.
+        '/api/auth/mfa/offer/dismiss',
         '/api/auth/session/status', '/api/auth/session/activity', '/api/auth/session/lock',
         '/api/auth/session/lock-preference',
         '/api/auth/domain-login/authorize',

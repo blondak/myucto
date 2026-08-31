@@ -485,6 +485,44 @@ final class LicenseService
     }
 
     /**
+     * Obnova dobrovolně zrušeného předplatného.
+     *
+     * ⚠️ Vrací ADRESU K PLATBĚ, ne hotovou obnovu. Zrušení zneplatnilo mandát
+     * u brány, takže bez nové karty by se příští obnova jen znovu nestrhla
+     * a zákazník by se to dozvěděl až tím, že mu přestane fungovat instalace.
+     * Předplatné se rozeběhne, až platba projde — proto se tady ani neukládá
+     * stav: dokud zákazník nezaplatí, je pořád zrušené.
+     *
+     * @return array{ok:bool,error?:string,pay_url?:string,valid_until?:?int}
+     */
+    public function resumeRenewal(): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+
+        try {
+            $resp = $this->client->resumeRenewal($key, (string) $row['instance_id']);
+        } catch (LicenseNetworkException $e) {
+            $this->logger->info('license.resume_renewal.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'server_unreachable'];
+        }
+
+        if (($resp['ok'] ?? false) !== true) {
+            $this->logger->warning('license.resume_renewal.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
+            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'resume_failed')];
+        }
+
+        return [
+            'ok'          => true,
+            'pay_url'     => (string) ($resp['pay_url'] ?? ''),
+            'valid_until' => isset($resp['valid_until']) ? (int) $resp['valid_until'] : null,
+        ];
+    }
+
+    /**
      * Kalkulace poměrného doplatku za navýšení počtu uživatelů (in-place upgrade).
      * Nic nestrhává — jen dotáhne od serveru {current_users, new_users, amount, currency, period_end}.
      *
@@ -536,7 +574,7 @@ final class LicenseService
 
         if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
             $this->logger->warning('license.upgrade.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
-            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'upgrade_failed')];
+            return $this->rejection($resp, 'upgrade_failed');
         }
 
         $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
@@ -617,7 +655,7 @@ final class LicenseService
 
         if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
             $this->logger->warning('license.storage_upgrade.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
-            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'upgrade_failed')];
+            return $this->rejection($resp, 'upgrade_failed');
         }
 
         $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
@@ -637,6 +675,27 @@ final class LicenseService
             'order_id'             => $resp['order_id'] ?? null,
             'state'                => $this->current(),
         ];
+    }
+
+    /**
+     * Odmítnutí placené změny licence, i s odkazem na zaplacení, když ho server poslal.
+     *
+     * ⚠️ `pay_url` se NESMÍ zahodit. Když uložená karta neprojde, je to jediná
+     * cesta, jak doplatek zaplatit jinou — bez něj obrazovka nabídne leda
+     * „zkuste to prosím znovu", což s mrtvou kartou nevyjde nikdy.
+     *
+     * @param  array<string,mixed> $resp
+     * @return array{ok:false,error:string,pay_url?:string}
+     */
+    private function rejection(array $resp, string $fallback): array
+    {
+        $out = ['ok' => false, 'error' => (string) ($resp['error'] ?? $fallback)];
+        $payUrl = isset($resp['pay_url']) ? (string) $resp['pay_url'] : '';
+        if ($payUrl !== '') {
+            $out['pay_url'] = $payUrl;
+        }
+
+        return $out;
     }
 
     /** @return array<string,mixed> */
@@ -672,7 +731,7 @@ final class LicenseService
             return ['ok' => false, 'error' => 'result_unknown'];
         }
         if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
-            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'change_failed')];
+            return $this->rejection($resp, 'change_failed');
         }
         $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
         $scheduled = ($resp['scheduled'] ?? false) === true || ($resp['change'] ?? '') === 'scheduled';
@@ -1371,6 +1430,77 @@ final class LicenseService
             'license:companies',
             fn (): int => (int) $this->db->pdo()->query('SELECT COUNT(*) FROM supplier')->fetchColumn(),
         );
+    }
+
+    /**
+     * Převezme licenční klíč doručený provozovatelem spravované instalace.
+     *
+     * Spravovanou instalaci dostává zákazník hotovou a licenční klíč nemá kam
+     * opsat — dokud tahle cesta nebyla, běžela zaplacená instalace na zkušebním
+     * období, protože klíč se do ní nikdy nedostal. Prvotní zřízení klíč nese
+     * v setupu; tohle je cesta pro instalaci, která už běží.
+     *
+     * ⚠️ Autentizace je KRYPTOGRAFICKÁ, ne sdíleným heslem. Obálku podepisuje
+     * licenční server týmž Ed25519 klíčem jako licenční token, takže se ověří
+     * veřejným klíčem, který aplikace už má — nevzniká další tajemství, které
+     * by se muselo distribuovat a chránit.
+     *
+     * ⚠️ Obálka musí být adresovaná TÉHLE instalaci (`instance_id`) a čerstvá.
+     * Bez toho by se jednou odchycená obálka dala přehrát na cizí instalaci
+     * a vnutit jí cizí licenci.
+     *
+     * @return array{ok:bool,error:?string}
+     */
+    /**
+     * Zahodí zapamatovaný licenční řádek.
+     *
+     * Prvotní setup zapisuje `license.instance_id` PŘÍMO přes PDO (je součástí
+     * jedné transakce se založením admina), takže se o tom tahle služba nemá
+     * jak dozvědět — a následná aktivace odešla se STARÝM, lokálně vygenerovaným
+     * UUID. Licenční server ji odmítl `instance_not_managed` a zaplacená
+     * instalace zůstala na zkušebním období.
+     */
+    public function forgetCachedRow(): void
+    {
+        $this->rowCache = null;
+        $this->cache->invalidateGroup(EntityCache::GROUP_LICENSE);
+    }
+
+    public function acceptManagedLicense(string $envelope): array
+    {
+        if (!$this->isManaged()) {
+            return ['ok' => false, 'error' => 'not_managed'];
+        }
+
+        $payload = $this->verifier->verify(trim($envelope), $this->publicKeys());
+        if ($payload === null) {
+            return ['ok' => false, 'error' => 'invalid_signature'];
+        }
+        if ((string) ($payload['purpose'] ?? '') !== 'managed_license') {
+            return ['ok' => false, 'error' => 'wrong_purpose'];
+        }
+
+        $own = $this->instanceIdOf($this->loadRow());
+        if ($own === '' || (string) ($payload['instance_id'] ?? '') !== $own) {
+            return ['ok' => false, 'error' => 'instance_mismatch'];
+        }
+
+        // Pět minut stačí na síť i na rozjeté hodiny, a přehrání staré obálky
+        // za týden to nepustí.
+        $issuedAt = (int) ($payload['iat'] ?? 0);
+        if ($issuedAt <= 0 || abs(time() - $issuedAt) > 300) {
+            return ['ok' => false, 'error' => 'stale_envelope'];
+        }
+
+        $key = trim((string) ($payload['license_key'] ?? ''));
+        if ($key === '') {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+
+        // `takeover` schválně NE. Kdyby licence visela na jiné instalaci, je to
+        // nález k prošetření, ne něco, co má provozovatel přebít mlčky.
+        $res = $this->activate($key);
+        return ['ok' => ($res['ok'] ?? false) === true, 'error' => $res['error'] ?? null];
     }
 
     private function publicKey(): string

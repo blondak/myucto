@@ -22,6 +22,7 @@ import {
   storageUpgradeOptionsGb,
 } from '@/api/instanceHealth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import PayAgainNotice from './PayAgainNotice.vue'
 
 /**
  * Předplatné a provoz — co zákazník má, co mu dochází a co s tím (H-31).
@@ -106,6 +107,33 @@ async function load(): Promise<void> {
   }
 }
 
+/**
+ * Ruční stažení rozsahu z licenčního serveru.
+ *
+ * Zaplacené navýšení míst i rozšíření úložiště se do instalace propíše až
+ * novým licenčním tokenem, a ten se běžně obnovuje jednou denně. Po platbě,
+ * která proběhla jinde než tady — odkaz z e-mailu, ruční potvrzení obsluhou —
+ * koukal zákazník do té doby na staré počty a nechápal, za co zaplatil.
+ */
+const refreshing = ref(false)
+
+async function refreshEntitlement(): Promise<void> {
+  refreshing.value = true
+  errorMsg.value = null
+  try {
+    // ⚠️ Stav se čte AŽ POTOM běžnou cestou. Odpověď obnovy ho nenese —
+    // payload `/license/status` je bohatší a jeho druhá, chudší podoba by
+    // obrazovku shodila do „tahle instalace u nás neběží".
+    await licenseApi.refresh()
+    await load()
+    await auth.refresh()
+  } catch (e: unknown) {
+    errorMsg.value = (e as Error)?.message ?? t('hosting.refresh_failed')
+  } finally {
+    refreshing.value = false
+  }
+}
+
 onMounted(async () => {
   await load()
   if (!auth.isSuperadmin) return
@@ -145,15 +173,31 @@ function fmtPeriodEnd(value: number | string | null): string | null {
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString()
 }
 
-/** Chybová hláška ze serveru. ⚠️ Zobrazuje se TA — nevymýšlíme si vlastní. */
-function apiError(e: unknown, fallbackKey: string): { code: string | null; message: string } {
-  const err = e as { response?: { data?: { error?: { code?: string; message?: string } } } }
+/**
+ * Chybová hláška ze serveru. ⚠️ Zobrazuje se TA — nevymýšlíme si vlastní.
+ *
+ * `payUrl` přijde, když doplatek nešlo strhnout z uložené karty. Tehdy je to
+ * jediná nabídka, která dává smysl — opakovat nákup se stejnou kartou dopadne
+ * stejně.
+ */
+function apiError(e: unknown, fallbackKey: string): { code: string | null; message: string; payUrl: string | null } {
+  const err = e as { response?: { data?: { error?: { code?: string; message?: string; pay_url?: string } } } }
+  const error = err.response?.data?.error
 
   return {
-    code: err.response?.data?.error?.code ?? null,
-    message: err.response?.data?.error?.message ?? t(fallbackKey),
+    code: error?.code ?? null,
+    message: error?.message ?? t(fallbackKey),
+    payUrl: error?.pay_url ?? null,
   }
 }
+
+/**
+ * Odkaz na doplacení po odmítnuté kartě.
+ *
+ * ⚠️ Sdílený jeden pro všechny tři nákupy: patří vždycky k chybě, která je
+ * zrovna vidět, a každý nákup si ho na začátku vynuluje.
+ */
+const payUrl = ref<string | null>(null)
 
 // ─── Co mám ────────────────────────────────────────────────────────────────
 
@@ -308,13 +352,25 @@ const openFeatures = computed(() => (tm('license.open_features') as unknown[]).m
 
 // ─── Co mi dochází ─────────────────────────────────────────────────────────
 
-/** Souhrn nahoře. Prázdný seznam = není co řešit a nic se nekreslí. */
+/**
+ * Souhrn nahoře. Prázdný seznam = není co řešit a nic se nekreslí.
+ *
+ * ⚠️ VYČERPANÁ KAPACITA SEM NEPATŘÍ. Kdo má 1 uživatele z 1 zaplaceného,
+ * využívá přesně to, co si koupil — je to správný stav, ne nález. Dokud tady
+ * byl, přivítala čerstvě zřízená instalace zákazníka při prvním přihlášení
+ * výstrahou „Vyžaduje pozornost", protože 1 z 1 se rovná stropu. Že na víc
+ * místa není, říká chip „Na stropu" na kartě a tlačítka Dokoupit / Změnit
+ * tarif — ta informace se tím neztrácí, jen přestává vypadat jako porucha.
+ *
+ * Docházející MÍSTO je něco jiného a v souhrnu zůstává i jako `notice`: 80 %
+ * je trajektorie k problému, ne ustálený stav.
+ */
 const attention = computed(() => {
   const items: Array<{ key: string; anchor: string; tone: Tone }> = []
   if (billingTone.value !== 'ok') items.push({ key: 'hosting.attention_billing', anchor: '#platba', tone: billingTone.value })
   if (licenseKeyTone.value !== 'ok') items.push({ key: 'hosting.attention_key', anchor: '#klic', tone: licenseKeyTone.value })
-  if (usersTone.value !== 'ok') items.push({ key: 'hosting.attention_users', anchor: '#uzivatele', tone: usersTone.value })
-  if (companiesTone.value !== 'ok') items.push({ key: 'hosting.attention_companies', anchor: '#tarif', tone: companiesTone.value })
+  if (usersTone.value === 'critical') items.push({ key: 'hosting.attention_users', anchor: '#uzivatele', tone: usersTone.value })
+  if (companiesTone.value === 'critical') items.push({ key: 'hosting.attention_companies', anchor: '#tarif', tone: companiesTone.value })
   if (storageTone.value !== 'ok') items.push({ key: 'hosting.attention_storage', anchor: '#misto', tone: storageTone.value })
 
   return items
@@ -344,11 +400,14 @@ async function calcTierQuote(): Promise<void> {
   if (quotingTier.value || previewing.value || targetTier.value === status.value?.tier) return
   quotingTier.value = true
   tierError.value = null
+  payUrl.value = null
   tierMessage.value = null
   try {
     tierQuote.value = await licenseApi.tierQuote(targetTier.value)
   } catch (e: unknown) {
-    tierError.value = apiError(e, 'license.tier_change_failed').message
+    const failure = apiError(e, 'license.tier_change_failed')
+    tierError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     quotingTier.value = false
   }
@@ -360,6 +419,7 @@ async function applyTierChange(): Promise<void> {
   if (!confirm(t(quote.scheduled ? 'license.tier_schedule_confirm' : 'license.tier_change_confirm'))) return
   changingTier.value = true
   tierError.value = null
+  payUrl.value = null
   try {
     let result = await licenseApi.changeTier(quote.new_tier, quote.quote_token)
     if (result.pending && result.order_id) {
@@ -374,7 +434,9 @@ async function applyTierChange(): Promise<void> {
     await load()
     await auth.refresh()
   } catch (e: unknown) {
-    tierError.value = apiError(e, 'license.tier_change_failed').message
+    const failure = apiError(e, 'license.tier_change_failed')
+    tierError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     changingTier.value = false
   }
@@ -406,10 +468,13 @@ async function calcUserQuote(): Promise<void> {
   userError.value = null
   userDone.value = null
   userQuote.value = null
+  payUrl.value = null
   try {
     userQuote.value = await licenseApi.upgradeQuote(n)
   } catch (e: unknown) {
-    userError.value = apiError(e, 'license.upgrade_failed').message
+    const failure = apiError(e, 'license.upgrade_failed')
+    userError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     quotingUsers.value = false
   }
@@ -424,6 +489,7 @@ async function buyUsers(): Promise<void> {
   upgradingUsers.value = true
   userError.value = null
   userDone.value = null
+  payUrl.value = null
   try {
     let res = await licenseApi.upgrade(n, userQuote.value.quote_token)
     if (res.pending && res.order_id) {
@@ -439,7 +505,9 @@ async function buyUsers(): Promise<void> {
         : t('license.upgrade_success', { n: res.new_users })
     await auth.refresh()
   } catch (e: unknown) {
-    userError.value = apiError(e, 'license.upgrade_failed').message
+    const failure = apiError(e, 'license.upgrade_failed')
+    userError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     upgradingUsers.value = false
   }
@@ -480,11 +548,14 @@ async function pickSize(gb: number): Promise<void> {
   storageQuote.value = null
   storageError.value = null
   storageDone.value = null
+  payUrl.value = null
   quotingStorage.value = true
   try {
     storageQuote.value = await licenseApi.storageQuote(gb)
   } catch (e: unknown) {
-    storageError.value = apiError(e, 'hosting.storage_order_failed').message
+    const failure = apiError(e, 'hosting.storage_order_failed')
+    storageError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     quotingStorage.value = false
   }
@@ -505,6 +576,7 @@ async function buyStorage(): Promise<void> {
   buyingStorage.value = true
   storageError.value = null
   storageDone.value = null
+  payUrl.value = null
   try {
     let res = await licenseApi.storageUpgrade(quote.new_quota_gb, quote.quote_token)
     if (res.pending && res.order_id) {
@@ -528,8 +600,9 @@ async function buyStorage(): Promise<void> {
     await load()
     await auth.refresh()
   } catch (e: unknown) {
-    const { code, message } = apiError(e, 'hosting.storage_order_failed')
+    const { code, message, payUrl: link } = apiError(e, 'hosting.storage_order_failed')
     storageError.value = message
+    payUrl.value = link
     if (code === 'result_unknown') offerClosed.value = true
   } finally {
     buyingStorage.value = false
@@ -561,6 +634,7 @@ watch(previewScenario, (scenario) => {
   tierQuote.value = null
   tierMessage.value = null
   tierError.value = null
+  payUrl.value = null
   offerClosed.value = false
   selectedGb.value = null
   if (scenario === null) return
@@ -577,6 +651,7 @@ watch(previewScenario, (scenario) => {
   if (ui.outcome === 'storage_pending') storageDone.value = t('hosting.storage_pending', { gb: 22 })
   if (ui.outcome === 'users_done') userDone.value = t('license.upgrade_success', { n: 5 })
   if (ui.error) storageError.value = ui.error
+  if (ui.payUrl) payUrl.value = ui.payUrl
   if (ui.offerClosed) offerClosed.value = true
 // ⚠️ `immediate`: scénář z `?nahled=` je nastavený UŽ při setupu (viz
 // `syncPreviewFromRoute` výš), takže se nikdy „nezmění" a bez tohohle by se
@@ -704,6 +779,24 @@ watch(previewScenario, (scenario) => {
         </p>
       </section>
 
+      <!-- ⚠️ Odmítnutou kontrolu licence NELZE mlčet — a musí být vidět BEZ
+           OHLEDU na to, jestli server poslal vyprávění o fázi neuhrazení.
+           Server licenci odmítne třeba po vrácení peněz nebo jejím zneplatnění,
+           jenže token doběhne dál: obrazovka do té doby hlásila „Stav licence:
+           Aktivní" a datum poslední kontroly, jako by všechno sedělo, a
+           zákazník se o konci placených funkcí dozvěděl až tím, že mu zmizely. -->
+      <section
+        v-if="billing && !billing.last_check_ok"
+        class="rounded-lg border border-danger-500/40 bg-danger-50/50 px-4 py-3"
+        data-hosting-check-failed
+      >
+        <p class="text-sm font-medium text-danger-600">{{ t('hosting.check_failed_title') }}</p>
+        <p class="mt-1 text-sm text-neutral-700">{{ t('hosting.unpaid_check_failed') }}</p>
+        <p v-if="billing.last_check_at" class="mt-1 text-xs text-neutral-600">
+          {{ t('hosting.check_failed_when', { checked: fmtDateTime(billing.last_check_at) }) }}
+        </p>
+      </section>
+
       <!-- ── CO MI DOCHÁZÍ ──────────────────────────────────────────────────
            Kreslí se jen tehdy, když je co řešit. -->
       <section
@@ -724,8 +817,26 @@ watch(previewScenario, (scenario) => {
       <!-- ── CO MÁM ─────────────────────────────────────────────────────────
            Řádek v pořádku je šedý a bez tlačítka. Křičí jen to, co se má řešit. -->
       <section>
-        <h2 class="text-lg font-semibold text-neutral-900">{{ t('hosting.overview_title') }}</h2>
-        <p class="mt-0.5 text-sm text-neutral-600">{{ t('hosting.overview_desc') }}</p>
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-neutral-900">{{ t('hosting.overview_title') }}</h2>
+            <p class="mt-0.5 text-sm text-neutral-600">{{ t('hosting.overview_desc') }}</p>
+          </div>
+          <!-- ⚠️ Rozsah se do instalace propíše až novým licenčním tokenem, a ten
+               se obnovuje jednou denně. Po platbě, která proběhla jinde než tady,
+               by zákazník do zítřka koukal na staré počty. -->
+          <button
+            v-if="auth.isSuperadmin"
+            type="button"
+            :class="btnOutline('primary')"
+            :disabled="refreshing"
+            data-hosting-refresh
+            @click="refreshEntitlement"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+            {{ refreshing ? t('hosting.refresh_busy') : t('hosting.refresh_cta') }}
+          </button>
+        </div>
 
         <ul class="mt-4 grid gap-3 sm:grid-cols-2">
           <!-- Tarif licence -->
@@ -947,6 +1058,7 @@ watch(previewScenario, (scenario) => {
               <button
                 type="button" :disabled="buyingStorage || previewing"
                 :class="[btnFilled('success'), 'mt-3']"
+                data-hosting-storage-buy
                 @click="buyStorage"
               >
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
@@ -966,6 +1078,7 @@ watch(previewScenario, (scenario) => {
         </div>
         <div v-if="storageError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600" data-hosting-storage-error>
           {{ storageError }}
+          <PayAgainNotice v-if="payUrl" :href="payUrl" />
         </div>
 
         <p v-if="!links?.subscription && !links?.expand_storage" class="mt-3 text-xs text-neutral-500">
@@ -1002,7 +1115,10 @@ watch(previewScenario, (scenario) => {
           </button>
         </div>
         <p v-if="tierMessage" class="mt-3 text-sm text-success-700">{{ tierMessage }}</p>
-        <p v-if="tierError" class="mt-3 text-sm text-danger-600">{{ tierError }}</p>
+        <div v-if="tierError" class="mt-3 text-sm text-danger-600">
+          {{ tierError }}
+          <PayAgainNotice v-if="payUrl" :href="payUrl" />
+        </div>
         <p v-if="previewing" class="mt-2 text-xs text-neutral-800">{{ t('hosting.preview_no_orders') }}</p>
       </section>
 
@@ -1021,6 +1137,7 @@ watch(previewScenario, (scenario) => {
           <button
             type="button" :disabled="quotingUsers || previewing || !upgradeUsers || upgradeUsers < 1"
             :class="btnOutline('primary')"
+            data-hosting-users-quote
             @click="calcUserQuote"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
@@ -1039,6 +1156,7 @@ watch(previewScenario, (scenario) => {
           <button
             type="button" :disabled="upgradingUsers || previewing"
             :class="[btnFilled('success'), 'mt-3']"
+            data-hosting-users-buy
             @click="buyUsers"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
@@ -1048,7 +1166,10 @@ watch(previewScenario, (scenario) => {
         </div>
 
         <div v-if="userDone" class="mt-4 rounded-md border border-success-500/40 bg-success-50 p-3 text-sm text-success-700">{{ userDone }}</div>
-        <div v-if="userError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ userError }}</div>
+        <div v-if="userError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">
+          {{ userError }}
+          <PayAgainNotice v-if="payUrl" :href="payUrl" />
+        </div>
       </section>
 
       <!-- Co provoz zahrnuje a co ne -->

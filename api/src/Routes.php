@@ -302,7 +302,9 @@ use MyInvoice\Action\License\LicenseBillingAction;
 use MyInvoice\Action\License\LicenseStatusAction;
 use MyInvoice\Action\License\ActivateLicenseAction;
 use MyInvoice\Action\License\DeactivateLicenseAction;
+use MyInvoice\Action\License\RefreshLicenseAction;
 use MyInvoice\Action\License\CancelRenewalLicenseAction;
+use MyInvoice\Action\License\ResumeRenewalLicenseAction;
 use MyInvoice\Action\License\StorageQuoteAction;
 use MyInvoice\Action\License\StorageUpgradeAction;
 use MyInvoice\Action\License\UpgradeQuoteLicenseAction;
@@ -399,6 +401,9 @@ final class Routes
             $g->post  ('/mfa/step-up/recovery',               [MfaStepUpAction::class, 'recovery']);
             $g->get   ('/mfa/recovery-codes',                 [\MyInvoice\Action\Auth\MfaRecoveryCodeAction::class, 'status']);
             $g->post  ('/mfa/recovery-codes',                 [\MyInvoice\Action\Auth\MfaRecoveryCodeAction::class, 'generate']);
+            // Dobrovolná nabídka MFA — „pokračovat bez ověření". Jen když se MFA nevynucuje;
+            // při require_mfa = true endpoint odpoví 409 (viz MfaOfferService::dismiss).
+            $g->post  ('/mfa/offer/dismiss',                  [\MyInvoice\Action\Auth\MfaOfferAction::class, 'dismiss']);
             $g->get   ('/session/status',                     [SessionAction::class, 'status']);
             $g->post  ('/session/activity',                   [SessionAction::class, 'activity']);
             $g->post  ('/session/lock',                       [SessionAction::class, 'lock']);
@@ -425,9 +430,18 @@ final class Routes
         // instalace přestane fungovat. Rozsah viz BillingSnapshot::dunning().
         $app->get ('/api/license/billing',       LicenseBillingAction::class);
         $app->post('/api/license/activate',      ActivateLicenseAction::class);
+        // ⚠️ Mimo admin bránu schválně: tohle volá licenční server, ne člověk.
+        // Autentizace je Ed25519 podpis obálky, ověřený zabudovaným veřejným
+        // klíčem — nepodepsaný požadavek neudělá nic.
+        $app->post('/api/managed/license',       \MyInvoice\Action\License\ManagedLicenseAction::class);
         $app->post('/api/license/deactivate',    DeactivateLicenseAction::class);
+        // Okamžité stažení rozsahu z licenčního serveru — zaplacené navýšení
+        // se jinak projeví až denní obnovou tokenu a zákazník kouká na staré
+        // počty. Nic nekupuje, jen si řekne o čerstvý token.
+        $app->post('/api/license/refresh',       RefreshLicenseAction::class);
         // Vypnutí automatického prodlužování — licence doběhne do valid_until.
         $app->post('/api/license/cancel-renewal', CancelRenewalLicenseAction::class);
+        $app->post('/api/license/resume-renewal', ResumeRenewalLicenseAction::class);
         // In-place navýšení počtu uživatelů (poměrný doplatek z uložené karty).
         $app->post('/api/license/upgrade/quote', UpgradeQuoteLicenseAction::class);
         $app->post('/api/license/upgrade',       UpgradeLicenseAction::class);

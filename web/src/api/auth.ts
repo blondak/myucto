@@ -14,6 +14,12 @@ export interface User {
   mfa_methods?: Array<'passkey' | 'totp'>
   passkey_count?: number
   must_setup_mfa?: boolean
+  /**
+   * Protipól `must_setup_mfa` pro instalace, kde se MFA nevynucuje: server nabízí
+   * zapnutí účtu bez jediného faktoru, dokud uživatel nabídku neodmítne. Nabídku
+   * lze přeskočit — na rozdíl od `must_setup_mfa` nic neblokuje.
+   */
+  should_offer_mfa?: boolean
 }
 
 export interface RoleSummary {
@@ -194,6 +200,12 @@ export interface MfaSetupCompletion {
 
 export interface PasskeyRegistrationResult extends MfaSetupCompletion {
   credential: PasskeyCredential
+  /**
+   * První sada záložních kódů — chodí PRÁVĚ JEDNOU a jen tomu, kdo ještě žádné
+   * použitelné neměl. Server plaintext neukládá, takže kdo je hned nezobrazí,
+   * už je nikde nedohledá.
+   */
+  recovery_codes?: string[]
 }
 
 export interface TotpSetup {
@@ -221,6 +233,7 @@ export interface SetupPayload {
     ic?: string
     dic?: string
     is_vat_payer?: boolean
+    vat_period?: 'monthly' | 'quarterly'
     email: string
     phone?: string
     web?: string
@@ -378,6 +391,10 @@ export const authApi = {
     api.post<{ step_up_token: string; remaining: number }>('/auth/mfa/step-up/recovery', { operation, code })
       .then(r => r.data),
 
+  /** „Pokračovat bez dvoufázového ověření" — nabídku už server znovu nepošle. */
+  dismissMfaOffer: () =>
+    api.post<{ dismissed: boolean }>('/auth/mfa/offer/dismiss').then(r => r.data),
+
   recoveryCodeStatus: () =>
     api.get<RecoveryCodeStatus>('/auth/mfa/recovery-codes').then(r => r.data),
   /** Vrátí kódy v plaintextu — jediná a poslední příležitost, kdy je lze zobrazit. */
@@ -412,6 +429,17 @@ export const authApi = {
   // TOTP / 2FA
   totpStatus: () => api.get<{ enabled: boolean }>('/auth/totp/status').then(r => r.data),
   totpSetup:  () => api.post<TotpSetup>('/auth/totp/setup').then(r => r.data),
+  /**
+   * Zapne TOTP.
+   *
+   * ⚠️ `recovery_codes` chodí PRÁVĚ JEDNOU a jen tomu, kdo ještě žádné
+   * použitelné neměl — server plaintext neukládá. Kdo je v tu chvíli
+   * nezobrazí, už je nikde nedohledá.
+   */
   totpEnable: (code: string) =>
-    api.post<{ enabled: boolean } & MfaSetupCompletion>('/auth/totp/enable', { code }).then(r => r.data),
+    api.post<{ enabled: boolean; recovery_codes?: string[] } & MfaSetupCompletion>(
+      '/auth/totp/enable',
+      { code },
+    ).then(r => r.data),
 }
+
