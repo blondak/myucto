@@ -33,6 +33,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonTaxDeclarationsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonTaxResidencesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRecurringComponentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunPersonsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunRevisionsProjection;
@@ -187,6 +188,11 @@ final class TenantDataRegistryFactory
         ],
         'payroll_offices' => ['supplier_id', 'code'],
         'payroll_person_tax_declarations' => [
+            'supplier_id',
+            'employee_id',
+            'effective_from',
+        ],
+        'payroll_person_tax_residences' => [
             'supplier_id',
             'employee_id',
             'effective_from',
@@ -1417,6 +1423,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollPersonTaxDeclarationsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_person_tax_residences') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonTaxResidencesProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollPersonTaxResidencesProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

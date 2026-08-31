@@ -2479,6 +2479,139 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-06-01 09:00:00', $revoked['updated_at']);
     }
 
+    public function testCompanyBackupStreamsTaxResidenceHistory(): void
+    {
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_residences
+                (supplier_id, employee_id, residence, country_code,
+                 effective_from, effective_to, evidence_reference,
+                 evidence_note, created_by, updated_by, row_version,
+                 created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'czech-resident',
+            'CZ',
+            '2026-01-01',
+            '2026-05-31',
+            'document:synthetic-czech-tax-residence',
+            'Syntetické české daňové rezidentství',
+            $this->actors[0],
+            $this->actors[1],
+            4,
+            '2026-01-03 08:00:00',
+            '2026-05-31 17:00:00',
+        ]);
+        $czechId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'non-resident',
+            'SK',
+            '2026-06-01',
+            null,
+            'document:synthetic-slovak-tax-residence',
+            'Syntetické slovenské daňové rezidentství',
+            $this->actors[1],
+            null,
+            1,
+            '2026-06-01 10:00:00',
+            '2026-06-01 10:00:00',
+        ]);
+        $foreignId = (int) $this->db->pdo()->lastInsertId();
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Synthetic Foreign Tax Resident", "employee", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherEmployeeId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->otherSupplierId,
+            $otherEmployeeId,
+            'unverified',
+            null,
+            '2026-01-01',
+            null,
+            null,
+            null,
+            $this->actors[0],
+            null,
+            1,
+            '2026-01-03 08:00:00',
+            '2026-01-03 08:00:00',
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_person_tax_residences',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $czech = $rows[0];
+        $foreign = $rows[1];
+        self::assertSame($czechId, (int) $czech['id']);
+        self::assertSame($this->supplierId, (int) $czech['supplier_id']);
+        self::assertSame($this->employeeId, (int) $czech['employee_id']);
+        self::assertSame('czech-resident', $czech['residence']);
+        self::assertSame('CZ', $czech['country_code']);
+        self::assertSame('2026-01-01', $czech['effective_from']);
+        self::assertSame('2026-05-31', $czech['effective_to']);
+        self::assertSame(
+            'document:synthetic-czech-tax-residence',
+            $czech['evidence_reference'],
+        );
+        self::assertSame(
+            'Syntetické české daňové rezidentství',
+            $czech['evidence_note'],
+        );
+        self::assertSame($this->actors[0], (int) $czech['created_by']);
+        self::assertSame($this->actors[1], (int) $czech['updated_by']);
+        self::assertSame(4, (int) $czech['row_version']);
+        self::assertSame('2026-01-03 08:00:00', $czech['created_at']);
+        self::assertSame('2026-05-31 17:00:00', $czech['updated_at']);
+
+        self::assertSame($foreignId, (int) $foreign['id']);
+        self::assertSame('non-resident', $foreign['residence']);
+        self::assertSame('SK', $foreign['country_code']);
+        self::assertSame('2026-06-01', $foreign['effective_from']);
+        self::assertNull($foreign['effective_to']);
+        self::assertSame(
+            'document:synthetic-slovak-tax-residence',
+            $foreign['evidence_reference'],
+        );
+        self::assertSame(
+            'Syntetické slovenské daňové rezidentství',
+            $foreign['evidence_note'],
+        );
+        self::assertSame($this->actors[1], (int) $foreign['created_by']);
+        self::assertNull($foreign['updated_by']);
+        self::assertSame(1, (int) $foreign['row_version']);
+        self::assertSame('2026-06-01 10:00:00', $foreign['created_at']);
+        self::assertSame('2026-06-01 10:00:00', $foreign['updated_at']);
+    }
+
     public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void
     {
         $this->db->pdo()->prepare(
