@@ -34,6 +34,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthCoverageProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMinimumReductionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMonthEvidenceProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthOtherEmployerBasesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialDiscountClaimsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialJurisdictionsProjection;
@@ -203,6 +204,11 @@ final class TenantDataRegistryFactory
             'employee_id',
             'reason',
             'effective_from',
+        ],
+        'payroll_person_health_month_evidence' => [
+            'supplier_id',
+            'employee_id',
+            'period_start',
         ],
         'payroll_person_health_other_employer_bases' => [
             'supplier_id',
@@ -1490,6 +1496,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollPersonHealthMinimumReductionsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_person_health_month_evidence') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonHealthMonthEvidenceProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollPersonHealthMonthEvidenceProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

@@ -140,6 +140,8 @@ final readonly class CompanyBackupReferenceSet
         array $claims,
     ): bool {
         $hasReferenceKey = false;
+        $hasNaturalKey = false;
+        $hasTenantId = false;
         foreach ($claims as $reference) {
             $position = array_search($column, $reference->columns, true);
             if (!is_int($position)) {
@@ -154,14 +156,24 @@ final readonly class CompanyBackupReferenceSet
                 $hasReferenceKey = true;
                 continue;
             }
+            if ($reference->mapping
+                === CompanyBackupReferenceMapping::TenantNaturalKey
+            ) {
+                if (($reference->targetColumns[$position] ?? null) !== $column) {
+                    return false;
+                }
+                $hasNaturalKey = true;
+                continue;
+            }
             if ($reference->mapping !== CompanyBackupReferenceMapping::TenantId
                 || $reference->columns !== ['supplier_id', $column]
                 || $reference->targetColumns !== ['supplier_id', 'id']
             ) {
                 return false;
             }
+            $hasTenantId = true;
         }
-        return $hasReferenceKey;
+        return $hasReferenceKey || ($hasNaturalKey && $hasTenantId);
     }
 
     /**

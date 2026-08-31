@@ -3429,6 +3429,187 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-06-02 10:00:00', $beta['updated_at']);
     }
 
+    public function testCompanyBackupStreamsHealthMonthEvidence(): void
+    {
+        $baseInsert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_health_other_employer_bases
+                (supplier_id, employee_id, period_start, employer_reference,
+                 assessment_base_minor_units, employment_from, employment_to,
+                 evidence_reference, evidence_note, created_by, updated_by,
+                 row_version, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $baseInsert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            '2026-06-01',
+            'other-employer:synthetic-selected',
+            2_500_000,
+            '2026-01-01',
+            null,
+            'document:synthetic-selected-employer-base',
+            null,
+            $this->actors[0],
+            null,
+            1,
+            '2026-06-02 07:30:00',
+            '2026-06-02 07:30:00',
+        ]);
+
+        $evidenceInsert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_health_month_evidence
+                (supplier_id, employee_id, period_start,
+                 top_up_responsibility,
+                 top_up_responsibility_evidence_reference,
+                 selected_top_up_employer_reference,
+                 selected_top_up_employer_evidence_reference, evidence_note,
+                 created_by, updated_by, row_version, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $evidenceInsert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            '2026-06-01',
+            'employer_obstacle_verified',
+            'document:synthetic-health-top-up-obstacle',
+            'other-employer:synthetic-selected',
+            'document:synthetic-selected-top-up-employer',
+            'Syntetická měsíční evidence doplatku zdravotního minima',
+            $this->actors[0],
+            $this->actors[1],
+            11,
+            '2026-06-03 08:00:00',
+            '2026-06-04 09:00:00',
+        ]);
+        $selectedId = (int) $this->db->pdo()->lastInsertId();
+        $evidenceInsert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            '2026-07-01',
+            'employee',
+            null,
+            null,
+            null,
+            null,
+            $this->actors[1],
+            null,
+            1,
+            '2026-07-02 10:00:00',
+            '2026-07-02 10:00:00',
+        ]);
+        $employeeId = (int) $this->db->pdo()->lastInsertId();
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Synthetic Foreign Health Month Person", "employee", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherEmployeeId = (int) $this->db->pdo()->lastInsertId();
+        $baseInsert->execute([
+            $this->otherSupplierId,
+            $otherEmployeeId,
+            '2026-06-01',
+            'other-employer:foreign-selected',
+            8_500_000,
+            '2026-01-01',
+            null,
+            null,
+            null,
+            $this->actors[0],
+            null,
+            1,
+            '2026-06-02 07:30:00',
+            '2026-06-02 07:30:00',
+        ]);
+        $evidenceInsert->execute([
+            $this->otherSupplierId,
+            $otherEmployeeId,
+            '2026-06-01',
+            'unverified',
+            null,
+            'other-employer:foreign-selected',
+            null,
+            null,
+            $this->actors[0],
+            null,
+            1,
+            '2026-06-03 08:00:00',
+            '2026-06-03 08:00:00',
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_person_health_month_evidence',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $selected = $rows[0];
+        $employee = $rows[1];
+        self::assertSame($selectedId, (int) $selected['id']);
+        self::assertSame($this->supplierId, (int) $selected['supplier_id']);
+        self::assertSame($this->employeeId, (int) $selected['employee_id']);
+        self::assertSame('2026-06-01', $selected['period_start']);
+        self::assertSame(
+            'employer_obstacle_verified',
+            $selected['top_up_responsibility'],
+        );
+        self::assertSame(
+            'document:synthetic-health-top-up-obstacle',
+            $selected['top_up_responsibility_evidence_reference'],
+        );
+        self::assertSame(
+            'other-employer:synthetic-selected',
+            $selected['selected_top_up_employer_reference'],
+        );
+        self::assertSame(
+            'document:synthetic-selected-top-up-employer',
+            $selected['selected_top_up_employer_evidence_reference'],
+        );
+        self::assertSame(
+            'Syntetická měsíční evidence doplatku zdravotního minima',
+            $selected['evidence_note'],
+        );
+        self::assertSame($this->actors[0], (int) $selected['created_by']);
+        self::assertSame($this->actors[1], (int) $selected['updated_by']);
+        self::assertSame(11, (int) $selected['row_version']);
+        self::assertSame('2026-06-03 08:00:00', $selected['created_at']);
+        self::assertSame('2026-06-04 09:00:00', $selected['updated_at']);
+
+        self::assertSame($employeeId, (int) $employee['id']);
+        self::assertSame($this->supplierId, (int) $employee['supplier_id']);
+        self::assertSame($this->employeeId, (int) $employee['employee_id']);
+        self::assertSame('2026-07-01', $employee['period_start']);
+        self::assertSame('employee', $employee['top_up_responsibility']);
+        self::assertNull($employee['top_up_responsibility_evidence_reference']);
+        self::assertNull($employee['selected_top_up_employer_reference']);
+        self::assertNull($employee['selected_top_up_employer_evidence_reference']);
+        self::assertNull($employee['evidence_note']);
+        self::assertSame($this->actors[1], (int) $employee['created_by']);
+        self::assertNull($employee['updated_by']);
+        self::assertSame(1, (int) $employee['row_version']);
+        self::assertSame('2026-07-02 10:00:00', $employee['created_at']);
+        self::assertSame('2026-07-02 10:00:00', $employee['updated_at']);
+    }
+
     public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void
     {
         $this->db->pdo()->prepare(

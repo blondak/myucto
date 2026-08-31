@@ -176,6 +176,78 @@ final class CompanyBackupReferenceSetTest extends TestCase
         );
     }
 
+    public function testAllowsNaturalKeyToShareRemappedTenantCoordinate(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                [
+                    'columns' => [
+                        'supplier_id',
+                        'employee_id',
+                        'period_start',
+                        'selected_employer_reference',
+                    ],
+                    'target' => 'table:other_employer_bases',
+                    'target_columns' => [
+                        'supplier_id',
+                        'employee_id',
+                        'period_start',
+                        'employer_reference',
+                    ],
+                    'mapping' => CompanyBackupReferenceMapping::TenantNaturalKey->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+                    'nullable_columns' => ['selected_employer_reference'],
+                    'fallbacks' => [],
+                ],
+                [
+                    'columns' => ['supplier_id', 'employee_id'],
+                    'target' => 'table:payroll_employees',
+                    'target_columns' => ['supplier_id', 'id'],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                    'nullable_columns' => [],
+                    'fallbacks' => [],
+                ],
+            ],
+            'table:health_month_evidence',
+        );
+        $registry = new TenantDataRegistry(1, [
+            $this->definition(
+                'other_employer_bases',
+                TenantDataPolicy::TenantOwned,
+                ['natural_key' => [
+                    'supplier_id',
+                    'employee_id',
+                    'period_start',
+                    'employer_reference',
+                ]],
+            ),
+            $this->definition(
+                'payroll_employees',
+                TenantDataPolicy::TenantOwned,
+            ),
+        ]);
+
+        $references->assertProjectionColumns([
+            'id',
+            'supplier_id',
+            'employee_id',
+            'period_start',
+            'selected_employer_reference',
+        ]);
+        $references->assertRegistryTargets($registry);
+        $references->assertRuntimeSchema(new CompanyBackupTableReferenceSchema(
+            ['selected_employer_reference'],
+            [new CompanyBackupForeignKey(
+                ['supplier_id', 'employee_id'],
+                'payroll_employees',
+                ['supplier_id', 'id'],
+            )],
+        ));
+
+        self::assertCount(2, $references->references);
+    }
+
     public function testRejectsOverlappingBusinessReferenceColumns(): void
     {
         try {
