@@ -2077,52 +2077,7 @@ final class PayrollRunPersistenceTest extends TestCase
 
     public function testCompanyBackupStreamsVersionedDeductionAgreement(): void
     {
-        $repository = $this->container->get(
-            PayrollDeductionAgreementRepository::class,
-        );
-        self::assertInstanceOf(
-            PayrollDeductionAgreementRepository::class,
-            $repository,
-        );
-        $terms = DeductionAgreementTerms::fromRequest([
-            'agreement_reference' => 'SYNTHETIC-BACKUP-DEDUCTION',
-            'title' => 'Syntetická procentní srážka',
-            'deduction_kind' => 'contribution',
-            'priority_no' => 40,
-            'basis_points' => 1250,
-            'basis_amount_minor' => 30_000,
-            'total_limit_minor' => 20_000,
-            'valid_from' => '2026-01-01',
-            'recipient_reference' => 'SYNTHETIC-RECIPIENT',
-            'note' => 'Syntetická dohoda pro zálohu',
-        ]);
-        $created = $repository->create(
-            $this->supplierId,
-            $this->employeeId,
-            $terms,
-            DeductionAgreementStatus::Active,
-            $this->actors[0],
-        );
-        $updated = $repository->update(
-            $this->supplierId,
-            (int) $created['id'],
-            DeductionAgreementTerms::fromRequest([
-                'agreement_reference' => 'SYNTHETIC-BACKUP-DEDUCTION',
-                'title' => 'Syntetická procentní srážka po kontrole',
-                'deduction_kind' => 'contribution',
-                'priority_no' => 40,
-                'basis_points' => 1250,
-                'basis_amount_minor' => 30_000,
-                'total_limit_minor' => 20_000,
-                'valid_from' => '2026-01-01',
-                'recipient_reference' => 'SYNTHETIC-RECIPIENT',
-                'note' => 'Syntetická dohoda po kontrole',
-            ]),
-            (int) $created['row_version'],
-            '2026-02-01',
-            'Syntetická kontrola dohody',
-            $this->actors[1],
-        );
+        $updated = $this->createVersionedDeductionAgreement();
 
         $registry = TenantDataRegistryFactory::draftV1();
         $definition = $registry->definition(
@@ -2183,6 +2138,82 @@ final class PayrollRunPersistenceTest extends TestCase
         $restored = $projection->restoreOverrides->apply($row);
         self::assertSame('active', $restored['status']);
         self::assertSame(2, (int) $restored['version_no']);
+    }
+
+    public function testCompanyBackupStreamsImmutableDeductionAgreementVersions(): void
+    {
+        $agreement = $this->createVersionedDeductionAgreement();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_deduction_agreement_versions',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $created = $rows[0];
+        $updated = $rows[1];
+        self::assertSame(
+            (int) $agreement['versions'][0]['id'],
+            (int) $created['id'],
+        );
+        self::assertSame($this->supplierId, (int) $created['supplier_id']);
+        self::assertSame((int) $agreement['id'], (int) $created['agreement_id']);
+        self::assertSame($this->employeeId, (int) $created['employee_id']);
+        self::assertSame(1, (int) $created['version_no']);
+        self::assertSame('created', $created['change_kind']);
+        self::assertSame('Syntetická procentní srážka', $created['title']);
+        self::assertSame('contribution', $created['deduction_kind']);
+        self::assertSame('active', $created['status']);
+        self::assertSame(40, (int) $created['priority_no']);
+        self::assertSame(3_750, (int) $created['requested_minor']);
+        self::assertSame(1_250, (int) $created['basis_points']);
+        self::assertSame(30_000, (int) $created['basis_amount_minor']);
+        self::assertSame(20_000, (int) $created['total_limit_minor']);
+        self::assertSame(0, (int) $created['withheld_total_minor']);
+        self::assertSame('2026-01-01', $created['valid_from']);
+        self::assertNull($created['valid_to']);
+        self::assertSame('SYNTHETIC-RECIPIENT', $created['recipient_reference']);
+        self::assertSame('Syntetická dohoda pro zálohu', $created['note']);
+        self::assertSame('2026-01-01', $created['effective_from']);
+        self::assertNull($created['reason']);
+        self::assertSame($this->actors[0], (int) $created['actor_user_id']);
+        self::assertNotSame('', (string) $created['created_at']);
+
+        self::assertSame(
+            (int) $agreement['versions'][1]['id'],
+            (int) $updated['id'],
+        );
+        self::assertSame((int) $agreement['id'], (int) $updated['agreement_id']);
+        self::assertSame(2, (int) $updated['version_no']);
+        self::assertSame('updated', $updated['change_kind']);
+        self::assertSame(
+            'Syntetická procentní srážka po kontrole',
+            $updated['title'],
+        );
+        self::assertSame('active', $updated['status']);
+        self::assertSame('Syntetická dohoda po kontrole', $updated['note']);
+        self::assertSame('2026-02-01', $updated['effective_from']);
+        self::assertSame('Syntetická kontrola dohody', $updated['reason']);
+        self::assertSame($this->actors[1], (int) $updated['actor_user_id']);
+        self::assertNotSame('', (string) $updated['created_at']);
     }
 
     public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void
@@ -3924,6 +3955,57 @@ final class PayrollRunPersistenceTest extends TestCase
             '2026-07-15',
             null,
             $this->actors[0],
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function createVersionedDeductionAgreement(): array
+    {
+        $repository = $this->container->get(
+            PayrollDeductionAgreementRepository::class,
+        );
+        self::assertInstanceOf(
+            PayrollDeductionAgreementRepository::class,
+            $repository,
+        );
+        $created = $repository->create(
+            $this->supplierId,
+            $this->employeeId,
+            DeductionAgreementTerms::fromRequest([
+                'agreement_reference' => 'SYNTHETIC-BACKUP-DEDUCTION',
+                'title' => 'Syntetická procentní srážka',
+                'deduction_kind' => 'contribution',
+                'priority_no' => 40,
+                'basis_points' => 1250,
+                'basis_amount_minor' => 30_000,
+                'total_limit_minor' => 20_000,
+                'valid_from' => '2026-01-01',
+                'recipient_reference' => 'SYNTHETIC-RECIPIENT',
+                'note' => 'Syntetická dohoda pro zálohu',
+            ]),
+            DeductionAgreementStatus::Active,
+            $this->actors[0],
+        );
+
+        return $repository->update(
+            $this->supplierId,
+            (int) $created['id'],
+            DeductionAgreementTerms::fromRequest([
+                'agreement_reference' => 'SYNTHETIC-BACKUP-DEDUCTION',
+                'title' => 'Syntetická procentní srážka po kontrole',
+                'deduction_kind' => 'contribution',
+                'priority_no' => 40,
+                'basis_points' => 1250,
+                'basis_amount_minor' => 30_000,
+                'total_limit_minor' => 20_000,
+                'valid_from' => '2026-01-01',
+                'recipient_reference' => 'SYNTHETIC-RECIPIENT',
+                'note' => 'Syntetická dohoda po kontrole',
+            ]),
+            (int) $created['row_version'],
+            '2026-02-01',
+            'Syntetická kontrola dohody',
+            $this->actors[1],
         );
     }
 
