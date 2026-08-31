@@ -102,6 +102,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
                     }
                     $objects = [];
                     $sourceFiles = [];
+                    $temporarySourceFiles = [];
                     foreach (CompanyBackupDataInventory::payloadDefinitions($registry) as $index => $definition) {
                         $filePath = $resolvedDirectory . DIRECTORY_SEPARATOR
                             . 'company-data-' . bin2hex(random_bytes(16)) . '.jsonl';
@@ -114,6 +115,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
                         $createdFiles[] = $filePath;
                         $objects[] = $object;
                         $sourceFiles[$object->path] = $filePath;
+                        $temporarySourceFiles[$object->path] = $filePath;
                     }
                     $inventory = CompanyBackupDataInventory::fromObjects($objects, $registry);
                     $files = $this->fileCollector->collect(
@@ -139,6 +141,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
                         $secrets,
                         $secretEnvelope,
                         $sourceFiles,
+                        $temporarySourceFiles,
                     );
                 },
             );

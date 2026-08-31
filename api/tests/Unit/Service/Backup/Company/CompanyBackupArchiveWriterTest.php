@@ -271,6 +271,35 @@ final class CompanyBackupArchiveWriterTest extends TestCase
         self::assertFileDoesNotExist($archive);
     }
 
+    public function testSealedSourceCanBeRemovedBeforeArchiveIsFinished(): void
+    {
+        $archive = $this->unusedPath('zip');
+        $source = $this->temporaryFile("{\"id\":1}\n");
+        $format = new CompanyBackupFormat();
+        $writer = new CompanyBackupArchiveWriter(
+            $archive,
+            self::PASSWORD,
+            $format,
+            $this->limits(),
+        );
+        $writer->addFile('data/table-supplier.jsonl', $source);
+
+        $writer->sealAddedFiles();
+        self::assertTrue(unlink($source));
+        $writer->addString(
+            'readable/synthetic-report.txt',
+            "Syntetická čitelná sestava.\n",
+        );
+        $result = $writer->finish(
+            $this->manifest($format),
+            "Syntetická záloha.\n",
+        );
+
+        self::assertFileExists($archive);
+        self::assertSame($archive, $result->archivePath);
+        self::assertSame(5, $result->entryCount);
+    }
+
     public function testSelfInspectionRejectsArchiveOutsideCompressionLimits(): void
     {
         $archive = $this->unusedPath('zip');

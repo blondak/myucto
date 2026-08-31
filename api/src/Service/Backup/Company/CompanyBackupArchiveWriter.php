@@ -137,6 +137,28 @@ final class CompanyBackupArchiveWriter
         }
     }
 
+    /**
+     * Uzavře a ověří dosud přidané soubory. Po návratu už jejich zdrojové
+     * cesty nejsou pro dokončení archivu potřeba a writer lze dál plnit.
+     */
+    public function sealAddedFiles(): void
+    {
+        $this->assertOpen();
+        try {
+            $this->flush(true);
+        } catch (\Throwable $e) {
+            $this->abort();
+            if ($e instanceof CompanyBackupArchiveWriteException) {
+                throw $e;
+            }
+            throw new CompanyBackupArchiveWriteException(
+                'archive_write_failed',
+                null,
+                $e,
+            );
+        }
+    }
+
     public function finish(
         CompanyBackupManifest $manifest,
         string $readme,

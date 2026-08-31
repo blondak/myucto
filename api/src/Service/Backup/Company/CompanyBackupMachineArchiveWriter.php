@@ -42,9 +42,19 @@ final readonly class CompanyBackupMachineArchiveWriter
             if ($snapshot->secretEnvelope !== null) {
                 $writer->addSecretEnvelope($snapshot->secretEnvelope);
             }
+            $writer->sealAddedFiles();
+            $snapshot->cleanupTemporaryFiles();
             return $writer->finish($manifest, $readme);
         } catch (\Throwable $e) {
             $writer->abort();
+            try {
+                $snapshot->cleanupTemporaryFiles();
+            } catch (\Throwable) {
+                throw new CompanyBackupSnapshotException(
+                    'snapshot_cleanup_failed',
+                    $e,
+                );
+            }
             throw $e;
         }
     }

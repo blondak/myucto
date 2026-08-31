@@ -51,6 +51,8 @@ final class CompanyBackupMachineArchiveWriterTest extends TestCase
     {
         $snapshot = $this->snapshot(self::BACKUP_ID);
         $archive = $this->unusedPath('zip');
+        $plaintext = $snapshot->sourceFiles['data/table-supplier.jsonl'];
+        self::assertFileExists($plaintext);
 
         $result = (new CompanyBackupMachineArchiveWriter(
             $this->limits(),
@@ -92,6 +94,7 @@ final class CompanyBackupMachineArchiveWriterTest extends TestCase
             CompanyBackupSecretEnvelopeDescriptor::PATH,
             $inspection->entryHashes,
         );
+        self::assertFileDoesNotExist($plaintext);
     }
 
     public function testEnvelopeForDifferentBackupIdIsNeverPublished(): void
@@ -101,6 +104,7 @@ final class CompanyBackupMachineArchiveWriterTest extends TestCase
             self::OTHER_BACKUP_ID,
         );
         $archive = $this->unusedPath('zip');
+        $plaintext = $snapshot->sourceFiles['data/table-supplier.jsonl'];
 
         try {
             (new CompanyBackupMachineArchiveWriter(
@@ -127,11 +131,45 @@ final class CompanyBackupMachineArchiveWriterTest extends TestCase
 
         self::assertFileDoesNotExist($archive);
         self::assertSame([], glob($archive . '.part-*') ?: []);
+        self::assertFileDoesNotExist($plaintext);
+    }
+
+    public function testKeepsBorrowedRegisteredFileAfterPlaintextCleanup(): void
+    {
+        $snapshot = $this->snapshot(
+            self::BACKUP_ID,
+            self::BACKUP_ID,
+            withRegisteredFile: true,
+        );
+        $archive = $this->unusedPath('zip');
+        $plaintext = $snapshot->temporarySourceFiles[
+            'data/table-supplier.jsonl'
+        ];
+        $borrowed = array_values(array_diff_key(
+            $snapshot->sourceFiles,
+            $snapshot->temporarySourceFiles,
+        ));
+        self::assertCount(1, $borrowed);
+        $borrowedPath = $borrowed[0];
+        $borrowedContents = file_get_contents($borrowedPath);
+
+        (new CompanyBackupMachineArchiveWriter($this->limits()))->write(
+            $snapshot,
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            "Syntetická přenositelná záloha.\n",
+        );
+
+        self::assertFileDoesNotExist($plaintext);
+        self::assertFileExists($borrowedPath);
+        self::assertSame($borrowedContents, file_get_contents($borrowedPath));
     }
 
     private function snapshot(
         string $envelopeBackupId,
         string $snapshotBackupId = self::BACKUP_ID,
+        bool $withRegisteredFile = false,
     ): CompanyBackupMachineSnapshot {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
         $definition = new TenantDataDefinition(
@@ -154,8 +192,29 @@ final class CompanyBackupMachineArchiveWriterTest extends TestCase
                 ],
             ],
         );
+        $definitions = [$definition];
+        if ($withRegisteredFile) {
+            $definitions[] = new TenantDataDefinition(
+                'file-area:supplier-logos',
+                TenantDataObjectKind::FileArea,
+                TenantDataPolicy::TenantOwned,
+                [$profile],
+                [
+                    'file_policy' => 'historical_optional',
+                    'path_policy' => 'relative',
+                    'file_owners' => [[
+                        'registry_key' => 'table:supplier',
+                        'column' => 'logo_path',
+                        'path' => [],
+                        'stored_prefix' => 'storage/supplier-logos/',
+                    ]],
+                    'ownership' => ['strategy' => 'database_references'],
+                    'storage_subdirectory' => 'supplier-logos',
+                ],
+            );
+        }
         $registry = TenantDataRegistrySnapshot::fromRegistry(
-            new TenantDataRegistry(1, [$definition], [$profile]),
+            new TenantDataRegistry(1, $definitions, [$profile]),
             $profile,
         );
         $jsonl = "{\"id\":7,\"name\":\"Synthetic s.r.o.\"}\n";
@@ -169,10 +228,36 @@ final class CompanyBackupMachineArchiveWriterTest extends TestCase
                 hash('sha256', $jsonl),
             ),
         ], $registry);
+        $sourceFiles = ['data/table-supplier.jsonl' => $sourcePath];
+        $areas = [];
+        if ($withRegisteredFile) {
+            $fileContents = "synthetic-borrowed-logo\n";
+            $borrowedPath = $this->temporaryFile($fileContents);
+            $sha256 = hash('sha256', $fileContents);
+            $archivePath = 'files/supplier-logos/' . $sha256 . '.png';
+            $sourceFiles[$archivePath] = $borrowedPath;
+            $areas[] = [
+                'registry_key' => 'file-area:supplier-logos',
+                'order' => 1,
+                'entries' => [[
+                    'source_path' => '00000007.png',
+                    'archive_path' => $archivePath,
+                    'state' => 'present',
+                    'bytes' => strlen($fileContents),
+                    'sha256' => $sha256,
+                    'owners' => [[
+                        'registry_key' => 'table:supplier',
+                        'primary_key' => ['id' => 7],
+                        'column' => 'logo_path',
+                        'path' => [],
+                    ]],
+                ]],
+            ];
+        }
         $fileInventory = CompanyBackupFileInventory::fromArray([
             'format' => CompanyBackupFileInventory::FORMAT,
             'version' => CompanyBackupFileInventory::VERSION,
-            'areas' => [],
+            'areas' => $areas,
         ], $registry);
         $payload = CompanyBackupSecretPayload::fromValues([
             CompanyBackupSecretValue::fromPlaintext(
@@ -200,6 +285,7 @@ final class CompanyBackupMachineArchiveWriterTest extends TestCase
             $fileInventory,
             $secretInventory,
             $envelope,
+            $sourceFiles,
             ['data/table-supplier.jsonl' => $sourcePath],
         );
     }
