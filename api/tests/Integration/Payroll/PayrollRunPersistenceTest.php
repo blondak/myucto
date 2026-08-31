@@ -3015,6 +3015,155 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-06-01 13:00:00', $notClaimed['updated_at']);
     }
 
+    public function testCompanyBackupStreamsHealthCoverageHistory(): void
+    {
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_health_coverage_history
+                (supplier_id, employee_id, jurisdiction,
+                 foreign_country_code, jurisdiction_evidence_reference,
+                 insurer_status, insurer_code, insurer_evidence_reference,
+                 effective_from, effective_to, evidence_note, created_by,
+                 updated_by, row_version, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'czech_regime_verified',
+            null,
+            null,
+            'verified',
+            '111',
+            'document:synthetic-health-insurer',
+            '2026-01-01',
+            '2026-05-31',
+            'Syntetická česká zdravotní evidence',
+            $this->actors[0],
+            $this->actors[1],
+            8,
+            '2026-01-07 08:00:00',
+            '2026-05-31 19:00:00',
+        ]);
+        $czechId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'foreign_regime_verified',
+            'SK',
+            'document:synthetic-health-jurisdiction',
+            'not_applicable',
+            null,
+            null,
+            '2026-06-01',
+            null,
+            'Syntetická zahraniční zdravotní evidence',
+            $this->actors[1],
+            null,
+            1,
+            '2026-06-01 14:00:00',
+            '2026-06-01 14:00:00',
+        ]);
+        $foreignId = (int) $this->db->pdo()->lastInsertId();
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Synthetic Foreign Health Person", "employee", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherEmployeeId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->otherSupplierId,
+            $otherEmployeeId,
+            'unverified',
+            null,
+            null,
+            'unverified',
+            null,
+            null,
+            '2026-01-01',
+            null,
+            null,
+            $this->actors[0],
+            null,
+            1,
+            '2026-01-07 08:00:00',
+            '2026-01-07 08:00:00',
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_person_health_coverage_history',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $czech = $rows[0];
+        $foreign = $rows[1];
+        self::assertSame($czechId, (int) $czech['id']);
+        self::assertSame($this->supplierId, (int) $czech['supplier_id']);
+        self::assertSame($this->employeeId, (int) $czech['employee_id']);
+        self::assertSame('czech_regime_verified', $czech['jurisdiction']);
+        self::assertNull($czech['foreign_country_code']);
+        self::assertNull($czech['jurisdiction_evidence_reference']);
+        self::assertSame('verified', $czech['insurer_status']);
+        self::assertSame('111', $czech['insurer_code']);
+        self::assertSame(
+            'document:synthetic-health-insurer',
+            $czech['insurer_evidence_reference'],
+        );
+        self::assertSame('2026-01-01', $czech['effective_from']);
+        self::assertSame('2026-05-31', $czech['effective_to']);
+        self::assertSame(
+            'Syntetická česká zdravotní evidence',
+            $czech['evidence_note'],
+        );
+        self::assertSame($this->actors[0], (int) $czech['created_by']);
+        self::assertSame($this->actors[1], (int) $czech['updated_by']);
+        self::assertSame(8, (int) $czech['row_version']);
+        self::assertSame('2026-01-07 08:00:00', $czech['created_at']);
+        self::assertSame('2026-05-31 19:00:00', $czech['updated_at']);
+
+        self::assertSame($foreignId, (int) $foreign['id']);
+        self::assertSame('foreign_regime_verified', $foreign['jurisdiction']);
+        self::assertSame('SK', $foreign['foreign_country_code']);
+        self::assertSame(
+            'document:synthetic-health-jurisdiction',
+            $foreign['jurisdiction_evidence_reference'],
+        );
+        self::assertSame('not_applicable', $foreign['insurer_status']);
+        self::assertNull($foreign['insurer_code']);
+        self::assertNull($foreign['insurer_evidence_reference']);
+        self::assertSame('2026-06-01', $foreign['effective_from']);
+        self::assertNull($foreign['effective_to']);
+        self::assertSame(
+            'Syntetická zahraniční zdravotní evidence',
+            $foreign['evidence_note'],
+        );
+        self::assertSame($this->actors[1], (int) $foreign['created_by']);
+        self::assertNull($foreign['updated_by']);
+        self::assertSame(1, (int) $foreign['row_version']);
+        self::assertSame('2026-06-01 14:00:00', $foreign['created_at']);
+        self::assertSame('2026-06-01 14:00:00', $foreign['updated_at']);
+    }
+
     public function testCompanyBackupStreamsEffectiveEmploymentTerm(): void
     {
         $this->db->pdo()->prepare(
