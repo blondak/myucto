@@ -34,6 +34,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthCoverageProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMinimumReductionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthOtherEmployerBasesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialDiscountClaimsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialJurisdictionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonTaxCreditClaimsProjection;
@@ -202,6 +203,12 @@ final class TenantDataRegistryFactory
             'employee_id',
             'reason',
             'effective_from',
+        ],
+        'payroll_person_health_other_employer_bases' => [
+            'supplier_id',
+            'employee_id',
+            'period_start',
+            'employer_reference',
         ],
         'payroll_person_social_discount_claims' => [
             'supplier_id',
@@ -1483,6 +1490,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollPersonHealthMinimumReductionsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_person_health_other_employer_bases') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonHealthOtherEmployerBasesProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollPersonHealthOtherEmployerBasesProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
