@@ -18,6 +18,38 @@ final readonly class CompanyBackupManifest
         public CompanyBackupSecretInventory $secrets,
     ) {}
 
+    public static function fromMachineSnapshot(
+        CompanyBackupMachineSnapshot $snapshot,
+        string $sourceAppVersion,
+        string $schemaRevision = CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+    ): self {
+        $requiredCapabilities = $snapshot->secretEnvelope === null
+            ? []
+            : [CompanyBackupSecretEnvelopeDescriptor::CAPABILITY];
+
+        return self::fromHeader(CompanyBackupManifestHeader::fromArray([
+            'product' => CompanyBackupFormat::PRODUCT,
+            'format' => CompanyBackupFormat::FORMAT,
+            'format_version' => [
+                'major' => CompanyBackupFormat::MAJOR,
+                'minor' => CompanyBackupFormat::MINOR,
+            ],
+            'backup_id' => $snapshot->backupId,
+            'source' => [
+                'app_version' => $sourceAppVersion,
+                'schema_revision' => $schemaRevision,
+            ],
+            'capabilities' => [
+                'required' => $requiredCapabilities,
+                'optional' => [],
+            ],
+            'registry' => $snapshot->registry->toArray(),
+            'data' => $snapshot->inventory->toArray(),
+            'files' => $snapshot->fileInventory->toArray(),
+            'secrets' => $snapshot->secretInventory->toArray(),
+        ]));
+    }
+
     public static function fromHeader(CompanyBackupManifestHeader $header): self
     {
         $manifest = $header->toArray();

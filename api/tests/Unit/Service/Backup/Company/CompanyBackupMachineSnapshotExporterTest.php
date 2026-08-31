@@ -84,9 +84,11 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
             $directory,
             $source,
             $fileSource,
+            backupId: self::BACKUP_ID,
         );
 
         self::assertSame(['table:invoices@7', 'table:supplier@7'], $source->calls);
+        self::assertSame(self::BACKUP_ID, $snapshot->backupId);
         self::assertSame([$pdo], $coverage->snapshots);
         self::assertSame([$pdo], $fileSource->snapshots);
         self::assertSame(['file-area:invoice-pdf@7'], $fileSource->calls);
@@ -153,6 +155,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                 $directory,
                 $source,
                 $fileSource,
+                backupId: self::BACKUP_ID,
             );
             self::fail('Neúplný snapshot se nesmí vrátit volajícímu.');
         } catch (\DomainException $e) {
@@ -212,8 +215,8 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
             $directory,
             $rowSource,
             new RecordingEmptyFileReferenceSource(),
-            backupPassword: self::PASSWORD,
             backupId: self::BACKUP_ID,
+            backupPassword: self::PASSWORD,
         );
 
         self::assertSame([$pdo], $secretSource->snapshots);
@@ -268,6 +271,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                 $directory,
                 $source,
                 new RecordingEmptyFileReferenceSource(),
+                backupId: self::BACKUP_ID,
             );
             self::fail('Protected registry nesmí vytvořit snapshot bez envelope.');
         } catch (CompanyBackupSnapshotException $e) {
@@ -312,6 +316,7 @@ final class CompanyBackupMachineSnapshotExporterTest extends TestCase
                 $directory,
                 $source,
                 $fileSource,
+                backupId: self::BACKUP_ID,
             );
             self::fail('Neúplná DB coverage nesmí pustit snapshot ke čtení řádků.');
         } catch (\DomainException $e) {

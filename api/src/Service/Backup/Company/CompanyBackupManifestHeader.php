@@ -59,10 +59,7 @@ final readonly class CompanyBackupManifestHeader
 
         $backupId = $manifest['backup_id'] ?? null;
         if (!is_string($backupId)
-            || preg_match(
-                '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D',
-                $backupId,
-            ) !== 1
+            || !self::isCanonicalBackupId($backupId)
         ) {
             self::fail('backup_id_invalid', 'backup_id', 'Identifikátor zálohy musí být kanonické UUID.');
         }
@@ -162,6 +159,14 @@ final readonly class CompanyBackupManifestHeader
             }
         }
         return true;
+    }
+
+    public static function isCanonicalBackupId(string $backupId): bool
+    {
+        return preg_match(
+            '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D',
+            $backupId,
+        ) === 1;
     }
 
     /** @return array<string,mixed> */

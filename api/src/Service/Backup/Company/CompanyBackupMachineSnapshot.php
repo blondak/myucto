@@ -15,6 +15,7 @@ final readonly class CompanyBackupMachineSnapshot
     /** @param array<string,string> $sourceFiles */
     public function __construct(
         public int $supplierId,
+        public string $backupId,
         public TenantDataRegistrySnapshot $registry,
         public CompanyBackupDataInventory $inventory,
         public CompanyBackupFileInventory $fileInventory,
@@ -23,6 +24,7 @@ final readonly class CompanyBackupMachineSnapshot
         array $sourceFiles,
     ) {
         if ($supplierId < 1
+            || !CompanyBackupManifestHeader::isCanonicalBackupId($backupId)
             || !hash_equals($registry->fingerprint, $inventory->registryFingerprint)
             || !hash_equals(
                 $registry->fingerprint,

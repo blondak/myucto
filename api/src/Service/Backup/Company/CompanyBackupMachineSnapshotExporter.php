@@ -27,11 +27,16 @@ final readonly class CompanyBackupMachineSnapshotExporter
         string $workDirectory,
         CompanyBackupDataRowSource $source,
         CompanyBackupFileReferenceSource $fileSource,
+        string $backupId,
         #[\SensitiveParameter] ?string $backupPassword = null,
-        ?string $backupId = null,
     ): CompanyBackupMachineSnapshot {
         if ($supplierId < 1) {
             throw new \InvalidArgumentException('Firma snapshotu musí mít kladné ID.');
+        }
+        if (!CompanyBackupManifestHeader::isCanonicalBackupId($backupId)) {
+            throw new \InvalidArgumentException(
+                'Identifikátor snapshotu musí být kanonické UUID.',
+            );
         }
         $resolvedDirectory = realpath($workDirectory);
         if (!is_string($resolvedDirectory)
@@ -65,7 +70,6 @@ final readonly class CompanyBackupMachineSnapshotExporter
                     if ($secrets->requiresEnvelope()) {
                         if ($this->secretEnvelopeCollector === null
                             || $backupPassword === null
-                            || $backupId === null
                         ) {
                             throw new CompanyBackupSnapshotException(
                                 'snapshot_secret_envelope_required',
@@ -114,6 +118,7 @@ final readonly class CompanyBackupMachineSnapshotExporter
                     }
                     return new CompanyBackupMachineSnapshot(
                         $supplierId,
+                        $backupId,
                         $registry,
                         $inventory,
                         $files->inventory,
