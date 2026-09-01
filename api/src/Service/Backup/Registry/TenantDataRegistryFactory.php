@@ -29,6 +29,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeeProfilesProject
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentChecklistItemsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentEventsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentTermsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
@@ -88,6 +89,7 @@ final class TenantDataRegistryFactory
         'payroll_employees' => 'payroll',
         'payroll_employer_policies' => 'payroll',
         'payroll_employment_checklist_items' => 'payroll',
+        'payroll_employment_events' => 'payroll',
         'payroll_employments' => 'payroll',
         'payroll_employment_terms' => 'payroll',
         'payroll_input_imports' => 'payroll',
@@ -1426,6 +1428,21 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollEmploymentChecklistItemsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_employment_events') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollEmploymentEventsProjection::dataColumns(),
+                    'embedded_references' =>
+                        CompanyBackupPayrollEmploymentEventsProjection::embeddedReferences(),
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollEmploymentEventsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

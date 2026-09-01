@@ -2611,6 +2611,202 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-06-04 09:00:00', $pending['updated_at']);
     }
 
+    public function testCompanyBackupStreamsEmploymentEventsWithRemappableOfficeDiff(): void
+    {
+        $office = $this->db->pdo()->prepare(
+            'SELECT office_id
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?',
+        );
+        $office->execute([$this->supplierId, $this->employmentId]);
+        $currentOfficeId = (int) $office->fetchColumn();
+        self::assertGreaterThan(0, $currentOfficeId);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, "EVT", "Syntetická cílová účtárna", 1)'
+        )->execute([$this->supplierId]);
+        $targetOfficeId = (int) $this->db->pdo()->lastInsertId();
+
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_events
+                (supplier_id, employment_id, event_type, from_status,
+                 to_status, effective_on, note, diff_json, created_by,
+                 created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $officeDiff = CanonicalJson::encode([
+            'office_id' => [
+                'from' => $currentOfficeId,
+                'to' => $targetOfficeId,
+            ],
+            'weekly_hours' => ['from' => '40.00', 'to' => '32.00'],
+        ]);
+        $insert->execute([
+            $this->supplierId,
+            $this->employmentId,
+            'terms_changed',
+            null,
+            null,
+            '2026-04-01',
+            'Syntetická změna pracovních podmínek',
+            $officeDiff,
+            $this->actors[1],
+            '2026-03-20 10:00:00',
+        ]);
+        $termsEventId = (int) $this->db->pdo()->lastInsertId();
+        $statusDiff = CanonicalJson::encode([
+            'status' => ['from' => 'planned', 'to' => 'active'],
+        ]);
+        $insert->execute([
+            $this->supplierId,
+            $this->employmentId,
+            'status_changed',
+            'planned',
+            'active',
+            '2026-01-01',
+            null,
+            $statusDiff,
+            null,
+            '2026-01-02 08:00:00',
+        ]);
+        $statusEventId = (int) $this->db->pdo()->lastInsertId();
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Synthetic Foreign Event Person", "employee", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherEmployeeId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, "EVT", "Syntetická cizí event účtárna", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherOfficeId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, office_id, code, relation_type,
+                 status, start_date, actual_start_date, is_primary)
+             VALUES (?, ?, ?, "SYN-EVT", "employment", "active",
+                     "2026-01-01", "2026-01-01", 1)'
+        )->execute([
+            $this->otherSupplierId,
+            $otherEmployeeId,
+            $otherOfficeId,
+        ]);
+        $otherEmploymentId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->otherSupplierId,
+            $otherEmploymentId,
+            'created',
+            null,
+            'active',
+            '2026-01-01',
+            null,
+            CanonicalJson::encode([
+                'relation_type' => ['from' => null, 'to' => 'employment'],
+            ]),
+            $this->actors[0],
+            '2026-01-02 07:00:00',
+        ]);
+        $otherEventId = (int) $this->db->pdo()->lastInsertId();
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_employment_events');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->embeddedReferences->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        self::assertSame(
+            [$termsEventId, $statusEventId],
+            array_map(static fn (array $row): int => (int) $row['id'], $rows),
+        );
+        self::assertNotContains(
+            $otherEventId,
+            array_map(static fn (array $row): int => (int) $row['id'], $rows),
+        );
+
+        $terms = $rows[0];
+        self::assertSame($this->supplierId, (int) $terms['supplier_id']);
+        self::assertSame($this->employmentId, (int) $terms['employment_id']);
+        self::assertSame('terms_changed', $terms['event_type']);
+        self::assertNull($terms['from_status']);
+        self::assertNull($terms['to_status']);
+        self::assertSame('2026-04-01', $terms['effective_on']);
+        self::assertSame(
+            'Syntetická změna pracovních podmínek',
+            $terms['note'],
+        );
+        self::assertSame($officeDiff, $terms['diff_json']);
+        self::assertSame($this->actors[1], (int) $terms['created_by']);
+        self::assertSame('2026-03-20 10:00:00', $terms['created_at']);
+
+        $restored = $projection->remapEmbeddedReferences(
+            $terms,
+            static fn (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ): int => $reference->target === 'table:payroll_offices'
+                ? (int) $value + 1_000
+                : throw new \LogicException(
+                    'Test zachytil neočekávanou referenci.',
+                ),
+        );
+        $restoredDiff = json_decode(
+            (string) $restored['diff_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            $currentOfficeId + 1_000,
+            $restoredDiff['office_id']['from'],
+        );
+        self::assertSame(
+            $targetOfficeId + 1_000,
+            $restoredDiff['office_id']['to'],
+        );
+        self::assertSame(
+            ['from' => '40.00', 'to' => '32.00'],
+            $restoredDiff['weekly_hours'],
+        );
+
+        $status = $rows[1];
+        self::assertSame('status_changed', $status['event_type']);
+        self::assertSame('planned', $status['from_status']);
+        self::assertSame('active', $status['to_status']);
+        self::assertSame('2026-01-01', $status['effective_on']);
+        self::assertNull($status['note']);
+        self::assertSame($statusDiff, $status['diff_json']);
+        self::assertNull($status['created_by']);
+        self::assertSame('2026-01-02 08:00:00', $status['created_at']);
+        self::assertSame(
+            $statusDiff,
+            $projection->remapEmbeddedReferences(
+                $status,
+                static fn (): never => throw new \LogicException(
+                    'Diff bez office_id se nesmí mapovat.',
+                ),
+            )['diff_json'],
+        );
+    }
+
     public function testCompanyBackupStreamsPersonIdentityHistory(): void
     {
         $insert = $this->db->pdo()->prepare(
