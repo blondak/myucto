@@ -25,6 +25,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollComponentDefinitionsPro
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionAgreementVersionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionLedgerProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeeProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
@@ -763,6 +764,22 @@ final class TenantDataRegistryFactory
                 ...self::companyBackupProjection('projects'),
             ],
         );
+        $definitions[] = new TenantDataDefinition(
+            'table:payroll_employee_profiles',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['supplier_id', 'employee_id'],
+                'feature_group' => 'payroll',
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                ...self::companyBackupProjection('payroll_employee_profiles'),
+            ],
+        );
         foreach (self::COMPANY_BACKUP_ONLY_REFERENCE_TARGETS as $table => $featureGroup) {
             $projection = self::companyBackupProjection($table);
             $details = [
@@ -1358,6 +1375,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollDeductionLedgerProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_employee_profiles') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollEmployeeProfilesProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollEmployeeProfilesProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

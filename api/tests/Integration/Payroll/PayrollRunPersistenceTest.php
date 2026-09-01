@@ -2352,6 +2352,130 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertNotSame('', (string) $reversal['created_at']);
     }
 
+    public function testCompanyBackupStreamsEmployeeProfiles(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side,
+                 is_synthetic, is_active)
+             VALUES (?, "365.901", "Syntetický účet zápočtu", "liability",
+                     "credit", 1, 1)'
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employee_profiles
+                SET profile_status = "ready",
+                    payout_method = "partner_settlement",
+                    partner_settlement_account_code = "365.901",
+                    cash_allocation_basis_points = 0,
+                    payout_effective_on = "2026-06-01",
+                    secure_delivery_channel = "paper",
+                    row_version = 7,
+                    created_at = "2026-01-02 07:00:00",
+                    updated_at = "2026-06-02 08:00:00"
+              WHERE supplier_id = ? AND employee_id = ?'
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Synthetic Cash Profile Person", "employee", 1)'
+        )->execute([$this->supplierId]);
+        $cashEmployeeId = (int) $this->db->pdo()->lastInsertId();
+        $profileInsert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employee_profiles
+                (supplier_id, employee_id, profile_status, payout_method,
+                 partner_settlement_account_code, cash_allocation_basis_points,
+                 payout_effective_on, secure_delivery_channel, row_version,
+                 created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $profileInsert->execute([
+            $this->supplierId,
+            $cashEmployeeId,
+            'legacy',
+            'cash',
+            null,
+            10_000,
+            null,
+            'portal',
+            1,
+            '2026-02-03 09:00:00',
+            '2026-02-03 09:00:00',
+        ]);
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Synthetic Foreign Profile Person", "employee", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherEmployeeId = (int) $this->db->pdo()->lastInsertId();
+        $profileInsert->execute([
+            $this->otherSupplierId,
+            $otherEmployeeId,
+            'setup',
+            'cash',
+            null,
+            10_000,
+            null,
+            'portal',
+            1,
+            '2026-02-03 09:00:00',
+            '2026-02-03 09:00:00',
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_employee_profiles');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $settlement = $rows[0];
+        $cash = $rows[1];
+        self::assertSame($this->supplierId, (int) $settlement['supplier_id']);
+        self::assertSame($this->employeeId, (int) $settlement['employee_id']);
+        self::assertSame('ready', $settlement['profile_status']);
+        self::assertSame('partner_settlement', $settlement['payout_method']);
+        self::assertSame(
+            '365.901',
+            $settlement['partner_settlement_account_code'],
+        );
+        self::assertSame(0, (int) $settlement['cash_allocation_basis_points']);
+        self::assertSame('2026-06-01', $settlement['payout_effective_on']);
+        self::assertSame('paper', $settlement['secure_delivery_channel']);
+        self::assertSame(7, (int) $settlement['row_version']);
+        self::assertSame('2026-01-02 07:00:00', $settlement['created_at']);
+        self::assertSame('2026-06-02 08:00:00', $settlement['updated_at']);
+
+        self::assertSame($this->supplierId, (int) $cash['supplier_id']);
+        self::assertSame($cashEmployeeId, (int) $cash['employee_id']);
+        self::assertSame('legacy', $cash['profile_status']);
+        self::assertSame('cash', $cash['payout_method']);
+        self::assertNull($cash['partner_settlement_account_code']);
+        self::assertSame(10_000, (int) $cash['cash_allocation_basis_points']);
+        self::assertNull($cash['payout_effective_on']);
+        self::assertSame('portal', $cash['secure_delivery_channel']);
+        self::assertSame(1, (int) $cash['row_version']);
+        self::assertSame('2026-02-03 09:00:00', $cash['created_at']);
+        self::assertSame('2026-02-03 09:00:00', $cash['updated_at']);
+    }
+
     public function testCompanyBackupStreamsPersonIdentityHistory(): void
     {
         $insert = $this->db->pdo()->prepare(
