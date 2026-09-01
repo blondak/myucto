@@ -37,6 +37,10 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentTermsProjecti
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeAveragingPeriodsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeCompensationsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeConsentsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeProtectionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonAddressesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthCoverageProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMinimumReductionsProjection;
@@ -102,6 +106,10 @@ final class TenantDataRegistryFactory
         'payroll_institution_accounts' => 'payroll',
         'payroll_jmhz_work_month_revisions' => 'payroll',
         'payroll_offices' => 'payroll',
+        'payroll_overtime_averaging_periods' => 'payroll',
+        'payroll_overtime_compensations' => 'payroll',
+        'payroll_overtime_consents' => 'payroll',
+        'payroll_overtime_protections' => 'payroll',
         'payroll_payout_rules' => 'payroll',
         'payroll_person_accounts' => 'payroll',
         'payroll_person_addresses' => 'payroll',
@@ -213,6 +221,18 @@ final class TenantDataRegistryFactory
             'content_hash',
         ],
         'payroll_offices' => ['supplier_id', 'code'],
+        'payroll_overtime_averaging_periods' => ['supplier_id', 'valid_from'],
+        'payroll_overtime_compensations' => [
+            'supplier_id',
+            'employment_id',
+            'overtime_date',
+        ],
+        'payroll_overtime_protections' => [
+            'supplier_id',
+            'employment_id',
+            'protection',
+            'valid_from',
+        ],
         'payroll_person_addresses' => [
             'supplier_id',
             'employee_id',
@@ -1571,6 +1591,62 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollOfficesProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_overtime_averaging_periods') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollOvertimeAveragingPeriodsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollOvertimeAveragingPeriodsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_overtime_compensations') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollOvertimeCompensationsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollOvertimeCompensationsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_overtime_consents') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollOvertimeConsentsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollOvertimeConsentsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_overtime_protections') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollOvertimeProtectionsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollOvertimeProtectionsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
