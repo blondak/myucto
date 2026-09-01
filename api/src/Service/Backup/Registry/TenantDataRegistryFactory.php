@@ -25,10 +25,12 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollComponentDefinitionsPro
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionAgreementVersionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionLedgerProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDimensionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeeProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentChecklistItemsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentDimensionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentEventsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentTermsProjection;
@@ -86,9 +88,11 @@ final class TenantDataRegistryFactory
         'payroll_deduction_agreement_versions' => 'payroll',
         'payroll_deduction_agreements' => 'payroll',
         'payroll_deduction_ledger' => 'payroll',
+        'payroll_dimensions' => 'payroll',
         'payroll_employees' => 'payroll',
         'payroll_employer_policies' => 'payroll',
         'payroll_employment_checklist_items' => 'payroll',
+        'payroll_employment_dimensions' => 'payroll',
         'payroll_employment_events' => 'payroll',
         'payroll_employments' => 'payroll',
         'payroll_employment_terms' => 'payroll',
@@ -1389,6 +1393,20 @@ final class TenantDataRegistryFactory
                 ],
             ];
         }
+        if ($table === 'payroll_dimensions') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollDimensionsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollDimensionsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
         if ($table === 'payroll_employee_profiles') {
             return [
                 'company_backup' => [
@@ -1428,6 +1446,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollEmploymentChecklistItemsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_employment_dimensions') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollEmploymentDimensionsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollEmploymentDimensionsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

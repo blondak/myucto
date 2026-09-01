@@ -10,6 +10,10 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use Psr\Container\ContainerInterface;
@@ -324,6 +328,171 @@ final class PayrollDimensionApiTest extends TestCase
         self::assertSame(201, $assign->getStatusCode());
     }
 
+    public function testCompanyBackupStreamsDimensionsAndAssignmentsByTenant(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side,
+                 is_synthetic, is_active)
+             VALUES (?, "521.100", "Syntetický účet mzdové dimenze", "expense",
+                     "debit", 1, 1)'
+        )->execute([$this->supplierId]);
+        $costCenter = $this->createDimension($this->supplierId, [
+            'dimension_type' => 'cost_center',
+            'code' => 'CC-SYN',
+            'name' => 'Syntetické mzdové středisko',
+            'default_account_code' => '521.100',
+        ]);
+        $activity = $this->createDimension($this->supplierId, [
+            'dimension_type' => 'activity',
+            'code' => 'ACT-SYN',
+            'name' => 'Syntetická mzdová činnost',
+            'valid_from' => '2026-02-01',
+            'valid_to' => '2026-12-31',
+        ]);
+        $foreign = $this->createDimension($this->otherSupplierId, [
+            'dimension_type' => 'cost_center',
+            'code' => 'CC-SYN',
+            'name' => 'Syntetické cizí mzdové středisko',
+        ]);
+
+        $employmentId = $this->createEmployment($this->supplierId);
+        $costCenterAssignment = $this->createAssignment(
+            $this->supplierId,
+            $employmentId,
+            (int) $costCenter['id'],
+            '2026-01-01',
+            null,
+        );
+        $activityAssignment = $this->createAssignment(
+            $this->supplierId,
+            $employmentId,
+            (int) $activity['id'],
+            '2026-02-01',
+            '2026-12-31',
+        );
+        $otherEmploymentId = $this->createEmployment($this->otherSupplierId);
+        $foreignAssignment = $this->createAssignment(
+            $this->otherSupplierId,
+            $otherEmploymentId,
+            (int) $foreign['id'],
+            '2026-01-01',
+            null,
+        );
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $definition = $registry->definition('table:payroll_dimensions');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+        $dimensions = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+
+        self::assertCount(2, $dimensions);
+        self::assertSame(
+            [(int) $costCenter['id'], (int) $activity['id']],
+            array_map(
+                static fn (array $row): int => (int) $row['id'],
+                $dimensions,
+            ),
+        );
+        self::assertNotContains(
+            (int) $foreign['id'],
+            array_map(
+                static fn (array $row): int => (int) $row['id'],
+                $dimensions,
+            ),
+        );
+        self::assertSame('cost_center', $dimensions[0]['dimension_type']);
+        self::assertSame('CC-SYN', $dimensions[0]['code']);
+        self::assertSame('521.100', $dimensions[0]['default_account_code']);
+        self::assertSame($this->userId, (int) $dimensions[0]['created_by']);
+        self::assertSame($this->userId, (int) $dimensions[0]['updated_by']);
+        self::assertSame('activity', $dimensions[1]['dimension_type']);
+        self::assertSame('ACT-SYN', $dimensions[1]['code']);
+        self::assertSame('2026-02-01', $dimensions[1]['valid_from']);
+        self::assertSame('2026-12-31', $dimensions[1]['valid_to']);
+        self::assertNull($dimensions[1]['default_account_code']);
+
+        $assignmentDefinition = $registry->definition(
+            'table:payroll_employment_dimensions',
+        );
+        self::assertNotNull($assignmentDefinition);
+        $assignmentProjection = CompanyBackupTableProjection::fromDefinition(
+            $assignmentDefinition,
+        );
+        $assignmentSchema = $schemaReader->read(
+            $this->db->pdo(),
+            $assignmentProjection,
+        );
+        $assignmentProjection->assertRuntimeSchema(
+            $assignmentSchema->columns,
+            $assignmentSchema->generatedColumns,
+            $assignmentSchema->primaryKey,
+            $assignmentSchema->binaryColumns,
+        );
+        $assignmentProjection->references->assertRegistryTargets($registry);
+        $assignmentProjection->references->assertRuntimeSchema(
+            $schemaReader->readReferences(
+                $this->db->pdo(),
+                $assignmentProjection,
+            ),
+        );
+        $assignments = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $assignmentDefinition,
+        ));
+
+        self::assertCount(2, $assignments);
+        self::assertSame(
+            [
+                (int) $costCenterAssignment['id'],
+                (int) $activityAssignment['id'],
+            ],
+            array_map(
+                static fn (array $row): int => (int) $row['id'],
+                $assignments,
+            ),
+        );
+        self::assertNotContains(
+            (int) $foreignAssignment['id'],
+            array_map(
+                static fn (array $row): int => (int) $row['id'],
+                $assignments,
+            ),
+        );
+        self::assertSame($employmentId, (int) $assignments[0]['employment_id']);
+        self::assertSame(
+            (int) $costCenter['id'],
+            (int) $assignments[0]['dimension_id'],
+        );
+        self::assertSame('2026-01-01', $assignments[0]['valid_from']);
+        self::assertNull($assignments[0]['valid_to']);
+        self::assertSame($this->userId, (int) $assignments[0]['created_by']);
+        self::assertSame($this->userId, (int) $assignments[0]['updated_by']);
+        self::assertSame(
+            (int) $activity['id'],
+            (int) $assignments[1]['dimension_id'],
+        );
+        self::assertSame('2026-02-01', $assignments[1]['valid_from']);
+        self::assertSame('2026-12-31', $assignments[1]['valid_to']);
+    }
+
     /**
      * @param array<string,mixed> $overrides
      * @return array<string,mixed>
@@ -372,6 +541,32 @@ final class PayrollDimensionApiTest extends TestCase
         )->execute([$supplierId, $employeeId]);
 
         return (int) $pdo->lastInsertId();
+    }
+
+    /** @return array<string,mixed> */
+    private function createAssignment(
+        int $supplierId,
+        int $employmentId,
+        int $dimensionId,
+        string $validFrom,
+        ?string $validTo,
+    ): array {
+        $response = $this->assignmentAction->create(
+            $this->request('POST', $supplierId)->withParsedBody([
+                'dimension_id' => $dimensionId,
+                'valid_from' => $validFrom,
+                'valid_to' => $validTo,
+            ]),
+            new Response(),
+            ['id' => (string) $employmentId],
+        );
+        self::assertSame(
+            201,
+            $response->getStatusCode(),
+            (string) $response->getBody(),
+        );
+
+        return $this->row($this->json($response)['dimension'] ?? null);
     }
 
     private function approveRevisionFor(int $supplierId, int $employmentId, string $periodStart): void
