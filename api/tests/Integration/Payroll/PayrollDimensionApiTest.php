@@ -168,6 +168,26 @@ final class PayrollDimensionApiTest extends TestCase
         self::assertSame(201, $first->getStatusCode());
         $firstAssignment = $this->row($this->json($first)['dimension'] ?? null);
 
+        $updated = $this->assignmentAction->update(
+            $this->request('PUT', $this->supplierId)->withParsedBody([
+                'dimension_id' => $ccOne['id'],
+                'valid_from' => '2026-01-01',
+                'valid_to' => '2026-07-31',
+                'row_version' => 1,
+            ]),
+            new Response(),
+            [
+                'id' => (string) $employmentId,
+                'assignmentId' => (string) $firstAssignment['id'],
+            ],
+        );
+        self::assertSame(200, $updated->getStatusCode());
+        $updatedAssignment = $this->row(
+            $this->json($updated)['dimension'] ?? null,
+        );
+        self::assertSame('2026-07-31', $updatedAssignment['valid_to']);
+        self::assertSame(2, $updatedAssignment['row_version']);
+
         $overlap = $this->assignmentAction->create(
             $this->request('POST', $this->supplierId)->withParsedBody([
                 'dimension_id' => $ccTwo['id'],
@@ -204,7 +224,7 @@ final class PayrollDimensionApiTest extends TestCase
         self::assertSame(409, $staleUpdate->getStatusCode());
         $staleError = $this->row($this->json($staleUpdate)['error'] ?? null);
         self::assertSame('row_version_conflict', $staleError['code']);
-        self::assertSame(1, $staleError['current_row_version']);
+        self::assertSame(2, $staleError['current_row_version']);
     }
 
     public function testAssignmentRejectsInactiveOrIneffectiveDimension(): void
