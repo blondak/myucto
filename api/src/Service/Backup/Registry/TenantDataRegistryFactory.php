@@ -32,6 +32,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentTermsProjecti
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonAddressesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthCoverageProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMinimumReductionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMonthEvidenceProjection;
@@ -94,6 +95,7 @@ final class TenantDataRegistryFactory
         'payroll_offices' => 'payroll',
         'payroll_payout_rules' => 'payroll',
         'payroll_person_accounts' => 'payroll',
+        'payroll_person_addresses' => 'payroll',
         'payroll_person_health_coverage_history' => 'payroll',
         'payroll_person_health_minimum_reductions' => 'payroll',
         'payroll_person_health_month_evidence' => 'payroll',
@@ -196,6 +198,12 @@ final class TenantDataRegistryFactory
             'content_hash',
         ],
         'payroll_offices' => ['supplier_id', 'code'],
+        'payroll_person_addresses' => [
+            'supplier_id',
+            'employee_id',
+            'address_type',
+            'effective_from',
+        ],
         'payroll_person_health_coverage_history' => [
             'supplier_id',
             'employee_id',
@@ -1461,6 +1469,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollOfficesProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_person_addresses') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonAddressesProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollPersonAddressesProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
