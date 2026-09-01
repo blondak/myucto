@@ -9,6 +9,9 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlProtectedSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
@@ -32,6 +35,7 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
     private Connection $db;
     private PayrollInstitutionAccountsAction $action;
     private PayrollSensitiveData $sensitiveData;
+    private SecretEncryption $encryption;
     private int $userId;
     private int $supplierId;
     private int $otherSupplierId;
@@ -50,6 +54,9 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollInstitutionAccountsAction::class);
             $this->sensitiveData = $container->get(PayrollSensitiveData::class);
+            $encryption = $container->get(SecretEncryption::class);
+            self::assertInstanceOf(SecretEncryption::class, $encryption);
+            $this->encryption = $encryption;
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -289,6 +296,109 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         self::assertSame('health_insurer', $rows[0]['institution_type']);
         self::assertSame('SYNTH-111', $rows[0]['institution_code']);
         self::assertArrayHasKey('created_at', $rows[0]);
+    }
+
+    public function testCompanyBackupStreamsAndResealsSelectedInstitutionAccount(): void
+    {
+        $ownAccount = $this->json(
+            $this->create($this->supplierId, $this->payload()),
+        )['account'] ?? null;
+        $foreignAccount = $this->json(
+            $this->create($this->otherSupplierId, $this->payload()),
+        )['account'] ?? null;
+        self::assertIsArray($ownAccount);
+        self::assertIsArray($foreignAccount);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_institution_accounts');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = array_values(iterator_to_array(
+            (new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+                $this->db->pdo(),
+                $this->supplierId,
+                $definition,
+            ),
+        ));
+        self::assertCount(1, $rows);
+        self::assertSame((int) $ownAccount['id'], (int) $rows[0]['id']);
+        self::assertNotSame((int) $foreignAccount['id'], (int) $rows[0]['id']);
+        self::assertArrayNotHasKey('bank_account_ciphertext', $rows[0]);
+        self::assertArrayNotHasKey('bank_account_hash', $rows[0]);
+        self::assertArrayNotHasKey('bank_account_masked', $rows[0]);
+
+        $secretProjection = CompanyBackupProtectedSecretProjection::fromDefinition(
+            $definition,
+        );
+        $values = array_values(iterator_to_array(
+            (new CompanyBackupSqlProtectedSecretSource($this->encryption))->values(
+                $this->db->pdo(),
+                $this->supplierId,
+                $secretProjection,
+            ),
+        ));
+        self::assertCount(1, $values);
+        self::assertSame('1000000005/0100', $values[0]->plaintext());
+        self::assertSame(['id' => (int) $ownAccount['id']], $values[0]->primaryKey);
+
+        $storedSource = $this->db->pdo()->prepare(
+            'SELECT bank_account_ciphertext, bank_account_hash
+               FROM payroll_institution_accounts
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $storedSource->execute([$this->supplierId, $ownAccount['id']]);
+        $sourceStorage = $storedSource->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($sourceStorage);
+
+        $targetSupplierId = $this->otherSupplierId + 100_000;
+        $targetAccountId = (int) $ownAccount['id'] + 100_000;
+        $targetRow = $rows[0];
+        $targetRow['supplier_id'] = $targetSupplierId;
+        $targetRow['id'] = $targetAccountId;
+        $targetStorage = $projection->protectedSecretMaterializations->materialize(
+            $values[0],
+            $rows[0],
+            $targetRow,
+            $this->sensitiveData,
+        );
+
+        self::assertNotSame(
+            $sourceStorage['bank_account_ciphertext'],
+            $targetStorage['bank_account_ciphertext'],
+        );
+        self::assertNotSame(
+            $sourceStorage['bank_account_hash'],
+            $targetStorage['bank_account_hash'],
+        );
+        self::assertSame(
+            '1000000005/0100',
+            $this->sensitiveData->reveal(
+                $targetStorage['bank_account_ciphertext'],
+                PayrollSensitiveField::BANK_ACCOUNT,
+                $targetSupplierId,
+                $targetAccountId,
+            ),
+        );
+        self::assertSame(
+            $this->sensitiveData->mask(
+                '1000000005/0100',
+                PayrollSensitiveField::BANK_ACCOUNT,
+            ),
+            $targetStorage['bank_account_masked'],
+        );
     }
 
     public function testOptimisticLockAndImmutableBankHistory(): void

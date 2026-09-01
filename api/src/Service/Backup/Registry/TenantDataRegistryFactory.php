@@ -36,6 +36,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentTermsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInstitutionAccountsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInstitutionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeAveragingPeriodsProjection;
@@ -836,7 +837,9 @@ final class TenantDataRegistryFactory
                 ...(isset(self::COMPANY_BACKUP_REFERENCE_KEYS[$table]) ? [
                     'reference_keys' => self::COMPANY_BACKUP_REFERENCE_KEYS[$table],
                 ] : []),
-                ...($projection === [] ? [] : ['secrets' => []]),
+                ...($projection === [] ? [] : [
+                    'secrets' => self::secretPolicies($table),
+                ]),
                 ...$projection,
             ];
             $definitions[] = new TenantDataDefinition(
@@ -1238,6 +1241,18 @@ final class TenantDataRegistryFactory
      *   omit_columns:array<string,string>,
      *   polymorphic_references?:list<array<string,mixed>>,
      *   preserved_identifiers?:list<string>,
+     *   protected_secret_materializations?:list<array{
+     *     entity_id_column:string,
+     *     field:string,
+     *     materializer:string,
+     *     secret_column:string,
+     *     target_columns:array{
+     *       ciphertext:string,
+     *       lookup_hash:string,
+     *       masked:string
+     *     },
+     *     tenant_id_column:string
+     *   }>,
      *   restore_overrides:array<string,array{value:string|int|bool|null,reason:string}>,
      *   references:list<array{
      *     columns:list<string>,
@@ -1569,6 +1584,23 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollInputsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_institution_accounts') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollInstitutionAccountsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' =>
+                        CompanyBackupPayrollInstitutionAccountsProjection::omitColumns(),
+                    'protected_secret_materializations' =>
+                        CompanyBackupPayrollInstitutionAccountsProjection::protectedSecretMaterializations(),
+                    'references' =>
+                        CompanyBackupPayrollInstitutionAccountsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
@@ -2402,7 +2434,7 @@ final class TenantDataRegistryFactory
         };
     }
 
-    /** @return array<string,array{policy:string,reason?:string}> */
+    /** @return array<string,array<string,string>> */
     private static function secretPolicies(string $table): array
     {
         if ($table === 'supplier') {
@@ -2418,10 +2450,13 @@ final class TenantDataRegistryFactory
                 'public_token' => ['policy' => TenantSecretPolicy::OmitAndReconfigure->value],
             ];
         }
+        if ($table === 'payroll_institution_accounts') {
+            return CompanyBackupPayrollInstitutionAccountsProjection::secrets();
+        }
         return [];
     }
 
-    /** @return array<string,array{policy:string}> */
+    /** @return array<string,array<string,string>> */
     private static function supplierSecretPolicies(): array
     {
         $optional = TenantSecretPolicy::OptionalCredential->value;

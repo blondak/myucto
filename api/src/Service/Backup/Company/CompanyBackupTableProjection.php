@@ -51,6 +51,8 @@ final readonly class CompanyBackupTableProjection
 
     public CompanyBackupPreservedIdentifierSet $preservedIdentifiers;
 
+    public CompanyBackupProtectedSecretMaterializationSet $protectedSecretMaterializations;
+
     public CompanyBackupRestoreOverrideSet $restoreOverrides;
 
     /**
@@ -81,6 +83,7 @@ final readonly class CompanyBackupTableProjection
         CompanyBackupDerivedHashSet $derivedHashes,
         CompanyBackupPolymorphicReferenceSet $polymorphicReferences,
         CompanyBackupPreservedIdentifierSet $preservedIdentifiers,
+        CompanyBackupProtectedSecretMaterializationSet $protectedSecretMaterializations,
         CompanyBackupRestoreOverrideSet $restoreOverrides,
     ) {
         $this->primaryKey = $primaryKey;
@@ -98,6 +101,7 @@ final readonly class CompanyBackupTableProjection
         $this->derivedHashes = $derivedHashes;
         $this->polymorphicReferences = $polymorphicReferences;
         $this->preservedIdentifiers = $preservedIdentifiers;
+        $this->protectedSecretMaterializations = $protectedSecretMaterializations;
         $this->restoreOverrides = $restoreOverrides;
     }
 
@@ -161,6 +165,7 @@ final readonly class CompanyBackupTableProjection
             'embedded_hashes',
             'polymorphic_references',
             'preserved_identifiers',
+            'protected_secret_materializations',
         ];
         sort($allowedMetadataKeys, SORT_STRING);
         if (array_diff($baseMetadataKeys, $metadataKeys) !== []
@@ -184,10 +189,17 @@ final readonly class CompanyBackupTableProjection
             $registryKey,
         );
         $omitColumns = self::omitColumns($metadata['omit_columns'], $registryKey);
+        $secretMetadata = $definition->details['secrets'] ?? null;
         $secretPolicies = CompanyBackupSecretColumnSet::fromArray(
-            $definition->details['secrets'] ?? null,
+            $secretMetadata,
             $registryKey,
         )->policies;
+        if (!is_array($secretMetadata)) {
+            throw new CompanyBackupDataSourceException(
+                'data_secret_registry_invalid',
+                $registryKey,
+            );
+        }
         $columnCodecs = self::columnCodecs(
             $metadata['column_codecs'] ?? [],
             $dataColumns,
@@ -257,6 +269,17 @@ final readonly class CompanyBackupTableProjection
             $registryKey,
             $dataColumns,
         );
+        $protectedSecretMaterializations =
+            CompanyBackupProtectedSecretMaterializationSet::fromArray(
+                $metadata['protected_secret_materializations'] ?? [],
+                $registryKey,
+                $dataColumns,
+                $primaryKey,
+                $ownership,
+                $omitColumns,
+                $secretPolicies,
+                $secretMetadata,
+            );
         $restoreOverrides = CompanyBackupRestoreOverrideSet::fromArray(
             $metadata['restore_overrides'],
             $registryKey,
@@ -329,6 +352,7 @@ final readonly class CompanyBackupTableProjection
             $derivedHashes,
             $polymorphicReferences,
             $preservedIdentifiers,
+            $protectedSecretMaterializations,
             $restoreOverrides,
         );
     }

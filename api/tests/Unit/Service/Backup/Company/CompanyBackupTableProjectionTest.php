@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedHashReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretStorage;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -642,6 +643,46 @@ final class CompanyBackupTableProjectionTest extends TestCase
         self::assertSame('protected_value_enc', $projection->requiredSecretEnvelopeColumn());
     }
 
+    public function testBindsProtectedSecretToTargetMaterialization(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            secrets: [
+                'bank_account_ciphertext' => [
+                    'policy' => TenantSecretPolicy::ProtectedDomainSecret->value,
+                    'storage' =>
+                        CompanyBackupSecretStorage::ApplicationEncryptedContext->value,
+                    'context' => 'payroll:{supplier_id}:{id}:bank_account',
+                ],
+            ],
+            dataColumns: ['id', 'supplier_id', 'name'],
+            omitColumns: [
+                'bank_account_hash' => 'rederived_from_protected_secret',
+                'bank_account_masked' => 'rederived_from_protected_secret',
+            ],
+            protectedSecretMaterializations: [[
+                'entity_id_column' => 'id',
+                'field' => 'bank_account',
+                'materializer' => 'payroll_sensitive_v1',
+                'secret_column' => 'bank_account_ciphertext',
+                'target_columns' => [
+                    'ciphertext' => 'bank_account_ciphertext',
+                    'lookup_hash' => 'bank_account_hash',
+                    'masked' => 'bank_account_masked',
+                ],
+                'tenant_id_column' => 'supplier_id',
+            ]],
+        ));
+
+        self::assertSame(
+            'bank_account_ciphertext<-payroll_sensitive_v1:bank_account'
+                . '@supplier_id,id'
+                . '->bank_account_ciphertext,bank_account_hash,bank_account_masked',
+            $projection->protectedSecretMaterializations
+                ->materializations[0]
+                ->signature(),
+        );
+    }
+
     public function testProductionDraftCannotBeStreamedBeforeColumnInventoryIsExplicit(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition('table:supplier');
@@ -668,6 +709,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param list<array<string,mixed>> $embeddedHashes
      * @param list<array<string,mixed>> $embeddedHashReferences
      * @param list<array<string,mixed>> $embeddedReferences
+     * @param list<array<string,mixed>> $protectedSecretMaterializations
      */
     private function definition(
         array $secrets = [],
@@ -682,6 +724,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
         array $embeddedHashes = [],
         array $embeddedHashReferences = [],
         array $embeddedReferences = [],
+        array $protectedSecretMaterializations = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:synthetic_records',
@@ -717,6 +760,10 @@ final class CompanyBackupTableProjectionTest extends TestCase
                     ]),
                     ...($preservedIdentifiers === [] ? [] : [
                         'preserved_identifiers' => $preservedIdentifiers,
+                    ]),
+                    ...($protectedSecretMaterializations === [] ? [] : [
+                        'protected_secret_materializations' =>
+                            $protectedSecretMaterializations,
                     ]),
                     'references' => $references ?? [$this->supplierReference()],
                     'restore_overrides' => [],
