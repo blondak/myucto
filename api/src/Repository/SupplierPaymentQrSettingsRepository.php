@@ -17,6 +17,12 @@ final class SupplierPaymentQrSettingsRepository
 
     public function __construct(private readonly Connection $db) {}
 
+    /** @param list<string> $changed */
+    public static function invalidatesInvoicePdfs(array $changed): bool
+    {
+        return in_array(self::INVOICE_FIELD, $changed, true);
+    }
+
     /**
      * @return array{invoice_qr_include_due_date:bool,purchase_invoice_qr_include_due_date:bool}|null
      */

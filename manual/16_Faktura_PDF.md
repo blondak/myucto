@@ -215,8 +215,8 @@ QR obsahuje:
 
 Volba **Firma → Nastavení → Fakturace → Datum splatnosti v QR platbě →
 Vystavené doklady** určuje, zda se do nově generovaného SPAYD kódu vloží skutečné
-datum splatnosti dokladu. Ve výchozím stavu je zapnutá; po vypnutí pole `DT` v QR
-zcela chybí. Nastavení platí stejně pro QR v PDF, e-mailu, upomínce a veřejném
+datum splatnosti dokladu. Ve výchozím stavu je vypnutá; po zapnutí se pole `DT`
+do QR doplní. Nastavení platí stejně pro QR v PDF, e-mailu, upomínce a veřejném
 náhledu. Formát SEPA EPC datum splatnosti nepodporuje, takže u jiných měn nemá
 přepínač vliv.
 

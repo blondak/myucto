@@ -14406,7 +14406,7 @@
     "invoice_qr_include_due_date": "Issued documents: include the due date",
     "invoice_qr_include_due_date_hint": "Newly generated QR codes in PDFs, emails, reminders and public previews will contain the document's actual due date.",
     "purchase_invoice_qr_include_due_date": "Received documents: include the due date",
-    "purchase_invoice_qr_include_due_date_hint": "Newly generated QR codes on received-document details and in payment orders will contain the document's actual due date.",
+    "purchase_invoice_qr_include_due_date_hint": "A newly generated QR code on the received-document detail will contain the document's actual due date.",
     "email_profile_managed_by_staff": "Managed by accountant",
     "email_profile_managed_by_staff_hint": "This profile uses system sendmail or a cryptographic signature and can only be changed by the installation administrator.",
     "branding_profiles": {

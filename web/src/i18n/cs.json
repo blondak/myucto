@@ -14406,7 +14406,7 @@
     "invoice_qr_include_due_date": "Vystavené doklady: zahrnout datum splatnosti",
     "invoice_qr_include_due_date_hint": "Do nově generovaných QR kódů v PDF, e-mailu, upomínce a veřejném náhledu se vloží skutečná splatnost dokladu.",
     "purchase_invoice_qr_include_due_date": "Přijaté doklady: zahrnout datum splatnosti",
-    "purchase_invoice_qr_include_due_date_hint": "Do nově generovaných QR kódů v detailu přijatého dokladu a platebních příkazech se vloží jeho skutečná splatnost.",
+    "purchase_invoice_qr_include_due_date_hint": "Do nově generovaného QR kódu v detailu přijatého dokladu se vloží jeho skutečná splatnost.",
     "email_profile_managed_by_staff": "Spravuje účetní",
     "email_profile_managed_by_staff_hint": "Profil používá systémový sendmail nebo kryptografický podpis a může jej změnit pouze správce instalace.",
     "branding_profiles": {

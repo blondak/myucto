@@ -318,7 +318,7 @@ final class InvoicePdfRenderer
                 $bankData,
                 (string) ($supplierData['display_name'] ?? $supplierData['company_name'] ?? 'MyÚčto.cz'),
                 PaymentQrDueDate::parse($invoice['due_date'] ?? null),
-                includeDueDate: (bool) ($qrSettings[SupplierPaymentQrSettingsRepository::INVOICE_FIELD] ?? true),
+                includeDueDate: (bool) ($qrSettings[SupplierPaymentQrSettingsRepository::INVOICE_FIELD] ?? false),
             );
         }
 

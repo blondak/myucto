@@ -12,6 +12,31 @@ use PHPUnit\Framework\TestCase;
 
 final class SupplierPaymentQrSettingsRepositoryTest extends TestCase
 {
+    public function testOnlyIssuedSettingInvalidatesInvoicePdfs(): void
+    {
+        self::assertTrue(SupplierPaymentQrSettingsRepository::invalidatesInvoicePdfs([
+            SupplierPaymentQrSettingsRepository::INVOICE_FIELD,
+        ]));
+        self::assertFalse(SupplierPaymentQrSettingsRepository::invalidatesInvoicePdfs([
+            SupplierPaymentQrSettingsRepository::PURCHASE_INVOICE_FIELD,
+        ]));
+        self::assertFalse(SupplierPaymentQrSettingsRepository::invalidatesInvoicePdfs([]));
+    }
+
+    public function testMigrationCreatesBothSettingsAsOptIn(): void
+    {
+        $sql = (string) file_get_contents(
+            dirname(__DIR__, 4) . '/db/migrations/1665_supplier_payment_qr_due_date.sql',
+        );
+
+        foreach (SupplierPaymentQrSettingsRepository::FIELDS as $field) {
+            self::assertMatchesRegularExpression(
+                '/\b' . preg_quote($field, '/') . '\b\s+TINYINT\(1\)\s+NOT NULL\s+DEFAULT 0/i',
+                $sql,
+            );
+        }
+    }
+
     public function testUpdateChangesBothIndependentSettingsAndReturnsBeforeState(): void
     {
         $select = $this->createMock(PDOStatement::class);

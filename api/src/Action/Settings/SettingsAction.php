@@ -911,7 +911,7 @@ final class SettingsAction
         if ($paymentQrBody !== []) {
             $qrResult = $this->paymentQrSettings->update($id, $paymentQrBody);
             $invalidated = 0;
-            if (in_array(SupplierPaymentQrSettingsRepository::INVOICE_FIELD, $qrResult['changed'], true)) {
+            if (SupplierPaymentQrSettingsRepository::invalidatesInvoicePdfs($qrResult['changed'])) {
                 $invalidated = $this->pdf->invalidatePaymentQrBySupplier($id);
             }
             if ($qrResult['changed'] !== []) {
@@ -1163,8 +1163,8 @@ final class SettingsAction
         $row['auto_generate_recurring']  = (bool) ($row['auto_generate_recurring'] ?? true);
         $row['default_prices_include_vat'] = (bool) ($row['default_prices_include_vat'] ?? false);
         $row['embed_isdoc']              = (bool) ($row['embed_isdoc'] ?? true);
-        $row['invoice_qr_include_due_date'] = (bool) ($row['invoice_qr_include_due_date'] ?? true);
-        $row['purchase_invoice_qr_include_due_date'] = (bool) ($row['purchase_invoice_qr_include_due_date'] ?? true);
+        $row['invoice_qr_include_due_date'] = (bool) ($row['invoice_qr_include_due_date'] ?? false);
+        $row['purchase_invoice_qr_include_due_date'] = (bool) ($row['purchase_invoice_qr_include_due_date'] ?? false);
         // Režim účetnictví (Epic F0, migrace 1001)
         $row['accounting_mode']          = (string) ($row['accounting_mode'] ?? 'tax_evidence');
         // „Vést účetnictví" (migrace 1179) — vypnuté schová účetní sekce z menu. Na licenci

@@ -82,7 +82,7 @@ final class ClientPaymentQrSettingsAction
         }
 
         $invalidated = 0;
-        if (in_array(SupplierPaymentQrSettingsRepository::INVOICE_FIELD, $result['changed'], true)) {
+        if (SupplierPaymentQrSettingsRepository::invalidatesInvoicePdfs($result['changed'])) {
             $invalidated = $this->pdf->invalidatePaymentQrBySupplier($supplierId);
         }
         if ($result['changed'] !== []) {

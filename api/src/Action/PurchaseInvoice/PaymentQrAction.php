@@ -247,7 +247,7 @@ final class PaymentQrAction
             (string) ($invoice['vendor_company_name'] ?? ''),
             $dueDate,
             $message,
-            (bool) ($settings[SupplierPaymentQrSettingsRepository::PURCHASE_INVOICE_FIELD] ?? true),
+            (bool) ($settings[SupplierPaymentQrSettingsRepository::PURCHASE_INVOICE_FIELD] ?? false),
         );
 
         return [

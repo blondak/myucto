@@ -238,9 +238,11 @@ final class RbacHttpRoleMatrixTest extends TestCase
 
             $audit->execute([$userId, 'supplier.payment_qr_settings_updated']);
             $auditPayload = (string) $audit->fetchColumn();
-            $auditChanges = (array) ((json_decode($auditPayload, true) ?: [])['changes'] ?? []);
+            $decodedAudit = json_decode($auditPayload, true) ?: [];
+            $auditChanges = (array) ($decodedAudit['changes'] ?? []);
             self::assertArrayHasKey('purchase_invoice_qr_include_due_date', $auditChanges);
             self::assertArrayNotHasKey('invoice_qr_include_due_date', $auditChanges);
+            self::assertSame(0, $decodedAudit['invalidated_invoice_pdfs'] ?? null);
 
             $qrMassAssignment = $this->request('PUT', '/api/settings/client/payment-qr', $session, [
                 'company_name' => '__TEST forbidden QR settings change',
@@ -273,6 +275,12 @@ final class RbacHttpRoleMatrixTest extends TestCase
         $current = $this->request('GET', '/api/settings/supplier', $session);
         self::assertSame(200, $current->getStatusCode(), (string) $current->getBody());
         $before = $this->json($current);
+        $audit = $this->db->pdo()->prepare(
+            'SELECT payload FROM activity_log WHERE user_id = ? AND action = ? ORDER BY id DESC LIMIT 1'
+        );
+        $auditCount = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM activity_log WHERE user_id = ? AND action = ?'
+        );
 
         try {
             $updated = $this->request('PUT', '/api/settings/supplier', $session, [
@@ -287,6 +295,27 @@ final class RbacHttpRoleMatrixTest extends TestCase
             self::assertSame(
                 $before['invoice_qr_include_due_date'],
                 $body['invoice_qr_include_due_date'] ?? null,
+            );
+
+            $audit->execute([$userId, 'supplier.payment_qr_settings_updated']);
+            $payload = json_decode((string) $audit->fetchColumn(), true) ?: [];
+            self::assertSame(0, $payload['invalidated_invoice_pdfs'] ?? null);
+            self::assertArrayHasKey(
+                'purchase_invoice_qr_include_due_date',
+                (array) ($payload['changes'] ?? []),
+            );
+
+            $auditCount->execute([$userId, 'supplier.payment_qr_settings_updated']);
+            $countAfterChange = (int) $auditCount->fetchColumn();
+            $unchanged = $this->request('PUT', '/api/settings/supplier', $session, [
+                'purchase_invoice_qr_include_due_date' => !$before['purchase_invoice_qr_include_due_date'],
+            ]);
+            self::assertSame(200, $unchanged->getStatusCode(), (string) $unchanged->getBody());
+            $auditCount->execute([$userId, 'supplier.payment_qr_settings_updated']);
+            self::assertSame(
+                $countAfterChange,
+                (int) $auditCount->fetchColumn(),
+                'Uložení stejné hodnoty nesmí invalidovat PDF ani vytvořit audit změny.',
             );
         } finally {
             $this->db->pdo()->prepare(

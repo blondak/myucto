@@ -165,7 +165,7 @@ final class InvoiceEmailVarsBuilder
             $bank,
             (string) ($supplierName ?: 'MyÚčto.cz'),
             PaymentQrDueDate::parse($invoice['due_date'] ?? null),
-            includeDueDate: (bool) ($qrSettings[SupplierPaymentQrSettingsRepository::INVOICE_FIELD] ?? true),
+            includeDueDate: (bool) ($qrSettings[SupplierPaymentQrSettingsRepository::INVOICE_FIELD] ?? false),
         );
     }
 
