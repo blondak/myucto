@@ -95,6 +95,64 @@ final class CompanyBackupSqlProtectedSecretSourceTest extends TestCase
         self::assertStringNotContainsString($encrypted, $sql);
     }
 
+    public function testResolvesContextTemplateFromTenantAndPrimaryKey(): void
+    {
+        $encryption = $this->encryption();
+        $encrypted = $encryption->encryptFor(
+            '1000000005/0100',
+            'payroll:42:73:bank_account',
+        );
+        $definition = $this->dynamicContextDefinition();
+        $projection = CompanyBackupProtectedSecretProjection::fromDefinition(
+            $definition,
+        );
+        $data = $this->streamStatement([[
+            'id' => 73,
+            'supplier_id' => 42,
+            'bank_account_ciphertext' => $encrypted,
+        ]], [42]);
+        $sql = '';
+        $pdo = $this->schemaPdo(
+            $data,
+            $sql,
+            columns: [
+                $this->schemaColumn('id', 'bigint', 'auto_increment'),
+                $this->schemaColumn('supplier_id', 'int'),
+                $this->schemaColumn('bank_account_ciphertext', 'varchar'),
+            ],
+            table: 'payroll_institution_accounts',
+        );
+
+        $values = iterator_to_array(
+            (new CompanyBackupSqlProtectedSecretSource($encryption))->values(
+                $pdo,
+                42,
+                $projection,
+            ),
+            false,
+        );
+
+        self::assertCount(1, $values);
+        self::assertSame('1000000005/0100', $values[0]->plaintext());
+        self::assertSame(['id' => 73], $values[0]->primaryKey);
+        self::assertSame(
+            'payroll:{supplier_id}:{id}:bank_account',
+            $projection->contexts['bank_account_ciphertext'] ?? null,
+        );
+        self::assertStringContainsString(
+            'SELECT `_company_secret`.`id`, `_company_secret`.`supplier_id`, '
+                . '`_company_secret`.`bank_account_ciphertext` '
+                . 'FROM `payroll_institution_accounts`',
+            $sql,
+        );
+        self::assertStringContainsString(
+            'WHERE `_company_secret`.`supplier_id` = ? '
+                . 'ORDER BY `_company_secret`.`id`',
+            $sql,
+        );
+        self::assertStringNotContainsString($encrypted, $sql);
+    }
+
     public function testRejectsUndecryptableValueWithoutReturningCiphertext(): void
     {
         $data = $this->streamStatement([[
@@ -135,6 +193,48 @@ final class CompanyBackupSqlProtectedSecretSourceTest extends TestCase
                 'not-valid-ciphertext',
                 $e->getMessage(),
             );
+        }
+    }
+
+    public function testRejectsInvalidContextCoordinateBeforeDecrypting(): void
+    {
+        $encrypted = $this->encryption()->encryptFor(
+            'synthetic-bank-account',
+            'payroll:42:73:bank_account',
+        );
+        $data = $this->streamStatement([[
+            'id' => '73:foreign',
+            'supplier_id' => 42,
+            'bank_account_ciphertext' => $encrypted,
+        ]], [42]);
+        $sql = '';
+        $pdo = $this->schemaPdo(
+            $data,
+            $sql,
+            columns: [
+                $this->schemaColumn('id', 'bigint', 'auto_increment'),
+                $this->schemaColumn('supplier_id', 'int'),
+                $this->schemaColumn('bank_account_ciphertext', 'varchar'),
+            ],
+            table: 'payroll_institution_accounts',
+        );
+
+        try {
+            iterator_to_array(
+                (new CompanyBackupSqlProtectedSecretSource($this->encryption()))
+                    ->values(
+                        $pdo,
+                        42,
+                        CompanyBackupProtectedSecretProjection::fromDefinition(
+                            $this->dynamicContextDefinition(),
+                        ),
+                    ),
+            );
+            self::fail('Neplatná souřadnice AAD nesmí vstoupit do dešifrování.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('secret_source_context_invalid', $e->errorCode);
+            self::assertSame('bank_account_ciphertext', $e->column);
+            self::assertStringNotContainsString('73:foreign', $e->getMessage());
         }
     }
 
@@ -230,6 +330,33 @@ final class CompanyBackupSqlProtectedSecretSourceTest extends TestCase
         );
     }
 
+    private function dynamicContextDefinition(): TenantDataDefinition
+    {
+        return new TenantDataDefinition(
+            'table:payroll_institution_accounts',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [
+                    'bank_account_ciphertext' => [
+                        'policy' =>
+                            TenantSecretPolicy::ProtectedDomainSecret->value,
+                        'storage' =>
+                            CompanyBackupSecretStorage::ApplicationEncryptedContext->value,
+                        'context' =>
+                            'payroll:{supplier_id}:{id}:bank_account',
+                    ],
+                ],
+            ],
+        );
+    }
+
     private function encryption(): SecretEncryption
     {
         return new SecretEncryption(new Config([
@@ -261,9 +388,10 @@ final class CompanyBackupSqlProtectedSecretSourceTest extends TestCase
         PDOStatement $data,
         string &$sql,
         array $columns,
+        string $table = 'supplier',
     ): PDO {
-        $schema = $this->statement($columns, ['supplier'], PDO::FETCH_ASSOC);
-        $primary = $this->statement(['id'], ['supplier'], PDO::FETCH_COLUMN);
+        $schema = $this->statement($columns, [$table], PDO::FETCH_ASSOC);
+        $primary = $this->statement(['id'], [$table], PDO::FETCH_COLUMN);
         $pdo = $this->createMock(PDO::class);
         $pdo->expects(self::exactly(3))
             ->method('prepare')

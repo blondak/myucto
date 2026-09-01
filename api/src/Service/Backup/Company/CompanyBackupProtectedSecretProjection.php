@@ -25,11 +25,15 @@ final readonly class CompanyBackupProtectedSecretProjection
     /** @var array<string,?string> */
     public array $contexts;
 
+    /** @var array<string,CompanyBackupSecretContextTemplate|null> */
+    private array $contextTemplates;
+
     /**
      * @param list<string> $primaryKey
      * @param list<string> $columns
      * @param array<string,CompanyBackupSecretStorage> $storage
      * @param array<string,?string> $contexts
+     * @param array<string,CompanyBackupSecretContextTemplate|null> $contextTemplates
      */
     private function __construct(
         public string $registryKey,
@@ -40,11 +44,13 @@ final readonly class CompanyBackupProtectedSecretProjection
         array $columns,
         array $storage,
         array $contexts,
+        array $contextTemplates,
     ) {
         $this->primaryKey = $primaryKey;
         $this->columns = $columns;
         $this->storage = $storage;
         $this->contexts = $contexts;
+        $this->contextTemplates = $contextTemplates;
     }
 
     public static function fromDefinition(
@@ -93,6 +99,11 @@ final readonly class CompanyBackupProtectedSecretProjection
         $columns = [];
         $storage = [];
         $contexts = [];
+        $contextTemplates = [];
+        $allowedContextColumns = array_values(array_unique([
+            ...$primaryKey,
+            $ownershipColumn,
+        ]));
         foreach ($policies as $column => $policy) {
             if ($policy !== TenantSecretPolicy::ProtectedDomainSecret) {
                 continue;
@@ -106,6 +117,12 @@ final readonly class CompanyBackupProtectedSecretProjection
             $columns[] = $column;
             $storage[$column] = $contract->storage;
             $contexts[$column] = $contract->context;
+            $contract->contextTemplate?->assertAllowedColumns(
+                $allowedContextColumns,
+                $definition->key,
+                $column,
+            );
+            $contextTemplates[$column] = $contract->contextTemplate;
         }
         if ($columns === []) {
             throw self::error('secret_source_projection_empty', $definition->key);
@@ -120,6 +137,7 @@ final readonly class CompanyBackupProtectedSecretProjection
             $columns,
             $storage,
             $contexts,
+            $contextTemplates,
         );
     }
 
@@ -158,12 +176,37 @@ final readonly class CompanyBackupProtectedSecretProjection
     public function selectedColumns(): array
     {
         $columns = $this->primaryKey;
+        foreach ($this->contextTemplates as $template) {
+            if ($template === null) {
+                continue;
+            }
+            foreach ($template->columns as $column) {
+                if (!in_array($column, $columns, true)) {
+                    $columns[] = $column;
+                }
+            }
+        }
         foreach ($this->columns as $column) {
             if (!in_array($column, $columns, true)) {
                 $columns[] = $column;
             }
         }
         return $columns;
+    }
+
+    /** @param array<string,mixed> $row */
+    public function contextFor(string $column, array $row): ?string
+    {
+        if (!array_key_exists($column, $this->contextTemplates)) {
+            throw self::error(
+                'secret_source_schema_invalid',
+                $this->registryKey,
+                $column,
+            );
+        }
+        $template = $this->contextTemplates[$column];
+
+        return $template?->resolve($row, $this->registryKey, $column);
     }
 
     /** @return list<string> */

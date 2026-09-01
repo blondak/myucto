@@ -97,10 +97,11 @@ final readonly class CompanyBackupSqlProtectedSecretSource implements
                             $column,
                         );
                     }
+                    $context = $projection->contextFor($column, $row);
                     try {
                         $plaintext = $projection->storage[$column]->decode(
                             $stored,
-                            $projection->contexts[$column],
+                            $context,
                             $this->encryption,
                         );
                     } catch (\Throwable $e) {

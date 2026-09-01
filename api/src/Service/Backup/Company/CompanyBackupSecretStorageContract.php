@@ -10,6 +10,7 @@ final readonly class CompanyBackupSecretStorageContract
     private function __construct(
         public CompanyBackupSecretStorage $storage,
         public ?string $context,
+        public ?CompanyBackupSecretContextTemplate $contextTemplate,
     ) {}
 
     public static function fromMetadata(
@@ -31,17 +32,26 @@ final readonly class CompanyBackupSecretStorageContract
         $keys = array_keys($metadata);
         sort($keys, SORT_STRING);
         $context = $metadata['context'] ?? null;
+        $contextTemplate = null;
         if ($storage === CompanyBackupSecretStorage::ApplicationEncryptedContext) {
             if ($keys !== ['context', 'policy', 'storage']
                 || !is_string($context)
-                || preg_match('/^[a-z][a-z0-9:._-]{0,127}$/D', $context) !== 1
             ) {
                 throw self::error('secret_source_storage_invalid', $registryKey, $column);
             }
+            $contextTemplate = CompanyBackupSecretContextTemplate::fromString(
+                $context,
+                $registryKey,
+                $column,
+            );
         } elseif ($keys !== ['policy', 'storage'] || $context !== null) {
             throw self::error('secret_source_storage_invalid', $registryKey, $column);
         }
-        return new self($storage, is_string($context) ? $context : null);
+        return new self(
+            $storage,
+            is_string($context) ? $context : null,
+            $contextTemplate,
+        );
     }
 
     private static function error(

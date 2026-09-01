@@ -147,6 +147,42 @@ final class CompanyBackupSqlOptionalSecretSourceTest extends TestCase
         }
     }
 
+    public function testProjectionRejectsDynamicContextForOptionalCredential(): void
+    {
+        $definition = $this->definition();
+        $details = $definition->details;
+        $details['secrets']['smtp_password_enc']['storage'] =
+            CompanyBackupSecretStorage::ApplicationEncryptedContext->value;
+        $details['secrets']['smtp_password_enc']['context'] =
+            'backup:{supplier_id}:{id}:smtp_password';
+        $invalid = new TenantDataDefinition(
+            $definition->key,
+            $definition->kind,
+            $definition->policy,
+            $definition->profiles,
+            $details,
+        );
+        $selection = $this->selection($invalid, [[
+            'registry_key' => $invalid->key,
+            'scope' => 'column',
+            'name' => 'smtp_password_enc',
+            'primary_key' => ['id' => 31],
+        ]]);
+
+        try {
+            CompanyBackupOptionalSecretProjection::fromSelection(
+                $invalid,
+                $selection->entries(),
+            );
+            self::fail(
+                'Volitelný credential nesmí používat řádkový context template.',
+            );
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('secret_source_storage_invalid', $e->errorCode);
+            self::assertSame('smtp_password_enc', $e->column);
+        }
+    }
+
     public function testProductionOptionalColumnsDeclareExactAtRestStorage(): void
     {
         $draft = TenantDataRegistryFactory::draftV1();
