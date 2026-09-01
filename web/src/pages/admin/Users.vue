@@ -37,6 +37,7 @@ const supplierSearchOpen = ref(false)
 const supplierCursor = ref<string | null>(null)
 const assignments = ref<Array<UserSupplierAssignment & { role_id: number | null }>>([])
 let searchTimer: ReturnType<typeof setTimeout> | undefined
+let supplierSearchGeneration = 0
 
 const form = reactive({ id: null as number | null, email: '', name: '', role_id: 0, locale: 'cs' as 'cs' | 'en', is_active: true, password: '' })
 const selectedRole = computed(() => roles.value.find(r => r.id === form.role_id) ?? null)
@@ -63,8 +64,10 @@ async function load() {
 
 function resetSupplierSearch() {
   clearTimeout(searchTimer)
+  supplierSearchGeneration++
   supplierQuery.value = ''
   supplierResults.value = []
+  supplierSearching.value = false
   supplierCursor.value = null
   supplierSearchOpen.value = false
 }
@@ -85,13 +88,25 @@ async function openEdit(user: AdminUser) {
 }
 
 async function searchSuppliers(query: string, append: boolean) {
+  const normalizedQuery = query.trim()
+  if (normalizedQuery.length === 1 && !/^\d$/.test(normalizedQuery)) {
+    supplierResults.value = []
+    supplierCursor.value = null
+    supplierSearching.value = false
+    return
+  }
+  const generation = ++supplierSearchGeneration
+  const cursor = append ? supplierCursor.value : null
   supplierSearching.value = true
   try {
-    const response = await adminApi.searchSuppliers({ q: query || undefined, limit: 20, ...(append && supplierCursor.value ? { cursor: supplierCursor.value } : {}) })
+    const response = await adminApi.searchSuppliers({ q: normalizedQuery || undefined, limit: 20, ...(cursor ? { cursor } : {}) })
+    if (generation !== supplierSearchGeneration || !supplierSearchOpen.value || normalizedQuery !== supplierQuery.value.trim()) return
     const available = response.data.filter(s => !assignments.value.some(a => a.supplier_id === s.id))
     supplierResults.value = append ? [...supplierResults.value, ...available] : available
     supplierCursor.value = response.next_cursor
-  } finally { supplierSearching.value = false }
+  } finally {
+    if (generation === supplierSearchGeneration) supplierSearching.value = false
+  }
 }
 
 function openSupplierSearch() {
@@ -102,12 +117,21 @@ function openSupplierSearch() {
 function closeSupplierSearch() {
   supplierSearchOpen.value = false
   clearTimeout(searchTimer)
+  supplierSearchGeneration++
+  supplierSearching.value = false
 }
 
 watch(supplierQuery, query => {
   clearTimeout(searchTimer)
+  supplierSearchGeneration++
+  supplierSearching.value = false
   if (!supplierSearchOpen.value) return
-  if (query.length === 1) { supplierResults.value = []; return }
+  const normalizedQuery = query.trim()
+  if (normalizedQuery.length === 1 && !/^\d$/.test(normalizedQuery)) {
+    supplierResults.value = []
+    supplierCursor.value = null
+    return
+  }
   searchTimer = setTimeout(() => { void searchSuppliers(query, false) }, 275)
 })
 
