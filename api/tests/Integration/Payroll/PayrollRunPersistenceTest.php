@@ -2476,6 +2476,141 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-02-03 09:00:00', $cash['updated_at']);
     }
 
+    public function testCompanyBackupStreamsEmploymentChecklist(): void
+    {
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_checklist_items
+                (supplier_id, employment_id, phase, item_key, status, due_date,
+                 completed_at, completed_by, note, row_version, created_at,
+                 updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $insert->execute([
+            $this->supplierId,
+            $this->employmentId,
+            'onboarding',
+            'employment_contract',
+            'completed',
+            '2026-01-01',
+            '2026-01-03 12:00:00',
+            $this->actors[0],
+            'Synteticky dokončený nástupní úkol',
+            3,
+            '2026-01-02 08:00:00',
+            '2026-01-03 12:00:00',
+        ]);
+        $completedId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->supplierId,
+            $this->employmentId,
+            'offboarding',
+            'termination_document',
+            'pending',
+            null,
+            null,
+            null,
+            null,
+            1,
+            '2026-06-04 09:00:00',
+            '2026-06-04 09:00:00',
+        ]);
+        $pendingId = (int) $this->db->pdo()->lastInsertId();
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Synthetic Foreign Checklist Person", "employee", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherEmployeeId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, "CHK", "Syntetická cizí účtárna", 1)'
+        )->execute([$this->otherSupplierId]);
+        $otherOfficeId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, office_id, code, relation_type,
+                 status, start_date, actual_start_date, is_primary)
+             VALUES (?, ?, ?, "SYN-CHK", "employment", "active",
+                     "2026-01-01", "2026-01-01", 1)'
+        )->execute([
+            $this->otherSupplierId,
+            $otherEmployeeId,
+            $otherOfficeId,
+        ]);
+        $otherEmploymentId = (int) $this->db->pdo()->lastInsertId();
+        $insert->execute([
+            $this->otherSupplierId,
+            $otherEmploymentId,
+            'onboarding',
+            'employment_contract',
+            'completed',
+            '2026-01-01',
+            '2026-01-03 12:00:00',
+            $this->actors[0],
+            null,
+            1,
+            '2026-01-02 08:00:00',
+            '2026-01-03 12:00:00',
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_employment_checklist_items',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(),
+            $this->supplierId,
+            $definition,
+        ));
+        self::assertCount(2, $rows);
+        $completed = $rows[0];
+        $pending = $rows[1];
+        self::assertSame($completedId, (int) $completed['id']);
+        self::assertSame($this->supplierId, (int) $completed['supplier_id']);
+        self::assertSame($this->employmentId, (int) $completed['employment_id']);
+        self::assertSame('onboarding', $completed['phase']);
+        self::assertSame('employment_contract', $completed['item_key']);
+        self::assertSame('completed', $completed['status']);
+        self::assertSame('2026-01-01', $completed['due_date']);
+        self::assertSame('2026-01-03 12:00:00', $completed['completed_at']);
+        self::assertSame($this->actors[0], (int) $completed['completed_by']);
+        self::assertSame(
+            'Synteticky dokončený nástupní úkol',
+            $completed['note'],
+        );
+        self::assertSame(3, (int) $completed['row_version']);
+        self::assertSame('2026-01-02 08:00:00', $completed['created_at']);
+        self::assertSame('2026-01-03 12:00:00', $completed['updated_at']);
+
+        self::assertSame($pendingId, (int) $pending['id']);
+        self::assertSame('offboarding', $pending['phase']);
+        self::assertSame('termination_document', $pending['item_key']);
+        self::assertSame('pending', $pending['status']);
+        self::assertNull($pending['due_date']);
+        self::assertNull($pending['completed_at']);
+        self::assertNull($pending['completed_by']);
+        self::assertNull($pending['note']);
+        self::assertSame(1, (int) $pending['row_version']);
+        self::assertSame('2026-06-04 09:00:00', $pending['created_at']);
+        self::assertSame('2026-06-04 09:00:00', $pending['updated_at']);
+    }
+
     public function testCompanyBackupStreamsPersonIdentityHistory(): void
     {
         $insert = $this->db->pdo()->prepare(

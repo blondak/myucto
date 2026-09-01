@@ -28,6 +28,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionLedgerProjecti
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeeProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployerPoliciesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentChecklistItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentTermsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
@@ -86,6 +87,7 @@ final class TenantDataRegistryFactory
         'payroll_deduction_ledger' => 'payroll',
         'payroll_employees' => 'payroll',
         'payroll_employer_policies' => 'payroll',
+        'payroll_employment_checklist_items' => 'payroll',
         'payroll_employments' => 'payroll',
         'payroll_employment_terms' => 'payroll',
         'payroll_input_imports' => 'payroll',
@@ -193,6 +195,12 @@ final class TenantDataRegistryFactory
             'effective_from',
         ],
         'payroll_employer_policies' => ['supplier_id', 'valid_from'],
+        'payroll_employment_checklist_items' => [
+            'supplier_id',
+            'employment_id',
+            'phase',
+            'item_key',
+        ],
         'payroll_input_imports' => [
             'supplier_id',
             'period_start',
@@ -1405,6 +1413,20 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollEmployeesProjection::references(),
                     'restore_overrides' =>
                         CompanyBackupPayrollEmployeesProjection::restoreOverrides(),
+                ],
+            ];
+        }
+        if ($table === 'payroll_employment_checklist_items') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollEmploymentChecklistItemsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollEmploymentChecklistItemsProjection::references(),
+                    'restore_overrides' => [],
                 ],
             ];
         }
