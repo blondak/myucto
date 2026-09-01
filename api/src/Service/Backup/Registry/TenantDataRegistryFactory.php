@@ -36,6 +36,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthCoveragePro
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMinimumReductionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMonthEvidenceProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthOtherEmployerBasesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonIdentityHistoryProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialDiscountClaimsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialJurisdictionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonTaxCreditClaimsProjection;
@@ -97,6 +98,7 @@ final class TenantDataRegistryFactory
         'payroll_person_health_minimum_reductions' => 'payroll',
         'payroll_person_health_month_evidence' => 'payroll',
         'payroll_person_health_other_employer_bases' => 'payroll',
+        'payroll_person_identity_history' => 'payroll',
         'payroll_person_social_discount_claims' => 'payroll',
         'payroll_person_social_jurisdictions' => 'payroll',
         'payroll_person_tax_child_claims' => 'payroll',
@@ -215,6 +217,11 @@ final class TenantDataRegistryFactory
             'employee_id',
             'period_start',
             'employer_reference',
+        ],
+        'payroll_person_identity_history' => [
+            'supplier_id',
+            'employee_id',
+            'effective_from',
         ],
         'payroll_person_social_discount_claims' => [
             'supplier_id',
@@ -1538,6 +1545,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollPersonSocialJurisdictionsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_person_identity_history') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonIdentityHistoryProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollPersonIdentityHistoryProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
