@@ -36,6 +36,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmploymentTermsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputImportsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInputsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollInstitutionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOfficesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeAveragingPeriodsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeCompensationsProjection;
@@ -104,6 +105,7 @@ final class TenantDataRegistryFactory
         'payroll_inputs' => 'payroll',
         'payroll_insolvency_payment_instructions' => 'payroll',
         'payroll_institution_accounts' => 'payroll',
+        'payroll_institutions' => 'payroll',
         'payroll_jmhz_work_month_revisions' => 'payroll',
         'payroll_offices' => 'payroll',
         'payroll_overtime_averaging_periods' => 'payroll',
@@ -219,6 +221,11 @@ final class TenantDataRegistryFactory
             'supplier_id',
             'period_start',
             'content_hash',
+        ],
+        'payroll_institutions' => [
+            'supplier_id',
+            'institution_type',
+            'institution_code',
         ],
         'payroll_offices' => ['supplier_id', 'code'],
         'payroll_overtime_averaging_periods' => ['supplier_id', 'valid_from'],
@@ -1562,6 +1569,20 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollInputsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_institutions') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollInstitutionsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollInstitutionsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

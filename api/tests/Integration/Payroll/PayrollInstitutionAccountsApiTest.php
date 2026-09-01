@@ -9,10 +9,16 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
+use Psr\Container\ContainerInterface;
+use Psr\Http\Message\ResponseInterface;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -40,6 +46,7 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
 
         try {
             $container = Bootstrap::buildApp()->getContainer();
+            self::assertInstanceOf(ContainerInterface::class, $container);
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollInstitutionAccountsAction::class);
             $this->sensitiveData = $container->get(PayrollSensitiveData::class);
@@ -53,12 +60,16 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         }
 
         $pdo = $this->db->pdo();
-        $sourceSupplierId = (int) ($pdo->query(
+        $sourceSupplier = $pdo->query(
             'SELECT id FROM supplier ORDER BY id LIMIT 1'
-        )->fetchColumn() ?: 0);
-        $this->userId = (int) ($pdo->query(
+        );
+        $sourceUser = $pdo->query(
             'SELECT id FROM users ORDER BY id LIMIT 1'
-        )->fetchColumn() ?: 0);
+        );
+        self::assertInstanceOf(\PDOStatement::class, $sourceSupplier);
+        self::assertInstanceOf(\PDOStatement::class, $sourceUser);
+        $sourceSupplierId = (int) ($sourceSupplier->fetchColumn() ?: 0);
+        $this->userId = (int) ($sourceUser->fetchColumn() ?: 0);
         if ($sourceSupplierId === 0 || $this->userId === 0) {
             $this->markTestSkipped('Chybí supplier nebo uživatel.');
         }
@@ -233,6 +244,53 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         ]);
     }
 
+    public function testCompanyBackupStreamsOnlySelectedTenantInstitution(): void
+    {
+        $ownAccount = $this->json(
+            $this->create($this->supplierId, $this->payload()),
+        )['account'] ?? null;
+        $foreignAccount = $this->json(
+            $this->create($this->otherSupplierId, $this->payload()),
+        )['account'] ?? null;
+        self::assertIsArray($ownAccount);
+        self::assertIsArray($foreignAccount);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_institutions');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+        $rows = array_values(iterator_to_array(
+            (new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+                $this->db->pdo(),
+                $this->supplierId,
+                $definition,
+            ),
+        ));
+
+        self::assertCount(1, $rows);
+        self::assertSame((int) $ownAccount['institution_id'], (int) $rows[0]['id']);
+        self::assertNotSame(
+            (int) $foreignAccount['institution_id'],
+            (int) $rows[0]['id'],
+        );
+        self::assertSame($this->supplierId, (int) $rows[0]['supplier_id']);
+        self::assertSame('health_insurer', $rows[0]['institution_type']);
+        self::assertSame('SYNTH-111', $rows[0]['institution_code']);
+        self::assertArrayHasKey('created_at', $rows[0]);
+    }
+
     public function testOptimisticLockAndImmutableBankHistory(): void
     {
         $created = $this->json($this->create($this->supplierId, $this->payload()))['account'];
@@ -381,7 +439,7 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         int $supplierId,
         array $payload,
         string $role = 'admin',
-    ): Response {
+    ): ResponseInterface {
         return $this->action->create(
             $this->request('POST', $supplierId, $role)->withParsedBody($payload),
             new Response(),
@@ -405,7 +463,7 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function json(Response $response): array
+    private function json(ResponseInterface $response): array
     {
         $response->getBody()->rewind();
         $decoded = json_decode((string) $response->getBody(), true);
