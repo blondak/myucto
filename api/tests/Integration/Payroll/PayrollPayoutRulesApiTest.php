@@ -9,6 +9,12 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
+use MyInvoice\Service\Backup\Company\CompanyBackupEncodedReference;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -324,6 +330,130 @@ final class PayrollPayoutRulesApiTest extends TestCase
 
         self::assertSame(404, $response->getStatusCode());
         self::assertSame(0, $this->activeRuleCount($this->supplierId));
+    }
+
+    public function testCompanyBackupRemapsOnlyBankDestination(): void
+    {
+        $accountId = $this->createAccount($this->employeeId, verified: true);
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payout_rules
+                (supplier_id, employee_id, allocation_reference,
+                 destination_kind, destination_reference, allocation_kind,
+                 amount_minor, basis_points, priority_no, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'
+        );
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'backup-bank',
+            'bank',
+            'account:' . $accountId,
+            'fixed',
+            1_000,
+            null,
+            10,
+        ]);
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'backup-cash',
+            'cash',
+            null,
+            'percentage',
+            null,
+            2_500,
+            20,
+        ]);
+        $insert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'backup-partner',
+            'partner_settlement',
+            '365.100',
+            'remainder',
+            null,
+            null,
+            30,
+        ]);
+
+        $foreignEmployeeId = $this->createEmployee($this->foreignSupplierId);
+        $insert->execute([
+            $this->foreignSupplierId,
+            $foreignEmployeeId,
+            'backup-foreign',
+            'cash',
+            null,
+            'remainder',
+            null,
+            null,
+            10,
+        ]);
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_payout_rules');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->encodedReferences->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = array_values(iterator_to_array(
+            (new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+                $this->db->pdo(),
+                $this->supplierId,
+                $definition,
+            ),
+        ));
+        self::assertCount(3, $rows);
+        $rowsByReference = [];
+        foreach ($rows as $row) {
+            self::assertArrayNotHasKey('remainder_guard', $row);
+            self::assertSame(1, (int) $row['is_active']);
+            $rowsByReference[(string) $row['allocation_reference']] = $row;
+        }
+        self::assertArrayHasKey('backup-bank', $rowsByReference);
+        self::assertArrayHasKey('backup-cash', $rowsByReference);
+        self::assertArrayHasKey('backup-partner', $rowsByReference);
+        self::assertArrayNotHasKey('backup-foreign', $rowsByReference);
+
+        $restoredBank = $projection->remapPayloadReferences(
+            $rowsByReference['backup-bank'],
+            static function (
+                CompanyBackupEncodedReference|CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ) use ($accountId): int {
+                self::assertInstanceOf(CompanyBackupEncodedReference::class, $reference);
+                self::assertSame('table:payroll_person_accounts', $reference->target);
+                self::assertSame($accountId, $value);
+                return $accountId + 100_000;
+            },
+        );
+        self::assertSame(
+            'account:' . ($accountId + 100_000),
+            $restoredBank['destination_reference'],
+        );
+
+        foreach (['backup-cash', 'backup-partner'] as $reference) {
+            self::assertSame(
+                $rowsByReference[$reference],
+                $projection->remapPayloadReferences(
+                    $rowsByReference[$reference],
+                    static fn (): never => throw new \LogicException(
+                        'Nebankovní cíl nesmí volat ID mapper.',
+                    ),
+                ),
+            );
+        }
     }
 
     /**

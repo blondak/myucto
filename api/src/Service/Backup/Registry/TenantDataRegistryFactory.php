@@ -44,6 +44,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeAveragingPeriod
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeCompensationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeConsentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeProtectionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPayoutRulesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonAccountsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonAddressesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthCoverageProjection;
@@ -244,6 +245,11 @@ final class TenantDataRegistryFactory
             'employment_id',
             'protection',
             'valid_from',
+        ],
+        'payroll_payout_rules' => [
+            'supplier_id',
+            'employee_id',
+            'allocation_reference',
         ],
         'payroll_person_addresses' => [
             'supplier_id',
@@ -1728,6 +1734,23 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollOvertimeProtectionsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_payout_rules') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPayoutRulesProjection::dataColumns(),
+                    'encoded_references' =>
+                        CompanyBackupPayrollPayoutRulesProjection::encodedReferences(),
+                    'embedded_references' => [],
+                    'generated_columns' =>
+                        CompanyBackupPayrollPayoutRulesProjection::generatedColumns(),
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollPayoutRulesProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
