@@ -34,6 +34,7 @@ final readonly class CompanyBackupEncodedReferenceSet
         $exported = array_fill_keys($dataColumns, true);
         $references = [];
         $claimed = [];
+        $claimedCorrelations = [];
         foreach ($metadata as $value) {
             $reference = CompanyBackupEncodedReference::fromArray(
                 $value,
@@ -46,6 +47,26 @@ final readonly class CompanyBackupEncodedReferenceSet
                     $reference->column,
                 );
             }
+            $correlatedIdColumn = $reference->correlatedIdColumn;
+            if ($correlatedIdColumn !== null
+                && !isset($exported[$correlatedIdColumn])
+            ) {
+                throw new CompanyBackupDataSourceException(
+                    'data_encoded_reference_correlation_source_not_exported',
+                    $registryKey,
+                    $correlatedIdColumn,
+                );
+            }
+            if ($correlatedIdColumn !== null
+                && (isset($claimed[$correlatedIdColumn])
+                    || isset($claimedCorrelations[$correlatedIdColumn]))
+            ) {
+                throw new CompanyBackupDataSourceException(
+                    'data_encoded_reference_duplicate',
+                    $registryKey,
+                    $correlatedIdColumn,
+                );
+            }
             $conditionColumn = $reference->condition?->column;
             if ($conditionColumn !== null && !isset($exported[$conditionColumn])) {
                 throw new CompanyBackupDataSourceException(
@@ -54,7 +75,9 @@ final readonly class CompanyBackupEncodedReferenceSet
                     $conditionColumn,
                 );
             }
-            if (isset($claimed[$reference->column])) {
+            if (isset($claimed[$reference->column])
+                || isset($claimedCorrelations[$reference->column])
+            ) {
                 throw new CompanyBackupDataSourceException(
                     'data_encoded_reference_duplicate',
                     $registryKey,
@@ -62,6 +85,9 @@ final readonly class CompanyBackupEncodedReferenceSet
                 );
             }
             $claimed[$reference->column] = true;
+            if ($correlatedIdColumn !== null) {
+                $claimedCorrelations[$correlatedIdColumn] = true;
+            }
             $references[] = $reference;
         }
         $ordered = $references;
@@ -117,11 +143,19 @@ final readonly class CompanyBackupEncodedReferenceSet
             if (!array_key_exists($reference->column, $row)) {
                 throw $this->valueError($reference);
             }
+            $correlation = $this->correlation($row, $reference);
+            if (!$correlation['active']) {
+                continue;
+            }
             $value = $row[$reference->column];
             if ($value === null && $reference->nullable) {
                 continue;
             }
-            if ($this->sourceValue($value, $reference) === null) {
+            $source = $this->sourceValue($value, $reference);
+            if ($source === null
+                || ($correlation['identifier'] !== null
+                    && $source['identifier'] !== $correlation['identifier'])
+            ) {
                 throw $this->valueError($reference);
             }
         }
@@ -137,6 +171,10 @@ final readonly class CompanyBackupEncodedReferenceSet
         $this->assertSourceRow($row);
         foreach ($this->references as $reference) {
             if (!$this->conditionMatches($row, $reference)) {
+                continue;
+            }
+            $correlation = $this->correlation($row, $reference);
+            if (!$correlation['active']) {
                 continue;
             }
             $value = $row[$reference->column];
@@ -155,11 +193,43 @@ final readonly class CompanyBackupEncodedReferenceSet
             if (!is_int($mapped) || $mapped < $minimum) {
                 throw $this->valueError($reference);
             }
+            if ($reference->correlatedIdColumn !== null) {
+                $row[$reference->correlatedIdColumn] = $mapped;
+            }
             $row[$reference->column] = $reference->valuePrefix
                 . $mapped
                 . $source['suffix'];
         }
         return $row;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array{active:bool,identifier:?int}
+     */
+    private function correlation(
+        array $row,
+        CompanyBackupEncodedReference $reference,
+    ): array {
+        $column = $reference->correlatedIdColumn;
+        if ($column === null) {
+            return ['active' => true, 'identifier' => null];
+        }
+        if (!array_key_exists($column, $row)) {
+            throw $this->valueError($reference);
+        }
+        $value = $row[$column];
+        if ($value === null) {
+            return ['active' => false, 'identifier' => null];
+        }
+        $minimum = $reference->mapping
+            === CompanyBackupReferenceMapping::TenantIdOrZero
+            ? 0
+            : 1;
+        if (!is_int($value) || $value < $minimum) {
+            throw $this->valueError($reference);
+        }
+        return ['active' => true, 'identifier' => $value];
     }
 
     /** @param array<string,mixed> $row */

@@ -52,6 +52,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthOtherEmploy
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonIdentityHistoryProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialDiscountClaimsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialJurisdictionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonTaxChildClaimsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonTaxCreditClaimsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonTaxDeclarationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonTaxResidencesProjection;
@@ -284,6 +285,12 @@ final class TenantDataRegistryFactory
         'payroll_person_social_jurisdictions' => [
             'supplier_id',
             'employee_id',
+            'effective_from',
+        ],
+        'payroll_person_tax_child_claims' => [
+            'supplier_id',
+            'employee_id',
+            'child_reference',
             'effective_from',
         ],
         'payroll_person_tax_credit_claims' => [
@@ -1846,6 +1853,22 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollPersonSocialDiscountClaimsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_person_tax_child_claims') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonTaxChildClaimsProjection::dataColumns(),
+                    'encoded_references' =>
+                        CompanyBackupPayrollPersonTaxChildClaimsProjection::encodedReferences(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollPersonTaxChildClaimsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

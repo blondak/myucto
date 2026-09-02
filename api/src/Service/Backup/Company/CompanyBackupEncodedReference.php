@@ -16,6 +16,7 @@ final readonly class CompanyBackupEncodedReference
     private function __construct(
         public string $column,
         public ?CompanyBackupReferenceCondition $condition,
+        public ?string $correlatedIdColumn,
         public CompanyBackupReferenceMapping $mapping,
         public bool $nullable,
         public string $target,
@@ -33,7 +34,7 @@ final readonly class CompanyBackupEncodedReference
         }
         $keys = array_keys($value);
         sort($keys, SORT_STRING);
-        if ($keys !== [
+        $baseKeys = [
             'column',
             'condition',
             'mapping',
@@ -42,11 +43,21 @@ final readonly class CompanyBackupEncodedReference
             'target_columns',
             'value_prefix',
             'value_suffix_separator',
-        ]) {
+        ];
+        $allowedKeys = [...$baseKeys, 'correlated_id_column'];
+        sort($allowedKeys, SORT_STRING);
+        if (array_diff($baseKeys, $keys) !== []
+            || array_diff($keys, $allowedKeys) !== []
+        ) {
             throw self::invalid($registryKey);
         }
 
         $column = $value['column'];
+        $hasCorrelatedIdColumn = array_key_exists(
+            'correlated_id_column',
+            $value,
+        );
+        $correlatedIdColumn = $value['correlated_id_column'] ?? null;
         $mappingValue = $value['mapping'];
         $mapping = is_string($mappingValue)
             ? CompanyBackupReferenceMapping::tryFrom($mappingValue)
@@ -66,6 +77,11 @@ final readonly class CompanyBackupEncodedReference
                 CompanyBackupReferenceMapping::TenantIdOrZero,
             ], true)
             || !is_bool($nullable)
+            || ($hasCorrelatedIdColumn
+                && (!is_string($correlatedIdColumn)
+                    || !self::isIdentifier($correlatedIdColumn)
+                    || $correlatedIdColumn === $column
+                    || $nullable))
             || !is_string($target)
             || !str_starts_with($target, 'table:')
             || !TenantDataDefinition::isValidKey($target)
@@ -82,17 +98,22 @@ final readonly class CompanyBackupEncodedReference
             );
         }
         $conditionValue = $value['condition'];
+        $referenceColumns = [$column];
+        if (is_string($correlatedIdColumn)) {
+            $referenceColumns[] = $correlatedIdColumn;
+        }
         $condition = $conditionValue === null
             ? null
             : CompanyBackupReferenceCondition::fromArray(
                 $conditionValue,
                 $registryKey,
-                [$column],
+                $referenceColumns,
             );
 
         return new self(
             $column,
             $condition,
+            is_string($correlatedIdColumn) ? $correlatedIdColumn : null,
             $mapping,
             $nullable,
             $target,
@@ -109,8 +130,11 @@ final readonly class CompanyBackupEncodedReference
 
     public function signature(): string
     {
-        $signature = $this->column
-            . '->'
+        $signature = $this->column;
+        if ($this->correlatedIdColumn !== null) {
+            $signature .= '=' . $this->correlatedIdColumn;
+        }
+        $signature .= '->'
             . $this->targetTable()
             . ':'
             . implode(',', $this->targetColumns);
@@ -122,6 +146,11 @@ final readonly class CompanyBackupEncodedReference
             $signature .= '~' . $this->valueSuffixSeparator;
         }
         return $signature;
+    }
+
+    private static function isIdentifier(string $value): bool
+    {
+        return preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $value) === 1;
     }
 
     /** @return list<string> */

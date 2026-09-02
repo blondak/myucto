@@ -11,6 +11,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReference;
+use MyInvoice\Service\Backup\Company\CompanyBackupEncodedReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlProtectedSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
@@ -293,6 +295,150 @@ final class PayrollDependantApiTest extends TestCase
                 $this->sensitiveData,
             ),
         );
+    }
+
+    public function testCompanyBackupStreamsAndRemapsChildClaimGraph(): void
+    {
+        $dependantId = $this->createChild();
+        $created = $this->json($this->postClaim(
+            $dependantId,
+            $this->claim(['effective_from' => '2026-01-01']),
+        ));
+        $original = $created['dependants'][0]['claims'][0];
+        $this->approveRun('2026-03-01');
+        $superseded = $this->json($this->putClaim(
+            $dependantId,
+            (int) $original['id'],
+            $this->claim([
+                'child_order' => 2,
+                'effective_from' => '2026-01-01',
+                'row_version' => $original['row_version'],
+            ]),
+        ));
+        $claims = $superseded['dependants'][0]['claims'];
+        self::assertCount(2, $claims);
+
+        $legacyInsert = $this->db->pdo()->prepare(
+            "INSERT INTO payroll_person_tax_child_claims
+                (supplier_id, employee_id, dependant_id, child_reference,
+                 child_order, ztp_p, evidence_status,
+                 shared_household_confirmed, other_claimant_excluded,
+                 effective_from, effective_to, evidence_reference)
+             VALUES (?, ?, NULL, ?, 3, 0, 'unverified', 0, 0,
+                     '2026-01-01', NULL, NULL)"
+        );
+        $legacyInsert->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'legacy:synthetic-child',
+        ]);
+        $legacyId = (int) $this->db->pdo()->lastInsertId();
+
+        $foreign = $this->post(
+            $this->otherSupplierId,
+            $this->otherEmployeeId,
+            $this->child(),
+        );
+        self::assertSame(200, $foreign->getStatusCode(), (string) $foreign->getBody());
+        $foreignDependantId = (int) $this->json($foreign)['dependants'][0]['id'];
+        $foreignInsert = $this->db->pdo()->prepare(
+            "INSERT INTO payroll_person_tax_child_claims
+                (supplier_id, employee_id, dependant_id, child_reference,
+                 child_order, ztp_p, evidence_status,
+                 shared_household_confirmed, other_claimant_excluded,
+                 effective_from, effective_to, evidence_reference)
+             VALUES (?, ?, ?, ?, 1, 0, 'unverified', 0, 0,
+                     '2026-01-01', NULL, NULL)"
+        );
+        $foreignInsert->execute([
+            $this->otherSupplierId,
+            $this->otherEmployeeId,
+            $foreignDependantId,
+            'dependant-' . $foreignDependantId,
+        ]);
+        $foreignClaimId = (int) $this->db->pdo()->lastInsertId();
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:payroll_person_tax_child_claims',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->encodedReferences->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = array_values(iterator_to_array(
+            (new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+                $this->db->pdo(),
+                $this->supplierId,
+                $definition,
+            ),
+        ));
+        self::assertCount(3, $rows);
+        $rowsById = [];
+        foreach ($rows as $row) {
+            $rowsById[(int) $row['id']] = $row;
+        }
+        self::assertArrayHasKey((int) $original['id'], $rowsById);
+        self::assertArrayHasKey($legacyId, $rowsById);
+        self::assertArrayNotHasKey($foreignClaimId, $rowsById);
+
+        $modernRows = array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => $row['dependant_id'] === $dependantId,
+        ));
+        self::assertCount(2, $modernRows);
+        foreach ($modernRows as $row) {
+            self::assertSame('dependant-' . $dependantId, $row['child_reference']);
+            $restored = $projection->remapPayloadReferences(
+                $row,
+                static function (
+                    CompanyBackupEncodedReference|CompanyBackupEmbeddedReference $reference,
+                    int|string $value,
+                ) use ($dependantId): int {
+                    self::assertInstanceOf(
+                        CompanyBackupEncodedReference::class,
+                        $reference,
+                    );
+                    self::assertSame('table:payroll_dependants', $reference->target);
+                    self::assertSame($dependantId, $value);
+                    return $dependantId + 100_000;
+                },
+            );
+            self::assertSame($dependantId + 100_000, $restored['dependant_id']);
+            self::assertSame(
+                'dependant-' . ($dependantId + 100_000),
+                $restored['child_reference'],
+            );
+        }
+
+        $legacy = $rowsById[$legacyId];
+        self::assertNull($legacy['dependant_id']);
+        self::assertSame('legacy:synthetic-child', $legacy['child_reference']);
+        self::assertSame(
+            $legacy,
+            $projection->remapPayloadReferences(
+                $legacy,
+                static fn (): never => throw new \LogicException(
+                    'Legacy reference bez dependant_id nesmí volat mapper.',
+                ),
+            ),
+        );
+
+        $originalRow = $rowsById[(int) $original['id']];
+        self::assertNotNull($originalRow['superseded_by_id']);
+        self::assertArrayHasKey((int) $originalRow['superseded_by_id'], $rowsById);
     }
 
     public function testOverlappingClaimForTheSameChildIsRejected(): void

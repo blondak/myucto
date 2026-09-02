@@ -56,6 +56,89 @@ final class CompanyBackupEncodedReferenceSetTest extends TestCase
         self::assertSame('travel:117:exempt', $restored['external_id']);
     }
 
+    public function testSynchronizesCorrelatedIdAndPreservesLegacyValue(): void
+    {
+        $references = CompanyBackupEncodedReferenceSet::fromArray(
+            [$this->dependantReference()],
+            'table:payroll_person_tax_child_claims',
+            ['dependant_id', 'child_reference'],
+        );
+        $references->assertRegistryTargets($this->targetRegistry());
+
+        self::assertSame(
+            'child_reference=dependant_id->payroll_dependants:id@dependant-',
+            $references->references[0]->signature(),
+        );
+        self::assertSame(
+            [
+                'dependant_id' => null,
+                'child_reference' => 'legacy:synthetic-child',
+            ],
+            $references->remap(
+                [
+                    'dependant_id' => null,
+                    'child_reference' => 'legacy:synthetic-child',
+                ],
+                static fn (): never => throw new \LogicException(
+                    'Legacy reference bez dependant_id nesmí volat mapper.',
+                ),
+            ),
+        );
+
+        $restored = $references->remap(
+            ['dependant_id' => 17, 'child_reference' => 'dependant-17'],
+            static function (
+                CompanyBackupEncodedReference $reference,
+                int $value,
+            ): int {
+                self::assertSame('table:payroll_dependants', $reference->target);
+                self::assertSame(17, $value);
+                return 117;
+            },
+        );
+        self::assertSame(117, $restored['dependant_id']);
+        self::assertSame('dependant-117', $restored['child_reference']);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function invalidCorrelatedRows(): iterable
+    {
+        yield 'different identifier' => [[
+            'dependant_id' => 18,
+            'child_reference' => 'dependant-17',
+        ]];
+        yield 'textual scalar identifier' => [[
+            'dependant_id' => '17',
+            'child_reference' => 'dependant-17',
+        ]];
+        yield 'zero scalar identifier' => [[
+            'dependant_id' => 0,
+            'child_reference' => 'dependant-0',
+        ]];
+        yield 'missing scalar identifier' => [[
+            'child_reference' => 'dependant-17',
+        ]];
+    }
+
+    /** @param array<string,mixed> $row */
+    #[DataProvider('invalidCorrelatedRows')]
+    public function testRejectsInvalidCorrelatedIdentity(array $row): void
+    {
+        $references = CompanyBackupEncodedReferenceSet::fromArray(
+            [$this->dependantReference()],
+            'table:payroll_person_tax_child_claims',
+            ['dependant_id', 'child_reference'],
+        );
+
+        try {
+            $references->assertSourceRow($row);
+            self::fail('Nesouhlasící skalární a řetězcové ID nesmí projít.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_encoded_reference_value_invalid', $e->errorCode);
+            self::assertSame('child_reference', $e->column);
+        }
+    }
+
     /** @return iterable<string,array{mixed}> */
     public static function invalidTravelValues(): iterable
     {
@@ -117,6 +200,59 @@ final class CompanyBackupEncodedReferenceSetTest extends TestCase
         } catch (CompanyBackupDataSourceException $e) {
             self::assertSame('data_encoded_reference_target_invalid', $e->errorCode);
         }
+
+        foreach ([
+            [...$this->dependantReference(), 'correlated_id_column' => null],
+            [...$this->dependantReference(), 'correlated_id_column' => 'child_reference'],
+            [...$this->dependantReference(), 'nullable' => true],
+        ] as $invalid) {
+            try {
+                CompanyBackupEncodedReferenceSet::fromArray(
+                    [$invalid],
+                    'table:payroll_person_tax_child_claims',
+                    ['dependant_id', 'child_reference'],
+                );
+                self::fail('Nejednoznačná korelace nesmí vstoupit do registru.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame(
+                    'data_encoded_reference_metadata_invalid',
+                    $e->errorCode,
+                );
+            }
+        }
+
+        try {
+            CompanyBackupEncodedReferenceSet::fromArray(
+                [$this->dependantReference()],
+                'table:payroll_person_tax_child_claims',
+                ['child_reference'],
+            );
+            self::fail('Korelované ID musí být součástí exportu.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame(
+                'data_encoded_reference_correlation_source_not_exported',
+                $e->errorCode,
+            );
+            self::assertSame('dependant_id', $e->column);
+        }
+
+        try {
+            CompanyBackupEncodedReferenceSet::fromArray(
+                [
+                    $this->dependantReference(),
+                    [
+                        ...$this->dependantReference(),
+                        'column' => 'alternate_reference',
+                    ],
+                ],
+                'table:payroll_person_tax_child_claims',
+                ['dependant_id', 'child_reference', 'alternate_reference'],
+            );
+            self::fail('Jedno ID nesmějí současně přepisovat dva kontrakty.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_encoded_reference_duplicate', $e->errorCode);
+            self::assertSame('dependant_id', $e->column);
+        }
     }
 
     /** @return array<string,mixed> */
@@ -137,11 +273,31 @@ final class CompanyBackupEncodedReferenceSetTest extends TestCase
         ];
     }
 
+    /** @return array<string,mixed> */
+    private function dependantReference(): array
+    {
+        return [
+            'column' => 'child_reference',
+            'condition' => null,
+            'correlated_id_column' => 'dependant_id',
+            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+            'nullable' => false,
+            'target' => 'table:payroll_dependants',
+            'target_columns' => ['id'],
+            'value_prefix' => 'dependant-',
+            'value_suffix_separator' => null,
+        ];
+    }
+
     private function targetRegistry(): TenantDataRegistry
     {
         return new TenantDataRegistry(1, [
             $this->definition(
                 'payroll_business_trips',
+                TenantDataPolicy::TenantOwned,
+            ),
+            $this->definition(
+                'payroll_dependants',
                 TenantDataPolicy::TenantOwned,
             ),
         ]);
