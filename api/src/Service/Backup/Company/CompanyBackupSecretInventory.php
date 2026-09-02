@@ -390,6 +390,9 @@ final readonly class CompanyBackupSecretInventory
     private static function columnDeclarations(
         TenantDataDefinition $definition,
     ): array {
+        if ($definition->policy === TenantDataPolicy::RuntimeDerived) {
+            return [];
+        }
         if (!array_key_exists('secrets', $definition->details)) {
             return [];
         }

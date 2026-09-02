@@ -13,8 +13,6 @@ use ZipArchive;
  */
 final class CompanyBackupArchiveWriter
 {
-    private const MIN_PASSWORD_BYTES = 12;
-    private const MAX_PASSWORD_BYTES = 1_024;
     private const FLUSH_ENTRIES = 200;
     private const FLUSH_BYTES = 33_554_432;
 
@@ -41,13 +39,7 @@ final class CompanyBackupArchiveWriter
         private readonly CompanyBackupFormat $format,
         private readonly CompanyBackupArchiveLimits $limits = new CompanyBackupArchiveLimits(),
     ) {
-        $passwordBytes = strlen($password);
-        if ($passwordBytes < self::MIN_PASSWORD_BYTES
-            || $passwordBytes > self::MAX_PASSWORD_BYTES
-            || str_contains($password, "\0")
-        ) {
-            throw new CompanyBackupArchiveWriteException('archive_password_weak');
-        }
+        CompanyBackupPasswordPolicy::assertValid($password);
         if (!defined('ZipArchive::EM_AES_256')) {
             throw new CompanyBackupArchiveWriteException('zip_aes256_unavailable');
         }

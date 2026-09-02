@@ -680,6 +680,23 @@ final class TenantDataRegistryFactory
             ],
         );
         $definitions[] = new TenantDataDefinition(
+            'table:company_backup_jobs',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::RuntimeDerived,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['backup_id'],
+                'feature_group' => 'backup',
+                'reason' => 'ephemeral_company_backup_job',
+                'secrets' => [
+                    'password_ciphertext' => [
+                        'policy' => TenantSecretPolicy::OmitAndReconfigure->value,
+                        'reason' => 'transient_job_password',
+                    ],
+                ],
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
             'table:countries',
             TenantDataObjectKind::Table,
             TenantDataPolicy::GlobalReference,

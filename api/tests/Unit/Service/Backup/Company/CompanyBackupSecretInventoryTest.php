@@ -293,6 +293,38 @@ final class CompanyBackupSecretInventoryTest extends TestCase
         CompanyBackupSecretInventory::requiredDeclarations($snapshot);
     }
 
+    public function testRuntimeJobSecretIsClassifiedButNotCountedAsTenantData(): void
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        $snapshot = TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
+            1,
+            [new TenantDataDefinition(
+                'table:company_backup_jobs',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::RuntimeDerived,
+                [$profile],
+                [
+                    'primary_key' => ['backup_id'],
+                    'reason' => 'ephemeral_company_backup_job',
+                    'secrets' => [
+                        'password_ciphertext' => [
+                            'policy' =>
+                                TenantSecretPolicy::OmitAndReconfigure->value,
+                            'reason' => 'transient_job_password',
+                        ],
+                    ],
+                ],
+            )],
+            [$profile],
+        ), $profile);
+
+        self::assertSame(
+            [],
+            CompanyBackupSecretInventory::requiredDeclarations($snapshot),
+            'Runtime job není součást firmy ani manifestového počtu vynechání.',
+        );
+    }
+
     private function registry(): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;

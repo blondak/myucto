@@ -25,6 +25,25 @@ use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupProductionProjectionTest extends TestCase
 {
+    public function testCompanyBackupJobsAreRuntimeMetadataOutsidePayload(): void
+    {
+        $definition = TenantDataRegistryFactory::draftV1()->definition(
+            'table:company_backup_jobs',
+        );
+
+        self::assertNotNull($definition);
+        self::assertSame(TenantDataPolicy::RuntimeDerived, $definition->policy);
+        self::assertFalse($definition->policy->hasMachineDataPayload());
+        self::assertSame(
+            'ephemeral_company_backup_job',
+            $definition->details['reason'] ?? null,
+        );
+        self::assertSame(
+            TenantSecretPolicy::OmitAndReconfigure->value,
+            $definition->details['secrets']['password_ciphertext']['policy'] ?? null,
+        );
+    }
+
     public function testBrandingProfilesDeclareSupplierEmailProfileAndLogo(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();

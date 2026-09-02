@@ -1,0 +1,431 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Backup;
+
+use DateTimeImmutable;
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Backup\Company\CompanyBackupJobException;
+use MyInvoice\Service\Backup\Company\CompanyBackupJobRetentionPolicy;
+use MyInvoice\Service\Backup\Company\CompanyBackupJobStatus;
+use MyInvoice\Service\Backup\Company\CompanyBackupJobStore;
+use MyInvoice\Service\Backup\Company\CompanyBackupStoredArtifact;
+use PDO;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+#[Group('integration')]
+final class CompanyBackupJobStoreTest extends TestCase
+{
+    private const PASSWORD = 'synthetic-job-password-42';
+    private const FINGERPRINT =
+        'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+    private Connection $db;
+    private CompanyBackupJobStore $jobs;
+    private int $supplierId = 0;
+    private int $foreignSupplierId = 0;
+    private int $userId = 0;
+    private bool $connected = false;
+
+    protected function setUp(): void
+    {
+        $rootDir = dirname(__DIR__, 4);
+        if (!is_file($rootDir . '/cfg.php')) {
+            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
+        }
+        try {
+            $container = Bootstrap::buildApp()->getContainer();
+            if ($container === null) {
+                throw new \RuntimeException('Aplikace nemá DI kontejner.');
+            }
+            $connection = $container->get(Connection::class);
+            if (!$connection instanceof Connection) {
+                throw new \RuntimeException('DI nevrátilo databázové spojení.');
+            }
+            $this->db = $connection;
+            $pdo = $this->db->pdo();
+            $this->connected = true;
+        } catch (\Throwable $e) {
+            $this->markTestSkipped('Testovací DB není dostupná: ' . $e->getMessage());
+        }
+        if (!$this->tableExists($pdo, 'company_backup_jobs')) {
+            self::fail('Chybí migrace tabulky company_backup_jobs.');
+        }
+
+        $countryId = $this->scalarInt(
+            $pdo,
+            "SELECT id FROM countries WHERE iso2 = 'CZ' ORDER BY id LIMIT 1",
+        );
+        $currencyId = $this->scalarInt(
+            $pdo,
+            "SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1",
+        );
+        $vatRateId = $this->scalarInt(
+            $pdo,
+            'SELECT id FROM vat_rates ORDER BY id LIMIT 1',
+        );
+        $this->userId = $this->scalarInt(
+            $pdo,
+            'SELECT id FROM users ORDER BY id LIMIT 1',
+        );
+        if ($countryId < 1 || $currencyId < 1 || $vatRateId < 1 || $this->userId < 1) {
+            $this->markTestSkipped('Testovací DB nemá základní syntetická data.');
+        }
+
+        $pdo->beginTransaction();
+        $this->supplierId = $this->createSupplier(
+            $pdo,
+            'Company backup job vlastník s.r.o.',
+            'company-backup-job-owner@example.test',
+            $countryId,
+            $currencyId,
+            $vatRateId,
+        );
+        $this->foreignSupplierId = $this->createSupplier(
+            $pdo,
+            'Company backup job cizí s.r.o.',
+            'company-backup-job-foreign@example.test',
+            $countryId,
+            $currencyId,
+            $vatRateId,
+        );
+        $this->jobs = new CompanyBackupJobStore(
+            $this->db,
+            new SecretEncryption(new Config([
+                'app' => [
+                    'secret_encryption_key' => base64_encode(str_repeat('j', 32)),
+                ],
+            ])),
+        );
+    }
+
+    protected function tearDown(): void
+    {
+        if (!$this->connected) {
+            return;
+        }
+        $pdo = $this->db->pdo();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $this->db->close();
+    }
+
+    public function testCreatesEncryptedTenantScopedJobWithoutExposingCiphertext(): void
+    {
+        $backupId = $this->createJob($this->supplierId);
+        $job = $this->jobs->find($backupId, $this->supplierId);
+
+        self::assertNotNull($job);
+        self::assertSame($backupId, $job['backup_id']);
+        self::assertSame('queued', $job['status']);
+        self::assertArrayNotHasKey('password_ciphertext', $job);
+        self::assertNull($this->jobs->find($backupId, $this->foreignSupplierId));
+        self::assertSame(self::PASSWORD, $this->jobs->passwordForWorker($backupId));
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT password_ciphertext FROM company_backup_jobs WHERE backup_id = ?',
+        );
+        $statement->execute([$backupId]);
+        $stored = $statement->fetchColumn();
+        self::assertIsString($stored);
+        self::assertStringStartsWith('enc:v2:', $stored);
+        self::assertStringNotContainsString(self::PASSWORD, $stored);
+    }
+
+    public function testCreateRequiresDedicatedValidApplicationEncryptionKey(): void
+    {
+        $fallbackOnly = new CompanyBackupJobStore(
+            $this->db,
+            new SecretEncryption(new Config([
+                'app' => ['pepper' => 'synthetic-fallback-is-not-enough'],
+            ])),
+        );
+
+        try {
+            $fallbackOnly->create(
+                $this->supplierId,
+                $this->userId,
+                self::FINGERPRINT,
+                self::PASSWORD,
+            );
+            self::fail('Nový citlivý job nesmí spoléhat na legacy HKDF fallback.');
+        } catch (CompanyBackupJobException $e) {
+            self::assertSame('job_secret_key_unavailable', $e->errorCode);
+        }
+
+        self::assertSame([], $this->jobs->listForSupplier($this->supplierId));
+    }
+
+    public function testOneActiveJobPerSupplierDoesNotBlockAnotherSupplier(): void
+    {
+        $first = $this->createJob($this->supplierId);
+
+        try {
+            $this->createJob($this->supplierId);
+            self::fail('Druhý aktivní backup job stejné firmy musí být odmítnut.');
+        } catch (CompanyBackupJobException $e) {
+            self::assertSame('already_running', $e->errorCode);
+        }
+
+        $foreign = $this->createJob($this->foreignSupplierId);
+        self::assertNotSame($first, $foreign);
+    }
+
+    public function testCompletesOnlyOrderedLifecycleAndClearsTransientPassword(): void
+    {
+        $backupId = $this->createJob($this->supplierId);
+        self::assertFalse($this->jobs->startSnapshotting($backupId));
+        self::assertTrue($this->jobs->startChecking($backupId));
+        self::assertFalse($this->jobs->startPackaging($backupId));
+        self::assertTrue($this->jobs->startSnapshotting($backupId));
+        self::assertTrue($this->jobs->startPackaging($backupId));
+
+        $completedAt = new DateTimeImmutable('2026-09-02T10:00:00+00:00');
+        $artifact = new CompanyBackupStoredArtifact(
+            $this->supplierId,
+            $backupId,
+            'sup-' . $this->supplierId . '/' . $backupId . '.zip',
+            'myucto-company-backup-' . $backupId . '.zip',
+            12_345,
+            str_repeat('a', 64),
+            77,
+        );
+        self::assertTrue($this->jobs->complete(
+            $backupId,
+            $artifact,
+            $completedAt,
+            new CompanyBackupJobRetentionPolicy(24),
+        ));
+
+        $job = $this->jobs->find($backupId, $this->supplierId);
+        self::assertNotNull($job);
+        self::assertSame(CompanyBackupJobStatus::Completed->value, $job['status']);
+        self::assertSame($artifact->relativePath, $job['artifact_path']);
+        self::assertSame(12_345, $job['artifact_bytes']);
+        self::assertSame('2026-09-03 12:00:00.000000', $job['expires_at']);
+        self::assertFalse($this->jobs->startPackaging($backupId));
+        $this->assertPasswordUnavailable($backupId);
+    }
+
+    public function testPasswordCiphertextCannotMoveBetweenTenantJobs(): void
+    {
+        $ownId = $this->createJob($this->supplierId);
+        $foreignId = $this->createJob($this->foreignSupplierId);
+        $statement = $this->db->pdo()->prepare(
+            'SELECT password_ciphertext FROM company_backup_jobs WHERE backup_id = ?',
+        );
+        $statement->execute([$ownId]);
+        $ownCiphertext = $statement->fetchColumn();
+        self::assertIsString($ownCiphertext);
+
+        $this->db->pdo()->prepare(
+            'UPDATE company_backup_jobs SET password_ciphertext = ? WHERE backup_id = ?',
+        )->execute([$ownCiphertext, $foreignId]);
+
+        $this->assertPasswordUnavailable($foreignId, expectNullInDatabase: false);
+        self::assertSame(self::PASSWORD, $this->jobs->passwordForWorker($ownId));
+    }
+
+    public function testDatabaseRejectsPlaintextAndTerminalStateWithPassword(): void
+    {
+        $backupId = $this->createJob($this->supplierId);
+
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE company_backup_jobs SET password_ciphertext = ?'
+                . ' WHERE backup_id = ?',
+            )->execute(['plaintext-password', $backupId]);
+            self::fail('DB nesmí přijmout plaintext heslo aktivního jobu.');
+        } catch (\PDOException) {
+            self::addToAssertionCount(1);
+        }
+
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE company_backup_jobs SET status = ?, finished_at = CURRENT_TIMESTAMP(6)'
+                . ' WHERE backup_id = ?',
+            )->execute([CompanyBackupJobStatus::Failed->value, $backupId]);
+            self::fail('DB nesmí ukončit job bez atomického odstranění hesla.');
+        } catch (\PDOException) {
+            self::addToAssertionCount(1);
+        }
+
+        self::assertSame(self::PASSWORD, $this->jobs->passwordForWorker($backupId));
+    }
+
+    public function testCancelAndFailureClearPasswordAndReleaseActiveSlot(): void
+    {
+        $cancelledId = $this->createJob($this->supplierId);
+        self::assertTrue($this->jobs->requestCancel(
+            $cancelledId,
+            $this->supplierId,
+        ));
+        self::assertFalse($this->jobs->requestCancel(
+            $cancelledId,
+            $this->foreignSupplierId,
+        ));
+        self::assertFalse(
+            $this->jobs->startChecking($cancelledId),
+            'Po přijetí storna worker nesmí zahájit další fázi.',
+        );
+        self::assertTrue($this->jobs->markCancelled($cancelledId));
+        $this->assertPasswordUnavailable($cancelledId);
+
+        $failedId = $this->createJob($this->supplierId);
+        self::assertTrue($this->jobs->startChecking($failedId));
+        self::assertTrue($this->jobs->markFailed(
+            $failedId,
+            'snapshot_failed',
+            'Syntetická chyba snapshotu.',
+        ));
+        $this->assertPasswordUnavailable($failedId);
+
+        $nextId = $this->createJob($this->supplierId);
+        self::assertNotSame($failedId, $nextId);
+    }
+
+    public function testStaleJobFailsClosedClearsPasswordAndReleasesSlot(): void
+    {
+        $staleId = $this->createJob($this->supplierId);
+        self::assertTrue($this->jobs->startChecking($staleId));
+        $this->db->pdo()->prepare(
+            'UPDATE company_backup_jobs'
+            . ' SET updated_at = CURRENT_TIMESTAMP(6) - INTERVAL 2 HOUR'
+            . ' WHERE backup_id = ?',
+        )->execute([$staleId]);
+
+        self::assertSame(1, $this->jobs->reapStale($this->supplierId, 60));
+        $job = $this->jobs->find($staleId, $this->supplierId);
+        self::assertNotNull($job);
+        self::assertSame(CompanyBackupJobStatus::Failed->value, $job['status']);
+        self::assertSame('worker_stale', $job['last_error_code']);
+        $this->assertPasswordUnavailable($staleId);
+
+        self::assertNotSame($staleId, $this->createJob($this->supplierId));
+    }
+
+    public function testExpiredCompletedArtifactLosesMetadataAndDownloadability(): void
+    {
+        $backupId = $this->completedJob($this->supplierId);
+        $expired = $this->jobs->expiredArtifacts(
+            new DateTimeImmutable('2026-09-04T00:00:00+00:00'),
+        );
+        self::assertSame([$backupId], array_column($expired, 'backup_id'));
+
+        self::assertTrue($this->jobs->markExpired($backupId));
+        $job = $this->jobs->find($backupId, $this->supplierId);
+        self::assertNotNull($job);
+        self::assertSame(CompanyBackupJobStatus::Expired->value, $job['status']);
+        self::assertNull($job['artifact_path']);
+        self::assertNull($job['artifact_sha256']);
+        self::assertNull($job['expires_at']);
+    }
+
+    private function createJob(int $supplierId): string
+    {
+        return $this->jobs->create(
+            $supplierId,
+            $this->userId,
+            self::FINGERPRINT,
+            self::PASSWORD,
+        );
+    }
+
+    private function completedJob(int $supplierId): string
+    {
+        $backupId = $this->createJob($supplierId);
+        self::assertTrue($this->jobs->startChecking($backupId));
+        self::assertTrue($this->jobs->startSnapshotting($backupId));
+        self::assertTrue($this->jobs->startPackaging($backupId));
+        self::assertTrue($this->jobs->complete(
+            $backupId,
+            new CompanyBackupStoredArtifact(
+                $supplierId,
+                $backupId,
+                'sup-' . $supplierId . '/' . $backupId . '.zip',
+                'myucto-company-backup-' . $backupId . '.zip',
+                1_024,
+                str_repeat('b', 64),
+                5,
+            ),
+            new DateTimeImmutable('2026-09-02T10:00:00+00:00'),
+            new CompanyBackupJobRetentionPolicy(24),
+        ));
+        return $backupId;
+    }
+
+    private function assertPasswordUnavailable(
+        string $backupId,
+        bool $expectNullInDatabase = true,
+    ): void {
+        try {
+            $this->jobs->passwordForWorker($backupId);
+            self::fail('Koncový job nesmí nadále zpřístupnit heslo archivu.');
+        } catch (CompanyBackupJobException $e) {
+            self::assertSame('password_unavailable', $e->errorCode);
+        }
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT password_ciphertext FROM company_backup_jobs WHERE backup_id = ?',
+        );
+        $statement->execute([$backupId]);
+        if ($expectNullInDatabase) {
+            self::assertNull($statement->fetchColumn());
+        } else {
+            self::assertIsString($statement->fetchColumn());
+        }
+    }
+
+    private function tableExists(PDO $pdo, string $table): bool
+    {
+        $statement = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.tables'
+            . ' WHERE table_schema = DATABASE() AND table_name = ?',
+        );
+        $statement->execute([$table]);
+        return (int) $statement->fetchColumn() === 1;
+    }
+
+    private function scalarInt(PDO $pdo, string $sql): int
+    {
+        $statement = $pdo->query($sql);
+        if ($statement === false) {
+            return 0;
+        }
+        $value = $statement->fetchColumn();
+        return $value === false ? 0 : (int) $value;
+    }
+
+    private function createSupplier(
+        PDO $pdo,
+        string $name,
+        string $email,
+        int $countryId,
+        int $currencyId,
+        int $vatRateId,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO supplier ('
+            . 'company_name, street, city, zip, country_id, email,'
+            . ' default_currency_id, default_vat_rate_id'
+            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        $statement->execute([
+            $name,
+            'Testovací 1',
+            'Praha',
+            '11000',
+            $countryId,
+            $email,
+            $currencyId,
+            $vatRateId,
+        ]);
+        return (int) $pdo->lastInsertId();
+    }
+}
