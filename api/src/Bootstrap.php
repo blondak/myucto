@@ -137,6 +137,10 @@ final class Bootstrap
             \MyInvoice\Service\Backup\Registry\TenantDataRegistry::class =>
                 static fn (): \MyInvoice\Service\Backup\Registry\TenantDataRegistry =>
                     \MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory::draftV1(),
+            \MyInvoice\Service\Backup\Company\CompanyBackupDownloadProvider::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupDownloadService::class,
+                ),
             \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,

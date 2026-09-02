@@ -199,8 +199,8 @@ final class RoutePermissionMapTest extends TestCase
         ] as [$method, $path, $key, $level]) {
             $match = $map->match($method, $path);
             self::assertSame(RoutePermissionMap::PERMISSION, $match?->kind, "$method $path");
-            self::assertSame($key, $match?->key, "$method $path");
-            self::assertSame($level, $match?->minimum, "$method $path");
+            self::assertSame($key, $match->key, "$method $path");
+            self::assertSame($level, $match->minimum, "$method $path");
         }
     }
 
@@ -219,6 +219,23 @@ final class RoutePermissionMapTest extends TestCase
             $key = (string) $map->match($method, $path)?->key;
             self::assertTrue($catalog->has($key), "$method $path → $key");
         }
+    }
+
+    public function testCompanyBackupDownloadUsesDedicatedTenantPermission(): void
+    {
+        $path = '/api/admin/company-backups/'
+            . '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1/download';
+        $match = (new RoutePermissionMap())->match('GET', $path);
+
+        self::assertSame(RoutePermissionMap::PERMISSION, $match?->kind);
+        self::assertSame('utilities.company_backup', $match->key);
+        self::assertSame(AccessLevel::READ, $match->minimum);
+        self::assertTrue((new PermissionCatalog())->has((string) $match->key));
+        self::assertSame(
+            RoutePermissionMap::SUPERADMIN,
+            (new RoutePermissionMap())->match('POST', $path)?->kind,
+            'Jiná metoda nesmí využít GET oprávnění.',
+        );
     }
 
     /**

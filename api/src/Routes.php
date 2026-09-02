@@ -31,6 +31,7 @@ use MyInvoice\Action\Approval\UpdateApprovalStatusAction;
 use MyInvoice\Action\Admin\ExportAction;
 use MyInvoice\Action\Admin\ImportAction;
 use MyInvoice\Action\Export\InstanceExportAction;
+use MyInvoice\Action\Backup\CompanyBackupDownloadAction;
 use MyInvoice\Action\Admin\Import\StartIdokladImportAction;
 use MyInvoice\Action\Admin\Import\StartFakturoidImportAction;
 use MyInvoice\Action\Admin\Import\ImportJobStatusAction;
@@ -1801,6 +1802,14 @@ final class Routes
         $app->get    ('/api/admin/instance-export/{id:[0-9]+}/download',   [InstanceExportAction::class, 'download']);
         $app->post   ('/api/admin/instance-export/{id:[0-9]+}/cancel',     [InstanceExportAction::class, 'cancel']);
         $app->delete ('/api/admin/instance-export/{id:[0-9]+}',            [InstanceExportAction::class, 'delete']);
+
+        // Přenositelná záloha jedné firmy — první veřejně zapojený krok nového
+        // kontraktu. UUID se znovu kanonicky ověřuje v Action a job se vždy hledá
+        // jen v aktuálním supplier scope.
+        $app->get(
+            '/api/admin/company-backups/{backupId:[0-9a-f-]+}/download',
+            [CompanyBackupDownloadAction::class, 'download'],
+        );
 
         // iDoklad API import (fáze 2a) — credentials + background job lifecycle
         $app->get    ('/api/admin/imports/idoklad/credentials', [IdokladCredentialsAction::class, 'status']);

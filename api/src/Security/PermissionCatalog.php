@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-08-domains-document-submissions-v1';
+    public const VERSION = '2026-09-company-backup-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -138,6 +138,7 @@ final class PermissionCatalog
             ['settings.signing', 'utilities', 'Elektronické podepisování', $staffOnly],
             ['utilities', 'utilities', 'Nástroje', $staffOnly],
             ['utilities.export', 'utilities', 'Export dat', $staffOnly],
+            ['utilities.company_backup', 'utilities', 'Záloha firmy', $staffOnly],
             ['utilities.import', 'utilities', 'Import dat', $staffOnly],
             ['utilities.archives', 'utilities', 'ZIP archivy', $staffOnly],
             ['profile', 'profile', 'Osobní profil', $both],
@@ -187,6 +188,7 @@ final class PermissionCatalog
                 'accounting.periods.close', 'accounting.periods.manage',
                 'settings.ai_provider', 'settings.bank_accounts', 'settings.branding',
                 'settings.company.write', 'settings.domains', 'utilities.import',
+                'utilities.company_backup',
                 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.approve',
                 'payroll.reopen', 'payroll.enforcement', 'payroll.insolvency', 'payroll.rulesets',
                 // Výmaz osobních údajů je nevratný a právně významný — patří ke

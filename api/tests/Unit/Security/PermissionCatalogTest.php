@@ -88,6 +88,40 @@ final class PermissionCatalogTest extends TestCase
         self::assertTrue($checker->allows($superadmin, 'invoices.delete', AccessLevel::WRITE));
     }
 
+    public function testCompanyBackupIsHighRiskAndMustBeGrantedExplicitly(): void
+    {
+        $catalog = new PermissionCatalog();
+        $checker = new PermissionChecker($catalog);
+        self::assertSame(
+            ['staff'],
+            $catalog->all()['utilities.company_backup']['role_types'],
+        );
+
+        foreach (['accountant', 'readonly', 'client'] as $legacyRole) {
+            $roleType = $legacyRole === 'client' ? 'client' : 'staff';
+            $role = new EffectiveRole(
+                2,
+                $legacyRole,
+                $roleType,
+                true,
+                $catalog->legacyPreset($legacyRole),
+            );
+            self::assertFalse(
+                $checker->allows($role, 'utilities.company_backup'),
+                "Výchozí role {$legacyRole} nesmí stáhnout úplnou zálohu firmy.",
+            );
+        }
+
+        $companyAdmin = new EffectiveRole(9, 'Správce firmy', 'staff', true, [
+            'utilities.company_backup' => AccessLevel::WRITE->value,
+        ]);
+        self::assertTrue($checker->allows(
+            $companyAdmin,
+            'utilities.company_backup',
+            AccessLevel::READ,
+        ));
+    }
+
     /**
      * Výmaz osobních údajů je nevratný, proto ho výchozí účetní role NEMÁ —
      * stejně jako schválení běhu. Retenční lhůty naopak ano: prodloužit lhůtu

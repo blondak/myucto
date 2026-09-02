@@ -538,6 +538,9 @@ final class RoutePermissionMap
      * @var list<array{0:string,1:string,2:string,3:AccessLevel}>
      */
     private const ADMIN_RULES = [
+        // Úplný archiv firmy je high-risk export. Oprávnění se přiděluje výslovně
+        // a Action navíc vynucuje browser session i tenantový ownership jobu.
+        ['GET', '#^/api/admin/company-backups/[0-9a-f-]+/download$#D', 'utilities.company_backup', AccessLevel::READ],
         // Import dokladů (Pohoda XML / ISDOC, iDoklad, Fakturoid) — ImportAction,
         // Start{Idoklad,Fakturoid}ImportAction, ImportJobStatus/Cancel/DeleteImportJobAction.
         ['POST',   '#^/api/admin/import$#', 'utilities.import', AccessLevel::WRITE],

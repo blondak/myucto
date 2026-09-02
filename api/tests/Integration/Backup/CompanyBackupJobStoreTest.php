@@ -12,6 +12,8 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriteResult;
 use MyInvoice\Service\Backup\Company\CompanyBackupArtifactRootResolver;
 use MyInvoice\Service\Backup\Company\CompanyBackupArtifactStorage;
+use MyInvoice\Service\Backup\Company\CompanyBackupDownloadException;
+use MyInvoice\Service\Backup\Company\CompanyBackupDownloadService;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobException;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobRetentionPolicy;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobStatus;
@@ -21,6 +23,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupStoredArtifact;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Clock\MockClock;
 
 #[Group('integration')]
 final class CompanyBackupJobStoreTest extends TestCase
@@ -426,6 +429,87 @@ final class CompanyBackupJobStoreTest extends TestCase
         }
     }
 
+    public function testDownloadServiceKeepsTenantStatusAndArtifactBoundaries(): void
+    {
+        [$backupId, $artifact, $storage, $path, $root] =
+            $this->completedStoredJob($this->supplierId);
+        $clock = new MockClock('2026-09-03T09:00:00+00:00');
+        $downloads = new CompanyBackupDownloadService(
+            $this->jobs,
+            $storage,
+            $clock,
+        );
+
+        try {
+            $prepared = $downloads->prepare(
+                $backupId,
+                $this->supplierId,
+                'bytes=10-19',
+                '"sha256:' . $artifact->sha256 . '"',
+            );
+
+            self::assertSame(206, $prepared->plan->statusCode);
+            self::assertSame(
+                'bytes 10-19/' . $artifact->bytes,
+                $prepared->plan->contentRange(),
+            );
+            self::assertSame(
+                substr('synthetic-expiring-company-backup', 10, 10),
+                $prepared->stream->getContents(),
+            );
+
+            $this->assertDownloadError(
+                fn () => $downloads->prepare(
+                    $backupId,
+                    $this->foreignSupplierId,
+                    null,
+                    null,
+                ),
+                'not_found',
+            );
+
+            $pendingId = $this->createJob($this->supplierId);
+            $this->assertDownloadError(
+                fn () => $downloads->prepare(
+                    $pendingId,
+                    $this->supplierId,
+                    null,
+                    null,
+                ),
+                'not_ready',
+            );
+
+            chmod($path, 0640);
+            self::assertTrue(unlink($path));
+            $this->assertDownloadError(
+                fn () => $downloads->prepare(
+                    $backupId,
+                    $this->supplierId,
+                    null,
+                    null,
+                ),
+                'artifact_unavailable',
+            );
+
+            $expired = new CompanyBackupDownloadService(
+                $this->jobs,
+                $storage,
+                new MockClock('2026-09-03T10:00:00+00:00'),
+            );
+            $this->assertDownloadError(
+                fn () => $expired->prepare(
+                    $backupId,
+                    $this->supplierId,
+                    null,
+                    null,
+                ),
+                'artifact_expired',
+            );
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
     private function createJob(int $supplierId): string
     {
         return $this->jobs->create(
@@ -546,6 +630,17 @@ final class CompanyBackupJobStoreTest extends TestCase
             self::assertNull($statement->fetchColumn());
         } else {
             self::assertIsString($statement->fetchColumn());
+        }
+    }
+
+    /** @param callable():mixed $operation */
+    private function assertDownloadError(callable $operation, string $code): void
+    {
+        try {
+            $operation();
+            self::fail("Stažení mělo skončit chybou {$code}.");
+        } catch (CompanyBackupDownloadException $e) {
+            self::assertSame($code, $e->errorCode);
         }
     }
 

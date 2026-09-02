@@ -131,6 +131,8 @@ tags:
     description: Číselníky (země, měny, DPH sazby, jednotky)
   - name: Documents
     description: Dokumenty — úložiště souborů, složky, ZFO datové zprávy, fulltext, párování s entitami
+  - name: Backups
+    description: Session-only přenositelná záloha a obnova jedné firmy
   - name: Purchase invoices
     description: Přijaté faktury (náklady) — evidence, položky, DPH odpočet, export, párování záloh
   - name: Recurring
@@ -4557,6 +4559,109 @@ paths:
         '400': { description: "Validace — neexistující supplier_id, duplicitní položka, neplatná role" }
         '403': { description: "Forbidden — role není admin (nebo bearer token)" }
         '404': { description: Uživatel nenalezen }
+
+  /api/v1/admin/company-backups/{backupId}/download:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: backupId
+        required: true
+        description: Kanonické UUID zálohového jobu aktuální firmy.
+        schema:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      - in: header
+        name: Range
+        required: false
+        description: Jeden HTTP byte range; vícedílné rozsahy nejsou podporované.
+        schema: { type: string, example: bytes=1048576- }
+      - in: header
+        name: If-Range
+        required: false
+        description: Silný ETag z dřívější odpovědi; při neshodě se vrátí celý archiv.
+        schema:
+          type: string
+          example: '"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
+    get:
+      tags: [Backups]
+      summary: Stáhne hotovou přenositelnou zálohu aktuální firmy
+      description: |
+        Session-only endpoint s oprávněním `utilities.company_backup` na úrovni read.
+        Záloha se dohledává výhradně podle jobu aktuální firmy; cizí i neplatné
+        identifikátory vracejí stejné `404`. Hotový archiv je po dobu retence
+        neměnný, podporuje navázání jedním byte range a používá silný ETag
+        odvozený z SHA-256. API token vrací `403 token_endpoint_forbidden`.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Celý šifrovaný ZIP archiv.
+          headers:
+            Content-Disposition: { description: Bezpečný serverem vytvořený název souboru., schema: { type: string } }
+            Content-Length: { description: Velikost celého archivu v bajtech., schema: { type: integer, format: int64 } }
+            ETag: { description: Silný ETag odvozený z SHA-256 archivu., schema: { type: string } }
+            Accept-Ranges: { description: Podporovaná jednotka rozsahu., schema: { type: string, const: bytes } }
+            X-Checksum-SHA256: { description: SHA-256 celého archivu., schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+            Cache-Control: { description: Citlivý archiv se nesmí ukládat do cache., schema: { type: string, const: 'private, no-store' } }
+            Pragma: { description: Kompatibilní zákaz cache pro starší klienty., schema: { type: string, const: no-cache } }
+            X-Content-Type-Options: { description: Zákaz MIME sniffingu., schema: { type: string, const: nosniff } }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '206':
+          description: Požadovaná část šifrovaného ZIP archivu.
+          headers:
+            Content-Disposition: { description: Bezpečný serverem vytvořený název souboru., schema: { type: string } }
+            Content-Length: { description: Velikost vrácené části v bajtech., schema: { type: integer, format: int64 } }
+            Content-Range: { description: Vrácený rozsah a celková velikost., schema: { type: string, example: bytes 1048576-2097151/8388608 } }
+            ETag: { description: Silný ETag odvozený z SHA-256 celého archivu., schema: { type: string } }
+            Accept-Ranges: { description: Podporovaná jednotka rozsahu., schema: { type: string, const: bytes } }
+            X-Checksum-SHA256: { description: SHA-256 celého archivu., schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+            Cache-Control: { description: Citlivý archiv se nesmí ukládat do cache., schema: { type: string, const: 'private, no-store' } }
+            Pragma: { description: Kompatibilní zákaz cache pro starší klienty., schema: { type: string, const: no-cache } }
+            X-Content-Type-Options: { description: Zákaz MIME sniffingu., schema: { type: string, const: nosniff } }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '400':
+          description: Chybí kontext firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupDownloadError' }
+        '401':
+          description: Chybí platná přihlášená session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupDownloadError' }
+        '403':
+          description: Endpoint byl volán tokenem nebo chybí oprávnění k záloze firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupDownloadError' }
+        '404':
+          description: Job neexistuje v aktuální firmě nebo identifikátor není platný.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupDownloadError' }
+        '409':
+          description: Job ještě není ve stavu completed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupDownloadError' }
+        '410':
+          description: Retence uplynula nebo fyzický archiv už není bezpečně dostupný.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupDownloadError' }
+        '416':
+          description: Range je neplatný, vícedílný nebo neuspokojitelný.
+          headers:
+            Content-Range: { description: Hvězdičkový rozsah s celkovou velikostí., schema: { type: string, example: bytes */8388608 } }
+            Accept-Ranges: { description: Podporovaná jednotka rozsahu., schema: { type: string, const: bytes } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupDownloadError' }
 
   /api/v1/admin/bank-rule-templates:
     get:
@@ -18622,6 +18727,29 @@ components:
                 type: array
                 items: { type: string }
               example: { name: ["Název zakázky je povinný"], payment_due_days: ["Splatnost musí být 1–365 dní"] }
+
+    CompanyBackupDownloadError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                [no_supplier, unauthenticated, invalid_token,
+                 token_endpoint_forbidden, session_required,
+                 forbidden_permission, forbidden_supplier, forbidden,
+                 not_found, not_ready, artifact_expired,
+                 artifact_unavailable, range_not_satisfiable]
+            message: { type: string }
+            size_bytes:
+              type: integer
+              format: int64
+              minimum: 1
+              description: Celková velikost archivu u chyby range_not_satisfiable.
 
     ListMeta:
       type: object
