@@ -25,6 +25,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollComponentDefinitionsPro
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionAgreementVersionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDeductionLedgerProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDependantsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollDimensionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeeProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollEmployeesProjection;
@@ -94,6 +95,7 @@ final class TenantDataRegistryFactory
         'payroll_deduction_agreement_versions' => 'payroll',
         'payroll_deduction_agreements' => 'payroll',
         'payroll_deduction_ledger' => 'payroll',
+        'payroll_dependants' => 'payroll',
         'payroll_dimensions' => 'payroll',
         'payroll_employees' => 'payroll',
         'payroll_employer_policies' => 'payroll',
@@ -1245,6 +1247,7 @@ final class TenantDataRegistryFactory
      *     entity_id_column:string,
      *     field:string,
      *     materializer:string,
+     *     nullable:bool,
      *     secret_column:string,
      *     target_columns:array{
      *       ciphertext:string,
@@ -1431,6 +1434,23 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollDeductionLedgerProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_dependants') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollDependantsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' =>
+                        CompanyBackupPayrollDependantsProjection::omitColumns(),
+                    'protected_secret_materializations' =>
+                        CompanyBackupPayrollDependantsProjection::protectedSecretMaterializations(),
+                    'references' =>
+                        CompanyBackupPayrollDependantsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
@@ -2452,6 +2472,9 @@ final class TenantDataRegistryFactory
         }
         if ($table === 'payroll_institution_accounts') {
             return CompanyBackupPayrollInstitutionAccountsProjection::secrets();
+        }
+        if ($table === 'payroll_dependants') {
+            return CompanyBackupPayrollDependantsProjection::secrets();
         }
         return [];
     }

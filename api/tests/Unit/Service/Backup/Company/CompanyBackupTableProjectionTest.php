@@ -663,6 +663,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
                 'entity_id_column' => 'id',
                 'field' => 'bank_account',
                 'materializer' => 'payroll_sensitive_v1',
+                'nullable' => false,
                 'secret_column' => 'bank_account_ciphertext',
                 'target_columns' => [
                     'ciphertext' => 'bank_account_ciphertext',

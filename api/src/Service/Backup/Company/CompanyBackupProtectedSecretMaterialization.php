@@ -20,6 +20,7 @@ final readonly class CompanyBackupProtectedSecretMaterialization
         public PayrollSensitiveField $field,
         public string $tenantIdColumn,
         public string $entityIdColumn,
+        public bool $nullable,
         array $targetColumns,
     ) {
         $this->targetColumns = $targetColumns;
@@ -36,6 +37,7 @@ final readonly class CompanyBackupProtectedSecretMaterialization
             'entity_id_column',
             'field',
             'materializer',
+            'nullable',
             'secret_column',
             'target_columns',
             'tenant_id_column',
@@ -48,6 +50,7 @@ final readonly class CompanyBackupProtectedSecretMaterialization
         $fieldValue = $value['field'];
         $tenantIdColumn = $value['tenant_id_column'];
         $entityIdColumn = $value['entity_id_column'];
+        $nullable = $value['nullable'];
         $targetColumns = $value['target_columns'];
         $materializer = is_string($materializerValue)
             ? CompanyBackupProtectedSecretMaterializer::tryFrom($materializerValue)
@@ -64,6 +67,7 @@ final readonly class CompanyBackupProtectedSecretMaterialization
             || !is_string($entityIdColumn)
             || !self::isIdentifier($entityIdColumn)
             || $tenantIdColumn === $entityIdColumn
+            || !is_bool($nullable)
             || !is_array($targetColumns)
             || array_is_list($targetColumns)
         ) {
@@ -99,6 +103,7 @@ final readonly class CompanyBackupProtectedSecretMaterialization
             $field,
             $tenantIdColumn,
             $entityIdColumn,
+            $nullable,
             $validatedTargets,
         );
     }
@@ -106,6 +111,7 @@ final readonly class CompanyBackupProtectedSecretMaterialization
     public function signature(): string
     {
         return $this->secretColumn
+            . ($this->nullable ? '?' : '')
             . '<-'
             . $this->materializer->value
             . ':'

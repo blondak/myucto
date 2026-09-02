@@ -7,11 +7,11 @@ namespace MyInvoice\Service\Backup\Company;
 use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 
 /**
- * Úplná company projekce účinné historie účtů mzdových institucí.
+ * Úplná company projekce vyživovaných osob zaměstnance.
  *
- * Číslo účtu jde povinně přes secret envelope. Zdrojový ciphertext, keyed
- * hash ani maska se nevkládají raw; cílový materializer je po remapu ID vytvoří
- * z plaintextu pod instalačními klíči cíle.
+ * Rodné číslo je volitelná atomická trojice. Je-li přítomné, jde jen přes
+ * secret envelope; cílový materializer po remapu ID znovu vytvoří instalační
+ * ciphertext, tenantový keyed hash i masku. Chybějící hodnota obnoví tři NULL.
  *
  * @phpstan-type TableReference array{
  *   columns:list<string>,
@@ -32,7 +32,7 @@ use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
  *   tenant_id_column:string
  * }
  */
-final class CompanyBackupPayrollInstitutionAccountsProjection
+final class CompanyBackupPayrollDependantsProjection
 {
     /** @return list<string> */
     public static function dataColumns(): array
@@ -40,18 +40,15 @@ final class CompanyBackupPayrollInstitutionAccountsProjection
         return [
             'id',
             'supplier_id',
-            'institution_id',
-            'institution_name',
-            'currency_code',
-            'variable_symbol',
-            'specific_symbol',
-            'constant_symbol',
-            'valid_from',
-            'valid_to',
-            'source_kind',
-            'source_reference',
-            'verified_on',
-            'verified_by',
+            'employee_id',
+            'relation',
+            'full_name',
+            'birth_date',
+            'ztp_p',
+            'student',
+            'existence_from',
+            'existence_to',
+            'note',
             'created_by',
             'updated_by',
             'row_version',
@@ -64,8 +61,8 @@ final class CompanyBackupPayrollInstitutionAccountsProjection
     public static function omitColumns(): array
     {
         return [
-            'bank_account_hash' => 'rederived_from_protected_secret',
-            'bank_account_masked' => 'rederived_from_protected_secret',
+            'birth_number_hash' => 'rederived_from_protected_secret',
+            'birth_number_masked' => 'rederived_from_protected_secret',
         ];
     }
 
@@ -73,11 +70,11 @@ final class CompanyBackupPayrollInstitutionAccountsProjection
     public static function secrets(): array
     {
         return [
-            'bank_account_ciphertext' => [
+            'birth_number_ciphertext' => [
                 'policy' => TenantSecretPolicy::ProtectedDomainSecret->value,
                 'storage' =>
                     CompanyBackupSecretStorage::ApplicationEncryptedContext->value,
-                'context' => 'payroll:{supplier_id}:{id}:bank_account',
+                'context' => 'payroll:{supplier_id}:{id}:personal_identifier',
             ],
         ];
     }
@@ -87,15 +84,15 @@ final class CompanyBackupPayrollInstitutionAccountsProjection
     {
         return [[
             'entity_id_column' => 'id',
-            'field' => 'bank_account',
+            'field' => 'personal_identifier',
             'materializer' =>
                 CompanyBackupProtectedSecretMaterializer::PayrollSensitiveV1->value,
-            'nullable' => false,
-            'secret_column' => 'bank_account_ciphertext',
+            'nullable' => true,
+            'secret_column' => 'birth_number_ciphertext',
             'target_columns' => [
-                'ciphertext' => 'bank_account_ciphertext',
-                'lookup_hash' => 'bank_account_hash',
-                'masked' => 'bank_account_masked',
+                'ciphertext' => 'birth_number_ciphertext',
+                'lookup_hash' => 'birth_number_hash',
+                'masked' => 'birth_number_masked',
             ],
             'tenant_id_column' => 'supplier_id',
         ]];
@@ -107,8 +104,8 @@ final class CompanyBackupPayrollInstitutionAccountsProjection
         return [
             self::actor('created_by'),
             [
-                'columns' => ['supplier_id', 'institution_id'],
-                'target' => 'table:payroll_institutions',
+                'columns' => ['supplier_id', 'employee_id'],
+                'target' => 'table:payroll_employees',
                 'target_columns' => ['supplier_id', 'id'],
                 'mapping' => CompanyBackupReferenceMapping::TenantId->value,
                 'constraint' => CompanyBackupReferenceConstraint::Required->value,
@@ -116,7 +113,6 @@ final class CompanyBackupPayrollInstitutionAccountsProjection
                 'fallbacks' => [],
             ],
             self::actor('updated_by'),
-            self::actor('verified_by'),
         ];
     }
 

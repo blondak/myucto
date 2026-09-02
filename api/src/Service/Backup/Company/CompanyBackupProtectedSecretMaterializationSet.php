@@ -191,6 +191,62 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
     }
 
     /**
+     * Materializuje konkrétní secret řádku, včetně legitimně prázdné hodnoty.
+     *
+     * @param array<string,mixed> $sourceRow
+     * @param array<string,mixed> $targetRow
+     * @return array<string,string|null>
+     */
+    public function materializeForColumn(
+        string $secretColumn,
+        ?CompanyBackupSecretValue $value,
+        array $sourceRow,
+        array $targetRow,
+        PayrollSensitiveData $sensitiveData,
+    ): array {
+        $materialization = $this->bySecretColumn[$secretColumn] ?? null;
+        if ($materialization === null
+            || $value !== null && $value->name !== $secretColumn
+        ) {
+            throw $this->valueError($secretColumn);
+        }
+        if ($value !== null) {
+            return $this->materialize(
+                $value,
+                $sourceRow,
+                $targetRow,
+                $sensitiveData,
+            );
+        }
+        if (!$materialization->nullable) {
+            throw $this->valueError($secretColumn);
+        }
+        foreach ($this->primaryKey as $column) {
+            if (!array_key_exists($column, $sourceRow)) {
+                throw $this->valueError($secretColumn);
+            }
+        }
+        foreach ($materialization->targetColumns as $column) {
+            if (array_key_exists($column, $targetRow)) {
+                throw $this->valueError($secretColumn);
+            }
+        }
+        $tenantId = $targetRow[$materialization->tenantIdColumn] ?? null;
+        $entityId = $targetRow[$materialization->entityIdColumn] ?? null;
+        if (!is_int($tenantId) || $tenantId < 1
+            || !is_int($entityId) || $entityId < 1
+        ) {
+            throw $this->valueError($secretColumn);
+        }
+
+        return [
+            $materialization->targetColumns['ciphertext'] => null,
+            $materialization->targetColumns['lookup_hash'] => null,
+            $materialization->targetColumns['masked'] => null,
+        ];
+    }
+
+    /**
      * @param array<string,true> $data
      * @param array<string,true> $primary
      * @param array<string,mixed> $ownership

@@ -158,6 +158,64 @@ final class CompanyBackupProtectedSecretMaterializationSetTest extends TestCase
         }
     }
 
+    public function testMaterializesMissingNullableSecretAsAtomicNullTriple(): void
+    {
+        $definition = $this->definition();
+        $details = $definition->details;
+        $details['company_backup']['protected_secret_materializations'][0]
+            ['nullable'] = true;
+        $projection = CompanyBackupTableProjection::fromDefinition(
+            new TenantDataDefinition(
+                $definition->key,
+                $definition->kind,
+                $definition->policy,
+                $definition->profiles,
+                $details,
+            ),
+        );
+
+        self::assertTrue(
+            $projection->protectedSecretMaterializations
+                ->materializations[0]
+                ->nullable,
+        );
+        self::assertSame(
+            [
+                'bank_account_ciphertext' => null,
+                'bank_account_hash' => null,
+                'bank_account_masked' => null,
+            ],
+            $projection->protectedSecretMaterializations->materializeForColumn(
+                'bank_account_ciphertext',
+                null,
+                ['id' => 73, 'supplier_id' => 42, 'name' => 'Synthetic office'],
+                ['id' => 173, 'supplier_id' => 142, 'name' => 'Synthetic office'],
+                $this->sensitiveData(),
+            ),
+        );
+    }
+
+    public function testRejectsMissingValueForRequiredSecret(): void
+    {
+        try {
+            $this->projection()->protectedSecretMaterializations
+                ->materializeForColumn(
+                    'bank_account_ciphertext',
+                    null,
+                    ['id' => 73, 'supplier_id' => 42],
+                    ['id' => 173, 'supplier_id' => 142],
+                    $this->sensitiveData(),
+                );
+            self::fail('Chybějící povinný secret nesmí vytvořit NULL trojici.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame(
+                'secret_restore_materialization_invalid',
+                $e->errorCode,
+            );
+            self::assertSame('bank_account_ciphertext', $e->column);
+        }
+    }
+
     private function projection(): CompanyBackupTableProjection
     {
         return CompanyBackupTableProjection::fromDefinition($this->definition());
@@ -200,6 +258,7 @@ final class CompanyBackupProtectedSecretMaterializationSetTest extends TestCase
                         'entity_id_column' => 'id',
                         'field' => 'bank_account',
                         'materializer' => 'payroll_sensitive_v1',
+                        'nullable' => false,
                         'secret_column' => 'bank_account_ciphertext',
                         'target_columns' => [
                             'ciphertext' => 'bank_account_ciphertext',

@@ -10,6 +10,13 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlProtectedSecretSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponent;
@@ -26,7 +33,12 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\RulesetApproval;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PDOStatement;
+use Psr\Container\ContainerInterface;
+use Psr\Http\Message\ResponseInterface;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -47,6 +59,8 @@ final class PayrollDependantApiTest extends TestCase
     private Connection $db;
     private PayrollDependantAction $action;
     private PayrollPersonStatutoryEvidenceRepository $statutory;
+    private PayrollSensitiveData $sensitiveData;
+    private SecretEncryption $encryption;
     private int $userId;
     private int $supplierId;
     private int $otherSupplierId;
@@ -63,11 +77,16 @@ final class PayrollDependantApiTest extends TestCase
 
         try {
             $container = Bootstrap::buildApp()->getContainer();
+            self::assertInstanceOf(ContainerInterface::class, $container);
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollDependantAction::class);
             $this->statutory = $container->get(
                 PayrollPersonStatutoryEvidenceRepository::class,
             );
+            $this->sensitiveData = $container->get(PayrollSensitiveData::class);
+            $encryption = $container->get(SecretEncryption::class);
+            self::assertInstanceOf(SecretEncryption::class, $encryption);
+            $this->encryption = $encryption;
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -77,12 +96,16 @@ final class PayrollDependantApiTest extends TestCase
         }
 
         $pdo = $this->db->pdo();
-        $sourceSupplierId = (int) ($pdo->query(
+        $sourceSupplier = $pdo->query(
             'SELECT id FROM supplier ORDER BY id LIMIT 1',
-        )->fetchColumn() ?: 0);
-        $this->userId = (int) ($pdo->query(
+        );
+        $sourceUser = $pdo->query(
             'SELECT id FROM users ORDER BY id LIMIT 1',
-        )->fetchColumn() ?: 0);
+        );
+        self::assertInstanceOf(PDOStatement::class, $sourceSupplier);
+        self::assertInstanceOf(PDOStatement::class, $sourceUser);
+        $sourceSupplierId = (int) ($sourceSupplier->fetchColumn() ?: 0);
+        $this->userId = (int) ($sourceUser->fetchColumn() ?: 0);
         if ($sourceSupplierId === 0 || $this->userId === 0) {
             $this->markTestSkipped('Chybí supplier nebo uživatel.');
         }
@@ -141,6 +164,134 @@ final class PayrollDependantApiTest extends TestCase
         self::assertStringNotContainsString(
             self::CHILD_A,
             json_encode($list, JSON_THROW_ON_ERROR),
+        );
+    }
+
+    public function testCompanyBackupStreamsAndResealsOptionalBirthNumber(): void
+    {
+        $protectedId = $this->createChild();
+        $emptyId = $this->createChild([
+            'full_name' => 'Syntetické Dítě Bez Identifikátoru',
+            'birth_date' => '2018-03-03',
+            'birth_number' => null,
+            'existence_from' => '2018-03-03',
+        ]);
+        $foreign = $this->post(
+            $this->otherSupplierId,
+            $this->otherEmployeeId,
+            $this->child(),
+        );
+        self::assertSame(200, $foreign->getStatusCode(), (string) $foreign->getBody());
+        $foreignId = (int) $this->json($foreign)['dependants'][0]['id'];
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_dependants');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = array_values(iterator_to_array(
+            (new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+                $this->db->pdo(),
+                $this->supplierId,
+                $definition,
+            ),
+        ));
+        self::assertCount(2, $rows);
+        $rowsById = [];
+        foreach ($rows as $row) {
+            $rowsById[(int) $row['id']] = $row;
+            self::assertArrayNotHasKey('birth_number_ciphertext', $row);
+            self::assertArrayNotHasKey('birth_number_hash', $row);
+            self::assertArrayNotHasKey('birth_number_masked', $row);
+        }
+        self::assertArrayHasKey($protectedId, $rowsById);
+        self::assertArrayHasKey($emptyId, $rowsById);
+        self::assertArrayNotHasKey($foreignId, $rowsById);
+
+        $secretProjection = CompanyBackupProtectedSecretProjection::fromDefinition(
+            $definition,
+        );
+        $values = array_values(iterator_to_array(
+            (new CompanyBackupSqlProtectedSecretSource($this->encryption))->values(
+                $this->db->pdo(),
+                $this->supplierId,
+                $secretProjection,
+            ),
+        ));
+        self::assertCount(1, $values);
+        self::assertSame(self::CHILD_A, $values[0]->plaintext());
+        self::assertSame(['id' => $protectedId], $values[0]->primaryKey);
+
+        $storedSource = $this->db->pdo()->prepare(
+            'SELECT birth_number_ciphertext, birth_number_hash
+               FROM payroll_dependants
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $storedSource->execute([$this->supplierId, $protectedId]);
+        $sourceStorage = $storedSource->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($sourceStorage);
+
+        $targetSupplierId = $this->otherSupplierId + 100_000;
+        $protectedTarget = $rowsById[$protectedId];
+        $protectedTarget['supplier_id'] = $targetSupplierId;
+        $protectedTarget['id'] = $protectedId + 100_000;
+        $targetStorage = $projection->protectedSecretMaterializations
+            ->materializeForColumn(
+                'birth_number_ciphertext',
+                $values[0],
+                $rowsById[$protectedId],
+                $protectedTarget,
+                $this->sensitiveData,
+            );
+
+        self::assertIsString($targetStorage['birth_number_ciphertext']);
+        self::assertIsString($targetStorage['birth_number_hash']);
+        self::assertNotSame(
+            $sourceStorage['birth_number_ciphertext'],
+            $targetStorage['birth_number_ciphertext'],
+        );
+        self::assertNotSame(
+            $sourceStorage['birth_number_hash'],
+            $targetStorage['birth_number_hash'],
+        );
+        self::assertSame(
+            self::CHILD_A,
+            $this->sensitiveData->reveal(
+                $targetStorage['birth_number_ciphertext'],
+                PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                $targetSupplierId,
+                (int) $protectedTarget['id'],
+            ),
+        );
+
+        $emptyTarget = $rowsById[$emptyId];
+        $emptyTarget['supplier_id'] = $targetSupplierId;
+        $emptyTarget['id'] = $emptyId + 100_000;
+        self::assertSame(
+            [
+                'birth_number_ciphertext' => null,
+                'birth_number_hash' => null,
+                'birth_number_masked' => null,
+            ],
+            $projection->protectedSecretMaterializations->materializeForColumn(
+                'birth_number_ciphertext',
+                null,
+                $rowsById[$emptyId],
+                $emptyTarget,
+                $this->sensitiveData,
+            ),
         );
     }
 
@@ -557,7 +708,10 @@ final class PayrollDependantApiTest extends TestCase
 
     // --- pomocníci ---------------------------------------------------------
 
-    /** @param array<string,mixed> $overrides @return array<string,mixed> */
+    /**
+     * @param array<string,mixed> $overrides
+     * @return array<string,mixed>
+     */
     private function child(array $overrides = []): array
     {
         return $overrides + [
@@ -573,7 +727,10 @@ final class PayrollDependantApiTest extends TestCase
         ];
     }
 
-    /** @param array<string,mixed> $overrides @return array<string,mixed> */
+    /**
+     * @param array<string,mixed> $overrides
+     * @return array<string,mixed>
+     */
     private function claim(array $overrides = []): array
     {
         return $overrides + [
@@ -611,7 +768,7 @@ final class PayrollDependantApiTest extends TestCase
         return (int) $statement->fetchColumn();
     }
 
-    private function get(int $supplierId, int $employeeId): Response
+    private function get(int $supplierId, int $employeeId): ResponseInterface
     {
         return $this->action->list(
             $this->request(
@@ -625,7 +782,11 @@ final class PayrollDependantApiTest extends TestCase
     }
 
     /** @param array<string,mixed> $payload */
-    private function post(int $supplierId, int $employeeId, array $payload): Response
+    private function post(
+        int $supplierId,
+        int $employeeId,
+        array $payload,
+    ): ResponseInterface
     {
         return $this->action->create(
             $this->request(
@@ -640,7 +801,10 @@ final class PayrollDependantApiTest extends TestCase
     }
 
     /** @param array<string,mixed> $payload */
-    private function postClaim(int $dependantId, array $payload): Response
+    private function postClaim(
+        int $dependantId,
+        array $payload,
+    ): ResponseInterface
     {
         return $this->action->createClaim(
             $this->request(
@@ -658,7 +822,11 @@ final class PayrollDependantApiTest extends TestCase
     }
 
     /** @param array<string,mixed> $payload */
-    private function putClaim(int $dependantId, int $claimId, array $payload): Response
+    private function putClaim(
+        int $dependantId,
+        int $claimId,
+        array $payload,
+    ): ResponseInterface
     {
         return $this->action->saveClaim(
             $this->request(
@@ -696,7 +864,7 @@ final class PayrollDependantApiTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function json(Response $response): array
+    private function json(ResponseInterface $response): array
     {
         $response->getBody()->rewind();
         $decoded = json_decode((string) $response->getBody(), true);
