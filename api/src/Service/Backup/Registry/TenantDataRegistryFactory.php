@@ -47,10 +47,12 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeProtectionsProj
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPayoutRulesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonAccountsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonAddressesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonContactsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthCoverageProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMinimumReductionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMonthEvidenceProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthOtherEmployerBasesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonIdentifiersProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonIdentityHistoryProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialDiscountClaimsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonSocialJurisdictionsProjection;
@@ -121,10 +123,12 @@ final class TenantDataRegistryFactory
         'payroll_payout_rules' => 'payroll',
         'payroll_person_accounts' => 'payroll',
         'payroll_person_addresses' => 'payroll',
+        'payroll_person_contacts' => 'payroll',
         'payroll_person_health_coverage_history' => 'payroll',
         'payroll_person_health_minimum_reductions' => 'payroll',
         'payroll_person_health_month_evidence' => 'payroll',
         'payroll_person_health_other_employer_bases' => 'payroll',
+        'payroll_person_identifiers' => 'payroll',
         'payroll_person_identity_history' => 'payroll',
         'payroll_person_social_discount_claims' => 'payroll',
         'payroll_person_social_jurisdictions' => 'payroll',
@@ -278,6 +282,11 @@ final class TenantDataRegistryFactory
             'employee_id',
             'period_start',
             'employer_reference',
+        ],
+        'payroll_person_identifiers' => [
+            'supplier_id',
+            'employee_id',
+            'identifier_type',
         ],
         'payroll_person_identity_history' => [
             'supplier_id',
@@ -1259,7 +1268,10 @@ final class TenantDataRegistryFactory
      *   preserved_identifiers?:list<string>,
      *   protected_secret_materializations?:list<array{
      *     entity_id_column:string,
-     *     field:string,
+     *     field:string|array{
+     *       cases:list<array{equals:string,field:string}>,
+     *       discriminator_column:string
+     *     },
      *     materializer:string,
      *     nullable:bool,
      *     secret_column:string,
@@ -1786,6 +1798,23 @@ final class TenantDataRegistryFactory
                 ],
             ];
         }
+        if ($table === 'payroll_person_contacts') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonContactsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' =>
+                        CompanyBackupPayrollPersonContactsProjection::omitColumns(),
+                    'protected_secret_materializations' =>
+                        CompanyBackupPayrollPersonContactsProjection::protectedSecretMaterializations(),
+                    'references' =>
+                        CompanyBackupPayrollPersonContactsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
         if ($table === 'payroll_person_tax_declarations') {
             return [
                 'company_backup' => [
@@ -1852,6 +1881,23 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollPersonHealthOtherEmployerBasesProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_person_identifiers') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonIdentifiersProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' =>
+                        CompanyBackupPayrollPersonIdentifiersProjection::omitColumns(),
+                    'protected_secret_materializations' =>
+                        CompanyBackupPayrollPersonIdentifiersProjection::protectedSecretMaterializations(),
+                    'references' =>
+                        CompanyBackupPayrollPersonIdentifiersProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];
@@ -2518,7 +2564,7 @@ final class TenantDataRegistryFactory
         };
     }
 
-    /** @return array<string,array<string,string>> */
+    /** @return array<string,array<string,mixed>> */
     private static function secretPolicies(string $table): array
     {
         if ($table === 'supplier') {
@@ -2542,6 +2588,12 @@ final class TenantDataRegistryFactory
         }
         if ($table === 'payroll_person_accounts') {
             return CompanyBackupPayrollPersonAccountsProjection::secrets();
+        }
+        if ($table === 'payroll_person_contacts') {
+            return CompanyBackupPayrollPersonContactsProjection::secrets();
+        }
+        if ($table === 'payroll_person_identifiers') {
+            return CompanyBackupPayrollPersonIdentifiersProjection::secrets();
         }
         return [];
     }

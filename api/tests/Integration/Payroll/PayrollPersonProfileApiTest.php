@@ -351,6 +351,202 @@ final class PayrollPersonProfileApiTest extends TestCase
         );
     }
 
+    public function testCompanyBackupStreamsAndResealsTypedPersonSecrets(): void
+    {
+        $payload = $this->completePayload();
+        $payload['contacts'][] = [
+            'contact_type' => 'phone',
+            'value' => '+420 777 000 111',
+            'is_primary' => true,
+            'is_active' => true,
+        ];
+        $payload['identifiers'][] = [
+            'identifier_type' => 'foreign_tax_identifier',
+            'value' => 'DE:SYNTHETIC123',
+        ];
+        $ownResponse = $this->put(
+            $this->supplierId,
+            $this->employeeId,
+            $payload,
+        );
+        $foreignResponse = $this->put(
+            $this->otherSupplierId,
+            $this->otherEmployeeId,
+            $payload,
+        );
+        self::assertSame(200, $ownResponse->getStatusCode());
+        self::assertSame(200, $foreignResponse->getStatusCode());
+        $ownProfile = $this->json($ownResponse)['profile'];
+        $foreignProfile = $this->json($foreignResponse)['profile'];
+
+        $contracts = [
+            'payroll_person_contacts' => [
+                'profile_key' => 'contacts',
+                'type_column' => 'contact_type',
+                'ciphertext_column' => 'contact_value_ciphertext',
+                'hash_column' => 'contact_value_hash',
+                'masked_column' => 'contact_value_masked',
+                'expected' => [
+                    'email' => [
+                        'plaintext' => 'jana.testovaci@example.invalid',
+                        'field' => PayrollSensitiveField::CONTACT_EMAIL,
+                    ],
+                    'phone' => [
+                        'plaintext' => '+420 777 000 111',
+                        'field' => PayrollSensitiveField::CONTACT_PHONE,
+                    ],
+                ],
+            ],
+            'payroll_person_identifiers' => [
+                'profile_key' => 'identifiers',
+                'type_column' => 'identifier_type',
+                'ciphertext_column' => 'value_ciphertext',
+                'hash_column' => 'value_hash',
+                'masked_column' => 'value_masked',
+                'expected' => [
+                    'ecp' => [
+                        'plaintext' => '123456789',
+                        'field' => PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                    ],
+                    'foreign_tax_identifier' => [
+                        'plaintext' => 'DE:SYNTHETIC123',
+                        'field' => PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER,
+                    ],
+                ],
+            ],
+        ];
+        $registry = TenantDataRegistryFactory::draftV1();
+        $schemaReader = new CompanyBackupTableSchemaReader();
+
+        foreach ($contracts as $table => $contract) {
+            $definition = $registry->definition('table:' . $table);
+            self::assertNotNull($definition);
+            $projection = CompanyBackupTableProjection::fromDefinition($definition);
+            $schema = $schemaReader->read($this->db->pdo(), $projection);
+            $projection->assertRuntimeSchema(
+                $schema->columns,
+                $schema->generatedColumns,
+                $schema->primaryKey,
+                $schema->binaryColumns,
+            );
+            $projection->references->assertRegistryTargets($registry);
+            $projection->references->assertRuntimeSchema(
+                $schemaReader->readReferences($this->db->pdo(), $projection),
+            );
+
+            $rows = array_values(iterator_to_array(
+                (new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+                    $this->db->pdo(),
+                    $this->supplierId,
+                    $definition,
+                ),
+            ));
+            self::assertCount(2, $rows);
+            $ownIds = array_map(
+                static fn (array $row): int => (int) $row['id'],
+                $ownProfile[$contract['profile_key']],
+            );
+            $foreignIds = array_map(
+                static fn (array $row): int => (int) $row['id'],
+                $foreignProfile[$contract['profile_key']],
+            );
+            foreach ($rows as $row) {
+                self::assertContains((int) $row['id'], $ownIds);
+                self::assertNotContains((int) $row['id'], $foreignIds);
+                self::assertSame($this->supplierId, (int) $row['supplier_id']);
+                self::assertSame($this->employeeId, (int) $row['employee_id']);
+                self::assertArrayNotHasKey($contract['ciphertext_column'], $row);
+                self::assertArrayNotHasKey($contract['hash_column'], $row);
+                self::assertArrayNotHasKey($contract['masked_column'], $row);
+            }
+
+            $secretProjection =
+                CompanyBackupProtectedSecretProjection::fromDefinition($definition);
+            $values = array_values(iterator_to_array(
+                (new CompanyBackupSqlProtectedSecretSource($this->encryption))->values(
+                    $this->db->pdo(),
+                    $this->supplierId,
+                    $secretProjection,
+                ),
+            ));
+            self::assertCount(2, $values);
+            $valuesById = [];
+            foreach ($values as $value) {
+                self::assertSame($contract['ciphertext_column'], $value->name);
+                $valueId = $value->primaryKey['id'] ?? null;
+                self::assertIsInt($valueId);
+                $valuesById[$valueId] = $value;
+            }
+
+            foreach ($rows as $row) {
+                $sourceId = (int) $row['id'];
+                $type = $row[$contract['type_column']] ?? null;
+                self::assertIsString($type);
+                $expected = $contract['expected'][$type] ?? null;
+                self::assertIsArray($expected);
+                $value = $valuesById[$sourceId] ?? null;
+                self::assertNotNull($value);
+                self::assertSame($expected['plaintext'], $value->plaintext());
+
+                $source = $this->db->pdo()->prepare(
+                    'SELECT `' . $contract['ciphertext_column'] . '`, `'
+                        . $contract['hash_column'] . '`, `'
+                        . $contract['masked_column'] . '` FROM `' . $table
+                        . '` WHERE supplier_id = ? AND id = ?',
+                );
+                $source->execute([$this->supplierId, $sourceId]);
+                $sourceStorage = $source->fetch(\PDO::FETCH_ASSOC);
+                self::assertIsArray($sourceStorage);
+
+                $targetSupplierId = $this->otherSupplierId + 100_000;
+                $targetId = $sourceId + 100_000;
+                $targetRow = $row;
+                $targetRow['supplier_id'] = $targetSupplierId;
+                $targetRow['id'] = $targetId;
+                $targetStorage =
+                    $projection->protectedSecretMaterializations->materialize(
+                        $value,
+                        $row,
+                        $targetRow,
+                        $this->sensitiveData,
+                    );
+
+                self::assertNotSame(
+                    $sourceStorage[$contract['ciphertext_column']],
+                    $targetStorage[$contract['ciphertext_column']],
+                );
+                self::assertNotSame(
+                    $sourceStorage[$contract['hash_column']],
+                    $targetStorage[$contract['hash_column']],
+                );
+                self::assertSame(
+                    $expected['plaintext'],
+                    $this->sensitiveData->reveal(
+                        $targetStorage[$contract['ciphertext_column']],
+                        $expected['field'],
+                        $targetSupplierId,
+                        $targetId,
+                    ),
+                );
+                self::assertSame(
+                    $this->sensitiveData->lookupHash(
+                        $expected['plaintext'],
+                        $expected['field'],
+                        $targetSupplierId,
+                    ),
+                    $targetStorage[$contract['hash_column']],
+                );
+                self::assertSame(
+                    $this->sensitiveData->mask(
+                        $expected['plaintext'],
+                        $expected['field'],
+                    ),
+                    $targetStorage[$contract['masked_column']],
+                );
+            }
+        }
+    }
+
     public function testRegistrationIdentityFactsAreSavedInHistoryAndReadableAtEmploymentStart(): void
     {
         $employmentId = $this->createEmployment($this->employeeId, 'employment');
