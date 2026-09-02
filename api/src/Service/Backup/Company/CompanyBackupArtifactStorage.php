@@ -76,6 +76,47 @@ final readonly class CompanyBackupArtifactStorage
         return $real;
     }
 
+    public function openDownload(
+        CompanyBackupStoredArtifact $artifact,
+        CompanyBackupDownloadPlan $plan,
+    ): CompanyBackupDownloadStream {
+        if ($plan->totalBytes !== $artifact->bytes
+            || $plan->etag !== '"sha256:' . $artifact->sha256 . '"'
+        ) {
+            throw new \InvalidArgumentException(
+                'Plán stažení nepatří uloženému archivu.',
+            );
+        }
+
+        return CompanyBackupDownloadStream::open(
+            $this->resolve($artifact),
+            $plan,
+        );
+    }
+
+    /**
+     * Odstraní pouze přesnou deterministickou cestu archivu. Chybějící soubor
+     * je úspěch pro opakovatelný cleanup; nebezpečný nebo zamčený cíl se odloží.
+     */
+    public function remove(CompanyBackupStoredArtifact $artifact): void
+    {
+        $path = $this->removalPath($artifact);
+        if ($path === null) {
+            return;
+        }
+        if (!@unlink($path)) {
+            clearstatcache(true, $path);
+            if (file_exists($path) || is_link($path)) {
+                throw new CompanyBackupJobException('artifact_delete_deferred');
+            }
+            return;
+        }
+        clearstatcache(true, $path);
+        if (file_exists($path) || is_link($path)) {
+            throw new CompanyBackupJobException('artifact_delete_deferred');
+        }
+    }
+
     public static function relativePath(int $supplierId, string $backupId): string
     {
         self::assertCoordinates($supplierId, $backupId);
@@ -135,6 +176,56 @@ final readonly class CompanyBackupArtifactStorage
         }
 
         return $realRoot;
+    }
+
+    private function removalPath(
+        CompanyBackupStoredArtifact $artifact,
+    ): ?string {
+        $root = rtrim($this->rootResolver->root(), "/\\");
+        if ($root === '' || is_link($root)) {
+            throw new CompanyBackupJobException('artifact_delete_unsafe');
+        }
+        if (!file_exists($root)) {
+            return null;
+        }
+        $realRoot = realpath($root);
+        if ($realRoot === false || !is_dir($realRoot)) {
+            throw new CompanyBackupJobException('artifact_delete_unsafe');
+        }
+
+        $directory = $realRoot . DIRECTORY_SEPARATOR
+            . 'sup-' . $artifact->supplierId;
+        if (is_link($directory)) {
+            throw new CompanyBackupJobException('artifact_delete_unsafe');
+        }
+        if (!file_exists($directory)) {
+            return null;
+        }
+        $realDirectory = realpath($directory);
+        if ($realDirectory === false
+            || !is_dir($realDirectory)
+            || !$this->inside($realDirectory, $realRoot)
+        ) {
+            throw new CompanyBackupJobException('artifact_delete_unsafe');
+        }
+
+        $path = $realDirectory . DIRECTORY_SEPARATOR
+            . $artifact->backupId . '.zip';
+        if (is_link($path)) {
+            throw new CompanyBackupJobException('artifact_delete_unsafe');
+        }
+        if (!file_exists($path)) {
+            return null;
+        }
+        $realPath = realpath($path);
+        if ($realPath === false
+            || !is_file($realPath)
+            || !$this->samePath($realPath, $path)
+        ) {
+            throw new CompanyBackupJobException('artifact_delete_unsafe');
+        }
+
+        return $path;
     }
 
     private static function assertCoordinates(int $supplierId, string $backupId): void

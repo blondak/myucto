@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriteResult;
 use MyInvoice\Service\Backup\Company\CompanyBackupArtifactRootResolver;
 use MyInvoice\Service\Backup\Company\CompanyBackupArtifactStorage;
+use MyInvoice\Service\Backup\Company\CompanyBackupDownloadPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobException;
 use PHPUnit\Framework\TestCase;
 
@@ -154,6 +155,163 @@ final class CompanyBackupArtifactStorageTest extends TestCase
         } catch (CompanyBackupJobException $e) {
             self::assertSame('artifact_path_invalid', $e->errorCode);
         }
+    }
+
+    public function testOpensOnlyThePlannedSeekableReadOnlyRange(): void
+    {
+        $storage = $this->storage();
+        $destination = $storage->prepareDestination(42, self::BACKUP_ID);
+        $contents = '0123456789abcdef';
+        file_put_contents($destination, $contents);
+        $artifact = $storage->capture(
+            42,
+            self::BACKUP_ID,
+            new CompanyBackupArchiveWriteResult(
+                $destination,
+                hash('sha256', $contents),
+                strlen($contents),
+                3,
+            ),
+        );
+        $plan = CompanyBackupDownloadPlan::forArchive(
+            strlen($contents),
+            $artifact->sha256,
+            'bytes=3-7',
+        );
+
+        $stream = $storage->openDownload($artifact, $plan);
+
+        self::assertSame(5, $stream->getSize());
+        self::assertSame(0, $stream->tell());
+        self::assertTrue($stream->isReadable());
+        self::assertTrue($stream->isSeekable());
+        self::assertFalse($stream->isWritable());
+        self::assertSame('34', $stream->read(2));
+        self::assertSame(2, $stream->tell());
+        $stream->seek(-1, SEEK_END);
+        self::assertSame('7', $stream->read(100));
+        self::assertTrue($stream->eof());
+        self::assertSame('', $stream->read(100));
+        self::assertSame('34567', (string) $stream);
+
+        try {
+            $stream->seek(6);
+            self::fail('Seek nesmí opustit naplánovaný rozsah archivu.');
+        } catch (CompanyBackupJobException $e) {
+            self::assertSame('artifact_seek_invalid', $e->errorCode);
+        }
+
+        try {
+            $stream->write('x');
+            self::fail('Download stream nesmí změnit hotový archiv.');
+        } catch (CompanyBackupJobException $e) {
+            self::assertSame('artifact_stream_read_only', $e->errorCode);
+        }
+    }
+
+    public function testDownloadRejectsPlanForDifferentArtifact(): void
+    {
+        $storage = $this->storage();
+        $destination = $storage->prepareDestination(42, self::BACKUP_ID);
+        $contents = 'synthetic-plan-bound-archive';
+        file_put_contents($destination, $contents);
+        $artifact = $storage->capture(
+            42,
+            self::BACKUP_ID,
+            new CompanyBackupArchiveWriteResult(
+                $destination,
+                hash('sha256', $contents),
+                strlen($contents),
+                3,
+            ),
+        );
+        $foreignPlan = CompanyBackupDownloadPlan::forArchive(
+            strlen($contents),
+            str_repeat('f', 64),
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $storage->openDownload($artifact, $foreignPlan);
+    }
+
+    public function testDownloadFailsClosedWhenFileShrinksAfterOpening(): void
+    {
+        $storage = $this->storage();
+        $destination = $storage->prepareDestination(42, self::BACKUP_ID);
+        $contents = 'synthetic-complete-archive';
+        file_put_contents($destination, $contents);
+        $artifact = $storage->capture(
+            42,
+            self::BACKUP_ID,
+            new CompanyBackupArchiveWriteResult(
+                $destination,
+                hash('sha256', $contents),
+                strlen($contents),
+                3,
+            ),
+        );
+        $stream = $storage->openDownload(
+            $artifact,
+            CompanyBackupDownloadPlan::forArchive(
+                $artifact->bytes,
+                $artifact->sha256,
+            ),
+        );
+
+        chmod($destination, 0640);
+        file_put_contents($destination, 'short');
+
+        try {
+            $stream->read($artifact->bytes);
+            self::fail('Zkrácený archiv nesmí vytvořit zdánlivě úplnou odpověď.');
+        } catch (CompanyBackupJobException $e) {
+            self::assertSame('artifact_read_failed', $e->errorCode);
+        }
+    }
+
+    public function testRemovalNeverInvalidatesAnOpenDownloadPrematurely(): void
+    {
+        $storage = $this->storage();
+        $destination = $storage->prepareDestination(42, self::BACKUP_ID);
+        $contents = 'synthetic-concurrent-download';
+        file_put_contents($destination, $contents);
+        $artifact = $storage->capture(
+            42,
+            self::BACKUP_ID,
+            new CompanyBackupArchiveWriteResult(
+                $destination,
+                hash('sha256', $contents),
+                strlen($contents),
+                3,
+            ),
+        );
+        $stream = $storage->openDownload(
+            $artifact,
+            CompanyBackupDownloadPlan::forArchive(
+                $artifact->bytes,
+                $artifact->sha256,
+            ),
+        );
+
+        try {
+            $storage->remove($artifact);
+            self::assertSame(
+                $contents,
+                $stream->getContents(),
+                'Unixový otevřený inode musí zůstat čitelný po unlinku.',
+            );
+        } catch (CompanyBackupJobException $e) {
+            self::assertSame(
+                'artifact_delete_deferred',
+                $e->errorCode,
+                'Windowsový zámek musí smazání odložit, ne předstírat úspěch.',
+            );
+            self::assertFileExists($destination);
+            $stream->close();
+            $storage->remove($artifact);
+        }
+
+        self::assertFileDoesNotExist($destination);
     }
 
     private function storage(): CompanyBackupArtifactStorage

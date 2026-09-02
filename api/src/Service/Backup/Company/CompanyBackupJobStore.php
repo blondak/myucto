@@ -127,6 +127,31 @@ final readonly class CompanyBackupJobStore
         return $this->fetch($statement);
     }
 
+    /** @return array<string,mixed>|null */
+    public function findDownloadable(
+        string $backupId,
+        int $supplierId,
+        DateTimeImmutable $now,
+    ): ?array {
+        self::assertBackupId($backupId);
+        if ($supplierId < 1) {
+            throw new \InvalidArgumentException('Firma zálohového jobu není platná.');
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::safeColumnList()
+            . ' FROM company_backup_jobs'
+            . ' WHERE backup_id = ? AND supplier_id = ? AND status = ?'
+            . ' AND expires_at > FROM_UNIXTIME(?)',
+        );
+        $statement->execute([
+            $backupId,
+            $supplierId,
+            CompanyBackupJobStatus::Completed->value,
+            $now->getTimestamp(),
+        ]);
+        return $this->fetch($statement);
+    }
+
     /**
      * @return array<string,mixed>|null
      * @internal Jen worker s interně předaným backup_id.
@@ -348,31 +373,44 @@ final readonly class CompanyBackupJobStore
         );
     }
 
-    public function markExpired(string $backupId): bool
+    public function expireProcessing(string $backupId): bool
     {
-        self::assertBackupId($backupId);
-        $from = [
-            ...self::processingStatuses(),
-            CompanyBackupJobStatus::Completed,
-        ];
-        foreach ($from as $status) {
-            if (!$status->canTransitionTo(CompanyBackupJobStatus::Expired)) {
-                throw new \LogicException('Stavový kontrakt expirace není konzistentní.');
-            }
+        return $this->finishWithoutArtifact(
+            $backupId,
+            CompanyBackupJobStatus::Expired,
+        );
+    }
+
+    /** Archiv musí být fyzicky pryč dřív, než tato metoda zahodí jeho metadata. */
+    public function markArtifactRemoved(
+        CompanyBackupStoredArtifact $artifact,
+    ): bool {
+        if (!CompanyBackupJobStatus::Completed->canTransitionTo(
+            CompanyBackupJobStatus::Expired,
+        )) {
+            throw new \LogicException('Stavový kontrakt expirace není konzistentní.');
         }
         $statement = $this->db->pdo()->prepare(
             'UPDATE company_backup_jobs SET'
             . ' status = ?, password_ciphertext = NULL, artifact_path = NULL,'
             . ' artifact_name = NULL, artifact_bytes = NULL, artifact_sha256 = NULL,'
             . ' artifact_entry_count = NULL, expires_at = NULL,'
-            . ' finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP(6)),'
             . ' updated_at = CURRENT_TIMESTAMP(6)'
-            . ' WHERE backup_id = ? AND status IN ('
-            . self::statusSql($from) . ')',
+            . ' WHERE backup_id = ? AND supplier_id = ? AND status = ?'
+            . ' AND artifact_path = ? AND artifact_name = ?'
+            . ' AND artifact_bytes = ? AND artifact_sha256 = ?'
+            . ' AND artifact_entry_count = ?',
         );
         $statement->execute([
             CompanyBackupJobStatus::Expired->value,
-            $backupId,
+            $artifact->backupId,
+            $artifact->supplierId,
+            CompanyBackupJobStatus::Completed->value,
+            $artifact->relativePath,
+            $artifact->downloadName,
+            $artifact->bytes,
+            $artifact->sha256,
+            $artifact->entryCount,
         ]);
         return $statement->rowCount() === 1;
     }

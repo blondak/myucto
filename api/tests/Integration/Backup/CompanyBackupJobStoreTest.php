@@ -9,10 +9,14 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriteResult;
+use MyInvoice\Service\Backup\Company\CompanyBackupArtifactRootResolver;
+use MyInvoice\Service\Backup\Company\CompanyBackupArtifactStorage;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobException;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobRetentionPolicy;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobStatus;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobStore;
+use MyInvoice\Service\Backup\Company\CompanyBackupRetentionCleanup;
 use MyInvoice\Service\Backup\Company\CompanyBackupStoredArtifact;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -310,6 +314,19 @@ final class CompanyBackupJobStoreTest extends TestCase
         self::assertNotSame($staleId, $this->createJob($this->supplierId));
     }
 
+    public function testProcessingJobMayExpireWithoutLeavingPassword(): void
+    {
+        $backupId = $this->createJob($this->supplierId);
+        self::assertTrue($this->jobs->startChecking($backupId));
+
+        self::assertTrue($this->jobs->expireProcessing($backupId));
+        $job = $this->jobs->find($backupId, $this->supplierId);
+        self::assertNotNull($job);
+        self::assertSame(CompanyBackupJobStatus::Expired->value, $job['status']);
+        $this->assertPasswordUnavailable($backupId);
+        self::assertNotSame($backupId, $this->createJob($this->supplierId));
+    }
+
     public function testExpiredCompletedArtifactLosesMetadataAndDownloadability(): void
     {
         $backupId = $this->completedJob($this->supplierId);
@@ -318,13 +335,95 @@ final class CompanyBackupJobStoreTest extends TestCase
         );
         self::assertSame([$backupId], array_column($expired, 'backup_id'));
 
-        self::assertTrue($this->jobs->markExpired($backupId));
+        $completed = $this->jobs->find($backupId, $this->supplierId);
+        self::assertNotNull($completed);
+        self::assertTrue($this->jobs->markArtifactRemoved(
+            $this->artifactFromJob($completed),
+        ));
         $job = $this->jobs->find($backupId, $this->supplierId);
         self::assertNotNull($job);
         self::assertSame(CompanyBackupJobStatus::Expired->value, $job['status']);
         self::assertNull($job['artifact_path']);
         self::assertNull($job['artifact_sha256']);
         self::assertNull($job['expires_at']);
+    }
+
+    public function testRetentionCleanupDeletesFileBeforeExpiringMetadata(): void
+    {
+        [$backupId, , $storage, $path, $root] = $this->completedStoredJob(
+            $this->supplierId,
+        );
+        try {
+            $cleanup = new CompanyBackupRetentionCleanup($this->jobs, $storage);
+
+            $early = $cleanup->run(
+                new DateTimeImmutable('2026-09-03T09:59:59+00:00'),
+            );
+            self::assertSame(0, $early->candidateCount);
+            self::assertNotNull($this->jobs->findDownloadable(
+                $backupId,
+                $this->supplierId,
+                new DateTimeImmutable('2026-09-03T09:59:59+00:00'),
+            ));
+            self::assertFileExists($path);
+
+            self::assertNull($this->jobs->findDownloadable(
+                $backupId,
+                $this->supplierId,
+                new DateTimeImmutable('2026-09-03T10:00:00+00:00'),
+            ));
+            $result = $cleanup->run(
+                new DateTimeImmutable('2026-09-03T10:00:00+00:00'),
+            );
+            self::assertSame(1, $result->candidateCount);
+            self::assertSame(1, $result->expiredCount);
+            self::assertSame(0, $result->deferredCount);
+            self::assertFileDoesNotExist($path);
+
+            $job = $this->jobs->find($backupId, $this->supplierId);
+            self::assertNotNull($job);
+            self::assertSame(CompanyBackupJobStatus::Expired->value, $job['status']);
+            self::assertNull($job['artifact_path']);
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testRetentionCleanupKeepsMetadataWhenRemovalIsUnsafe(): void
+    {
+        [$backupId, , $storage, $path, $root] = $this->completedStoredJob(
+            $this->supplierId,
+        );
+        try {
+            chmod($path, 0640);
+            self::assertTrue(unlink($path));
+            self::assertTrue(mkdir($path, 0750));
+            $cleanup = new CompanyBackupRetentionCleanup($this->jobs, $storage);
+
+            $deferred = $cleanup->run(
+                new DateTimeImmutable('2026-09-03T10:00:00+00:00'),
+            );
+            self::assertSame(1, $deferred->candidateCount);
+            self::assertSame(0, $deferred->expiredCount);
+            self::assertSame(1, $deferred->deferredCount);
+            $job = $this->jobs->find($backupId, $this->supplierId);
+            self::assertNotNull($job);
+            self::assertSame(CompanyBackupJobStatus::Completed->value, $job['status']);
+            self::assertNotNull($job['artifact_path']);
+            self::assertNull($this->jobs->findDownloadable(
+                $backupId,
+                $this->supplierId,
+                new DateTimeImmutable('2026-09-03T10:00:00+00:00'),
+            ));
+
+            self::assertTrue(rmdir($path));
+            $retried = $cleanup->run(
+                new DateTimeImmutable('2026-09-03T10:00:01+00:00'),
+            );
+            self::assertSame(1, $retried->expiredCount);
+        } finally {
+            $this->removeDirectory($root);
+        }
     }
 
     private function createJob(int $supplierId): string
@@ -358,6 +457,74 @@ final class CompanyBackupJobStoreTest extends TestCase
             new CompanyBackupJobRetentionPolicy(24),
         ));
         return $backupId;
+    }
+
+    /**
+     * @return array{
+     *   string,
+     *   CompanyBackupStoredArtifact,
+     *   CompanyBackupArtifactStorage,
+     *   string,
+     *   string
+     * }
+     */
+    private function completedStoredJob(int $supplierId): array
+    {
+        $root = sys_get_temp_dir() . '/company-backup-cleanup-'
+            . bin2hex(random_bytes(8));
+        if (!mkdir($root, 0750)) {
+            self::fail('Nepodařilo se vytvořit syntetické artifact storage.');
+        }
+        $storageRoot = $root . '/company-backups';
+        $storage = new CompanyBackupArtifactStorage(
+            new class ($storageRoot) implements CompanyBackupArtifactRootResolver {
+                public function __construct(private readonly string $root) {}
+
+                public function root(): string
+                {
+                    return $this->root;
+                }
+            },
+        );
+        $backupId = $this->createJob($supplierId);
+        $path = $storage->prepareDestination($supplierId, $backupId);
+        $contents = 'synthetic-expiring-company-backup';
+        file_put_contents($path, $contents);
+        $artifact = $storage->capture(
+            $supplierId,
+            $backupId,
+            new CompanyBackupArchiveWriteResult(
+                $path,
+                hash('sha256', $contents),
+                strlen($contents),
+                3,
+            ),
+        );
+        self::assertTrue($this->jobs->startChecking($backupId));
+        self::assertTrue($this->jobs->startSnapshotting($backupId));
+        self::assertTrue($this->jobs->startPackaging($backupId));
+        self::assertTrue($this->jobs->complete(
+            $backupId,
+            $artifact,
+            new DateTimeImmutable('2026-09-02T10:00:00+00:00'),
+            new CompanyBackupJobRetentionPolicy(24),
+        ));
+
+        return [$backupId, $artifact, $storage, $path, $root];
+    }
+
+    /** @param array<string,mixed> $job */
+    private function artifactFromJob(array $job): CompanyBackupStoredArtifact
+    {
+        return new CompanyBackupStoredArtifact(
+            (int) $job['supplier_id'],
+            (string) $job['backup_id'],
+            (string) $job['artifact_path'],
+            (string) $job['artifact_name'],
+            (int) $job['artifact_bytes'],
+            (string) $job['artifact_sha256'],
+            (int) $job['artifact_entry_count'],
+        );
     }
 
     private function assertPasswordUnavailable(
@@ -427,5 +594,25 @@ final class CompanyBackupJobStoreTest extends TestCase
             $vatRateId,
         ]);
         return (int) $pdo->lastInsertId();
+    }
+
+    private function removeDirectory(string $directory): void
+    {
+        if (!is_dir($directory)) {
+            return;
+        }
+        foreach (scandir($directory) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $directory . '/' . $entry;
+            if (is_dir($path) && !is_link($path)) {
+                $this->removeDirectory($path);
+            } else {
+                @chmod($path, 0640);
+                @unlink($path);
+            }
+        }
+        @rmdir($directory);
     }
 }
