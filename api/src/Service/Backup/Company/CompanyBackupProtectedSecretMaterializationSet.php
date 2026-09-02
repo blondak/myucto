@@ -161,8 +161,10 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
         }
         $tenantId = $targetRow[$materialization->tenantIdColumn] ?? null;
         $entityId = $targetRow[$materialization->entityIdColumn] ?? null;
+        $field = $materialization->fieldForRows($sourceRow, $targetRow);
         if (!is_int($tenantId) || $tenantId < 1
             || !is_int($entityId) || $entityId < 1
+            || $field === null
         ) {
             throw $this->valueError($materialization->secretColumn);
         }
@@ -170,7 +172,7 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
         try {
             $sealed = $sensitiveData->seal(
                 $value->plaintext(),
-                $materialization->field,
+                $field,
                 $tenantId,
                 $entityId,
             );
@@ -233,8 +235,10 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
         }
         $tenantId = $targetRow[$materialization->tenantIdColumn] ?? null;
         $entityId = $targetRow[$materialization->entityIdColumn] ?? null;
+        $field = $materialization->fieldForRows($sourceRow, $targetRow);
         if (!is_int($tenantId) || $tenantId < 1
             || !is_int($entityId) || $entityId < 1
+            || $field === null
         ) {
             throw $this->valueError($secretColumn);
         }
@@ -265,6 +269,10 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
             || !isset($data[$materialization->tenantIdColumn])
             || !isset($data[$materialization->entityIdColumn])
             || !isset($primary[$materialization->entityIdColumn])
+            || ($materialization->fieldSelector->discriminatorColumn !== null
+                && !isset($data[
+                    $materialization->fieldSelector->discriminatorColumn
+                ]))
         ) {
             throw self::metadataError(
                 $materialization->registryKey,
@@ -293,15 +301,33 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
             $materialization->registryKey,
             $column,
         );
-        $expectedContext = 'payroll:{'
-            . $materialization->tenantIdColumn
-            . '}:{'
-            . $materialization->entityIdColumn
-            . '}:'
-            . $materialization->field->value;
         if ($storage->storage
             !== CompanyBackupSecretStorage::ApplicationEncryptedContext
-            || $storage->context !== $expectedContext
+        ) {
+            throw self::metadataError($materialization->registryKey, $column);
+        }
+        $fixedField = $materialization->fieldSelector->fixedField;
+        if ($fixedField !== null) {
+            $expectedContext = 'payroll:{'
+                . $materialization->tenantIdColumn
+                . '}:{'
+                . $materialization->entityIdColumn
+                . '}:'
+                . $fixedField->value;
+            if ($storage->context !== $expectedContext
+                || $storage->payrollSensitiveContext !== null
+            ) {
+                throw self::metadataError($materialization->registryKey, $column);
+            }
+            return;
+        }
+        if ($storage->context !== null
+            || $storage->payrollSensitiveContext === null
+            || !$storage->payrollSensitiveContext->matches(
+                $materialization->tenantIdColumn,
+                $materialization->entityIdColumn,
+                $materialization->fieldSelector,
+            )
         ) {
             throw self::metadataError($materialization->registryKey, $column);
         }

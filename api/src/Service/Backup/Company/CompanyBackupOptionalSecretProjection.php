@@ -120,8 +120,9 @@ final readonly class CompanyBackupOptionalSecretProjection
                     $definition->key,
                     $entry->name,
                 );
-                if ($contract->contextTemplate !== null
-                    && $contract->contextTemplate->columns !== []
+                if (($contract->contextTemplate !== null
+                        && $contract->contextTemplate->columns !== [])
+                    || $contract->payrollSensitiveContext !== null
                 ) {
                     throw self::error(
                         'secret_source_storage_invalid',

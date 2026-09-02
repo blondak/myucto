@@ -17,7 +17,7 @@ final readonly class CompanyBackupProtectedSecretMaterialization
         public string $registryKey,
         public string $secretColumn,
         public CompanyBackupProtectedSecretMaterializer $materializer,
-        public PayrollSensitiveField $field,
+        public CompanyBackupPayrollSensitiveFieldSelector $fieldSelector,
         public string $tenantIdColumn,
         public string $entityIdColumn,
         public bool $nullable,
@@ -55,13 +55,18 @@ final readonly class CompanyBackupProtectedSecretMaterialization
         $materializer = is_string($materializerValue)
             ? CompanyBackupProtectedSecretMaterializer::tryFrom($materializerValue)
             : null;
-        $field = is_string($fieldValue)
-            ? PayrollSensitiveField::tryFrom($fieldValue)
-            : null;
+        try {
+            $fieldSelector =
+                CompanyBackupPayrollSensitiveFieldSelector::fromMetadata($fieldValue);
+        } catch (\InvalidArgumentException) {
+            throw self::invalid(
+                $registryKey,
+                is_string($secretColumn) ? $secretColumn : null,
+            );
+        }
         if (!is_string($secretColumn)
             || !self::isIdentifier($secretColumn)
             || $materializer !== CompanyBackupProtectedSecretMaterializer::PayrollSensitiveV1
-            || $field === null
             || !is_string($tenantIdColumn)
             || !self::isIdentifier($tenantIdColumn)
             || !is_string($entityIdColumn)
@@ -100,7 +105,7 @@ final readonly class CompanyBackupProtectedSecretMaterialization
             $registryKey,
             $secretColumn,
             $materializer,
-            $field,
+            $fieldSelector,
             $tenantIdColumn,
             $entityIdColumn,
             $nullable,
@@ -115,13 +120,29 @@ final readonly class CompanyBackupProtectedSecretMaterialization
             . '<-'
             . $this->materializer->value
             . ':'
-            . $this->field->value
+            . $this->fieldSelector->signature()
             . '@'
             . $this->tenantIdColumn
             . ','
             . $this->entityIdColumn
             . '->'
             . implode(',', $this->targetColumns);
+    }
+
+    /**
+     * @param array<string,mixed> $sourceRow
+     * @param array<string,mixed> $targetRow
+     */
+    public function fieldForRows(
+        array $sourceRow,
+        array $targetRow,
+    ): ?PayrollSensitiveField {
+        $sourceField = $this->fieldSelector->fieldFor($sourceRow);
+        $targetField = $this->fieldSelector->fieldFor($targetRow);
+
+        return $sourceField !== null && $sourceField === $targetField
+            ? $sourceField
+            : null;
     }
 
     private static function isIdentifier(string $value): bool

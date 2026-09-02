@@ -28,12 +28,16 @@ final readonly class CompanyBackupProtectedSecretProjection
     /** @var array<string,CompanyBackupSecretContextTemplate|null> */
     private array $contextTemplates;
 
+    /** @var array<string,CompanyBackupPayrollSensitiveContext|null> */
+    private array $payrollSensitiveContexts;
+
     /**
      * @param list<string> $primaryKey
      * @param list<string> $columns
      * @param array<string,CompanyBackupSecretStorage> $storage
      * @param array<string,?string> $contexts
      * @param array<string,CompanyBackupSecretContextTemplate|null> $contextTemplates
+     * @param array<string,CompanyBackupPayrollSensitiveContext|null> $payrollSensitiveContexts
      */
     private function __construct(
         public string $registryKey,
@@ -45,12 +49,14 @@ final readonly class CompanyBackupProtectedSecretProjection
         array $storage,
         array $contexts,
         array $contextTemplates,
+        array $payrollSensitiveContexts,
     ) {
         $this->primaryKey = $primaryKey;
         $this->columns = $columns;
         $this->storage = $storage;
         $this->contexts = $contexts;
         $this->contextTemplates = $contextTemplates;
+        $this->payrollSensitiveContexts = $payrollSensitiveContexts;
     }
 
     public static function fromDefinition(
@@ -100,6 +106,8 @@ final readonly class CompanyBackupProtectedSecretProjection
         $storage = [];
         $contexts = [];
         $contextTemplates = [];
+        $payrollSensitiveContexts = [];
+        $dataColumns = self::companyBackupDataColumns($definition);
         $allowedContextColumns = array_values(array_unique([
             ...$primaryKey,
             $ownershipColumn,
@@ -122,7 +130,22 @@ final readonly class CompanyBackupProtectedSecretProjection
                 $definition->key,
                 $column,
             );
+            if ($contract->payrollSensitiveContext !== null
+                && !$contract->payrollSensitiveContext->hasValidCoordinates(
+                    $primaryKey,
+                    $ownershipColumn,
+                    $dataColumns,
+                )
+            ) {
+                throw self::error(
+                    'secret_source_storage_invalid',
+                    $definition->key,
+                    $column,
+                );
+            }
             $contextTemplates[$column] = $contract->contextTemplate;
+            $payrollSensitiveContexts[$column] =
+                $contract->payrollSensitiveContext;
         }
         if ($columns === []) {
             throw self::error('secret_source_projection_empty', $definition->key);
@@ -138,6 +161,7 @@ final readonly class CompanyBackupProtectedSecretProjection
             $storage,
             $contexts,
             $contextTemplates,
+            $payrollSensitiveContexts,
         );
     }
 
@@ -148,9 +172,8 @@ final readonly class CompanyBackupProtectedSecretProjection
         }
         $available = array_fill_keys($schema->columns, true);
         foreach ([
-            ...$this->primaryKey,
             $this->ownershipColumn,
-            ...$this->columns,
+            ...$this->selectedColumns(),
         ] as $column) {
             if (!isset($available[$column])) {
                 throw self::error(
@@ -186,6 +209,16 @@ final readonly class CompanyBackupProtectedSecretProjection
                 }
             }
         }
+        foreach ($this->payrollSensitiveContexts as $context) {
+            if ($context === null) {
+                continue;
+            }
+            foreach ($context->columns() as $column) {
+                if (!in_array($column, $columns, true)) {
+                    $columns[] = $column;
+                }
+            }
+        }
         foreach ($this->columns as $column) {
             if (!in_array($column, $columns, true)) {
                 $columns[] = $column;
@@ -197,7 +230,9 @@ final readonly class CompanyBackupProtectedSecretProjection
     /** @param array<string,mixed> $row */
     public function contextFor(string $column, array $row): ?string
     {
-        if (!array_key_exists($column, $this->contextTemplates)) {
+        if (!array_key_exists($column, $this->contextTemplates)
+            || !array_key_exists($column, $this->payrollSensitiveContexts)
+        ) {
             throw self::error(
                 'secret_source_schema_invalid',
                 $this->registryKey,
@@ -205,8 +240,45 @@ final readonly class CompanyBackupProtectedSecretProjection
             );
         }
         $template = $this->contextTemplates[$column];
+        $payrollContext = $this->payrollSensitiveContexts[$column];
+
+        if ($payrollContext !== null) {
+            try {
+                return $payrollContext->resolve($row);
+            } catch (\InvalidArgumentException) {
+                throw self::error(
+                    'secret_source_context_invalid',
+                    $this->registryKey,
+                    $column,
+                );
+            }
+        }
 
         return $template?->resolve($row, $this->registryKey, $column);
+    }
+
+    /** @return list<string> */
+    private static function companyBackupDataColumns(
+        TenantDataDefinition $definition,
+    ): array {
+        $companyBackup = $definition->details['company_backup'] ?? null;
+        $columns = is_array($companyBackup) && !array_is_list($companyBackup)
+            ? ($companyBackup['data_columns'] ?? null)
+            : null;
+        if (!is_array($columns) || !array_is_list($columns)) {
+            return [];
+        }
+        $result = [];
+        foreach ($columns as $column) {
+            if (!is_string($column)
+                || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $column) !== 1
+                || in_array($column, $result, true)
+            ) {
+                return [];
+            }
+            $result[] = $column;
+        }
+        return $result;
     }
 
     /** @return list<string> */

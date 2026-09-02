@@ -84,6 +84,124 @@ final class CompanyBackupProtectedSecretMaterializationSetTest extends TestCase
         );
     }
 
+    public function testResealsPlaintextWithFieldSelectedByImmutableRowType(): void
+    {
+        $service = $this->sensitiveData();
+        $projection = CompanyBackupTableProjection::fromDefinition(
+            $this->discriminatedDefinition(),
+        );
+        $value = CompanyBackupSecretValue::fromPlaintext(
+            'table:synthetic_contacts',
+            CompanyBackupSecretScope::Column,
+            'contact_value_ciphertext',
+            ['id' => 73],
+            'person@example.invalid',
+        );
+
+        $stored = $projection->protectedSecretMaterializations->materialize(
+            $value,
+            [
+                'id' => 73,
+                'supplier_id' => 42,
+                'contact_type' => 'email',
+            ],
+            [
+                'id' => 173,
+                'supplier_id' => 142,
+                'contact_type' => 'email',
+            ],
+            $service,
+        );
+
+        self::assertSame(
+            'person@example.invalid',
+            $service->reveal(
+                $stored['contact_value_ciphertext'],
+                PayrollSensitiveField::CONTACT_EMAIL,
+                142,
+                173,
+            ),
+        );
+        self::assertSame(
+            $service->lookupHash(
+                'person@example.invalid',
+                PayrollSensitiveField::CONTACT_EMAIL,
+                142,
+            ),
+            $stored['contact_value_hash'],
+        );
+        self::assertSame(
+            'contact_value_ciphertext<-payroll_sensitive_v1:'
+                . '?contact_type{email=contact_email,phone=contact_phone}'
+                . '@supplier_id,id->contact_value_ciphertext,'
+                . 'contact_value_hash,contact_value_masked',
+            $projection->protectedSecretMaterializations
+                ->materializations[0]
+                ->signature(),
+        );
+    }
+
+    public function testRejectsUnknownOrChangedDiscriminatedSecretType(): void
+    {
+        $set = CompanyBackupTableProjection::fromDefinition(
+            $this->discriminatedDefinition(),
+        )->protectedSecretMaterializations;
+        $value = CompanyBackupSecretValue::fromPlaintext(
+            'table:synthetic_contacts',
+            CompanyBackupSecretScope::Column,
+            'contact_value_ciphertext',
+            ['id' => 73],
+            'person@example.invalid',
+        );
+
+        foreach ([
+            [
+                ['id' => 73, 'supplier_id' => 42, 'contact_type' => 'fax'],
+                ['id' => 173, 'supplier_id' => 142, 'contact_type' => 'fax'],
+            ],
+            [
+                ['id' => 73, 'supplier_id' => 42, 'contact_type' => 'email'],
+                ['id' => 173, 'supplier_id' => 142, 'contact_type' => 'phone'],
+            ],
+        ] as [$sourceRow, $targetRow]) {
+            try {
+                $set->materialize(
+                    $value,
+                    $sourceRow,
+                    $targetRow,
+                    $this->sensitiveData(),
+                );
+                self::fail('Neznámý ani změněný typ secretu nesmí projít.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame(
+                    'secret_restore_materialization_invalid',
+                    $e->errorCode,
+                );
+                self::assertSame('contact_value_ciphertext', $e->column);
+                self::assertStringNotContainsString(
+                    $value->plaintext(),
+                    $e->getMessage(),
+                );
+            }
+        }
+    }
+
+    public function testRejectsDriftBetweenSourceAndTargetFieldSelectors(): void
+    {
+        $definition = $this->discriminatedDefinition();
+        $details = $definition->details;
+        $details['secrets']['contact_value_ciphertext']['context']['field']
+            ['cases'][1]['field'] = 'contact_email';
+
+        $this->assertProjectionError(new TenantDataDefinition(
+            $definition->key,
+            $definition->kind,
+            $definition->policy,
+            $definition->profiles,
+            $details,
+        ), 'contact_value_ciphertext');
+    }
+
     public function testRejectsContextOrDerivedColumnsOutsideExactContract(): void
     {
         $wrongContext = $this->definition();
@@ -264,6 +382,84 @@ final class CompanyBackupProtectedSecretMaterializationSetTest extends TestCase
                             'ciphertext' => 'bank_account_ciphertext',
                             'lookup_hash' => 'bank_account_hash',
                             'masked' => 'bank_account_masked',
+                        ],
+                        'tenant_id_column' => 'supplier_id',
+                    ]],
+                    'references' => [[
+                        'columns' => ['supplier_id'],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' =>
+                            CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ]],
+                    'restore_overrides' => [],
+                ],
+            ],
+        );
+    }
+
+    private function discriminatedDefinition(): TenantDataDefinition
+    {
+        $field = [
+            'cases' => [
+                ['equals' => 'email', 'field' => 'contact_email'],
+                ['equals' => 'phone', 'field' => 'contact_phone'],
+            ],
+            'discriminator_column' => 'contact_type',
+        ];
+
+        return new TenantDataDefinition(
+            'table:synthetic_contacts',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [
+                    'contact_value_ciphertext' => [
+                        'policy' =>
+                            TenantSecretPolicy::ProtectedDomainSecret->value,
+                        'storage' =>
+                            CompanyBackupSecretStorage::ApplicationEncryptedContext->value,
+                        'context' => [
+                            'entity_id_column' => 'id',
+                            'field' => $field,
+                            'scheme' => 'payroll_sensitive_v1',
+                            'tenant_id_column' => 'supplier_id',
+                        ],
+                    ],
+                ],
+                'company_backup' => [
+                    'data_columns' => [
+                        'id',
+                        'supplier_id',
+                        'contact_type',
+                    ],
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' => [
+                        'contact_value_hash' =>
+                            'rederived_from_protected_secret',
+                        'contact_value_masked' =>
+                            'rederived_from_protected_secret',
+                    ],
+                    'protected_secret_materializations' => [[
+                        'entity_id_column' => 'id',
+                        'field' => $field,
+                        'materializer' => 'payroll_sensitive_v1',
+                        'nullable' => false,
+                        'secret_column' => 'contact_value_ciphertext',
+                        'target_columns' => [
+                            'ciphertext' => 'contact_value_ciphertext',
+                            'lookup_hash' => 'contact_value_hash',
+                            'masked' => 'contact_value_masked',
                         ],
                         'tenant_id_column' => 'supplier_id',
                     ]],

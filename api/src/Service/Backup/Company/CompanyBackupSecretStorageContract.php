@@ -11,6 +11,7 @@ final readonly class CompanyBackupSecretStorageContract
         public CompanyBackupSecretStorage $storage,
         public ?string $context,
         public ?CompanyBackupSecretContextTemplate $contextTemplate,
+        public ?CompanyBackupPayrollSensitiveContext $payrollSensitiveContext,
     ) {}
 
     public static function fromMetadata(
@@ -33,17 +34,32 @@ final readonly class CompanyBackupSecretStorageContract
         sort($keys, SORT_STRING);
         $context = $metadata['context'] ?? null;
         $contextTemplate = null;
+        $payrollSensitiveContext = null;
         if ($storage === CompanyBackupSecretStorage::ApplicationEncryptedContext) {
             if ($keys !== ['context', 'policy', 'storage']
-                || !is_string($context)
             ) {
                 throw self::error('secret_source_storage_invalid', $registryKey, $column);
             }
-            $contextTemplate = CompanyBackupSecretContextTemplate::fromString(
-                $context,
-                $registryKey,
-                $column,
-            );
+            if (is_string($context)) {
+                $contextTemplate = CompanyBackupSecretContextTemplate::fromString(
+                    $context,
+                    $registryKey,
+                    $column,
+                );
+            } elseif (is_array($context)) {
+                try {
+                    $payrollSensitiveContext =
+                        CompanyBackupPayrollSensitiveContext::fromMetadata($context);
+                } catch (\InvalidArgumentException) {
+                    throw self::error(
+                        'secret_source_storage_invalid',
+                        $registryKey,
+                        $column,
+                    );
+                }
+            } else {
+                throw self::error('secret_source_storage_invalid', $registryKey, $column);
+            }
         } elseif ($keys !== ['policy', 'storage'] || $context !== null) {
             throw self::error('secret_source_storage_invalid', $registryKey, $column);
         }
@@ -51,6 +67,7 @@ final readonly class CompanyBackupSecretStorageContract
             $storage,
             is_string($context) ? $context : null,
             $contextTemplate,
+            $payrollSensitiveContext,
         );
     }
 

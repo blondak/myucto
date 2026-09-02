@@ -153,6 +153,112 @@ final class CompanyBackupSqlProtectedSecretSourceTest extends TestCase
         self::assertStringNotContainsString($encrypted, $sql);
     }
 
+    public function testResolvesPayrollContextFromDiscriminatedField(): void
+    {
+        $encryption = $this->encryption();
+        $definition = $this->discriminatedContextDefinition();
+        $projection = CompanyBackupProtectedSecretProjection::fromDefinition(
+            $definition,
+        );
+        $data = $this->streamStatement([
+            [
+                'id' => 73,
+                'supplier_id' => 42,
+                'contact_type' => 'email',
+                'contact_value_ciphertext' => $encryption->encryptFor(
+                    'person@example.invalid',
+                    'payroll:42:73:contact_email',
+                ),
+            ],
+            [
+                'id' => 74,
+                'supplier_id' => 42,
+                'contact_type' => 'phone',
+                'contact_value_ciphertext' => $encryption->encryptFor(
+                    '+420 777 000 111',
+                    'payroll:42:74:contact_phone',
+                ),
+            ],
+        ], [42]);
+        $sql = '';
+        $pdo = $this->schemaPdo(
+            $data,
+            $sql,
+            columns: [
+                $this->schemaColumn('id', 'bigint', 'auto_increment'),
+                $this->schemaColumn('supplier_id', 'int'),
+                $this->schemaColumn('contact_type', 'enum'),
+                $this->schemaColumn('contact_value_ciphertext', 'varchar'),
+            ],
+            table: 'payroll_person_contacts',
+        );
+
+        $values = iterator_to_array(
+            (new CompanyBackupSqlProtectedSecretSource($encryption))->values(
+                $pdo,
+                42,
+                $projection,
+            ),
+            false,
+        );
+
+        self::assertSame(
+            ['person@example.invalid', '+420 777 000 111'],
+            array_map(static fn ($value): string => $value->plaintext(), $values),
+        );
+        self::assertSame(
+            [['id' => 73], ['id' => 74]],
+            array_map(static fn ($value): array => $value->primaryKey, $values),
+        );
+        self::assertStringContainsString(
+            'SELECT `_company_secret`.`id`, `_company_secret`.`supplier_id`, '
+                . '`_company_secret`.`contact_type`, '
+                . '`_company_secret`.`contact_value_ciphertext` '
+                . 'FROM `payroll_person_contacts`',
+            $sql,
+        );
+    }
+
+    public function testRejectsUnknownDiscriminatedFieldBeforeDecrypting(): void
+    {
+        $data = $this->streamStatement([[
+            'id' => 73,
+            'supplier_id' => 42,
+            'contact_type' => 'fax',
+            'contact_value_ciphertext' => 'enc:v2:not-inspected',
+        ]], [42]);
+        $sql = '';
+        $pdo = $this->schemaPdo(
+            $data,
+            $sql,
+            columns: [
+                $this->schemaColumn('id', 'bigint', 'auto_increment'),
+                $this->schemaColumn('supplier_id', 'int'),
+                $this->schemaColumn('contact_type', 'enum'),
+                $this->schemaColumn('contact_value_ciphertext', 'varchar'),
+            ],
+            table: 'payroll_person_contacts',
+        );
+
+        try {
+            iterator_to_array(
+                (new CompanyBackupSqlProtectedSecretSource($this->encryption()))
+                    ->values(
+                        $pdo,
+                        42,
+                        CompanyBackupProtectedSecretProjection::fromDefinition(
+                            $this->discriminatedContextDefinition(),
+                        ),
+                    ),
+            );
+            self::fail('Neznámý typ nesmí vstoupit do dešifrování.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('secret_source_context_invalid', $e->errorCode);
+            self::assertSame('contact_value_ciphertext', $e->column);
+            self::assertStringNotContainsString('not-inspected', $e->getMessage());
+        }
+    }
+
     public function testRejectsUndecryptableValueWithoutReturningCiphertext(): void
     {
         $data = $this->streamStatement([[
@@ -352,6 +458,52 @@ final class CompanyBackupSqlProtectedSecretSourceTest extends TestCase
                         'context' =>
                             'payroll:{supplier_id}:{id}:bank_account',
                     ],
+                ],
+            ],
+        );
+    }
+
+    private function discriminatedContextDefinition(): TenantDataDefinition
+    {
+        return new TenantDataDefinition(
+            'table:payroll_person_contacts',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [
+                    'contact_value_ciphertext' => [
+                        'policy' =>
+                            TenantSecretPolicy::ProtectedDomainSecret->value,
+                        'storage' =>
+                            CompanyBackupSecretStorage::ApplicationEncryptedContext->value,
+                        'context' => [
+                            'entity_id_column' => 'id',
+                            'field' => [
+                                'cases' => [
+                                    [
+                                        'equals' => 'email',
+                                        'field' => 'contact_email',
+                                    ],
+                                    [
+                                        'equals' => 'phone',
+                                        'field' => 'contact_phone',
+                                    ],
+                                ],
+                                'discriminator_column' => 'contact_type',
+                            ],
+                            'scheme' => 'payroll_sensitive_v1',
+                            'tenant_id_column' => 'supplier_id',
+                        ],
+                    ],
+                ],
+                'company_backup' => [
+                    'data_columns' => ['id', 'supplier_id', 'contact_type'],
                 ],
             ],
         );
