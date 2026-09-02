@@ -44,6 +44,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeAveragingPeriod
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeCompensationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeConsentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollOvertimeProtectionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonAccountsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonAddressesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthCoverageProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollPersonHealthMinimumReductionsProjection;
@@ -1731,6 +1732,23 @@ final class TenantDataRegistryFactory
                 ],
             ];
         }
+        if ($table === 'payroll_person_accounts') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollPersonAccountsProjection::dataColumns(),
+                    'embedded_references' => [],
+                    'generated_columns' => [],
+                    'omit_columns' =>
+                        CompanyBackupPayrollPersonAccountsProjection::omitColumns(),
+                    'protected_secret_materializations' =>
+                        CompanyBackupPayrollPersonAccountsProjection::protectedSecretMaterializations(),
+                    'references' =>
+                        CompanyBackupPayrollPersonAccountsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
         if ($table === 'payroll_person_addresses') {
             return [
                 'company_backup' => [
@@ -2498,6 +2516,9 @@ final class TenantDataRegistryFactory
         }
         if ($table === 'payroll_dependants') {
             return CompanyBackupPayrollDependantsProjection::secrets();
+        }
+        if ($table === 'payroll_person_accounts') {
+            return CompanyBackupPayrollPersonAccountsProjection::secrets();
         }
         return [];
     }

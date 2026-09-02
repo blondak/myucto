@@ -13,10 +13,20 @@ use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Repository\PayrollEmployeeRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlProtectedSecretSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use Psr\Container\ContainerInterface;
+use Psr\Http\Message\ResponseInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -34,6 +44,7 @@ final class PayrollPersonProfileApiTest extends TestCase
     private PayrollRegistrationIdentityRepository $registrationIdentities;
     private PayrollRegistrationIdentityService $registrationIdentityService;
     private PayrollSensitiveData $sensitiveData;
+    private SecretEncryption $encryption;
     private PayrollEmployeeRepository $employees;
     private int $userId;
     private int $supplierId;
@@ -51,12 +62,14 @@ final class PayrollPersonProfileApiTest extends TestCase
 
         try {
             $container = Bootstrap::buildApp()->getContainer();
+            self::assertInstanceOf(ContainerInterface::class, $container);
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollPersonProfileAction::class);
             $this->validator = $container->get(PayrollPersonProfileValidator::class);
             $this->registrationIdentities = $container->get(PayrollRegistrationIdentityRepository::class);
             $this->registrationIdentityService = $container->get(PayrollRegistrationIdentityService::class);
             $this->sensitiveData = $container->get(PayrollSensitiveData::class);
+            $this->encryption = $container->get(SecretEncryption::class);
             $this->employees = $container->get(PayrollEmployeeRepository::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
@@ -75,10 +88,10 @@ final class PayrollPersonProfileApiTest extends TestCase
         }
 
         $pdo = $this->db->pdo();
-        $sourceSupplierId = (int) ($pdo->query(
+        $sourceSupplierId = (int) ($this->query(
             'SELECT id FROM supplier ORDER BY id LIMIT 1'
         )->fetchColumn() ?: 0);
-        $this->userId = (int) ($pdo->query(
+        $this->userId = (int) ($this->query(
             'SELECT id FROM users ORDER BY id LIMIT 1'
         )->fetchColumn() ?: 0);
         if ($sourceSupplierId === 0 || $this->userId === 0) {
@@ -177,7 +190,7 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertNull($profile['accounts'][0]['verified_on']);
         self::assertNull($profile['accounts'][0]['verified_by']);
 
-        $identifier = $this->db->pdo()->query(
+        $identifier = $this->query(
             'SELECT value_ciphertext, value_hash FROM payroll_person_identifiers'
             . ' WHERE supplier_id = ' . $this->supplierId
             . ' AND employee_id = ' . $this->employeeId
@@ -187,7 +200,7 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertSame(32, strlen((string) $identifier['value_hash']));
         self::assertStringNotContainsString('123456789', (string) $identifier['value_ciphertext']);
 
-        $contact = $this->db->pdo()->query(
+        $contact = $this->query(
             'SELECT contact_value_ciphertext, contact_value_hash FROM payroll_person_contacts'
             . ' WHERE supplier_id = ' . $this->supplierId
             . ' AND employee_id = ' . $this->employeeId
@@ -200,7 +213,7 @@ final class PayrollPersonProfileApiTest extends TestCase
             (string) $contact['contact_value_ciphertext'],
         );
 
-        $account = $this->db->pdo()->query(
+        $account = $this->query(
             'SELECT bank_account_ciphertext, bank_account_hash FROM payroll_person_accounts'
             . ' WHERE supplier_id = ' . $this->supplierId
             . ' AND employee_id = ' . $this->employeeId
@@ -209,6 +222,133 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertStringStartsWith('enc:v2:', (string) $account['bank_account_ciphertext']);
         self::assertSame(32, strlen((string) $account['bank_account_hash']));
         self::assertStringNotContainsString('1000000005', (string) $account['bank_account_ciphertext']);
+    }
+
+    public function testCompanyBackupStreamsAndResealsPersonAccount(): void
+    {
+        $ownResponse = $this->put(
+            $this->supplierId,
+            $this->employeeId,
+            $this->completePayload(),
+        );
+        $foreignResponse = $this->put(
+            $this->otherSupplierId,
+            $this->otherEmployeeId,
+            $this->completePayload(),
+        );
+        self::assertSame(200, $ownResponse->getStatusCode());
+        self::assertSame(200, $foreignResponse->getStatusCode());
+        $ownAccount = $this->json($ownResponse)['profile']['accounts'][0];
+        $foreignAccount = $this->json($foreignResponse)['profile']['accounts'][0];
+
+        $verify = $this->db->pdo()->prepare(
+            "UPDATE payroll_person_accounts
+                SET verification_source = 'user_verified',
+                    verified_on = '2026-01-02', verified_by = ?
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?"
+        );
+        $verify->execute([
+            $this->userId,
+            $this->supplierId,
+            $this->employeeId,
+            $ownAccount['id'],
+        ]);
+        self::assertSame(1, $verify->rowCount());
+
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:payroll_person_accounts');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $schemaReader = new CompanyBackupTableSchemaReader();
+        $schema = $schemaReader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            $schemaReader->readReferences($this->db->pdo(), $projection),
+        );
+
+        $rows = array_values(iterator_to_array(
+            (new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+                $this->db->pdo(),
+                $this->supplierId,
+                $definition,
+            ),
+        ));
+        self::assertCount(1, $rows);
+        self::assertSame((int) $ownAccount['id'], (int) $rows[0]['id']);
+        self::assertNotSame((int) $foreignAccount['id'], (int) $rows[0]['id']);
+        self::assertSame($this->employeeId, (int) $rows[0]['employee_id']);
+        self::assertSame('user_verified', $rows[0]['verification_source']);
+        self::assertSame('2026-01-02', $rows[0]['verified_on']);
+        self::assertSame($this->userId, (int) $rows[0]['verified_by']);
+        self::assertArrayNotHasKey('bank_account_ciphertext', $rows[0]);
+        self::assertArrayNotHasKey('bank_account_hash', $rows[0]);
+        self::assertArrayNotHasKey('bank_account_masked', $rows[0]);
+
+        $secretProjection = CompanyBackupProtectedSecretProjection::fromDefinition(
+            $definition,
+        );
+        $values = array_values(iterator_to_array(
+            (new CompanyBackupSqlProtectedSecretSource($this->encryption))->values(
+                $this->db->pdo(),
+                $this->supplierId,
+                $secretProjection,
+            ),
+        ));
+        self::assertCount(1, $values);
+        self::assertSame('1000000005/0100', $values[0]->plaintext());
+        self::assertSame(['id' => (int) $ownAccount['id']], $values[0]->primaryKey);
+
+        $storedSource = $this->db->pdo()->prepare(
+            'SELECT bank_account_ciphertext, bank_account_hash
+               FROM payroll_person_accounts
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $storedSource->execute([$this->supplierId, $ownAccount['id']]);
+        $sourceStorage = $storedSource->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($sourceStorage);
+
+        $targetSupplierId = $this->otherSupplierId + 100_000;
+        $targetAccountId = (int) $ownAccount['id'] + 100_000;
+        $targetRow = $rows[0];
+        $targetRow['supplier_id'] = $targetSupplierId;
+        $targetRow['id'] = $targetAccountId;
+        $targetStorage = $projection->protectedSecretMaterializations->materialize(
+            $values[0],
+            $rows[0],
+            $targetRow,
+            $this->sensitiveData,
+        );
+
+        self::assertNotSame(
+            $sourceStorage['bank_account_ciphertext'],
+            $targetStorage['bank_account_ciphertext'],
+        );
+        self::assertNotSame(
+            $sourceStorage['bank_account_hash'],
+            $targetStorage['bank_account_hash'],
+        );
+        self::assertSame(
+            '1000000005/0100',
+            $this->sensitiveData->reveal(
+                $targetStorage['bank_account_ciphertext'],
+                PayrollSensitiveField::BANK_ACCOUNT,
+                $targetSupplierId,
+                $targetAccountId,
+            ),
+        );
+        self::assertSame(
+            $this->sensitiveData->mask(
+                '1000000005/0100',
+                PayrollSensitiveField::BANK_ACCOUNT,
+            ),
+            $targetStorage['bank_account_masked'],
+        );
     }
 
     public function testRegistrationIdentityFactsAreSavedInHistoryAndReadableAtEmploymentStart(): void
@@ -634,7 +774,7 @@ final class PayrollPersonProfileApiTest extends TestCase
             $this->sensitiveData,
             new FailingPayrollActivityLogger($this->db),
         );
-        $activityBefore = (int) $this->db->pdo()->query(
+        $activityBefore = (int) $this->query(
             'SELECT COUNT(*) FROM activity_log'
         )->fetchColumn();
 
@@ -669,7 +809,7 @@ final class PayrollPersonProfileApiTest extends TestCase
         }
         self::assertSame(
             $activityBefore,
-            (int) $this->db->pdo()->query('SELECT COUNT(*) FROM activity_log')->fetchColumn(),
+            (int) $this->query('SELECT COUNT(*) FROM activity_log')->fetchColumn(),
         );
         self::assertSame(
             'Audit Testovací',
@@ -770,7 +910,7 @@ final class PayrollPersonProfileApiTest extends TestCase
         ];
     }
 
-    private function get(int $supplierId, int $employeeId): Response
+    private function get(int $supplierId, int $employeeId): ResponseInterface
     {
         return $this->action->get(
             $this->request(
@@ -784,7 +924,11 @@ final class PayrollPersonProfileApiTest extends TestCase
     }
 
     /** @param array<string,mixed> $payload */
-    private function put(int $supplierId, int $employeeId, array $payload): Response
+    private function put(
+        int $supplierId,
+        int $employeeId,
+        array $payload,
+    ): ResponseInterface
     {
         return $this->action->put(
             $this->request(
@@ -817,13 +961,23 @@ final class PayrollPersonProfileApiTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function json(Response $response): array
+    private function json(ResponseInterface $response): array
     {
         $response->getBody()->rewind();
         $decoded = json_decode((string) $response->getBody(), true);
         self::assertIsArray($decoded);
 
         return $decoded;
+    }
+
+    private function query(string $sql): \PDOStatement
+    {
+        $statement = $this->db->pdo()->query($sql);
+        if (!$statement instanceof \PDOStatement) {
+            throw new \RuntimeException('Syntetický SQL dotaz se nepodařilo spustit.');
+        }
+
+        return $statement;
     }
 
     private function createEmployee(int $supplierId, string $fullName): int
