@@ -1810,6 +1810,10 @@ final class Routes
             '/api/admin/company-backups',
             [CompanyBackupJobAction::class, 'list'],
         );
+        $app->post(
+            '/api/admin/company-backups',
+            [CompanyBackupJobAction::class, 'create'],
+        );
         $app->get(
             '/api/admin/company-backups/{backupId:[0-9a-f-]+}',
             [CompanyBackupJobAction::class, 'status'],

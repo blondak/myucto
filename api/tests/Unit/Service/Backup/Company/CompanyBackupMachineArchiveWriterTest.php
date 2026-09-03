@@ -89,7 +89,7 @@ final class CompanyBackupMachineArchiveWriterTest extends TestCase
             $snapshot->secretInventory->toArray(),
             $inspection->secretInventory->toArray(),
         );
-        self::assertArrayHasKey('README.txt', $inspection->entryHashes);
+        self::assertArrayHasKey('CTI-MNE.txt', $inspection->entryHashes);
         self::assertArrayHasKey(
             CompanyBackupSecretEnvelopeDescriptor::PATH,
             $inspection->entryHashes,

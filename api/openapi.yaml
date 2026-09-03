@@ -4594,6 +4594,65 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+    post:
+      tags: [Backups]
+      summary: Založí přenositelnou zálohu aktuální firmy
+      description: |
+        High-risk session-only operace s oprávněním
+        `utilities.company_backup` na úrovni write. Vyžaduje samostatné heslo
+        archivu s potvrzením a jednorázový step-up proof účelově vázaný na
+        `company_backup.create`; recovery kód tento účel nesmí potvrdit.
+
+        Úplnost registru se ověří ještě před spotřebou proofu. Job a audit jeho
+        založení vzniknou v jedné databázové transakci. Úspěšná odpověď pouze
+        potvrzuje přijetí do perzistentní fronty; stav se dále polluje přes GET.
+        Odpověď nikdy neobsahuje heslo ani jeho odvozenou hodnotu.
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompanyBackupCreateRequest' }
+      responses:
+        '201':
+          description: Job byl bezpečně založen, zauditován a předán workeru.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupCreateResponse' }
+        '400':
+          description: Chybí firma, heslo či potvrzení nebo heslo nesplňuje politiku.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupCreationError' }
+        '401':
+          description: Přihlášená session už není dostupná.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupCreationError' }
+        '403':
+          description: Bearer token, chybějící oprávnění nebo neplatný step-up proof.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupCreationError' }
+        '409':
+          description: Pro firmu už existuje aktivní zálohový job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupCreationError' }
+        '429':
+          description: Dedikovaný hodinový limit vytváření záloh byl překročen.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupCreationError' }
+        '503':
+          description: Registr není úplný, chybí bezpečný serverový klíč nebo worker.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupCreationError' }
 
   /api/v1/admin/company-backups/{backupId}:
     parameters:
@@ -18958,6 +19017,61 @@ components:
         deletable:
           type: boolean
           description: Job má validní metadata fyzického archivu k odstranění.
+
+    CompanyBackupCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [password, password_confirm, step_up_token]
+      properties:
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          description: Samostatné heslo ZIPu; 12 až 1024 bajtů, bez nulového znaku.
+        password_confirm:
+          type: string
+          format: password
+          writeOnly: true
+          description: Přesná kopie hesla archivu.
+        step_up_token:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: Jednorázový proof pro účel company_backup.create.
+
+    CompanyBackupCreateResponse:
+      type: object
+      additionalProperties: false
+      required: [backup_id, status]
+      properties:
+        backup_id:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        status: { type: string, const: queued }
+
+    CompanyBackupCreationError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                [no_supplier, unauthenticated, session_expired,
+                 session_required, forbidden, validation_failed,
+                 password_confirmation_mismatch, archive_password_weak,
+                 step_up_required, step_up_invalid, already_running,
+                 registry_incomplete, job_secret_key_unavailable,
+                 job_id_collision, worker_unavailable, rate_limited]
+            message: { type: string }
+            operation:
+              type: string
+              const: company_backup.create
+              description: Přítomno u chyb vyžadujících nový účelový step-up.
 
     CompanyBackupJobListResponse:
       type: object

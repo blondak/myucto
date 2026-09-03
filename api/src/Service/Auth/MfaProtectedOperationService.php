@@ -36,35 +36,60 @@ final class MfaProtectedOperationService
         string $scope,
         ?\DateTimeImmutable $expiresAt,
     ): array {
+        return $this->runWithStepUp(
+            $userId,
+            $sessionToken,
+            $proofToken,
+            MfaStepUpService::OPERATION_API_TOKEN_CREATE,
+            fn (): array => $this->tokens->generateInTransaction(
+                $this->db->pdo(),
+                $userId,
+                $supplierId,
+                $name,
+                $scope,
+                $expiresAt,
+            ),
+        );
+    }
+
+    /**
+     * @template T
+     * @param \Closure():T $operation
+     * @return T
+     */
+    public function runWithStepUp(
+        int $userId,
+        string $sessionToken,
+        string $proofToken,
+        string $purpose,
+        \Closure $operation,
+    ): mixed {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
             $cutoff = $this->clock->capture($pdo);
             $this->lockActiveUser($pdo, $userId);
             $this->lockCurrentSession($pdo, $cutoff, $userId, $sessionToken);
-            $this->stepUp->consumeInTransaction(
-                $pdo,
-                $cutoff,
-                $proofToken,
-                $userId,
-                $sessionToken,
-                MfaStepUpService::OPERATION_API_TOKEN_CREATE,
-            );
-            $token = $this->tokens->generateInTransaction(
-                $pdo,
-                $userId,
-                $supplierId,
-                $name,
-                $scope,
-                $expiresAt,
-            );
-            $pdo->commit();
-            return $token;
-        } catch (OneTimeTokenException|StepUpOperationException $e) {
-            if ($pdo->inTransaction()) {
+            try {
+                $this->stepUp->consumeInTransaction(
+                    $pdo,
+                    $cutoff,
+                    $proofToken,
+                    $userId,
+                    $sessionToken,
+                    $purpose,
+                );
+            } catch (OneTimeTokenException|StepUpOperationException $e) {
+                // Proof store označí i neplatný pokus jako použitý. Tento zápis se
+                // zachová, ale stejný typ výjimky z vlastní operace už commitnout
+                // nesmíme — proto je catch úmyslně jen kolem consume fáze.
                 $pdo->commit();
+                throw $e;
             }
-            throw $e;
+
+            $result = $operation();
+            $pdo->commit();
+            return $result;
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

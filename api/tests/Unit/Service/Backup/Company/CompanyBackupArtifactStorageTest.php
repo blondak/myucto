@@ -78,6 +78,18 @@ final class CompanyBackupArtifactStorageTest extends TestCase
         self::assertSame('existing', file_get_contents($destination));
     }
 
+    public function testDiscardsPublishedDestinationBeforeMetadataCapture(): void
+    {
+        $storage = $this->storage();
+        $destination = $storage->prepareDestination(42, self::BACKUP_ID);
+        file_put_contents($destination, 'uncaptured-synthetic-archive');
+
+        $storage->discardDestination(42, self::BACKUP_ID);
+        $storage->discardDestination(42, self::BACKUP_ID);
+
+        self::assertFileDoesNotExist($destination);
+    }
+
     public function testCaptureRejectsPathFromAnotherTenant(): void
     {
         $storage = $this->storage();

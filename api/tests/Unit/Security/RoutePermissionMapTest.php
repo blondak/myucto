@@ -227,6 +227,7 @@ final class RoutePermissionMapTest extends TestCase
         $map = new RoutePermissionMap();
         foreach ([
             ['GET', '/api/admin/company-backups', AccessLevel::READ],
+            ['POST', '/api/admin/company-backups', AccessLevel::WRITE],
             ['GET', "/api/admin/company-backups/{$id}", AccessLevel::READ],
             ['GET', "/api/admin/company-backups/{$id}/download", AccessLevel::READ],
             ['POST', "/api/admin/company-backups/{$id}/cancel", AccessLevel::WRITE],

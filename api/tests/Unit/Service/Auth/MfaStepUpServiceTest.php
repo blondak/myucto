@@ -136,6 +136,29 @@ final class MfaStepUpServiceTest extends TestCase
         $service->assertAllowed(17, MfaStepUpService::OPERATION_API_TOKEN_CREATE, 'totp');
     }
 
+    public function testStrongFactorCanAuthorizeCompanyBackupCreation(): void
+    {
+        $policy = $this->createMock(MfaPolicyService::class);
+        $policy->expects(self::once())
+            ->method('isMethodAllowed')
+            ->with('totp')
+            ->willReturn(true);
+        $service = new MfaStepUpService(
+            $this->createStub(MfaStepUpProofStore::class),
+            $policy,
+            $this->createStub(PasskeyCredentialRepository::class),
+        );
+
+        self::assertSame(
+            MfaStepUpService::OPERATION_COMPANY_BACKUP_CREATE,
+            $service->assertAllowed(
+                17,
+                MfaStepUpService::OPERATION_COMPANY_BACKUP_CREATE,
+                'totp',
+            ),
+        );
+    }
+
     public function testRevokeOperationMustReferenceOwnedActiveCredential(): void
     {
         $credentials = $this->createMock(PasskeyCredentialRepository::class);
@@ -251,7 +274,11 @@ final class MfaStepUpServiceTest extends TestCase
      */
     public function testRecoveryCodeCannotAuthorizeHighValueOperations(): void
     {
-        foreach ([MfaStepUpService::OPERATION_API_TOKEN_CREATE, MfaStepUpService::OPERATION_EPO_CERTIFICATE] as $operation) {
+        foreach ([
+            MfaStepUpService::OPERATION_API_TOKEN_CREATE,
+            MfaStepUpService::OPERATION_EPO_CERTIFICATE,
+            MfaStepUpService::OPERATION_COMPANY_BACKUP_CREATE,
+        ] as $operation) {
             $proofs = $this->createMock(MfaStepUpProofStore::class);
             $proofs->expects(self::never())->method('issue');
             $service = new MfaStepUpService(

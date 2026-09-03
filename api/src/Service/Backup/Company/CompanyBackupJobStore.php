@@ -17,7 +17,7 @@ use PDOException;
  * výhradně workeru, který dostává interně vytvořené UUID, nikdy přímo HTTP
  * requestu. Bezpečný seznam sloupců záměrně neobsahuje password_ciphertext.
  */
-final readonly class CompanyBackupJobStore
+final readonly class CompanyBackupJobStore implements CompanyBackupJobLifecycle
 {
     private const STALE_MINUTES = 60;
 

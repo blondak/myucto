@@ -100,7 +100,14 @@ final readonly class CompanyBackupArtifactStorage
      */
     public function remove(CompanyBackupStoredArtifact $artifact): void
     {
-        $path = $this->removalPath($artifact);
+        $this->discardDestination($artifact->supplierId, $artifact->backupId);
+    }
+
+    /** Uklidí i publikovaný soubor, jehož metadata se ještě nestihla zachytit. */
+    public function discardDestination(int $supplierId, string $backupId): void
+    {
+        self::assertCoordinates($supplierId, $backupId);
+        $path = $this->removalPath($supplierId, $backupId);
         if ($path === null) {
             return;
         }
@@ -179,7 +186,8 @@ final readonly class CompanyBackupArtifactStorage
     }
 
     private function removalPath(
-        CompanyBackupStoredArtifact $artifact,
+        int $supplierId,
+        string $backupId,
     ): ?string {
         $root = rtrim($this->rootResolver->root(), "/\\");
         if ($root === '' || is_link($root)) {
@@ -194,7 +202,7 @@ final readonly class CompanyBackupArtifactStorage
         }
 
         $directory = $realRoot . DIRECTORY_SEPARATOR
-            . 'sup-' . $artifact->supplierId;
+            . 'sup-' . $supplierId;
         if (is_link($directory)) {
             throw new CompanyBackupJobException('artifact_delete_unsafe');
         }
@@ -210,7 +218,7 @@ final readonly class CompanyBackupArtifactStorage
         }
 
         $path = $realDirectory . DIRECTORY_SEPARATOR
-            . $artifact->backupId . '.zip';
+            . $backupId . '.zip';
         if (is_link($path)) {
             throw new CompanyBackupJobException('artifact_delete_unsafe');
         }

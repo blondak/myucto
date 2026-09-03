@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration;
 use MyInvoice\Infrastructure\Cache\RedisFactory;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\RateLimitMiddleware;
 use MyInvoice\Service\IpMatcher;
 use PHPUnit\Framework\Attributes\Group;
@@ -55,6 +56,7 @@ final class RateLimitDbFallbackTest extends TestCase
             $data['rate_limits']['forgot_per_hour_per_ip'] = 2;
             $data['rate_limits']['forgot_per_hour_per_email'] = 2;
             $data['rate_limits']['token_create_per_hour'] = 2;
+            $data['rate_limits']['company_backup_create_per_hour'] = 2;
 
             $this->config = new Config($data, $loaded->dataDir());
             $this->db = new Connection($this->config);
@@ -77,7 +79,7 @@ final class RateLimitDbFallbackTest extends TestCase
     {
         // Jen vlastní prefixy — na sdílené dev DB můžou souběžně běžet jiné testy.
         $stmt = $this->db->pdo()->prepare('DELETE FROM rate_limit_counters WHERE bucket_key LIKE ?');
-        foreach (['rl:login:ip:%', 'rl:forgot:ip:%', 'rl:forgot:email-ip:%', 'rl:pat:%', self::EMAIL_BUCKET] as $pattern) {
+        foreach (['rl:login:ip:%', 'rl:forgot:ip:%', 'rl:forgot:email-ip:%', 'rl:pat:%', 'rl:company-backup:%', self::EMAIL_BUCKET] as $pattern) {
             $stmt->execute([$pattern]);
         }
     }
@@ -137,6 +139,27 @@ final class RateLimitDbFallbackTest extends TestCase
 
         self::assertSame([200, 200, 200, 429, 429], $codes,
             'Limit 3/min musí propustit 3 pokusy a zbytek odmítnout — dřív prošlo všech 5');
+    }
+
+    public function testCompanyBackupCreationHasDedicatedHourlyLimit(): void
+    {
+        $request = (new ServerRequestFactory())
+            ->createServerRequest(
+                'POST',
+                'http://localhost/api/admin/company-backups',
+                ['REMOTE_ADDR' => self::TEST_IP],
+            )
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 91_337]);
+        $middleware = $this->middleware();
+        $handler = $this->handler();
+
+        $codes = [];
+        for ($attempt = 0; $attempt < 4; $attempt++) {
+            $codes[] = $middleware->process($request, $handler)->getStatusCode();
+        }
+
+        self::assertSame([200, 200, 429, 429], $codes);
+        self::assertSame(2, $this->hits('rl:company-backup:%'));
     }
 
     /**

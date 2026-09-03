@@ -551,6 +551,52 @@ final class AtomicAuthTransitionTest extends TestCase
         );
     }
 
+    public function testGenericProtectedOperationRollsBackProofWithFailedMutation(): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $proof = $this->proofs->issue(
+            $this->userId,
+            $session['token'],
+            MfaStepUpService::OPERATION_COMPANY_BACKUP_CREATE,
+            'totp',
+        );
+
+        try {
+            $this->protectedOperations->runWithStepUp(
+                $this->userId,
+                $session['token'],
+                $proof,
+                MfaStepUpService::OPERATION_COMPANY_BACKUP_CREATE,
+                static function (): never {
+                    throw new \RuntimeException('synthetic callback failure');
+                },
+            );
+            self::fail('Selhání chráněné mutace se musí propsat ven.');
+        } catch (\RuntimeException $e) {
+            self::assertSame('synthetic callback failure', $e->getMessage());
+        }
+
+        self::assertSame(
+            'created-after-retry',
+            $this->protectedOperations->runWithStepUp(
+                $this->userId,
+                $session['token'],
+                $proof,
+                MfaStepUpService::OPERATION_COMPANY_BACKUP_CREATE,
+                static fn (): string => 'created-after-retry',
+            ),
+        );
+
+        $this->expectException(OneTimeTokenException::class);
+        $this->protectedOperations->runWithStepUp(
+            $this->userId,
+            $session['token'],
+            $proof,
+            MfaStepUpService::OPERATION_COMPANY_BACKUP_CREATE,
+            static fn (): string => 'must-not-run',
+        );
+    }
+
     public function testPasskeyRevokePreservesCurrentFamilyAndRevokesOtherSessions(): void
     {
         [$targetId] = $this->createCredential(0, 'Target key');

@@ -64,7 +64,7 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         self::assertSame(hash_file('sha256', $archive), $inspection->archiveSha256);
         self::assertSame(4, $inspection->entryCount);
         self::assertSame(
-            ['README.txt', 'data/table-supplier.jsonl', 'manifest.json'],
+            ['CTI-MNE.txt', 'data/table-supplier.jsonl', 'manifest.json'],
             array_keys($inspection->entryHashes),
         );
         foreach ($inspection->entryHashes as $path => $sha256) {
@@ -511,7 +511,7 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
             'omissions' => [],
         ];
         $payload = [
-            'README.txt' => "Syntetická záloha MyÚčta.\n",
+            'CTI-MNE.txt' => "Syntetická záloha MyÚčta.\n",
             'data/table-supplier.jsonl' => $supplier,
         ];
         if ($withSecretEnvelope) {

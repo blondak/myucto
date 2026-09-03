@@ -92,7 +92,7 @@ final class CompanyBackupArchiveWriterTest extends TestCase
         self::assertSame($result->archiveSha256, $inspection->archiveSha256);
         self::assertSame(
             [
-                'README.txt',
+                'CTI-MNE.txt',
                 'data/table-supplier.jsonl',
                 $filePath,
                 'manifest.json',

@@ -541,6 +541,7 @@ final class RoutePermissionMap
         // Úplný archiv firmy je high-risk export. Oprávnění se přiděluje výslovně
         // a Action navíc vynucuje browser session i tenantový ownership jobu.
         ['GET', '#^/api/admin/company-backups$#D', 'utilities.company_backup', AccessLevel::READ],
+        ['POST', '#^/api/admin/company-backups$#D', 'utilities.company_backup', AccessLevel::WRITE],
         ['GET', '#^/api/admin/company-backups/[0-9a-f-]+$#D', 'utilities.company_backup', AccessLevel::READ],
         ['GET', '#^/api/admin/company-backups/[0-9a-f-]+/download$#D', 'utilities.company_backup', AccessLevel::READ],
         ['POST', '#^/api/admin/company-backups/[0-9a-f-]+/cancel$#D', 'utilities.company_backup', AccessLevel::WRITE],

@@ -10,6 +10,7 @@ use PDO;
 final class MfaStepUpService
 {
     public const OPERATION_API_TOKEN_CREATE = 'api_token.create';
+    public const OPERATION_COMPANY_BACKUP_CREATE = 'company_backup.create';
     public const OPERATION_PASSKEY_REGISTER = 'passkey.register';
     /**
      * MyÚčto: správa osobního kvalifikovaného certifikátu pro EPO a přímé podání.
@@ -56,6 +57,7 @@ final class MfaStepUpService
         $isPasskeyRevoke = preg_match('/^passkey\.revoke:([1-9][0-9]*)$/D', $operation, $passkeyMatches) === 1;
         $isDomainActivation = preg_match('/^domain\.activate:([1-9][0-9]*)$/D', $operation) === 1;
         if ($operation !== self::OPERATION_API_TOKEN_CREATE
+            && $operation !== self::OPERATION_COMPANY_BACKUP_CREATE
             && $operation !== self::OPERATION_PASSKEY_REGISTER
             && $operation !== self::OPERATION_EPO_CERTIFICATE
             && $operation !== self::OPERATION_RECOVERY_CODES

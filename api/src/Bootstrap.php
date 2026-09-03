@@ -137,6 +137,62 @@ final class Bootstrap
             \MyInvoice\Service\Backup\Registry\TenantDataRegistry::class =>
                 static fn (): \MyInvoice\Service\Backup\Registry\TenantDataRegistry =>
                     \MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory::draftV1(),
+            \MyInvoice\Service\Backup\Company\CompanyBackupRegistrySnapshotProvider::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CurrentCompanyBackupRegistrySnapshotProvider::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupCreator::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupCreationService::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupWorkerLauncher::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\BackgroundCompanyBackupWorkerLauncher::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupJobLifecycle::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupJobStore::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupExportPipeline::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupExportPipelineService::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupDataRowSource::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupFileReferenceSource::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupSqlFileReferenceSource::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretSource::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupSqlProtectedSecretSource::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretSource::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupSqlOptionalSecretSource::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupCredentialSecretSource::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupSqlCredentialSecretSource::class,
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCollector::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCollector(
+                        $c->get(\MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretSource::class),
+                        new \MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher(),
+                        $c->get(\MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretSource::class),
+                        $c->get(\MyInvoice\Service\Backup\Company\CompanyBackupCredentialSecretSource::class),
+                    ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupMachineSnapshotExporter::class =>
+                \DI\autowire()->constructorParameter(
+                    'secretEnvelopeCollector',
+                    \DI\get(\MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCollector::class),
+                ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupJobRetentionPolicy::class =>
+                static fn (): \MyInvoice\Service\Backup\Company\CompanyBackupJobRetentionPolicy =>
+                    \MyInvoice\Service\Backup\Company\CompanyBackupJobRetentionPolicy::defaults(),
             \MyInvoice\Service\Backup\Company\CompanyBackupDownloadProvider::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Backup\Company\CompanyBackupDownloadService::class,

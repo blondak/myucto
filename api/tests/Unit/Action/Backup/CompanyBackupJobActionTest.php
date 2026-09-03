@@ -12,6 +12,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobManager;
+use MyInvoice\Service\Backup\Company\CompanyBackupCreator;
 use MyInvoice\Service\Backup\Company\CompanyBackupManagementException;
 use MyInvoice\Service\IpMatcher;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -338,6 +339,7 @@ final class CompanyBackupJobActionTest extends TestCase
     ): CompanyBackupJobAction {
         return new CompanyBackupJobAction(
             $manager,
+            $this->createStub(CompanyBackupCreator::class),
             $activity,
             new IpMatcher(new Config([])),
         );

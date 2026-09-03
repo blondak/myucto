@@ -27,6 +27,7 @@ use Slim\Psr7\Factory\ResponseFactory;
  *                               (konzumuje ForgotPasswordAction přes consume() —
  *                                tady na e-mail nedosáhneme, viz ruleFor())
  *   token_create_per_hour     → 3600s window, key = "rl:pat:user:{id}"
+ *   company_backup_create_per_hour → 3600s, key = "rl:company-backup:user:{id}"
  *   ares_per_min_per_user     → 60s window, key = "rl:ares:user:{id}"
  *   ai_per_5min_per_user      → 300s window, key = "rl:ai:user:{id}" (AI extract + inbox scan)
  *   setup_per_hour_per_ip     → 3600s window, key = "rl:setup:ip:{ip}"
@@ -289,6 +290,20 @@ final class RateLimitMiddleware implements MiddlewareInterface
         if ($path === '/api/auth/tokens' && $method === 'POST') {
             $bucket = $userId > 0 ? 'user:' . $userId : 'ip:' . $this->ipBucket($ip);
             return ['rl:pat:' . $bucket, (int) ($rl['token_create_per_hour'] ?? 10), 3600];
+        }
+
+        // Kompletní záloha čte celý tenantový graf, soubory a protected secrets.
+        // Obecný mutation bucket je pro takto drahou high-risk operaci příliš
+        // široký; samostatný hodinový limit brzdí omyl i kompromitovanou session.
+        if ($path === '/api/admin/company-backups' && $method === 'POST') {
+            $bucket = $userId > 0
+                ? 'user:' . $userId
+                : 'ip:' . $this->ipBucket($ip);
+            return [
+                'rl:company-backup:' . $bucket,
+                (int) ($rl['company_backup_create_per_hour'] ?? 5),
+                3600,
+            ];
         }
 
         // Setup

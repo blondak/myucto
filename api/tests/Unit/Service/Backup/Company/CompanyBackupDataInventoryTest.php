@@ -55,13 +55,13 @@ final class CompanyBackupDataInventoryTest extends TestCase
 
         $inventory->assertArchiveEntries(
             [
-                'README.txt' => hash('sha256', "README\n"),
+                'CTI-MNE.txt' => hash('sha256', "README\n"),
                 'data/table-invoices.jsonl' => hash('sha256', $invoice),
                 'data/table-supplier.jsonl' => hash('sha256', $supplier),
                 'manifest.json' => hash('sha256', '{}'),
             ],
             [
-                'README.txt' => 7,
+                'CTI-MNE.txt' => 7,
                 'data/table-invoices.jsonl' => strlen($invoice),
                 'data/table-supplier.jsonl' => strlen($supplier),
                 'manifest.json' => 2,
