@@ -97,6 +97,13 @@ final readonly class CompanyBackupJsonlWriter
                         $rowNumber,
                     );
                 }
+                if ($lineBytes > $this->limits->maxDataRowBytes) {
+                    throw new CompanyBackupDataWriteException(
+                        'data_row_size_exceeded',
+                        $registryKey,
+                        $rowNumber,
+                    );
+                }
                 self::writeAll($stream, $line, $registryKey, $rowNumber);
                 hash_update($hash, $line);
                 $bytes += $lineBytes;

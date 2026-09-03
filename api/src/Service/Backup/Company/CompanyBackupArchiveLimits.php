@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Backup\Company;
 /** Limity technické validace, vynucované před rozbalením jediné položky. */
 final readonly class CompanyBackupArchiveLimits
 {
+    public int $maxDataRowBytes;
+
     public function __construct(
         public int $maxArchiveBytes = 5_368_709_120,
         public int $maxEntries = 50_000,
@@ -15,7 +17,10 @@ final readonly class CompanyBackupArchiveLimits
         public int $maxCompressionRatio = 200,
         public int $maxManifestBytes = 4_194_304,
         public int $maxChecksumsBytes = 33_554_432,
+        ?int $maxDataRowBytes = null,
     ) {
+        $resolvedMaxDataRowBytes = $maxDataRowBytes
+            ?? min(16_777_216, $maxEntryBytes);
         foreach ([
             $maxArchiveBytes,
             $maxEntries,
@@ -24,6 +29,7 @@ final readonly class CompanyBackupArchiveLimits
             $maxCompressionRatio,
             $maxManifestBytes,
             $maxChecksumsBytes,
+            $resolvedMaxDataRowBytes,
         ] as $limit) {
             if ($limit < 1) {
                 throw new \InvalidArgumentException('Limit zálohového archivu musí být kladný.');
@@ -31,9 +37,11 @@ final readonly class CompanyBackupArchiveLimits
         }
         if ($maxManifestBytes > $maxEntryBytes
             || $maxChecksumsBytes > $maxEntryBytes
+            || $resolvedMaxDataRowBytes > $maxEntryBytes
             || $maxEntryBytes > $maxExpandedBytes
         ) {
             throw new \InvalidArgumentException('Limity zálohového archivu si odporují.');
         }
+        $this->maxDataRowBytes = $resolvedMaxDataRowBytes;
     }
 }

@@ -157,6 +157,36 @@ final class CompanyBackupJsonlWriterTest extends TestCase
         self::assertFileDoesNotExist($path);
     }
 
+    public function testDedicatedRowLimitStopsAndRemovesPartialFile(): void
+    {
+        $path = $this->unusedPath();
+        $writer = new CompanyBackupJsonlWriter(new CompanyBackupArchiveLimits(
+            maxArchiveBytes: 1_000,
+            maxEntries: 10,
+            maxEntryBytes: 500,
+            maxExpandedBytes: 1_000,
+            maxCompressionRatio: 100,
+            maxManifestBytes: 200,
+            maxChecksumsBytes: 200,
+            maxDataRowBytes: 40,
+        ));
+
+        try {
+            $writer->write(
+                $this->definition(),
+                1,
+                [['description' => str_repeat('x', 40)]],
+                $path,
+            );
+            self::fail('Jediný JSONL řádek nesmí obejít vlastní paměťový limit.');
+        } catch (CompanyBackupDataWriteException $e) {
+            self::assertSame('data_row_size_exceeded', $e->errorCode);
+            self::assertSame(1, $e->rowNumber);
+        }
+
+        self::assertFileDoesNotExist($path);
+    }
+
     public function testSourceFailureRemovesPartialPlaintextFile(): void
     {
         $path = $this->unusedPath();
