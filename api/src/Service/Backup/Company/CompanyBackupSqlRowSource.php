@@ -129,7 +129,7 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
                 $column,
             );
         }
-        $projection->assertExportRow($row);
+        $projection->assertCompleteSourceRow($row);
         return $row;
     }
 

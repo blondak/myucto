@@ -225,7 +225,7 @@ final readonly class CompanyBackupJsonlReader
                     $column,
                 );
             }
-            $projection->assertExportRow($row);
+            $projection->assertCompleteSourceRow($row);
         } catch (CompanyBackupDataSourceException $e) {
             throw self::fromDataSourceException($e, $rowNumber);
         }

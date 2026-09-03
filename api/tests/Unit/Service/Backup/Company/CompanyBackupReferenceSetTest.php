@@ -787,6 +787,118 @@ final class CompanyBackupReferenceSetTest extends TestCase
         }
     }
 
+    public function testVisitsOnlyActiveNonNullReferenceValues(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                $this->actorReference(),
+                $this->sourceReference('invoice', 'invoices'),
+                $this->sourceReference('purchase_invoice', 'purchase_invoices'),
+                $this->supplierReference(),
+            ],
+            'table:synthetic_records',
+        );
+        $visited = [];
+
+        $references->visitSourceRow(
+            [
+                'approved_by' => null,
+                'source_id' => 17,
+                'source_type' => 'invoice',
+                'supplier_id' => 7,
+            ],
+            static function (
+                \MyInvoice\Service\Backup\Company\CompanyBackupReference $reference,
+                array $values,
+            ) use (&$visited): void {
+                $visited[] = [$reference->signature(), $values];
+            },
+        );
+
+        self::assertSame([
+            ['source_id->invoices:id?source_type=invoice', [17]],
+            ['supplier_id->supplier:id', [7]],
+        ], $visited);
+    }
+
+    public function testReferenceValueTraversalRejectsInvalidScalarTypes(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [$this->actorReference(), $this->supplierReference()],
+            'table:synthetic_records',
+        );
+
+        foreach (
+            [
+                [['approved_by' => '9', 'supplier_id' => 7], 'approved_by'],
+                [['approved_by' => null, 'supplier_id' => null], 'supplier_id'],
+            ] as [$row, $column]
+        ) {
+            try {
+                $references->visitSourceRow($row, static function (): void {});
+                self::fail('Neplatná hodnota reference nesmí vstoupit do plánu.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_reference_value_invalid', $e->errorCode);
+                self::assertSame($column, $e->column);
+            }
+        }
+    }
+
+    public function testReferenceTraversalRejectsUnclassifiedConditionalValue(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                $this->sourceReference('invoice', 'invoices'),
+                $this->sourceReference('purchase_invoice', 'purchase_invoices'),
+            ],
+            'table:synthetic_records',
+        );
+
+        try {
+            $references->visitSourceRow(
+                ['source_id' => 17, 'source_type' => 'future_document'],
+                static function (): void {},
+            );
+            self::fail('Neznámý typ neprázdné soft reference musí zastavit preflight.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_value_invalid', $e->errorCode);
+            self::assertSame('source_id', $e->column);
+        }
+    }
+
+    public function testZeroSentinelDoesNotCreateReferenceOccurrence(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [[
+                'columns' => ['register_id'],
+                'target' => 'table:cash_registers',
+                'target_columns' => ['id'],
+                'mapping' => CompanyBackupReferenceMapping::TenantIdOrZero->value,
+                'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+                'nullable_columns' => [],
+                'fallbacks' => [],
+            ]],
+            'table:accounting_document_series',
+        );
+        $visited = [];
+
+        $references->visitSourceRow(
+            ['register_id' => 0],
+            static function ($reference, array $values) use (&$visited): void {
+                $visited[] = $values;
+            },
+        );
+        self::assertSame([], $visited);
+
+        $references->visitSourceRow(
+            ['register_id' => 7],
+            static function ($reference, array $values) use (&$visited): void {
+                $visited[] = $values;
+            },
+        );
+        self::assertSame([[7]], $visited);
+    }
+
     /** @return array<string,mixed> */
     private function supplierReference(): array
     {

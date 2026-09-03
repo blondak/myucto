@@ -82,6 +82,11 @@ final class CompanyBackupJsonlReaderTest extends TestCase
             'data_primary_key_invalid',
             'id',
         ];
+        yield 'null required reference' => [
+            "{\"id\":1,\"label\":\"A\",\"supplier_id\":null}\n",
+            'data_reference_value_invalid',
+            'supplier_id',
+        ];
         yield 'invalid binary codec payload' => [
             "{\"id\":1,\"label\":\"zz\",\"supplier_id\":7}\n",
             'data_column_codec_payload_invalid',
@@ -175,9 +180,37 @@ final class CompanyBackupJsonlReaderTest extends TestCase
         }, 1);
     }
 
-    /** @param array<string,string> $columnCodecs */
-    private function definition(array $columnCodecs = []): TenantDataDefinition
+    public function testRejectsInvalidEmbeddedReferenceValue(): void
     {
+        $definition = $this->definition(embeddedReference: true);
+        $contents = self::jsonl([[
+            'id' => 1,
+            'supplier_id' => 7,
+            'label' => CanonicalJson::encode(['owner_id' => '7']),
+        ]]);
+
+        try {
+            iterator_to_array((new CompanyBackupJsonlReader())->rows(
+                self::stream($contents),
+                $definition,
+                $this->object($contents, 1, $definition),
+            ));
+            self::fail('Neplatná vnořená reference nesmí vstoupit do plánu.');
+        } catch (CompanyBackupJsonlReadException $e) {
+            self::assertSame(
+                'data_embedded_reference_value_invalid',
+                $e->errorCode,
+            );
+            self::assertSame(1, $e->rowNumber);
+            self::assertSame('label', $e->column);
+        }
+    }
+
+    /** @param array<string,string> $columnCodecs */
+    private function definition(
+        array $columnCodecs = [],
+        bool $embeddedReference = false,
+    ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:synthetic_records',
             TenantDataObjectKind::Table,
@@ -195,7 +228,16 @@ final class CompanyBackupJsonlReaderTest extends TestCase
                         'column_codecs' => $columnCodecs,
                     ]),
                     'data_columns' => ['id', 'supplier_id', 'label'],
-                    'embedded_references' => [],
+                    'embedded_references' => $embeddedReference ? [[
+                        'column' => 'label',
+                        'condition' => null,
+                        'fallbacks' => [],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'nullable' => false,
+                        'path' => ['owner_id'],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                    ]] : [],
                     'generated_columns' => [],
                     'omit_columns' => [],
                     'references' => [[

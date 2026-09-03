@@ -476,6 +476,91 @@ final readonly class CompanyBackupTableProjection
         $this->derivedHashes->assertSourceRow($row);
     }
 
+    /** @param array<string,mixed> $row */
+    public function assertCompleteSourceRow(array $row): void
+    {
+        $this->visitSourceReferences(
+            $row,
+            static function (CompanyBackupReferenceOccurrence $occurrence): void {},
+        );
+        $this->embeddedHashReferences->assertSourceRow($row);
+        $this->embeddedHashes->assertSourceRow($row);
+        $this->derivedHashes->assertSourceRow($row);
+    }
+
+    /**
+     * Projde všechny remapovatelné reprezentace přes stejné parsery jako obnova.
+     *
+     * @param array<string,mixed> $row
+     * @param callable(CompanyBackupReferenceOccurrence):void $visitor
+     */
+    public function visitSourceReferences(array $row, callable $visitor): void
+    {
+        $this->references->visitSourceRow(
+            $row,
+            function (CompanyBackupReference $reference, array $values) use (
+                $visitor,
+            ): void {
+                $visitor(CompanyBackupReferenceOccurrence::column(
+                    $this->registryKey,
+                    $reference,
+                    $values,
+                ));
+            },
+        );
+        $this->encodedReferences->remap(
+            $row,
+            function (
+                CompanyBackupEncodedReference $reference,
+                int $value,
+            ) use ($visitor): int {
+                $visitor(CompanyBackupReferenceOccurrence::encoded(
+                    $this->registryKey,
+                    $reference,
+                    $value,
+                ));
+                return $value;
+            },
+        );
+        $this->embeddedReferences->remap(
+            $row,
+            function (
+                CompanyBackupEmbeddedReference $reference,
+                int|string $value,
+            ) use ($visitor): int|string {
+                $visitor(CompanyBackupReferenceOccurrence::embedded(
+                    $this->registryKey,
+                    $reference,
+                    $value,
+                ));
+                return $value;
+            },
+        );
+        $this->polymorphicReferences->remap(
+            $row,
+            function (
+                CompanyBackupPolymorphicReferenceCase $case,
+                int $value,
+            ) use ($visitor): int {
+                foreach ($this->polymorphicReferences->references as $reference) {
+                    if (!in_array($case, $reference->cases, true)) {
+                        continue;
+                    }
+                    $visitor(CompanyBackupReferenceOccurrence::polymorphic(
+                        $this->registryKey,
+                        $reference,
+                        $case,
+                        $value,
+                    ));
+                    return $value;
+                }
+                throw new \LogicException(
+                    'Polymorfní varianta nepatří do projekce.',
+                );
+            },
+        );
+    }
+
     /**
      * Přemapuje JSON reference a ve stejném kroku obnoví jejich odvozené pečetě.
      *

@@ -341,6 +341,117 @@ final readonly class CompanyBackupReferenceSet
         }
     }
 
+    /**
+     * @param array<string,mixed> $row
+     * @param callable(CompanyBackupReference,list<int|string>):void $visitor
+     */
+    public function visitSourceRow(array $row, callable $visitor): void
+    {
+        /** @var array<string,CompanyBackupReference> $conditionalGroups */
+        $conditionalGroups = [];
+        $matchedConditionalGroups = [];
+        foreach ($this->references as $reference) {
+            $condition = $reference->condition;
+            $conditionalGroup = $condition === null
+                ? null
+                : $condition->column . "\0" . implode("\0", $reference->columns);
+            if ($conditionalGroup !== null) {
+                $conditionalGroups[$conditionalGroup] = $reference;
+            }
+            if (!$this->conditionMatches($row, $reference)) {
+                continue;
+            }
+            if ($conditionalGroup !== null) {
+                $matchedConditionalGroups[$conditionalGroup] = true;
+            }
+
+            $values = [];
+            $hasNull = false;
+            foreach ($reference->columns as $index => $column) {
+                if (!array_key_exists($column, $row)) {
+                    throw $this->valueError($column);
+                }
+                $value = $row[$column];
+                if ($value === null) {
+                    if (!in_array($column, $reference->nullableColumns, true)) {
+                        throw $this->valueError($column);
+                    }
+                    $hasNull = true;
+                    continue;
+                }
+                if (!$this->validSourceValue(
+                    $value,
+                    $reference,
+                    $reference->targetColumns[$index],
+                )) {
+                    throw $this->valueError($column);
+                }
+                $values[] = $value;
+            }
+            if ($hasNull
+                || ($reference->mapping === CompanyBackupReferenceMapping::TenantIdOrZero
+                    && $values === [0])
+            ) {
+                continue;
+            }
+            $visitor($reference, $values);
+        }
+
+        foreach ($conditionalGroups as $group => $reference) {
+            if (isset($matchedConditionalGroups[$group])) {
+                continue;
+            }
+            foreach ($reference->columns as $column) {
+                if (!array_key_exists($column, $row)) {
+                    throw $this->valueError($column);
+                }
+                if ($row[$column] !== null) {
+                    throw $this->valueError($column);
+                }
+            }
+        }
+    }
+
+    /** @param array<string,mixed> $row */
+    private function conditionMatches(
+        array $row,
+        CompanyBackupReference $reference,
+    ): bool {
+        $condition = $reference->condition;
+        if ($condition === null) {
+            return true;
+        }
+        if (!array_key_exists($condition->column, $row)
+            || !is_string($row[$condition->column])
+        ) {
+            throw $this->valueError($condition->column);
+        }
+        return $row[$condition->column] === $condition->equals;
+    }
+
+    private function validSourceValue(
+        mixed $value,
+        CompanyBackupReference $reference,
+        string $targetColumn,
+    ): bool {
+        if ($reference->mapping === CompanyBackupReferenceMapping::Actor
+            || $reference->mapping === CompanyBackupReferenceMapping::CredentialDecision
+        ) {
+            return is_int($value) && $value > 0;
+        }
+        if ($reference->mapping === CompanyBackupReferenceMapping::TenantIdOrZero) {
+            return is_int($value) && $value >= 0;
+        }
+        if (!is_int($value) && !is_string($value)) {
+            return false;
+        }
+        if (is_string($value)) {
+            return $value !== '';
+        }
+        return ($targetColumn !== 'id' && !str_ends_with($targetColumn, '_id'))
+            || $value > 0;
+    }
+
     private function targetError(
         CompanyBackupReference $reference,
     ): CompanyBackupDataSourceException {
@@ -348,6 +459,15 @@ final readonly class CompanyBackupReferenceSet
             'data_reference_target_invalid',
             $this->registryKey,
             $reference->firstColumn(),
+        );
+    }
+
+    private function valueError(string $column): CompanyBackupDataSourceException
+    {
+        return new CompanyBackupDataSourceException(
+            'data_reference_value_invalid',
+            $this->registryKey,
+            $column,
         );
     }
 
