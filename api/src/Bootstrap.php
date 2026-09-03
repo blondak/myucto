@@ -141,6 +141,10 @@ final class Bootstrap
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Backup\Company\CompanyBackupDownloadService::class,
                 ),
+            \MyInvoice\Service\Backup\Company\CompanyBackupJobManager::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Backup\Company\CompanyBackupJobManagementService::class,
+                ),
             \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,

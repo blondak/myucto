@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Backup;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -15,9 +16,11 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArtifactStorage;
 use MyInvoice\Service\Backup\Company\CompanyBackupDownloadException;
 use MyInvoice\Service\Backup\Company\CompanyBackupDownloadService;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobException;
+use MyInvoice\Service\Backup\Company\CompanyBackupJobManagementService;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobRetentionPolicy;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobStatus;
 use MyInvoice\Service\Backup\Company\CompanyBackupJobStore;
+use MyInvoice\Service\Backup\Company\CompanyBackupManagementException;
 use MyInvoice\Service\Backup\Company\CompanyBackupRetentionCleanup;
 use MyInvoice\Service\Backup\Company\CompanyBackupStoredArtifact;
 use PDO;
@@ -273,6 +276,10 @@ final class CompanyBackupJobStoreTest extends TestCase
             $cancelledId,
             $this->supplierId,
         ));
+        self::assertFalse(
+            $this->jobs->requestCancel($cancelledId, $this->supplierId),
+            'Opakované storno nesmí atomicky ohlásit další změnu.',
+        );
         self::assertFalse($this->jobs->requestCancel(
             $cancelledId,
             $this->foreignSupplierId,
@@ -510,6 +517,183 @@ final class CompanyBackupJobStoreTest extends TestCase
         }
     }
 
+    public function testManagementServiceListsOnlySanitizedTenantJobs(): void
+    {
+        $completedId = $this->completedJob($this->supplierId);
+        $queuedId = $this->createJob($this->supplierId);
+        $foreignId = $this->createJob($this->foreignSupplierId);
+        $management = new CompanyBackupJobManagementService(
+            $this->jobs,
+            new CompanyBackupArtifactStorage(),
+            new MockClock('2026-09-03T11:59:59+02:00'),
+        );
+
+        $items = $management->list($this->supplierId, 20);
+
+        self::assertSame([$queuedId, $completedId], array_column($items, 'backup_id'));
+        self::assertNotContains($foreignId, array_column($items, 'backup_id'));
+        $completed = $management->detail($completedId, $this->supplierId);
+        self::assertTrue($completed['downloadable']);
+        self::assertTrue($completed['deletable']);
+        self::assertFalse($completed['cancellable']);
+        self::assertSame(str_repeat('b', 64), $completed['sha256']);
+        self::assertSame(
+            '2026-09-03T12:00:00.000000+02:00',
+            $completed['expires_at'],
+        );
+        foreach ([
+            'supplier_id',
+            'registry_fingerprint',
+            'password_ciphertext',
+            'artifact_path',
+            'last_error_message',
+            'created_by',
+            'expires_at_epoch',
+            'started_at_epoch',
+            'finished_at_epoch',
+            'created_at_epoch',
+            'updated_at_epoch',
+        ] as $privateKey) {
+            self::assertArrayNotHasKey($privateKey, $completed);
+        }
+
+        $expiredView = new CompanyBackupJobManagementService(
+            $this->jobs,
+            new CompanyBackupArtifactStorage(),
+            new MockClock('2026-09-03T12:00:00+02:00'),
+        );
+        self::assertFalse(
+            $expiredView->detail($completedId, $this->supplierId)['downloadable'],
+            'Přesná expirační hranice už nesmí být prezentovaná ke stažení.',
+        );
+        $this->assertManagementError(
+            fn () => $management->detail($completedId, $this->foreignSupplierId),
+            'not_found',
+        );
+    }
+
+    public function testManagementServiceRequestsCancellationIdempotently(): void
+    {
+        $backupId = $this->createJob($this->supplierId);
+        $management = new CompanyBackupJobManagementService(
+            $this->jobs,
+            new CompanyBackupArtifactStorage(),
+            new MockClock('2026-09-02T12:00:00+02:00'),
+        );
+
+        $first = $management->cancel($backupId, $this->supplierId);
+        self::assertTrue($first['changed']);
+        self::assertTrue($first['job']['cancel_requested']);
+        self::assertFalse($first['job']['cancellable']);
+
+        $second = $management->cancel($backupId, $this->supplierId);
+        self::assertFalse($second['changed']);
+        self::assertTrue($second['job']['cancel_requested']);
+        $this->assertManagementError(
+            fn () => $management->cancel($backupId, $this->foreignSupplierId),
+            'not_found',
+        );
+
+        self::assertTrue($this->jobs->markCancelled($backupId));
+        $this->assertManagementError(
+            fn () => $management->cancel($backupId, $this->supplierId),
+            'not_cancellable',
+        );
+    }
+
+    public function testManagementServiceKeepsFirstDstFoldExpiryInstant(): void
+    {
+        $backupId = $this->createJob($this->supplierId);
+        self::assertTrue($this->jobs->startChecking($backupId));
+        self::assertTrue($this->jobs->startSnapshotting($backupId));
+        self::assertTrue($this->jobs->startPackaging($backupId));
+        self::assertTrue($this->jobs->complete(
+            $backupId,
+            new CompanyBackupStoredArtifact(
+                $this->supplierId,
+                $backupId,
+                'sup-' . $this->supplierId . '/' . $backupId . '.zip',
+                'myucto-company-backup-' . $backupId . '.zip',
+                1_024,
+                str_repeat('c', 64),
+                5,
+            ),
+            new DateTimeImmutable('2026-10-24T00:30:00+00:00'),
+            new CompanyBackupJobRetentionPolicy(24),
+        ));
+        $prague = new DateTimeZone('Europe/Prague');
+        $before = new CompanyBackupJobManagementService(
+            $this->jobs,
+            new CompanyBackupArtifactStorage(),
+            new MockClock(
+                new DateTimeImmutable('2026-10-25T00:29:59+00:00'),
+                $prague,
+            ),
+        );
+        $atCutoff = new CompanyBackupJobManagementService(
+            $this->jobs,
+            new CompanyBackupArtifactStorage(),
+            new MockClock(
+                new DateTimeImmutable('2026-10-25T00:30:00+00:00'),
+                $prague,
+            ),
+        );
+
+        $beforeJob = $before->detail($backupId, $this->supplierId);
+        self::assertSame(
+            '2026-10-25T02:30:00.000000+02:00',
+            $beforeJob['expires_at'],
+        );
+        self::assertTrue($beforeJob['downloadable']);
+        self::assertFalse(
+            $atCutoff->detail($backupId, $this->supplierId)['downloadable'],
+        );
+    }
+
+    public function testManagementServiceDeletesOwnedArtifactBeforeExpiringMetadata(): void
+    {
+        [$backupId, $artifact, $storage, $path, $root] =
+            $this->completedStoredJob($this->supplierId);
+        $management = new CompanyBackupJobManagementService(
+            $this->jobs,
+            $storage,
+            new MockClock('2026-09-02T12:30:00+02:00'),
+        );
+
+        try {
+            $this->assertManagementError(
+                fn () => $management->deleteArtifact(
+                    $backupId,
+                    $this->foreignSupplierId,
+                ),
+                'not_found',
+            );
+            self::assertFileExists($path);
+
+            $deleted = $management->deleteArtifact($backupId, $this->supplierId);
+            self::assertTrue($deleted['changed']);
+            self::assertSame($artifact->sha256, $deleted['sha256']);
+            self::assertSame('expired', $deleted['job']['status']);
+            self::assertNull($deleted['job']['sha256']);
+            self::assertFileDoesNotExist($path);
+
+            $again = $management->deleteArtifact($backupId, $this->supplierId);
+            self::assertFalse($again['changed']);
+            self::assertNull($again['sha256']);
+
+            $activeId = $this->createJob($this->supplierId);
+            $this->assertManagementError(
+                fn () => $management->deleteArtifact(
+                    $activeId,
+                    $this->supplierId,
+                ),
+                'not_deletable',
+            );
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
     private function createJob(int $supplierId): string
     {
         return $this->jobs->create(
@@ -640,6 +824,17 @@ final class CompanyBackupJobStoreTest extends TestCase
             $operation();
             self::fail("Stažení mělo skončit chybou {$code}.");
         } catch (CompanyBackupDownloadException $e) {
+            self::assertSame($code, $e->errorCode);
+        }
+    }
+
+    /** @param callable():mixed $operation */
+    private function assertManagementError(callable $operation, string $code): void
+    {
+        try {
+            $operation();
+            self::fail("Správa jobu měla skončit chybou {$code}.");
+        } catch (CompanyBackupManagementException $e) {
             self::assertSame($code, $e->errorCode);
         }
     }

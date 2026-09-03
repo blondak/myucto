@@ -221,20 +221,27 @@ final class RoutePermissionMapTest extends TestCase
         }
     }
 
-    public function testCompanyBackupDownloadUsesDedicatedTenantPermission(): void
+    public function testCompanyBackupManagementUsesDedicatedTenantPermission(): void
     {
-        $path = '/api/admin/company-backups/'
-            . '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1/download';
-        $match = (new RoutePermissionMap())->match('GET', $path);
-
-        self::assertSame(RoutePermissionMap::PERMISSION, $match?->kind);
-        self::assertSame('utilities.company_backup', $match->key);
-        self::assertSame(AccessLevel::READ, $match->minimum);
-        self::assertTrue((new PermissionCatalog())->has((string) $match->key));
+        $id = '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1';
+        $map = new RoutePermissionMap();
+        foreach ([
+            ['GET', '/api/admin/company-backups', AccessLevel::READ],
+            ['GET', "/api/admin/company-backups/{$id}", AccessLevel::READ],
+            ['GET', "/api/admin/company-backups/{$id}/download", AccessLevel::READ],
+            ['POST', "/api/admin/company-backups/{$id}/cancel", AccessLevel::WRITE],
+            ['DELETE', "/api/admin/company-backups/{$id}", AccessLevel::WRITE],
+        ] as [$method, $path, $level]) {
+            $match = $map->match($method, $path);
+            self::assertSame(RoutePermissionMap::PERMISSION, $match?->kind);
+            self::assertSame('utilities.company_backup', $match->key);
+            self::assertSame($level, $match->minimum);
+            self::assertTrue((new PermissionCatalog())->has((string) $match->key));
+        }
         self::assertSame(
             RoutePermissionMap::SUPERADMIN,
-            (new RoutePermissionMap())->match('POST', $path)?->kind,
-            'Jiná metoda nesmí využít GET oprávnění.',
+            $map->match('PATCH', "/api/admin/company-backups/{$id}")?->kind,
+            'Jiná metoda nesmí využít oprávnění správy zálohy.',
         );
     }
 

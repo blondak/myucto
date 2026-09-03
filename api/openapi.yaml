@@ -4560,17 +4560,172 @@ paths:
         '403': { description: "Forbidden — role není admin (nebo bearer token)" }
         '404': { description: Uživatel nenalezen }
 
+  /api/v1/admin/company-backups:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Backups]
+      summary: Vrátí historii zálohových jobů aktuální firmy
+      description: |
+        Session-only endpoint s oprávněním `utilities.company_backup` na úrovni
+        read. Vrací nejvýše 20 nejnovějších jobů. Odpověď nikdy neobsahuje
+        transientní heslo, registry fingerprint, fyzickou cestu archivu,
+        interní chybovou zprávu ani identifikátor autora. API token se odmítá.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Nejnovější tenantově omezené joby.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupJobListResponse' }
+        '400':
+          description: Chybí kontext firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '401':
+          description: Chybí platná přihlášená session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '403':
+          description: Endpoint byl volán tokenem nebo chybí oprávnění k záloze firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+
+  /api/v1/admin/company-backups/{backupId}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - $ref: '#/components/parameters/CompanyBackupId'
+    get:
+      tags: [Backups]
+      summary: Vrátí stav jednoho zálohového jobu aktuální firmy
+      description: |
+        Session-only polling endpoint s oprávněním
+        `utilities.company_backup` na úrovni read. Cizí a neplatné UUID vrací
+        stejnou odpověď `404` a neprozradí existenci jobu v jiné firmě.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Bezpečný stav jobu bez interních údajů.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupJobResponse' }
+        '400':
+          description: Chybí kontext firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '401':
+          description: Chybí platná přihlášená session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '403':
+          description: Endpoint byl volán tokenem nebo chybí oprávnění k záloze firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '404':
+          description: Job neexistuje v aktuální firmě nebo identifikátor není platný.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+    delete:
+      tags: [Backups]
+      summary: Odstraní hotový archiv zálohy ze serveru
+      description: |
+        Session-only operace s oprávněním `utilities.company_backup` na úrovni
+        write. Fyzický archiv se odstraní před zneplatněním jeho DB metadat.
+        Job zůstane jako historický tombstone ve stavu `expired`; opakované
+        volání nad tímto stavem je úspěšné a vrátí `artifact_removed: false`.
+        Aktivní, neúspěšný ani stornovaný job fyzický archiv nemá a vrací `409`.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Archiv je odstraněný nebo už dříve chyběl.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupDeleteResponse' }
+        '400':
+          description: Chybí kontext firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '401':
+          description: Chybí platná přihlášená session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '403':
+          description: Endpoint byl volán tokenem nebo chybí write oprávnění.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '404':
+          description: Job neexistuje v aktuální firmě nebo identifikátor není platný.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '409':
+          description: Job nemá odstranitelný archiv, soubor je zamčený nebo se stav změnil.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+
+  /api/v1/admin/company-backups/{backupId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - $ref: '#/components/parameters/CompanyBackupId'
+    post:
+      tags: [Backups]
+      summary: Vyžádá storno rozpracovaného zálohového jobu
+      description: |
+        Session-only operace s oprávněním `utilities.company_backup` na úrovni
+        write. Nastaví atomický příznak storna, který worker zpracuje na bezpečné
+        hranici. Opakované volání je idempotentní a nevytváří duplicitní audit.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Storno bylo vyžádáno nebo už bylo vyžádané dříve.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupCancelResponse' }
+        '400':
+          description: Chybí kontext firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '401':
+          description: Chybí platná přihlášená session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '403':
+          description: Endpoint byl volán tokenem nebo chybí write oprávnění.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '404':
+          description: Job neexistuje v aktuální firmě nebo identifikátor není platný.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+        '409':
+          description: Job už je v koncovém stavu nebo se jeho stav souběžně změnil.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyBackupManagementError' }
+
   /api/v1/admin/company-backups/{backupId}/download:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
-      - in: path
-        name: backupId
-        required: true
-        description: Kanonické UUID zálohového jobu aktuální firmy.
-        schema:
-          type: string
-          format: uuid
-          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      - $ref: '#/components/parameters/CompanyBackupId'
       - in: header
         name: Range
         required: false
@@ -16979,6 +17134,15 @@ components:
         jen u **multi-supplier účtů s tokenem bez bind**. Pokud je token bound
         na konkrétního supplier-a, hlavička se ignoruje.
       schema: { type: integer }
+    CompanyBackupId:
+      in: path
+      name: backupId
+      required: true
+      description: Kanonické UUID zálohového jobu aktuální firmy.
+      schema:
+        type: string
+        format: uuid
+        pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
 
   responses:
     Unauthorized:
@@ -18750,6 +18914,107 @@ components:
               format: int64
               minimum: 1
               description: Celková velikost archivu u chyby range_not_satisfiable.
+
+    CompanyBackupJob:
+      type: object
+      additionalProperties: false
+      required:
+        [backup_id, status, processed_steps, total_steps, cancel_requested,
+         error_code, artifact_name, size_bytes, sha256, entry_count, expires_at,
+         started_at, finished_at, created_at, updated_at, downloadable,
+         cancellable, deletable]
+      properties:
+        backup_id:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        status:
+          type: string
+          enum: [queued, checking, snapshotting, packaging, completed, failed, cancelled, expired]
+        processed_steps: { type: integer, minimum: 0 }
+        total_steps: { type: [integer, "null"], minimum: 1 }
+        cancel_requested: { type: boolean }
+        error_code:
+          type: [string, "null"]
+          pattern: '^[a-z][a-z0-9_]{2,63}$'
+          description: Bezpečný stabilní kód; interní chybová zpráva se nezveřejňuje.
+        artifact_name:
+          type: [string, "null"]
+          pattern: '^myucto-company-backup-[0-9a-f-]{36}\.zip$'
+        size_bytes: { type: [integer, "null"], format: int64, minimum: 1 }
+        sha256: { type: [string, "null"], pattern: '^[0-9a-f]{64}$' }
+        entry_count: { type: [integer, "null"], minimum: 3 }
+        expires_at: { type: [string, "null"], format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        downloadable:
+          type: boolean
+          description: Hotový archiv existuje a jeho retenční okamžik ještě neuplynul.
+        cancellable:
+          type: boolean
+          description: Job je rozpracovaný a dosud nemá vyžádané storno.
+        deletable:
+          type: boolean
+          description: Job má validní metadata fyzického archivu k odstranění.
+
+    CompanyBackupJobListResponse:
+      type: object
+      additionalProperties: false
+      required: [items, limit]
+      properties:
+        items:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/CompanyBackupJob' }
+        limit: { type: integer, const: 20 }
+
+    CompanyBackupJobResponse:
+      type: object
+      additionalProperties: false
+      required: [job]
+      properties:
+        job: { $ref: '#/components/schemas/CompanyBackupJob' }
+
+    CompanyBackupCancelResponse:
+      type: object
+      additionalProperties: false
+      required: [cancel_requested, changed, job]
+      properties:
+        cancel_requested: { type: boolean, const: true }
+        changed:
+          type: boolean
+          description: False znamená, že storno už bylo vyžádané dříve.
+        job: { $ref: '#/components/schemas/CompanyBackupJob' }
+
+    CompanyBackupDeleteResponse:
+      type: object
+      additionalProperties: false
+      required: [artifact_removed, job]
+      properties:
+        artifact_removed:
+          type: boolean
+          description: False znamená idempotentní opakování nad expired jobem.
+        job: { $ref: '#/components/schemas/CompanyBackupJob' }
+
+    CompanyBackupManagementError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                [no_supplier, unauthenticated, invalid_token,
+                 token_endpoint_forbidden, session_required,
+                 forbidden_permission, forbidden_supplier, forbidden,
+                 not_found, not_cancellable, not_deletable,
+                 artifact_delete_deferred, state_conflict]
+            message: { type: string }
 
     ListMeta:
       type: object

@@ -45,6 +45,20 @@ final readonly class CompanyBackupJobStore
         'updated_at',
     ];
 
+    /**
+     * TIMESTAMP se z MariaDB vrací v session zóně bez offsetu. Epoch vedle něj
+     * zachová jednoznačný okamžik i v opakované hodině při konci letního času.
+     *
+     * @var list<string>
+     */
+    private const TIMESTAMP_COLUMNS = [
+        'expires_at',
+        'started_at',
+        'finished_at',
+        'created_at',
+        'updated_at',
+    ];
+
     public function __construct(
         private Connection $db,
         private SecretEncryption $encryption,
@@ -283,7 +297,7 @@ final readonly class CompanyBackupJobStore
             'UPDATE company_backup_jobs'
             . ' SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP(6)'
             . ' WHERE backup_id = ? AND supplier_id = ? AND status IN ('
-            . self::processingStatusSql() . ')',
+            . self::processingStatusSql() . ') AND cancel_requested = 0',
         );
         $statement->execute([$backupId, $supplierId]);
         return $statement->rowCount() === 1;
@@ -555,10 +569,15 @@ final readonly class CompanyBackupJobStore
 
     private static function safeColumnList(): string
     {
-        return implode(
-            ', ',
-            array_map(static fn (string $column): string => '`' . $column . '`', self::SAFE_COLUMNS),
+        $columns = array_map(
+            static fn (string $column): string => '`' . $column . '`',
+            self::SAFE_COLUMNS,
         );
+        foreach (self::TIMESTAMP_COLUMNS as $column) {
+            $columns[] = 'UNIX_TIMESTAMP(`' . $column . '`) AS `'
+                . $column . '_epoch`';
+        }
+        return implode(', ', $columns);
     }
 
     private static function passwordContext(

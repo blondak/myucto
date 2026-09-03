@@ -32,6 +32,7 @@ use MyInvoice\Action\Admin\ExportAction;
 use MyInvoice\Action\Admin\ImportAction;
 use MyInvoice\Action\Export\InstanceExportAction;
 use MyInvoice\Action\Backup\CompanyBackupDownloadAction;
+use MyInvoice\Action\Backup\CompanyBackupJobAction;
 use MyInvoice\Action\Admin\Import\StartIdokladImportAction;
 use MyInvoice\Action\Admin\Import\StartFakturoidImportAction;
 use MyInvoice\Action\Admin\Import\ImportJobStatusAction;
@@ -1803,9 +1804,24 @@ final class Routes
         $app->post   ('/api/admin/instance-export/{id:[0-9]+}/cancel',     [InstanceExportAction::class, 'cancel']);
         $app->delete ('/api/admin/instance-export/{id:[0-9]+}',            [InstanceExportAction::class, 'delete']);
 
-        // Přenositelná záloha jedné firmy — první veřejně zapojený krok nového
-        // kontraktu. UUID se znovu kanonicky ověřuje v Action a job se vždy hledá
-        // jen v aktuálním supplier scope.
+        // Přenositelná záloha jedné firmy. UUID se znovu kanonicky ověřuje v
+        // Action a job se vždy hledá jen v aktuálním supplier scope.
+        $app->get(
+            '/api/admin/company-backups',
+            [CompanyBackupJobAction::class, 'list'],
+        );
+        $app->get(
+            '/api/admin/company-backups/{backupId:[0-9a-f-]+}',
+            [CompanyBackupJobAction::class, 'status'],
+        );
+        $app->post(
+            '/api/admin/company-backups/{backupId:[0-9a-f-]+}/cancel',
+            [CompanyBackupJobAction::class, 'cancel'],
+        );
+        $app->delete(
+            '/api/admin/company-backups/{backupId:[0-9a-f-]+}',
+            [CompanyBackupJobAction::class, 'delete'],
+        );
         $app->get(
             '/api/admin/company-backups/{backupId:[0-9a-f-]+}/download',
             [CompanyBackupDownloadAction::class, 'download'],
