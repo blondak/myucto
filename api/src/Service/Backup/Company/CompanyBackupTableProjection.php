@@ -479,10 +479,19 @@ final readonly class CompanyBackupTableProjection
     /** @param array<string,mixed> $row */
     public function assertCompleteSourceRow(array $row): void
     {
-        $this->visitSourceReferences(
+        $this->inspectCompleteSourceRow(
             $row,
             static function (CompanyBackupReferenceOccurrence $occurrence): void {},
         );
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param callable(CompanyBackupReferenceOccurrence):void $visitor
+     */
+    public function inspectCompleteSourceRow(array $row, callable $visitor): void
+    {
+        $this->visitSourceReferences($row, $visitor);
         $this->embeddedHashReferences->assertSourceRow($row);
         $this->embeddedHashes->assertSourceRow($row);
         $this->derivedHashes->assertSourceRow($row);

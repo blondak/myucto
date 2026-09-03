@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 use MyInvoice\Service\Backup\CanonicalJson;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataObject;
+use MyInvoice\Service\Backup\Company\CompanyBackupExternalReferenceCollector;
 use MyInvoice\Service\Backup\Company\CompanyBackupJsonlReadException;
 use MyInvoice\Service\Backup\Company\CompanyBackupJsonlReader;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
@@ -206,10 +207,38 @@ final class CompanyBackupJsonlReaderTest extends TestCase
         }
     }
 
+    public function testStreamsReferenceOccurrencesIntoSharedPreflightCollector(): void
+    {
+        $definition = $this->definition(actorReference: true);
+        $contents = self::jsonl([[
+            'id' => 1,
+            'supplier_id' => 7,
+            'label' => 'synthetic',
+            'approved_by' => 9,
+        ]]);
+        $collector = new CompanyBackupExternalReferenceCollector();
+
+        iterator_to_array((new CompanyBackupJsonlReader())->rows(
+            self::stream($contents),
+            $definition,
+            $this->object($contents, 1, $definition),
+            $collector->accept(...),
+        ));
+
+        $requirement = $collector->finish()->find(
+            CompanyBackupReferenceMapping::Actor,
+            'table:users',
+            ['id' => 9],
+        );
+        self::assertNotNull($requirement);
+        self::assertSame(1, $requirement->occurrenceCount);
+    }
+
     /** @param array<string,string> $columnCodecs */
     private function definition(
         array $columnCodecs = [],
         bool $embeddedReference = false,
+        bool $actorReference = false,
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:synthetic_records',
@@ -227,7 +256,12 @@ final class CompanyBackupJsonlReaderTest extends TestCase
                     ...($columnCodecs === [] ? [] : [
                         'column_codecs' => $columnCodecs,
                     ]),
-                    'data_columns' => ['id', 'supplier_id', 'label'],
+                    'data_columns' => [
+                        'id',
+                        'supplier_id',
+                        'label',
+                        ...($actorReference ? ['approved_by'] : []),
+                    ],
                     'embedded_references' => $embeddedReference ? [[
                         'column' => 'label',
                         'condition' => null,
@@ -240,15 +274,28 @@ final class CompanyBackupJsonlReaderTest extends TestCase
                     ]] : [],
                     'generated_columns' => [],
                     'omit_columns' => [],
-                    'references' => [[
-                        'columns' => ['supplier_id'],
-                        'target' => 'table:supplier',
-                        'target_columns' => ['id'],
-                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
-                        'constraint' => CompanyBackupReferenceConstraint::Required->value,
-                        'nullable_columns' => [],
-                        'fallbacks' => [],
-                    ]],
+                    'references' => [
+                        ...($actorReference ? [[
+                            'columns' => ['approved_by'],
+                            'target' => 'table:users',
+                            'target_columns' => ['id'],
+                            'mapping' => CompanyBackupReferenceMapping::Actor->value,
+                            'constraint' =>
+                                CompanyBackupReferenceConstraint::Optional->value,
+                            'nullable_columns' => ['approved_by'],
+                            'fallbacks' => ['null', 'restore_actor'],
+                        ]] : []),
+                        [
+                            'columns' => ['supplier_id'],
+                            'target' => 'table:supplier',
+                            'target_columns' => ['id'],
+                            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                            'constraint' =>
+                                CompanyBackupReferenceConstraint::Required->value,
+                            'nullable_columns' => [],
+                            'fallbacks' => [],
+                        ],
+                    ],
                     'restore_overrides' => [],
                 ],
             ],

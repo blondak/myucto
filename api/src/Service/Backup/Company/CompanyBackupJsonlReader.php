@@ -17,15 +17,18 @@ final readonly class CompanyBackupJsonlReader
     ) {}
 
     /**
-     * Stream vlastní volající. Pro dokončení kontrol manifestu musí iterátor vyčerpat.
+     * Stream vlastní volající. Pro dokončení kontrol manifestu musí iterátor vyčerpat;
+     * výskyty předané visitoru jsou do té doby pouze provizorní.
      *
      * @param resource $stream
+     * @param null|callable(CompanyBackupReferenceOccurrence):void $referenceVisitor
      * @return \Generator<int,array<string,mixed>>
      */
     public function rows(
         mixed $stream,
         TenantDataDefinition $definition,
         CompanyBackupDataObject $object,
+        ?callable $referenceVisitor = null,
     ): \Generator {
         $registryKey = $definition->key;
         if (!is_resource($stream) || get_resource_type($stream) !== 'stream') {
@@ -57,6 +60,8 @@ final readonly class CompanyBackupJsonlReader
 
         $expectedColumns = $projection->dataColumns;
         sort($expectedColumns, SORT_STRING);
+        $resolvedReferenceVisitor = $referenceVisitor
+            ?? static function (CompanyBackupReferenceOccurrence $occurrence): void {};
         $hash = hash_init('sha256');
         $bytes = 0;
         $rowNumber = 0;
@@ -107,6 +112,7 @@ final readonly class CompanyBackupJsonlReader
                 $projection,
                 $expectedColumns,
                 $rowNumber,
+                $resolvedReferenceVisitor,
             );
             if ($rowNumber > $object->rows) {
                 throw new CompanyBackupJsonlReadException(
@@ -148,6 +154,7 @@ final readonly class CompanyBackupJsonlReader
 
     /**
      * @param list<string> $expectedColumns
+     * @param callable(CompanyBackupReferenceOccurrence):void $referenceVisitor
      * @return array<string,mixed>
      */
     private function decodeRow(
@@ -155,6 +162,7 @@ final readonly class CompanyBackupJsonlReader
         CompanyBackupTableProjection $projection,
         array $expectedColumns,
         int $rowNumber,
+        callable $referenceVisitor,
     ): array {
         try {
             $decoded = json_decode($payload, true, 128, JSON_THROW_ON_ERROR);
@@ -225,7 +233,7 @@ final readonly class CompanyBackupJsonlReader
                     $column,
                 );
             }
-            $projection->assertCompleteSourceRow($row);
+            $projection->inspectCompleteSourceRow($row, $referenceVisitor);
         } catch (CompanyBackupDataSourceException $e) {
             throw self::fromDataSourceException($e, $rowNumber);
         }

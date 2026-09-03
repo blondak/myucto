@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Company;
 
-/** Limity technické validace, vynucované před rozbalením jediné položky. */
+/** Sdílené bezpečnostní limity zápisu, inspekce a preflightu archivu. */
 final readonly class CompanyBackupArchiveLimits
 {
     public int $maxDataRowBytes;
@@ -18,6 +18,7 @@ final readonly class CompanyBackupArchiveLimits
         public int $maxManifestBytes = 4_194_304,
         public int $maxChecksumsBytes = 33_554_432,
         ?int $maxDataRowBytes = null,
+        public int $maxReferenceRequirements = 100_000,
     ) {
         $resolvedMaxDataRowBytes = $maxDataRowBytes
             ?? min(16_777_216, $maxEntryBytes);
@@ -30,6 +31,7 @@ final readonly class CompanyBackupArchiveLimits
             $maxManifestBytes,
             $maxChecksumsBytes,
             $resolvedMaxDataRowBytes,
+            $maxReferenceRequirements,
         ] as $limit) {
             if ($limit < 1) {
                 throw new \InvalidArgumentException('Limit zálohového archivu musí být kladný.');
