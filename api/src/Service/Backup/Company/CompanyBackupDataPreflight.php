@@ -117,6 +117,7 @@ final readonly class CompanyBackupDataPreflight
                 $index->entryCount(),
                 $index->indexedBytes(),
                 $referenceOccurrenceCount,
+                $validation->targetRegistryFingerprint,
                 $validation->bindingSha256,
             );
         } catch (\Throwable $e) {

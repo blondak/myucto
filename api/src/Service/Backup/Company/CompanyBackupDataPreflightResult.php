@@ -21,6 +21,7 @@ final readonly class CompanyBackupDataPreflightResult
         public int $sourceKeyCount,
         public int $sourceIndexBytes,
         public int $referenceOccurrenceCount,
+        public string $targetRegistryFingerprint,
         public string $technicalValidationBindingSha256,
     ) {
         if ($rowCount < 0
@@ -28,6 +29,10 @@ final readonly class CompanyBackupDataPreflightResult
             || $sourceKeyCount < $identityCount
             || $sourceIndexBytes < 0
             || $referenceOccurrenceCount < $externalReferences->occurrenceCount
+            || preg_match(
+                '/^sha256:[0-9a-f]{64}$/D',
+                $targetRegistryFingerprint,
+            ) !== 1
             || preg_match(
                 '/^[0-9a-f]{64}$/D',
                 $technicalValidationBindingSha256,
@@ -42,6 +47,7 @@ final readonly class CompanyBackupDataPreflightResult
             'version' => self::VERSION,
             'technical_validation_binding_sha256' =>
                 $technicalValidationBindingSha256,
+            'target_registry_fingerprint' => $targetRegistryFingerprint,
             'external_references_sha256' => $externalReferences->sha256(),
             'row_count' => $rowCount,
             'identity_count' => $identityCount,
@@ -59,6 +65,7 @@ final readonly class CompanyBackupDataPreflightResult
             'version' => self::VERSION,
             'technical_validation_binding_sha256' =>
                 $this->technicalValidationBindingSha256,
+            'target_registry_fingerprint' => $this->targetRegistryFingerprint,
             'external_references' => $this->externalReferences->toArray(),
             'row_count' => $this->rowCount,
             'identity_count' => $this->identityCount,
