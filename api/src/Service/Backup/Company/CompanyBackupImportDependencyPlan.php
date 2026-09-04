@@ -29,6 +29,12 @@ final readonly class CompanyBackupImportDependencyPlan
     /** @var list<CompanyBackupImportDependency> */
     private array $dependencies;
 
+    /** @var array<string,true> */
+    private array $insertRegistryKeys;
+
+    /** @var array<string,CompanyBackupImportDependency> */
+    private array $dependenciesByKey;
+
     public string $bindingSha256;
 
     /**
@@ -46,6 +52,23 @@ final readonly class CompanyBackupImportDependencyPlan
         $this->globalRegistryKeys = $globalRegistryKeys;
         $this->insertBatches = $insertBatches;
         $this->dependencies = $dependencies;
+        $insertRegistryKeys = [];
+        foreach ($insertBatches as $batch) {
+            foreach ($batch as $registryKey) {
+                $insertRegistryKeys[$registryKey] = true;
+            }
+        }
+        $this->insertRegistryKeys = $insertRegistryKeys;
+        $dependenciesByKey = [];
+        foreach ($dependencies as $dependency) {
+            $dependenciesByKey[self::dependencyKey(
+                $dependency->sourceRegistryKey,
+                $dependency->targetRegistryKey,
+                $dependency->kind,
+                $dependency->signature,
+            )] = $dependency;
+        }
+        $this->dependenciesByKey = $dependenciesByKey;
         $this->bindingSha256 = CanonicalJson::sha256($this->payload());
     }
 
@@ -178,6 +201,25 @@ final readonly class CompanyBackupImportDependencyPlan
         ));
     }
 
+    public function containsInsertRegistryKey(string $registryKey): bool
+    {
+        return isset($this->insertRegistryKeys[$registryKey]);
+    }
+
+    public function dependency(
+        string $sourceRegistryKey,
+        string $targetRegistryKey,
+        CompanyBackupImportDependencyKind $kind,
+        string $signature,
+    ): ?CompanyBackupImportDependency {
+        return $this->dependenciesByKey[self::dependencyKey(
+            $sourceRegistryKey,
+            $targetRegistryKey,
+            $kind,
+            $signature,
+        )] ?? null;
+    }
+
     /** @return array<string,mixed> */
     public function toArray(): array
     {
@@ -207,7 +249,7 @@ final readonly class CompanyBackupImportDependencyPlan
                 $reference->target,
                 CompanyBackupImportDependencyKind::Column,
                 $reference->signature(),
-                $reference->nullableColumns !== [],
+                $reference->nullableColumns === $reference->columns,
                 $insertDefinitions,
             );
         }
@@ -218,7 +260,8 @@ final readonly class CompanyBackupImportDependencyPlan
                 $reference->target,
                 CompanyBackupImportDependencyKind::Encoded,
                 $reference->signature(),
-                $reference->nullable,
+                $reference->nullable
+                    && $reference->correlatedIdColumn === null,
                 $insertDefinitions,
             );
         }
@@ -232,7 +275,7 @@ final readonly class CompanyBackupImportDependencyPlan
                 $reference->target,
                 CompanyBackupImportDependencyKind::Embedded,
                 $reference->signature(),
-                $reference->nullable || $reference->documentNullable,
+                $reference->nullable,
                 $insertDefinitions,
             );
         }
@@ -266,8 +309,7 @@ final readonly class CompanyBackupImportDependencyPlan
                     $definition->key,
                     $target,
                     CompanyBackupImportDependencyKind::Polymorphic,
-                    $reference->column . '?' . $reference->discriminatorColumn
-                        . ':' . $case->signature(),
+                    $reference->signature() . '/' . $case->signature(),
                     $reference->nullable,
                     $insertDefinitions,
                 );
@@ -306,12 +348,12 @@ final readonly class CompanyBackupImportDependencyPlan
                 $targetRegistryKey,
             );
         }
-        $key = implode("\0", [
+        $key = self::dependencyKey(
             $sourceRegistryKey,
             $targetRegistryKey,
-            $kind->value,
+            $kind,
             $signature,
-        ]);
+        );
         if (isset($dependencies[$key])) {
             throw self::error(
                 'import_dependency_duplicate',
@@ -354,6 +396,20 @@ final readonly class CompanyBackupImportDependencyPlan
             $right->signature,
             $right->deferred ? 1 : 0,
         ];
+    }
+
+    private static function dependencyKey(
+        string $sourceRegistryKey,
+        string $targetRegistryKey,
+        CompanyBackupImportDependencyKind $kind,
+        string $signature,
+    ): string {
+        return implode("\0", [
+            $sourceRegistryKey,
+            $targetRegistryKey,
+            $kind->value,
+            $signature,
+        ]);
     }
 
     /**

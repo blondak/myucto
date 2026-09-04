@@ -682,21 +682,22 @@ final readonly class CompanyBackupTableProjection
                     fn (
                         CompanyBackupReference $reference,
                         array $values,
-                    ): ?array => $this->mappedValues(
-                        CompanyBackupReferenceOccurrence::column(
-                            $this->registryKey,
-                            $reference,
-                            $values,
+                    ): array|CompanyBackupReferenceRemapDirective|null =>
+                        $this->mappedValues(
+                            CompanyBackupReferenceOccurrence::column(
+                                $this->registryKey,
+                                $reference,
+                                $values,
+                            ),
+                            $mapper,
                         ),
-                        $mapper,
-                    ),
                 );
                 $source = $this->encodedReferences->remap(
                     $source,
                     function (
                         CompanyBackupEncodedReference $reference,
                         int $value,
-                    ) use ($mapper): ?int {
+                    ) use ($mapper): int|CompanyBackupReferenceRemapDirective|null {
                         $values = $this->mappedValues(
                             CompanyBackupReferenceOccurrence::encoded(
                                 $this->registryKey,
@@ -705,6 +706,11 @@ final readonly class CompanyBackupTableProjection
                             ),
                             $mapper,
                         );
+                        if ($values
+                            === CompanyBackupReferenceRemapDirective::Defer
+                        ) {
+                            return $values;
+                        }
                         $mapped = $values[0] ?? null;
                         return is_int($mapped) ? $mapped : null;
                     },
@@ -718,7 +724,7 @@ final readonly class CompanyBackupTableProjection
                                 function (
                                     CompanyBackupEmbeddedReference $reference,
                                     int|string $value,
-                                ) use ($mapper): int|string|null {
+                                ) use ($mapper): int|string|CompanyBackupReferenceRemapDirective|null {
                                     $values = $this->mappedValues(
                                         CompanyBackupReferenceOccurrence::embedded(
                                             $this->registryKey,
@@ -727,6 +733,11 @@ final readonly class CompanyBackupTableProjection
                                         ),
                                         $mapper,
                                     );
+                                    if ($values
+                                        === CompanyBackupReferenceRemapDirective::Defer
+                                    ) {
+                                        return $values;
+                                    }
                                     return $values[0] ?? null;
                                 },
                             ),
@@ -738,7 +749,7 @@ final readonly class CompanyBackupTableProjection
                     function (
                         CompanyBackupPolymorphicReferenceCase $case,
                         int $value,
-                    ) use ($mapper): ?int {
+                    ) use ($mapper): int|CompanyBackupReferenceRemapDirective|null {
                         foreach ($this->polymorphicReferences->references as $reference) {
                             if (!in_array($case, $reference->cases, true)) {
                                 continue;
@@ -752,6 +763,11 @@ final readonly class CompanyBackupTableProjection
                                 ),
                                 $mapper,
                             );
+                            if ($values
+                                === CompanyBackupReferenceRemapDirective::Defer
+                            ) {
+                                return $values;
+                            }
                             $mapped = $values[0] ?? null;
                             return is_int($mapped) ? $mapped : null;
                         }
@@ -766,13 +782,16 @@ final readonly class CompanyBackupTableProjection
 
     /**
      * @param callable(CompanyBackupReferenceOccurrence):mixed $mapper
-     * @return list<int|string>|null
+     * @return list<int|string>|CompanyBackupReferenceRemapDirective|null
      */
     private function mappedValues(
         CompanyBackupReferenceOccurrence $occurrence,
         callable $mapper,
-    ): ?array {
+    ): array|CompanyBackupReferenceRemapDirective|null {
         $mapped = $mapper($occurrence);
+        if ($mapped === CompanyBackupReferenceRemapDirective::Defer) {
+            return $mapped;
+        }
         if ($mapped === null) {
             return null;
         }

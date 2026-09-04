@@ -173,7 +173,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
 
         self::assertSame([
             CompanyBackupImportDependencyKind::Column->value => false,
-            CompanyBackupImportDependencyKind::Embedded->value => true,
+            CompanyBackupImportDependencyKind::Embedded->value => false,
             CompanyBackupImportDependencyKind::EmbeddedHash->value => true,
             CompanyBackupImportDependencyKind::Encoded->value => false,
             CompanyBackupImportDependencyKind::Polymorphic->value => false,

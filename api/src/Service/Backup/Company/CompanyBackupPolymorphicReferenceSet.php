@@ -113,7 +113,7 @@ final readonly class CompanyBackupPolymorphicReferenceSet
 
     /**
      * @param array<string,mixed> $row
-     * @param callable(CompanyBackupPolymorphicReferenceCase,int):(int|null) $mapper
+     * @param callable(CompanyBackupPolymorphicReferenceCase,int):(int|CompanyBackupReferenceRemapDirective|null) $mapper
      * @return array<string,mixed>
      */
     public function remap(array $row, callable $mapper): array
@@ -142,6 +142,13 @@ final readonly class CompanyBackupPolymorphicReferenceSet
                 throw $this->valueError($reference->column);
             }
             $mapped = $case->remap($value, $mapper);
+            if ($mapped === CompanyBackupReferenceRemapDirective::Defer) {
+                if (!$reference->nullable) {
+                    throw $this->valueError($reference->column);
+                }
+                $row[$reference->column] = null;
+                continue;
+            }
             if ($mapped === null || $mapped <= 0) {
                 throw $this->valueError($reference->column);
             }

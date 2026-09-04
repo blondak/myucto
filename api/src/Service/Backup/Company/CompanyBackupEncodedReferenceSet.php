@@ -163,7 +163,7 @@ final readonly class CompanyBackupEncodedReferenceSet
 
     /**
      * @param array<string,mixed> $row
-     * @param callable(CompanyBackupEncodedReference,int):(int|null) $mapper
+     * @param callable(CompanyBackupEncodedReference,int):(int|CompanyBackupReferenceRemapDirective|null) $mapper
      * @return array<string,mixed>
      */
     public function remap(array $row, callable $mapper): array
@@ -192,6 +192,15 @@ final readonly class CompanyBackupEncodedReferenceSet
                 continue;
             }
             $mapped = $mapper($reference, $source['identifier']);
+            if ($mapped === CompanyBackupReferenceRemapDirective::Defer) {
+                if (!$reference->nullable
+                    || $reference->correlatedIdColumn !== null
+                ) {
+                    throw $this->valueError($reference);
+                }
+                $row[$reference->column] = null;
+                continue;
+            }
             $minimum = $reference->mapping
                 === CompanyBackupReferenceMapping::TenantIdOrZero
                 ? 0

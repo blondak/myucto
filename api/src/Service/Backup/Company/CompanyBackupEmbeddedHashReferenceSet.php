@@ -209,6 +209,13 @@ final readonly class CompanyBackupEmbeddedHashReferenceSet
                 return;
             }
             $mapped = $mapper($reference, $value);
+            if ($mapped === CompanyBackupReferenceRemapDirective::Defer) {
+                if (!$reference->nullable) {
+                    throw $this->valueError($reference->column);
+                }
+                $value = null;
+                return;
+            }
             if (!self::validHash($mapped)) {
                 throw $this->valueError($reference->column);
             }

@@ -131,9 +131,12 @@ final readonly class CompanyBackupPolymorphicReferenceCase
     }
 
     /**
-     * @param callable(self,int):(int|null) $mapper
+     * @param callable(self,int):(int|CompanyBackupReferenceRemapDirective|null) $mapper
      */
-    public function remap(int $value, callable $mapper): ?int
+    public function remap(
+        int $value,
+        callable $mapper,
+    ): int|CompanyBackupReferenceRemapDirective|null
     {
         if ($this->mapping === CompanyBackupPolymorphicReferenceMapping::Preserve) {
             return $value;
@@ -143,6 +146,9 @@ final readonly class CompanyBackupPolymorphicReferenceCase
             return null;
         }
         $mapped = $mapper($this, $decoded['id']);
+        if ($mapped === CompanyBackupReferenceRemapDirective::Defer) {
+            return $mapped;
+        }
         if (!is_int($mapped) || $mapped <= 0) {
             return null;
         }

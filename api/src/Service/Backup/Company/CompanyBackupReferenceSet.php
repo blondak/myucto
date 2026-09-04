@@ -431,7 +431,12 @@ final readonly class CompanyBackupReferenceSet
                 array $values,
             ) use ($mapper, &$mappedColumns): void {
                 $mapped = $mapper($reference, $values);
-                if ($mapped === null) {
+                if ($mapped === CompanyBackupReferenceRemapDirective::Defer) {
+                    if ($reference->nullableColumns !== $reference->columns) {
+                        throw $this->valueError($reference->firstColumn());
+                    }
+                    $mapped = array_fill(0, count($reference->columns), null);
+                } elseif ($mapped === null) {
                     if ($reference->nullableColumns !== $reference->columns) {
                         throw $this->valueError($reference->firstColumn());
                     }

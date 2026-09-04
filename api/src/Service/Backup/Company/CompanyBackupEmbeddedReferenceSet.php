@@ -168,7 +168,7 @@ final readonly class CompanyBackupEmbeddedReferenceSet
 
     /**
      * @param array<string,mixed> $row
-     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|null) $mapper
+     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|CompanyBackupReferenceRemapDirective|null) $mapper
      * @return array<string,mixed>
      */
     public function remap(array $row, callable $mapper): array
@@ -244,7 +244,7 @@ final readonly class CompanyBackupEmbeddedReferenceSet
     /**
      * @param array<mixed> $value
      * @param array<string,list<CompanyBackupEmbeddedReference>> $groups
-     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|null) $mapper
+     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|CompanyBackupReferenceRemapDirective|null) $mapper
      */
     private function remapGroups(
         array &$value,
@@ -260,7 +260,7 @@ final readonly class CompanyBackupEmbeddedReferenceSet
     /**
      * @param list<string> $documentPath
      * @param array<string,list<CompanyBackupEmbeddedReference>> $groups
-     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|null) $mapper
+     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|CompanyBackupReferenceRemapDirective|null) $mapper
      */
     private function remapDocumentPath(
         mixed &$value,
@@ -338,7 +338,7 @@ final readonly class CompanyBackupEmbeddedReferenceSet
      * @param array<mixed> $root
      * @param list<CompanyBackupEmbeddedReference> $references
      * @param list<int|string> $wildcardBindings
-     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|null) $mapper
+     * @param callable(CompanyBackupEmbeddedReference,int|string):(int|string|CompanyBackupReferenceRemapDirective|null) $mapper
      */
     private function remapPath(
         mixed &$value,
@@ -382,6 +382,13 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 return;
             }
             $mapped = $mapper($reference, $source['identifier']);
+            if ($mapped === CompanyBackupReferenceRemapDirective::Defer) {
+                if (!$reference->nullable) {
+                    throw $this->valueError($reference->column);
+                }
+                $value = null;
+                return;
+            }
             if (!$this->validMappedValue($mapped, $reference)) {
                 throw $this->valueError($reference->column);
             }
