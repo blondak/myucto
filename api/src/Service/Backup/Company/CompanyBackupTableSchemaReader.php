@@ -82,6 +82,84 @@ final class CompanyBackupTableSchemaReader
         return $this->readTable($pdo, $projection->name, $projection->registryKey);
     }
 
+    public function readImportMetadata(
+        PDO $pdo,
+        CompanyBackupTableProjection $projection,
+    ): CompanyBackupImportTableMetadata {
+        $engineRows = $this->fetchAll(
+            $pdo,
+            'SELECT `ENGINE` FROM `information_schema`.`TABLES`'
+                . ' WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?'
+                . " AND `TABLE_TYPE` IN ('BASE TABLE', 'SYSTEM VERSIONED')",
+            [$projection->name],
+            PDO::FETCH_ASSOC,
+            $projection->registryKey,
+            'import_schema_read_failed',
+        );
+        $engine = $engineRows[0]['ENGINE'] ?? null;
+        if (count($engineRows) !== 1
+            || !is_string($engine)
+            || strcasecmp($engine, 'InnoDB') !== 0
+        ) {
+            throw new CompanyBackupDataSourceException(
+                'import_storage_engine_unsupported',
+                $projection->registryKey,
+            );
+        }
+
+        $rows = $this->fetchAll(
+            $pdo,
+            'SELECT `COLUMN_NAME`, `COLUMN_TYPE`, `DATA_TYPE`'
+                . ' FROM `information_schema`.`COLUMNS`'
+                . ' WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?'
+                . " AND LOCATE('auto_increment', LOWER(`EXTRA`)) > 0"
+                . ' ORDER BY `ORDINAL_POSITION`',
+            [$projection->name],
+            PDO::FETCH_ASSOC,
+            $projection->registryKey,
+            'import_schema_read_failed',
+        );
+        if ($rows === []) {
+            return new CompanyBackupImportTableMetadata(null);
+        }
+        if (count($rows) !== 1 || !is_array($rows[0])) {
+            throw new CompanyBackupDataSourceException(
+                'import_auto_increment_metadata_invalid',
+                $projection->registryKey,
+            );
+        }
+        $row = $rows[0];
+        $column = $row['COLUMN_NAME'] ?? null;
+        $columnType = $row['COLUMN_TYPE'] ?? null;
+        $dataType = $row['DATA_TYPE'] ?? null;
+        if (!is_string($column)
+            || !is_string($columnType)
+            || !is_string($dataType)
+            || $projection->primaryKey !== [$column]
+        ) {
+            throw new CompanyBackupDataSourceException(
+                'import_auto_increment_metadata_invalid',
+                $projection->registryKey,
+                is_string($column) ? $column : null,
+            );
+        }
+        try {
+            $autoIncrement = CompanyBackupAutoIncrementColumn::fromDatabaseMetadata(
+                $column,
+                $dataType,
+                $columnType,
+            );
+        } catch (\InvalidArgumentException $e) {
+            throw new CompanyBackupDataSourceException(
+                'import_auto_increment_metadata_invalid',
+                $projection->registryKey,
+                $column,
+                $e,
+            );
+        }
+        return new CompanyBackupImportTableMetadata($autoIncrement);
+    }
+
     private function readTable(
         PDO $pdo,
         string $table,

@@ -158,6 +158,52 @@ final class CompanyBackupTableSchemaReaderTest extends TestCase
         $projection->references->assertRuntimeSchema($schema);
     }
 
+    public function testReadsBoundedAutoIncrementMetadataForImport(): void
+    {
+        $engine = $this->statement([[
+            'ENGINE' => 'InnoDB',
+        ]]);
+        $autoIncrement = $this->statement([[
+            'COLUMN_NAME' => 'id',
+            'COLUMN_TYPE' => 'tinyint(3) unsigned',
+            'DATA_TYPE' => 'tinyint',
+        ]]);
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::exactly(2))
+            ->method('prepare')
+            ->willReturnOnConsecutiveCalls($engine, $autoIncrement);
+
+        $metadata = (new CompanyBackupTableSchemaReader())->readImportMetadata(
+            $pdo,
+            CompanyBackupTableProjection::fromDefinition(new TenantDataDefinition(
+                'table:synthetic_records',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantRoot,
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+                [
+                    'primary_key' => ['id'],
+                    'ownership' => [
+                        'strategy' => 'selected_supplier',
+                        'column' => 'id',
+                    ],
+                    'secrets' => [],
+                    'company_backup' => [
+                        'data_columns' => ['id', 'name'],
+                        'embedded_references' => [],
+                        'generated_columns' => [],
+                        'omit_columns' => [],
+                        'references' => [],
+                        'restore_overrides' => [],
+                    ],
+                ],
+            )),
+        );
+
+        self::assertNotNull($metadata->autoIncrement);
+        self::assertSame('id', $metadata->autoIncrement->column);
+        self::assertSame(255, $metadata->autoIncrement->maximumValue);
+    }
+
     /** @param list<mixed> $rows */
     private function statement(array $rows, int $fetchMode = PDO::FETCH_ASSOC): PDOStatement
     {
