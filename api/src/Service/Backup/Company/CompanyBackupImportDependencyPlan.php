@@ -179,6 +179,11 @@ final readonly class CompanyBackupImportDependencyPlan
         return $this->globalRegistryKeys;
     }
 
+    public function containsGlobalRegistryKey(string $registryKey): bool
+    {
+        return in_array($registryKey, $this->globalRegistryKeys, true);
+    }
+
     /** @return list<list<string>> */
     public function insertBatches(): array
     {

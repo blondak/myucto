@@ -22,7 +22,9 @@ final class CompanyBackupSqlPrimaryKeyReservation
     private function __construct(
         private readonly PDO $database,
         private readonly string $registryKey,
+        private readonly string $table,
         private readonly string $column,
+        private readonly int $maximumValue,
         int $firstValue,
         int $count,
     ) {
@@ -95,10 +97,30 @@ final class CompanyBackupSqlPrimaryKeyReservation
         return new self(
             $database,
             $projection->registryKey,
+            $projection->name,
             $autoIncrement->column,
+            $autoIncrement->maximumValue,
             $highest + 1,
             $rowCount,
         );
+    }
+
+    public function assertScope(
+        CompanyBackupTableProjection $projection,
+        CompanyBackupAutoIncrementColumn $autoIncrement,
+    ): void {
+        if ($projection->registryKey !== $this->registryKey
+            || $projection->name !== $this->table
+            || $projection->primaryKey !== [$this->column]
+            || $autoIncrement->column !== $this->column
+            || $autoIncrement->maximumValue !== $this->maximumValue
+        ) {
+            throw new CompanyBackupImportWriteException(
+                'import_primary_key_reservation_scope_mismatch',
+                $projection->registryKey,
+                $autoIncrement->column,
+            );
+        }
     }
 
     public function next(): int
