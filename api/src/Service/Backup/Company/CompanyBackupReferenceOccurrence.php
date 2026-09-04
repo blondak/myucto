@@ -111,6 +111,25 @@ final readonly class CompanyBackupReferenceOccurrence
         );
     }
 
+    public function withSourceKey(CompanyBackupSourceKey $sourceKey): self
+    {
+        if ($sourceKey->registryKey !== $this->targetRegistryKey) {
+            throw new \InvalidArgumentException(
+                'Vyřešený zdrojový klíč patří jinému cílovému objektu.',
+            );
+        }
+        return new self(
+            $this->sourceRegistryKey,
+            $this->sourceColumn,
+            $this->sourceKind,
+            $this->signature,
+            $this->mapping,
+            $this->targetRegistryKey,
+            $sourceKey->values,
+            $this->fallbacks,
+        );
+    }
+
     /**
      * @param list<string> $columns
      * @param list<int|string> $values
