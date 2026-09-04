@@ -476,6 +476,15 @@ final readonly class CompanyBackupTableProjection
         $this->derivedHashes->assertSourceRow($row);
     }
 
+    public function assertRegistryTargets(TenantDataRegistry $registry): void
+    {
+        $this->references->assertRegistryTargets($registry);
+        $this->encodedReferences->assertRegistryTargets($registry);
+        $this->embeddedReferences->assertRegistryTargets($registry);
+        $this->embeddedHashReferences->assertRegistryTargets($registry);
+        $this->polymorphicReferences->assertRegistryTargets($registry);
+    }
+
     /** @param array<string,mixed> $row */
     public function assertCompleteSourceRow(array $row): void
     {

@@ -83,11 +83,7 @@ final readonly class CompanyBackupDatabaseCoverageValidator implements CompanyBa
                     $schema->primaryKey,
                     $schema->binaryColumns,
                 );
-                $projection->references->assertRegistryTargets($registry);
-                $projection->encodedReferences->assertRegistryTargets($registry);
-                $projection->embeddedReferences->assertRegistryTargets($registry);
-                $projection->embeddedHashReferences->assertRegistryTargets($registry);
-                $projection->polymorphicReferences->assertRegistryTargets($registry);
+                $projection->assertRegistryTargets($registry);
                 $projection->references->assertRuntimeSchema(
                     $this->schemaReader->readReferences($pdo, $projection),
                 );

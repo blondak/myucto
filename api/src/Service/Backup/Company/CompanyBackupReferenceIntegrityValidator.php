@@ -11,6 +11,7 @@ final readonly class CompanyBackupReferenceIntegrityValidator
 {
     public function __construct(
         private CompanyBackupSourceIdentityLookup $identities,
+        private CompanyBackupArchiveLimits $limits = new CompanyBackupArchiveLimits(),
     ) {}
 
     public function normalize(
@@ -26,6 +27,7 @@ final readonly class CompanyBackupReferenceIntegrityValidator
         $key = CompanyBackupSourceKey::fromValues(
             $occurrence->targetRegistryKey,
             $occurrence->sourceKey,
+            $this->limits->maxSourceKeyBytes,
         );
         $identity = $this->identities->find($key);
         if ($identity === null) {

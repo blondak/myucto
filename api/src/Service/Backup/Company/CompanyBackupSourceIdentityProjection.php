@@ -35,6 +35,7 @@ final readonly class CompanyBackupSourceIdentityProjection
         ?array $tenantScopedPrimaryKeyColumns,
         ?array $naturalKeyColumns,
         array $referenceKeyColumns,
+        private int $maxSourceKeyBytes,
     ) {
         $this->primaryKeyColumns = $primaryKeyColumns;
         $this->tenantScopedPrimaryKeyColumns = $tenantScopedPrimaryKeyColumns;
@@ -42,8 +43,10 @@ final readonly class CompanyBackupSourceIdentityProjection
         $this->referenceKeyColumns = $referenceKeyColumns;
     }
 
-    public static function fromDefinition(TenantDataDefinition $definition): self
-    {
+    public static function fromDefinition(
+        TenantDataDefinition $definition,
+        CompanyBackupArchiveLimits $limits = new CompanyBackupArchiveLimits(),
+    ): self {
         try {
             $projection = CompanyBackupTableProjection::fromDefinition($definition);
         } catch (CompanyBackupDataSourceException $e) {
@@ -91,6 +94,17 @@ final readonly class CompanyBackupSourceIdentityProjection
             ];
         }
 
+        $sourceKeyCount = 1
+            + ($tenantScopedPrimaryKey === null ? 0 : 1)
+            + ($naturalKey === null ? 0 : 1)
+            + count($referenceKeys);
+        if ($sourceKeyCount > $limits->maxSourceKeysPerRow) {
+            throw new CompanyBackupPreflightException(
+                'source_key_count_exceeded',
+                $definition->key,
+            );
+        }
+
         return new self(
             $definition->key,
             $definition->policy,
@@ -98,6 +112,7 @@ final readonly class CompanyBackupSourceIdentityProjection
             $tenantScopedPrimaryKey,
             $naturalKey,
             $referenceKeys,
+            $limits->maxSourceKeyBytes,
         );
     }
 
@@ -108,6 +123,7 @@ final readonly class CompanyBackupSourceIdentityProjection
             $this->registryKey,
             $this->primaryKeyColumns,
             $row,
+            $this->maxSourceKeyBytes,
         );
         $tenantScopedPrimaryKey = $this->tenantScopedPrimaryKeyColumns === null
             ? null
@@ -115,6 +131,7 @@ final readonly class CompanyBackupSourceIdentityProjection
                 $this->registryKey,
                 $this->tenantScopedPrimaryKeyColumns,
                 $row,
+                $this->maxSourceKeyBytes,
             );
         $naturalKey = $this->naturalKeyColumns === null
             ? null
@@ -122,6 +139,7 @@ final readonly class CompanyBackupSourceIdentityProjection
                 $this->registryKey,
                 $this->naturalKeyColumns,
                 $row,
+                $this->maxSourceKeyBytes,
             );
         $referenceKeys = array_map(
             fn (array $columns): CompanyBackupSourceKey =>
@@ -129,6 +147,7 @@ final readonly class CompanyBackupSourceIdentityProjection
                     $this->registryKey,
                     $columns,
                     $row,
+                    $this->maxSourceKeyBytes,
                 ),
             $this->referenceKeyColumns,
         );

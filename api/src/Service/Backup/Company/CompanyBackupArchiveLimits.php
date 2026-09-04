@@ -9,6 +9,10 @@ final readonly class CompanyBackupArchiveLimits
 {
     public int $maxDataRowBytes;
 
+    public int $maxSourceKeyBytes;
+
+    public int $maxSourceIndexBytes;
+
     public function __construct(
         public int $maxArchiveBytes = 5_368_709_120,
         public int $maxEntries = 50_000,
@@ -19,9 +23,19 @@ final readonly class CompanyBackupArchiveLimits
         public int $maxChecksumsBytes = 33_554_432,
         ?int $maxDataRowBytes = null,
         public int $maxReferenceRequirements = 100_000,
+        ?int $maxSourceKeyBytes = null,
+        public int $maxSourceKeysPerRow = 64,
+        public int $maxSourceIdentities = 10_000_000,
+        public int $maxSourceIndexEntries = 40_000_000,
+        ?int $maxSourceIndexBytes = null,
+        public int $maxReferenceOccurrences = 10_000_000,
     ) {
         $resolvedMaxDataRowBytes = $maxDataRowBytes
             ?? min(16_777_216, $maxEntryBytes);
+        $resolvedMaxSourceKeyBytes = $maxSourceKeyBytes
+            ?? min(65_536, $resolvedMaxDataRowBytes);
+        $resolvedMaxSourceIndexBytes = $maxSourceIndexBytes
+            ?? min(4_294_967_296, $maxExpandedBytes);
         foreach ([
             $maxArchiveBytes,
             $maxEntries,
@@ -32,6 +46,12 @@ final readonly class CompanyBackupArchiveLimits
             $maxChecksumsBytes,
             $resolvedMaxDataRowBytes,
             $maxReferenceRequirements,
+            $resolvedMaxSourceKeyBytes,
+            $maxSourceKeysPerRow,
+            $maxSourceIdentities,
+            $maxSourceIndexEntries,
+            $resolvedMaxSourceIndexBytes,
+            $maxReferenceOccurrences,
         ] as $limit) {
             if ($limit < 1) {
                 throw new \InvalidArgumentException('Limit zálohového archivu musí být kladný.');
@@ -45,5 +65,7 @@ final readonly class CompanyBackupArchiveLimits
             throw new \InvalidArgumentException('Limity zálohového archivu si odporují.');
         }
         $this->maxDataRowBytes = $resolvedMaxDataRowBytes;
+        $this->maxSourceKeyBytes = $resolvedMaxSourceKeyBytes;
+        $this->maxSourceIndexBytes = $resolvedMaxSourceIndexBytes;
     }
 }
