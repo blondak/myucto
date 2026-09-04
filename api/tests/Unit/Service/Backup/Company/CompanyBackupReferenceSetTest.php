@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
 use MyInvoice\Service\Backup\Company\CompanyBackupForeignKey;
+use MyInvoice\Service\Backup\Company\CompanyBackupReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceSet;
@@ -897,6 +898,141 @@ final class CompanyBackupReferenceSetTest extends TestCase
             },
         );
         self::assertSame([[7]], $visited);
+    }
+
+    public function testRemapsSharedCompositeColumnsFromOriginalRow(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                [
+                    'columns' => ['supplier_id', 'employee_id'],
+                    'target' => 'table:payroll_employees',
+                    'target_columns' => ['supplier_id', 'id'],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                    'nullable_columns' => [],
+                    'fallbacks' => [],
+                ],
+                $this->supplierReference(),
+            ],
+            'table:synthetic_records',
+        );
+        $visited = [];
+
+        $restored = $references->remap(
+            ['supplier_id' => 7, 'employee_id' => 31],
+            static function (
+                CompanyBackupReference $reference,
+                array $values,
+            ) use (&$visited): array {
+                $visited[$reference->signature()] = $values;
+                return count($values) === 2 ? [71, 401] : [71];
+            },
+        );
+
+        self::assertSame(
+            [
+                'supplier_id,employee_id->payroll_employees:supplier_id,id' =>
+                    [7, 31],
+                'supplier_id->supplier:id' => [7],
+            ],
+            $visited,
+        );
+        self::assertSame(
+            ['supplier_id' => 71, 'employee_id' => 401],
+            $restored,
+        );
+    }
+
+    public function testRemapAllowsActorNullAndPreservesZeroSentinel(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                $this->actorReference(),
+                [
+                    'columns' => ['register_id'],
+                    'target' => 'table:cash_registers',
+                    'target_columns' => ['id'],
+                    'mapping' =>
+                        CompanyBackupReferenceMapping::TenantIdOrZero->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Optional->value,
+                    'nullable_columns' => [],
+                    'fallbacks' => [],
+                ],
+            ],
+            'table:synthetic_records',
+        );
+        $calls = 0;
+
+        $restored = $references->remap(
+            ['approved_by' => 9, 'register_id' => 0],
+            static function () use (&$calls): ?array {
+                $calls++;
+                return null;
+            },
+        );
+
+        self::assertSame(1, $calls);
+        self::assertSame(
+            ['approved_by' => null, 'register_id' => 0],
+            $restored,
+        );
+    }
+
+    public function testRemapRejectsConflictingSharedColumnAtomically(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                [
+                    'columns' => ['supplier_id', 'employee_id'],
+                    'target' => 'table:payroll_employees',
+                    'target_columns' => ['supplier_id', 'id'],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                    'nullable_columns' => [],
+                    'fallbacks' => [],
+                ],
+                $this->supplierReference(),
+            ],
+            'table:synthetic_records',
+        );
+        $source = ['supplier_id' => 7, 'employee_id' => 31];
+
+        try {
+            $references->remap(
+                $source,
+                static fn (
+                    CompanyBackupReference $reference,
+                    array $values,
+                ): array => count($values) === 2 ? [71, 401] : [72],
+            );
+            self::fail('Sdílený sloupec nesmí získat dvě různé cílové hodnoty.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_value_invalid', $e->errorCode);
+            self::assertSame('supplier_id', $e->column);
+        }
+        self::assertSame(['supplier_id' => 7, 'employee_id' => 31], $source);
+    }
+
+    public function testRemapRejectsInvalidMappedShapeAndRequiredNull(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [$this->supplierReference()],
+            'table:synthetic_records',
+        );
+
+        foreach ([[], [true], null] as $mapped) {
+            try {
+                $references->remap(
+                    ['supplier_id' => 7],
+                    static fn () => $mapped,
+                );
+                self::fail('Neplatný výsledek mapování nesmí vstoupit do řádku.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_reference_value_invalid', $e->errorCode);
+                self::assertSame('supplier_id', $e->column);
+            }
+        }
     }
 
     /** @return array<string,mixed> */

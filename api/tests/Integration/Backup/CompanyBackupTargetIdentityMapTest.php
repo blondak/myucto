@@ -76,9 +76,18 @@ final class CompanyBackupTargetIdentityMapTest extends TestCase
             ),
             [],
         );
-        $target = CompanyBackupSourceKey::fromValues(
-            'table:synthetic_records',
-            ['id' => 401],
+        $target = new CompanyBackupSourceIdentity(
+            TenantDataPolicy::TenantOwned,
+            CompanyBackupSourceKey::fromValues(
+                'table:synthetic_records',
+                ['id' => 401],
+            ),
+            null,
+            CompanyBackupSourceKey::fromValues(
+                'table:synthetic_records',
+                ['supplier_id' => 71, 'code' => 'TARGET-EMP-1'],
+            ),
+            [],
         );
         $map = new CompanyBackupSqlTargetIdentityMap(
             $pdo,
@@ -96,7 +105,11 @@ final class CompanyBackupTargetIdentityMapTest extends TestCase
             }
             $mapped = $map->find($naturalKey);
             self::assertNotNull($mapped);
-            self::assertTrue($target->equals($mapped));
+            $targetNaturalKey = $target->naturalKey;
+            if ($targetNaturalKey === null) {
+                throw new \LogicException('Cílová identita nemá natural key.');
+            }
+            self::assertTrue($targetNaturalKey->equals($mapped));
             $map->seal();
             self::assertTrue($pdo->inTransaction());
         } finally {

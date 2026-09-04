@@ -100,6 +100,41 @@ final class CompanyBackupEncodedReferenceSetTest extends TestCase
         self::assertSame('dependant-117', $restored['child_reference']);
     }
 
+    public function testPreservesExplicitZeroSentinelWithoutCallingMapper(): void
+    {
+        $references = CompanyBackupEncodedReferenceSet::fromArray(
+            [[
+                'column' => 'register_reference',
+                'condition' => null,
+                'mapping' => CompanyBackupReferenceMapping::TenantIdOrZero->value,
+                'nullable' => false,
+                'target' => 'table:cash_registers',
+                'target_columns' => ['id'],
+                'value_prefix' => 'register:',
+                'value_suffix_separator' => null,
+            ]],
+            'table:synthetic_records',
+            ['register_reference'],
+        );
+
+        self::assertSame(
+            ['register_reference' => 'register:0'],
+            $references->remap(
+                ['register_reference' => 'register:0'],
+                static fn (): never => throw new \LogicException(
+                    'Nulový sentinel nesmí vstoupit do ID mapy.',
+                ),
+            ),
+        );
+        self::assertSame(
+            'register:107',
+            $references->remap(
+                ['register_reference' => 'register:7'],
+                static fn ($reference, int $value): int => $value + 100,
+            )['register_reference'],
+        );
+    }
+
     /** @return iterable<string,array{array<string,mixed>}> */
     public static function invalidCorrelatedRows(): iterable
     {

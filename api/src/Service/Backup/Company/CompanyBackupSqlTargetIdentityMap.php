@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\CanonicalJson;
+use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use PDO;
 use PDOStatement;
 
 /**
  * SQL-backed mapa nových ID. Jediný vícenásobný INSERT ukládá cílový sentinel
- * i všechny zdrojové aliasy atomicky; temp InnoDB drží velké mapy mimo PHP heap.
+ * i dvojice odpovídajících aliasů atomicky; temp InnoDB drží velké mapy mimo
+ * PHP heap.
  */
 final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIdentityMap
 {
@@ -53,8 +55,10 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
                 $created = $database->exec(
                     'CREATE TEMPORARY TABLE `' . $this->table . '` ('
                     . 'lookup_id VARBINARY(73) NOT NULL,'
-                    . 'key_payload LONGBLOB NOT NULL,'
+                    . 'lookup_key_payload LONGBLOB NOT NULL,'
+                    . 'mapped_key_payload LONGBLOB NOT NULL,'
                     . 'target_key_id VARBINARY(71) NOT NULL,'
+                    . 'external_requirement_id VARBINARY(71) NULL,'
                     . 'PRIMARY KEY (lookup_id)'
                     . ') ENGINE=InnoDB',
                 );
@@ -63,8 +67,10 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
                 $created = $database->exec(
                     'CREATE TEMP TABLE "' . $this->table . '" ('
                     . 'lookup_id TEXT NOT NULL PRIMARY KEY,'
-                    . 'key_payload BLOB NOT NULL,'
-                    . 'target_key_id TEXT NOT NULL'
+                    . 'lookup_key_payload BLOB NOT NULL,'
+                    . 'mapped_key_payload BLOB NOT NULL,'
+                    . 'target_key_id TEXT NOT NULL,'
+                    . 'external_requirement_id TEXT NULL'
                     . ')',
                 );
                 $quotedTable = '"' . $this->table . '"';
@@ -77,7 +83,9 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
                 throw new \RuntimeException('Dočasnou cílovou mapu nelze vytvořit.');
             }
             $select = $database->prepare(
-                'SELECT key_payload, target_key_id FROM ' . $quotedTable
+                'SELECT lookup_key_payload, mapped_key_payload, target_key_id,'
+                . ' external_requirement_id'
+                . ' FROM ' . $quotedTable
                 . ' WHERE lookup_id = :lookup_id',
             );
             if (!$select instanceof PDOStatement) {
@@ -100,31 +108,31 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
 
     public function add(
         CompanyBackupSourceIdentity $sourceIdentity,
-        CompanyBackupSourceKey $targetPrimaryKey,
+        CompanyBackupSourceIdentity $targetIdentity,
     ): void {
         $this->assertWritable();
         $registryKey = $sourceIdentity->primaryKey->registryKey;
-        if ($targetPrimaryKey->registryKey !== $registryKey
-            || $targetPrimaryKey->columns
-                !== $sourceIdentity->primaryKey->columns
-        ) {
-            throw self::error('target_identity_key_invalid', $registryKey);
-        }
-        $this->assertKeyWithinLimits($targetPrimaryKey, $registryKey);
+        $pairs = $this->identityPairs(
+            $sourceIdentity,
+            $targetIdentity,
+            $registryKey,
+        );
+        $targetPrimaryKey = $targetIdentity->primaryKey;
+        $externalRequirementId = $this->externalRequirementId(
+            $sourceIdentity,
+            $targetIdentity,
+            $registryKey,
+        );
         if ($this->identities >= $this->limits->maxSourceIdentities) {
             throw self::error('target_identity_limit_exceeded', $registryKey);
         }
 
-        $sourceKeys = $sourceIdentity->keys();
-        $keyCount = count($sourceKeys);
+        $keyCount = count($pairs);
         if ($keyCount < 1 || $keyCount > $this->limits->maxSourceKeysPerRow) {
             throw self::error(
                 'target_identity_key_count_exceeded',
                 $registryKey,
             );
-        }
-        foreach ($sourceKeys as $sourceKey) {
-            $this->assertKeyWithinLimits($sourceKey, $registryKey);
         }
         if ($keyCount > $this->limits->maxSourceIndexEntries - $this->entries) {
             throw self::error(
@@ -135,21 +143,26 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
 
         $targetPayload = CanonicalJson::encode($targetPrimaryKey->toArray());
         $sourcePayloads = [];
+        $mappedPayloads = [];
         $additionalBytes = self::LOOKUP_ID_BYTES
             + self::KEY_ID_BYTES
-            + strlen($targetPayload);
-        foreach ($sourceKeys as $sourceKey) {
+            + strlen($targetPayload) * 2;
+        foreach ($pairs as [$sourceKey, $mappedKey]) {
             $payload = CanonicalJson::encode($sourceKey->toArray());
+            $mappedPayload = CanonicalJson::encode($mappedKey->toArray());
             $sourcePayloads[] = $payload;
+            $mappedPayloads[] = $mappedPayload;
             $additionalBytes += self::LOOKUP_ID_BYTES
                 + self::KEY_ID_BYTES
-                + strlen($payload);
+                + strlen($payload)
+                + strlen($mappedPayload)
+                + strlen($externalRequirementId ?? '');
         }
         if ($additionalBytes > $this->limits->maxSourceIndexBytes - $this->bytes) {
             throw self::error('target_identity_size_exceeded', $registryKey);
         }
 
-        foreach ($sourceKeys as $sourceKey) {
+        foreach ($pairs as [$sourceKey]) {
             if ($this->lookupSource($sourceKey) !== null) {
                 throw self::error(
                     'target_identity_source_duplicate',
@@ -167,13 +180,17 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
         $rows = [[
             self::TARGET_PREFIX . $targetPrimaryKey->id,
             $targetPayload,
+            $targetPayload,
             $targetPrimaryKey->id,
+            null,
         ]];
-        foreach ($sourceKeys as $index => $sourceKey) {
+        foreach ($pairs as $index => [$sourceKey]) {
             $rows[] = [
                 self::SOURCE_PREFIX . $sourceKey->id,
                 $sourcePayloads[$index],
+                $mappedPayloads[$index],
                 $targetPrimaryKey->id,
+                $externalRequirementId,
             ];
         }
         $this->insertRows($rows, $registryKey);
@@ -186,8 +203,14 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
     public function find(
         CompanyBackupSourceKey $sourceKey,
     ): ?CompanyBackupSourceKey {
+        return $this->findMatch($sourceKey)?->mappedKey;
+    }
+
+    public function findMatch(
+        CompanyBackupSourceKey $sourceKey,
+    ): ?CompanyBackupTargetIdentityMatch {
         $this->assertOpen();
-        return $this->lookupSource($sourceKey);
+        return $this->lookupSourceMatch($sourceKey);
     }
 
     public function seal(): void
@@ -244,6 +267,12 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
     private function lookupSource(
         CompanyBackupSourceKey $sourceKey,
     ): ?CompanyBackupSourceKey {
+        return $this->lookupSourceMatch($sourceKey)?->mappedKey;
+    }
+
+    private function lookupSourceMatch(
+        CompanyBackupSourceKey $sourceKey,
+    ): ?CompanyBackupTargetIdentityMatch {
         $row = $this->lookupRow(
             self::SOURCE_PREFIX . $sourceKey->id,
             $sourceKey->registryKey,
@@ -252,7 +281,7 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
             return null;
         }
         $storedSource = $this->decodeKey(
-            $row['key_payload'],
+            $row['lookup_key_payload'],
             $sourceKey->registryKey,
         );
         if (!$storedSource->equals($sourceKey)) {
@@ -261,17 +290,49 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
                 $sourceKey->registryKey,
             );
         }
-        $target = $this->targetById(
+        $targetPrimaryKey = $this->targetById(
             $row['target_key_id'],
             $sourceKey->registryKey,
         );
-        if ($target->registryKey !== $sourceKey->registryKey) {
+        $mapped = $this->decodeKey(
+            $row['mapped_key_payload'],
+            $sourceKey->registryKey,
+        );
+        if ($targetPrimaryKey->registryKey !== $sourceKey->registryKey
+            || $mapped->registryKey !== $sourceKey->registryKey
+            || $mapped->columns !== $sourceKey->columns
+        ) {
             throw self::error(
                 'target_identity_map_corrupted',
                 $sourceKey->registryKey,
             );
         }
-        return $target;
+        $externalRequirementId = $row['external_requirement_id'];
+        if ($externalRequirementId !== null
+            && preg_match(
+                '/^sha256:[0-9a-f]{64}$/D',
+                $externalRequirementId,
+            ) !== 1
+        ) {
+            throw self::error(
+                'target_identity_map_corrupted',
+                $sourceKey->registryKey,
+            );
+        }
+        try {
+            return new CompanyBackupTargetIdentityMatch(
+                $storedSource,
+                $mapped,
+                $targetPrimaryKey,
+                $externalRequirementId,
+            );
+        } catch (\InvalidArgumentException $e) {
+            throw self::error(
+                'target_identity_map_corrupted',
+                $sourceKey->registryKey,
+                $e,
+            );
+        }
     }
 
     private function lookupTarget(
@@ -285,16 +346,26 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
             return null;
         }
         $stored = $this->decodeKey(
-            $row['key_payload'],
+            $row['lookup_key_payload'],
             $targetKey->registryKey,
         );
-        if (!$stored->equals($targetKey)) {
+        $mapped = $this->decodeKey(
+            $row['mapped_key_payload'],
+            $targetKey->registryKey,
+        );
+        if (!$stored->equals($targetKey) || !$mapped->equals($targetKey)) {
             throw self::error(
                 'target_identity_target_hash_collision',
                 $targetKey->registryKey,
             );
         }
         if (!hash_equals($stored->id, $row['target_key_id'])) {
+            throw self::error(
+                'target_identity_map_corrupted',
+                $targetKey->registryKey,
+            );
+        }
+        if ($row['external_requirement_id'] !== null) {
             throw self::error(
                 'target_identity_map_corrupted',
                 $targetKey->registryKey,
@@ -316,18 +387,27 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
         );
         if ($row === null
             || !hash_equals($targetKeyId, $row['target_key_id'])
+            || $row['external_requirement_id'] !== null
         ) {
             throw self::error('target_identity_map_corrupted', $registryKey);
         }
-        $target = $this->decodeKey($row['key_payload'], $registryKey);
-        if (!hash_equals($targetKeyId, $target->id)) {
+        $target = $this->decodeKey($row['lookup_key_payload'], $registryKey);
+        $mapped = $this->decodeKey($row['mapped_key_payload'], $registryKey);
+        if (!hash_equals($targetKeyId, $target->id)
+            || !$mapped->equals($target)
+        ) {
             throw self::error('target_identity_map_corrupted', $registryKey);
         }
         return $target;
     }
 
     /**
-     * @return array{key_payload:string,target_key_id:string}|null
+     * @return array{
+     *   lookup_key_payload:string,
+     *   mapped_key_payload:string,
+     *   target_key_id:string,
+     *   external_requirement_id:?string
+     * }|null
      */
     private function lookupRow(
         string $lookupId,
@@ -362,9 +442,17 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
         }
         if (!is_array($row)
             || array_is_list($row)
-            || array_keys($row) !== ['key_payload', 'target_key_id']
-            || !is_string($row['key_payload'])
+            || array_keys($row) !== [
+                'lookup_key_payload',
+                'mapped_key_payload',
+                'target_key_id',
+                'external_requirement_id',
+            ]
+            || !is_string($row['lookup_key_payload'])
+            || !is_string($row['mapped_key_payload'])
             || !is_string($row['target_key_id'])
+            || ($row['external_requirement_id'] !== null
+                && !is_string($row['external_requirement_id']))
         ) {
             throw self::error('target_identity_map_corrupted', $registryKey);
         }
@@ -415,11 +503,115 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
     }
 
     /**
-     * @param list<array{string,string,string}> $rows
+     * @return list<array{CompanyBackupSourceKey,CompanyBackupSourceKey}>
+     */
+    private function identityPairs(
+        CompanyBackupSourceIdentity $source,
+        CompanyBackupSourceIdentity $target,
+        string $registryKey,
+    ): array {
+        if ($target->policy !== $source->policy
+            || $target->primaryKey->registryKey !== $registryKey
+            || ($source->tenantScopedPrimaryKey === null)
+                !== ($target->tenantScopedPrimaryKey === null)
+            || ($source->naturalKey === null) !== ($target->naturalKey === null)
+            || count($source->referenceKeys) !== count($target->referenceKeys)
+        ) {
+            throw self::error('target_identity_key_invalid', $registryKey);
+        }
+
+        $pairs = [];
+        $this->addIdentityPair(
+            $pairs,
+            $source->primaryKey,
+            $target->primaryKey,
+            $registryKey,
+        );
+        if ($source->tenantScopedPrimaryKey !== null
+            && $target->tenantScopedPrimaryKey !== null
+        ) {
+            $this->addIdentityPair(
+                $pairs,
+                $source->tenantScopedPrimaryKey,
+                $target->tenantScopedPrimaryKey,
+                $registryKey,
+            );
+        }
+        if ($source->naturalKey !== null && $target->naturalKey !== null) {
+            $this->addIdentityPair(
+                $pairs,
+                $source->naturalKey,
+                $target->naturalKey,
+                $registryKey,
+            );
+        }
+        foreach ($source->referenceKeys as $index => $sourceKey) {
+            $this->addIdentityPair(
+                $pairs,
+                $sourceKey,
+                $target->referenceKeys[$index],
+                $registryKey,
+            );
+        }
+        return array_values($pairs);
+    }
+
+    private function externalRequirementId(
+        CompanyBackupSourceIdentity $source,
+        CompanyBackupSourceIdentity $target,
+        string $registryKey,
+    ): ?string {
+        if ($source->policy !== TenantDataPolicy::GlobalReference) {
+            return null;
+        }
+        $sourceNaturalKey = $source->naturalKey;
+        $targetNaturalKey = $target->naturalKey;
+        if ($sourceNaturalKey === null
+            || $targetNaturalKey === null
+            || $sourceNaturalKey->values !== $targetNaturalKey->values
+        ) {
+            throw self::error('target_identity_key_invalid', $registryKey);
+        }
+        return CompanyBackupExternalReferenceRequirement::idFor(
+            CompanyBackupReferenceMapping::GlobalNaturalKey,
+            $registryKey,
+            $sourceNaturalKey->values,
+        );
+    }
+
+    /**
+     * @param array<string,array{CompanyBackupSourceKey,CompanyBackupSourceKey}> $pairs
+     */
+    private function addIdentityPair(
+        array &$pairs,
+        CompanyBackupSourceKey $source,
+        CompanyBackupSourceKey $target,
+        string $registryKey,
+    ): void {
+        if ($source->registryKey !== $registryKey
+            || $target->registryKey !== $registryKey
+            || $source->columns !== $target->columns
+        ) {
+            throw self::error('target_identity_key_invalid', $registryKey);
+        }
+        $this->assertKeyWithinLimits($source, $registryKey);
+        $this->assertKeyWithinLimits($target, $registryKey);
+        $existing = $pairs[$source->id] ?? null;
+        if ($existing !== null && !$existing[1]->equals($target)) {
+            throw self::error('target_identity_key_invalid', $registryKey);
+        }
+        $pairs[$source->id] = [$source, $target];
+    }
+
+    /**
+     * @param list<array{string,string,string,string,?string}> $rows
      */
     private function insertRows(array $rows, string $registryKey): void
     {
-        $placeholders = implode(', ', array_fill(0, count($rows), '(?, ?, ?)'));
+        $placeholders = implode(
+            ', ',
+            array_fill(0, count($rows), '(?, ?, ?, ?, ?)'),
+        );
         $params = [];
         foreach ($rows as $row) {
             array_push($params, ...$row);
@@ -428,7 +620,8 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
         try {
             $prepared = $this->database->prepare(
                 'INSERT INTO ' . $this->quotedTable()
-                . ' (lookup_id, key_payload, target_key_id) VALUES '
+                . ' (lookup_id, lookup_key_payload, mapped_key_payload,'
+                . ' target_key_id, external_requirement_id) VALUES '
                 . $placeholders,
             );
             if (!$prepared instanceof PDOStatement) {

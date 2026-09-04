@@ -8,7 +8,9 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedHashReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceOccurrence;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretStorage;
+use MyInvoice\Service\Backup\Company\CompanyBackupSourceKey;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -294,6 +296,118 @@ final class CompanyBackupTableProjectionTest extends TestCase
                 \MyInvoice\Service\Backup\CanonicalJson::encode($record),
             ),
             $recordHash,
+        );
+        self::assertSame(
+            hash('sha256', (string) $restored['payload_json']),
+            $restored['payload_hash'],
+        );
+    }
+
+    public function testRemapsEveryReferenceShapeAndRefreshesOuterSeal(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            dataColumns: [
+                'id',
+                'supplier_id',
+                'external_reference',
+                'source_type',
+                'source_id',
+                'payload_json',
+                'payload_hash',
+            ],
+            encodedReferences: [[
+                'column' => 'external_reference',
+                'condition' => null,
+                'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                'nullable' => false,
+                'target' => 'table:synthetic_records',
+                'target_columns' => ['id'],
+                'value_prefix' => 'employee:',
+                'value_suffix_separator' => null,
+            ]],
+            derivedHashes: [[
+                'algorithm' => 'sha256_canonical_json',
+                'hash_column' => 'payload_hash',
+                'nullable' => false,
+                'source_column' => 'payload_json',
+            ]],
+            embeddedReferences: [[
+                'column' => 'payload_json',
+                'condition' => null,
+                'fallbacks' => [],
+                'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                'nullable' => false,
+                'path' => ['person_id'],
+                'target' => 'table:synthetic_records',
+                'target_columns' => ['id'],
+            ]],
+            polymorphicReferences: [[
+                'column' => 'source_id',
+                'discriminator_column' => 'source_type',
+                'nullable' => false,
+                'cases' => [[
+                    'base' => 0,
+                    'equals' => 'synthetic',
+                    'mapping' => 'tenant_id',
+                    'multiplier' => 1,
+                    'slots' => [],
+                    'target' => 'table:synthetic_records',
+                    'target_columns' => ['id'],
+                    'transform' => 'identity',
+                ]],
+            ]],
+        ));
+        $payload = \MyInvoice\Service\Backup\CanonicalJson::encode([
+            'person_id' => 17,
+        ]);
+        $kinds = [];
+
+        $restored = $projection->remapReferences(
+            [
+                'id' => 3,
+                'supplier_id' => 7,
+                'external_reference' => 'employee:13',
+                'source_type' => 'synthetic',
+                'source_id' => 19,
+                'payload_json' => $payload,
+                'payload_hash' => hash('sha256', $payload),
+            ],
+            static function (
+                CompanyBackupReferenceOccurrence $occurrence,
+            ) use (&$kinds): CompanyBackupSourceKey {
+                $kinds[] = $occurrence->sourceKind;
+                $values = $occurrence->sourceKey;
+                foreach ($values as $column => $value) {
+                    $values[$column] = $occurrence->targetRegistryKey === 'table:supplier'
+                        ? 71
+                        : (int) $value + 100;
+                }
+                return CompanyBackupSourceKey::fromValues(
+                    $occurrence->targetRegistryKey,
+                    $values,
+                );
+            },
+        );
+
+        self::assertSame(
+            [
+                CompanyBackupReferenceOccurrence::KIND_COLUMN,
+                CompanyBackupReferenceOccurrence::KIND_ENCODED,
+                CompanyBackupReferenceOccurrence::KIND_EMBEDDED,
+                CompanyBackupReferenceOccurrence::KIND_POLYMORPHIC,
+            ],
+            $kinds,
+        );
+        self::assertSame(71, $restored['supplier_id']);
+        self::assertSame('employee:113', $restored['external_reference']);
+        self::assertSame(119, $restored['source_id']);
+        self::assertSame(
+            117,
+            json_decode(
+                (string) $restored['payload_json'],
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            )['person_id'],
         );
         self::assertSame(
             hash('sha256', (string) $restored['payload_json']),
@@ -706,6 +820,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param list<array<string,mixed>> $polymorphicReferences
      * @param list<string> $preservedIdentifiers
      * @param array<string,string> $columnCodecs
+     * @param list<array<string,mixed>> $encodedReferences
      * @param list<array<string,mixed>> $derivedHashes
      * @param list<array<string,mixed>> $embeddedHashes
      * @param list<array<string,mixed>> $embeddedHashReferences
@@ -721,6 +836,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
         array $polymorphicReferences = [],
         array $preservedIdentifiers = [],
         array $columnCodecs = [],
+        array $encodedReferences = [],
         array $derivedHashes = [],
         array $embeddedHashes = [],
         array $embeddedHashReferences = [],
@@ -746,6 +862,9 @@ final class CompanyBackupTableProjectionTest extends TestCase
                     ]),
                     ...($derivedHashes === [] ? [] : [
                         'derived_hashes' => $derivedHashes,
+                    ]),
+                    ...($encodedReferences === [] ? [] : [
+                        'encoded_references' => $encodedReferences,
                     ]),
                     ...($embeddedHashes === [] ? [] : [
                         'embedded_hashes' => $embeddedHashes,

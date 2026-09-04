@@ -649,6 +649,146 @@ final readonly class CompanyBackupTableProjection
         );
     }
 
+    /**
+     * Přemapuje všechny deklarované tvary referencí jedním normalizovaným
+     * mapperem a vnější pečetě ověří před první změnou a obnoví až nakonec.
+     *
+     * @param array<string,mixed> $row
+     * @param callable(CompanyBackupReferenceOccurrence):mixed $mapper
+     * @param null|callable(CompanyBackupEmbeddedHashReference,string):mixed $hashMapper
+     * @return array<string,mixed>
+     */
+    public function remapReferences(
+        array $row,
+        callable $mapper,
+        ?callable $hashMapper = null,
+    ): array {
+        if ($hashMapper === null && $this->embeddedHashReferences->references !== []) {
+            throw new CompanyBackupDataSourceException(
+                'data_embedded_hash_reference_mapper_missing',
+                $this->registryKey,
+                $this->embeddedHashReferences->references[0]->column,
+            );
+        }
+        $resolvedHashMapper = $hashMapper ?? static fn (): never => throw new \LogicException(
+            'Prázdná sada hashových referencí nesmí vyžádat mapování.',
+        );
+
+        return $this->derivedHashes->transform(
+            $row,
+            function (array $source) use ($mapper, $resolvedHashMapper): array {
+                $source = $this->references->remap(
+                    $source,
+                    fn (
+                        CompanyBackupReference $reference,
+                        array $values,
+                    ): ?array => $this->mappedValues(
+                        CompanyBackupReferenceOccurrence::column(
+                            $this->registryKey,
+                            $reference,
+                            $values,
+                        ),
+                        $mapper,
+                    ),
+                );
+                $source = $this->encodedReferences->remap(
+                    $source,
+                    function (
+                        CompanyBackupEncodedReference $reference,
+                        int $value,
+                    ) use ($mapper): ?int {
+                        $values = $this->mappedValues(
+                            CompanyBackupReferenceOccurrence::encoded(
+                                $this->registryKey,
+                                $reference,
+                                $value,
+                            ),
+                            $mapper,
+                        );
+                        $mapped = $values[0] ?? null;
+                        return is_int($mapped) ? $mapped : null;
+                    },
+                );
+                $source = $this->embeddedHashes->transform(
+                    $source,
+                    fn (array $payload): array =>
+                        $this->embeddedHashReferences->remap(
+                            $this->embeddedReferences->remap(
+                                $payload,
+                                function (
+                                    CompanyBackupEmbeddedReference $reference,
+                                    int|string $value,
+                                ) use ($mapper): int|string|null {
+                                    $values = $this->mappedValues(
+                                        CompanyBackupReferenceOccurrence::embedded(
+                                            $this->registryKey,
+                                            $reference,
+                                            $value,
+                                        ),
+                                        $mapper,
+                                    );
+                                    return $values[0] ?? null;
+                                },
+                            ),
+                            $resolvedHashMapper,
+                        ),
+                );
+                return $this->polymorphicReferences->remap(
+                    $source,
+                    function (
+                        CompanyBackupPolymorphicReferenceCase $case,
+                        int $value,
+                    ) use ($mapper): ?int {
+                        foreach ($this->polymorphicReferences->references as $reference) {
+                            if (!in_array($case, $reference->cases, true)) {
+                                continue;
+                            }
+                            $values = $this->mappedValues(
+                                CompanyBackupReferenceOccurrence::polymorphic(
+                                    $this->registryKey,
+                                    $reference,
+                                    $case,
+                                    $value,
+                                ),
+                                $mapper,
+                            );
+                            $mapped = $values[0] ?? null;
+                            return is_int($mapped) ? $mapped : null;
+                        }
+                        throw new \LogicException(
+                            'Polymorfní varianta nepatří do projekce.',
+                        );
+                    },
+                );
+            },
+        );
+    }
+
+    /**
+     * @param callable(CompanyBackupReferenceOccurrence):mixed $mapper
+     * @return list<int|string>|null
+     */
+    private function mappedValues(
+        CompanyBackupReferenceOccurrence $occurrence,
+        callable $mapper,
+    ): ?array {
+        $mapped = $mapper($occurrence);
+        if ($mapped === null) {
+            return null;
+        }
+        if (!$mapped instanceof CompanyBackupSourceKey
+            || $mapped->registryKey !== $occurrence->targetRegistryKey
+            || $mapped->columns !== array_keys($occurrence->sourceKey)
+        ) {
+            throw new CompanyBackupDataSourceException(
+                'data_reference_mapping_invalid',
+                $this->registryKey,
+                $occurrence->sourceColumn,
+            );
+        }
+        return array_values($mapped->values);
+    }
+
     public function hasDataColumn(string $column): bool
     {
         return in_array($column, $this->dataColumns, true);

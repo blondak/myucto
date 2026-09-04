@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupIdentityMapException;
+use MyInvoice\Service\Backup\Company\CompanyBackupExternalReferenceRequirement;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupSourceIdentity;
 use MyInvoice\Service\Backup\Company\CompanyBackupSourceKey;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlTargetIdentityMap;
@@ -29,20 +31,25 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
         ]);
     }
 
-    public function testMapsEverySourceAliasToOneTargetPrimaryKey(): void
+    public function testMapsEverySourceAliasToCorrespondingTargetAlias(): void
     {
         $identity = $this->identity(31, 'EMP-1', 'legacy-1');
-        $target = $this->target(401);
+        $target = $this->identity(
+            401,
+            'TARGET-EMP-1',
+            'target-legacy-1',
+            71,
+        );
         $map = new CompanyBackupSqlTargetIdentityMap(
             $this->database,
             $this->limits(),
         );
 
         $map->add($identity, $target);
-        foreach ($identity->keys() as $sourceKey) {
+        foreach ($identity->keys() as $index => $sourceKey) {
             $mapped = $map->find($sourceKey);
             self::assertNotNull($mapped);
-            self::assertTrue($target->equals($mapped));
+            self::assertTrue($target->keys()[$index]->equals($mapped));
         }
         self::assertSame(1, $map->identityCount());
         self::assertSame(4, $map->entryCount());
@@ -51,7 +58,7 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
         $map->seal();
         $mapped = $map->find($identity->primaryKey);
         self::assertNotNull($mapped);
-        self::assertTrue($target->equals($mapped));
+        self::assertTrue($target->primaryKey->equals($mapped));
         $map->close();
         self::assertSame(0, $this->temporaryTableCount());
     }
@@ -62,25 +69,68 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
             $this->database,
             $this->limits(),
         );
-        $map->add($this->identity(31, 'EMP-1', 'legacy-1'), $this->target(401));
+        $map->add(
+            $this->identity(31, 'EMP-1', 'legacy-1'),
+            $this->identity(401, 'TARGET-EMP-1', 'target-legacy-1', 71),
+        );
 
         $this->assertMapError(
             'target_identity_source_duplicate',
             fn () => $map->add(
                 $this->identity(32, 'EMP-1', 'legacy-2'),
-                $this->target(402),
+                $this->identity(402, 'TARGET-EMP-2', 'target-legacy-2', 71),
             ),
         );
         $this->assertMapError(
             'target_identity_target_duplicate',
             fn () => $map->add(
                 $this->identity(33, 'EMP-3', 'legacy-3'),
-                $this->target(401),
+                $this->identity(401, 'TARGET-EMP-3', 'target-legacy-3', 71),
             ),
         );
         self::assertSame(1, $map->identityCount());
         self::assertSame(4, $map->entryCount());
 
+        $map->close();
+    }
+
+    public function testBindsGlobalAliasesToRequirementAndTargetPrimaryKey(): void
+    {
+        $source = $this->globalIdentity(1, 'CZ');
+        $target = $this->globalIdentity(10, 'CZ');
+        $map = new CompanyBackupSqlTargetIdentityMap(
+            $this->database,
+            $this->limits(),
+        );
+        $map->add($source, $target);
+
+        $match = $map->findMatch($source->primaryKey);
+        self::assertNotNull($match);
+        self::assertTrue($target->primaryKey->equals($match->mappedKey));
+        self::assertTrue($target->primaryKey->equals($match->targetPrimaryKey));
+        self::assertSame(
+            CompanyBackupExternalReferenceRequirement::idFor(
+                CompanyBackupReferenceMapping::GlobalNaturalKey,
+                'table:countries',
+                ['iso2' => 'CZ'],
+            ),
+            $match->externalRequirementId,
+        );
+        $sourceNatural = $source->naturalKey;
+        $targetNatural = $target->naturalKey;
+        self::assertNotNull($sourceNatural);
+        self::assertNotNull($targetNatural);
+        $mappedNatural = $map->find($sourceNatural);
+        self::assertNotNull($mappedNatural);
+        self::assertTrue($targetNatural->equals($mappedNatural));
+
+        $this->assertMapError(
+            'target_identity_key_invalid',
+            fn () => $map->add(
+                $this->globalIdentity(2, 'SK'),
+                $this->globalIdentity(11, 'DE'),
+            ),
+        );
         $map->close();
     }
 
@@ -96,9 +146,15 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
             'target_identity_key_invalid',
             fn () => $map->add(
                 $identity,
-                CompanyBackupSourceKey::fromValues(
-                    'table:other_records',
-                    ['id' => 401],
+                new CompanyBackupSourceIdentity(
+                    TenantDataPolicy::TenantOwned,
+                    CompanyBackupSourceKey::fromValues(
+                        'table:other_records',
+                        ['id' => 401],
+                    ),
+                    null,
+                    null,
+                    [],
                 ),
             ),
         );
@@ -106,9 +162,34 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
             'target_identity_key_invalid',
             fn () => $map->add(
                 $identity,
-                CompanyBackupSourceKey::fromValues(
-                    'table:synthetic_records',
-                    ['code' => 'TARGET'],
+                new CompanyBackupSourceIdentity(
+                    TenantDataPolicy::TenantOwned,
+                    CompanyBackupSourceKey::fromValues(
+                        'table:synthetic_records',
+                        ['code' => 'TARGET'],
+                    ),
+                    null,
+                    null,
+                    [],
+                ),
+            ),
+        );
+        $this->assertMapError(
+            'target_identity_key_invalid',
+            fn () => $map->add(
+                $identity,
+                new CompanyBackupSourceIdentity(
+                    TenantDataPolicy::TenantOwned,
+                    CompanyBackupSourceKey::fromValues(
+                        'table:synthetic_records',
+                        ['id' => 401],
+                    ),
+                    CompanyBackupSourceKey::fromValues(
+                        'table:synthetic_records',
+                        ['supplier_id' => 71, 'id' => 401],
+                    ),
+                    null,
+                    [],
                 ),
             ),
         );
@@ -133,11 +214,51 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
                     str_repeat('X', 256),
                     'legacy-1',
                 ),
-                $this->target(401),
+                $this->identity(
+                    401,
+                    'TARGET-EMP-1',
+                    'target-legacy-1',
+                    71,
+                ),
             ),
         );
         self::assertSame(0, $limited->identityCount());
         $limited->close();
+    }
+
+    public function testRejectsTargetAliasWithDifferentShape(): void
+    {
+        $map = new CompanyBackupSqlTargetIdentityMap(
+            $this->database,
+            $this->limits(),
+        );
+        $source = $this->identity(31, 'EMP-1', 'legacy-1');
+        $target = new CompanyBackupSourceIdentity(
+            TenantDataPolicy::TenantOwned,
+            CompanyBackupSourceKey::fromValues(
+                'table:synthetic_records',
+                ['id' => 401],
+            ),
+            CompanyBackupSourceKey::fromValues(
+                'table:synthetic_records',
+                ['supplier_id' => 71, 'id' => 401],
+            ),
+            CompanyBackupSourceKey::fromValues(
+                'table:synthetic_records',
+                ['supplier_id' => 71, 'different_code' => 'TARGET'],
+            ),
+            [CompanyBackupSourceKey::fromValues(
+                'table:synthetic_records',
+                ['supplier_id' => 71, 'legacy_ref' => 'target-legacy-1'],
+            )],
+        );
+
+        $this->assertMapError(
+            'target_identity_key_invalid',
+            fn () => $map->add($source, $target),
+        );
+        self::assertSame(0, $map->identityCount());
+        $map->close();
     }
 
     public function testEnforcesIdentityEntryAndByteLimitsBeforeWriting(): void
@@ -152,13 +273,13 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
         );
         $identityLimited->add(
             $this->identity(31, 'EMP-1', 'legacy-1'),
-            $this->target(401),
+            $this->identity(401, 'TARGET-EMP-1', 'target-legacy-1', 71),
         );
         $this->assertMapError(
             'target_identity_limit_exceeded',
             fn () => $identityLimited->add(
                 $this->identity(32, 'EMP-2', 'legacy-2'),
-                $this->target(402),
+                $this->identity(402, 'TARGET-EMP-2', 'target-legacy-2', 71),
             ),
         );
         $identityLimited->close();
@@ -175,7 +296,7 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
             'target_identity_entry_limit_exceeded',
             fn () => $entryLimited->add(
                 $this->identity(31, 'EMP-1', 'legacy-1'),
-                $this->target(401),
+                $this->identity(401, 'TARGET-EMP-1', 'target-legacy-1', 71),
             ),
         );
         self::assertSame(0, $entryLimited->identityCount());
@@ -193,7 +314,7 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
             'target_identity_size_exceeded',
             fn () => $byteLimited->add(
                 $this->identity(31, 'EMP-1', 'legacy-1'),
-                $this->target(401),
+                $this->identity(401, 'TARGET-EMP-1', 'target-legacy-1', 71),
             ),
         );
         self::assertSame(0, $byteLimited->indexedBytes());
@@ -207,13 +328,16 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
             $this->limits(),
         );
         $identity = $this->identity(31, 'EMP-1', 'legacy-1');
-        $map->add($identity, $this->target(401));
+        $map->add(
+            $identity,
+            $this->identity(401, 'TARGET-EMP-1', 'target-legacy-1', 71),
+        );
         $map->seal();
 
         try {
             $map->add(
                 $this->identity(32, 'EMP-2', 'legacy-2'),
-                $this->target(402),
+                $this->identity(402, 'TARGET-EMP-2', 'target-legacy-2', 71),
             );
             self::fail('Uzavřenou mapu nesmí jít rozšířit.');
         } catch (\LogicException $e) {
@@ -239,6 +363,7 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
         int $id,
         string $code,
         string $legacyReference,
+        int $supplierId = 7,
     ): CompanyBackupSourceIdentity {
         return new CompanyBackupSourceIdentity(
             TenantDataPolicy::TenantOwned,
@@ -248,24 +373,38 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
             ),
             CompanyBackupSourceKey::fromValues(
                 'table:synthetic_records',
-                ['supplier_id' => 7, 'id' => $id],
+                ['supplier_id' => $supplierId, 'id' => $id],
             ),
             CompanyBackupSourceKey::fromValues(
                 'table:synthetic_records',
-                ['supplier_id' => 7, 'code' => $code],
+                ['supplier_id' => $supplierId, 'code' => $code],
             ),
             [CompanyBackupSourceKey::fromValues(
                 'table:synthetic_records',
-                ['supplier_id' => 7, 'legacy_ref' => $legacyReference],
+                [
+                    'supplier_id' => $supplierId,
+                    'legacy_ref' => $legacyReference,
+                ],
             )],
         );
     }
 
-    private function target(int $id): CompanyBackupSourceKey
-    {
-        return CompanyBackupSourceKey::fromValues(
-            'table:synthetic_records',
-            ['id' => $id],
+    private function globalIdentity(
+        int $id,
+        string $iso2,
+    ): CompanyBackupSourceIdentity {
+        return new CompanyBackupSourceIdentity(
+            TenantDataPolicy::GlobalReference,
+            CompanyBackupSourceKey::fromValues(
+                'table:countries',
+                ['id' => $id],
+            ),
+            null,
+            CompanyBackupSourceKey::fromValues(
+                'table:countries',
+                ['iso2' => $iso2],
+            ),
+            [],
         );
     }
 

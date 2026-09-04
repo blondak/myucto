@@ -412,6 +412,71 @@ final readonly class CompanyBackupReferenceSet
         }
     }
 
+    /**
+     * Přemapuje všechny aktivní přímé reference nad původním řádkem a změny
+     * aplikuje až po úplné validaci, aby sdílený sloupec nemohl záviset na pořadí.
+     *
+     * @param array<string,mixed> $row
+     * @param callable(CompanyBackupReference,list<int|string>):mixed $mapper
+     * @return array<string,mixed>
+     */
+    public function remap(array $row, callable $mapper): array
+    {
+        /** @var array<string,int|string|null> $mappedColumns */
+        $mappedColumns = [];
+        $this->visitSourceRow(
+            $row,
+            function (
+                CompanyBackupReference $reference,
+                array $values,
+            ) use ($mapper, &$mappedColumns): void {
+                $mapped = $mapper($reference, $values);
+                if ($mapped === null) {
+                    if ($reference->nullableColumns !== $reference->columns) {
+                        throw $this->valueError($reference->firstColumn());
+                    }
+                    $mapped = array_fill(0, count($reference->columns), null);
+                }
+                if (!is_array($mapped)
+                    || !array_is_list($mapped)
+                    || count($mapped) !== count($reference->columns)
+                ) {
+                    throw $this->valueError($reference->firstColumn());
+                }
+
+                foreach ($reference->columns as $index => $column) {
+                    $value = $mapped[$index];
+                    if ($value === null) {
+                        if (!in_array(
+                            $column,
+                            $reference->nullableColumns,
+                            true,
+                        )) {
+                            throw $this->valueError($column);
+                        }
+                    } elseif (!$this->validSourceValue(
+                        $value,
+                        $reference,
+                        $reference->targetColumns[$index],
+                    )) {
+                        throw $this->valueError($column);
+                    }
+                    if (array_key_exists($column, $mappedColumns)
+                        && $mappedColumns[$column] !== $value
+                    ) {
+                        throw $this->valueError($column);
+                    }
+                    $mappedColumns[$column] = $value;
+                }
+            },
+        );
+
+        foreach ($mappedColumns as $column => $value) {
+            $row[$column] = $value;
+        }
+        return $row;
+    }
+
     /** @param array<string,mixed> $row */
     private function conditionMatches(
         array $row,

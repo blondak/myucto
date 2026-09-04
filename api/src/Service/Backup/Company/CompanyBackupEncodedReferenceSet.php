@@ -185,6 +185,12 @@ final readonly class CompanyBackupEncodedReferenceSet
             if ($source === null) {
                 throw $this->valueError($reference);
             }
+            if ($reference->mapping
+                === CompanyBackupReferenceMapping::TenantIdOrZero
+                && $source['identifier'] === 0
+            ) {
+                continue;
+            }
             $mapped = $mapper($reference, $source['identifier']);
             $minimum = $reference->mapping
                 === CompanyBackupReferenceMapping::TenantIdOrZero

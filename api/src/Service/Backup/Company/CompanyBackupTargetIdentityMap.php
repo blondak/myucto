@@ -4,17 +4,21 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Company;
 
-/** Diskově omezená mapa zdrojových souřadnic na nové cílové primární klíče. */
+/** Diskově omezená mapa zdrojových souřadnic na odpovídající cílové klíče. */
 interface CompanyBackupTargetIdentityMap
 {
     public function add(
         CompanyBackupSourceIdentity $sourceIdentity,
-        CompanyBackupSourceKey $targetPrimaryKey,
+        CompanyBackupSourceIdentity $targetIdentity,
     ): void;
 
     public function find(
         CompanyBackupSourceKey $sourceKey,
     ): ?CompanyBackupSourceKey;
+
+    public function findMatch(
+        CompanyBackupSourceKey $sourceKey,
+    ): ?CompanyBackupTargetIdentityMatch;
 
     public function seal(): void;
 
