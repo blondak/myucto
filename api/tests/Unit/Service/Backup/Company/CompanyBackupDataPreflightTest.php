@@ -12,6 +12,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflight;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
+use MyInvoice\Service\Backup\Company\CompanyBackupImportArchiveSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
@@ -91,6 +92,84 @@ final class CompanyBackupDataPreflightTest extends TestCase
         ));
         self::assertSame('unchanged', $this->sentinelValue());
         self::assertSame(0, $this->temporaryIndexCount());
+    }
+
+    public function testVerifiedArchiveSourceReplaysCanonicalRows(): void
+    {
+        [$archive, $validation] = $this->archive(countryReference: 7);
+        $source = new CompanyBackupImportArchiveSource(
+            $archive,
+            self::PASSWORD,
+            $validation,
+            $this->limits(),
+        );
+        $passes = [];
+        for ($pass = 0; $pass < 2; $pass++) {
+            $rows = [];
+            $source->consumeRows(
+                'table:supplier',
+                static function (array $row) use (&$rows): void {
+                    $rows[] = $row;
+                },
+            );
+            $passes[] = $rows;
+        }
+        $source->close();
+
+        self::assertSame([
+            [[
+                'id' => 42,
+                'name' => 'Synthetic supplier',
+            ]],
+            [[
+                'id' => 42,
+                'name' => 'Synthetic supplier',
+            ]],
+        ], $passes);
+        try {
+            $source->consumeRows(
+                'table:supplier',
+                static function (array $row): void {},
+            );
+            self::fail('Zavřený zdroj archivu nesmí znovu číst payload.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('source_archive_reader_closed', $e->errorCode);
+        }
+    }
+
+    public function testImportSourceRejectsNewPasswordAndChangedArchive(): void
+    {
+        [$archive, $validation] = $this->archive(countryReference: 7);
+        $wrongPassword = new CompanyBackupImportArchiveSource(
+            $archive,
+            'different-synthetic-password',
+            $validation,
+            $this->limits(),
+        );
+        try {
+            $wrongPassword->consumeRows(
+                'table:supplier',
+                static function (array $row): void {},
+            );
+            self::fail('Import musí nové heslo zálohy znovu ověřit.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('source_archive_unlock_failed', $e->errorCode);
+        }
+        $wrongPassword->close();
+
+        $changed = new CompanyBackupImportArchiveSource(
+            $archive,
+            self::PASSWORD,
+            $validation,
+            $this->limits(),
+        );
+        self::assertIsInt(file_put_contents($archive, 'changed', FILE_APPEND));
+        try {
+            $changed->close();
+            self::fail('Změněný upload nesmí zůstat platným importním zdrojem.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('source_archive_changed', $e->errorCode);
+        }
     }
 
     public function testMissingInternalTargetFailsWithoutBusinessWriteAndCleansIndex(): void

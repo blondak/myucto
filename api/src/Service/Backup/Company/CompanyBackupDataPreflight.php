@@ -6,7 +6,6 @@ namespace MyInvoice\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use PDO;
-use ZipArchive;
 
 /**
  * Dvouprůchodová, read-only kontrola úplného zdrojového grafu JSONL.
@@ -14,13 +13,9 @@ use ZipArchive;
  */
 final readonly class CompanyBackupDataPreflight
 {
-    private CompanyBackupJsonlReader $reader;
-
     public function __construct(
         private CompanyBackupArchiveLimits $limits = new CompanyBackupArchiveLimits(),
-    ) {
-        $this->reader = new CompanyBackupJsonlReader($limits);
-    }
+    ) {}
 
     public function inspect(
         string $archivePath,
@@ -28,43 +23,24 @@ final readonly class CompanyBackupDataPreflight
         CompanyBackupTechnicalValidation $validation,
         PDO $database,
     ): CompanyBackupDataPreflightResult {
-        if ($password === '' || strlen($password) > 1_024) {
-            throw new CompanyBackupPreflightException(
-                'source_archive_unlock_failed',
-            );
-        }
-
-        $expectedArchiveHash = $validation->inspection->archiveSha256;
-        $before = $this->archiveState($archivePath);
-        if (!hash_equals($expectedArchiveHash, $before['sha256'])) {
-            throw new CompanyBackupPreflightException('source_archive_changed');
-        }
-
         $contexts = $this->contexts($validation);
-        $zip = new ZipArchive();
-        $opened = $zip->open($archivePath, ZipArchive::RDONLY);
-        if ($opened !== true) {
-            throw new CompanyBackupPreflightException('source_archive_unreadable');
-        }
+        $source = new CompanyBackupImportArchiveSource(
+            $archivePath,
+            $password,
+            $validation,
+            $this->limits,
+        );
 
         $index = null;
         $result = null;
         $failure = null;
         try {
-            if (!$zip->setPassword($password)) {
-                throw new CompanyBackupPreflightException(
-                    'source_archive_unlock_failed',
-                );
-            }
             $index = new CompanyBackupSqlSourceIdentityIndex($database, $this->limits);
             $rowCount = 0;
             foreach ($validation->inspection->dataInventory->objects as $object) {
                 $context = $contexts[$object->registryKey];
-                $this->consumeRows(
-                    $zip,
-                    $context['definition'],
-                    $object,
-                    null,
+                $source->consumeRows(
+                    $object->registryKey,
                     function (array $row) use (
                         $index,
                         $context,
@@ -84,11 +60,9 @@ final readonly class CompanyBackupDataPreflight
             );
             $referenceOccurrenceCount = 0;
             foreach ($validation->inspection->dataInventory->objects as $object) {
-                $context = $contexts[$object->registryKey];
-                $this->consumeRows(
-                    $zip,
-                    $context['definition'],
-                    $object,
+                $source->consumeRows(
+                    $object->registryKey,
+                    static function (array $row): void {},
                     function (CompanyBackupReferenceOccurrence $occurrence) use (
                         $collector,
                         $integrity,
@@ -106,7 +80,6 @@ final readonly class CompanyBackupDataPreflight
                         }
                         $collector->accept($integrity->normalize($occurrence));
                     },
-                    static function (array $row): void {},
                 );
             }
 
@@ -132,11 +105,7 @@ final readonly class CompanyBackupDataPreflight
             }
         }
         try {
-            if (!$zip->close()) {
-                throw new CompanyBackupPreflightException(
-                    'source_archive_close_failed',
-                );
-            }
+            $source->close();
         } catch (\Throwable $e) {
             $failure ??= $e;
         }
@@ -148,13 +117,6 @@ final readonly class CompanyBackupDataPreflight
             throw new \LogicException('Datový preflight nevytvořil výsledek.');
         }
 
-        $after = $this->archiveState($archivePath);
-        if ($after['size'] !== $before['size']
-            || $after['mtime'] !== $before['mtime']
-            || !hash_equals($before['sha256'], $after['sha256'])
-        ) {
-            throw new CompanyBackupPreflightException('source_archive_changed');
-        }
         return $result;
     }
 
@@ -207,86 +169,5 @@ final readonly class CompanyBackupDataPreflight
             $expectedRows += $object->rows;
         }
         return $contexts;
-    }
-
-    /**
-     * @param null|callable(CompanyBackupReferenceOccurrence):void $referenceVisitor
-     * @param callable(array<string,mixed>):void $rowVisitor
-     */
-    private function consumeRows(
-        ZipArchive $zip,
-        TenantDataDefinition $definition,
-        CompanyBackupDataObject $object,
-        ?callable $referenceVisitor,
-        callable $rowVisitor,
-    ): void {
-        $index = $zip->locateName($object->path);
-        if (!is_int($index)) {
-            throw new CompanyBackupPreflightException(
-                'source_data_entry_missing',
-                $object->registryKey,
-            );
-        }
-        $stat = $zip->statIndex($index);
-        if (!is_array($stat)
-            || $stat['name'] !== $object->path
-            || $stat['size'] !== $object->bytes
-        ) {
-            throw new CompanyBackupPreflightException(
-                'source_data_entry_changed',
-                $object->registryKey,
-            );
-        }
-        $stream = @$zip->getStreamIndex($index);
-        if (!is_resource($stream)) {
-            throw new CompanyBackupPreflightException(
-                'source_data_entry_unreadable',
-                $object->registryKey,
-            );
-        }
-        try {
-            foreach ($this->reader->rows(
-                $stream,
-                $definition,
-                $object,
-                $referenceVisitor,
-            ) as $row) {
-                $rowVisitor($row);
-            }
-        } finally {
-            @fclose($stream);
-        }
-    }
-
-    /** @return array{size:int,mtime:int,sha256:string} */
-    private function archiveState(string $archivePath): array
-    {
-        clearstatcache(true, $archivePath);
-        $before = @stat($archivePath);
-        if ($before === false
-            || !is_file($archivePath)
-            || is_link($archivePath)
-            || $before['size'] < 1
-            || $before['size'] > $this->limits->maxArchiveBytes
-        ) {
-            throw new CompanyBackupPreflightException('source_archive_unreadable');
-        }
-        $sha256 = @hash_file('sha256', $archivePath);
-        if (!is_string($sha256)) {
-            throw new CompanyBackupPreflightException('source_archive_unreadable');
-        }
-        clearstatcache(true, $archivePath);
-        $after = @stat($archivePath);
-        if ($after === false
-            || $after['size'] !== $before['size']
-            || $after['mtime'] !== $before['mtime']
-        ) {
-            throw new CompanyBackupPreflightException('source_archive_changed');
-        }
-        return [
-            'size' => $before['size'],
-            'mtime' => $before['mtime'],
-            'sha256' => $sha256,
-        ];
     }
 }

@@ -12,10 +12,15 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormatException;
+use MyInvoice\Service\Backup\Company\CompanyBackupImportArchiveSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeCipher;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeDescriptor;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretScope;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretValue;
+use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidation;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -264,6 +269,41 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
             $inspection->entryHashes,
         );
         self::assertSame(5, $inspection->entryCount);
+    }
+
+    public function testImportSourceOpensSecretPayloadOnlyOnceInMemory(): void
+    {
+        $archive = $this->archive($this->payload(withSecretEnvelope: true));
+        $inspection = $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+        $source = new CompanyBackupImportArchiveSource(
+            $archive,
+            self::PASSWORD,
+            new CompanyBackupTechnicalValidation(
+                $inspection,
+                $inspection->sourceRegistry,
+                '5.28.1',
+                CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+            ),
+        );
+
+        $payload = $source->secretPayload();
+        self::assertInstanceOf(CompanyBackupSecretPayload::class, $payload);
+        self::assertSame($inspection->sourceRegistry->fingerprint, $payload->registryFingerprint);
+        $values = $payload->values();
+        self::assertCount(1, $values);
+        self::assertSame('synthetic-domain-salt', $values[0]->plaintext());
+        try {
+            $source->secretPayload();
+            self::fail('Secret payload se v jedné session nesmí odemykat opakovaně.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('source_secret_payload_already_read', $e->errorCode);
+        }
+        $source->close();
     }
 
     public function testAuthenticatedEnvelopeStillRequiresRegistryBoundPayload(): void
@@ -522,7 +562,15 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
             $sealed = (new CompanyBackupSecretEnvelopeCipher())->seal(
                 $invalidSecretPayload
                     ? '{"synthetic":true}'
-                    : CompanyBackupSecretPayload::fromValues([], $snapshot)->toJson(),
+                    : CompanyBackupSecretPayload::fromValues([
+                        CompanyBackupSecretValue::fromPlaintext(
+                            'table:supplier',
+                            CompanyBackupSecretScope::Column,
+                            'domain_salt',
+                            ['id' => 1],
+                            'synthetic-domain-salt',
+                        ),
+                    ], $snapshot)->toJson(),
                 self::PASSWORD,
                 '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1',
                 $snapshot->fingerprint,
