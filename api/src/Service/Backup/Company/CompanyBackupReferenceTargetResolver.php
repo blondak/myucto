@@ -14,8 +14,8 @@ use PDOStatement;
 
 /**
  * Ověří plán proti aktuálním cílovým řádkům výhradně SELECT dotazy.
- * Import jej musí zopakovat ve své transakci, aby mezi preflightem a zápisem
- * nevzniklo TOCTOU okno.
+ * Import používá transakční režim se zámky cílových řádků, aby mezi
+ * preflightem a zápisem nevzniklo TOCTOU okno.
  */
 final readonly class CompanyBackupReferenceTargetResolver
 {
@@ -23,6 +23,7 @@ final readonly class CompanyBackupReferenceTargetResolver
         private PDO $database,
         private CompanyBackupArchiveLimits $limits =
             new CompanyBackupArchiveLimits(),
+        private bool $lockTargets = false,
     ) {}
 
     public function resolve(
@@ -31,9 +32,11 @@ final readonly class CompanyBackupReferenceTargetResolver
         TenantDataRegistrySnapshot $targetRegistry,
     ): CompanyBackupReferenceResolutionPlan {
         $this->assertContext($decisionPlan, $preflight, $targetRegistry);
+        $lockClause = $this->lockClause();
         $restoreActorKey = $this->resolveRestoreActor(
             $decisionPlan,
             $targetRegistry,
+            $lockClause,
         );
 
         $resolutions = [];
@@ -53,13 +56,19 @@ final readonly class CompanyBackupReferenceTargetResolver
             }
             $targetPrimaryKey = match ($requirement->mapping) {
                 CompanyBackupReferenceMapping::GlobalNaturalKey =>
-                    $this->resolveGlobal($requirement, $decision, $definition),
+                    $this->resolveGlobal(
+                        $requirement,
+                        $decision,
+                        $definition,
+                        $lockClause,
+                    ),
                 CompanyBackupReferenceMapping::Actor =>
                     $this->resolveActor(
                         $requirement,
                         $decision,
                         $definition,
                         $restoreActorKey,
+                        $lockClause,
                     ),
                 CompanyBackupReferenceMapping::CredentialDecision =>
                     $this->resolveCredential(
@@ -112,6 +121,7 @@ final readonly class CompanyBackupReferenceTargetResolver
     private function resolveRestoreActor(
         CompanyBackupReferenceDecisionPlan $decisionPlan,
         TenantDataRegistrySnapshot $targetRegistry,
+        string $lockClause,
     ): array {
         $definition = $targetRegistry->registry->definition('table:users');
         if (!$definition instanceof TenantDataDefinition
@@ -122,7 +132,12 @@ final readonly class CompanyBackupReferenceTargetResolver
             throw self::error('reference_restore_actor_contract_mismatch');
         }
         $expected = ['id' => $decisionPlan->restoreActorId];
-        $matches = $this->findPrimaryKeys($definition, $expected, null);
+        $matches = $this->findPrimaryKeys(
+            $definition,
+            $expected,
+            null,
+            $lockClause,
+        );
         if ($matches === []) {
             throw self::error('reference_restore_actor_missing');
         }
@@ -137,6 +152,7 @@ final readonly class CompanyBackupReferenceTargetResolver
         CompanyBackupExternalReferenceRequirement $requirement,
         CompanyBackupReferenceDecision $decision,
         TenantDataDefinition $definition,
+        string $lockClause,
     ): array {
         if ($definition->kind !== TenantDataObjectKind::Table
             || $definition->policy !== TenantDataPolicy::GlobalReference
@@ -157,6 +173,7 @@ final readonly class CompanyBackupReferenceTargetResolver
             $definition,
             $requirement->sourceKey,
             $requirement->id,
+            $lockClause,
         );
         $match = $this->singleMatch($matches, $requirement->id);
         if ($decision->targetPrimaryKey !== $match) {
@@ -177,6 +194,7 @@ final readonly class CompanyBackupReferenceTargetResolver
         CompanyBackupReferenceDecision $decision,
         TenantDataDefinition $definition,
         array $restoreActorKey,
+        string $lockClause,
     ): ?array {
         if ($definition->kind !== TenantDataObjectKind::Table
             || $definition->policy !== TenantDataPolicy::InstanceOwned
@@ -194,7 +212,12 @@ final readonly class CompanyBackupReferenceTargetResolver
         }
         return match ($decision->action) {
             CompanyBackupReferenceDecisionAction::MapExisting =>
-                $this->resolveMappedActor($requirement, $decision, $definition),
+                $this->resolveMappedActor(
+                    $requirement,
+                    $decision,
+                    $definition,
+                    $lockClause,
+                ),
             CompanyBackupReferenceDecisionAction::UseRestoreActor =>
                 $restoreActorKey,
             CompanyBackupReferenceDecisionAction::SetNull => null,
@@ -210,6 +233,7 @@ final readonly class CompanyBackupReferenceTargetResolver
         CompanyBackupExternalReferenceRequirement $requirement,
         CompanyBackupReferenceDecision $decision,
         TenantDataDefinition $definition,
+        string $lockClause,
     ): array {
         $targetPrimaryKey = $decision->targetPrimaryKey;
         if ($targetPrimaryKey === null) {
@@ -222,6 +246,7 @@ final readonly class CompanyBackupReferenceTargetResolver
             $definition,
             $targetPrimaryKey,
             $requirement->id,
+            $lockClause,
         );
         $match = $this->singleMatch($matches, $requirement->id);
         if ($match !== $targetPrimaryKey) {
@@ -259,6 +284,7 @@ final readonly class CompanyBackupReferenceTargetResolver
         TenantDataDefinition $definition,
         array $lookupKey,
         ?string $requirementId,
+        string $lockClause,
     ): array {
         $primaryKey = $this->keyColumns(
             $definition,
@@ -301,7 +327,8 @@ final readonly class CompanyBackupReferenceTargetResolver
             ));
             $statement = $this->database->prepare(
                 'SELECT ' . $select . ' FROM ' . $table
-                . ' WHERE ' . $where . ' ORDER BY ' . $order . ' LIMIT 2',
+                . ' WHERE ' . $where . ' ORDER BY ' . $order . ' LIMIT 2'
+                . $lockClause,
             );
             if (!$statement instanceof PDOStatement) {
                 throw new \RuntimeException('Cílový lookup nelze připravit.');
@@ -383,6 +410,38 @@ final readonly class CompanyBackupReferenceTargetResolver
             }
         }
         return $matches;
+    }
+
+    private function lockClause(): string
+    {
+        if (!$this->lockTargets) {
+            return '';
+        }
+        try {
+            $inTransaction = $this->database->inTransaction();
+        } catch (\Throwable $e) {
+            throw self::error(
+                'reference_resolution_transaction_state_failed',
+                previous: $e,
+            );
+        }
+        if (!$inTransaction) {
+            throw self::error('reference_resolution_transaction_required');
+        }
+        try {
+            $driver = $this->database->getAttribute(PDO::ATTR_DRIVER_NAME);
+        } catch (\Throwable $e) {
+            throw self::error(
+                'reference_resolution_lock_driver_unsupported',
+                previous: $e,
+            );
+        }
+        if (!is_string($driver)
+            || !in_array($driver, ['mysql', 'sqlite'], true)
+        ) {
+            throw self::error('reference_resolution_lock_driver_unsupported');
+        }
+        return $driver === 'mysql' ? ' FOR UPDATE' : '';
     }
 
     /**

@@ -24,7 +24,7 @@ use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
-/** Živá MariaDB kontrola read-only cílového lookupu. */
+/** Živá MariaDB kontrola transakčně zamčeného cílového lookupu. */
 #[Group('integration')]
 final class CompanyBackupReferenceTargetResolverTest extends TestCase
 {
@@ -117,11 +117,10 @@ final class CompanyBackupReferenceTargetResolverTest extends TestCase
         ], $preflight, $registry, '123e4567-e89b-42d3-a456-426614174000', 91);
         $pdo->beginTransaction();
 
-        $resolved = (new CompanyBackupReferenceTargetResolver($pdo))->resolve(
-            $plan,
-            $preflight,
-            $registry,
-        );
+        $resolved = (new CompanyBackupReferenceTargetResolver(
+            $pdo,
+            lockTargets: true,
+        ))->resolve($plan, $preflight, $registry);
 
         self::assertSame(
             ['id' => 10],

@@ -9,7 +9,7 @@ use PDO;
 use PDOStatement;
 
 /** Jediná runtime interpretace tabulek, sloupců, klíčů a jejich referencí. */
-final class CompanyBackupTableSchemaReader
+final class CompanyBackupTableSchemaReader implements CompanyBackupImportSchemaSource
 {
     /** @var list<string> */
     private const BINARY_DATA_TYPES = [

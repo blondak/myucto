@@ -97,6 +97,35 @@ final class CompanyBackupReferenceTargetResolverTest extends TestCase
         $this->database->rollBack();
     }
 
+    public function testLockedImportResolutionRequiresCallerTransaction(): void
+    {
+        $this->seedRequiredTargets();
+        $registry = $this->registry();
+        $preflight = $this->preflight($registry);
+        $plan = $this->plan($preflight, $registry);
+        $resolver = new CompanyBackupReferenceTargetResolver(
+            $this->database,
+            lockTargets: true,
+        );
+
+        $this->assertResolutionError(
+            'reference_resolution_transaction_required',
+            null,
+            fn () => $resolver->resolve($plan, $preflight, $registry),
+        );
+
+        self::assertTrue($this->database->beginTransaction());
+        $resolved = $resolver->resolve($plan, $preflight, $registry);
+        self::assertNotNull($resolved->resolution(
+            $this->requirement(
+                $preflight->externalReferences,
+                CompanyBackupReferenceMapping::GlobalNaturalKey,
+            )->id,
+        ));
+        self::assertTrue($this->database->inTransaction());
+        self::assertTrue($this->database->rollBack());
+    }
+
     public function testResolvesExplicitExistingActorAndIsDeterministic(): void
     {
         $this->seedRequiredTargets();

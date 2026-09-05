@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use ZipArchive;
 
 /**
  * Otevřená read-only session nad technicky ověřeným archivem. JSONL položky
  * lze plně přehrát opakovaně; plaintext secret payload nikdy nejde na disk.
  */
-final class CompanyBackupImportArchiveSource
+final class CompanyBackupImportArchiveSource implements CompanyBackupImportSource
 {
     private const READ_CHUNK_BYTES = 65_536;
 
@@ -83,6 +84,26 @@ final class CompanyBackupImportArchiveSource
         }
         $this->password = $password;
         $this->zip = $zip;
+    }
+
+    public function sourceRegistry(): TenantDataRegistrySnapshot
+    {
+        return $this->validation->inspection->sourceRegistry;
+    }
+
+    public function targetRegistry(): TenantDataRegistrySnapshot
+    {
+        return $this->validation->targetRegistry;
+    }
+
+    public function dataInventory(): CompanyBackupDataInventory
+    {
+        return $this->validation->inspection->dataInventory;
+    }
+
+    public function technicalValidationBindingSha256(): string
+    {
+        return $this->validation->bindingSha256;
     }
 
     /**
