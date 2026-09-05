@@ -7,16 +7,22 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
+use MyInvoice\Service\Backup\Company\CompanyBackupPreparedImportRow;
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretRestoreMaterializer;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretScope;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretStorage;
+use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretValue;
+use MyInvoice\Service\Backup\Company\CompanyBackupSourceIdentityProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -24,6 +30,152 @@ use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupProtectedSecretMaterializationSetTest extends TestCase
 {
+    public function testConsumesExactSecretAndResealsPreparedTargetRow(): void
+    {
+        $definition = $this->definition();
+        $registry = $this->registrySnapshot($definition);
+        $service = $this->sensitiveData();
+        $materializer = new CompanyBackupProtectedSecretRestoreMaterializer(
+            CompanyBackupSecretPayload::fromValues(
+                [$this->secretValue()],
+                $registry,
+            ),
+            $registry,
+            $service,
+        );
+        $source = [
+            'id' => 73,
+            'supplier_id' => 42,
+            'name' => 'Synthetic office',
+        ];
+        $target = [
+            'id' => 173,
+            'supplier_id' => 142,
+            'name' => 'Synthetic office',
+        ];
+        $identity = CompanyBackupSourceIdentityProjection::fromDefinition(
+            $definition,
+        );
+
+        $stored = $materializer->valuesFor(
+            $definition,
+            $source,
+            new CompanyBackupPreparedImportRow(
+                $target,
+                $identity->identityForRow($source),
+                $identity->identityForRow($target),
+            ),
+        );
+        $materializer->finish();
+
+        self::assertSame([
+            'bank_account_ciphertext',
+            'bank_account_hash',
+            'bank_account_masked',
+        ], array_keys($stored));
+        $ciphertext = $stored['bank_account_ciphertext'];
+        self::assertIsString($ciphertext);
+        self::assertSame(
+            '1000000005 / 0100',
+            $service->reveal(
+                $ciphertext,
+                PayrollSensitiveField::BANK_ACCOUNT,
+                142,
+                173,
+            ),
+        );
+    }
+
+    public function testRejectsUnconsumedAndRepeatedProtectedValue(): void
+    {
+        $definition = $this->definition();
+        $registry = $this->registrySnapshot($definition);
+        $payload = CompanyBackupSecretPayload::fromValues(
+            [$this->secretValue()],
+            $registry,
+        );
+        $unconsumed = new CompanyBackupProtectedSecretRestoreMaterializer(
+            $payload,
+            $registry,
+            $this->sensitiveData(),
+        );
+        self::assertSame(1, $unconsumed->indexedValueCount());
+        self::assertSame(0, $unconsumed->consumedValueCount());
+        $this->assertImportError(
+            'import_protected_secret_unconsumed',
+            fn () => $unconsumed->finish(),
+        );
+
+        $materializer = new CompanyBackupProtectedSecretRestoreMaterializer(
+            $payload,
+            $registry,
+            $this->sensitiveData(),
+        );
+        [$source, $prepared] = $this->preparedRow($definition);
+        $materializer->valuesFor($definition, $source, $prepared);
+        self::assertSame(1, $materializer->consumedValueCount());
+        $this->assertImportError(
+            'import_protected_secret_duplicate',
+            fn () => $materializer->valuesFor(
+                $definition,
+                $source,
+                $prepared,
+            ),
+        );
+        $materializer->finish();
+        $this->assertImportError(
+            'import_protected_secret_materializer_closed',
+            fn () => $materializer->valuesFor(
+                $definition,
+                $source,
+                $prepared,
+            ),
+        );
+    }
+
+    public function testRejectsMissingValueAndMismatchedPreparedIdentity(): void
+    {
+        $definition = $this->definition();
+        $registry = $this->registrySnapshot($definition);
+        [$source, $prepared] = $this->preparedRow($definition);
+        $missing = new CompanyBackupProtectedSecretRestoreMaterializer(
+            CompanyBackupSecretPayload::fromValues([], $registry),
+            $registry,
+            $this->sensitiveData(),
+        );
+        $this->assertImportError(
+            'import_protected_secret_materialization_failed',
+            fn () => $missing->valuesFor($definition, $source, $prepared),
+        );
+
+        $foreignSource = [...$source, 'id' => 74];
+        $identity = CompanyBackupSourceIdentityProjection::fromDefinition(
+            $definition,
+        );
+        $foreignPrepared = new CompanyBackupPreparedImportRow(
+            $prepared->row,
+            $identity->identityForRow($foreignSource),
+            $prepared->targetIdentity,
+        );
+        $materializer = new CompanyBackupProtectedSecretRestoreMaterializer(
+            CompanyBackupSecretPayload::fromValues(
+                [$this->secretValue()],
+                $registry,
+            ),
+            $registry,
+            $this->sensitiveData(),
+        );
+        $this->assertImportError(
+            'import_protected_secret_row_invalid',
+            fn () => $materializer->valuesFor(
+                $definition,
+                $source,
+                $foreignPrepared,
+            ),
+        );
+        self::assertSame(0, $materializer->consumedValueCount());
+    }
+
     public function testResealsPlaintextForRemappedTenantAndEntity(): void
     {
         $service = $this->sensitiveData();
@@ -490,6 +642,71 @@ final class CompanyBackupProtectedSecretMaterializationSetTest extends TestCase
         );
     }
 
+    private function registrySnapshot(
+        TenantDataDefinition $definition,
+    ): TenantDataRegistrySnapshot {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        return TenantDataRegistrySnapshot::fromRegistry(
+            new TenantDataRegistry(1, [
+                new TenantDataDefinition(
+                    'table:supplier',
+                    TenantDataObjectKind::Table,
+                    TenantDataPolicy::TenantRoot,
+                    [$profile],
+                    [
+                        'primary_key' => ['id'],
+                        'ownership' => [
+                            'strategy' => 'selected_supplier',
+                            'column' => 'id',
+                        ],
+                        'secrets' => [],
+                        'company_backup' => [
+                            'data_columns' => ['id'],
+                            'embedded_references' => [],
+                            'generated_columns' => [],
+                            'omit_columns' => [],
+                            'references' => [],
+                            'restore_overrides' => [],
+                        ],
+                    ],
+                ),
+                $definition,
+            ], [$profile]),
+            $profile,
+        );
+    }
+
+    /**
+     * @return array{
+     *   array<string,mixed>,
+     *   CompanyBackupPreparedImportRow
+     * }
+     */
+    private function preparedRow(TenantDataDefinition $definition): array
+    {
+        $source = [
+            'id' => 73,
+            'supplier_id' => 42,
+            'name' => 'Synthetic office',
+        ];
+        $target = [
+            'id' => 173,
+            'supplier_id' => 142,
+            'name' => 'Synthetic office',
+        ];
+        $identity = CompanyBackupSourceIdentityProjection::fromDefinition(
+            $definition,
+        );
+        return [
+            $source,
+            new CompanyBackupPreparedImportRow(
+                $target,
+                $identity->identityForRow($source),
+                $identity->identityForRow($target),
+            ),
+        ];
+    }
+
     private function sensitiveData(): PayrollSensitiveData
     {
         $config = new Config([
@@ -514,6 +731,23 @@ final class CompanyBackupProtectedSecretMaterializationSetTest extends TestCase
                 $e->errorCode,
             );
             self::assertSame($column, $e->column);
+        }
+    }
+
+    /** @param callable():mixed $operation */
+    private function assertImportError(
+        string $errorCode,
+        callable $operation,
+    ): void {
+        try {
+            $operation();
+            self::fail('Neplatná obnova secretu musí být odmítnuta.');
+        } catch (CompanyBackupImportWriteException $e) {
+            self::assertSame($errorCode, $e->errorCode);
+            self::assertStringNotContainsString(
+                '1000000005',
+                $e->getMessage(),
+            );
         }
     }
 }
