@@ -8,10 +8,14 @@ use MyInvoice\Service\Backup\CanonicalJson;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataObject;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflightResult;
+use MyInvoice\Service\Backup\Company\CompanyBackupDeferredColumnSet;
+use MyInvoice\Service\Backup\Company\CompanyBackupDeferredRowPreparer;
 use MyInvoice\Service\Backup\Company\CompanyBackupExternalReferenceCollector;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportDependencyPlan;
+use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
 use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceTransform;
+use MyInvoice\Service\Backup\Company\CompanyBackupPreparedDeferredUpdate;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
@@ -20,14 +24,17 @@ use MyInvoice\Service\Backup\Company\CompanyBackupRowReferenceTransformer;
 use MyInvoice\Service\Backup\Company\CompanyBackupRowTransformException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSourceIdentity;
 use MyInvoice\Service\Backup\Company\CompanyBackupSourceKey;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlDeferredUpdateWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlTargetIdentityMap;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchema;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use PDO;
+use PDOStatement;
 use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupRowInsertTransformerTest extends TestCase
@@ -46,6 +53,14 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_STRINGIFY_FETCHES => false,
         ]);
+        $this->database->exec(
+            'CREATE TABLE sources ('
+                . 'id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL,'
+                . 'target_id INTEGER NOT NULL, next_id INTEGER NULL,'
+                . 'encoded_ref TEXT NULL, embedded_json TEXT NOT NULL,'
+                . 'embedded_digest BLOB NOT NULL, polymorphic_id INTEGER NULL,'
+                . 'source_type TEXT NOT NULL, is_active INTEGER NOT NULL)',
+        );
     }
 
     public function testMapsEagerReferencesAndNullsOnlyPlannedDeferredShapes(): void
@@ -60,22 +75,7 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
             $map,
             $this->emptyResolutionPlan($snapshot),
         );
-        $payload = CanonicalJson::encode([
-            'embedded_id' => 99,
-            'source_hash' => str_repeat('a', 64),
-        ]);
-        $source = [
-            'id' => 501,
-            'supplier_id' => 7,
-            'target_id' => 11,
-            'next_id' => 99,
-            'encoded_ref' => 'target:99',
-            'embedded_json' => $payload,
-            'embedded_digest' => hash('sha256', $payload),
-            'polymorphic_id' => 99,
-            'source_type' => 'target',
-            'is_active' => 1,
-        ];
+        $source = $this->deferredSourceRow();
 
         $insert = $transformer->transformForInsert(
             $this->projection($snapshot, 'table:sources'),
@@ -115,6 +115,55 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
         $map->close();
     }
 
+    public function testRequiresCompleteSealedIdentityMapForSecondPass(): void
+    {
+        $snapshot = $this->snapshot(includeSources: true);
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot),
+        );
+        $definition = $this->definitionFor($snapshot, 'table:sources');
+        $resolutions = $this->emptyResolutionPlan($snapshot);
+        $unsealed = new CompanyBackupSqlTargetIdentityMap($this->database);
+
+        $this->assertWriteError(
+            'import_deferred_context_mismatch',
+            fn () => new CompanyBackupDeferredRowPreparer(
+                $definition,
+                $unsealed,
+                $resolutions,
+                $plan,
+            ),
+        );
+        $unsealed->close();
+
+        $incomplete = $this->identityMap();
+        $incompletePreparer = new CompanyBackupDeferredRowPreparer(
+            $definition,
+            $incomplete,
+            $resolutions,
+            $plan,
+        );
+        $this->assertWriteError(
+            'import_deferred_target_identity_invalid',
+            fn () => $incompletePreparer->prepare($this->deferredSourceRow()),
+        );
+        $incomplete->close();
+
+        $closed = $this->identityMap(complete: true);
+        $closedPreparer = new CompanyBackupDeferredRowPreparer(
+            $definition,
+            $closed,
+            $resolutions,
+            $plan,
+        );
+        $closed->close();
+        $this->assertWriteError(
+            'import_deferred_identity_lookup_failed',
+            fn () => $closedPreparer->prepare($this->deferredSourceRow()),
+        );
+    }
+
     public function testRejectsProjectionOutsideDependencyPlan(): void
     {
         $fullSnapshot = $this->snapshot(includeSources: true);
@@ -143,7 +192,290 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
         $map->close();
     }
 
-    private function identityMap(): CompanyBackupSqlTargetIdentityMap
+    public function testDerivesOnlyDeferredColumnsAndTheirHashClosure(): void
+    {
+        $snapshot = $this->snapshot(includeSources: true);
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot),
+        );
+
+        $columns = CompanyBackupDeferredColumnSet::fromProjection(
+            $this->projection($snapshot, 'table:sources'),
+            $plan,
+        );
+
+        self::assertSame([
+            'next_id',
+            'encoded_ref',
+            'embedded_json',
+            'embedded_digest',
+            'polymorphic_id',
+        ], $columns->columns);
+    }
+
+    public function testPreparesOnlyDeferredValuesForGuardedSecondPass(): void
+    {
+        $snapshot = $this->snapshot(includeSources: true);
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot),
+        );
+        $map = $this->identityMap(complete: true);
+        $preparer = new CompanyBackupDeferredRowPreparer(
+            $this->definitionFor($snapshot, 'table:sources'),
+            $map,
+            $this->emptyResolutionPlan($snapshot),
+            $plan,
+        );
+        $source = $this->deferredSourceRow();
+
+        $update = $preparer->prepare(
+            $source,
+            static fn ($reference, string $hash): string => str_repeat('b', 64),
+        );
+
+        $beforePayload = CanonicalJson::encode([
+            'embedded_id' => null,
+            'source_hash' => null,
+        ]);
+        $afterPayload = CanonicalJson::encode([
+            'embedded_id' => 999,
+            'source_hash' => str_repeat('b', 64),
+        ]);
+        self::assertSame(['id' => 1501], $update->targetPrimaryKey->values);
+        self::assertSame([
+            'next_id' => null,
+            'encoded_ref' => null,
+            'embedded_json' => $beforePayload,
+            'embedded_digest' => hash('sha256', $beforePayload),
+            'polymorphic_id' => null,
+        ], $update->beforeValues);
+        self::assertSame([
+            'next_id' => 999,
+            'encoded_ref' => 'target:999',
+            'embedded_json' => $afterPayload,
+            'embedded_digest' => hash('sha256', $afterPayload),
+            'polymorphic_id' => 999,
+        ], $update->afterValues);
+        self::assertTrue($update->hasChanges());
+        self::assertSame(99, $source['next_id']);
+        $map->close();
+    }
+
+    public function testUpdatesOnlyGuardedDeferredColumnsAndDecodesCodec(): void
+    {
+        [$update, $map, $snapshot, $plan] = $this->preparedDeferredUpdate();
+        self::assertTrue($this->database->beginTransaction());
+        $this->insertFirstPassRow($update, encodedReference: null);
+        $writer = new CompanyBackupSqlDeferredUpdateWriter(
+            $this->database,
+            $this->definitionFor($snapshot, 'table:sources'),
+            $this->sourcesSchema(),
+            $plan,
+            1,
+        );
+
+        $writer->update($update);
+        self::assertSame(1, $writer->processedRows());
+        self::assertSame(1, $writer->updatedRows());
+        $writer->finish();
+
+        $statement = $this->database->query(
+            'SELECT id, supplier_id, target_id, next_id, encoded_ref,'
+                . ' embedded_json, hex(embedded_digest) AS embedded_digest,'
+                . ' polymorphic_id, source_type, is_active FROM sources',
+        );
+        self::assertInstanceOf(PDOStatement::class, $statement);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertTrue($statement->closeCursor());
+        self::assertIsArray($row);
+        self::assertSame([
+            'id' => 1501,
+            'supplier_id' => 71,
+            'target_id' => 111,
+            'next_id' => 999,
+            'encoded_ref' => 'target:999',
+            'embedded_json' => $update->afterValues['embedded_json'],
+            'embedded_digest' => strtoupper(
+                $update->afterValues['embedded_digest'],
+            ),
+            'polymorphic_id' => 999,
+            'source_type' => 'target',
+            'is_active' => 0,
+        ], $row);
+        self::assertTrue($this->database->inTransaction());
+        self::assertTrue($this->database->rollBack());
+        $map->close();
+    }
+
+    public function testRejectsChangedFirstPassStateWithoutPartialUpdate(): void
+    {
+        [$update, $map, $snapshot, $plan] = $this->preparedDeferredUpdate();
+        self::assertTrue($this->database->beginTransaction());
+        $this->insertFirstPassRow($update, encodedReference: 'tampered');
+        $writer = new CompanyBackupSqlDeferredUpdateWriter(
+            $this->database,
+            $this->definitionFor($snapshot, 'table:sources'),
+            $this->sourcesSchema(),
+            $plan,
+            1,
+        );
+
+        $this->assertWriteError(
+            'import_deferred_row_state_changed',
+            fn () => $writer->update($update),
+        );
+        self::assertSame(0, $writer->processedRows());
+        self::assertSame(0, $writer->updatedRows());
+        $statement = $this->database->query(
+            'SELECT next_id, encoded_ref, polymorphic_id FROM sources',
+        );
+        self::assertInstanceOf(PDOStatement::class, $statement);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertTrue($statement->closeCursor());
+        self::assertSame([
+            'next_id' => null,
+            'encoded_ref' => 'tampered',
+            'polymorphic_id' => null,
+        ], $row);
+        self::assertTrue($this->database->rollBack());
+        $map->close();
+    }
+
+    public function testCountsNoopRowsAndRequiresCompleteLiveTransaction(): void
+    {
+        [$prepared, $map, $snapshot, $plan] = $this->preparedDeferredUpdate();
+        $noop = new CompanyBackupPreparedDeferredUpdate(
+            $prepared->targetPrimaryKey,
+            $prepared->beforeValues,
+            $prepared->beforeValues,
+        );
+        self::assertTrue($this->database->beginTransaction());
+        $writer = new CompanyBackupSqlDeferredUpdateWriter(
+            $this->database,
+            $this->definitionFor($snapshot, 'table:sources'),
+            $this->sourcesSchema(),
+            $plan,
+            1,
+        );
+
+        $this->assertWriteError(
+            'import_deferred_row_count_incomplete',
+            fn () => $writer->finish(),
+        );
+        $writer->update($noop);
+        self::assertSame(1, $writer->processedRows());
+        self::assertSame(0, $writer->updatedRows());
+        $this->assertWriteError(
+            'import_deferred_row_count_exceeded',
+            fn () => $writer->update($noop),
+        );
+        self::assertTrue($this->database->rollBack());
+        $this->assertWriteError(
+            'import_transaction_lost',
+            fn () => $writer->finish(),
+        );
+        $map->close();
+    }
+
+    /**
+     * @return array{
+     *   CompanyBackupPreparedDeferredUpdate,
+     *   CompanyBackupSqlTargetIdentityMap,
+     *   TenantDataRegistrySnapshot,
+     *   CompanyBackupImportDependencyPlan
+     * }
+     */
+    private function preparedDeferredUpdate(): array
+    {
+        $snapshot = $this->snapshot(includeSources: true);
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot),
+        );
+        $map = $this->identityMap(complete: true);
+        $preparer = new CompanyBackupDeferredRowPreparer(
+            $this->definitionFor($snapshot, 'table:sources'),
+            $map,
+            $this->emptyResolutionPlan($snapshot),
+            $plan,
+        );
+        $prepared = $preparer->prepare(
+            $this->deferredSourceRow(),
+            static fn ($reference, string $hash): string => str_repeat('b', 64),
+        );
+        return [$prepared, $map, $snapshot, $plan];
+    }
+
+    /** @return array<string,mixed> */
+    private function deferredSourceRow(): array
+    {
+        $payload = CanonicalJson::encode([
+            'embedded_id' => 99,
+            'source_hash' => str_repeat('a', 64),
+        ]);
+        return [
+            'id' => 501,
+            'supplier_id' => 7,
+            'target_id' => 11,
+            'next_id' => 99,
+            'encoded_ref' => 'target:99',
+            'embedded_json' => $payload,
+            'embedded_digest' => hash('sha256', $payload),
+            'polymorphic_id' => 99,
+            'source_type' => 'target',
+            'is_active' => 1,
+        ];
+    }
+
+    private function insertFirstPassRow(
+        CompanyBackupPreparedDeferredUpdate $update,
+        ?string $encodedReference,
+    ): void {
+        $statement = $this->database->prepare(
+            'INSERT INTO sources (id, supplier_id, target_id, next_id,'
+                . ' encoded_ref, embedded_json, embedded_digest,'
+                . ' polymorphic_id, source_type, is_active)'
+                . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        self::assertInstanceOf(PDOStatement::class, $statement);
+        self::assertTrue($statement->execute([
+            $update->targetPrimaryKey->values['id'],
+            71,
+            111,
+            $update->beforeValues['next_id'],
+            $encodedReference,
+            $update->beforeValues['embedded_json'],
+            hex2bin($update->beforeValues['embedded_digest']),
+            $update->beforeValues['polymorphic_id'],
+            'target',
+            0,
+        ]));
+    }
+
+    private function sourcesSchema(): CompanyBackupTableSchema
+    {
+        return new CompanyBackupTableSchema(
+            [
+                'id',
+                'supplier_id',
+                'target_id',
+                'next_id',
+                'encoded_ref',
+                'embedded_json',
+                'embedded_digest',
+                'polymorphic_id',
+                'source_type',
+                'is_active',
+            ],
+            [],
+            ['id'],
+            ['embedded_digest'],
+        );
+    }
+
+    private function identityMap(bool $complete = false): CompanyBackupSqlTargetIdentityMap
     {
         $map = new CompanyBackupSqlTargetIdentityMap($this->database);
         $map->add(
@@ -154,6 +486,36 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
             $this->identity('table:targets', TenantDataPolicy::TenantOwned, 11, 7),
             $this->identity('table:targets', TenantDataPolicy::TenantOwned, 111, 71),
         );
+        if ($complete) {
+            $map->add(
+                $this->identity(
+                    'table:targets',
+                    TenantDataPolicy::TenantOwned,
+                    99,
+                    7,
+                ),
+                $this->identity(
+                    'table:targets',
+                    TenantDataPolicy::TenantOwned,
+                    999,
+                    71,
+                ),
+            );
+            $map->add(
+                $this->identity(
+                    'table:sources',
+                    TenantDataPolicy::TenantOwned,
+                    501,
+                    7,
+                ),
+                $this->identity(
+                    'table:sources',
+                    TenantDataPolicy::TenantOwned,
+                    1501,
+                    71,
+                ),
+            );
+        }
         $map->seal();
         return $map;
     }
@@ -312,6 +674,15 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
         return CompanyBackupTableProjection::fromDefinition($definition);
     }
 
+    private function definitionFor(
+        TenantDataRegistrySnapshot $snapshot,
+        string $registryKey,
+    ): TenantDataDefinition {
+        $definition = $snapshot->registry->definition($registryKey);
+        self::assertInstanceOf(TenantDataDefinition::class, $definition);
+        return $definition;
+    }
+
     private function emptyResolutionPlan(
         TenantDataRegistrySnapshot $snapshot,
     ): CompanyBackupReferenceResolutionPlan {
@@ -372,6 +743,11 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
                     : ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
                 'secrets' => [],
                 'company_backup' => [
+                    ...($key === 'table:sources' ? [
+                        'column_codecs' => [
+                            'embedded_digest' => 'binary_hex',
+                        ],
+                    ] : []),
                     'data_columns' => $dataColumns,
                     'derived_hashes' => $derivedHashes,
                     'embedded_hash_references' => $embeddedHashReferences,
@@ -406,5 +782,18 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
             'target' => $target,
             'target_columns' => ['id'],
         ];
+    }
+
+    /** @param callable():mixed $operation */
+    private function assertWriteError(
+        string $errorCode,
+        callable $operation,
+    ): void {
+        try {
+            $operation();
+            self::fail('Neplatný druhý průchod importu musí být odmítnut.');
+        } catch (CompanyBackupImportWriteException $e) {
+            self::assertSame($errorCode, $e->errorCode);
+        }
     }
 }

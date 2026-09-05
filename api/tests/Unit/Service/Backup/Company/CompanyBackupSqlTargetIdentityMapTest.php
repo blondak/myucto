@@ -44,6 +44,7 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
             $this->database,
             $this->limits(),
         );
+        self::assertFalse($map->isSealed());
 
         $map->add($identity, $target);
         foreach ($identity->keys() as $index => $sourceKey) {
@@ -56,6 +57,7 @@ final class CompanyBackupSqlTargetIdentityMapTest extends TestCase
         self::assertGreaterThan(0, $map->indexedBytes());
 
         $map->seal();
+        self::assertTrue($map->isSealed());
         $mapped = $map->find($identity->primaryKey);
         self::assertNotNull($mapped);
         self::assertTrue($target->primaryKey->equals($mapped));

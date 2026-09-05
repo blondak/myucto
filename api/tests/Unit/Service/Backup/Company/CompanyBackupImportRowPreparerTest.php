@@ -325,6 +325,43 @@ final class CompanyBackupImportRowPreparerTest extends TestCase
         $map->close();
     }
 
+    public function testRejectsSealedIdentityMapForEveryFirstPassProducer(): void
+    {
+        $snapshot = $this->snapshot();
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot),
+        );
+        $resolutions = $this->resolutions($snapshot);
+        $map = new CompanyBackupSqlTargetIdentityMap($this->database);
+        $map->seal();
+
+        $this->assertWriteError(
+            'import_global_context_mismatch',
+            fn () => new CompanyBackupGlobalIdentityMapper(
+                $this->definition($snapshot, 'table:countries'),
+                $map,
+                $resolutions,
+                $plan,
+            ),
+        );
+        $this->assertWriteError(
+            'import_row_context_mismatch',
+            fn () => new CompanyBackupImportRowPreparer(
+                $this->definition($snapshot, 'table:synthetic_records'),
+                new CompanyBackupImportTableMetadata(
+                    new CompanyBackupAutoIncrementColumn('id', PHP_INT_MAX),
+                ),
+                null,
+                $map,
+                $resolutions,
+                $plan,
+            ),
+        );
+        self::assertSame(0, $map->identityCount());
+        $map->close();
+    }
+
     private function snapshot(): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;

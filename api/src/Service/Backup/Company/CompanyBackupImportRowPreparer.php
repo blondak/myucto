@@ -40,6 +40,7 @@ final class CompanyBackupImportRowPreparer
             TenantDataPolicy::TenantOwned,
             TenantDataPolicy::TenantOwnedIndirect,
         ], true)
+            || $identities->isSealed()
             || !$plan->containsInsertRegistryKey($definition->key)
             || !hash_equals(
                 $plan->registryFingerprint,

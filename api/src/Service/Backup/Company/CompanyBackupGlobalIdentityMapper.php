@@ -24,6 +24,7 @@ final readonly class CompanyBackupGlobalIdentityMapper
             $limits,
         );
         if ($definition->policy !== TenantDataPolicy::GlobalReference
+            || $identities->isSealed()
             || !$plan->containsGlobalRegistryKey($definition->key)
             || $this->identityProjection->naturalKeyColumns === null
             || $this->identityProjection->referenceKeyColumns !== []

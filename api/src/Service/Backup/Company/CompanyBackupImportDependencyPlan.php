@@ -206,6 +206,17 @@ final readonly class CompanyBackupImportDependencyPlan
         ));
     }
 
+    /** @return list<CompanyBackupImportDependency> */
+    public function deferredDependenciesFor(string $registryKey): array
+    {
+        return array_values(array_filter(
+            $this->dependencies,
+            static fn (CompanyBackupImportDependency $dependency): bool =>
+                $dependency->deferred
+                && $dependency->sourceRegistryKey === $registryKey,
+        ));
+    }
+
     public function containsInsertRegistryKey(string $registryKey): bool
     {
         return isset($this->insertRegistryKeys[$registryKey]);

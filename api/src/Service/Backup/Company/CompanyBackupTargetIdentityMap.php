@@ -22,6 +22,8 @@ interface CompanyBackupTargetIdentityMap
 
     public function seal(): void;
 
+    public function isSealed(): bool;
+
     public function identityCount(): int;
 
     public function entryCount(): int;

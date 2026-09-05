@@ -222,6 +222,12 @@ final class CompanyBackupSqlTargetIdentityMap implements CompanyBackupTargetIden
         $this->sealed = true;
     }
 
+    public function isSealed(): bool
+    {
+        $this->assertOpen();
+        return $this->sealed;
+    }
+
     public function identityCount(): int
     {
         return $this->identities;
