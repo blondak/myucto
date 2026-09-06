@@ -40,4 +40,38 @@ enum CompanyBackupFilePathPolicy: string
             ),
         };
     }
+
+    public function restoreTargetPath(
+        string $sourcePath,
+        int $sourceSupplierId,
+        int $targetSupplierId,
+    ): string {
+        $sourcePath = CompanyBackupFileEntry::normalizeSourcePath($sourcePath);
+        if ($sourceSupplierId < 1
+            || $targetSupplierId < 1
+            || !$this->accepts($sourcePath, $sourceSupplierId)
+        ) {
+            throw new \InvalidArgumentException(
+                'Zdrojová cesta souboru neodpovídá obnovované firmě.',
+            );
+        }
+        if ($this === self::Relative) {
+            return $sourcePath;
+        }
+
+        $sourcePrefix = 'sup-' . $sourceSupplierId;
+        if (!str_starts_with($sourcePath, $sourcePrefix)) {
+            throw new \InvalidArgumentException(
+                'Zdrojová cesta loga nemá tenantový prefix.',
+            );
+        }
+        $targetPath = 'sup-' . $targetSupplierId
+            . substr($sourcePath, strlen($sourcePrefix));
+        if (!$this->accepts($targetPath, $targetSupplierId)) {
+            throw new \InvalidArgumentException(
+                'Cílovou cestu loga nelze bezpečně odvodit.',
+            );
+        }
+        return $targetPath;
+    }
 }

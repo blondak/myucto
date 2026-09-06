@@ -35,12 +35,17 @@ final readonly class CompanyBackupDatabaseImporter
         $sourceRegistry = $source->sourceRegistry();
         $targetRegistry = $source->targetRegistry();
         $inventory = $source->dataInventory();
+        $fileInventory = $source->fileInventory();
         if ($sourceRegistry->profile !== TenantDataRegistry::COMPANY_BACKUP_PROFILE
             || $targetRegistry->profile
                 !== TenantDataRegistry::COMPANY_BACKUP_PROFILE
             || !hash_equals(
                 $sourceRegistry->fingerprint,
                 $inventory->registryFingerprint,
+            )
+            || !hash_equals(
+                $sourceRegistry->fingerprint,
+                $fileInventory->registryFingerprint,
             )
             || !hash_equals(
                 $sourceRegistry->fingerprint,
@@ -95,6 +100,7 @@ final readonly class CompanyBackupDatabaseImporter
 
         $identities = null;
         $hashes = null;
+        $filePaths = null;
         $result = null;
         $failure = null;
         try {
@@ -104,6 +110,13 @@ final readonly class CompanyBackupDatabaseImporter
             );
             $hashes = new CompanyBackupSqlTargetHashMap(
                 $this->database,
+                $this->limits,
+            );
+            $filePaths = new CompanyBackupSqlFilePathMap(
+                $this->database,
+                $fileInventory,
+                $sourceRegistry,
+                $targetRegistry,
                 $this->limits,
             );
             $hashMapper = static fn (
@@ -129,6 +142,7 @@ final readonly class CompanyBackupDatabaseImporter
                 $hashes,
                 $hashMapper,
                 $secrets,
+                $filePaths,
             );
             if ($identities->identityCount() !== $preflight->identityCount
                 || $identities->entryCount() !== $preflight->sourceKeyCount
@@ -147,7 +161,9 @@ final readonly class CompanyBackupDatabaseImporter
                 $resolutions,
                 $identities,
                 $hashMapper,
+                $filePaths,
             );
+            $filePaths->finish();
             $protectedSecretCount = $secrets?->consumedValueCount() ?? 0;
             $secrets?->finish();
             $result = new CompanyBackupDatabaseImportResult(
@@ -165,6 +181,13 @@ final readonly class CompanyBackupDatabaseImporter
             $failure = $e;
         }
 
+        if ($filePaths instanceof CompanyBackupSqlFilePathMap) {
+            try {
+                $filePaths->close();
+            } catch (\Throwable $e) {
+                $failure ??= $e;
+            }
+        }
         if ($hashes instanceof CompanyBackupSqlTargetHashMap) {
             try {
                 $hashes->close();
@@ -348,6 +371,7 @@ final readonly class CompanyBackupDatabaseImporter
         CompanyBackupSqlTargetHashMap $hashes,
         callable $hashMapper,
         ?CompanyBackupProtectedSecretRestoreMaterializer $secrets,
+        CompanyBackupSqlFilePathMap $filePaths,
     ): array {
         $insertedRows = 0;
         $supplierId = null;
@@ -387,6 +411,7 @@ final readonly class CompanyBackupDatabaseImporter
                     $resolutions,
                     $plan,
                     $this->limits,
+                    $filePaths,
                 );
                 $writer = new CompanyBackupSqlInsertWriter(
                     $this->database,
@@ -471,6 +496,7 @@ final readonly class CompanyBackupDatabaseImporter
         CompanyBackupReferenceResolutionPlan $resolutions,
         CompanyBackupTargetIdentityMap $identities,
         callable $hashMapper,
+        CompanyBackupSqlFilePathMap $filePaths,
     ): array {
         $processed = 0;
         $updated = 0;
@@ -500,6 +526,7 @@ final readonly class CompanyBackupDatabaseImporter
                     $resolutions,
                     $plan,
                     $this->limits,
+                    $filePaths,
                 );
                 $writer = new CompanyBackupSqlDeferredUpdateWriter(
                     $this->database,

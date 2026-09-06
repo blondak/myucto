@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Company;
 
-/** Stabilní chyba stagingu souborů bez zdrojových cest a obsahu ve zprávě. */
+/** Stabilní chyba obnovy souborů bez zdrojových cest a obsahu ve zprávě. */
 final class CompanyBackupFileRestoreException extends \RuntimeException
 {
     public function __construct(

@@ -29,6 +29,7 @@ final readonly class CompanyBackupDeferredRowPreparer
         CompanyBackupReferenceResolutionPlan $resolutions,
         private CompanyBackupImportDependencyPlan $plan,
         CompanyBackupArchiveLimits $limits = new CompanyBackupArchiveLimits(),
+        private ?CompanyBackupSqlFilePathMap $filePaths = null,
     ) {
         $this->projection = CompanyBackupTableProjection::fromDefinition($definition);
         $this->identityProjection = CompanyBackupSourceIdentityProjection::fromDefinition(
@@ -112,17 +113,27 @@ final readonly class CompanyBackupDeferredRowPreparer
             $targetSeed[$column] = $value;
         }
         $stableHashMapper = $this->stableHashMapper($hashMapper);
+        $rowMapper = $this->filePaths === null
+            ? null
+            : fn (array $row): array => $this->filePaths->transform(
+                $this->projection,
+                $sourceRow,
+                $row,
+                false,
+            );
         try {
             $before = $this->transformer->transformForInsert(
                 $this->projection,
                 $targetSeed,
                 $this->plan,
                 $stableHashMapper,
+                $rowMapper,
             );
             $after = $this->transformer->transform(
                 $this->projection,
                 $targetSeed,
                 $stableHashMapper,
+                $rowMapper,
             );
         } catch (CompanyBackupRowTransformException|\LogicException $e) {
             throw self::error(

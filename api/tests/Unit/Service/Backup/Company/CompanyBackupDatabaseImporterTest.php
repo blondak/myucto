@@ -14,6 +14,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflightResult;
 use MyInvoice\Service\Backup\Company\CompanyBackupDatabaseImporter;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedHashReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupExternalReferenceCollector;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileRestoreException;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportSchemaSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportTableMetadata;
@@ -68,7 +70,8 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         );
         $this->database->exec(
             'CREATE TABLE supplier ('
-                . 'id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)',
+                . 'id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,'
+                . ' logo_path TEXT NULL)',
         );
         $this->database->exec(
             'CREATE TABLE synthetic_nodes ('
@@ -96,7 +99,8 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             "INSERT INTO users (id, email) VALUES (91, 'restore@example.test')",
         );
         $this->database->exec(
-            "INSERT INTO supplier (id, name) VALUES (40, 'Existing tenant')",
+            "INSERT INTO supplier (id, name, logo_path)"
+                . " VALUES (40, 'Existing tenant', NULL)",
         );
         $existingPayload = CanonicalJson::encode([
             'supplier_id' => 40,
@@ -127,7 +131,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
 
     public function testRestoresCompleteGraphAndLeavesCommitToCaller(): void
     {
-        [$source, $preflight, $decisions] = $this->context();
+        [$source, $preflight, $decisions] = $this->context(withFiles: true);
         $importer = new CompanyBackupDatabaseImporter(
             $this->database,
             new SyntheticCompanyBackupImportSchemaSource(),
@@ -152,6 +156,15 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         self::assertSame(2, $result->hashMappingCount);
         self::assertSame(1, $result->protectedSecretCount);
 
+        $suppliers = $this->rows(
+            'SELECT id, name, logo_path FROM supplier WHERE id = 41',
+        );
+        self::assertCount(1, $suppliers);
+        self::assertSame(
+            'storage/supplier-logos/sup-41.png',
+            $suppliers[0]['logo_path'],
+        );
+
         $nodes = $this->rows(
             'SELECT id, supplier_id, country_id, parent_id, payload_json, row_hash'
                 . ' FROM synthetic_nodes WHERE supplier_id = 41 ORDER BY id',
@@ -167,6 +180,13 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             $payload = json_decode((string) $node['payload_json'], true);
             self::assertIsArray($payload);
             self::assertSame(41, $payload['supplier_id']);
+            if ($node['id'] === 101) {
+                self::assertSame(
+                    'storage/supplier-logos/'
+                        . 'sup-41-brand-11-aaaaaaaaaaaa.png',
+                    $payload['logo_path'],
+                );
+            }
             self::assertSame(
                 hash('sha256', (string) $node['payload_json']),
                 $node['row_hash'],
@@ -243,6 +263,42 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         self::assertSame(0, $this->temporaryTableCount());
     }
 
+    public function testRejectsDatabaseFileReferenceMissingFromInventory(): void
+    {
+        [$source, $preflight, $decisions] = $this->context(
+            withFiles: true,
+            omitNestedFileOwner: true,
+        );
+        $importer = new CompanyBackupDatabaseImporter(
+            $this->database,
+            new SyntheticCompanyBackupImportSchemaSource(),
+        );
+        self::assertTrue($this->database->beginTransaction());
+
+        try {
+            $importer->restore(
+                $source,
+                $preflight,
+                $decisions,
+                $this->sensitiveData(),
+            );
+            self::fail(
+                'Databázová cesta bez manifestového vlastníka musí obnovu zastavit.',
+            );
+        } catch (CompanyBackupFileRestoreException $e) {
+            self::assertSame(
+                'file_restore_inventory_owner_missing',
+                $e->errorCode,
+            );
+            self::assertSame('file-area:supplier-logos', $e->registryKey);
+        }
+
+        self::assertTrue($this->database->inTransaction());
+        self::assertGreaterThan(1, $this->countRows('supplier'));
+        self::assertTrue($this->database->rollBack());
+        self::assertSame(0, $this->temporaryTableCount());
+    }
+
     public function testRejectsHashTargetChangedByDeferredPassBeforeWriting(): void
     {
         [$source, $preflight, $decisions] = $this->context(
@@ -285,11 +341,18 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
     private function context(
         ?string $failOn = null,
         bool $unstableHashTarget = false,
+        bool $withFiles = false,
+        bool $omitNestedFileOwner = false,
     ): array
     {
-        $snapshot = $this->snapshot($unstableHashTarget);
-        $rows = $this->sourceRows();
+        $snapshot = $this->snapshot($unstableHashTarget, $withFiles);
+        $rows = $this->sourceRows($withFiles);
         $inventory = $this->inventory($snapshot, $rows);
+        $fileInventory = $this->fileInventory(
+            $snapshot,
+            $withFiles,
+            $omitNestedFileOwner,
+        );
         $external = new CompanyBackupExternalReferenceCollector();
         $country = $this->definition($snapshot, 'table:countries');
         $naturalKey = CompanyBackupSourceIdentityProjection::fromDefinition(
@@ -352,6 +415,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             new SyntheticCompanyBackupImportSource(
                 $snapshot,
                 $inventory,
+                $fileInventory,
                 $rows,
                 self::TECHNICAL_BINDING,
                 $failOn,
@@ -364,145 +428,176 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
 
     private function snapshot(
         bool $unstableHashTarget = false,
+        bool $withFiles = false,
     ): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        $definitions = [
+            $this->definitionFor(
+                'table:countries',
+                TenantDataPolicy::GlobalReference,
+                ['id', 'iso2', 'name'],
+                ['strategy' => 'global'],
+                naturalKey: ['iso2'],
+            ),
+            $this->definitionFor(
+                'table:supplier',
+                TenantDataPolicy::TenantRoot,
+                ['id', 'name', 'logo_path'],
+                ['strategy' => 'selected_supplier', 'column' => 'id'],
+            ),
+            $this->definitionFor(
+                'table:synthetic_nodes',
+                TenantDataPolicy::TenantOwned,
+                [
+                    'id',
+                    'supplier_id',
+                    'country_id',
+                    'parent_id',
+                    'payload_json',
+                    'row_hash',
+                ],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(
+                        ['country_id'],
+                        'table:countries',
+                        CompanyBackupReferenceMapping::GlobalNaturalKey,
+                    ),
+                    $this->reference(
+                        ['parent_id'],
+                        'table:synthetic_nodes',
+                        nullableColumns: ['parent_id'],
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                embeddedReferences: [[
+                    'column' => 'payload_json',
+                    'condition' => null,
+                    'fallbacks' => [],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'nullable' => false,
+                    'path' => ['supplier_id'],
+                    'target' => 'table:supplier',
+                    'target_columns' => ['id'],
+                ]],
+                embeddedHashReferences: $unstableHashTarget ? [[
+                    'column' => 'payload_json',
+                    'nullable' => true,
+                    'path' => ['previous_hash'],
+                    'target' => 'table:synthetic_nodes',
+                    'target_hash_column' => 'row_hash',
+                ]] : [],
+                derivedHashes: [[
+                    'algorithm' => 'sha256_canonical_json',
+                    'hash_column' => 'row_hash',
+                    'nullable' => false,
+                    'source_column' => 'payload_json',
+                ]],
+            ),
+            $this->definitionFor(
+                'table:synthetic_events',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'node_hash_json'],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                embeddedHashReferences: [[
+                    'column' => 'node_hash_json',
+                    'nullable' => true,
+                    'path' => ['node_hash'],
+                    'target' => 'table:synthetic_nodes',
+                    'target_hash_column' => 'row_hash',
+                ]],
+            ),
+            $this->definitionFor(
+                'table:synthetic_secrets',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'label'],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                secretPolicies: [
+                    'contact_ciphertext' => [
+                        'policy' =>
+                            TenantSecretPolicy::ProtectedDomainSecret->value,
+                        'storage' =>
+                            CompanyBackupSecretStorage::ApplicationEncryptedContext->value,
+                        'context' =>
+                            'payroll:{supplier_id}:{id}:contact_email',
+                    ],
+                ],
+                omitColumns: [
+                    'contact_hash' => 'rederived_from_protected_secret',
+                    'contact_masked' => 'rederived_from_protected_secret',
+                ],
+                protectedSecretMaterializations: [[
+                    'entity_id_column' => 'id',
+                    'field' => 'contact_email',
+                    'materializer' => 'payroll_sensitive_v1',
+                    'nullable' => false,
+                    'secret_column' => 'contact_ciphertext',
+                    'target_columns' => [
+                        'ciphertext' => 'contact_ciphertext',
+                        'lookup_hash' => 'contact_hash',
+                        'masked' => 'contact_masked',
+                    ],
+                    'tenant_id_column' => 'supplier_id',
+                ]],
+            ),
+            new TenantDataDefinition(
+                'table:users',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::InstanceOwned,
+                [$profile],
+                [
+                    'primary_key' => ['id'],
+                    'ownership' => ['strategy' => 'instance'],
+                ],
+            ),
+        ];
+        if ($withFiles) {
+            $definitions[] = new TenantDataDefinition(
+                'file-area:supplier-logos',
+                TenantDataObjectKind::FileArea,
+                TenantDataPolicy::TenantOwned,
+                [$profile],
+                [
+                    'file_policy' => 'historical_optional',
+                    'path_policy' => 'supplier_logo',
+                    'file_owners' => [[
+                        'registry_key' => 'table:supplier',
+                        'column' => 'logo_path',
+                        'path' => [],
+                        'stored_prefix' => 'storage/supplier-logos/',
+                    ], [
+                        'registry_key' => 'table:synthetic_nodes',
+                        'column' => 'payload_json',
+                        'path' => ['logo_path'],
+                        'stored_prefix' => 'storage/supplier-logos/',
+                    ]],
+                    'ownership' => ['strategy' => 'database_references'],
+                    'storage_subdirectory' => 'supplier-logos',
+                ],
+            );
+        }
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
             1,
-            [
-                $this->definitionFor(
-                    'table:countries',
-                    TenantDataPolicy::GlobalReference,
-                    ['id', 'iso2', 'name'],
-                    ['strategy' => 'global'],
-                    naturalKey: ['iso2'],
-                ),
-                $this->definitionFor(
-                    'table:supplier',
-                    TenantDataPolicy::TenantRoot,
-                    ['id', 'name'],
-                    ['strategy' => 'selected_supplier', 'column' => 'id'],
-                ),
-                $this->definitionFor(
-                    'table:synthetic_nodes',
-                    TenantDataPolicy::TenantOwned,
-                    [
-                        'id',
-                        'supplier_id',
-                        'country_id',
-                        'parent_id',
-                        'payload_json',
-                        'row_hash',
-                    ],
-                    ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
-                    references: [
-                        $this->reference(
-                            ['country_id'],
-                            'table:countries',
-                            CompanyBackupReferenceMapping::GlobalNaturalKey,
-                        ),
-                        $this->reference(
-                            ['parent_id'],
-                            'table:synthetic_nodes',
-                            nullableColumns: ['parent_id'],
-                        ),
-                        $this->reference(['supplier_id'], 'table:supplier'),
-                    ],
-                    embeddedReferences: [[
-                        'column' => 'payload_json',
-                        'condition' => null,
-                        'fallbacks' => [],
-                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
-                        'nullable' => false,
-                        'path' => ['supplier_id'],
-                        'target' => 'table:supplier',
-                        'target_columns' => ['id'],
-                    ]],
-                    embeddedHashReferences: $unstableHashTarget ? [[
-                        'column' => 'payload_json',
-                        'nullable' => true,
-                        'path' => ['previous_hash'],
-                        'target' => 'table:synthetic_nodes',
-                        'target_hash_column' => 'row_hash',
-                    ]] : [],
-                    derivedHashes: [[
-                        'algorithm' => 'sha256_canonical_json',
-                        'hash_column' => 'row_hash',
-                        'nullable' => false,
-                        'source_column' => 'payload_json',
-                    ]],
-                ),
-                $this->definitionFor(
-                    'table:synthetic_events',
-                    TenantDataPolicy::TenantOwned,
-                    ['id', 'supplier_id', 'node_hash_json'],
-                    ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
-                    references: [
-                        $this->reference(['supplier_id'], 'table:supplier'),
-                    ],
-                    embeddedHashReferences: [[
-                        'column' => 'node_hash_json',
-                        'nullable' => true,
-                        'path' => ['node_hash'],
-                        'target' => 'table:synthetic_nodes',
-                        'target_hash_column' => 'row_hash',
-                    ]],
-                ),
-                $this->definitionFor(
-                    'table:synthetic_secrets',
-                    TenantDataPolicy::TenantOwned,
-                    ['id', 'supplier_id', 'label'],
-                    ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
-                    references: [
-                        $this->reference(['supplier_id'], 'table:supplier'),
-                    ],
-                    secretPolicies: [
-                        'contact_ciphertext' => [
-                            'policy' =>
-                                TenantSecretPolicy::ProtectedDomainSecret->value,
-                            'storage' =>
-                                CompanyBackupSecretStorage::ApplicationEncryptedContext->value,
-                            'context' =>
-                                'payroll:{supplier_id}:{id}:contact_email',
-                        ],
-                    ],
-                    omitColumns: [
-                        'contact_hash' => 'rederived_from_protected_secret',
-                        'contact_masked' => 'rederived_from_protected_secret',
-                    ],
-                    protectedSecretMaterializations: [[
-                        'entity_id_column' => 'id',
-                        'field' => 'contact_email',
-                        'materializer' => 'payroll_sensitive_v1',
-                        'nullable' => false,
-                        'secret_column' => 'contact_ciphertext',
-                        'target_columns' => [
-                            'ciphertext' => 'contact_ciphertext',
-                            'lookup_hash' => 'contact_hash',
-                            'masked' => 'contact_masked',
-                        ],
-                        'tenant_id_column' => 'supplier_id',
-                    ]],
-                ),
-                new TenantDataDefinition(
-                    'table:users',
-                    TenantDataObjectKind::Table,
-                    TenantDataPolicy::InstanceOwned,
-                    [$profile],
-                    [
-                        'primary_key' => ['id'],
-                        'ownership' => ['strategy' => 'instance'],
-                    ],
-                ),
-            ],
+            $definitions,
             [$profile],
         ), $profile);
     }
 
     /** @return array<string,list<array<string,mixed>>> */
-    private function sourceRows(): array
+    private function sourceRows(bool $withFiles = false): array
     {
         $firstPayload = CanonicalJson::encode([
+            ...($withFiles ? [
+                'logo_path' => 'storage/supplier-logos/'
+                    . 'sup-7-brand-11-aaaaaaaaaaaa.png',
+            ] : []),
             'supplier_id' => 7,
             'value' => 'first',
         ]);
@@ -520,6 +615,9 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             'table:supplier' => [[
                 'id' => 7,
                 'name' => 'Restored tenant',
+                'logo_path' => $withFiles
+                    ? 'storage/supplier-logos/sup-7.png'
+                    : null,
             ]],
             'table:synthetic_nodes' => [[
                 'id' => 11,
@@ -569,6 +667,51 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             );
         }
         return CompanyBackupDataInventory::fromObjects($objects, $snapshot);
+    }
+
+    private function fileInventory(
+        TenantDataRegistrySnapshot $snapshot,
+        bool $withFiles,
+        bool $omitNestedFileOwner,
+    ): CompanyBackupFileInventory {
+        $areas = [];
+        if ($withFiles) {
+            $areas[] = [
+                'registry_key' => 'file-area:supplier-logos',
+                'order' => 1,
+                'entries' => [...($omitNestedFileOwner ? [] : [[
+                    'source_path' =>
+                        'sup-7-brand-11-aaaaaaaaaaaa.png',
+                    'archive_path' => null,
+                    'state' => 'missing',
+                    'bytes' => null,
+                    'sha256' => null,
+                    'owners' => [[
+                        'registry_key' => 'table:synthetic_nodes',
+                        'primary_key' => ['id' => 11],
+                        'column' => 'payload_json',
+                        'path' => ['logo_path'],
+                    ]],
+                ]]), [
+                    'source_path' => 'sup-7.png',
+                    'archive_path' => null,
+                    'state' => 'missing',
+                    'bytes' => null,
+                    'sha256' => null,
+                    'owners' => [[
+                        'registry_key' => 'table:supplier',
+                        'primary_key' => ['id' => 7],
+                        'column' => 'logo_path',
+                        'path' => [],
+                    ]],
+                ]],
+            ];
+        }
+        return CompanyBackupFileInventory::fromArray([
+            'format' => CompanyBackupFileInventory::FORMAT,
+            'version' => CompanyBackupFileInventory::VERSION,
+            'areas' => $areas,
+        ], $snapshot);
     }
 
     /**
@@ -704,7 +847,8 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             "SELECT COUNT(*) FROM sqlite_temp_master"
                 . " WHERE type = 'table'"
                 . " AND (name LIKE 'company_backup_target_%'"
-                . " OR name LIKE 'company_backup_hash_%')",
+                . " OR name LIKE 'company_backup_hash_%'"
+                . " OR name LIKE 'company_backup_file_path_%')",
         );
         if ($statement === false) {
             throw new \RuntimeException('Nelze ověřit dočasné tabulky.');
@@ -720,6 +864,7 @@ final readonly class SyntheticCompanyBackupImportSource implements CompanyBackup
     public function __construct(
         private TenantDataRegistrySnapshot $registry,
         private CompanyBackupDataInventory $inventory,
+        private CompanyBackupFileInventory $fileInventory,
         private array $rows,
         private string $binding,
         private ?string $failOn,
@@ -739,6 +884,16 @@ final readonly class SyntheticCompanyBackupImportSource implements CompanyBackup
     public function dataInventory(): CompanyBackupDataInventory
     {
         return $this->inventory;
+    }
+
+    public function fileInventory(): CompanyBackupFileInventory
+    {
+        return $this->fileInventory;
+    }
+
+    public function consumeFile(string $archivePath, callable $chunkVisitor): int
+    {
+        throw new \RuntimeException('synthetic_file_unavailable');
     }
 
     public function technicalValidationBindingSha256(): string

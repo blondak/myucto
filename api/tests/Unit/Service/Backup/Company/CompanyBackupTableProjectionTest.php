@@ -127,6 +127,91 @@ final class CompanyBackupTableProjectionTest extends TestCase
         );
     }
 
+    public function testAppliesRowMapperBeforeRefreshingDerivedHash(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
+            dataColumns: ['id', 'supplier_id', 'payload_json', 'payload_hash'],
+            derivedHashes: [[
+                'algorithm' => 'sha256_canonical_json',
+                'hash_column' => 'payload_hash',
+                'nullable' => false,
+                'source_column' => 'payload_json',
+            ]],
+            embeddedHashes: [[
+                'algorithm' => 'sha256_canonical_json',
+                'column' => 'payload_json',
+                'dependencies' => [],
+                'hash_path' => ['brand_hash'],
+                'name' => 'brand',
+                'nullable' => false,
+                'omit_paths' => [],
+                'source_path' => ['brand'],
+            ]],
+        ));
+        $brand = [
+            'logo_path' => 'storage/supplier-logos/sup-7.png',
+        ];
+        $json = \MyInvoice\Service\Backup\CanonicalJson::encode([
+            'brand' => $brand,
+            'brand_hash' => hash(
+                'sha256',
+                \MyInvoice\Service\Backup\CanonicalJson::encode($brand),
+            ),
+        ]);
+
+        $restored = $projection->remapReferences(
+            [
+                'id' => 3,
+                'supplier_id' => 7,
+                'payload_json' => $json,
+                'payload_hash' => hash('sha256', $json),
+            ],
+            static fn (): CompanyBackupSourceKey =>
+                CompanyBackupSourceKey::fromValues(
+                    'table:supplier',
+                    ['id' => 41],
+                ),
+            rowMapper: static function (array $row): array {
+                $payload = json_decode(
+                    (string) $row['payload_json'],
+                    true,
+                    flags: JSON_THROW_ON_ERROR,
+                );
+                self::assertIsArray($payload);
+                $payload['brand']['logo_path'] =
+                    'storage/supplier-logos/sup-41.png';
+                $row['payload_json'] =
+                    \MyInvoice\Service\Backup\CanonicalJson::encode($payload);
+                return $row;
+            },
+        );
+
+        $payload = json_decode(
+            (string) $restored['payload_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($payload);
+        self::assertIsArray($payload['brand']);
+        self::assertSame(
+            'storage/supplier-logos/sup-41.png',
+            $payload['brand']['logo_path'],
+        );
+        self::assertSame(
+            hash(
+                'sha256',
+                \MyInvoice\Service\Backup\CanonicalJson::encode(
+                    $payload['brand'],
+                ),
+            ),
+            $payload['brand_hash'],
+        );
+        self::assertSame(
+            hash('sha256', (string) $restored['payload_json']),
+            $restored['payload_hash'],
+        );
+    }
+
     public function testRefreshesNestedSealBeforeOuterSealAtomically(): void
     {
         $projection = CompanyBackupTableProjection::fromDefinition($this->definition(

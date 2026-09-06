@@ -29,6 +29,7 @@ final class CompanyBackupImportRowPreparer
         CompanyBackupReferenceResolutionPlan $resolutions,
         private readonly CompanyBackupImportDependencyPlan $plan,
         CompanyBackupArchiveLimits $limits = new CompanyBackupArchiveLimits(),
+        private readonly ?CompanyBackupSqlFilePathMap $filePaths = null,
     ) {
         $this->projection = CompanyBackupTableProjection::fromDefinition($definition);
         $this->identityProjection = CompanyBackupSourceIdentityProjection::fromDefinition(
@@ -96,11 +97,20 @@ final class CompanyBackupImportRowPreparer
             $column = $this->projection->primaryKey[0];
             $targetSeed[$column] = $autoIncrement->next();
         }
+        $rowMapper = $this->filePaths === null
+            ? null
+            : fn (array $row): array => $this->filePaths->transform(
+                $this->projection,
+                $sourceRow,
+                $row,
+                true,
+            );
         $targetRow = $this->transformer->transformForInsert(
             $this->projection,
             $targetSeed,
             $this->plan,
             $hashMapper,
+            $rowMapper,
         );
         $targetIdentity = $this->identityProjection->identityForRow($targetRow);
         $this->identities->add($sourceIdentity, $targetIdentity);

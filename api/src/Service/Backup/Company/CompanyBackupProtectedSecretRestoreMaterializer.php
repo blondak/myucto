@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\CanonicalJson;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -56,7 +57,9 @@ final class CompanyBackupProtectedSecretRestoreMaterializer
                     $targetRegistry->profile,
                 ) as $definition
             ) {
-                if (!$definition->policy->hasMachineDataPayload()) {
+                if ($definition->kind !== TenantDataObjectKind::Table
+                    || !$definition->policy->hasMachineDataPayload()
+                ) {
                     continue;
                 }
                 $projection = CompanyBackupTableProjection::fromDefinition(

@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Backup\Company;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 
 /** Opakovatelný, technickou validací svázaný zdroj databázového importu. */
-interface CompanyBackupImportSource
+interface CompanyBackupImportSource extends CompanyBackupImportFileSource
 {
     public function sourceRegistry(): TenantDataRegistrySnapshot;
 

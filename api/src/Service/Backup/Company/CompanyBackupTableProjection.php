@@ -656,12 +656,14 @@ final readonly class CompanyBackupTableProjection
      * @param array<string,mixed> $row
      * @param callable(CompanyBackupReferenceOccurrence):mixed $mapper
      * @param null|callable(CompanyBackupEmbeddedHashReference,string):mixed $hashMapper
+     * @param null|callable(array<string,mixed>):array<string,mixed> $rowMapper
      * @return array<string,mixed>
      */
     public function remapReferences(
         array $row,
         callable $mapper,
         ?callable $hashMapper = null,
+        ?callable $rowMapper = null,
     ): array {
         if ($hashMapper === null && $this->embeddedHashReferences->references !== []) {
             throw new CompanyBackupDataSourceException(
@@ -676,7 +678,11 @@ final readonly class CompanyBackupTableProjection
 
         return $this->derivedHashes->transform(
             $row,
-            function (array $source) use ($mapper, $resolvedHashMapper): array {
+            function (array $source) use (
+                $mapper,
+                $resolvedHashMapper,
+                $rowMapper,
+            ): array {
                 $source = $this->references->remap(
                     $source,
                     fn (
@@ -717,8 +723,12 @@ final readonly class CompanyBackupTableProjection
                 );
                 $source = $this->embeddedHashes->transform(
                     $source,
-                    fn (array $payload): array =>
-                        $this->embeddedHashReferences->remap(
+                    function (array $payload) use (
+                        $mapper,
+                        $resolvedHashMapper,
+                        $rowMapper,
+                    ): array {
+                        $payload = $this->embeddedHashReferences->remap(
                             $this->embeddedReferences->remap(
                                 $payload,
                                 function (
@@ -742,40 +752,48 @@ final readonly class CompanyBackupTableProjection
                                 },
                             ),
                             $resolvedHashMapper,
-                        ),
-                );
-                return $this->polymorphicReferences->remap(
-                    $source,
-                    function (
-                        CompanyBackupPolymorphicReferenceCase $case,
-                        int $value,
-                    ) use ($mapper): int|CompanyBackupReferenceRemapDirective|null {
-                        foreach ($this->polymorphicReferences->references as $reference) {
-                            if (!in_array($case, $reference->cases, true)) {
-                                continue;
-                            }
-                            $values = $this->mappedValues(
-                                CompanyBackupReferenceOccurrence::polymorphic(
-                                    $this->registryKey,
-                                    $reference,
-                                    $case,
-                                    $value,
-                                ),
-                                $mapper,
-                            );
-                            if ($values
-                                === CompanyBackupReferenceRemapDirective::Defer
-                            ) {
-                                return $values;
-                            }
-                            $mapped = $values[0] ?? null;
-                            return is_int($mapped) ? $mapped : null;
-                        }
-                        throw new \LogicException(
-                            'Polymorfní varianta nepatří do projekce.',
                         );
+                        $payload = $this->polymorphicReferences->remap(
+                            $payload,
+                            function (
+                                CompanyBackupPolymorphicReferenceCase $case,
+                                int $value,
+                            ) use ($mapper): int|CompanyBackupReferenceRemapDirective|null {
+                                foreach (
+                                    $this->polymorphicReferences->references
+                                    as $reference
+                                ) {
+                                    if (!in_array($case, $reference->cases, true)) {
+                                        continue;
+                                    }
+                                    $values = $this->mappedValues(
+                                        CompanyBackupReferenceOccurrence::polymorphic(
+                                            $this->registryKey,
+                                            $reference,
+                                            $case,
+                                            $value,
+                                        ),
+                                        $mapper,
+                                    );
+                                    if ($values
+                                        === CompanyBackupReferenceRemapDirective::Defer
+                                    ) {
+                                        return $values;
+                                    }
+                                    $mapped = $values[0] ?? null;
+                                    return is_int($mapped) ? $mapped : null;
+                                }
+                                throw new \LogicException(
+                                    'Polymorfní varianta nepatří do projekce.',
+                                );
+                            },
+                        );
+                        return $rowMapper === null
+                            ? $payload
+                            : $rowMapper($payload);
                     },
                 );
+                return $source;
             },
         );
     }

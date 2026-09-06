@@ -12,9 +12,7 @@ use ZipArchive;
  * Otevřená read-only session nad technicky ověřeným archivem. JSONL položky
  * lze plně přehrát opakovaně; plaintext secret payload nikdy nejde na disk.
  */
-final class CompanyBackupImportArchiveSource implements
-    CompanyBackupImportSource,
-    CompanyBackupImportFileSource
+final class CompanyBackupImportArchiveSource implements CompanyBackupImportSource
 {
     private const READ_CHUNK_BYTES = 65_536;
 
