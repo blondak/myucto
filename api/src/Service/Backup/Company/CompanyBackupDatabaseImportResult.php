@@ -17,8 +17,10 @@ final readonly class CompanyBackupDatabaseImportResult
         public int $sourceKeyCount,
         public int $hashMappingCount,
         public int $protectedSecretCount,
+        public CompanyBackupFilePublicationPlan $filePublicationPlan,
     ) {
         if ($supplierId < 1
+            || $filePublicationPlan->targetSupplierId !== $supplierId
             || min(
                 $mappedGlobalRows,
                 $insertedRows,

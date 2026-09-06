@@ -47,6 +47,8 @@ final class CompanyBackupSqlFilePathMap
 
     private ?int $targetSupplierId = null;
 
+    private ?CompanyBackupFilePublicationPlan $publicationPlan = null;
+
     private int $fileEntries = 0;
 
     private int $ownerEntries = 0;
@@ -63,7 +65,7 @@ final class CompanyBackupSqlFilePathMap
         private readonly PDO $database,
         private readonly CompanyBackupFileInventory $inventory,
         TenantDataRegistrySnapshot $sourceRegistry,
-        TenantDataRegistrySnapshot $targetRegistry,
+        private readonly TenantDataRegistrySnapshot $targetRegistry,
         private readonly CompanyBackupArchiveLimits $limits =
             new CompanyBackupArchiveLimits(),
     ) {
@@ -327,6 +329,17 @@ final class CompanyBackupSqlFilePathMap
         return $this->indexedBytes;
     }
 
+    public function publicationPlan(): CompanyBackupFilePublicationPlan
+    {
+        $this->assertOpen();
+        if (!$this->finished
+            || !$this->publicationPlan instanceof CompanyBackupFilePublicationPlan
+        ) {
+            throw self::error('file_restore_map_not_finished');
+        }
+        return $this->publicationPlan;
+    }
+
     public function close(): void
     {
         if ($this->closed) {
@@ -555,39 +568,15 @@ final class CompanyBackupSqlFilePathMap
             return;
         }
 
-        $targetPaths = [];
-        try {
-            foreach ($this->inventory->areas as $inventoryArea) {
-                $area = $this->areas[$inventoryArea->registryKey] ?? null;
-                if (!$area instanceof CompanyBackupFileAreaProjection) {
-                    throw self::error(
-                        'file_restore_area_contract_mismatch',
-                        $inventoryArea->registryKey,
-                    );
-                }
-                foreach ($inventoryArea->entries as $entry) {
-                    $targetPath = $area->pathPolicy->restoreTargetPath(
-                        $entry->sourcePath,
-                        $sourceId,
-                        $targetId,
-                    );
-                    $signature = $area->registryKey . "\0" . $targetPath;
-                    if (isset($targetPaths[$signature])) {
-                        throw self::error(
-                            'file_restore_target_path_duplicate',
-                            $area->registryKey,
-                        );
-                    }
-                    $targetPaths[$signature] = true;
-                }
-            }
-        } catch (CompanyBackupFileRestoreException $e) {
-            throw $e;
-        } catch (\InvalidArgumentException $e) {
-            throw self::error('file_restore_source_path_invalid', previous: $e);
-        }
+        $publicationPlan = CompanyBackupFilePublicationPlan::fromInventory(
+            $this->inventory,
+            $this->targetRegistry,
+            $sourceId,
+            $targetId,
+        );
         $this->sourceSupplierId = $sourceId;
         $this->targetSupplierId = $targetId;
+        $this->publicationPlan = $publicationPlan;
     }
 
     /**

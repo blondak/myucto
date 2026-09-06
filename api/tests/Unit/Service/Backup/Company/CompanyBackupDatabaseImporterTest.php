@@ -155,6 +155,10 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         self::assertSame(11, $result->sourceKeyCount);
         self::assertSame(2, $result->hashMappingCount);
         self::assertSame(1, $result->protectedSecretCount);
+        self::assertSame(7, $result->filePublicationPlan->sourceSupplierId);
+        self::assertSame(41, $result->filePublicationPlan->targetSupplierId);
+        self::assertSame(0, $result->filePublicationPlan->presentEntryCount());
+        self::assertSame(2, $result->filePublicationPlan->missingEntryCount());
 
         $suppliers = $this->rows(
             'SELECT id, name, logo_path FROM supplier WHERE id = 41',

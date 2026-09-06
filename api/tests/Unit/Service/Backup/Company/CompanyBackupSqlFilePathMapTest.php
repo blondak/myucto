@@ -68,10 +68,31 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
             $decoded['logo_path'],
         );
 
+        try {
+            $map->publicationPlan();
+            self::fail(
+                'Publication plán nesmí před dokončením mapy opustit SQL vrstvu.',
+            );
+        } catch (CompanyBackupFileRestoreException $e) {
+            self::assertSame('file_restore_map_not_finished', $e->errorCode);
+        }
+
         $map->finish();
         self::assertSame(2, $map->fileEntryCount());
         self::assertSame(2, $map->ownerEntryCount());
         self::assertGreaterThan(0, $map->indexedBytes());
+        $plan = $map->publicationPlan();
+        self::assertSame(7, $plan->sourceSupplierId);
+        self::assertSame(41, $plan->targetSupplierId);
+        self::assertSame(0, $plan->presentEntryCount());
+        self::assertSame(2, $plan->missingEntryCount());
+        self::assertSame([
+            'sup-41-brand-11-aaaaaaaaaaaa.png',
+            'sup-41.png',
+        ], array_map(
+            static fn ($entry): string => $entry->targetPath,
+            $plan->entries,
+        ));
         $map->close();
         self::assertTrue($database->inTransaction());
         self::assertTrue($database->rollBack());

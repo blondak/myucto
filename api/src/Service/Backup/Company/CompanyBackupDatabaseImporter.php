@@ -176,6 +176,7 @@ final readonly class CompanyBackupDatabaseImporter
                 $identities->entryCount(),
                 $hashes->mappingCount(),
                 $protectedSecretCount,
+                $filePaths->publicationPlan(),
             );
         } catch (\Throwable $e) {
             $failure = $e;
