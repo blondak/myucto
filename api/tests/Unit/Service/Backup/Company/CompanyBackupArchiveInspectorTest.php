@@ -306,6 +306,103 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         $source->close();
     }
 
+    public function testImportSourceReplaysOnlyRegisteredFileEntries(): void
+    {
+        $archive = $this->archive($this->payload(withFile: true));
+        $inspection = $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+        $source = new CompanyBackupImportArchiveSource(
+            $archive,
+            self::PASSWORD,
+            new CompanyBackupTechnicalValidation(
+                $inspection,
+                $inspection->sourceRegistry,
+                '5.28.1',
+                CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+            ),
+        );
+        $files = $source->fileInventory()->archiveFiles();
+        self::assertCount(1, $files);
+        $archivePath = array_key_first($files);
+        self::assertIsString($archivePath);
+
+        try {
+            $source->consumeFile(
+                $archivePath,
+                static function (string $chunk): void {
+                    throw new \RuntimeException('synthetic_file_visitor_failure');
+                },
+            );
+            self::fail('Chyba cílového writeru musí přerušit souborový stream.');
+        } catch (\RuntimeException $e) {
+            self::assertSame('synthetic_file_visitor_failure', $e->getMessage());
+        }
+
+        for ($pass = 0; $pass < 2; $pass++) {
+            $content = '';
+            $bytes = $source->consumeFile(
+                $archivePath,
+                static function (string $chunk) use (&$content): void {
+                    $content .= $chunk;
+                },
+            );
+            self::assertSame("synthetic-logo\0bytes", $content);
+            self::assertSame(strlen($content), $bytes);
+        }
+
+        try {
+            $source->consumeFile(
+                'files/supplier-logos/' . str_repeat('f', 64) . '.png',
+                static function (string $chunk): void {},
+            );
+            self::fail('Importní zdroj nesmí otevřít soubor mimo inventář.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('source_file_entry_missing', $e->errorCode);
+            self::assertStringNotContainsString(str_repeat('f', 64), $e->getMessage());
+        }
+        $source->close();
+    }
+
+    public function testImportSourceReplaysRegisteredEmptyFile(): void
+    {
+        $archive = $this->archive($this->payload(
+            withFile: true,
+            fileContent: '',
+        ));
+        $inspection = $this->inspector()->inspect(
+            $archive,
+            self::PASSWORD,
+            '5.28.1',
+            CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+        $source = new CompanyBackupImportArchiveSource(
+            $archive,
+            self::PASSWORD,
+            new CompanyBackupTechnicalValidation(
+                $inspection,
+                $inspection->sourceRegistry,
+                '5.28.1',
+                CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+            ),
+        );
+        $archivePath = array_key_first($source->fileInventory()->archiveFiles());
+        self::assertIsString($archivePath);
+        $chunks = [];
+
+        self::assertSame(0, $source->consumeFile(
+            $archivePath,
+            static function (string $chunk) use (&$chunks): void {
+                $chunks[] = $chunk;
+            },
+        ));
+        self::assertSame([], $chunks);
+        $source->close();
+    }
+
     public function testAuthenticatedEnvelopeStillRequiresRegistryBoundPayload(): void
     {
         $archive = $this->archive($this->payload(
@@ -478,31 +575,54 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
         bool $protectedSecret = false,
         bool $withSecretEnvelope = false,
         bool $invalidSecretPayload = false,
+        bool $withFile = false,
+        string $fileContent = "synthetic-logo\0bytes",
     ): array
     {
         $format = new CompanyBackupFormat();
         $protectedSecret = $protectedSecret || $withSecretEnvelope;
-        $registry = new TenantDataRegistry(
-            1,
-            [new TenantDataDefinition(
-                'table:supplier',
-                TenantDataObjectKind::Table,
-                TenantDataPolicy::TenantRoot,
+        $definitions = [new TenantDataDefinition(
+            'table:supplier',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRoot,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
+                ...($protectedSecret ? [
+                    'secrets' => [
+                        'domain_salt' => [
+                            'policy' =>
+                                TenantSecretPolicy::ProtectedDomainSecret->value,
+                            'storage' => 'raw',
+                        ],
+                    ],
+                ] : []),
+            ],
+        )];
+        if ($withFile) {
+            $definitions[] = new TenantDataDefinition(
+                'file-area:supplier-logos',
+                TenantDataObjectKind::FileArea,
+                TenantDataPolicy::TenantOwned,
                 [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
                 [
-                    'primary_key' => ['id'],
-                    'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
-                    ...($protectedSecret ? [
-                        'secrets' => [
-                            'domain_salt' => [
-                                'policy' =>
-                                    TenantSecretPolicy::ProtectedDomainSecret->value,
-                                'storage' => 'raw',
-                            ],
-                        ],
-                    ] : []),
+                    'file_policy' => 'historical_optional',
+                    'path_policy' => 'supplier_logo',
+                    'file_owners' => [[
+                        'registry_key' => 'table:supplier',
+                        'column' => 'logo_path',
+                        'path' => [],
+                        'stored_prefix' => 'storage/supplier-logos/',
+                    ]],
+                    'ownership' => ['strategy' => 'database_references'],
+                    'storage_subdirectory' => 'supplier-logos',
                 ],
-            )],
+            );
+        }
+        $registry = new TenantDataRegistry(
+            1,
+            $definitions,
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
         );
         $manifest = [
@@ -540,10 +660,28 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
                 'sha256' => hash('sha256', $supplier),
             ]],
         ];
+        $fileSha256 = hash('sha256', $fileContent);
         $manifest['files'] = [
             'format' => CompanyBackupFileInventory::FORMAT,
             'version' => CompanyBackupFileInventory::VERSION,
-            'areas' => [],
+            'areas' => $withFile ? [[
+                'registry_key' => 'file-area:supplier-logos',
+                'order' => 1,
+                'entries' => [[
+                    'source_path' => 'sup-1.png',
+                    'archive_path' =>
+                        'files/supplier-logos/' . $fileSha256 . '.png',
+                    'state' => 'present',
+                    'bytes' => strlen($fileContent),
+                    'sha256' => $fileSha256,
+                    'owners' => [[
+                        'registry_key' => 'table:supplier',
+                        'primary_key' => ['id' => 1],
+                        'column' => 'logo_path',
+                        'path' => [],
+                    ]],
+                ]],
+            ]] : [],
         ];
         $secrets = [
             'format' => CompanyBackupSecretInventory::FORMAT,
@@ -554,6 +692,10 @@ final class CompanyBackupArchiveInspectorTest extends TestCase
             'CTI-MNE.txt' => "Syntetická záloha MyÚčta.\n",
             'data/table-supplier.jsonl' => $supplier,
         ];
+        if ($withFile) {
+            $payload['files/supplier-logos/' . $fileSha256 . '.png'] =
+                $fileContent;
+        }
         if ($withSecretEnvelope) {
             $snapshot = TenantDataRegistrySnapshot::fromRegistry(
                 $registry,

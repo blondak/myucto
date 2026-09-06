@@ -12,7 +12,9 @@ use ZipArchive;
  * Otevřená read-only session nad technicky ověřeným archivem. JSONL položky
  * lze plně přehrát opakovaně; plaintext secret payload nikdy nejde na disk.
  */
-final class CompanyBackupImportArchiveSource implements CompanyBackupImportSource
+final class CompanyBackupImportArchiveSource implements
+    CompanyBackupImportSource,
+    CompanyBackupImportFileSource
 {
     private const READ_CHUNK_BYTES = 65_536;
 
@@ -101,6 +103,11 @@ final class CompanyBackupImportArchiveSource implements CompanyBackupImportSourc
         return $this->validation->inspection->dataInventory;
     }
 
+    public function fileInventory(): CompanyBackupFileInventory
+    {
+        return $this->validation->inspection->fileInventory;
+    }
+
     public function technicalValidationBindingSha256(): string
     {
         return $this->validation->bindingSha256;
@@ -166,6 +173,102 @@ final class CompanyBackupImportArchiveSource implements CompanyBackupImportSourc
             throw $failure;
         }
         return $rows;
+    }
+
+    /** @param callable(string):void $chunkVisitor */
+    public function consumeFile(
+        string $archivePath,
+        callable $chunkVisitor,
+    ): int {
+        $this->assertAvailable();
+        $expected = $this->fileInventory()->archiveFiles()[$archivePath]
+            ?? null;
+        $registryKey = self::fileRegistryKey($archivePath);
+        if ($expected === null) {
+            throw self::error('source_file_entry_missing', $registryKey);
+        }
+        $inspectionHash = $this->validation->inspection->entryHashes[
+            $archivePath
+        ] ?? null;
+        $index = $this->zip->locateName($archivePath);
+        if (!is_string($inspectionHash)
+            || !hash_equals($expected['sha256'], $inspectionHash)
+            || !is_int($index)
+        ) {
+            throw self::error('source_file_entry_changed', $registryKey);
+        }
+        $stat = $this->zip->statIndex($index);
+        if (!is_array($stat)
+            || $stat['name'] !== $archivePath
+            || $stat['size'] !== $expected['bytes']
+        ) {
+            throw self::error('source_file_entry_changed', $registryKey);
+        }
+        $stream = @$this->zip->getStreamIndex($index);
+        if (!is_resource($stream)) {
+            throw self::error('source_archive_unlock_failed');
+        }
+
+        $this->active = true;
+        $bytes = 0;
+        $failure = null;
+        try {
+            $hash = hash_init('sha256');
+            while ($bytes < $expected['bytes']) {
+                $remaining = $expected['bytes'] - $bytes;
+                $readBytes = min(self::READ_CHUNK_BYTES, $remaining);
+                if ($readBytes < 1) {
+                    throw self::error(
+                        'source_file_entry_changed',
+                        $registryKey,
+                    );
+                }
+                $chunk = @fread(
+                    $stream,
+                    $readBytes,
+                );
+                if (!is_string($chunk)
+                    || $chunk === ''
+                ) {
+                    throw self::error(
+                        'source_file_entry_unreadable',
+                        $registryKey,
+                    );
+                }
+                $bytes += strlen($chunk);
+                hash_update($hash, $chunk);
+                $chunkVisitor($chunk);
+            }
+            $extra = @fread($stream, 1);
+            if (!is_string($extra)) {
+                throw self::error(
+                    'source_file_entry_unreadable',
+                    $registryKey,
+                );
+            }
+            if ($extra !== ''
+                || $bytes !== $expected['bytes']
+                || !hash_equals($expected['sha256'], hash_final($hash))
+            ) {
+                throw self::error(
+                    'source_file_entry_changed',
+                    $registryKey,
+                );
+            }
+        } catch (\Throwable $e) {
+            $failure = $e;
+        }
+        if (!@fclose($stream) && $failure === null) {
+            $failure = self::error(
+                'source_file_entry_close_failed',
+                $registryKey,
+            );
+        }
+        $this->active = false;
+        if ($failure instanceof \Throwable) {
+            throw $failure;
+        }
+        return $bytes;
     }
 
     public function secretPayload(): ?CompanyBackupSecretPayload
@@ -386,6 +489,17 @@ final class CompanyBackupImportArchiveSource implements CompanyBackupImportSourc
         if ($sensitive !== '' && function_exists('sodium_memzero')) {
             sodium_memzero($sensitive);
         }
+    }
+
+    private static function fileRegistryKey(string $archivePath): string
+    {
+        $parts = explode('/', $archivePath, 3);
+        $area = $parts[0] === 'files'
+            && isset($parts[1])
+            && preg_match('/^[a-z][a-z0-9-]{0,63}$/D', $parts[1]) === 1
+                ? $parts[1]
+                : 'unknown';
+        return 'file-area:' . $area;
     }
 
     private static function error(
