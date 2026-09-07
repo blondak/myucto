@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Registry;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupAssetsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBrandingProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupClientBankAccountsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupClientsProjection;
@@ -690,7 +691,12 @@ final class TenantDataRegistryFactory
                 ],
                 ...self::companyBackupProjection($table),
             ];
-            if ($table === 'chart_of_accounts') {
+            if ($table === 'assets') {
+                $details['natural_key'] = [
+                    'supplier_id',
+                    'inventory_number',
+                ];
+            } elseif ($table === 'chart_of_accounts') {
                 $details['natural_key'] = ['supplier_id', 'account_code'];
             } elseif ($table === 'cost_centers') {
                 $details['natural_key'] = ['supplier_id', 'code'];
@@ -2368,6 +2374,7 @@ final class TenantDataRegistryFactory
         $columns = match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::dataColumns(),
+            'assets' => CompanyBackupAssetsProjection::dataColumns(),
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::dataColumns(),
             'client_bank_accounts' =>
@@ -2518,6 +2525,7 @@ final class TenantDataRegistryFactory
         return match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::references(),
+            'assets' => CompanyBackupAssetsProjection::references(),
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::references(),
             'client_bank_accounts' =>
