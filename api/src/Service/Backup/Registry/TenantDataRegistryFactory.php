@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjecti
 use MyInvoice\Service\Backup\Company\CompanyBackupAssetImprovementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupAssetsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBrandingProfilesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupCashDocumentVatLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupCashDocumentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupCashRegistersProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupClientBankAccountsProjection;
@@ -2383,6 +2384,8 @@ final class TenantDataRegistryFactory
             'assets' => CompanyBackupAssetsProjection::dataColumns(),
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::dataColumns(),
+            'cash_document_vat_lines' =>
+                CompanyBackupCashDocumentVatLinesProjection::dataColumns(),
             'cash_documents' => CompanyBackupCashDocumentsProjection::dataColumns(),
             'cash_registers' => CompanyBackupCashRegistersProjection::dataColumns(),
             'client_bank_accounts' =>
@@ -2540,6 +2543,8 @@ final class TenantDataRegistryFactory
             'assets' => CompanyBackupAssetsProjection::references(),
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::references(),
+            'cash_document_vat_lines' =>
+                CompanyBackupCashDocumentVatLinesProjection::references(),
             'cash_documents' => CompanyBackupCashDocumentsProjection::references(),
             'cash_registers' => CompanyBackupCashRegistersProjection::references(),
             'client_bank_accounts' =>

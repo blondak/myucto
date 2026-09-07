@@ -2269,6 +2269,50 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testCashDocumentVatLinesDeclareCompleteIndirectPayload(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:cash_document_vat_lines');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'cash_document_id',
+            'vat_rate',
+            'base_amount',
+            'vat_amount',
+            'vat_classification_code',
+            'vat_deduction',
+            'vat_deduction_percent',
+            'tax_treatment',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['vat_classification_code'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['cash_document_id'],
+                        'cash_documents',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame(TenantDataPolicy::TenantOwnedIndirect, $definition->policy);
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['cash_document_id->cash_documents:id'],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
