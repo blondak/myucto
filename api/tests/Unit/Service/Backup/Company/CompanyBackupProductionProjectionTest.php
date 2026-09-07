@@ -2150,6 +2150,125 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testCashDocumentsDeclareCompletePayloadAndSemanticReferences(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:cash_documents');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'register_id',
+            'doc_type',
+            'purpose',
+            'doc_number',
+            'issue_date',
+            'tax_date',
+            'partner_name',
+            'partner_ic',
+            'partner_dic',
+            'description',
+            'vat_mode',
+            'total_amount',
+            'currency_code',
+            'fx_rate',
+            'amount_foreign',
+            'rule_key',
+            'counter_account_code',
+            'project_id',
+            'invoice_id',
+            'purchase_invoice_id',
+            'auto_settlement',
+            'invoice_payment_id',
+            'journal_entry_id',
+            'reversal_entry_id',
+            'status',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [
+                    'doc_number',
+                    'tax_date',
+                    'partner_name',
+                    'partner_ic',
+                    'partner_dic',
+                    'amount_foreign',
+                    'rule_key',
+                    'counter_account_code',
+                    'project_id',
+                    'invoice_id',
+                    'purchase_invoice_id',
+                    'invoice_payment_id',
+                    'journal_entry_id',
+                    'reversal_entry_id',
+                    'created_by',
+                ],
+                [
+                    new CompanyBackupForeignKey(
+                        ['journal_entry_id'],
+                        'journal_entries',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['invoice_id'],
+                        'invoices',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['purchase_invoice_id'],
+                        'purchase_invoices',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['project_id'],
+                        'projects',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['register_id'],
+                        'cash_registers',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'created_by->users:id',
+                'invoice_id->invoices:id',
+                'invoice_payment_id->invoice_payments:id',
+                'journal_entry_id->journal_entries:id',
+                'project_id->projects:id',
+                'purchase_invoice_id->purchase_invoices:id',
+                'register_id->cash_registers:id',
+                'reversal_entry_id->journal_entries:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['null', 'restore_actor'],
+            $projection->references->references[0]->fallbacks,
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
