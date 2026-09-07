@@ -23,6 +23,9 @@ use MyInvoice\Service\Backup\Company\CompanyBackupFileStagingRootResolver;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupPostImportValidationResult;
 use MyInvoice\Service\Backup\Company\CompanyBackupPostImportException;
+use MyInvoice\Service\Backup\Company\CompanyBackupPostImportInvariant;
+use MyInvoice\Service\Backup\Company\CompanyBackupPostImportInvariantRegistry;
+use MyInvoice\Service\Backup\Company\CompanyBackupPostImportInvariantReport;
 use MyInvoice\Service\Backup\Company\CompanyBackupPostImportValidator;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupRegistryPostImportValidator;
@@ -293,7 +296,13 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
     {
         [$source, $preflight, , $plan] = $this->context();
         $rows = new CoordinatorPostImportRowSource(1);
-        $validator = new CompanyBackupRegistryPostImportValidator($rows);
+        $invariant = new CoordinatorPostImportInvariant();
+        $validator = new CompanyBackupRegistryPostImportValidator(
+            $rows,
+            CompanyBackupPostImportInvariantRegistry::fromInvariants([
+                $invariant,
+            ]),
+        );
         $result = $this->databaseResult($plan);
         self::assertTrue($this->database->beginTransaction());
 
@@ -309,6 +318,13 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
         self::assertSame(0, $validation->mappedGlobalRows);
         self::assertSame(1, $validation->presentFileCount);
         self::assertSame(0, $validation->missingFileCount);
+        self::assertSame(1, $validation->invariantReport->invariantCount);
+        self::assertSame(2, $validation->invariantReport->checkCount);
+        self::assertSame([41], $invariant->supplierIds);
+        self::assertSame(
+            [$source->targetRegistry()->fingerprint],
+            $invariant->registryFingerprints,
+        );
         self::assertSame([41], $rows->supplierIds);
         self::assertTrue($this->database->inTransaction());
         self::assertTrue($this->database->rollBack());
@@ -773,12 +789,46 @@ final class CoordinatorPostImportValidator implements CompanyBackupPostImportVal
             $source->targetRegistry()->fingerprint,
             $preflight->bindingSha256,
             $result->filePublicationPlan->bindingSha256,
+            new CompanyBackupPostImportInvariantReport(
+                $result->supplierId,
+                $source->targetRegistry()->fingerprint,
+                [],
+            ),
             1,
             1,
             0,
             1,
             0,
         );
+    }
+}
+
+/** @internal */
+final class CoordinatorPostImportInvariant implements
+    CompanyBackupPostImportInvariant
+{
+    /** @var list<int> */
+    public array $supplierIds = [];
+
+    /** @var list<string> */
+    public array $registryFingerprints = [];
+
+    public function id(): string
+    {
+        return 'synthetic.restore';
+    }
+
+    public function validate(
+        PDO $database,
+        int $supplierId,
+        TenantDataRegistrySnapshot $registry,
+    ): int {
+        if (!$database->inTransaction()) {
+            throw new \RuntimeException('Invariant neběží uvnitř transakce.');
+        }
+        $this->supplierIds[] = $supplierId;
+        $this->registryFingerprints[] = $registry->fingerprint;
+        return 2;
     }
 }
 

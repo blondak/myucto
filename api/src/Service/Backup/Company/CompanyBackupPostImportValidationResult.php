@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\CanonicalJson;
 
-/** Neměnný důkaz základních registry a souborových kontrol před commitem. */
+/** Neměnný důkaz registry, souborových a doménových kontrol před commitem. */
 final readonly class CompanyBackupPostImportValidationResult
 {
     public string $bindingSha256;
@@ -16,6 +16,7 @@ final readonly class CompanyBackupPostImportValidationResult
         public string $targetRegistryFingerprint,
         public string $dataPreflightBindingSha256,
         public string $filePublicationPlanBindingSha256,
+        public CompanyBackupPostImportInvariantReport $invariantReport,
         public int $checkedTableCount,
         public int $checkedTenantRows,
         public int $mappedGlobalRows,
@@ -32,6 +33,11 @@ final readonly class CompanyBackupPostImportValidationResult
                 '/^[0-9a-f]{64}$/D',
                 $filePublicationPlanBindingSha256,
             ) !== 1
+            || $invariantReport->supplierId !== $supplierId
+            || !hash_equals(
+                $targetRegistryFingerprint,
+                $invariantReport->targetRegistryFingerprint,
+            )
             || min(
                 $checkedTableCount,
                 $checkedTenantRows,
@@ -46,12 +52,14 @@ final readonly class CompanyBackupPostImportValidationResult
         }
         $this->bindingSha256 = CanonicalJson::sha256([
             'format' => 'myucto-company-post-import-validation',
-            'version' => 1,
+            'version' => 2,
             'supplier_id' => $supplierId,
             'target_registry_fingerprint' => $targetRegistryFingerprint,
             'data_preflight_binding_sha256' => $dataPreflightBindingSha256,
             'file_publication_plan_binding_sha256' =>
                 $filePublicationPlanBindingSha256,
+            'invariant_report_binding_sha256' =>
+                $invariantReport->bindingSha256,
             'checked_table_count' => $checkedTableCount,
             'checked_tenant_rows' => $checkedTenantRows,
             'mapped_global_rows' => $mappedGlobalRows,

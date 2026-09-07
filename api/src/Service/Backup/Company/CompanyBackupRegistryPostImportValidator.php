@@ -17,9 +17,15 @@ use PDO;
 final readonly class CompanyBackupRegistryPostImportValidator implements
     CompanyBackupPostImportValidator
 {
+    private CompanyBackupPostImportInvariantRegistry $invariants;
+
     public function __construct(
         private CompanyBackupDataRowSource $rows = new CompanyBackupSqlRowSource(),
-    ) {}
+        ?CompanyBackupPostImportInvariantRegistry $invariants = null,
+    ) {
+        $this->invariants = $invariants
+            ?? CompanyBackupPostImportInvariantRegistry::empty();
+    }
 
     public function validate(
         PDO $database,
@@ -194,11 +200,18 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
             throw self::error('post_import_count_mismatch');
         }
         self::assertTransaction($database);
+        $invariantReport = $this->invariants->validate(
+            $database,
+            $result->supplierId,
+            $registry,
+        );
+        self::assertTransaction($database);
         return new CompanyBackupPostImportValidationResult(
             $result->supplierId,
             $registry->fingerprint,
             $preflight->bindingSha256,
             $publication->bindingSha256,
+            $invariantReport,
             $checkedTables,
             $checkedTenantRows,
             $mappedGlobalRows,
