@@ -84,7 +84,7 @@ final class CompanyBackupPayrollRunPersonsProjectionTest extends TestCase
             static fn ($reference): string => $reference->signature(),
             $projection->embeddedReferences->references,
         );
-        self::assertCount(25, $signatures);
+        self::assertCount(29, $signatures);
         foreach ([
             'result_json:employee_id->payroll_employees:id',
             'result_json:employments.*.inputs.*.input_id->payroll_inputs:id',
@@ -94,6 +94,9 @@ final class CompanyBackupPayrollRunPersonsProjectionTest extends TestCase
                 . '->payroll_deduction_agreements:id@agreement:',
             'result_json:statutory.social_insurance.relationships.*.'
                 . 'included_assessment_base_components.*'
+                . '->payroll_inputs:id@input.~.',
+            'result_json:statutory.social_insurance.relationships.*.'
+                . 'excluded_assessment_base_components.*'
                 . '->payroll_inputs:id@input.~.',
         ] as $signature) {
             self::assertContains($signature, $signatures);
@@ -166,6 +169,11 @@ final class CompanyBackupPayrollRunPersonsProjectionTest extends TestCase
                 ['included_assessment_base_components'][0],
         );
         self::assertSame(
+            'input.324.excluded',
+            $person['statutory']['social_insurance']['relationships'][0]
+                ['excluded_assessment_base_components'][0],
+        );
+        self::assertSame(
             hash('sha256', (string) $restored['result_json']),
             $restored['result_hash'],
         );
@@ -202,6 +210,12 @@ final class CompanyBackupPayrollRunPersonsProjectionTest extends TestCase
             'person_id' => 'employee:17',
             'person_reference' => 'employee:17',
             'relationships' => [[
+                'excluded_assessment_base_components' => [
+                    'input.24.excluded',
+                ],
+                'excluded_participation_components' => [
+                    'input.25.excluded',
+                ],
                 'included_assessment_base_components' => ['input.23.base'],
                 'included_participation_components' => ['input.23.base'],
                 'participation' => ['relationship_id' => 'employment:19'],

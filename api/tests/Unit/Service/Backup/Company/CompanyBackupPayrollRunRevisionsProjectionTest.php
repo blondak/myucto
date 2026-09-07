@@ -130,7 +130,7 @@ final class CompanyBackupPayrollRunRevisionsProjectionTest extends TestCase
             static fn ($reference): string => $reference->signature(),
             $projection->embeddedReferences->references,
         );
-        self::assertCount(108, $signatures);
+        self::assertCount(116, $signatures);
         foreach (
             [
                 'input_snapshot_json:employer_policy.id'
@@ -144,6 +144,9 @@ final class CompanyBackupPayrollRunRevisionsProjectionTest extends TestCase
                     . '->payroll_deduction_agreements:id@agreement:',
                 'result_snapshot_json:people.*.statutory.social_insurance.'
                     . 'relationships.*.included_assessment_base_components.*'
+                    . '->payroll_inputs:id@input.~.',
+                'result_snapshot_json:people.*.statutory.social_insurance.'
+                    . 'relationships.*.excluded_assessment_base_components.*'
                     . '->payroll_inputs:id@input.~.',
                 'result_snapshot_json:statutory.people.*.income_tax.'
                     . 'relationships.*.relationship_reference'
@@ -309,6 +312,12 @@ final class CompanyBackupPayrollRunRevisionsProjectionTest extends TestCase
         $insurance = [
             'person_id' => 'employee:17',
             'relationships' => [[
+                'excluded_assessment_base_components' => [
+                    'input.24.excluded',
+                ],
+                'excluded_participation_components' => [
+                    'input.25.excluded',
+                ],
                 'included_assessment_base_components' => ['input.23.base'],
                 'included_participation_components' => ['input.23.base'],
                 'participation' => ['relationship_id' => 'employment:19'],
@@ -359,6 +368,11 @@ final class CompanyBackupPayrollRunRevisionsProjectionTest extends TestCase
             'input.323.base',
             $person['social_insurance']['relationships'][0]
                 ['included_assessment_base_components'][0],
+        );
+        self::assertSame(
+            'input.324.excluded',
+            $person['social_insurance']['relationships'][0]
+                ['excluded_assessment_base_components'][0],
         );
         self::assertSame(
             'employment:219',

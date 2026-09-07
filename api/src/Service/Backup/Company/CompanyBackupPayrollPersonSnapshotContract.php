@@ -49,141 +49,11 @@ final class CompanyBackupPayrollPersonSnapshotContract
                 [...$personPath, 'employee', 'id'],
                 'payroll_employees',
             ),
-            self::tenant(
-                'input_snapshot_json',
-                [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'absences',
-                    '*',
-                    'average_snapshot_id',
-                ],
-                'payroll_average_earning_snapshots',
-                nullable: true,
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [...$personPath, 'employments', '*', 'absences', '*', 'id'],
-                'payroll_absences',
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [...$personPath, 'employments', '*', 'average_earning', 'id'],
-                'payroll_average_earning_snapshots',
-                nullable: true,
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'employment',
-                    'employee_id',
-                ],
-                'payroll_employees',
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [...$personPath, 'employments', '*', 'employment', 'id'],
-                'payroll_employments',
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [...$personPath, 'employments', '*', 'employment', 'office_id'],
-                'payroll_offices',
-                nullable: true,
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'inputs',
-                    '*',
-                    'component',
-                    'component_id',
-                ],
-                'payroll_component_definitions',
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [...$personPath, 'employments', '*', 'inputs', '*', 'id'],
-                'payroll_inputs',
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'ordinary_evidence_profile',
-                    'source_term_id',
-                ],
-                'payroll_employment_terms',
-                nullable: true,
-            ),
-            self::actor(
-                'input_snapshot_json',
-                [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'risky_savings_evidence',
-                    'approved_by',
-                ],
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'risky_savings_evidence',
-                    'id',
-                ],
-                'payroll_risky_savings_evidence',
-                nullable: true,
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'risky_savings_evidence',
-                    'institution_account_id',
-                ],
-                'payroll_institution_accounts',
-                nullable: true,
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [...$personPath, 'employments', '*', 'term', 'id'],
-                'payroll_employment_terms',
-                nullable: true,
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [...$personPath, 'employments', '*', 'time_month', 'id'],
-                'payroll_time_months',
-                nullable: true,
-            ),
-            self::tenant(
-                'input_snapshot_json',
-                [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'time_month',
-                    'jmhz_work_summary',
-                    'id',
-                ],
-                'payroll_jmhz_work_month_revisions',
-                nullable: true,
-            ),
+            ...self::employmentInputEmbeddedReferences([
+                ...$personPath,
+                'employments',
+                '*',
+            ]),
             self::tenant(
                 'input_snapshot_json',
                 [
@@ -357,10 +227,117 @@ final class CompanyBackupPayrollPersonSnapshotContract
                 'payroll_person_social_discount_claims',
                 nullable: true,
             ),
-            ...self::jmhzSourceReferences($personPath),
         ];
 
         return self::sortReferences($references);
+    }
+
+    /**
+     * Reference uvnitř jednoho zmrazeného pracovního vztahu. Stejný objekt
+     * ukládá person snapshot i samostatný statutory relationship result.
+     *
+     * @param list<string> $employmentPath
+     * @return list<array<string,mixed>>
+     */
+    public static function employmentInputEmbeddedReferences(
+        array $employmentPath = [],
+    ): array {
+        $document = [
+            ...$employmentPath,
+            'time_month',
+            'jmhz_work_summary',
+            'source_snapshot_json',
+        ];
+        return self::sortReferences([
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'absences', '*', 'average_snapshot_id'],
+                'payroll_average_earning_snapshots',
+                nullable: true,
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'absences', '*', 'id'],
+                'payroll_absences',
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'average_earning', 'id'],
+                'payroll_average_earning_snapshots',
+                nullable: true,
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'employment', 'employee_id'],
+                'payroll_employees',
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'employment', 'id'],
+                'payroll_employments',
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'employment', 'office_id'],
+                'payroll_offices',
+                nullable: true,
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'inputs', '*', 'component', 'component_id'],
+                'payroll_component_definitions',
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'inputs', '*', 'id'],
+                'payroll_inputs',
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'ordinary_evidence_profile', 'source_term_id'],
+                'payroll_employment_terms',
+                nullable: true,
+            ),
+            self::actor(
+                'input_snapshot_json',
+                [...$employmentPath, 'risky_savings_evidence', 'approved_by'],
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'risky_savings_evidence', 'id'],
+                'payroll_risky_savings_evidence',
+                nullable: true,
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [
+                    ...$employmentPath,
+                    'risky_savings_evidence',
+                    'institution_account_id',
+                ],
+                'payroll_institution_accounts',
+                nullable: true,
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'term', 'id'],
+                'payroll_employment_terms',
+                nullable: true,
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'time_month', 'id'],
+                'payroll_time_months',
+                nullable: true,
+            ),
+            self::tenant(
+                'input_snapshot_json',
+                [...$employmentPath, 'time_month', 'jmhz_work_summary', 'id'],
+                'payroll_jmhz_work_month_revisions',
+                nullable: true,
+            ),
+            ...self::jmhzSourceReferences($document),
+        ]);
     }
 
     /** @return list<array<string,mixed>> */
@@ -375,68 +352,83 @@ final class CompanyBackupPayrollPersonSnapshotContract
      */
     public static function embeddedHashes(array $personPath = []): array
     {
+        $employmentPath = [...$personPath, 'employments', '*'];
         return [
-            [
-                'algorithm' => 'sha256_canonical_json',
-                'column' => 'input_snapshot_json',
-                'dependencies' => [],
-                'hash_path' => [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'inputs',
-                    '*',
-                    'component_snapshot_hash',
-                ],
-                'name' => 'input_component_snapshot',
-                'nullable' => false,
-                'omit_paths' => [],
-                'source_path' => [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'inputs',
-                    '*',
-                    'component',
-                ],
-            ],
+            self::componentSnapshotHash($employmentPath),
             ...self::accumulatorHashes($personPath, 'income_tax'),
+            ...self::jmhzHashes($employmentPath),
+            ...self::accumulatorHashes($personPath, 'social_insurance'),
+        ];
+    }
+
+    /**
+     * @param list<string> $employmentPath
+     * @return list<EmbeddedHash>
+     */
+    public static function employmentInputEmbeddedHashes(
+        array $employmentPath = [],
+    ): array {
+        return [
+            self::componentSnapshotHash($employmentPath),
+            ...self::jmhzHashes($employmentPath),
+        ];
+    }
+
+    /**
+     * @param list<string> $employmentPath
+     * @return EmbeddedHash
+     */
+    private static function componentSnapshotHash(array $employmentPath): array
+    {
+        return [
+            'algorithm' => 'sha256_canonical_json',
+            'column' => 'input_snapshot_json',
+            'dependencies' => [],
+            'hash_path' => [
+                ...$employmentPath,
+                'inputs',
+                '*',
+                'component_snapshot_hash',
+            ],
+            'name' => 'input_component_snapshot',
+            'nullable' => false,
+            'omit_paths' => [],
+            'source_path' => [
+                ...$employmentPath,
+                'inputs',
+                '*',
+                'component',
+            ],
+        ];
+    }
+
+    /**
+     * @param list<string> $employmentPath
+     * @return list<EmbeddedHash>
+     */
+    private static function jmhzHashes(array $employmentPath): array
+    {
+        $summaryPath = [
+            ...$employmentPath,
+            'time_month',
+            'jmhz_work_summary',
+        ];
+        return [
             [
                 'algorithm' => 'sha256_exact_string',
                 'column' => 'input_snapshot_json',
                 'dependencies' => [],
-                'hash_path' => [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'time_month',
-                    'jmhz_work_summary',
-                    'source_snapshot_sha256',
-                ],
+                'hash_path' => [...$summaryPath, 'source_snapshot_sha256'],
                 'name' => 'input_jmhz_source_snapshot',
                 'nullable' => true,
                 'omit_paths' => [],
-                'source_path' => [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'time_month',
-                    'jmhz_work_summary',
-                    'source_snapshot_json',
-                ],
+                'source_path' => [...$summaryPath, 'source_snapshot_json'],
             ],
             [
                 'algorithm' => 'sha256_canonical_json',
                 'column' => 'input_snapshot_json',
                 'dependencies' => ['input_jmhz_source_snapshot'],
-                'hash_path' => [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'time_month',
-                    'jmhz_work_summary',
-                    'summary_sha256',
-                ],
+                'hash_path' => [...$summaryPath, 'summary_sha256'],
                 'name' => 'input_jmhz_summary',
                 'nullable' => true,
                 'omit_paths' => [
@@ -445,15 +437,8 @@ final class CompanyBackupPayrollPersonSnapshotContract
                     ['summary_sha256'],
                     ['time_month_revision_no'],
                 ],
-                'source_path' => [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'time_month',
-                    'jmhz_work_summary',
-                ],
+                'source_path' => $summaryPath,
             ],
-            ...self::accumulatorHashes($personPath, 'social_insurance'),
         ];
     }
 
@@ -531,70 +516,61 @@ final class CompanyBackupPayrollPersonSnapshotContract
     }
 
     /**
-     * @param list<string> $personPath
+     * @param list<string> $documentPath
      * @return list<array<string,mixed>>
      */
-    private static function jmhzSourceReferences(array $personPath): array
+    private static function jmhzSourceReferences(array $documentPath): array
     {
-        $document = [
-            ...$personPath,
-            'employments',
-            '*',
-            'time_month',
-            'jmhz_work_summary',
-            'source_snapshot_json',
-        ];
-
         return [
             self::tenant(
                 'input_snapshot_json',
                 ['absences', '*', 'average_snapshot_id'],
                 'payroll_average_earning_snapshots',
                 nullable: true,
-                documentPath: $document,
+                documentPath: $documentPath,
             ),
             self::tenant(
                 'input_snapshot_json',
                 ['absences', '*', 'id'],
                 'payroll_absences',
-                documentPath: $document,
+                documentPath: $documentPath,
             ),
             self::tenant(
                 'input_snapshot_json',
                 ['calendars', '*', 'id'],
                 'payroll_work_calendars',
-                documentPath: $document,
+                documentPath: $documentPath,
             ),
             self::tenant(
                 'input_snapshot_json',
                 ['employment', 'id'],
                 'payroll_employments',
-                documentPath: $document,
+                documentPath: $documentPath,
             ),
             self::tenant(
                 'input_snapshot_json',
                 ['employment', 'term_id'],
                 'payroll_employment_terms',
                 nullable: true,
-                documentPath: $document,
+                documentPath: $documentPath,
             ),
             self::tenant(
                 'input_snapshot_json',
                 ['employment', 'term_versions', '*', 'id'],
                 'payroll_employment_terms',
-                documentPath: $document,
+                documentPath: $documentPath,
             ),
             self::tenant(
                 'input_snapshot_json',
                 ['supplier_id'],
                 'supplier',
-                documentPath: $document,
+                documentPath: $documentPath,
             ),
             self::tenant(
                 'input_snapshot_json',
                 ['time_entries', '*', 'id'],
                 'payroll_time_entries',
-                documentPath: $document,
+                documentPath: $documentPath,
             ),
         ];
     }

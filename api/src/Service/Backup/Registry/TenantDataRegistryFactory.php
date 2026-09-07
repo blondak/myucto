@@ -70,6 +70,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessEventsProjectio
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryAccumulatorEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryRelationshipResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTimeEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTimeMonthsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTravelCompensationLinksProjection;
@@ -152,6 +153,7 @@ final class TenantDataRegistryFactory
         'payroll_person_tax_residences' => 'payroll',
         'payroll_recurring_components' => 'payroll',
         'payroll_risky_savings_evidence' => 'payroll',
+        'payroll_run_employments' => 'payroll',
         'payroll_runs' => 'payroll',
         'payroll_run_persons' => 'payroll',
         'payroll_run_revisions' => 'payroll',
@@ -161,6 +163,7 @@ final class TenantDataRegistryFactory
         'payroll_statutory_accumulator_entries' => 'payroll',
         'payroll_statutory_accumulator_openings' => 'payroll',
         'payroll_statutory_person_results' => 'payroll',
+        'payroll_statutory_relationship_results' => 'payroll',
         'payroll_statutory_results' => 'payroll',
         'payroll_time_entries' => 'payroll',
         'payroll_time_months' => 'payroll',
@@ -176,6 +179,12 @@ final class TenantDataRegistryFactory
         'payroll_employments' => [
             ['supplier_id', 'id', 'employee_id'],
         ],
+        'payroll_run_employments' => [[
+            'supplier_id',
+            'revision_id',
+            'employee_id',
+            'employment_id',
+        ]],
         'payroll_run_persons' => [
             ['supplier_id', 'revision_id', 'employee_id'],
         ],
@@ -2244,6 +2253,25 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollStatutoryPersonResultsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_statutory_relationship_results') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollStatutoryRelationshipResultsProjection::dataColumns(),
+                    'derived_hashes' =>
+                        CompanyBackupPayrollStatutoryRelationshipResultsProjection::derivedHashes(),
+                    'embedded_hashes' =>
+                        CompanyBackupPayrollStatutoryRelationshipResultsProjection::embeddedHashes(),
+                    'embedded_references' =>
+                        CompanyBackupPayrollStatutoryRelationshipResultsProjection::embeddedReferences(),
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollStatutoryRelationshipResultsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

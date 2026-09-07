@@ -26,56 +26,11 @@ final class CompanyBackupPayrollStatutoryResultSnapshotContract
                 'payroll_employees',
                 valuePrefix: 'employee:',
             ),
-            self::tenant(
-                [
-                    ...$rootPath,
-                    'relationships',
-                    '*',
-                    'included_assessment_base_components',
-                    '*',
-                ],
-                'payroll_inputs',
-                valuePrefix: 'input.',
-                valueSuffixSeparator: '.',
-            ),
-            self::tenant(
-                [
-                    ...$rootPath,
-                    'relationships',
-                    '*',
-                    'included_participation_components',
-                    '*',
-                ],
-                'payroll_inputs',
-                valuePrefix: 'input.',
-                valueSuffixSeparator: '.',
-            ),
-            self::tenant(
-                [
-                    ...$rootPath,
-                    'relationships',
-                    '*',
-                    'participation',
-                    'relationship_id',
-                ],
-                'payroll_employments',
-                valuePrefix: 'employment:',
-            ),
-            self::tenant(
-                [...$rootPath, 'relationships', '*', 'relationship_id'],
-                'payroll_employments',
-                valuePrefix: 'employment:',
-            ),
-            self::tenant(
-                [
-                    ...$rootPath,
-                    'relationships',
-                    '*',
-                    'relationship_reference',
-                ],
-                'payroll_employments',
-                valuePrefix: 'employment:',
-            ),
+            ...self::relationshipReferences([
+                ...$rootPath,
+                'relationships',
+                '*',
+            ]),
             self::tenant(
                 [...$rootPath, 'payer_reference'],
                 'supplier',
@@ -86,6 +41,26 @@ final class CompanyBackupPayrollStatutoryResultSnapshotContract
                 'payroll_employees',
                 valuePrefix: 'employee:',
             ),
+            self::tenant(
+                [...$rootPath, 'person_reference'],
+                'payroll_employees',
+                valuePrefix: 'employee:',
+            ),
+        ]);
+    }
+
+    /**
+     * Samostatně uložený výsledek vztahu sdílí stejné identity jako jeho
+     * kopie v person a run snapshotu; blocked větev navíc nese osobu.
+     *
+     * @param list<string> $rootPath
+     * @return list<array<string,mixed>>
+     */
+    public static function relationshipEmbeddedReferences(
+        array $rootPath = [],
+    ): array {
+        return self::sortReferences([
+            ...self::relationshipReferences($rootPath),
             self::tenant(
                 [...$rootPath, 'person_reference'],
                 'payroll_employees',
@@ -126,46 +101,11 @@ final class CompanyBackupPayrollStatutoryResultSnapshotContract
     private static function insuranceReferences(array $rootPath): array
     {
         return [
-            self::tenant(
-                [
-                    ...$rootPath,
-                    'relationships',
-                    '*',
-                    'included_assessment_base_components',
-                    '*',
-                ],
-                'payroll_inputs',
-                valuePrefix: 'input.',
-                valueSuffixSeparator: '.',
-            ),
-            self::tenant(
-                [
-                    ...$rootPath,
-                    'relationships',
-                    '*',
-                    'included_participation_components',
-                    '*',
-                ],
-                'payroll_inputs',
-                valuePrefix: 'input.',
-                valueSuffixSeparator: '.',
-            ),
-            self::tenant(
-                [
-                    ...$rootPath,
-                    'relationships',
-                    '*',
-                    'participation',
-                    'relationship_id',
-                ],
-                'payroll_employments',
-                valuePrefix: 'employment:',
-            ),
-            self::tenant(
-                [...$rootPath, 'relationships', '*', 'relationship_id'],
-                'payroll_employments',
-                valuePrefix: 'employment:',
-            ),
+            ...self::insuranceRelationshipReferences([
+                ...$rootPath,
+                'relationships',
+                '*',
+            ]),
             self::tenant(
                 [...$rootPath, 'person_id'],
                 'payroll_employees',
@@ -177,6 +117,71 @@ final class CompanyBackupPayrollStatutoryResultSnapshotContract
                 valuePrefix: 'employee:',
             ),
         ];
+    }
+
+    /**
+     * @param list<string> $rootPath
+     * @return list<array<string,mixed>>
+     */
+    private static function relationshipReferences(array $rootPath): array
+    {
+        return [
+            ...self::insuranceRelationshipReferences($rootPath),
+            self::tenant(
+                [...$rootPath, 'relationship_reference'],
+                'payroll_employments',
+                valuePrefix: 'employment:',
+            ),
+        ];
+    }
+
+    /**
+     * @param list<string> $rootPath
+     * @return list<array<string,mixed>>
+     */
+    private static function insuranceRelationshipReferences(
+        array $rootPath,
+    ): array {
+        return [
+            ...self::componentReferences($rootPath),
+            self::tenant(
+                [
+                    ...$rootPath,
+                    'participation',
+                    'relationship_id',
+                ],
+                'payroll_employments',
+                valuePrefix: 'employment:',
+            ),
+            self::tenant(
+                [...$rootPath, 'relationship_id'],
+                'payroll_employments',
+                valuePrefix: 'employment:',
+            ),
+        ];
+    }
+
+    /**
+     * @param list<string> $rootPath
+     * @return list<array<string,mixed>>
+     */
+    private static function componentReferences(array $rootPath): array
+    {
+        $references = [];
+        foreach ([
+            'excluded_assessment_base_components',
+            'excluded_participation_components',
+            'included_assessment_base_components',
+            'included_participation_components',
+        ] as $field) {
+            $references[] = self::tenant(
+                [...$rootPath, $field, '*'],
+                'payroll_inputs',
+                valuePrefix: 'input.',
+                valueSuffixSeparator: '.',
+            );
+        }
+        return $references;
     }
 
     /**
