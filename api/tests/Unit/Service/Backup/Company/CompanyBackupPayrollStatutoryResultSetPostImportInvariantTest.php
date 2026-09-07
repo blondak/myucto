@@ -44,11 +44,17 @@ final class CompanyBackupPayrollStatutoryResultSetPostImportInvariantTest extend
 
         $report = $registry->validate($this->database, 7, $snapshot);
 
-        self::assertSame([[
-            'id' => 'payroll.statutory-result-set',
-            'check_count' => 3,
-        ]], $report->invariants);
-        self::assertSame(1, $report->invariantCount);
+        self::assertSame([
+            [
+                'id' => 'accounting.journal-balance',
+                'check_count' => 0,
+            ],
+            [
+                'id' => 'payroll.statutory-result-set',
+                'check_count' => 3,
+            ],
+        ], $report->invariants);
+        self::assertSame(2, $report->invariantCount);
         self::assertSame(3, $report->checkCount);
         self::assertTrue($this->database->inTransaction());
         self::assertSame(0, $this->temporaryTableCount());

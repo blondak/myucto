@@ -89,13 +89,11 @@ final class JournalIntegrityService
     /** Kolik ukázkových nálezů uložit do detail JSON (plný count je vždy přesný). */
     private const DETAIL_LIMIT = 100;
 
-    /** Haléřová tolerance porovnání částek (0,5 haléře). */
-    private const CENT_TOLERANCE = 0.005;
-
     /**
      * Tolerance porovnání celkové částky dokladu se zápisem (1 Kč). Přičítá se
      * k ní zaokrouhlení dokladu — viz {@see amountMismatchFrom}. Řádově vyšší než
-     * {@see CENT_TOLERANCE} záměrně: daň lze počítat ze základu i shora (§ 37
+     * {@see JournalEntryBalanceInspector::CENT_TOLERANCE} záměrně: daň lze
+     * počítat ze základu i shora (§ 37
      * odst. 1 a 2 ZDPH) a po jednotlivých položkách i ze součtu, takže daň
      * přepočtená z položek se od daně vytištěné na dokladu dodavatele běžně liší
      * o haléře až desetihaléře. To není nekonzistence deníku — kontrola má hledat
@@ -289,33 +287,11 @@ final class JournalIntegrityService
      */
     private function checkUnbalancedEntries(int $supplierId): array
     {
-        // LEFT JOIN, ne INNER: zápis BEZ jediného řádku je taky vadný (prázdná hlavička
-        // po zkolabovaném JournalEntryRepository::replace() nebo přímém DELETE řádků).
-        // S INNER JOINem takový zápis z GROUP BY vypadl a platil za vyvážený — přitom
-        // ho nechytí ani booked_without_entry (zápis existuje), ani entry_without_booked.
-        // U source_type mimo invoice/purchase_invoice (manual, bank, cash, closing,
-        // depreciation) ho nezachytí vůbec nic jiného.
-        $base =
-            "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no,
-                    COUNT(l.id) AS line_count,
-                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0), 2) AS debit,
-                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0), 2) AS credit
-               FROM journal_entries je
-               LEFT JOIN journal_entry_lines l ON l.entry_id = je.id
-              WHERE je.supplier_id = :sid
-              GROUP BY je.id
-             HAVING line_count = 0 OR ABS(debit - credit) > " . self::CENT_TOLERANCE;
-
-        $pdo = $this->db->pdo();
-        $stmt = $pdo->prepare($base . " ORDER BY entry_id LIMIT " . self::DETAIL_LIMIT);
-        $stmt->execute(['sid' => $supplierId]);
-        $sample = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-        $cntStmt = $pdo->prepare("SELECT COUNT(*) FROM (" . $base . ") x");
-        $cntStmt->execute(['sid' => $supplierId]);
-        $count = (int) $cntStmt->fetchColumn();
-
-        return ['count' => $count, 'sample' => $this->normalizeRows($sample)];
+        return JournalEntryBalanceInspector::inspect(
+            $this->db->pdo(),
+            $supplierId,
+            self::DETAIL_LIMIT,
+        );
     }
 
     /**

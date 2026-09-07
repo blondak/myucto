@@ -60,6 +60,7 @@ final readonly class CompanyBackupPostImportInvariantRegistry
         CompanyBackupArchiveLimits $limits = new CompanyBackupArchiveLimits(),
     ): self {
         return new self([
+            new CompanyBackupJournalBalancePostImportInvariant(),
             new CompanyBackupPayrollStatutoryResultSetPostImportInvariant(
                 $rows,
                 $limits,
