@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Registry;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupAssetImprovementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupAssetsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBrandingProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupClientBankAccountsProjection;
@@ -2374,6 +2375,8 @@ final class TenantDataRegistryFactory
         $columns = match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::dataColumns(),
+            'asset_improvements' =>
+                CompanyBackupAssetImprovementsProjection::dataColumns(),
             'assets' => CompanyBackupAssetsProjection::dataColumns(),
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::dataColumns(),
@@ -2525,6 +2528,8 @@ final class TenantDataRegistryFactory
         return match ($table) {
             'accounting_closing_steps' =>
                 CompanyBackupAccountingClosingStepsProjection::references(),
+            'asset_improvements' =>
+                CompanyBackupAssetImprovementsProjection::references(),
             'assets' => CompanyBackupAssetsProjection::references(),
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::references(),
