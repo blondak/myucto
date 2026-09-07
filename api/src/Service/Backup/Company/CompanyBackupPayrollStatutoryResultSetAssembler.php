@@ -10,8 +10,11 @@ use MyInvoice\Service\Payroll\Run\PayrollStatutoryResultSetHash;
 /** Rekonstrukce kořenové mzdové pečeti z normalizovaných fyzických řádků. */
 final class CompanyBackupPayrollStatutoryResultSetAssembler
 {
-    private const REGISTRY_KEY = 'table:payroll_statutory_results';
-    private const HASH_COLUMN = 'result_set_hash';
+    public const ROOT_REGISTRY_KEY = 'table:payroll_statutory_results';
+    public const PERSON_REGISTRY_KEY = 'table:payroll_statutory_person_results';
+    public const RELATIONSHIP_REGISTRY_KEY =
+        'table:payroll_statutory_relationship_results';
+    public const HASH_COLUMN = 'result_set_hash';
 
     /**
      * @param array<string,mixed> $header
@@ -233,7 +236,7 @@ final class CompanyBackupPayrollStatutoryResultSetAssembler
     ): CompanyBackupDataSourceException {
         return new CompanyBackupDataSourceException(
             $code,
-            self::REGISTRY_KEY,
+            self::ROOT_REGISTRY_KEY,
             self::HASH_COLUMN,
             $previous,
         );

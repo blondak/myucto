@@ -14,7 +14,6 @@ use PDOStatement;
  */
 final class CompanyBackupPayrollStatutoryResultSetSourceIndex
 {
-    private const REGISTRY_KEY = 'table:payroll_statutory_results';
     private const PERSON = 0;
     private const RELATIONSHIP = 1;
     private const INDEX_OVERHEAD_BYTES = 24;
@@ -146,7 +145,11 @@ final class CompanyBackupPayrollStatutoryResultSetSourceIndex
             if (!$selectRoot->execute([$rootId])) {
                 throw new \RuntimeException('Kontrola agregátního kořene selhala.');
             }
-            if ($selectRoot->fetchColumn() !== false) {
+            $existing = $selectRoot->fetchColumn();
+            if (!$selectRoot->closeCursor()) {
+                throw new \RuntimeException('Kontrolu agregátního kořene nelze uzavřít.');
+            }
+            if ($existing !== false) {
                 throw self::error('source_aggregate_root_duplicate');
             }
             $rows = $this->rowsFor($rootId);
@@ -195,6 +198,9 @@ final class CompanyBackupPayrollStatutoryResultSetSourceIndex
                 throw new \RuntimeException('Čtení agregátního indexu selhalo.');
             }
             $stored = $select->fetchAll(PDO::FETCH_ASSOC);
+            if (!$select->closeCursor()) {
+                throw new \RuntimeException('Čtení agregátního indexu nelze uzavřít.');
+            }
         } catch (\Throwable $e) {
             throw self::error('source_aggregate_index_read_failed', previous: $e);
         }
@@ -387,8 +393,8 @@ final class CompanyBackupPayrollStatutoryResultSetSourceIndex
     ): CompanyBackupPreflightException {
         return new CompanyBackupPreflightException(
             $code,
-            self::REGISTRY_KEY,
-            'result_set_hash',
+            CompanyBackupPayrollStatutoryResultSetAssembler::ROOT_REGISTRY_KEY,
+            CompanyBackupPayrollStatutoryResultSetAssembler::HASH_COLUMN,
             $previous,
         );
     }

@@ -72,6 +72,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryAccumulatorEnt
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryRelationshipResultsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTimeEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTimeMonthsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTravelCompensationLinksProjection;
@@ -2292,6 +2293,29 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollStatutoryRelationshipResultsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_statutory_results') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollStatutoryResultsProjection::dataColumns(),
+                    'derived_hashes' =>
+                        CompanyBackupPayrollStatutoryResultsProjection::derivedHashes(),
+                    'embedded_hash_references' =>
+                        CompanyBackupPayrollStatutoryResultsProjection::embeddedHashReferences(),
+                    'embedded_hashes' =>
+                        CompanyBackupPayrollStatutoryResultsProjection::embeddedHashes(),
+                    'embedded_references' =>
+                        CompanyBackupPayrollStatutoryResultsProjection::embeddedReferences(),
+                    'generated_columns' => [],
+                    'omit_columns' => [],
+                    'preserved_identifiers' =>
+                        CompanyBackupPayrollStatutoryResultsProjection::preservedIdentifiers(),
+                    'references' =>
+                        CompanyBackupPayrollStatutoryResultsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

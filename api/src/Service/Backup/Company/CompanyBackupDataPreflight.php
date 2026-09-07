@@ -13,6 +13,13 @@ use PDO;
  */
 final readonly class CompanyBackupDataPreflight
 {
+    private const STATUTORY_ROOT =
+        CompanyBackupPayrollStatutoryResultSetAssembler::ROOT_REGISTRY_KEY;
+    private const STATUTORY_PERSON =
+        CompanyBackupPayrollStatutoryResultSetAssembler::PERSON_REGISTRY_KEY;
+    private const STATUTORY_RELATIONSHIP =
+        CompanyBackupPayrollStatutoryResultSetAssembler::RELATIONSHIP_REGISTRY_KEY;
+
     public function __construct(
         private CompanyBackupArchiveLimits $limits = new CompanyBackupArchiveLimits(),
     ) {}
@@ -32,10 +39,18 @@ final readonly class CompanyBackupDataPreflight
         );
 
         $index = null;
+        $aggregateIndex = null;
         $result = null;
         $failure = null;
         try {
             $index = new CompanyBackupSqlSourceIdentityIndex($database, $this->limits);
+            $aggregateIndex = $this->usesStatutoryResultAggregate($validation)
+                ? new CompanyBackupPayrollStatutoryResultSetSourceIndex(
+                    $database,
+                    $this->limits,
+                )
+                : null;
+            $aggregateRootCount = 0;
             $rowCount = 0;
             foreach ($validation->inspection->dataInventory->objects as $object) {
                 $context = $contexts[$object->registryKey];
@@ -44,14 +59,29 @@ final readonly class CompanyBackupDataPreflight
                     function (array $row) use (
                         $index,
                         $context,
+                        $object,
+                        $aggregateIndex,
+                        &$aggregateRootCount,
                         &$rowCount,
                     ): void {
                         $index->add($context['identity']->identityForRow($row));
+                        if ($aggregateIndex !== null) {
+                            if ($object->registryKey === self::STATUTORY_PERSON) {
+                                $aggregateIndex->addPerson($row);
+                            } elseif ($object->registryKey
+                                === self::STATUTORY_RELATIONSHIP
+                            ) {
+                                $aggregateIndex->addRelationship($row);
+                            } elseif ($object->registryKey === self::STATUTORY_ROOT) {
+                                $aggregateRootCount++;
+                            }
+                        }
                         $rowCount++;
                     },
                 );
             }
             $index->seal();
+            $aggregateIndex?->seal();
 
             $collector = new CompanyBackupExternalReferenceCollector($this->limits);
             $integrity = new CompanyBackupReferenceIntegrityValidator(
@@ -62,7 +92,16 @@ final readonly class CompanyBackupDataPreflight
             foreach ($validation->inspection->dataInventory->objects as $object) {
                 $source->consumeRows(
                     $object->registryKey,
-                    static function (array $row): void {},
+                    static function (array $row) use (
+                        $object,
+                        $aggregateIndex,
+                    ): void {
+                        if ($aggregateIndex !== null
+                            && $object->registryKey === self::STATUTORY_ROOT
+                        ) {
+                            $aggregateIndex->assertSourceHeader($row);
+                        }
+                    },
                     function (CompanyBackupReferenceOccurrence $occurrence) use (
                         $collector,
                         $integrity,
@@ -82,6 +121,7 @@ final readonly class CompanyBackupDataPreflight
                     },
                 );
             }
+            $aggregateIndex?->finish($aggregateRootCount);
 
             $result = new CompanyBackupDataPreflightResult(
                 $collector->finish(),
@@ -104,6 +144,15 @@ final readonly class CompanyBackupDataPreflight
                 $failure ??= $e;
             }
         }
+        if ($aggregateIndex
+            instanceof CompanyBackupPayrollStatutoryResultSetSourceIndex
+        ) {
+            try {
+                $aggregateIndex->close();
+            } catch (\Throwable $e) {
+                $failure ??= $e;
+            }
+        }
         try {
             $source->close();
         } catch (\Throwable $e) {
@@ -118,6 +167,22 @@ final readonly class CompanyBackupDataPreflight
         }
 
         return $result;
+    }
+
+    private function usesStatutoryResultAggregate(
+        CompanyBackupTechnicalValidation $validation,
+    ): bool {
+        $inventory = $validation->inspection->dataInventory;
+        foreach ([
+            self::STATUTORY_ROOT,
+            self::STATUTORY_PERSON,
+            self::STATUTORY_RELATIONSHIP,
+        ] as $registryKey) {
+            if ($inventory->object($registryKey) !== null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

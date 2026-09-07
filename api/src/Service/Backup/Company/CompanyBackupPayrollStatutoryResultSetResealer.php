@@ -7,9 +7,6 @@ namespace MyInvoice\Service\Backup\Company;
 /** Přepočítá kořenovou pečeť ze skutečně přemapovaných potomků. */
 final class CompanyBackupPayrollStatutoryResultSetResealer
 {
-    private const REGISTRY_KEY = 'table:payroll_statutory_results';
-    private const HASH_COLUMN = 'result_set_hash';
-
     /**
      * @param array<string,mixed> $sourceHeader
      * @param array<string,mixed> $targetHeader
@@ -50,7 +47,7 @@ final class CompanyBackupPayrollStatutoryResultSetResealer
             );
         }
 
-        $targetHeader[self::HASH_COLUMN] =
+        $targetHeader[CompanyBackupPayrollStatutoryResultSetAssembler::HASH_COLUMN] =
             CompanyBackupPayrollStatutoryResultSetAssembler::calculate(
                 $targetHeader,
                 $people,
@@ -99,8 +96,8 @@ final class CompanyBackupPayrollStatutoryResultSetResealer
     {
         return new CompanyBackupDataSourceException(
             $code,
-            self::REGISTRY_KEY,
-            self::HASH_COLUMN,
+            CompanyBackupPayrollStatutoryResultSetAssembler::ROOT_REGISTRY_KEY,
+            CompanyBackupPayrollStatutoryResultSetAssembler::HASH_COLUMN,
         );
     }
 }

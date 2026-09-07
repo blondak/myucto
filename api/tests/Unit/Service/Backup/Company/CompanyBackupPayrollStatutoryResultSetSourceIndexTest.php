@@ -113,6 +113,35 @@ final class CompanyBackupPayrollStatutoryResultSetSourceIndexTest extends TestCa
         }
     }
 
+    public function testCloseRemovesIndexAfterFailedRootValidation(): void
+    {
+        $index = new CompanyBackupPayrollStatutoryResultSetSourceIndex(
+            $this->database,
+        );
+        $index->addPerson($this->person(41, 31, 17));
+        $index->addRelationship($this->relationship(61, 31, 41, 17, 19));
+        $header = $this->header(31);
+        $header['result_set_hash'] = str_repeat('f', 64);
+        $index->seal();
+
+        try {
+            $index->assertSourceHeader($header);
+            self::fail('Neplatná pečeť musí zastavit validaci kořene.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('data_aggregate_hash_value_invalid', $e->errorCode);
+        } finally {
+            $index->close();
+        }
+
+        $tables = $this->database->query(
+            "SELECT name FROM sqlite_temp_master"
+                . " WHERE type = 'table'"
+                . " AND name LIKE 'company_backup_statutory_%'",
+        );
+        self::assertNotFalse($tables);
+        self::assertSame([], $tables->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     /** @return array<string,mixed> */
     private function header(int $id): array
     {

@@ -48,18 +48,12 @@ final class CompanyBackupPayrollRunRevisionHashContract
     /** @return list<EmbeddedHash> */
     public static function embeddedHashes(): array
     {
-        return CompanyBackupPayrollPersonSnapshotContract::embeddedHashes([
-            'people',
-            '*',
-        ]);
+        return CompanyBackupPayrollRunInputSnapshotContract::embeddedHashes();
     }
 
     /** @return list<EmbeddedHashReference> */
     public static function embeddedHashReferences(): array
     {
-        return CompanyBackupPayrollPersonSnapshotContract::embeddedHashReferences([
-            'people',
-            '*',
-        ]);
+        return CompanyBackupPayrollRunInputSnapshotContract::embeddedHashReferences();
     }
 }

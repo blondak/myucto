@@ -13,6 +13,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflight;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportArchiveSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryResultSetAssembler;
 use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
@@ -91,7 +92,11 @@ final class CompanyBackupDataPreflightTest extends TestCase
             ['id' => 9],
         ));
         self::assertSame('unchanged', $this->sentinelValue());
-        self::assertSame(0, $this->temporaryIndexCount());
+        self::assertSame(
+            0,
+            $this->temporaryIndexCount(),
+            implode(', ', $this->temporaryIndexNames()),
+        );
     }
 
     public function testVerifiedArchiveSourceReplaysCanonicalRows(): void
@@ -192,7 +197,11 @@ final class CompanyBackupDataPreflightTest extends TestCase
         }
 
         self::assertSame('unchanged', $this->sentinelValue());
-        self::assertSame(0, $this->temporaryIndexCount());
+        self::assertSame(
+            0,
+            $this->temporaryIndexCount(),
+            implode(', ', $this->temporaryIndexNames()),
+        );
     }
 
     public function testReferenceOccurrenceLimitFailsAndCleansIndex(): void
@@ -222,10 +231,64 @@ final class CompanyBackupDataPreflightTest extends TestCase
         self::assertSame(0, $this->temporaryIndexCount());
     }
 
-    /** @return array{string,CompanyBackupTechnicalValidation} */
-    private function archive(int $countryReference): array
+    public function testRejectsBrokenStatutoryAggregateBeforeImportPlan(): void
     {
-        $registry = $this->registry();
+        [$archive, $validation] = $this->archive(
+            countryReference: 7,
+            statutoryAggregate: true,
+        );
+
+        try {
+            (new CompanyBackupDataPreflight($this->limits()))->inspect(
+                $archive,
+                self::PASSWORD,
+                $validation,
+                $this->database,
+            );
+            self::fail('Neplatná kořenová pečeť musí zastavit datový preflight.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('data_aggregate_hash_value_invalid', $e->errorCode);
+            self::assertSame('table:payroll_statutory_results', $e->registryKey);
+            self::assertSame('result_set_hash', $e->column);
+        }
+
+        self::assertSame('unchanged', $this->sentinelValue());
+        self::assertSame(
+            0,
+            $this->temporaryIndexCount(),
+            implode(', ', $this->temporaryIndexNames()),
+        );
+    }
+
+    public function testAcceptsCompleteStatutoryAggregateAndCleansBothIndexes(): void
+    {
+        [$archive, $validation] = $this->archive(
+            countryReference: 7,
+            statutoryAggregate: true,
+            breakStatutoryAggregate: false,
+        );
+
+        $result = (new CompanyBackupDataPreflight($this->limits()))->inspect(
+            $archive,
+            self::PASSWORD,
+            $validation,
+            $this->database,
+        );
+
+        self::assertSame(6, $result->rowCount);
+        self::assertSame(6, $result->identityCount);
+        self::assertSame('unchanged', $this->sentinelValue());
+        self::assertSame(0, $this->temporaryIndexCount());
+    }
+
+    /** @return array{string,CompanyBackupTechnicalValidation} */
+    private function archive(
+        int $countryReference,
+        bool $statutoryAggregate = false,
+        bool $breakStatutoryAggregate = true,
+    ): array
+    {
+        $registry = $this->registry($statutoryAggregate);
         $snapshot = TenantDataRegistrySnapshot::fromRegistry(
             $registry,
             TenantDataRegistry::COMPANY_BACKUP_PROFILE,
@@ -249,6 +312,25 @@ final class CompanyBackupDataPreflightTest extends TestCase
                 'name' => 'Synthetic supplier',
             ]]),
         ];
+        if ($statutoryAggregate) {
+            $person = $this->statutoryPerson();
+            $relationship = $this->statutoryRelationship();
+            $header = $this->statutoryHeader();
+            $header['result_set_hash'] =
+                CompanyBackupPayrollStatutoryResultSetAssembler::calculate(
+                    $header,
+                    [$person],
+                    [$relationship],
+                );
+            if ($breakStatutoryAggregate) {
+                $header['result_set_hash'] = str_repeat('f', 64);
+            }
+            $payloads['table:payroll_statutory_person_results'] =
+                self::jsonl([$person]);
+            $payloads['table:payroll_statutory_relationship_results'] =
+                self::jsonl([$relationship]);
+            $payloads['table:payroll_statutory_results'] = self::jsonl([$header]);
+        }
         $objects = [];
         foreach ($payloads as $registryKey => $payload) {
             $definition = $snapshot->registry->definition($registryKey);
@@ -335,9 +417,9 @@ final class CompanyBackupDataPreflightTest extends TestCase
         ];
     }
 
-    private function registry(): TenantDataRegistry
+    private function registry(bool $statutoryAggregate = false): TenantDataRegistry
     {
-        return new TenantDataRegistry(1, [
+        $definitions = [
             $this->tableDefinition(
                 'countries',
                 TenantDataPolicy::GlobalReference,
@@ -412,7 +494,100 @@ final class CompanyBackupDataPreflightTest extends TestCase
                     'ownership' => ['strategy' => 'instance'],
                 ],
             ),
-        ], [TenantDataRegistry::COMPANY_BACKUP_PROFILE]);
+        ];
+        if ($statutoryAggregate) {
+            $definitions[] = $this->tableDefinition(
+                'payroll_statutory_person_results',
+                TenantDataPolicy::TenantOwned,
+                array_keys($this->statutoryPerson()),
+                preservedIdentifiers: [
+                    'employee_id',
+                    'revision_id',
+                    'statutory_result_id',
+                    'supplier_id',
+                ],
+            );
+            $definitions[] = $this->tableDefinition(
+                'payroll_statutory_relationship_results',
+                TenantDataPolicy::TenantOwned,
+                array_keys($this->statutoryRelationship()),
+                preservedIdentifiers: [
+                    'employee_id',
+                    'employment_id',
+                    'person_result_id',
+                    'revision_id',
+                    'statutory_result_id',
+                    'supplier_id',
+                ],
+            );
+            $definitions[] = $this->tableDefinition(
+                'payroll_statutory_results',
+                TenantDataPolicy::TenantOwned,
+                array_keys($this->statutoryHeader()),
+                preservedIdentifiers: [
+                    'revision_id',
+                    'ruleset_id',
+                    'supplier_id',
+                ],
+            );
+        }
+        return new TenantDataRegistry(
+            1,
+            $definitions,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function statutoryHeader(): array
+    {
+        return [
+            'id' => 31,
+            'supplier_id' => 42,
+            'revision_id' => 51,
+            'calculation_kind' => 'social_insurance',
+            'schema_version' => 'payroll-social-result.v1',
+            'result_status' => 'calculated',
+            'ruleset_id' => 'cz-social-2026.1',
+            'ruleset_hash' => str_repeat('a', 64),
+            'input_snapshot_json' => CanonicalJson::encode(['period' => '2026-06']),
+            'result_snapshot_json' => CanonicalJson::encode(['amount_minor' => 2_500]),
+            'result_set_hash' => str_repeat('0', 64),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function statutoryPerson(): array
+    {
+        return [
+            'id' => 41,
+            'supplier_id' => 42,
+            'statutory_result_id' => 31,
+            'revision_id' => 51,
+            'calculation_kind' => 'social_insurance',
+            'employee_id' => 17,
+            'result_status' => 'calculated',
+            'input_snapshot_json' => CanonicalJson::encode(['employee_id' => 17]),
+            'result_snapshot_json' => CanonicalJson::encode(['amount_minor' => 1_700]),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function statutoryRelationship(): array
+    {
+        return [
+            'id' => 61,
+            'supplier_id' => 42,
+            'statutory_result_id' => 31,
+            'person_result_id' => 41,
+            'revision_id' => 51,
+            'calculation_kind' => 'social_insurance',
+            'employee_id' => 17,
+            'employment_id' => 19,
+            'result_status' => 'calculated',
+            'input_snapshot_json' => CanonicalJson::encode(['employment_id' => 19]),
+            'result_snapshot_json' => CanonicalJson::encode(['amount_minor' => 190]),
+        ];
     }
 
     /**
@@ -420,6 +595,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
      * @param list<string>|null $naturalKey
      * @param list<array<string,mixed>> $references
      * @param list<array<string,mixed>> $embeddedReferences
+     * @param list<string> $preservedIdentifiers
      */
     private function tableDefinition(
         string $table,
@@ -428,6 +604,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
         ?array $naturalKey = null,
         array $references = [],
         array $embeddedReferences = [],
+        array $preservedIdentifiers = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:' . $table,
@@ -444,6 +621,9 @@ final class CompanyBackupDataPreflightTest extends TestCase
                     'embedded_references' => $embeddedReferences,
                     'generated_columns' => [],
                     'omit_columns' => [],
+                    ...($preservedIdentifiers === [] ? [] : [
+                        'preserved_identifiers' => $preservedIdentifiers,
+                    ]),
                     'references' => $references,
                     'restore_overrides' => [],
                 ],
@@ -495,12 +675,29 @@ final class CompanyBackupDataPreflightTest extends TestCase
     {
         $statement = $this->database->query(
             "SELECT COUNT(*) FROM sqlite_temp_master"
-            . " WHERE type = 'table' AND name LIKE 'company_backup_source_%'",
+            . " WHERE type = 'table' AND name LIKE 'company_backup_%'",
         );
         if ($statement === false) {
             throw new \RuntimeException('Nelze ověřit dočasné tabulky.');
         }
         $count = $statement->fetchColumn();
         return is_int($count) ? $count : (int) $count;
+    }
+
+    /** @return list<string> */
+    private function temporaryIndexNames(): array
+    {
+        $statement = $this->database->query(
+            "SELECT name FROM sqlite_temp_master"
+            . " WHERE type = 'table' AND name LIKE 'company_backup_%'"
+            . ' ORDER BY name',
+        );
+        if ($statement === false) {
+            return [];
+        }
+        return array_values(array_filter(
+            $statement->fetchAll(PDO::FETCH_COLUMN),
+            is_string(...),
+        ));
     }
 }

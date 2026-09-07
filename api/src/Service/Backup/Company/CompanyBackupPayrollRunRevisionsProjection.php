@@ -81,26 +81,7 @@ final class CompanyBackupPayrollRunRevisionsProjection
     public static function embeddedReferences(): array
     {
         $references = [
-            ...CompanyBackupPayrollPersonSnapshotContract::inputEmbeddedReferences([
-                'people',
-                '*',
-            ]),
-            self::embeddedTenant(
-                'input_snapshot_json',
-                ['employer_policy', 'id'],
-                'payroll_employer_policies',
-            ),
-            self::embeddedTenant(
-                'input_snapshot_json',
-                ['office_id'],
-                'payroll_offices',
-                nullable: true,
-            ),
-            self::embeddedTenant(
-                'input_snapshot_json',
-                ['supplier_id'],
-                'supplier',
-            ),
+            ...CompanyBackupPayrollRunInputSnapshotContract::embeddedReferences(),
             ...CompanyBackupPayrollRunResultSnapshotContract::embeddedReferences(),
         ];
         usort(
@@ -174,25 +155,4 @@ final class CompanyBackupPayrollRunRevisionsProjection
         ];
     }
 
-    /**
-     * @param list<string> $path
-     * @return array<string,mixed>
-     */
-    private static function embeddedTenant(
-        string $column,
-        array $path,
-        string $target,
-        bool $nullable = false,
-    ): array {
-        return [
-            'column' => $column,
-            'condition' => null,
-            'fallbacks' => [],
-            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
-            'nullable' => $nullable,
-            'path' => $path,
-            'target' => 'table:' . $target,
-            'target_columns' => ['id'],
-        ];
-    }
 }
