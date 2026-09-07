@@ -130,6 +130,36 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
         self::assertTrue($database->rollBack());
     }
 
+    public function testAcceptsCanonicalEquivalentRegistryDefinitions(): void
+    {
+        $database = $this->database();
+        $target = $this->snapshot();
+        $decoded = json_decode(
+            CanonicalJson::encode($target->toArray()),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($decoded);
+        $source = TenantDataRegistrySnapshot::fromArray($decoded);
+        self::assertNotSame(
+            $source->registry->definition('file-area:supplier-logos')?->toArray(),
+            $target->registry->definition('file-area:supplier-logos')?->toArray(),
+        );
+        self::assertSame($source->fingerprint, $target->fingerprint);
+        self::assertTrue($database->beginTransaction());
+
+        $map = new CompanyBackupSqlFilePathMap(
+            $database,
+            $this->inventory($source),
+            $source,
+            $target,
+        );
+
+        $map->close();
+        self::assertTrue($database->inTransaction());
+        self::assertTrue($database->rollBack());
+    }
+
     private function database(): PDO
     {
         $dsn = getenv('COMPANY_BACKUP_FILE_MAP_TEST_DSN');

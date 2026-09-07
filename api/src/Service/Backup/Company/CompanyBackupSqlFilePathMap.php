@@ -404,7 +404,8 @@ final class CompanyBackupSqlFilePathMap
                 );
                 if (!$sourceDefinition instanceof TenantDataDefinition
                     || !$targetDefinition instanceof TenantDataDefinition
-                    || $sourceDefinition->toArray() !== $targetDefinition->toArray()
+                    || CanonicalJson::encode($sourceDefinition->toArray())
+                        !== CanonicalJson::encode($targetDefinition->toArray())
                 ) {
                     throw self::error(
                         'file_restore_area_contract_mismatch',
