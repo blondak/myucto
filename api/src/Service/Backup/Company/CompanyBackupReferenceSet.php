@@ -150,7 +150,13 @@ final readonly class CompanyBackupReferenceSet
             if ($reference->mapping
                 === CompanyBackupReferenceMapping::TenantReferenceKey
             ) {
-                if (($reference->targetColumns[$position] ?? null) !== $column) {
+                if (($reference->targetColumns[$position] ?? null) !== $column
+                    && !self::sharesTenantIdTargetCoordinate(
+                        $column,
+                        $reference,
+                        $claims,
+                    )
+                ) {
                     return false;
                 }
                 $hasReferenceKey = true;
@@ -168,12 +174,90 @@ final readonly class CompanyBackupReferenceSet
             if ($reference->mapping !== CompanyBackupReferenceMapping::TenantId
                 || $reference->columns !== ['supplier_id', $column]
                 || $reference->targetColumns !== ['supplier_id', 'id']
+                || !self::tenantIdCoordinateIsCompatible(
+                    $column,
+                    $reference,
+                    $claims,
+                )
             ) {
                 return false;
             }
             $hasTenantId = true;
         }
         return $hasReferenceKey || ($hasNaturalKey && $hasTenantId);
+    }
+
+    /** @param list<CompanyBackupReference> $claims */
+    private static function sharesTenantIdTargetCoordinate(
+        string $column,
+        CompanyBackupReference $referenceKey,
+        array $claims,
+    ): bool {
+        $referencePosition = array_search(
+            $column,
+            $referenceKey->columns,
+            true,
+        );
+        if (!is_int($referencePosition)) {
+            return false;
+        }
+        $targetColumn = $referenceKey->targetColumns[$referencePosition] ?? null;
+        foreach ($claims as $claim) {
+            if (self::tenantIdMatchesReferenceKeyCoordinate(
+                $column,
+                $claim,
+                $referenceKey,
+                $targetColumn,
+            )
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param list<CompanyBackupReference> $claims */
+    private static function tenantIdCoordinateIsCompatible(
+        string $column,
+        CompanyBackupReference $tenantId,
+        array $claims,
+    ): bool {
+        foreach ($claims as $claim) {
+            if ($claim->mapping
+                !== CompanyBackupReferenceMapping::TenantReferenceKey
+            ) {
+                continue;
+            }
+            $position = array_search($column, $claim->columns, true);
+            if (!is_int($position)) {
+                return false;
+            }
+            $targetColumn = $claim->targetColumns[$position] ?? null;
+            if ($targetColumn !== $column
+                && !self::tenantIdMatchesReferenceKeyCoordinate(
+                    $column,
+                    $tenantId,
+                    $claim,
+                    $targetColumn,
+                )
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static function tenantIdMatchesReferenceKeyCoordinate(
+        string $column,
+        CompanyBackupReference $tenantId,
+        CompanyBackupReference $referenceKey,
+        ?string $targetColumn,
+    ): bool {
+        $position = array_search($column, $tenantId->columns, true);
+        return $tenantId->mapping === CompanyBackupReferenceMapping::TenantId
+            && $tenantId->target === $referenceKey->target
+            && is_int($position)
+            && ($tenantId->targetColumns[$position] ?? null) === $targetColumn;
     }
 
     /**

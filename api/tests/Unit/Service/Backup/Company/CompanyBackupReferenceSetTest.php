@@ -532,6 +532,130 @@ final class CompanyBackupReferenceSetTest extends TestCase
         }
     }
 
+    public function testAcceptsReferenceKeySharingRenamedTenantIdCoordinate(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            [
+                [
+                    'columns' => ['supplier_id', 'employee_id'],
+                    'target' => 'table:payroll_employees',
+                    'target_columns' => ['supplier_id', 'id'],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                    'nullable_columns' => [],
+                    'fallbacks' => [],
+                ],
+                [
+                    'columns' => [
+                        'supplier_id',
+                        'employment_id',
+                        'employee_id',
+                    ],
+                    'target' => 'table:payroll_employments',
+                    'target_columns' => ['supplier_id', 'id', 'employee_id'],
+                    'mapping' =>
+                        CompanyBackupReferenceMapping::TenantReferenceKey->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                    'nullable_columns' => [],
+                    'fallbacks' => [],
+                ],
+                [
+                    'columns' => ['supplier_id', 'employment_id'],
+                    'target' => 'table:payroll_employments',
+                    'target_columns' => ['supplier_id', 'id'],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                    'nullable_columns' => [],
+                    'fallbacks' => [],
+                ],
+            ],
+            'table:payroll_run_employments',
+        );
+
+        $restored = $references->remap(
+            [
+                'supplier_id' => 7,
+                'employee_id' => 17,
+                'employment_id' => 19,
+            ],
+            static function (CompanyBackupReference $reference): array {
+                if ($reference->mapping
+                    === CompanyBackupReferenceMapping::TenantReferenceKey
+                ) {
+                    return [107, 219, 117];
+                }
+                return $reference->target === 'table:payroll_employees'
+                    ? [107, 117]
+                    : [107, 219];
+            },
+        );
+
+        self::assertSame(
+            [
+                'supplier_id' => 107,
+                'employee_id' => 117,
+                'employment_id' => 219,
+            ],
+            $restored,
+        );
+    }
+
+    public function testRejectsExtraTargetSharingRenamedReferenceKeyCoordinate(): void
+    {
+        try {
+            CompanyBackupReferenceSet::fromArray(
+                [
+                    [
+                        'columns' => [
+                            'supplier_id',
+                            'employment_id',
+                            'employee_id',
+                        ],
+                        'target' => 'table:payroll_employments',
+                        'target_columns' => [
+                            'supplier_id',
+                            'id',
+                            'employee_id',
+                        ],
+                        'mapping' =>
+                            CompanyBackupReferenceMapping::TenantReferenceKey->value,
+                        'constraint' =>
+                            CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ],
+                    [
+                        'columns' => ['supplier_id', 'employment_id'],
+                        'target' => 'table:payroll_contracts',
+                        'target_columns' => ['supplier_id', 'id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' =>
+                            CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ],
+                    [
+                        'columns' => ['supplier_id', 'employment_id'],
+                        'target' => 'table:payroll_employments',
+                        'target_columns' => ['supplier_id', 'id'],
+                        'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                        'constraint' =>
+                            CompanyBackupReferenceConstraint::Required->value,
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ],
+                ],
+                'table:payroll_run_employments',
+            );
+            self::fail(
+                'Přejmenovanou souřadnici nesmí sdílet další odlišný cíl.',
+            );
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_duplicate', $e->errorCode);
+            self::assertSame('employment_id', $e->column);
+        }
+    }
+
     public function testAcceptsNullableBusinessPartOfTenantReferenceKey(): void
     {
         $reference = [

@@ -52,22 +52,9 @@ final class CompanyBackupPayrollRunResultSnapshotContract
                 'payroll_employees',
                 column: $column,
             ),
-            self::tenant(
-                [...$personPath, 'employments', '*', 'employment_id'],
-                'payroll_employments',
-                column: $column,
-            ),
-            self::tenant(
-                [
-                    ...$personPath,
-                    'employments',
-                    '*',
-                    'inputs',
-                    '*',
-                    'input_id',
-                ],
-                'payroll_inputs',
-                column: $column,
+            ...self::employmentEmbeddedReferences(
+                [...$personPath, 'employments', '*'],
+                $column,
             ),
             self::tenant(
                 [
@@ -109,6 +96,28 @@ final class CompanyBackupPayrollRunResultSnapshotContract
         }
 
         return self::sortReferences($references);
+    }
+
+    /**
+     * @param list<string> $employmentPath
+     * @return list<array<string,mixed>>
+     */
+    public static function employmentEmbeddedReferences(
+        array $employmentPath = [],
+        string $column = 'result_json',
+    ): array {
+        return self::sortReferences([
+            self::tenant(
+                [...$employmentPath, 'employment_id'],
+                'payroll_employments',
+                column: $column,
+            ),
+            self::tenant(
+                [...$employmentPath, 'inputs', '*', 'input_id'],
+                'payroll_inputs',
+                column: $column,
+            ),
+        ]);
     }
 
     /**
