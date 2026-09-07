@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Run\PayrollStatutoryResultSetHash;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 use PDOException;
@@ -54,17 +55,16 @@ final class PayrollStatutoryResultRepository
         $this->validateStatusHierarchy($resultStatus, $normalizedPeople);
         $inputJson = CanonicalJson::encode($inputSnapshot);
         $resultJson = CanonicalJson::encode($resultSnapshot);
-        $resultSetJson = CanonicalJson::encode([
-            'calculation_kind' => $calculationKind,
-            'input_snapshot' => $inputSnapshot,
-            'people' => $normalizedPeople,
-            'result_snapshot' => $resultSnapshot,
-            'result_status' => $resultStatus,
-            'ruleset_hash' => $rulesetHash,
-            'ruleset_id' => $rulesetId,
-            'schema_version' => $schemaVersion,
-        ]);
-        $resultSetHash = hash('sha256', $resultSetJson);
+        $resultSetHash = PayrollStatutoryResultSetHash::calculate(
+            $calculationKind,
+            $inputSnapshot,
+            $normalizedPeople,
+            $resultSnapshot,
+            $resultStatus,
+            $rulesetHash,
+            $rulesetId,
+            $schemaVersion,
+        );
 
         return $this->transactional(function () use (
             $supplierId,
@@ -409,7 +409,10 @@ final class PayrollStatutoryResultRepository
         $stmt->execute([$supplierId, $revisionId, $calculationKind]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return is_array($row) ? $row : null;
+        return is_array($row) ? [
+            'id' => $row['id'] ?? null,
+            'result_set_hash' => $row['result_set_hash'] ?? null,
+        ] : null;
     }
 
     /**
