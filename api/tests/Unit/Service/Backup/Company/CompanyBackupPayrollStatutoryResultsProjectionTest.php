@@ -116,4 +116,25 @@ final class CompanyBackupPayrollStatutoryResultsProjectionTest extends TestCase
             ),
         );
     }
+
+    public function testImmutableGraphForbidsDeferredUpdates(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        foreach ([
+            'table:payroll_run_revisions',
+            'table:payroll_statutory_accumulator_entries',
+            'table:payroll_statutory_accumulator_openings',
+            'table:payroll_statutory_person_results',
+            'table:payroll_statutory_relationship_results',
+            'table:payroll_statutory_results',
+        ] as $registryKey) {
+            $definition = $registry->definition($registryKey);
+            self::assertNotNull($definition);
+            self::assertFalse(
+                CompanyBackupTableProjection::fromDefinition($definition)
+                    ->allowsDeferredUpdates,
+                $registryKey,
+            );
+        }
+    }
 }

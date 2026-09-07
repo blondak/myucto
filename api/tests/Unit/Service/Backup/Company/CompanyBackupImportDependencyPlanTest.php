@@ -180,6 +180,133 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         );
     }
 
+    public function testPreparesImmutableStatutoryHashesBeforeInsertGraph(): void
+    {
+        $snapshot = $this->snapshot([
+            $this->table('table:supplier', TenantDataPolicy::TenantRoot, ['id']),
+            $this->table(
+                'table:payroll_run_revisions',
+                TenantDataPolicy::TenantOwned,
+                [
+                    'id',
+                    'supplier_id',
+                    'snapshot_json',
+                    'snapshot_hash',
+                ],
+                references: [
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                embeddedReferences: [[
+                    'column' => 'snapshot_json',
+                    'condition' => null,
+                    'fallbacks' => [],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'nullable' => false,
+                    'path' => ['result_id'],
+                    'target' => 'table:payroll_statutory_results',
+                    'target_columns' => ['id'],
+                ]],
+                embeddedHashReferences: [[
+                    'column' => 'snapshot_json',
+                    'nullable' => true,
+                    'path' => ['person_hash'],
+                    'target' => 'table:payroll_statutory_person_results',
+                    'target_hash_column' => 'result_snapshot_hash',
+                ]],
+                derivedHashes: [[
+                    'algorithm' => 'sha256_canonical_json',
+                    'hash_column' => 'snapshot_hash',
+                    'nullable' => false,
+                    'source_column' => 'snapshot_json',
+                ]],
+                deferredUpdates: false,
+            ),
+            $this->table(
+                'table:payroll_statutory_results',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'revision_id'],
+                references: [
+                    $this->reference(
+                        ['revision_id'],
+                        'table:payroll_run_revisions',
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                referenceKeys: [[
+                    'supplier_id',
+                    'id',
+                    'revision_id',
+                ]],
+                deferredUpdates: false,
+            ),
+            $this->table(
+                'table:payroll_statutory_person_results',
+                TenantDataPolicy::TenantOwned,
+                [
+                    'id',
+                    'supplier_id',
+                    'statutory_result_id',
+                    'payload_json',
+                    'result_snapshot_hash',
+                ],
+                references: [
+                    $this->reference(
+                        ['statutory_result_id'],
+                        'table:payroll_statutory_results',
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                derivedHashes: [[
+                    'algorithm' => 'sha256_canonical_json',
+                    'hash_column' => 'result_snapshot_hash',
+                    'nullable' => false,
+                    'source_column' => 'payload_json',
+                ]],
+                referenceKeys: [[
+                    'supplier_id',
+                    'id',
+                    'statutory_result_id',
+                ]],
+                deferredUpdates: false,
+            ),
+            $this->table(
+                'table:payroll_statutory_relationship_results',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'person_result_id'],
+                references: [
+                    $this->reference(
+                        ['person_result_id'],
+                        'table:payroll_statutory_person_results',
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                deferredUpdates: false,
+            ),
+        ]);
+
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot, ['table:supplier' => 1]),
+        );
+
+        self::assertSame([
+            ['table:supplier'],
+            ['table:payroll_run_revisions'],
+            ['table:payroll_statutory_results'],
+            ['table:payroll_statutory_person_results'],
+            ['table:payroll_statutory_relationship_results'],
+        ], $plan->insertBatches());
+        $hashDependency = $plan->dependency(
+            'table:payroll_run_revisions',
+            'table:payroll_statutory_person_results',
+            CompanyBackupImportDependencyKind::EmbeddedHash,
+            'snapshot_json:person_hash->payroll_statutory_person_results:'
+                . 'result_snapshot_hash?',
+        );
+        self::assertNotNull($hashDependency);
+        self::assertFalse($hashDependency->deferred);
+    }
+
     public function testClassifiesEveryPayloadReferenceRepresentation(): void
     {
         $snapshot = $this->snapshot([
@@ -463,6 +590,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
      * @param list<array<string,mixed>> $polymorphicReferences
      * @param list<string>|null $naturalKey
      * @param list<list<string>> $referenceKeys
+     * @param bool $deferredUpdates
      */
     private function table(
         string $key,
@@ -477,6 +605,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         array $polymorphicReferences = [],
         ?array $naturalKey = null,
         array $referenceKeys = [],
+        bool $deferredUpdates = true,
     ): TenantDataDefinition {
         $details = [
             'primary_key' => ['id'],
@@ -497,6 +626,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
             'secrets' => [],
             'company_backup' => [
                 'data_columns' => $dataColumns,
+                ...($deferredUpdates ? [] : ['deferred_updates' => false]),
                 'derived_hashes' => $derivedHashes,
                 'embedded_hash_references' => $embeddedHashReferences,
                 'embedded_references' => $embeddedReferences,

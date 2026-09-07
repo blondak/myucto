@@ -77,6 +77,7 @@ final readonly class CompanyBackupTableProjection
         array $omitColumns,
         array $secretPolicies,
         array $columnCodecs,
+        public bool $allowsDeferredUpdates,
         CompanyBackupReferenceSet $references,
         CompanyBackupEncodedReferenceSet $encodedReferences,
         CompanyBackupEmbeddedReferenceSet $embeddedReferences,
@@ -163,6 +164,7 @@ final readonly class CompanyBackupTableProjection
         $allowedMetadataKeys = [
             ...$baseMetadataKeys,
             'column_codecs',
+            'deferred_updates',
             'derived_hashes',
             'encoded_references',
             'embedded_hash_references',
@@ -210,6 +212,13 @@ final readonly class CompanyBackupTableProjection
             $dataColumns,
             $registryKey,
         );
+        $allowsDeferredUpdates = $metadata['deferred_updates'] ?? true;
+        if (!is_bool($allowsDeferredUpdates)) {
+            throw new CompanyBackupDataSourceException(
+                'data_deferred_updates_metadata_invalid',
+                $registryKey,
+            );
+        }
         $references = CompanyBackupReferenceSet::fromArray(
             $metadata['references'],
             $registryKey,
@@ -354,6 +363,7 @@ final readonly class CompanyBackupTableProjection
             $omitColumns,
             $secretPolicies,
             $columnCodecs,
+            $allowsDeferredUpdates,
             $references,
             $encodedReferences,
             $embeddedReferences,

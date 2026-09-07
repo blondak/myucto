@@ -20,6 +20,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupImportSchemaSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportTableMetadata;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryResultSetAssembler;
+use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionAction;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionPlan;
@@ -104,6 +106,51 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 . 'supplier_id INTEGER NOT NULL, revision_id INTEGER NOT NULL)',
         );
         $this->database->exec(
+            'CREATE TABLE payroll_run_revisions ('
+                . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                . 'supplier_id INTEGER NOT NULL, snapshot_json TEXT NOT NULL,'
+                . 'snapshot_hash TEXT NOT NULL)',
+        );
+        $this->database->exec(
+            'CREATE TABLE payroll_statutory_results ('
+                . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                . 'supplier_id INTEGER NOT NULL, revision_id INTEGER NOT NULL,'
+                . 'calculation_kind TEXT NOT NULL, schema_version TEXT NOT NULL,'
+                . 'result_status TEXT NOT NULL, ruleset_id TEXT NOT NULL,'
+                . 'ruleset_hash TEXT NOT NULL, input_snapshot_json TEXT NOT NULL,'
+                . 'input_snapshot_hash TEXT NOT NULL,'
+                . 'result_snapshot_json TEXT NOT NULL,'
+                . 'result_snapshot_hash TEXT NOT NULL,'
+                . 'result_set_hash TEXT NOT NULL)',
+        );
+        $this->database->exec(
+            'CREATE TABLE payroll_statutory_person_results ('
+                . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                . 'supplier_id INTEGER NOT NULL,'
+                . 'statutory_result_id INTEGER NOT NULL,'
+                . 'revision_id INTEGER NOT NULL,'
+                . 'calculation_kind TEXT NOT NULL, employee_id INTEGER NOT NULL,'
+                . 'result_status TEXT NOT NULL,'
+                . 'input_snapshot_json TEXT NOT NULL,'
+                . 'input_snapshot_hash TEXT NOT NULL,'
+                . 'result_snapshot_json TEXT NOT NULL,'
+                . 'result_snapshot_hash TEXT NOT NULL)',
+        );
+        $this->database->exec(
+            'CREATE TABLE payroll_statutory_relationship_results ('
+                . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                . 'supplier_id INTEGER NOT NULL,'
+                . 'statutory_result_id INTEGER NOT NULL,'
+                . 'person_result_id INTEGER NOT NULL,'
+                . 'revision_id INTEGER NOT NULL,'
+                . 'calculation_kind TEXT NOT NULL, employee_id INTEGER NOT NULL,'
+                . 'employment_id INTEGER NOT NULL, result_status TEXT NOT NULL,'
+                . 'input_snapshot_json TEXT NOT NULL,'
+                . 'input_snapshot_hash TEXT NOT NULL,'
+                . 'result_snapshot_json TEXT NOT NULL,'
+                . 'result_snapshot_hash TEXT NOT NULL)',
+        );
+        $this->database->exec(
             "INSERT INTO countries (id, iso2, name) VALUES (10, 'CZ', 'Czechia')",
         );
         $this->database->exec(
@@ -147,6 +194,42 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         $this->database->exec(
             'INSERT INTO synthetic_results (id, supplier_id, revision_id)'
                 . ' VALUES (500, 40, 400)',
+        );
+        $this->database->exec(
+            "INSERT INTO payroll_run_revisions"
+                . " (id, supplier_id, snapshot_json, snapshot_hash)"
+                . " VALUES (600, 40, '{}', '" . str_repeat('a', 64) . "')",
+        );
+        $this->database->exec(
+            'INSERT INTO payroll_statutory_results'
+                . ' (id, supplier_id, revision_id, calculation_kind,'
+                . ' schema_version, result_status, ruleset_id, ruleset_hash,'
+                . ' input_snapshot_json, input_snapshot_hash,'
+                . ' result_snapshot_json, result_snapshot_hash, result_set_hash)'
+                . " VALUES (700, 40, 600, 'social_insurance', 'synthetic.v1',"
+                . " 'calculated', 'synthetic-ruleset', '" . str_repeat('b', 64)
+                . "', '{}', '" . str_repeat('c', 64) . "', '{}', '"
+                . str_repeat('d', 64) . "', '" . str_repeat('e', 64) . "')",
+        );
+        $this->database->exec(
+            'INSERT INTO payroll_statutory_person_results'
+                . ' (id, supplier_id, statutory_result_id, revision_id,'
+                . ' calculation_kind, employee_id, result_status,'
+                . ' input_snapshot_json, input_snapshot_hash,'
+                . ' result_snapshot_json, result_snapshot_hash)'
+                . " VALUES (800, 40, 700, 600, 'social_insurance', 17,"
+                . " 'calculated', '{}', '" . str_repeat('f', 64) . "', '{}', '"
+                . str_repeat('1', 64) . "')",
+        );
+        $this->database->exec(
+            'INSERT INTO payroll_statutory_relationship_results'
+                . ' (id, supplier_id, statutory_result_id, person_result_id,'
+                . ' revision_id, calculation_kind, employee_id, employment_id,'
+                . ' result_status, input_snapshot_json, input_snapshot_hash,'
+                . ' result_snapshot_json, result_snapshot_hash)'
+                . " VALUES (900, 40, 700, 800, 600, 'social_insurance', 17, 19,"
+                . " 'calculated', '{}', '" . str_repeat('2', 64) . "', '{}', '"
+                . str_repeat('3', 64) . "')",
         );
     }
 
@@ -338,6 +421,132 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         self::assertSame(0, $this->temporaryTableCount());
     }
 
+    public function testPreparesStatutoryPersonHashAndResealsImmutableRoot(): void
+    {
+        [$source, $preflight, $decisions] = $this->context(
+            statutoryHashCycle: true,
+        );
+        $importer = new CompanyBackupDatabaseImporter(
+            $this->database,
+            new SyntheticCompanyBackupImportSchemaSource(),
+        );
+        self::assertTrue($this->database->beginTransaction());
+
+        $result = $importer->restore(
+            $source,
+            $preflight,
+            $decisions,
+            $this->sensitiveData(),
+        );
+
+        self::assertSame(9, $result->insertedRows);
+        self::assertSame(10, $result->identityCount);
+        self::assertSame(21, $result->sourceKeyCount);
+        self::assertSame(9, $result->hashMappingCount);
+        self::assertSame(3, $result->deferredRows);
+        self::assertSame(2, $result->updatedRows);
+
+        $person = $this->rows(
+            'SELECT * FROM payroll_statutory_person_results'
+                . ' WHERE supplier_id = 41',
+        )[0];
+        $relationship = $this->rows(
+            'SELECT * FROM payroll_statutory_relationship_results'
+                . ' WHERE supplier_id = 41',
+        )[0];
+        $header = $this->rows(
+            'SELECT * FROM payroll_statutory_results WHERE supplier_id = 41',
+        )[0];
+        $revision = $this->rows(
+            'SELECT * FROM payroll_run_revisions WHERE supplier_id = 41',
+        )[0];
+
+        self::assertSame(601, $revision['id']);
+        self::assertSame(701, $header['id']);
+        self::assertSame(601, $header['revision_id']);
+        self::assertSame(801, $person['id']);
+        self::assertSame(701, $person['statutory_result_id']);
+        self::assertSame(901, $relationship['id']);
+        self::assertSame(801, $relationship['person_result_id']);
+        $personSnapshotHash = hash(
+            'sha256',
+            (string) $person['result_snapshot_json'],
+        );
+        self::assertSame($personSnapshotHash, $person['result_snapshot_hash']);
+        $revisionSnapshot = json_decode(
+            (string) $revision['snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(701, $revisionSnapshot['result_id']);
+        self::assertSame($personSnapshotHash, $revisionSnapshot['person_hash']);
+        self::assertSame(
+            hash('sha256', (string) $revision['snapshot_json']),
+            $revision['snapshot_hash'],
+        );
+        self::assertSame(
+            CompanyBackupPayrollStatutoryResultSetAssembler::calculate(
+                $header,
+                [$person],
+                [$relationship],
+            ),
+            $header['result_set_hash'],
+        );
+
+        self::assertTrue($this->database->rollBack());
+        self::assertSame(1, $this->countRows('payroll_run_revisions'));
+        self::assertSame(1, $this->countRows('payroll_statutory_results'));
+        self::assertSame(
+            1,
+            $this->countRows('payroll_statutory_person_results'),
+        );
+        self::assertSame(
+            1,
+            $this->countRows('payroll_statutory_relationship_results'),
+        );
+        self::assertSame(0, $this->temporaryTableCount());
+    }
+
+    public function testRejectsChangedStatutoryAggregateBeforeBusinessWrite(): void
+    {
+        [$source, $preflight, $decisions] = $this->context(
+            statutoryHashCycle: true,
+            invalidStatutorySeal: true,
+        );
+        $importer = new CompanyBackupDatabaseImporter(
+            $this->database,
+            new SyntheticCompanyBackupImportSchemaSource(),
+        );
+        self::assertTrue($this->database->beginTransaction());
+
+        try {
+            $importer->restore(
+                $source,
+                $preflight,
+                $decisions,
+                $this->sensitiveData(),
+            );
+            self::fail('Změněný agregát musí obnovu zastavit před prvním zápisem.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('data_aggregate_hash_value_invalid', $e->errorCode);
+        }
+
+        self::assertTrue($this->database->inTransaction());
+        self::assertSame(1, $this->countRows('supplier'));
+        self::assertSame(1, $this->countRows('payroll_run_revisions'));
+        self::assertSame(1, $this->countRows('payroll_statutory_results'));
+        self::assertSame(
+            1,
+            $this->countRows('payroll_statutory_person_results'),
+        );
+        self::assertSame(
+            1,
+            $this->countRows('payroll_statutory_relationship_results'),
+        );
+        self::assertTrue($this->database->rollBack());
+        self::assertSame(0, $this->temporaryTableCount());
+    }
+
     public function testRejectsDatabaseFileReferenceMissingFromInventory(): void
     {
         [$source, $preflight, $decisions] = $this->context(
@@ -419,14 +628,22 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         bool $withFiles = false,
         bool $omitNestedFileOwner = false,
         bool $logicalIdentityCycle = false,
+        bool $statutoryHashCycle = false,
+        bool $invalidStatutorySeal = false,
     ): array
     {
         $snapshot = $this->snapshot(
             $unstableHashTarget,
             $withFiles,
             $logicalIdentityCycle,
+            $statutoryHashCycle,
         );
-        $rows = $this->sourceRows($withFiles, $logicalIdentityCycle);
+        $rows = $this->sourceRows(
+            $withFiles,
+            $logicalIdentityCycle,
+            $statutoryHashCycle,
+            $invalidStatutorySeal,
+        );
         $inventory = $this->inventory($snapshot, $rows);
         $fileInventory = $this->fileInventory(
             $snapshot,
@@ -459,13 +676,25 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             )->withSourceKey($naturalKey));
         }
         $externalInventory = $external->finish();
+        $rowCount = 0;
+        $sourceKeyCount = 0;
+        foreach ($rows as $registryKey => $objectRows) {
+            $definition = $this->definition($snapshot, $registryKey);
+            $identity = CompanyBackupSourceIdentityProjection::fromDefinition(
+                $definition,
+            );
+            foreach ($objectRows as $row) {
+                $rowCount++;
+                $sourceKeyCount += count($identity->identityForRow($row)->keys());
+            }
+        }
         $preflight = new CompanyBackupDataPreflightResult(
             $externalInventory,
-            $logicalIdentityCycle ? 8 : 6,
-            $logicalIdentityCycle ? 8 : 6,
-            $logicalIdentityCycle ? 16 : 11,
+            $rowCount,
+            $rowCount,
+            $sourceKeyCount,
             1_024,
-            $logicalIdentityCycle ? 12 : 9,
+            $statutoryHashCycle ? 16 : ($logicalIdentityCycle ? 12 : 9),
             $snapshot->fingerprint,
             self::TECHNICAL_BINDING,
         );
@@ -510,6 +739,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         bool $unstableHashTarget = false,
         bool $withFiles = false,
         bool $logicalIdentityCycle = false,
+        bool $statutoryHashCycle = false,
     ): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
@@ -709,6 +939,175 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 ],
             );
         }
+        if ($statutoryHashCycle) {
+            $definitions[] = $this->definitionFor(
+                'table:payroll_run_revisions',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'snapshot_json', 'snapshot_hash'],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                embeddedReferences: [[
+                    'column' => 'snapshot_json',
+                    'condition' => null,
+                    'fallbacks' => [],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'nullable' => false,
+                    'path' => ['result_id'],
+                    'target' => 'table:payroll_statutory_results',
+                    'target_columns' => ['id'],
+                ]],
+                embeddedHashReferences: [[
+                    'column' => 'snapshot_json',
+                    'nullable' => false,
+                    'path' => ['person_hash'],
+                    'target' => 'table:payroll_statutory_person_results',
+                    'target_hash_column' => 'result_snapshot_hash',
+                ]],
+                derivedHashes: [[
+                    'algorithm' => 'sha256_canonical_json',
+                    'hash_column' => 'snapshot_hash',
+                    'nullable' => false,
+                    'source_column' => 'snapshot_json',
+                ]],
+                deferredUpdates: false,
+            );
+            $definitions[] = $this->definitionFor(
+                'table:payroll_statutory_results',
+                TenantDataPolicy::TenantOwned,
+                [
+                    'id',
+                    'supplier_id',
+                    'revision_id',
+                    'calculation_kind',
+                    'schema_version',
+                    'result_status',
+                    'ruleset_id',
+                    'ruleset_hash',
+                    'input_snapshot_json',
+                    'input_snapshot_hash',
+                    'result_snapshot_json',
+                    'result_snapshot_hash',
+                    'result_set_hash',
+                ],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(
+                        ['revision_id'],
+                        'table:payroll_run_revisions',
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                derivedHashes: $this->snapshotHashes(),
+                referenceKeys: [[
+                    'supplier_id',
+                    'id',
+                    'revision_id',
+                    'calculation_kind',
+                ]],
+                deferredUpdates: false,
+                preservedIdentifiers: ['ruleset_id'],
+            );
+            $definitions[] = $this->definitionFor(
+                'table:payroll_statutory_person_results',
+                TenantDataPolicy::TenantOwned,
+                [
+                    'id',
+                    'supplier_id',
+                    'statutory_result_id',
+                    'revision_id',
+                    'calculation_kind',
+                    'employee_id',
+                    'result_status',
+                    'input_snapshot_json',
+                    'input_snapshot_hash',
+                    'result_snapshot_json',
+                    'result_snapshot_hash',
+                ],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(
+                        ['revision_id'],
+                        'table:payroll_run_revisions',
+                    ),
+                    $this->reference(
+                        ['statutory_result_id'],
+                        'table:payroll_statutory_results',
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                embeddedReferences: [[
+                    'column' => 'result_snapshot_json',
+                    'condition' => null,
+                    'fallbacks' => [],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'nullable' => false,
+                    'path' => ['result_id'],
+                    'target' => 'table:payroll_statutory_results',
+                    'target_columns' => ['id'],
+                ]],
+                derivedHashes: $this->snapshotHashes(),
+                referenceKeys: [[
+                    'supplier_id',
+                    'id',
+                    'statutory_result_id',
+                    'revision_id',
+                    'calculation_kind',
+                    'employee_id',
+                ]],
+                deferredUpdates: false,
+                preservedIdentifiers: ['employee_id'],
+            );
+            $definitions[] = $this->definitionFor(
+                'table:payroll_statutory_relationship_results',
+                TenantDataPolicy::TenantOwned,
+                [
+                    'id',
+                    'supplier_id',
+                    'statutory_result_id',
+                    'person_result_id',
+                    'revision_id',
+                    'calculation_kind',
+                    'employee_id',
+                    'employment_id',
+                    'result_status',
+                    'input_snapshot_json',
+                    'input_snapshot_hash',
+                    'result_snapshot_json',
+                    'result_snapshot_hash',
+                ],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(
+                        ['person_result_id'],
+                        'table:payroll_statutory_person_results',
+                    ),
+                    $this->reference(
+                        ['revision_id'],
+                        'table:payroll_run_revisions',
+                    ),
+                    $this->reference(
+                        ['statutory_result_id'],
+                        'table:payroll_statutory_results',
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                embeddedReferences: [[
+                    'column' => 'result_snapshot_json',
+                    'condition' => null,
+                    'fallbacks' => [],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'nullable' => false,
+                    'path' => ['person_id'],
+                    'target' => 'table:payroll_statutory_person_results',
+                    'target_columns' => ['id'],
+                ]],
+                derivedHashes: $this->snapshotHashes(),
+                deferredUpdates: false,
+                preservedIdentifiers: ['employee_id', 'employment_id'],
+            );
+        }
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
             1,
             $definitions,
@@ -720,6 +1119,8 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
     private function sourceRows(
         bool $withFiles = false,
         bool $logicalIdentityCycle = false,
+        bool $statutoryHashCycle = false,
+        bool $invalidStatutorySeal = false,
     ): array
     {
         $firstPayload = CanonicalJson::encode([
@@ -788,7 +1189,113 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                     'revision_id' => 41,
                 ]],
             ] : []),
+            ...($statutoryHashCycle
+                ? $this->statutoryRows($invalidStatutorySeal)
+                : []),
         ];
+    }
+
+    /** @return array<string,list<array<string,mixed>>> */
+    private function statutoryRows(bool $invalidSeal = false): array
+    {
+        $personInput = CanonicalJson::encode(['employee_id' => 17]);
+        $personResult = CanonicalJson::encode([
+            'person_reference' => 'employee:17',
+            'result_id' => 71,
+        ]);
+        $person = [
+            'id' => 81,
+            'supplier_id' => 7,
+            'statutory_result_id' => 71,
+            'revision_id' => 61,
+            'calculation_kind' => 'social_insurance',
+            'employee_id' => 17,
+            'result_status' => 'calculated',
+            'input_snapshot_json' => $personInput,
+            'input_snapshot_hash' => hash('sha256', $personInput),
+            'result_snapshot_json' => $personResult,
+            'result_snapshot_hash' => hash('sha256', $personResult),
+        ];
+        $relationshipInput = CanonicalJson::encode(['employment_id' => 19]);
+        $relationshipResult = CanonicalJson::encode([
+            'person_id' => 81,
+            'relationship_reference' => 'employment:19',
+        ]);
+        $relationship = [
+            'id' => 91,
+            'supplier_id' => 7,
+            'statutory_result_id' => 71,
+            'person_result_id' => 81,
+            'revision_id' => 61,
+            'calculation_kind' => 'social_insurance',
+            'employee_id' => 17,
+            'employment_id' => 19,
+            'result_status' => 'calculated',
+            'input_snapshot_json' => $relationshipInput,
+            'input_snapshot_hash' => hash('sha256', $relationshipInput),
+            'result_snapshot_json' => $relationshipResult,
+            'result_snapshot_hash' => hash('sha256', $relationshipResult),
+        ];
+        $headerInput = CanonicalJson::encode(['employee_id' => 17]);
+        $headerResult = CanonicalJson::encode([
+            'person_reference' => 'employee:17',
+        ]);
+        $header = [
+            'id' => 71,
+            'supplier_id' => 7,
+            'revision_id' => 61,
+            'calculation_kind' => 'social_insurance',
+            'schema_version' => 'synthetic-statutory-result.v1',
+            'result_status' => 'calculated',
+            'ruleset_id' => 'synthetic-ruleset-2026.1',
+            'ruleset_hash' => str_repeat('a', 64),
+            'input_snapshot_json' => $headerInput,
+            'input_snapshot_hash' => hash('sha256', $headerInput),
+            'result_snapshot_json' => $headerResult,
+            'result_snapshot_hash' => hash('sha256', $headerResult),
+            'result_set_hash' => str_repeat('0', 64),
+        ];
+        $header['result_set_hash'] =
+            CompanyBackupPayrollStatutoryResultSetAssembler::calculate(
+                $header,
+                [$person],
+                [$relationship],
+            );
+        if ($invalidSeal) {
+            $header['result_set_hash'] = str_repeat('0', 64);
+        }
+        $revisionSnapshot = CanonicalJson::encode([
+            'person_hash' => $person['result_snapshot_hash'],
+            'result_id' => 71,
+        ]);
+
+        return [
+            'table:payroll_run_revisions' => [[
+                'id' => 61,
+                'supplier_id' => 7,
+                'snapshot_json' => $revisionSnapshot,
+                'snapshot_hash' => hash('sha256', $revisionSnapshot),
+            ]],
+            'table:payroll_statutory_results' => [$header],
+            'table:payroll_statutory_person_results' => [$person],
+            'table:payroll_statutory_relationship_results' => [$relationship],
+        ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function snapshotHashes(): array
+    {
+        return [[
+            'algorithm' => 'sha256_canonical_json',
+            'hash_column' => 'input_snapshot_hash',
+            'nullable' => false,
+            'source_column' => 'input_snapshot_json',
+        ], [
+            'algorithm' => 'sha256_canonical_json',
+            'hash_column' => 'result_snapshot_hash',
+            'nullable' => false,
+            'source_column' => 'result_snapshot_json',
+        ]];
     }
 
     /**
@@ -869,6 +1376,8 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
      * @param array<string,string> $omitColumns
      * @param list<array<string,mixed>> $protectedSecretMaterializations
      * @param list<list<string>> $referenceKeys
+     * @param bool $deferredUpdates
+     * @param list<string> $preservedIdentifiers
      */
     private function definitionFor(
         string $key,
@@ -885,6 +1394,8 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         array $omitColumns = [],
         array $protectedSecretMaterializations = [],
         array $referenceKeys = [],
+        bool $deferredUpdates = true,
+        array $preservedIdentifiers = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             $key,
@@ -901,12 +1412,16 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 'secrets' => $secretPolicies,
                 'company_backup' => [
                     'data_columns' => $columns,
+                    ...($deferredUpdates ? [] : ['deferred_updates' => false]),
                     'derived_hashes' => $derivedHashes,
                     'embedded_hash_references' => $embeddedHashReferences,
                     'embedded_references' => $embeddedReferences,
                     'generated_columns' => [],
                     'hash_references' => $hashReferences,
                     'omit_columns' => $omitColumns,
+                    ...($preservedIdentifiers === [] ? [] : [
+                        'preserved_identifiers' => $preservedIdentifiers,
+                    ]),
                     'protected_secret_materializations' =>
                         $protectedSecretMaterializations,
                     'references' => $references,
@@ -998,7 +1513,9 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 . " WHERE type = 'table'"
                 . " AND (name LIKE 'company_backup_target_%'"
                 . " OR name LIKE 'company_backup_hash_%'"
-                . " OR name LIKE 'company_backup_file_path_%')",
+                . " OR name LIKE 'company_backup_file_path_%'"
+                . " OR name LIKE 'company_backup_statutory_rows_%'"
+                . " OR name LIKE 'company_backup_statutory_roots_%')",
         );
         if ($statement === false) {
             throw new \RuntimeException('Nelze ověřit dočasné tabulky.');

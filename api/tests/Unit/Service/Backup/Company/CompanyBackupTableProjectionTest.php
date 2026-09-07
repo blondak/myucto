@@ -77,6 +77,34 @@ final class CompanyBackupTableProjectionTest extends TestCase
         );
     }
 
+    public function testControlsWhetherReferencesMayUseDeferredUpdates(): void
+    {
+        self::assertTrue(
+            CompanyBackupTableProjection::fromDefinition($this->definition())
+                ->allowsDeferredUpdates,
+        );
+        self::assertFalse(
+            CompanyBackupTableProjection::fromDefinition($this->definition(
+                deferredUpdates: false,
+            ))->allowsDeferredUpdates,
+        );
+    }
+
+    public function testRejectsNonBooleanDeferredUpdateMetadata(): void
+    {
+        try {
+            CompanyBackupTableProjection::fromDefinition($this->definition(
+                deferredUpdates: 'never',
+            ));
+            self::fail('Režim odložených změn musí být jednoznačný boolean.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame(
+                'data_deferred_updates_metadata_invalid',
+                $e->errorCode,
+            );
+        }
+    }
+
     public function testRemapsEmbeddedIdentityAndRefreshesDerivedHashAtomically(): void
     {
         $projection = CompanyBackupTableProjection::fromDefinition($this->definition(
@@ -911,6 +939,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
      * @param list<array<string,mixed>> $embeddedHashReferences
      * @param list<array<string,mixed>> $embeddedReferences
      * @param list<array<string,mixed>> $protectedSecretMaterializations
+     * @param mixed $deferredUpdates
      */
     private function definition(
         array $secrets = [],
@@ -927,6 +956,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
         array $embeddedHashReferences = [],
         array $embeddedReferences = [],
         array $protectedSecretMaterializations = [],
+        mixed $deferredUpdates = null,
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:synthetic_records',
@@ -942,6 +972,9 @@ final class CompanyBackupTableProjectionTest extends TestCase
                 'secrets' => $secrets,
                 'company_backup' => [
                     'data_columns' => $dataColumns,
+                    ...($deferredUpdates === null ? [] : [
+                        'deferred_updates' => $deferredUpdates,
+                    ]),
                     ...($columnCodecs === [] ? [] : [
                         'column_codecs' => $columnCodecs,
                     ]),

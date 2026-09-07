@@ -2241,6 +2241,7 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollRunRevisionsProjection::columnCodecs(),
                     'data_columns' =>
                         CompanyBackupPayrollRunRevisionsProjection::dataColumns(),
+                    'deferred_updates' => false,
                     'derived_hashes' =>
                         CompanyBackupPayrollRunRevisionsProjection::derivedHashes(),
                     'embedded_hash_references' =>
@@ -2262,6 +2263,7 @@ final class TenantDataRegistryFactory
                 'company_backup' => [
                     'data_columns' =>
                         CompanyBackupPayrollStatutoryPersonResultsProjection::dataColumns(),
+                    'deferred_updates' => false,
                     'derived_hashes' =>
                         CompanyBackupPayrollStatutoryPersonResultsProjection::derivedHashes(),
                     'embedded_hash_references' =>
@@ -2283,6 +2285,7 @@ final class TenantDataRegistryFactory
                 'company_backup' => [
                     'data_columns' =>
                         CompanyBackupPayrollStatutoryRelationshipResultsProjection::dataColumns(),
+                    'deferred_updates' => false,
                     'derived_hashes' =>
                         CompanyBackupPayrollStatutoryRelationshipResultsProjection::derivedHashes(),
                     'embedded_hashes' =>
@@ -2302,6 +2305,7 @@ final class TenantDataRegistryFactory
                 'company_backup' => [
                     'data_columns' =>
                         CompanyBackupPayrollStatutoryResultsProjection::dataColumns(),
+                    'deferred_updates' => false,
                     'derived_hashes' =>
                         CompanyBackupPayrollStatutoryResultsProjection::derivedHashes(),
                     'embedded_hash_references' =>
@@ -2325,6 +2329,7 @@ final class TenantDataRegistryFactory
                 'company_backup' => [
                     'data_columns' =>
                         CompanyBackupPayrollStatutoryAccumulatorEntriesProjection::dataColumns(),
+                    'deferred_updates' => false,
                     'derived_hashes' =>
                         CompanyBackupPayrollStatutoryAccumulatorEntriesProjection::derivedHashes(),
                     'embedded_references' => [],
@@ -2346,6 +2351,7 @@ final class TenantDataRegistryFactory
                         CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection::columnCodecs(),
                     'data_columns' =>
                         CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection::dataColumns(),
+                    'deferred_updates' => false,
                     'derived_hashes' =>
                         CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection::derivedHashes(),
                     'embedded_references' => [],

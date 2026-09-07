@@ -185,7 +185,7 @@ final readonly class CompanyBackupImportDependencyPlan
             ),
             self::topologicalBatches(
                 array_keys($insertDefinitions),
-                self::insertDependencies($dependencies),
+                self::insertDependencies($dependencies, $insertDefinitions),
             ),
             $dependencies,
         );
@@ -289,7 +289,8 @@ final readonly class CompanyBackupImportDependencyPlan
                 $reference->target,
                 CompanyBackupImportDependencyKind::Column,
                 $reference->signature(),
-                $reference->nullableColumns === $reference->columns,
+                $projection->allowsDeferredUpdates
+                    && $reference->nullableColumns === $reference->columns,
                 $insertDefinitions,
             );
         }
@@ -300,7 +301,8 @@ final readonly class CompanyBackupImportDependencyPlan
                 $reference->target,
                 CompanyBackupImportDependencyKind::Encoded,
                 $reference->signature(),
-                $reference->nullable
+                $projection->allowsDeferredUpdates
+                    && $reference->nullable
                     && $reference->correlatedIdColumn === null,
                 $insertDefinitions,
             );
@@ -315,7 +317,7 @@ final readonly class CompanyBackupImportDependencyPlan
                 $reference->target,
                 CompanyBackupImportDependencyKind::Embedded,
                 $reference->signature(),
-                $reference->nullable,
+                $projection->allowsDeferredUpdates && $reference->nullable,
                 $insertDefinitions,
             );
         }
@@ -326,7 +328,7 @@ final readonly class CompanyBackupImportDependencyPlan
                 $reference->target,
                 CompanyBackupImportDependencyKind::EmbeddedHash,
                 $reference->signature(),
-                $reference->nullable,
+                $projection->allowsDeferredUpdates && $reference->nullable,
                 $insertDefinitions,
             );
         }
@@ -337,7 +339,7 @@ final readonly class CompanyBackupImportDependencyPlan
                 $reference->target,
                 CompanyBackupImportDependencyKind::Hash,
                 $reference->signature(),
-                $reference->nullable,
+                $projection->allowsDeferredUpdates && $reference->nullable,
                 $insertDefinitions,
             );
         }
@@ -361,7 +363,7 @@ final readonly class CompanyBackupImportDependencyPlan
                     $target,
                     CompanyBackupImportDependencyKind::Polymorphic,
                     $reference->signature() . '/' . $case->signature(),
-                    $reference->nullable,
+                    $projection->allowsDeferredUpdates && $reference->nullable,
                     $insertDefinitions,
                 );
             }
@@ -444,10 +446,24 @@ final readonly class CompanyBackupImportDependencyPlan
 
     /**
      * @param list<CompanyBackupImportDependency> $dependencies
+     * @param array<string,TenantDataDefinition> $insertDefinitions
      * @return list<CompanyBackupImportDependency>
      */
-    private static function insertDependencies(array $dependencies): array
-    {
+    private static function insertDependencies(
+        array $dependencies,
+        array $insertDefinitions,
+    ): array {
+        $precomputedPersonHashes = isset(
+            $insertDefinitions[
+                CompanyBackupPayrollStatutoryResultSetAssembler::ROOT_REGISTRY_KEY
+            ],
+            $insertDefinitions[
+                CompanyBackupPayrollStatutoryResultSetAssembler::PERSON_REGISTRY_KEY
+            ],
+            $insertDefinitions[
+                CompanyBackupPayrollStatutoryResultSetAssembler::RELATIONSHIP_REGISTRY_KEY
+            ],
+        );
         return array_values(array_filter(
             $dependencies,
             static fn (CompanyBackupImportDependency $dependency): bool =>
@@ -455,7 +471,14 @@ final readonly class CompanyBackupImportDependencyPlan
                     CompanyBackupImportDependencyKind::Column,
                     CompanyBackupImportDependencyKind::EmbeddedHash,
                     CompanyBackupImportDependencyKind::Hash,
-                ], true),
+                ], true)
+                && !($precomputedPersonHashes
+                    && in_array($dependency->kind, [
+                        CompanyBackupImportDependencyKind::EmbeddedHash,
+                        CompanyBackupImportDependencyKind::Hash,
+                    ], true)
+                    && $dependency->targetRegistryKey
+                        === CompanyBackupPayrollStatutoryResultSetAssembler::PERSON_REGISTRY_KEY),
         ));
     }
 

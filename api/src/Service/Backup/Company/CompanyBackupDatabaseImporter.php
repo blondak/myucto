@@ -101,6 +101,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         $identities = null;
         $hashes = null;
         $filePaths = null;
+        $statutoryResults = null;
         $result = null;
         $failure = null;
         try {
@@ -152,6 +153,16 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 throw self::error('import_identity_count_mismatch');
             }
             $identities->seal();
+            $statutoryResults = $this->prepareStatutoryResults(
+                $source,
+                $inventory,
+                $identities,
+                $resolutions,
+                $plan,
+                $hashes,
+                $hashMapper,
+                $hashReferenceMapper,
+            );
             [$insertedRows, $supplierId] = $this->insertRows(
                 $source,
                 $inventory,
@@ -164,12 +175,14 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $hashReferenceMapper,
                 $secrets,
                 $filePaths,
+                $statutoryResults,
             );
             if ($insertedRows !== $preallocatedRows
                 || $mappedGlobalRows + $insertedRows !== $preflight->rowCount
             ) {
                 throw self::error('import_row_count_mismatch');
             }
+            $statutoryResults?->finish();
             $hashes->seal();
 
             [$deferredRows, $updatedRows] = $this->updateDeferredRows(
@@ -202,6 +215,15 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
             $failure = $e;
         }
 
+        if ($statutoryResults
+            instanceof CompanyBackupPayrollStatutoryResultSetImportPreparer
+        ) {
+            try {
+                $statutoryResults->close();
+            } catch (\Throwable $e) {
+                $failure ??= $e;
+            }
+        }
         if ($filePaths instanceof CompanyBackupSqlFilePathMap) {
             try {
                 $filePaths->close();
@@ -451,6 +473,49 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
     }
 
     /**
+     * @param callable(CompanyBackupEmbeddedHashReference,string):string $hashMapper
+     * @param callable(CompanyBackupHashReference,string):string $hashReferenceMapper
+     */
+    private function prepareStatutoryResults(
+        CompanyBackupImportSource $source,
+        CompanyBackupDataInventory $inventory,
+        CompanyBackupTargetIdentityMap $identities,
+        CompanyBackupReferenceResolutionPlan $resolutions,
+        CompanyBackupImportDependencyPlan $plan,
+        CompanyBackupSqlTargetHashMap $hashes,
+        callable $hashMapper,
+        callable $hashReferenceMapper,
+    ): ?CompanyBackupPayrollStatutoryResultSetImportPreparer {
+        $present = 0;
+        foreach ([
+            CompanyBackupPayrollStatutoryResultSetAssembler::ROOT_REGISTRY_KEY,
+            CompanyBackupPayrollStatutoryResultSetAssembler::PERSON_REGISTRY_KEY,
+            CompanyBackupPayrollStatutoryResultSetAssembler::RELATIONSHIP_REGISTRY_KEY,
+        ] as $registryKey) {
+            if ($inventory->object($registryKey) !== null) {
+                $present++;
+            }
+        }
+        if ($present === 0) {
+            return null;
+        }
+        if ($present !== 3) {
+            throw self::error('import_statutory_result_set_context_invalid');
+        }
+        return CompanyBackupPayrollStatutoryResultSetImportPreparer::prepare(
+            $this->database,
+            $source,
+            $identities,
+            $resolutions,
+            $plan,
+            $hashes,
+            $hashMapper,
+            $hashReferenceMapper,
+            $this->limits,
+        );
+    }
+
+    /**
      * @param array<string,array{
      *   definition:TenantDataDefinition,
      *   projection:CompanyBackupTableProjection,
@@ -472,6 +537,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         callable $hashReferenceMapper,
         ?CompanyBackupProtectedSecretRestoreMaterializer $secrets,
         CompanyBackupSqlFilePathMap $filePaths,
+        ?CompanyBackupPayrollStatutoryResultSetImportPreparer $statutoryResults,
     ): array {
         $insertedRows = 0;
         $supplierId = null;
@@ -516,6 +582,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                         $hashMapper,
                         $hashReferenceMapper,
                         $secrets,
+                        $statutoryResults,
                         &$insertedRows,
                         &$supplierId,
                     ): void {
@@ -524,6 +591,15 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                             $hashMapper,
                             $hashReferenceMapper,
                         );
+                        if ($statutoryResults !== null
+                            && $definition->key
+                                === CompanyBackupPayrollStatutoryResultSetAssembler::ROOT_REGISTRY_KEY
+                        ) {
+                            $prepared = $statutoryResults->resealRoot(
+                                $row,
+                                $prepared,
+                            );
+                        }
                         $protected = $secrets?->valuesFor(
                             $definition,
                             $row,
