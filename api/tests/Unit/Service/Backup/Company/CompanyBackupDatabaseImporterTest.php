@@ -927,6 +927,10 @@ final readonly class SyntheticCompanyBackupImportSource implements CompanyBackup
     {
         return $this->secretPayload;
     }
+
+    public function close(): void
+    {
+    }
 }
 
 /** @internal Runtime metadata odvozená z testovací SQLite projekce. */

@@ -28,4 +28,10 @@ interface CompanyBackupImportSource extends CompanyBackupImportFileSource
     ): int;
 
     public function secretPayload(): ?CompanyBackupSecretPayload;
+
+    /**
+     * Uzavře streamy a znovu ověří neměnnost archivu. Neměnná metadata
+     * registrů a inventářů zůstávají dostupná pro post-import kontrolu.
+     */
+    public function close(): void;
 }

@@ -173,6 +173,7 @@ final class CompanyBackupFilePublisherTest extends TestCase
 
         $published->verify();
         $published->release();
+        $published->release();
         $published->rollback();
         unset($published);
 

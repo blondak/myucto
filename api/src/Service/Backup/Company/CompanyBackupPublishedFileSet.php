@@ -86,7 +86,9 @@ final class CompanyBackupPublishedFileSet
     /** Po úspěšném DB commitu přestane sada cílové soubory vlastnit. */
     public function release(): void
     {
-        $this->assertOpen();
+        if ($this->closed) {
+            return;
+        }
         $this->closed = true;
         $this->files = [];
         $this->directories = [];

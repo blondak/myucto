@@ -15,7 +15,7 @@ use PDO;
  * Provede oba databázové průchody obnovy uvnitř již otevřené transakce.
  * Commit i rollback zůstává vyšší vrstvě, která později připojí soubory.
  */
-final readonly class CompanyBackupDatabaseImporter
+final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatabaseImport
 {
     public function __construct(
         private PDO $database,
