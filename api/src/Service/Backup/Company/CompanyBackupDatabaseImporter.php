@@ -136,6 +136,22 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $resolutions,
                 $identities,
             );
+            $preallocatedRows = $this->preallocateIdentities(
+                $source,
+                $inventory,
+                $contexts['tables'],
+                $plan,
+                $resolutions,
+                $identities,
+            );
+            if ($identities->identityCount() !== $preflight->identityCount
+                || $identities->entryCount() !== $preflight->sourceKeyCount
+                || $mappedGlobalRows + $preallocatedRows
+                    !== $preflight->rowCount
+            ) {
+                throw self::error('import_identity_count_mismatch');
+            }
+            $identities->seal();
             [$insertedRows, $supplierId] = $this->insertRows(
                 $source,
                 $inventory,
@@ -149,13 +165,11 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $secrets,
                 $filePaths,
             );
-            if ($identities->identityCount() !== $preflight->identityCount
-                || $identities->entryCount() !== $preflight->sourceKeyCount
+            if ($insertedRows !== $preallocatedRows
                 || $mappedGlobalRows + $insertedRows !== $preflight->rowCount
             ) {
-                throw self::error('import_identity_count_mismatch');
+                throw self::error('import_row_count_mismatch');
             }
-            $identities->seal();
             $hashes->seal();
 
             [$deferredRows, $updatedRows] = $this->updateDeferredRows(
@@ -368,6 +382,80 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
      *   projection:CompanyBackupTableProjection,
      *   deferred:CompanyBackupDeferredColumnSet
      * }> $tables
+     */
+    private function preallocateIdentities(
+        CompanyBackupImportSource $source,
+        CompanyBackupDataInventory $inventory,
+        array $tables,
+        CompanyBackupImportDependencyPlan $plan,
+        CompanyBackupReferenceResolutionPlan $resolutions,
+        CompanyBackupTargetIdentityMap $identities,
+    ): int {
+        $preallocated = 0;
+        foreach ($plan->identityBatches() as $batch) {
+            foreach ($batch as $registryKey) {
+                $context = $tables[$registryKey] ?? null;
+                $object = $inventory->object($registryKey);
+                if ($context === null
+                    || !$object instanceof CompanyBackupDataObject
+                ) {
+                    throw self::error(
+                        'import_registry_object_missing',
+                        $registryKey,
+                    );
+                }
+                $definition = $context['definition'];
+                $projection = $context['projection'];
+                $metadata = $this->schemas->readImportMetadata(
+                    $this->database,
+                    $projection,
+                );
+                $reservation = $metadata->autoIncrement === null
+                    ? null
+                    : CompanyBackupSqlPrimaryKeyReservation::reserve(
+                        $this->database,
+                        $projection,
+                        $metadata->autoIncrement,
+                        $object->rows,
+                        $this->limits,
+                    );
+                $preallocator = new CompanyBackupImportIdentityPreallocator(
+                    $definition,
+                    $metadata,
+                    $reservation,
+                    $identities,
+                    $resolutions,
+                    $plan,
+                    $this->limits,
+                );
+                $consumed = $source->consumeRows(
+                    $registryKey,
+                    static function (array $row) use (
+                        $preallocator,
+                        &$preallocated,
+                    ): void {
+                        $preallocator->preallocate($row);
+                        $preallocated++;
+                    },
+                );
+                $preallocator->finish();
+                if ($consumed !== $object->rows) {
+                    throw self::error(
+                        'import_row_count_mismatch',
+                        $registryKey,
+                    );
+                }
+            }
+        }
+        return $preallocated;
+    }
+
+    /**
+     * @param array<string,array{
+     *   definition:TenantDataDefinition,
+     *   projection:CompanyBackupTableProjection,
+     *   deferred:CompanyBackupDeferredColumnSet
+     * }> $tables
      * @param callable(CompanyBackupEmbeddedHashReference,string):string $hashMapper
      * @param callable(CompanyBackupHashReference,string):string $hashReferenceMapper
      * @return array{int,int}
@@ -402,23 +490,8 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $definition = $context['definition'];
                 $projection = $context['projection'];
                 $schema = $this->schemas->read($this->database, $projection);
-                $metadata = $this->schemas->readImportMetadata(
-                    $this->database,
-                    $projection,
-                );
-                $reservation = $metadata->autoIncrement === null
-                    ? null
-                    : CompanyBackupSqlPrimaryKeyReservation::reserve(
-                        $this->database,
-                        $projection,
-                        $metadata->autoIncrement,
-                        $object->rows,
-                        $this->limits,
-                    );
-                $preparer = new CompanyBackupImportRowPreparer(
+                $preparer = new CompanyBackupPreallocatedImportRowPreparer(
                     $definition,
-                    $metadata,
-                    $reservation,
                     $identities,
                     $resolutions,
                     $plan,
@@ -477,7 +550,6 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                         $insertedRows++;
                     },
                 );
-                $preparer->finish();
                 $writer->finish();
                 if ($consumed !== $object->rows) {
                     throw self::error(

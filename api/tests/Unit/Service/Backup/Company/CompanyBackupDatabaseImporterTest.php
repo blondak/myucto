@@ -94,6 +94,16 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 . 'contact_masked TEXT NULL)',
         );
         $this->database->exec(
+            'CREATE TABLE synthetic_revisions ('
+                . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                . 'supplier_id INTEGER NOT NULL, snapshot_json TEXT NOT NULL)',
+        );
+        $this->database->exec(
+            'CREATE TABLE synthetic_results ('
+                . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                . 'supplier_id INTEGER NOT NULL, revision_id INTEGER NOT NULL)',
+        );
+        $this->database->exec(
             "INSERT INTO countries (id, iso2, name) VALUES (10, 'CZ', 'Czechia')",
         );
         $this->database->exec(
@@ -128,6 +138,15 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 . " (id, supplier_id, label, contact_ciphertext,"
                 . " contact_hash, contact_masked)"
                 . " VALUES (300, 40, 'Existing', NULL, NULL, NULL)",
+        );
+        $this->database->exec(
+            "INSERT INTO synthetic_revisions"
+                . " (id, supplier_id, snapshot_json)"
+                . " VALUES (400, 40, '{\"result_id\":500}')",
+        );
+        $this->database->exec(
+            'INSERT INTO synthetic_results (id, supplier_id, revision_id)'
+                . ' VALUES (500, 40, 400)',
         );
     }
 
@@ -262,12 +281,60 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         }
 
         self::assertTrue($this->database->inTransaction());
-        self::assertGreaterThan(1, $this->countRows('supplier'));
+        self::assertSame(1, $this->countRows('supplier'));
+        self::assertSame(1, $this->countRows('synthetic_nodes'));
+        self::assertSame(1, $this->countRows('synthetic_events'));
+        self::assertSame(1, $this->countRows('synthetic_secrets'));
         self::assertTrue($this->database->rollBack());
         self::assertSame(1, $this->countRows('supplier'));
         self::assertSame(1, $this->countRows('synthetic_nodes'));
         self::assertSame(1, $this->countRows('synthetic_events'));
         self::assertSame(1, $this->countRows('synthetic_secrets'));
+        self::assertSame(0, $this->temporaryTableCount());
+    }
+
+    public function testRestoresLogicalIdentityCycleFromPreallocatedIds(): void
+    {
+        [$source, $preflight, $decisions] = $this->context(
+            logicalIdentityCycle: true,
+        );
+        $importer = new CompanyBackupDatabaseImporter(
+            $this->database,
+            new SyntheticCompanyBackupImportSchemaSource(),
+        );
+        self::assertTrue($this->database->beginTransaction());
+
+        $result = $importer->restore(
+            $source,
+            $preflight,
+            $decisions,
+            $this->sensitiveData(),
+        );
+
+        self::assertSame(7, $result->insertedRows);
+        self::assertSame(8, $result->identityCount);
+        self::assertSame(16, $result->sourceKeyCount);
+        $revisions = $this->rows(
+            'SELECT id, supplier_id, snapshot_json FROM synthetic_revisions'
+                . ' WHERE supplier_id = 41',
+        );
+        self::assertSame([[
+            'id' => 401,
+            'supplier_id' => 41,
+            'snapshot_json' => '{"result_id":501}',
+        ]], $revisions);
+        self::assertSame([[
+            'id' => 501,
+            'supplier_id' => 41,
+            'revision_id' => 401,
+        ]], $this->rows(
+            'SELECT id, supplier_id, revision_id FROM synthetic_results'
+                . ' WHERE supplier_id = 41',
+        ));
+
+        self::assertTrue($this->database->rollBack());
+        self::assertSame(1, $this->countRows('synthetic_revisions'));
+        self::assertSame(1, $this->countRows('synthetic_results'));
         self::assertSame(0, $this->temporaryTableCount());
     }
 
@@ -351,10 +418,15 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         bool $unstableHashTarget = false,
         bool $withFiles = false,
         bool $omitNestedFileOwner = false,
+        bool $logicalIdentityCycle = false,
     ): array
     {
-        $snapshot = $this->snapshot($unstableHashTarget, $withFiles);
-        $rows = $this->sourceRows($withFiles);
+        $snapshot = $this->snapshot(
+            $unstableHashTarget,
+            $withFiles,
+            $logicalIdentityCycle,
+        );
+        $rows = $this->sourceRows($withFiles, $logicalIdentityCycle);
         $inventory = $this->inventory($snapshot, $rows);
         $fileInventory = $this->fileInventory(
             $snapshot,
@@ -389,11 +461,11 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         $externalInventory = $external->finish();
         $preflight = new CompanyBackupDataPreflightResult(
             $externalInventory,
-            6,
-            6,
-            11,
+            $logicalIdentityCycle ? 8 : 6,
+            $logicalIdentityCycle ? 8 : 6,
+            $logicalIdentityCycle ? 16 : 11,
             1_024,
-            9,
+            $logicalIdentityCycle ? 12 : 9,
             $snapshot->fingerprint,
             self::TECHNICAL_BINDING,
         );
@@ -437,6 +509,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
     private function snapshot(
         bool $unstableHashTarget = false,
         bool $withFiles = false,
+        bool $logicalIdentityCycle = false,
     ): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
@@ -572,6 +645,45 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 ],
             ),
         ];
+        if ($logicalIdentityCycle) {
+            $definitions[] = $this->definitionFor(
+                'table:synthetic_revisions',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'snapshot_json'],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                embeddedReferences: [[
+                    'column' => 'snapshot_json',
+                    'condition' => null,
+                    'fallbacks' => [],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'nullable' => false,
+                    'path' => ['result_id'],
+                    'target' => 'table:synthetic_results',
+                    'target_columns' => ['id'],
+                ]],
+            );
+            $definitions[] = $this->definitionFor(
+                'table:synthetic_results',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'revision_id'],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(
+                        ['revision_id'],
+                        'table:synthetic_revisions',
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                referenceKeys: [[
+                    'supplier_id',
+                    'id',
+                    'revision_id',
+                ]],
+            );
+        }
         if ($withFiles) {
             $definitions[] = new TenantDataDefinition(
                 'file-area:supplier-logos',
@@ -605,7 +717,10 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
     }
 
     /** @return array<string,list<array<string,mixed>>> */
-    private function sourceRows(bool $withFiles = false): array
+    private function sourceRows(
+        bool $withFiles = false,
+        bool $logicalIdentityCycle = false,
+    ): array
     {
         $firstPayload = CanonicalJson::encode([
             ...($withFiles ? [
@@ -661,6 +776,18 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 'supplier_id' => 7,
                 'label' => 'Imported contact',
             ]],
+            ...($logicalIdentityCycle ? [
+                'table:synthetic_revisions' => [[
+                    'id' => 41,
+                    'supplier_id' => 7,
+                    'snapshot_json' => '{"result_id":51}',
+                ]],
+                'table:synthetic_results' => [[
+                    'id' => 51,
+                    'supplier_id' => 7,
+                    'revision_id' => 41,
+                ]],
+            ] : []),
         ];
     }
 
@@ -741,6 +868,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
      * @param array<string,mixed> $secretPolicies
      * @param array<string,string> $omitColumns
      * @param list<array<string,mixed>> $protectedSecretMaterializations
+     * @param list<list<string>> $referenceKeys
      */
     private function definitionFor(
         string $key,
@@ -756,6 +884,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         array $secretPolicies = [],
         array $omitColumns = [],
         array $protectedSecretMaterializations = [],
+        array $referenceKeys = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             $key,
@@ -765,6 +894,9 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             [
                 'primary_key' => ['id'],
                 ...($naturalKey === null ? [] : ['natural_key' => $naturalKey]),
+                ...($referenceKeys === [] ? [] : [
+                    'reference_keys' => $referenceKeys,
+                ]),
                 'ownership' => $ownership,
                 'secrets' => $secretPolicies,
                 'company_backup' => [

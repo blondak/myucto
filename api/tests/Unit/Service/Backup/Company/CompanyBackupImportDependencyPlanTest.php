@@ -118,6 +118,68 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         self::assertFalse($selfDependencies[0]->deferred);
     }
 
+    public function testSeparatesLogicalIdentityEdgeFromPhysicalInsertOrder(): void
+    {
+        $snapshot = $this->snapshot([
+            $this->table('table:supplier', TenantDataPolicy::TenantRoot, ['id']),
+            $this->table(
+                'table:run_revisions',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'snapshot_json'],
+                references: [
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                embeddedReferences: [[
+                    'column' => 'snapshot_json',
+                    'condition' => null,
+                    'fallbacks' => [],
+                    'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                    'nullable' => false,
+                    'path' => ['result_id'],
+                    'target' => 'table:statutory_results',
+                    'target_columns' => ['id'],
+                ]],
+            ),
+            $this->table(
+                'table:statutory_results',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'revision_id'],
+                references: [
+                    $this->reference(
+                        ['revision_id'],
+                        'table:run_revisions',
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                referenceKeys: [[
+                    'supplier_id',
+                    'id',
+                    'revision_id',
+                ]],
+            ),
+        ]);
+
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot, ['table:supplier' => 1]),
+        );
+
+        self::assertSame([
+            ['table:supplier'],
+            ['table:run_revisions'],
+            ['table:statutory_results'],
+        ], $plan->identityBatches());
+        self::assertSame([
+            ['table:supplier'],
+            ['table:run_revisions'],
+            ['table:statutory_results'],
+        ], $plan->insertBatches());
+        self::assertSame(
+            $plan->identityBatches(),
+            $plan->toArray()['identity_batches'],
+        );
+    }
+
     public function testClassifiesEveryPayloadReferenceRepresentation(): void
     {
         $snapshot = $this->snapshot([
@@ -400,6 +462,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
      * @param list<array<string,mixed>> $derivedHashes
      * @param list<array<string,mixed>> $polymorphicReferences
      * @param list<string>|null $naturalKey
+     * @param list<list<string>> $referenceKeys
      */
     private function table(
         string $key,
@@ -413,6 +476,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         array $derivedHashes = [],
         array $polymorphicReferences = [],
         ?array $naturalKey = null,
+        array $referenceKeys = [],
     ): TenantDataDefinition {
         $details = [
             'primary_key' => ['id'],
@@ -447,6 +511,9 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         ];
         if ($naturalKey !== null) {
             $details['natural_key'] = $naturalKey;
+        }
+        if ($referenceKeys !== []) {
+            $details['reference_keys'] = $referenceKeys;
         }
         return new TenantDataDefinition(
             $key,

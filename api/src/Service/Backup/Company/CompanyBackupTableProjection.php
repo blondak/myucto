@@ -678,6 +678,39 @@ final readonly class CompanyBackupTableProjection
         array $identityColumns,
         callable $mapper,
     ): array {
+        $identityReferences = $this->identityColumnReferences($identityColumns);
+        $signatures = [];
+        foreach ($identityReferences as $reference) {
+            $signatures[$reference->signature()] = true;
+        }
+
+        return $this->references->remap(
+            $row,
+            function (
+                CompanyBackupReference $reference,
+                array $values,
+            ) use ($signatures, $mapper): array|CompanyBackupReferenceRemapDirective|null {
+                if (!isset($signatures[$reference->signature()])) {
+                    return $values;
+                }
+                return $this->mappedValues(
+                    CompanyBackupReferenceOccurrence::column(
+                        $this->registryKey,
+                        $reference,
+                        $values,
+                    ),
+                    $mapper,
+                );
+            },
+        );
+    }
+
+    /**
+     * @param list<string> $identityColumns
+     * @return list<CompanyBackupReference>
+     */
+    public function identityColumnReferences(array $identityColumns): array
+    {
         $selected = array_fill_keys($identityColumns, true);
         do {
             $changed = false;
@@ -697,28 +730,14 @@ final readonly class CompanyBackupTableProjection
             }
         } while ($changed);
 
-        return $this->references->remap(
-            $row,
-            function (
-                CompanyBackupReference $reference,
-                array $values,
-            ) use ($selected, $mapper): array|CompanyBackupReferenceRemapDirective|null {
-                if (array_intersect_key(
+        return array_values(array_filter(
+            $this->references->references,
+            static fn (CompanyBackupReference $reference): bool =>
+                array_intersect_key(
                     $selected,
                     array_fill_keys($reference->columns, true),
-                ) === []) {
-                    return $values;
-                }
-                return $this->mappedValues(
-                    CompanyBackupReferenceOccurrence::column(
-                        $this->registryKey,
-                        $reference,
-                        $values,
-                    ),
-                    $mapper,
-                );
-            },
-        );
+                ) !== [],
+        ));
     }
 
     /**

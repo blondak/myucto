@@ -18,10 +18,13 @@ use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 final readonly class CompanyBackupImportDependencyPlan
 {
     public const FORMAT = 'myucto-company-import-dependency-plan';
-    public const VERSION = 1;
+    public const VERSION = 2;
 
     /** @var list<string> */
     private array $globalRegistryKeys;
+
+    /** @var list<list<string>> */
+    private array $identityBatches;
 
     /** @var list<list<string>> */
     private array $insertBatches;
@@ -39,6 +42,7 @@ final readonly class CompanyBackupImportDependencyPlan
 
     /**
      * @param list<string> $globalRegistryKeys
+     * @param list<list<string>> $identityBatches
      * @param list<list<string>> $insertBatches
      * @param list<CompanyBackupImportDependency> $dependencies
      */
@@ -46,10 +50,12 @@ final readonly class CompanyBackupImportDependencyPlan
         public string $registryFingerprint,
         public string $dataInventorySha256,
         array $globalRegistryKeys,
+        array $identityBatches,
         array $insertBatches,
         array $dependencies,
     ) {
         $this->globalRegistryKeys = $globalRegistryKeys;
+        $this->identityBatches = $identityBatches;
         $this->insertBatches = $insertBatches;
         $this->dependencies = $dependencies;
         $insertRegistryKeys = [];
@@ -168,7 +174,19 @@ final readonly class CompanyBackupImportDependencyPlan
             $snapshot->fingerprint,
             CanonicalJson::sha256($inventory->toArray()),
             $globalRegistryKeys,
-            self::topologicalBatches(array_keys($insertDefinitions), $dependencies),
+            self::topologicalBatches(
+                array_keys($insertDefinitions),
+                self::identityDependencies(
+                    $insertDefinitions,
+                    $projections,
+                    $dependencies,
+                ),
+                true,
+            ),
+            self::topologicalBatches(
+                array_keys($insertDefinitions),
+                self::insertDependencies($dependencies),
+            ),
             $dependencies,
         );
     }
@@ -182,6 +200,12 @@ final readonly class CompanyBackupImportDependencyPlan
     public function containsGlobalRegistryKey(string $registryKey): bool
     {
         return in_array($registryKey, $this->globalRegistryKeys, true);
+    }
+
+    /** @return list<list<string>> */
+    public function identityBatches(): array
+    {
+        return $this->identityBatches;
     }
 
     /** @return list<list<string>> */
@@ -356,6 +380,86 @@ final readonly class CompanyBackupImportDependencyPlan
     }
 
     /**
+     * @param array<string,TenantDataDefinition> $insertDefinitions
+     * @param array<string,CompanyBackupTableProjection> $projections
+     * @param list<CompanyBackupImportDependency> $dependencies
+     * @return list<CompanyBackupImportDependency>
+     */
+    private static function identityDependencies(
+        array $insertDefinitions,
+        array $projections,
+        array $dependencies,
+    ): array {
+        $byKey = [];
+        foreach ($dependencies as $dependency) {
+            $byKey[self::dependencyKey(
+                $dependency->sourceRegistryKey,
+                $dependency->targetRegistryKey,
+                $dependency->kind,
+                $dependency->signature,
+            )] = $dependency;
+        }
+
+        $identityDependencies = [];
+        foreach ($insertDefinitions as $registryKey => $definition) {
+            try {
+                $identity = CompanyBackupSourceIdentityProjection::fromDefinition(
+                    $definition,
+                );
+            } catch (CompanyBackupPreflightException $e) {
+                throw self::error(
+                    'import_payload_contract_invalid',
+                    $registryKey,
+                    previous: $e,
+                );
+            }
+            foreach (
+                $projections[$registryKey]->identityColumnReferences(
+                    $identity->identityColumns(),
+                )
+                as $reference
+            ) {
+                if (!self::isInternalMapping($reference->mapping)) {
+                    continue;
+                }
+                $key = self::dependencyKey(
+                    $registryKey,
+                    $reference->target,
+                    CompanyBackupImportDependencyKind::Column,
+                    $reference->signature(),
+                );
+                $dependency = $byKey[$key] ?? null;
+                if (!$dependency instanceof CompanyBackupImportDependency) {
+                    throw self::error(
+                        'import_dependency_invalid',
+                        $registryKey,
+                        $reference->target,
+                    );
+                }
+                $identityDependencies[$key] = $dependency;
+            }
+        }
+        return array_values($identityDependencies);
+    }
+
+    /**
+     * @param list<CompanyBackupImportDependency> $dependencies
+     * @return list<CompanyBackupImportDependency>
+     */
+    private static function insertDependencies(array $dependencies): array
+    {
+        return array_values(array_filter(
+            $dependencies,
+            static fn (CompanyBackupImportDependency $dependency): bool =>
+                in_array($dependency->kind, [
+                    CompanyBackupImportDependencyKind::Column,
+                    CompanyBackupImportDependencyKind::EmbeddedHash,
+                    CompanyBackupImportDependencyKind::Hash,
+                ], true),
+        ));
+    }
+
+    /**
      * @param array<string,CompanyBackupImportDependency> $dependencies
      * @param array<string,TenantDataDefinition> $insertDefinitions
      */
@@ -447,6 +551,7 @@ final readonly class CompanyBackupImportDependencyPlan
     private static function topologicalBatches(
         array $registryKeys,
         array $dependencies,
+        bool $includeDeferred = false,
     ): array {
         /** @var array<string,array<string,true>> $requires */
         $requires = [];
@@ -454,7 +559,7 @@ final readonly class CompanyBackupImportDependencyPlan
             $requires[$registryKey] = [];
         }
         foreach ($dependencies as $dependency) {
-            if (!$dependency->deferred
+            if (($includeDeferred || !$dependency->deferred)
                 && $dependency->sourceRegistryKey
                     !== $dependency->targetRegistryKey
             ) {
@@ -504,6 +609,7 @@ final readonly class CompanyBackupImportDependencyPlan
             'registry_fingerprint' => $this->registryFingerprint,
             'data_inventory_sha256' => $this->dataInventorySha256,
             'global_registry_keys' => $this->globalRegistryKeys,
+            'identity_batches' => $this->identityBatches,
             'insert_batches' => $this->insertBatches,
             'dependencies' => array_map(
                 static fn (CompanyBackupImportDependency $dependency): array =>
