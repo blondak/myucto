@@ -89,6 +89,18 @@ use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
 final class TenantDataRegistryFactory
 {
     /** @var array<string,string> */
+    private const COMPANY_BACKUP_RUNTIME_DERIVED_TABLES = [
+        'payroll_document_download_grants' =>
+            'ephemeral_payroll_document_download_grant',
+        'payroll_payment_export_download_grants' =>
+            'ephemeral_payroll_payment_export_download_grant',
+        'payroll_period_export_download_grants' =>
+            'ephemeral_payroll_period_export_download_grant',
+        'payroll_submission_artifact_download_grants' =>
+            'ephemeral_payroll_submission_artifact_download_grant',
+    ];
+
+    /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
         'payroll_absences' => 'payroll',
         'payroll_average_earning_snapshots' => 'payroll',
@@ -696,6 +708,28 @@ final class TenantDataRegistryFactory
                 ],
             ],
         );
+        foreach (
+            self::COMPANY_BACKUP_RUNTIME_DERIVED_TABLES as $table => $reason
+        ) {
+            $definitions[] = new TenantDataDefinition(
+                'table:' . $table,
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::RuntimeDerived,
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+                [
+                    'primary_key' => ['id'],
+                    'feature_group' => 'payroll',
+                    'reason' => $reason,
+                    'secrets' => [
+                        'token_hash' => [
+                            'policy' =>
+                                TenantSecretPolicy::OmitAndReconfigure->value,
+                            'reason' => 'ephemeral_one_time_download_token',
+                        ],
+                    ],
+                ],
+            );
+        }
         $definitions[] = new TenantDataDefinition(
             'table:countries',
             TenantDataObjectKind::Table,
