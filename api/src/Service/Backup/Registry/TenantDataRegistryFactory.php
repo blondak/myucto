@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Backup\Registry;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupAccountingClosingStepsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBrandingProfilesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupClientBankAccountsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupClientsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupCountriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmailProfilesProjection;
@@ -2369,6 +2370,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupAccountingClosingStepsProjection::dataColumns(),
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::dataColumns(),
+            'client_bank_accounts' =>
+                CompanyBackupClientBankAccountsProjection::dataColumns(),
             'clients' => CompanyBackupClientsProjection::dataColumns(),
             'countries' => CompanyBackupCountriesProjection::dataColumns(),
             'email_profiles' => CompanyBackupEmailProfilesProjection::dataColumns(),
@@ -2517,6 +2520,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupAccountingClosingStepsProjection::references(),
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::references(),
+            'client_bank_accounts' =>
+                CompanyBackupClientBankAccountsProjection::references(),
             'clients' => CompanyBackupClientsProjection::references(),
             'email_profiles' => CompanyBackupEmailProfilesProjection::references(),
             'expense_categories' =>

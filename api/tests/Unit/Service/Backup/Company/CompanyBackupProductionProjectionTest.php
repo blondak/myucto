@@ -1804,6 +1804,75 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testClientBankAccountsDeclareCompletePayloadAndReferences(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:client_bank_accounts');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'client_id',
+            'account_number',
+            'bank_code',
+            'iban',
+            'account_key',
+            'bank_key',
+            'source_manual',
+            'source_vat_registry',
+            'source_bank_statement',
+            'last_bank_transaction_id',
+            'is_active',
+            'first_seen_at',
+            'last_seen_at',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['bank_code', 'iban', 'last_bank_transaction_id'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['last_bank_transaction_id'],
+                        'bank_transactions',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['client_id'],
+                        'clients',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'client_id->clients:id',
+                'last_bank_transaction_id->bank_transactions:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['last_bank_transaction_id'],
+            $projection->references->references[1]->nullableColumns,
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
