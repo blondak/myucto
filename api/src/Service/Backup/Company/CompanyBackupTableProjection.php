@@ -43,6 +43,8 @@ final readonly class CompanyBackupTableProjection
 
     public CompanyBackupEmbeddedHashReferenceSet $embeddedHashReferences;
 
+    public CompanyBackupHashReferenceSet $hashReferences;
+
     public CompanyBackupEmbeddedHashSet $embeddedHashes;
 
     public CompanyBackupDerivedHashSet $derivedHashes;
@@ -79,6 +81,7 @@ final readonly class CompanyBackupTableProjection
         CompanyBackupEncodedReferenceSet $encodedReferences,
         CompanyBackupEmbeddedReferenceSet $embeddedReferences,
         CompanyBackupEmbeddedHashReferenceSet $embeddedHashReferences,
+        CompanyBackupHashReferenceSet $hashReferences,
         CompanyBackupEmbeddedHashSet $embeddedHashes,
         CompanyBackupDerivedHashSet $derivedHashes,
         CompanyBackupPolymorphicReferenceSet $polymorphicReferences,
@@ -97,6 +100,7 @@ final readonly class CompanyBackupTableProjection
         $this->encodedReferences = $encodedReferences;
         $this->embeddedReferences = $embeddedReferences;
         $this->embeddedHashReferences = $embeddedHashReferences;
+        $this->hashReferences = $hashReferences;
         $this->embeddedHashes = $embeddedHashes;
         $this->derivedHashes = $derivedHashes;
         $this->polymorphicReferences = $polymorphicReferences;
@@ -163,6 +167,7 @@ final readonly class CompanyBackupTableProjection
             'encoded_references',
             'embedded_hash_references',
             'embedded_hashes',
+            'hash_references',
             'polymorphic_references',
             'preserved_identifiers',
             'protected_secret_materializations',
@@ -259,6 +264,11 @@ final readonly class CompanyBackupTableProjection
             $registryKey,
             $dataColumns,
         );
+        $hashReferences = CompanyBackupHashReferenceSet::fromArray(
+            $metadata['hash_references'] ?? [],
+            $registryKey,
+            $dataColumns,
+        );
         $embeddedHashes = CompanyBackupEmbeddedHashSet::fromArray(
             $metadata['embedded_hashes'] ?? [],
             $registryKey,
@@ -348,6 +358,7 @@ final readonly class CompanyBackupTableProjection
             $encodedReferences,
             $embeddedReferences,
             $embeddedHashReferences,
+            $hashReferences,
             $embeddedHashes,
             $derivedHashes,
             $polymorphicReferences,
@@ -471,6 +482,7 @@ final readonly class CompanyBackupTableProjection
     public function assertExportRow(array $row): void
     {
         $this->encodedReferences->assertSourceRow($row);
+        $this->hashReferences->assertSourceRow($row);
         $this->embeddedHashReferences->assertSourceRow($row);
         $this->embeddedHashes->assertSourceRow($row);
         $this->derivedHashes->assertSourceRow($row);
@@ -481,6 +493,7 @@ final readonly class CompanyBackupTableProjection
         $this->references->assertRegistryTargets($registry);
         $this->encodedReferences->assertRegistryTargets($registry);
         $this->embeddedReferences->assertRegistryTargets($registry);
+        $this->hashReferences->assertRegistryTargets($registry);
         $this->embeddedHashReferences->assertRegistryTargets($registry);
         $this->polymorphicReferences->assertRegistryTargets($registry);
     }
@@ -501,6 +514,7 @@ final readonly class CompanyBackupTableProjection
     public function inspectCompleteSourceRow(array $row, callable $visitor): void
     {
         $this->visitSourceReferences($row, $visitor);
+        $this->hashReferences->assertSourceRow($row);
         $this->embeddedHashReferences->assertSourceRow($row);
         $this->embeddedHashes->assertSourceRow($row);
         $this->derivedHashes->assertSourceRow($row);
@@ -657,6 +671,7 @@ final readonly class CompanyBackupTableProjection
      * @param callable(CompanyBackupReferenceOccurrence):mixed $mapper
      * @param null|callable(CompanyBackupEmbeddedHashReference,string):mixed $hashMapper
      * @param null|callable(array<string,mixed>):array<string,mixed> $rowMapper
+     * @param null|callable(CompanyBackupHashReference,string):mixed $hashReferenceMapper
      * @return array<string,mixed>
      */
     public function remapReferences(
@@ -664,6 +679,7 @@ final readonly class CompanyBackupTableProjection
         callable $mapper,
         ?callable $hashMapper = null,
         ?callable $rowMapper = null,
+        ?callable $hashReferenceMapper = null,
     ): array {
         if ($hashMapper === null && $this->embeddedHashReferences->references !== []) {
             throw new CompanyBackupDataSourceException(
@@ -675,12 +691,24 @@ final readonly class CompanyBackupTableProjection
         $resolvedHashMapper = $hashMapper ?? static fn (): never => throw new \LogicException(
             'Prázdná sada hashových referencí nesmí vyžádat mapování.',
         );
+        if ($hashReferenceMapper === null && $this->hashReferences->references !== []) {
+            throw new CompanyBackupDataSourceException(
+                'data_hash_reference_mapper_missing',
+                $this->registryKey,
+                $this->hashReferences->references[0]->column,
+            );
+        }
+        $resolvedHashReferenceMapper = $hashReferenceMapper
+            ?? static fn (): never => throw new \LogicException(
+                'Prázdná sada přímých hashových referencí nesmí vyžádat mapování.',
+            );
 
         return $this->derivedHashes->transform(
             $row,
             function (array $source) use (
                 $mapper,
                 $resolvedHashMapper,
+                $resolvedHashReferenceMapper,
                 $rowMapper,
             ): array {
                 $source = $this->references->remap(
@@ -720,6 +748,10 @@ final readonly class CompanyBackupTableProjection
                         $mapped = $values[0] ?? null;
                         return is_int($mapped) ? $mapped : null;
                     },
+                );
+                $source = $this->hashReferences->remap(
+                    $source,
+                    $resolvedHashReferenceMapper,
                 );
                 $source = $this->embeddedHashes->transform(
                     $source,

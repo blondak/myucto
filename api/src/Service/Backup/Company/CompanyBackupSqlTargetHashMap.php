@@ -203,24 +203,47 @@ final class CompanyBackupSqlTargetHashMap
         CompanyBackupEmbeddedHashReference $reference,
         string $sourceHash,
     ): string {
-        $this->assertOpen($reference->target);
+        return $this->resolveTarget(
+            $reference->target,
+            $reference->targetHashColumn,
+            $sourceHash,
+        );
+    }
+
+    public function resolveHash(
+        CompanyBackupHashReference $reference,
+        string $sourceHash,
+    ): string {
+        return $this->resolveTarget(
+            $reference->target,
+            $reference->targetHashColumn,
+            $sourceHash,
+        );
+    }
+
+    private function resolveTarget(
+        string $target,
+        string $targetHashColumn,
+        string $sourceHash,
+    ): string {
+        $this->assertOpen($target);
         if (!self::validHash($sourceHash)) {
             throw self::error(
                 'import_hash_reference_invalid',
-                $reference->target,
-                $reference->targetHashColumn,
+                $target,
+                $targetHashColumn,
             );
         }
         $mapped = $this->lookup(
-            $reference->target,
-            $reference->targetHashColumn,
+            $target,
+            $targetHashColumn,
             $sourceHash,
         );
         if ($mapped === null) {
             throw self::error(
                 'import_hash_reference_unresolved',
-                $reference->target,
-                $reference->targetHashColumn,
+                $target,
+                $targetHashColumn,
             );
         }
         return $mapped;

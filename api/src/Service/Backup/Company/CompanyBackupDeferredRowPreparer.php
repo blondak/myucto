@@ -74,10 +74,12 @@ final readonly class CompanyBackupDeferredRowPreparer
     /**
      * @param array<string,mixed> $sourceRow
      * @param null|callable(CompanyBackupEmbeddedHashReference,string):mixed $hashMapper
+     * @param null|callable(CompanyBackupHashReference,string):mixed $hashReferenceMapper
      */
     public function prepare(
         array $sourceRow,
         ?callable $hashMapper = null,
+        ?callable $hashReferenceMapper = null,
     ): CompanyBackupPreparedDeferredUpdate {
         try {
             $sourceIdentity = $this->identityProjection->identityForRow($sourceRow);
@@ -113,6 +115,9 @@ final readonly class CompanyBackupDeferredRowPreparer
             $targetSeed[$column] = $value;
         }
         $stableHashMapper = $this->stableHashMapper($hashMapper);
+        $stableHashReferenceMapper = $this->stableHashReferenceMapper(
+            $hashReferenceMapper,
+        );
         $rowMapper = $this->filePaths === null
             ? null
             : fn (array $row): array => $this->filePaths->transform(
@@ -128,12 +133,14 @@ final readonly class CompanyBackupDeferredRowPreparer
                 $this->plan,
                 $stableHashMapper,
                 $rowMapper,
+                $stableHashReferenceMapper,
             );
             $after = $this->transformer->transform(
                 $this->projection,
                 $targetSeed,
                 $stableHashMapper,
                 $rowMapper,
+                $stableHashReferenceMapper,
             );
         } catch (CompanyBackupRowTransformException|\LogicException $e) {
             throw self::error(
@@ -218,6 +225,28 @@ final readonly class CompanyBackupDeferredRowPreparer
         $mapped = [];
         return static function (
             CompanyBackupEmbeddedHashReference $reference,
+            string $hash,
+        ) use ($mapper, &$mapped): mixed {
+            $key = $reference->signature() . "\0" . $hash;
+            if (!array_key_exists($key, $mapped)) {
+                $mapped[$key] = $mapper($reference, $hash);
+            }
+            return $mapped[$key];
+        };
+    }
+
+    /**
+     * @param null|callable(CompanyBackupHashReference,string):mixed $mapper
+     * @return null|callable(CompanyBackupHashReference,string):mixed
+     */
+    private function stableHashReferenceMapper(?callable $mapper): ?callable
+    {
+        if ($mapper === null) {
+            return null;
+        }
+        $mapped = [];
+        return static function (
+            CompanyBackupHashReference $reference,
             string $hash,
         ) use ($mapper, &$mapped): mixed {
             $key = $reference->signature() . "\0" . $hash;

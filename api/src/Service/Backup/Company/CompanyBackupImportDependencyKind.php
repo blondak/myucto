@@ -11,5 +11,6 @@ enum CompanyBackupImportDependencyKind: string
     case Encoded = 'encoded';
     case Embedded = 'embedded';
     case EmbeddedHash = 'embedded_hash';
+    case Hash = 'hash';
     case Polymorphic = 'polymorphic';
 }

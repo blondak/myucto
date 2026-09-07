@@ -78,10 +78,12 @@ final class CompanyBackupImportRowPreparer
     /**
      * @param array<string,mixed> $sourceRow
      * @param null|callable(CompanyBackupEmbeddedHashReference,string):mixed $hashMapper
+     * @param null|callable(CompanyBackupHashReference,string):mixed $hashReferenceMapper
      */
     public function prepare(
         array $sourceRow,
         ?callable $hashMapper = null,
+        ?callable $hashReferenceMapper = null,
     ): CompanyBackupPreparedImportRow {
         if ($this->closed) {
             throw self::error(
@@ -111,6 +113,7 @@ final class CompanyBackupImportRowPreparer
             $this->plan,
             $hashMapper,
             $rowMapper,
+            $hashReferenceMapper,
         );
         $targetIdentity = $this->identityProjection->identityForRow($targetRow);
         $this->identities->add($sourceIdentity, $targetIdentity);

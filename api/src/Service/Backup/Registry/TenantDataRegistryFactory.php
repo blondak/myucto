@@ -67,6 +67,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollShiftsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessCompensationSegmentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessEventsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryAccumulatorEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTimeEntriesProjection;
@@ -181,13 +182,13 @@ final class TenantDataRegistryFactory
         'payroll_run_revisions' => [
             ['supplier_id', 'id', 'run_id'],
         ],
-        'payroll_statutory_person_results' => [[
+        'payroll_statutory_accumulator_entries' => [[
             'supplier_id',
-            'id',
-            'statutory_result_id',
-            'revision_id',
-            'calculation_kind',
             'employee_id',
+            'tax_year',
+            'period_start',
+            'calculation_kind',
+            'id',
         ]],
         'payroll_statutory_accumulator_openings' => [[
             'supplier_id',
@@ -195,6 +196,14 @@ final class TenantDataRegistryFactory
             'tax_year',
             'calculation_kind',
             'id',
+        ]],
+        'payroll_statutory_person_results' => [[
+            'supplier_id',
+            'id',
+            'statutory_result_id',
+            'revision_id',
+            'calculation_kind',
+            'employee_id',
         ]],
         'payroll_statutory_results' => [[
             'supplier_id',
@@ -1310,6 +1319,12 @@ final class TenantDataRegistryFactory
      *     target:string,
      *     target_hash_column:string
      *   }>,
+     *   hash_references?:list<array{
+     *     column:string,
+     *     nullable:bool,
+     *     target:string,
+     *     target_hash_column:string
+     *   }>,
      *   embedded_hashes?:list<array{
      *     algorithm:string,
      *     column:string,
@@ -2229,6 +2244,25 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollStatutoryPersonResultsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_statutory_accumulator_entries') {
+            return [
+                'company_backup' => [
+                    'data_columns' =>
+                        CompanyBackupPayrollStatutoryAccumulatorEntriesProjection::dataColumns(),
+                    'derived_hashes' =>
+                        CompanyBackupPayrollStatutoryAccumulatorEntriesProjection::derivedHashes(),
+                    'embedded_references' => [],
+                    'generated_columns' =>
+                        CompanyBackupPayrollStatutoryAccumulatorEntriesProjection::generatedColumns(),
+                    'hash_references' =>
+                        CompanyBackupPayrollStatutoryAccumulatorEntriesProjection::hashReferences(),
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollStatutoryAccumulatorEntriesProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

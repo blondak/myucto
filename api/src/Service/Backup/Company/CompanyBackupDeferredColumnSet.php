@@ -66,6 +66,16 @@ final readonly class CompanyBackupDeferredColumnSet
                 $projection,
             );
         }
+        foreach ($projection->hashReferences->references as $reference) {
+            self::register(
+                $columnsByDependency,
+                CompanyBackupImportDependencyKind::Hash,
+                $reference->target,
+                $reference->signature(),
+                [$reference->column],
+                $projection,
+            );
+        }
         foreach ($projection->polymorphicReferences->references as $reference) {
             foreach ($reference->cases as $case) {
                 if ($case->mapping

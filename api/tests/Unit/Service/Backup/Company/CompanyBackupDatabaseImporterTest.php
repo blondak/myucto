@@ -83,7 +83,8 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         $this->database->exec(
             'CREATE TABLE synthetic_events ('
                 . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-                . 'supplier_id INTEGER NOT NULL, node_hash_json TEXT NOT NULL)',
+                . 'supplier_id INTEGER NOT NULL, node_hash_json TEXT NOT NULL,'
+                . ' node_hash TEXT NOT NULL)',
         );
         $this->database->exec(
             'CREATE TABLE synthetic_secrets ('
@@ -118,8 +119,9 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         ]));
         $this->database->exec(
             "INSERT INTO synthetic_events"
-                . " (id, supplier_id, node_hash_json)"
-                . " VALUES (200, 40, '{\"node_hash\":null}')",
+                . " (id, supplier_id, node_hash_json, node_hash)"
+                . " VALUES (200, 40, '{\"node_hash\":null}', '"
+                . str_repeat('c', 64) . "')",
         );
         $this->database->exec(
             "INSERT INTO synthetic_secrets"
@@ -197,7 +199,8 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             );
         }
         $events = $this->rows(
-            'SELECT id, supplier_id, node_hash_json FROM synthetic_events'
+            'SELECT id, supplier_id, node_hash_json, node_hash'
+                . ' FROM synthetic_events'
                 . ' WHERE supplier_id = 41',
         );
         self::assertCount(1, $events);
@@ -205,6 +208,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         $eventPayload = json_decode((string) $events[0]['node_hash_json'], true);
         self::assertIsArray($eventPayload);
         self::assertSame($nodes[1]['row_hash'], $eventPayload['node_hash']);
+        self::assertSame($nodes[1]['row_hash'], $events[0]['node_hash']);
         $secretRows = $this->rows(
             'SELECT id, supplier_id, label, contact_ciphertext, contact_hash,'
                 . ' contact_masked FROM synthetic_secrets WHERE supplier_id = 41',
@@ -502,7 +506,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             $this->definitionFor(
                 'table:synthetic_events',
                 TenantDataPolicy::TenantOwned,
-                ['id', 'supplier_id', 'node_hash_json'],
+                ['id', 'supplier_id', 'node_hash_json', 'node_hash'],
                 ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
                 references: [
                     $this->reference(['supplier_id'], 'table:supplier'),
@@ -511,6 +515,12 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                     'column' => 'node_hash_json',
                     'nullable' => true,
                     'path' => ['node_hash'],
+                    'target' => 'table:synthetic_nodes',
+                    'target_hash_column' => 'row_hash',
+                ]],
+                hashReferences: [[
+                    'column' => 'node_hash',
+                    'nullable' => false,
                     'target' => 'table:synthetic_nodes',
                     'target_hash_column' => 'row_hash',
                 ]],
@@ -644,6 +654,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 'node_hash_json' => CanonicalJson::encode([
                     'node_hash' => $secondHash,
                 ]),
+                'node_hash' => $secondHash,
             ]],
             'table:synthetic_secrets' => [[
                 'id' => 31,
@@ -724,6 +735,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
      * @param list<array<string,mixed>> $references
      * @param list<array<string,mixed>> $embeddedReferences
      * @param list<array<string,mixed>> $embeddedHashReferences
+     * @param list<array<string,mixed>> $hashReferences
      * @param list<array<string,mixed>> $derivedHashes
      * @param list<string>|null $naturalKey
      * @param array<string,mixed> $secretPolicies
@@ -738,6 +750,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         array $references = [],
         array $embeddedReferences = [],
         array $embeddedHashReferences = [],
+        array $hashReferences = [],
         array $derivedHashes = [],
         ?array $naturalKey = null,
         array $secretPolicies = [],
@@ -760,6 +773,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                     'embedded_hash_references' => $embeddedHashReferences,
                     'embedded_references' => $embeddedReferences,
                     'generated_columns' => [],
+                    'hash_references' => $hashReferences,
                     'omit_columns' => $omitColumns,
                     'protected_secret_materializations' =>
                         $protectedSecretMaterializations,

@@ -22,6 +22,7 @@ final readonly class CompanyBackupRowReferenceTransformer
      * @param array<string,mixed> $row
      * @param null|callable(CompanyBackupEmbeddedHashReference,string):mixed $hashMapper
      * @param null|callable(array<string,mixed>):array<string,mixed> $rowMapper
+     * @param null|callable(CompanyBackupHashReference,string):mixed $hashReferenceMapper
      * @return array<string,mixed>
      */
     public function transform(
@@ -29,6 +30,7 @@ final readonly class CompanyBackupRowReferenceTransformer
         array $row,
         ?callable $hashMapper = null,
         ?callable $rowMapper = null,
+        ?callable $hashReferenceMapper = null,
     ): array {
         $remapped = $projection->remapReferences(
             $row,
@@ -36,6 +38,7 @@ final readonly class CompanyBackupRowReferenceTransformer
                 $this->resolve($occurrence),
             $hashMapper,
             $rowMapper,
+            $hashReferenceMapper,
         );
         return $projection->restoreOverrides->apply($remapped);
     }
@@ -47,6 +50,7 @@ final readonly class CompanyBackupRowReferenceTransformer
      * @param array<string,mixed> $row
      * @param null|callable(CompanyBackupEmbeddedHashReference,string):mixed $hashMapper
      * @param null|callable(array<string,mixed>):array<string,mixed> $rowMapper
+     * @param null|callable(CompanyBackupHashReference,string):mixed $hashReferenceMapper
      * @return array<string,mixed>
      */
     public function transformForInsert(
@@ -55,6 +59,7 @@ final readonly class CompanyBackupRowReferenceTransformer
         CompanyBackupImportDependencyPlan $plan,
         ?callable $hashMapper = null,
         ?callable $rowMapper = null,
+        ?callable $hashReferenceMapper = null,
     ): array {
         if (!$plan->containsInsertRegistryKey($projection->registryKey)) {
             throw new CompanyBackupRowTransformException(
@@ -122,6 +127,35 @@ final readonly class CompanyBackupRowReferenceTransformer
                 return $hashMapper($reference, $hash);
             },
             $rowMapper,
+            function (
+                CompanyBackupHashReference $reference,
+                string $hash,
+            ) use ($projection, $plan, $hashReferenceMapper): mixed {
+                $dependency = $plan->dependency(
+                    $projection->registryKey,
+                    $reference->target,
+                    CompanyBackupImportDependencyKind::Hash,
+                    $reference->signature(),
+                );
+                if (!$dependency instanceof CompanyBackupImportDependency) {
+                    throw new CompanyBackupRowTransformException(
+                        'row_import_plan_mismatch',
+                        $projection->registryKey,
+                        $reference->column,
+                    );
+                }
+                if ($dependency->deferred) {
+                    return CompanyBackupReferenceRemapDirective::Defer;
+                }
+                if ($hashReferenceMapper === null) {
+                    throw new CompanyBackupRowTransformException(
+                        'row_hash_reference_mapper_missing',
+                        $projection->registryKey,
+                        $reference->column,
+                    );
+                }
+                return $hashReferenceMapper($reference, $hash);
+            },
         );
         return $projection->restoreOverrides->apply($remapped);
     }

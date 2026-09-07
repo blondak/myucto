@@ -123,6 +123,10 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 CompanyBackupEmbeddedHashReference $reference,
                 string $hash,
             ): string => $hashes->resolve($reference, $hash);
+            $hashReferenceMapper = static fn (
+                CompanyBackupHashReference $reference,
+                string $hash,
+            ): string => $hashes->resolveHash($reference, $hash);
 
             $mappedGlobalRows = $this->mapGlobals(
                 $source,
@@ -141,6 +145,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $identities,
                 $hashes,
                 $hashMapper,
+                $hashReferenceMapper,
                 $secrets,
                 $filePaths,
             );
@@ -161,6 +166,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $resolutions,
                 $identities,
                 $hashMapper,
+                $hashReferenceMapper,
                 $filePaths,
             );
             $filePaths->finish();
@@ -294,7 +300,10 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
     {
         foreach ($tables as $context) {
             foreach (
-                $context['projection']->embeddedHashReferences->references
+                [
+                    ...$context['projection']->embeddedHashReferences->references,
+                    ...$context['projection']->hashReferences->references,
+                ]
                 as $reference
             ) {
                 $target = $tables[$reference->target] ?? null;
@@ -360,6 +369,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
      *   deferred:CompanyBackupDeferredColumnSet
      * }> $tables
      * @param callable(CompanyBackupEmbeddedHashReference,string):string $hashMapper
+     * @param callable(CompanyBackupHashReference,string):string $hashReferenceMapper
      * @return array{int,int}
      */
     private function insertRows(
@@ -371,6 +381,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         CompanyBackupTargetIdentityMap $identities,
         CompanyBackupSqlTargetHashMap $hashes,
         callable $hashMapper,
+        callable $hashReferenceMapper,
         ?CompanyBackupProtectedSecretRestoreMaterializer $secrets,
         CompanyBackupSqlFilePathMap $filePaths,
     ): array {
@@ -430,11 +441,16 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                         $writer,
                         $hashes,
                         $hashMapper,
+                        $hashReferenceMapper,
                         $secrets,
                         &$insertedRows,
                         &$supplierId,
                     ): void {
-                        $prepared = $preparer->prepare($row, $hashMapper);
+                        $prepared = $preparer->prepare(
+                            $row,
+                            $hashMapper,
+                            $hashReferenceMapper,
+                        );
                         $protected = $secrets?->valuesFor(
                             $definition,
                             $row,
@@ -487,6 +503,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
      *   deferred:CompanyBackupDeferredColumnSet
      * }> $tables
      * @param callable(CompanyBackupEmbeddedHashReference,string):string $hashMapper
+     * @param callable(CompanyBackupHashReference,string):string $hashReferenceMapper
      * @return array{int,int}
      */
     private function updateDeferredRows(
@@ -497,6 +514,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         CompanyBackupReferenceResolutionPlan $resolutions,
         CompanyBackupTargetIdentityMap $identities,
         callable $hashMapper,
+        callable $hashReferenceMapper,
         CompanyBackupSqlFilePathMap $filePaths,
     ): array {
         $processed = 0;
@@ -543,8 +561,13 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                         $preparer,
                         $writer,
                         $hashMapper,
+                        $hashReferenceMapper,
                     ): void {
-                        $writer->update($preparer->prepare($row, $hashMapper));
+                        $writer->update($preparer->prepare(
+                            $row,
+                            $hashMapper,
+                            $hashReferenceMapper,
+                        ));
                     },
                 );
                 $writer->finish();

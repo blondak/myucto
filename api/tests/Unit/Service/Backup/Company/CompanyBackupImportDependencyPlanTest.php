@@ -143,6 +143,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
                     'direct_id',
                     'encoded_ref',
                     'embedded_json',
+                    'source_hash',
                     'polymorphic_id',
                     'source_type',
                 ],
@@ -176,6 +177,12 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
                     'column' => 'embedded_json',
                     'nullable' => true,
                     'path' => ['target_hash'],
+                    'target' => 'table:targets',
+                    'target_hash_column' => 'row_hash',
+                ]],
+                hashReferences: [[
+                    'column' => 'source_hash',
+                    'nullable' => false,
                     'target' => 'table:targets',
                     'target_hash_column' => 'row_hash',
                 ]],
@@ -213,6 +220,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
             CompanyBackupImportDependencyKind::Embedded->value => false,
             CompanyBackupImportDependencyKind::EmbeddedHash->value => true,
             CompanyBackupImportDependencyKind::Encoded->value => false,
+            CompanyBackupImportDependencyKind::Hash->value => false,
             CompanyBackupImportDependencyKind::Polymorphic->value => false,
         ], array_column(array_map(
             static fn ($dependency): array => [
@@ -388,6 +396,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
      * @param list<array<string,mixed>> $encodedReferences
      * @param list<array<string,mixed>> $embeddedReferences
      * @param list<array<string,mixed>> $embeddedHashReferences
+     * @param list<array<string,mixed>> $hashReferences
      * @param list<array<string,mixed>> $derivedHashes
      * @param list<array<string,mixed>> $polymorphicReferences
      * @param list<string>|null $naturalKey
@@ -400,6 +409,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         array $encodedReferences = [],
         array $embeddedReferences = [],
         array $embeddedHashReferences = [],
+        array $hashReferences = [],
         array $derivedHashes = [],
         array $polymorphicReferences = [],
         ?array $naturalKey = null,
@@ -428,6 +438,7 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
                 'embedded_references' => $embeddedReferences,
                 'encoded_references' => $encodedReferences,
                 'generated_columns' => [],
+                'hash_references' => $hashReferences,
                 'omit_columns' => [],
                 'polymorphic_references' => $polymorphicReferences,
                 'references' => $references,

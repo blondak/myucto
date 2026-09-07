@@ -306,6 +306,17 @@ final readonly class CompanyBackupImportDependencyPlan
                 $insertDefinitions,
             );
         }
+        foreach ($projection->hashReferences->references as $reference) {
+            self::addDependency(
+                $dependencies,
+                $definition->key,
+                $reference->target,
+                CompanyBackupImportDependencyKind::Hash,
+                $reference->signature(),
+                $reference->nullable,
+                $insertDefinitions,
+            );
+        }
         foreach ($projection->polymorphicReferences->references as $reference) {
             foreach ($reference->cases as $case) {
                 if ($case->mapping
