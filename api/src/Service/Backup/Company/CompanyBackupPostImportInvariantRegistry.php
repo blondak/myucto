@@ -55,6 +55,18 @@ final readonly class CompanyBackupPostImportInvariantRegistry
         return new self([]);
     }
 
+    public static function production(
+        CompanyBackupDataRowSource $rows = new CompanyBackupSqlRowSource(),
+        CompanyBackupArchiveLimits $limits = new CompanyBackupArchiveLimits(),
+    ): self {
+        return new self([
+            new CompanyBackupPayrollStatutoryResultSetPostImportInvariant(
+                $rows,
+                $limits,
+            ),
+        ]);
+    }
+
     /** @param list<CompanyBackupPostImportInvariant> $invariants */
     public static function fromInvariants(array $invariants): self
     {

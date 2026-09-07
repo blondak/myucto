@@ -24,7 +24,7 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
         ?CompanyBackupPostImportInvariantRegistry $invariants = null,
     ) {
         $this->invariants = $invariants
-            ?? CompanyBackupPostImportInvariantRegistry::empty();
+            ?? CompanyBackupPostImportInvariantRegistry::production($rows);
     }
 
     public function validate(
