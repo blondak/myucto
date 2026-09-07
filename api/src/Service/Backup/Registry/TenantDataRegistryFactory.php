@@ -11,6 +11,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupBrandingProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupClientBankAccountsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupClientsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupCountriesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupDepreciationEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupEmailProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupExpenseCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupInvoiceSettlementsProjection;
@@ -2384,6 +2385,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupClientBankAccountsProjection::dataColumns(),
             'clients' => CompanyBackupClientsProjection::dataColumns(),
             'countries' => CompanyBackupCountriesProjection::dataColumns(),
+            'depreciation_entries' =>
+                CompanyBackupDepreciationEntriesProjection::dataColumns(),
             'email_profiles' => CompanyBackupEmailProfilesProjection::dataColumns(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::dataColumns(),
@@ -2536,6 +2539,8 @@ final class TenantDataRegistryFactory
             'client_bank_accounts' =>
                 CompanyBackupClientBankAccountsProjection::references(),
             'clients' => CompanyBackupClientsProjection::references(),
+            'depreciation_entries' =>
+                CompanyBackupDepreciationEntriesProjection::references(),
             'email_profiles' => CompanyBackupEmailProfilesProjection::references(),
             'expense_categories' =>
                 CompanyBackupExpenseCategoriesProjection::references(),

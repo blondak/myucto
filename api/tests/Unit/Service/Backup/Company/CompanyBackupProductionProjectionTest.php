@@ -2047,6 +2047,65 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testDepreciationEntriesDeclareCompletePayloadAndReferences(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:depreciation_entries');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'asset_id',
+            'kind',
+            'fiscal_year',
+            'amount',
+            'full_amount',
+            'residual_value_end',
+            'is_paused',
+            'is_half',
+            'months_count',
+            'detail',
+            'status',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['months_count', 'detail'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['asset_id'],
+                        'assets',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'asset_id->assets:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame([], $projection->embeddedReferences->references);
+        self::assertArrayNotHasKey('natural_key', $definition->details);
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
