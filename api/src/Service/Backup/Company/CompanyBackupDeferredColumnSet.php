@@ -103,8 +103,12 @@ final readonly class CompanyBackupDeferredColumnSet
         do {
             $changed = false;
             foreach ($projection->derivedHashes->hashes as $hash) {
-                $dependsOnAffected = isset($affected[$hash->sourceColumn])
-                    || isset($affected[$hash->hashColumn]);
+                $sourceColumns = $hash->sourceColumns();
+                $dependsOnAffected = isset($affected[$hash->hashColumn]);
+                foreach ($sourceColumns as $column) {
+                    $dependsOnAffected = $dependsOnAffected
+                        || isset($affected[$column]);
+                }
                 foreach ($hash->dependencies as $dependency) {
                     $dependsOnAffected = $dependsOnAffected
                         || isset($affected[$dependency->sourceHashColumn]);
@@ -112,7 +116,7 @@ final readonly class CompanyBackupDeferredColumnSet
                 if (!$dependsOnAffected) {
                     continue;
                 }
-                foreach ([$hash->sourceColumn, $hash->hashColumn] as $column) {
+                foreach ([...$sourceColumns, $hash->hashColumn] as $column) {
                     if (!isset($affected[$column])) {
                         $affected[$column] = true;
                         $changed = true;

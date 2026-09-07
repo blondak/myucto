@@ -67,6 +67,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollRunsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollShiftsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessCompensationSegmentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollSicknessEventsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryPersonResultsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTimeEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTimeMonthsProjection;
@@ -187,6 +188,13 @@ final class TenantDataRegistryFactory
             'revision_id',
             'calculation_kind',
             'employee_id',
+        ]],
+        'payroll_statutory_accumulator_openings' => [[
+            'supplier_id',
+            'employee_id',
+            'tax_year',
+            'calculation_kind',
+            'id',
         ]],
         'payroll_statutory_results' => [[
             'supplier_id',
@@ -1287,7 +1295,13 @@ final class TenantDataRegistryFactory
      *     }>,
      *     hash_column:string,
      *     nullable:bool,
-     *     source_column:string
+     *     projection?:list<array{
+     *       column?:string,
+     *       json_column?:string,
+     *       key:string,
+     *       literal?:string|int|bool|null
+     *     }>,
+     *     source_column?:string
      *   }>,
      *   embedded_hash_references?:list<array{
      *     column:string,
@@ -2215,6 +2229,25 @@ final class TenantDataRegistryFactory
                     'omit_columns' => [],
                     'references' =>
                         CompanyBackupPayrollStatutoryPersonResultsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
+        if ($table === 'payroll_statutory_accumulator_openings') {
+            return [
+                'company_backup' => [
+                    'column_codecs' =>
+                        CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection::columnCodecs(),
+                    'data_columns' =>
+                        CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection::dataColumns(),
+                    'derived_hashes' =>
+                        CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection::derivedHashes(),
+                    'embedded_references' => [],
+                    'generated_columns' =>
+                        CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection::generatedColumns(),
+                    'omit_columns' => [],
+                    'references' =>
+                        CompanyBackupPayrollStatutoryAccumulatorOpeningsProjection::references(),
                     'restore_overrides' => [],
                 ],
             ];

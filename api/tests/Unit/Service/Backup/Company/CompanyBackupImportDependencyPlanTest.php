@@ -81,6 +81,43 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/D', $plan->bindingSha256);
     }
 
+    public function testRequiredSelfReferenceDoesNotCreateTableGraphCycle(): void
+    {
+        $snapshot = $this->snapshot([
+            $this->table('table:supplier', TenantDataPolicy::TenantRoot, ['id']),
+            $this->table(
+                'table:append_only_chain',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'previous_id'],
+                references: [
+                    $this->reference(
+                        ['previous_id'],
+                        'table:append_only_chain',
+                    ),
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+            ),
+        ]);
+
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot, ['table:supplier' => 1]),
+        );
+
+        self::assertSame([
+            ['table:supplier'],
+            ['table:append_only_chain'],
+        ], $plan->insertBatches());
+        $selfDependencies = array_values(array_filter(
+            $plan->dependencies(),
+            static fn ($dependency): bool =>
+                $dependency->sourceRegistryKey === 'table:append_only_chain'
+                && $dependency->targetRegistryKey === 'table:append_only_chain',
+        ));
+        self::assertCount(1, $selfDependencies);
+        self::assertFalse($selfDependencies[0]->deferred);
+    }
+
     public function testClassifiesEveryPayloadReferenceRepresentation(): void
     {
         $snapshot = $this->snapshot([

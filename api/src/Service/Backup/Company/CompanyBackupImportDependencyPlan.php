@@ -443,7 +443,10 @@ final readonly class CompanyBackupImportDependencyPlan
             $requires[$registryKey] = [];
         }
         foreach ($dependencies as $dependency) {
-            if (!$dependency->deferred) {
+            if (!$dependency->deferred
+                && $dependency->sourceRegistryKey
+                    !== $dependency->targetRegistryKey
+            ) {
                 $requires[$dependency->sourceRegistryKey][
                     $dependency->targetRegistryKey
                 ] = true;

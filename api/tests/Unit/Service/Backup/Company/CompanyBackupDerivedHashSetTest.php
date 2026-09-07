@@ -143,6 +143,160 @@ final class CompanyBackupDerivedHashSetTest extends TestCase
         }
     }
 
+    public function testValidatesAndRefreshesCanonicalRowProjectionAfterRemap(): void
+    {
+        $hashes = CompanyBackupDerivedHashSet::fromArray(
+            [[
+                'algorithm' => 'sha256_canonical_projection',
+                'hash_column' => 'record_hash',
+                'nullable' => false,
+                'projection' => [
+                    ['column' => 'employee_id', 'key' => 'employee_id'],
+                    ['json_column' => 'evidence_json', 'key' => 'evidence'],
+                    [
+                        'key' => 'schema_version',
+                        'literal' => 'synthetic-record.v1',
+                    ],
+                    ['column' => 'supplier_id', 'key' => 'supplier_id'],
+                    ['json_column' => 'values_json', 'key' => 'values'],
+                ],
+            ]],
+            'table:synthetic_records',
+            [
+                'supplier_id',
+                'employee_id',
+                'values_json',
+                'evidence_json',
+                'record_hash',
+            ],
+        );
+        $values = ['base_minor' => 42_000];
+        $evidence = ['confirmed' => true];
+        $source = [
+            'supplier_id' => 7,
+            'employee_id' => 17,
+            'values_json' => CanonicalJson::encode($values),
+            'evidence_json' => CanonicalJson::encode($evidence),
+            'record_hash' => CanonicalJson::sha256([
+                'employee_id' => 17,
+                'evidence' => $evidence,
+                'schema_version' => 'synthetic-record.v1',
+                'supplier_id' => 7,
+                'values' => $values,
+            ]),
+        ];
+
+        $hashes->assertSourceRow($source);
+        $restored = $hashes->transform(
+            $source,
+            static function (array $changed): array {
+                $changed['supplier_id'] = 107;
+                $changed['employee_id'] = 117;
+                $changed['values_json'] = CanonicalJson::encode([
+                    'base_minor' => 84_000,
+                ]);
+                return $changed;
+            },
+        );
+
+        self::assertSame(
+            CanonicalJson::sha256([
+                'employee_id' => 117,
+                'evidence' => $evidence,
+                'schema_version' => 'synthetic-record.v1',
+                'supplier_id' => 107,
+                'values' => ['base_minor' => 84_000],
+            ]),
+            $restored['record_hash'],
+        );
+
+        $tampered = $source;
+        $tampered['employee_id'] = 18;
+        try {
+            $hashes->assertSourceRow($tampered);
+            self::fail('Změněný řádek nesmí projít se starou pečetí.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_derived_hash_value_invalid', $e->errorCode);
+            self::assertSame('record_hash', $e->column);
+        }
+
+        $nonScalar = $source;
+        $nonScalar['employee_id'] = ['unexpected' => 17];
+        $nonScalar['record_hash'] = CanonicalJson::sha256([
+            'employee_id' => ['unexpected' => 17],
+            'evidence' => $evidence,
+            'schema_version' => 'synthetic-record.v1',
+            'supplier_id' => 7,
+            'values' => $values,
+        ]);
+        try {
+            $hashes->assertSourceRow($nonScalar);
+            self::fail('Skalární pole nesmí přijmout strukturovanou hodnotu.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_derived_hash_value_invalid', $e->errorCode);
+            self::assertSame('record_hash', $e->column);
+        }
+    }
+
+    public function testRefreshesRowProjectionAfterReferencedDerivedHash(): void
+    {
+        $hashes = CompanyBackupDerivedHashSet::fromArray(
+            [
+                [
+                    'algorithm' => 'sha256_canonical_json',
+                    'hash_column' => 'payload_hash',
+                    'nullable' => false,
+                    'source_column' => 'payload_json',
+                ],
+                [
+                    'algorithm' => 'sha256_canonical_projection',
+                    'hash_column' => 'record_hash',
+                    'nullable' => false,
+                    'projection' => [
+                        ['json_column' => 'payload_json', 'key' => 'payload'],
+                        ['column' => 'payload_hash', 'key' => 'payload_hash'],
+                        ['key' => 'schema_version', 'literal' => 'outer.v1'],
+                    ],
+                ],
+            ],
+            'table:synthetic_snapshots',
+            ['payload_json', 'payload_hash', 'record_hash'],
+        );
+        $payload = ['employee_id' => 17];
+        $payloadJson = CanonicalJson::encode($payload);
+        $payloadHash = hash('sha256', $payloadJson);
+        $source = [
+            'payload_json' => $payloadJson,
+            'payload_hash' => $payloadHash,
+            'record_hash' => CanonicalJson::sha256([
+                'payload' => $payload,
+                'payload_hash' => $payloadHash,
+                'schema_version' => 'outer.v1',
+            ]),
+        ];
+
+        $restored = $hashes->transform(
+            $source,
+            static function (array $changed): array {
+                $changed['payload_json'] = CanonicalJson::encode([
+                    'employee_id' => 117,
+                ]);
+                return $changed;
+            },
+        );
+
+        $newPayloadHash = hash('sha256', (string) $restored['payload_json']);
+        self::assertSame($newPayloadHash, $restored['payload_hash']);
+        self::assertSame(
+            CanonicalJson::sha256([
+                'payload' => ['employee_id' => 117],
+                'payload_hash' => $newPayloadHash,
+                'schema_version' => 'outer.v1',
+            ]),
+            $restored['record_hash'],
+        );
+    }
+
     public function testRejectsTamperedNonCanonicalAndHalfNullablePairs(): void
     {
         $required = CompanyBackupDerivedHashSet::fromArray(
@@ -287,6 +441,54 @@ final class CompanyBackupDerivedHashSetTest extends TestCase
                     $columns,
                 );
                 self::fail('Závislosti odvozených hashů musí tvořit platný DAG.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_derived_hash_metadata_invalid', $e->errorCode);
+            }
+        }
+    }
+
+    public function testRejectsInvalidCanonicalRowProjectionMetadata(): void
+    {
+        $valid = [
+            'algorithm' => 'sha256_canonical_projection',
+            'hash_column' => 'record_hash',
+            'nullable' => false,
+            'projection' => [
+                ['column' => 'employee_id', 'key' => 'employee_id'],
+                ['key' => 'schema_version', 'literal' => 'synthetic.v1'],
+            ],
+        ];
+        $columns = ['employee_id', 'record_hash'];
+
+        foreach (
+            [
+                [...$valid, 'nullable' => true],
+                [...$valid, 'projection' => []],
+                [...$valid, 'projection' => [
+                    ['column' => 'employee_id', 'key' => 'employee_id'],
+                    ['column' => 'employee_id', 'key' => 'employee_id'],
+                ]],
+                [...$valid, 'projection' => [
+                    ['column' => 'missing_id', 'key' => 'employee_id'],
+                ]],
+                [...$valid, 'source_column' => 'employee_id'],
+                [
+                    'algorithm' => 'sha256_canonical_json',
+                    'hash_column' => 'record_hash',
+                    'nullable' => false,
+                    'projection' => [
+                        ['column' => 'employee_id', 'key' => 'employee_id'],
+                    ],
+                ],
+            ] as $metadata
+        ) {
+            try {
+                CompanyBackupDerivedHashSet::fromArray(
+                    [$metadata],
+                    'table:synthetic_records',
+                    $columns,
+                );
+                self::fail('Řádková projekce musí mít jednoznačný kontrakt.');
             } catch (CompanyBackupDataSourceException $e) {
                 self::assertSame('data_derived_hash_metadata_invalid', $e->errorCode);
             }

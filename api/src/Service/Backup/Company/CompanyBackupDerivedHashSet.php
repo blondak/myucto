@@ -42,11 +42,20 @@ final readonly class CompanyBackupDerivedHashSet
         $claimed = [];
         foreach ($metadata as $value) {
             $hash = CompanyBackupDerivedHash::fromArray($value, $registryKey);
-            foreach ([$hash->sourceColumn, $hash->hashColumn] as $column) {
+            $exclusiveColumns = [$hash->hashColumn];
+            if ($hash->sourceColumn !== null) {
+                $exclusiveColumns[] = $hash->sourceColumn;
+            }
+            foreach ($exclusiveColumns as $column) {
                 if (!isset($exported[$column]) || isset($claimed[$column])) {
                     throw self::metadataError($registryKey, $column);
                 }
                 $claimed[$column] = true;
+            }
+            foreach ($hash->sourceColumns() as $column) {
+                if (!isset($exported[$column]) || $column === $hash->hashColumn) {
+                    throw self::metadataError($registryKey, $column);
+                }
             }
             $hashes[] = $hash;
         }
@@ -73,21 +82,34 @@ final readonly class CompanyBackupDerivedHashSet
     public function assertSourceRow(array $row): void
     {
         foreach ($this->hashes as $derivedHash) {
-            [$source, $hash] = $this->pair($row, $derivedHash);
-            if ($source === null && $hash === null && $derivedHash->nullable) {
-                continue;
+            $hash = $this->hashValue($row, $derivedHash);
+            $source = $derivedHash->sourceColumn === null
+                ? null
+                : $this->sourceValue($row, $derivedHash);
+            if ($derivedHash->sourceColumn !== null) {
+                if (($source === null) !== ($hash === null)
+                    || ($source === null && !$derivedHash->nullable)
+                ) {
+                    throw $this->valueError($derivedHash);
+                }
+                if ($source === null) {
+                    continue;
+                }
             }
-            $canonical = $this->canonicalSource($source, $derivedHash);
+            $canonical = $this->canonicalSource($row, $derivedHash);
             if (!is_string($hash)
                 || preg_match('/^[0-9a-f]{64}$/D', $hash) !== 1
-                || !hash_equals($canonical, $source)
+                || ($source !== null && !hash_equals($canonical, $source))
                 || !hash_equals(hash('sha256', $canonical), $hash)
             ) {
                 throw $this->valueError($derivedHash);
             }
         }
         foreach ($this->hashes as $derivedHash) {
-            [$source] = $this->pair($row, $derivedHash);
+            if ($derivedHash->sourceColumn === null) {
+                continue;
+            }
+            $source = $this->sourceValue($row, $derivedHash);
             if ($source === null) {
                 continue;
             }
@@ -126,70 +148,132 @@ final readonly class CompanyBackupDerivedHashSet
     private function refresh(array $row): array
     {
         foreach ($this->refreshOrder as $derivedHash) {
-            [$source, $hash] = $this->pair($row, $derivedHash);
-            if ($source === null && $hash === null && $derivedHash->nullable) {
-                continue;
+            $hash = $this->hashValue($row, $derivedHash);
+            $source = $derivedHash->sourceColumn === null
+                ? null
+                : $this->sourceValue($row, $derivedHash);
+            if ($derivedHash->sourceColumn !== null) {
+                if (($source === null) !== ($hash === null)
+                    || ($source === null && !$derivedHash->nullable)
+                ) {
+                    throw $this->valueError($derivedHash);
+                }
+                if ($source === null) {
+                    continue;
+                }
             }
             if (!is_string($hash)
                 || preg_match('/^[0-9a-f]{64}$/D', $hash) !== 1
             ) {
                 throw $this->valueError($derivedHash);
             }
-            $decoded = $this->decodedSource($source, $derivedHash);
-            foreach ($derivedHash->dependencies as $dependency) {
-                $dependencyHash = $row[$dependency->sourceHashColumn] ?? null;
-                if (!is_string($dependencyHash)
-                    || preg_match('/^[0-9a-f]{64}$/D', $dependencyHash) !== 1
-                ) {
-                    throw $this->valueError($derivedHash);
+            if ($derivedHash->sourceColumn !== null) {
+                $decoded = $this->decodedSource($source, $derivedHash);
+                foreach ($derivedHash->dependencies as $dependency) {
+                    $dependencyHash = $row[$dependency->sourceHashColumn] ?? null;
+                    if (!is_string($dependencyHash)
+                        || preg_match('/^[0-9a-f]{64}$/D', $dependencyHash) !== 1
+                    ) {
+                        throw $this->valueError($derivedHash);
+                    }
+                    $this->replacePathValue(
+                        $decoded,
+                        $dependency->path,
+                        $dependencyHash,
+                        $derivedHash,
+                    );
                 }
-                $this->replacePathValue(
-                    $decoded,
-                    $dependency->path,
-                    $dependencyHash,
-                    $derivedHash,
-                );
+                try {
+                    $canonical = CanonicalJson::encode($decoded);
+                } catch (\Throwable $e) {
+                    throw $this->valueError($derivedHash, $e);
+                }
+                $row[$derivedHash->sourceColumn] = $canonical;
+            } else {
+                $canonical = $this->canonicalSource($row, $derivedHash);
             }
-            try {
-                $canonical = CanonicalJson::encode($decoded);
-            } catch (\Throwable $e) {
-                throw $this->valueError($derivedHash, $e);
-            }
-            $row[$derivedHash->sourceColumn] = $canonical;
             $row[$derivedHash->hashColumn] = hash('sha256', $canonical);
         }
         return $row;
     }
 
-    /**
-     * @param array<string,mixed> $row
-     * @return array{mixed,mixed}
-     */
-    private function pair(
+    /** @param array<string,mixed> $row */
+    private function hashValue(
         array $row,
         CompanyBackupDerivedHash $derivedHash,
-    ): array {
-        if (!array_key_exists($derivedHash->sourceColumn, $row)
-            || !array_key_exists($derivedHash->hashColumn, $row)
-        ) {
+    ): mixed {
+        if (!array_key_exists($derivedHash->hashColumn, $row)) {
             throw $this->valueError($derivedHash);
         }
-        $source = $row[$derivedHash->sourceColumn];
-        $hash = $row[$derivedHash->hashColumn];
-        if (($source === null) !== ($hash === null)
-            || ($source === null && !$derivedHash->nullable)
-        ) {
-            throw $this->valueError($derivedHash);
-        }
-        return [$source, $hash];
+        return $row[$derivedHash->hashColumn];
     }
 
+    /** @param array<string,mixed> $row */
+    private function sourceValue(
+        array $row,
+        CompanyBackupDerivedHash $derivedHash,
+    ): mixed {
+        $column = $derivedHash->sourceColumn;
+        if ($column === null || !array_key_exists($column, $row)) {
+            throw $this->valueError($derivedHash);
+        }
+        return $row[$column];
+    }
+
+    /** @param array<string,mixed> $row */
     private function canonicalSource(
-        mixed $source,
+        array $row,
         CompanyBackupDerivedHash $derivedHash,
     ): string {
         try {
-            return CanonicalJson::encode($this->decodedSource($source, $derivedHash));
+            if ($derivedHash->sourceColumn !== null) {
+                return CanonicalJson::encode($this->decodedSource(
+                    $this->sourceValue($row, $derivedHash),
+                    $derivedHash,
+                ));
+            }
+            $payload = [];
+            foreach ($derivedHash->projection as $field) {
+                if ($field->hasLiteral) {
+                    $payload[$field->key] = $field->literal;
+                    continue;
+                }
+                $column = $field->sourceColumn();
+                if ($column === null || !array_key_exists($column, $row)) {
+                    throw new \UnexpectedValueException(
+                        'Zdrojové pole řádkové projekce chybí.',
+                    );
+                }
+                $value = $row[$column];
+                if ($field->jsonColumn !== null) {
+                    if (!is_string($value)) {
+                        throw new \UnexpectedValueException(
+                            'JSON pole řádkové projekce není řetězec.',
+                        );
+                    }
+                    $decoded = json_decode(
+                        $value,
+                        true,
+                        flags: JSON_THROW_ON_ERROR,
+                    );
+                    if (!hash_equals(CanonicalJson::encode($decoded), $value)) {
+                        throw new \UnexpectedValueException(
+                            'JSON pole řádkové projekce není kanonické.',
+                        );
+                    }
+                    $value = $decoded;
+                } elseif (!is_string($value)
+                    && !is_int($value)
+                    && !is_bool($value)
+                    && $value !== null
+                ) {
+                    throw new \UnexpectedValueException(
+                        'Skalární pole řádkové projekce má neplatný typ.',
+                    );
+                }
+                $payload[$field->key] = $value;
+            }
+            return CanonicalJson::encode($payload);
         } catch (CompanyBackupDataSourceException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -214,6 +298,10 @@ final readonly class CompanyBackupDerivedHashSet
             }
             return match ($derivedHash->algorithm) {
                 CompanyBackupDerivedHashAlgorithm::Sha256CanonicalJson => $decoded,
+                CompanyBackupDerivedHashAlgorithm::Sha256CanonicalProjection =>
+                    throw new \LogicException(
+                        'Řádková projekce nemá samostatný JSON zdroj.',
+                    ),
             };
         } catch (\Throwable $e) {
             throw $this->valueError($derivedHash, $e);
@@ -283,9 +371,21 @@ final readonly class CompanyBackupDerivedHashSet
             $incoming[$hash->hashColumn] = 0;
         }
         foreach ($hashes as $hash) {
+            $sources = [];
             foreach ($hash->dependencies as $dependency) {
                 $source = $dependency->sourceHashColumn;
-                if (!isset($byHashColumn[$source]) || $source === $hash->hashColumn) {
+                if (!isset($byHashColumn[$source])) {
+                    throw self::metadataError($registryKey, $source);
+                }
+                $sources[$source] = true;
+            }
+            foreach ($hash->sourceColumns() as $column) {
+                if (isset($byHashColumn[$column])) {
+                    $sources[$column] = true;
+                }
+            }
+            foreach (array_keys($sources) as $source) {
+                if ($source === $hash->hashColumn) {
                     throw self::metadataError($registryKey, $source);
                 }
                 $dependants[$source][] = $hash->hashColumn;
