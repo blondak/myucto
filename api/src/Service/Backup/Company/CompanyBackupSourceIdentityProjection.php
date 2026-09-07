@@ -161,6 +161,23 @@ final readonly class CompanyBackupSourceIdentityProjection
         );
     }
 
+    /** @return list<string> */
+    public function identityColumns(): array
+    {
+        $columns = [];
+        foreach ([
+            $this->primaryKeyColumns,
+            $this->tenantScopedPrimaryKeyColumns ?? [],
+            $this->naturalKeyColumns ?? [],
+            ...$this->referenceKeyColumns,
+        ] as $keyColumns) {
+            foreach ($keyColumns as $column) {
+                $columns[$column] = true;
+            }
+        }
+        return array_keys($columns);
+    }
+
     /**
      * @param array<string,mixed> $details
      * @param array<string,true> $exported

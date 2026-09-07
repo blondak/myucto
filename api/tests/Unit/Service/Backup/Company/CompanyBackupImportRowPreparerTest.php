@@ -11,9 +11,11 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflightResult;
 use MyInvoice\Service\Backup\Company\CompanyBackupExternalReferenceCollector;
 use MyInvoice\Service\Backup\Company\CompanyBackupGlobalIdentityMapper;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportDependencyPlan;
+use MyInvoice\Service\Backup\Company\CompanyBackupImportIdentityPreallocator;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportRowPreparer;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportTableMetadata;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
+use MyInvoice\Service\Backup\Company\CompanyBackupPreallocatedImportRowPreparer;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionAction;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionPlan;
@@ -245,6 +247,122 @@ final class CompanyBackupImportRowPreparerTest extends TestCase
         self::assertTrue($this->database->inTransaction());
 
         $map->seal();
+        self::assertTrue($this->database->rollBack());
+        $map->close();
+    }
+
+    public function testPreallocatesIdentityBeforeCompleteRowTransformation(): void
+    {
+        $snapshot = $this->snapshot();
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot),
+        );
+        $resolutions = $this->resolutions($snapshot);
+        $map = new CompanyBackupSqlTargetIdentityMap($this->database);
+        self::assertTrue($this->database->beginTransaction());
+
+        $supplier = $this->definition($snapshot, 'table:supplier');
+        $supplierKeys = CompanyBackupSqlPrimaryKeyReservation::reserve(
+            $this->database,
+            CompanyBackupTableProjection::fromDefinition($supplier),
+            new CompanyBackupAutoIncrementColumn('id', PHP_INT_MAX),
+            1,
+        );
+        $supplierPreallocator = new CompanyBackupImportIdentityPreallocator(
+            $supplier,
+            new CompanyBackupImportTableMetadata(
+                new CompanyBackupAutoIncrementColumn('id', PHP_INT_MAX),
+            ),
+            $supplierKeys,
+            $map,
+            $resolutions,
+            $plan,
+        );
+        $supplierIdentity = $supplierPreallocator->preallocate([
+            'id' => 7,
+            'name' => 'Imported tenant',
+        ]);
+        $supplierPreallocator->finish();
+
+        $records = $this->definition($snapshot, 'table:synthetic_records');
+        $recordKeys = CompanyBackupSqlPrimaryKeyReservation::reserve(
+            $this->database,
+            CompanyBackupTableProjection::fromDefinition($records),
+            new CompanyBackupAutoIncrementColumn('id', PHP_INT_MAX),
+            1,
+        );
+        $recordPreallocator = new CompanyBackupImportIdentityPreallocator(
+            $records,
+            new CompanyBackupImportTableMetadata(
+                new CompanyBackupAutoIncrementColumn('id', PHP_INT_MAX),
+            ),
+            $recordKeys,
+            $map,
+            $resolutions,
+            $plan,
+        );
+        $sourceRow = [
+            'id' => 11,
+            'supplier_id' => 7,
+            'country_id' => 1,
+            'code' => 'ROW-1',
+            'is_active' => 1,
+        ];
+        $recordIdentity = $recordPreallocator->preallocate($sourceRow);
+        $recordPreallocator->finish();
+
+        self::assertSame(
+            ['id' => 41],
+            $supplierIdentity->targetIdentity->primaryKey->values,
+        );
+        self::assertSame(
+            ['id' => 101],
+            $recordIdentity->targetIdentity->primaryKey->values,
+        );
+        self::assertSame(
+            ['supplier_id' => 41, 'code' => 'ROW-1'],
+            $recordIdentity->targetIdentity->referenceKeys[0]->values,
+        );
+        self::assertSame(2, $map->identityCount());
+        self::assertSame(1, $this->rowCount('supplier'));
+        self::assertSame(1, $this->rowCount('synthetic_records'));
+
+        (new CompanyBackupGlobalIdentityMapper(
+            $this->definition($snapshot, 'table:countries'),
+            $map,
+            $resolutions,
+            $plan,
+        ))->map([
+            'id' => 1,
+            'iso2' => 'CZ',
+            'name' => 'Česko',
+        ]);
+        $map->seal();
+
+        $preparer = new CompanyBackupPreallocatedImportRowPreparer(
+            $records,
+            $map,
+            $resolutions,
+            $plan,
+        );
+        $prepared = $preparer->prepare($sourceRow);
+        self::assertSame([
+            'id' => 101,
+            'supplier_id' => 41,
+            'country_id' => 10,
+            'code' => 'ROW-1',
+            'is_active' => 0,
+        ], $prepared->row);
+        self::assertSame(3, $map->identityCount());
+
+        $changedSourceRow = $sourceRow;
+        $changedSourceRow['code'] = 'CHANGED';
+        $this->assertWriteError(
+            'import_preallocated_target_identity_invalid',
+            fn () => $preparer->prepare($changedSourceRow),
+        );
+
         self::assertTrue($this->database->rollBack());
         $map->close();
     }

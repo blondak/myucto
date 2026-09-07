@@ -44,6 +44,24 @@ final readonly class CompanyBackupRowReferenceTransformer
     }
 
     /**
+     * @param array<string,mixed> $row
+     * @param list<string> $identityColumns
+     * @return array<string,mixed>
+     */
+    public function transformIdentityColumnReferences(
+        CompanyBackupTableProjection $projection,
+        array $row,
+        array $identityColumns,
+    ): array {
+        return $projection->remapIdentityColumnReferences(
+            $row,
+            $identityColumns,
+            fn (CompanyBackupReferenceOccurrence $occurrence): ?CompanyBackupSourceKey =>
+                $this->resolve($occurrence),
+        );
+    }
+
+    /**
      * Připraví první INSERT bez lookupu referencí výslovně odložených plánem.
      * Zdrojový řádek musí zůstat dostupný pro finální druhý průchod.
      *

@@ -664,6 +664,64 @@ final readonly class CompanyBackupTableProjection
     }
 
     /**
+     * Přemapuje pouze přímé reference, které tvoří obnovovací identitu.
+     * Překrývající se složené reference zahrne jako celek, aby sdílené
+     * souřadnice nikdy nezávisely na pořadí deklarací.
+     *
+     * @param list<string> $identityColumns
+     * @param array<string,mixed> $row
+     * @param callable(CompanyBackupReferenceOccurrence):mixed $mapper
+     * @return array<string,mixed>
+     */
+    public function remapIdentityColumnReferences(
+        array $row,
+        array $identityColumns,
+        callable $mapper,
+    ): array {
+        $selected = array_fill_keys($identityColumns, true);
+        do {
+            $changed = false;
+            foreach ($this->references->references as $reference) {
+                if (array_intersect_key(
+                    $selected,
+                    array_fill_keys($reference->columns, true),
+                ) === []) {
+                    continue;
+                }
+                foreach ($reference->columns as $column) {
+                    if (!isset($selected[$column])) {
+                        $selected[$column] = true;
+                        $changed = true;
+                    }
+                }
+            }
+        } while ($changed);
+
+        return $this->references->remap(
+            $row,
+            function (
+                CompanyBackupReference $reference,
+                array $values,
+            ) use ($selected, $mapper): array|CompanyBackupReferenceRemapDirective|null {
+                if (array_intersect_key(
+                    $selected,
+                    array_fill_keys($reference->columns, true),
+                ) === []) {
+                    return $values;
+                }
+                return $this->mappedValues(
+                    CompanyBackupReferenceOccurrence::column(
+                        $this->registryKey,
+                        $reference,
+                        $values,
+                    ),
+                    $mapper,
+                );
+            },
+        );
+    }
+
+    /**
      * Přemapuje všechny deklarované tvary referencí jedním normalizovaným
      * mapperem a vnější pečetě ověří před první změnou a obnoví až nakonec.
      *
