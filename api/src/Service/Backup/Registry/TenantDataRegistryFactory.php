@@ -98,6 +98,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockMediaProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockTagsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossApplicationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
@@ -719,6 +720,8 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_items') {
                 $details['natural_key'] = ['supplier_id', 'sku'];
+            } elseif ($table === 'stock_tags') {
+                $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'tax_losses') {
                 $details['natural_key'] = [
                     'supplier_id',
@@ -2460,6 +2463,7 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningSettingsProjection::dataColumns(),
             'stock_items' => CompanyBackupStockItemsProjection::dataColumns(),
             'stock_media' => CompanyBackupStockMediaProjection::dataColumns(),
+            'stock_tags' => CompanyBackupStockTagsProjection::dataColumns(),
             'tax_loss_applications' =>
                 CompanyBackupTaxLossApplicationsProjection::dataColumns(),
             'tax_losses' => CompanyBackupTaxLossesProjection::dataColumns(),
@@ -2624,6 +2628,7 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningSettingsProjection::references(),
             'stock_items' => CompanyBackupStockItemsProjection::references(),
             'stock_media' => CompanyBackupStockMediaProjection::references(),
+            'stock_tags' => CompanyBackupStockTagsProjection::references(),
             'tax_loss_applications' =>
                 CompanyBackupTaxLossApplicationsProjection::references(),
             'tax_losses' => CompanyBackupTaxLossesProjection::references(),
