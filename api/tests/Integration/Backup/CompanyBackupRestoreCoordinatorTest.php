@@ -138,7 +138,7 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
         self::assertSame('READ-COMMITTED', $this->sessionIsolation($pdo));
         self::assertSame(41, $result->database->supplierId);
         self::assertSame(1, $result->postImport->checkedTenantRows);
-        self::assertSame(0, $result->postImport->invariantReport->invariantCount);
+        self::assertSame(3, $result->postImport->invariantReport->invariantCount);
         self::assertSame(0, $result->publishedFileCount);
         self::assertSame(1, $source->closes);
         self::assertSame(1, $this->rowCount($pdo));

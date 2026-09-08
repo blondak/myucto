@@ -244,7 +244,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertSame(1, $result->database->updatedRows);
         self::assertSame(2, $result->postImport->checkedTableCount);
         self::assertSame(3, $result->postImport->checkedTenantRows);
-        self::assertSame(2, $result->postImport->invariantReport->invariantCount);
+        self::assertSame(3, $result->postImport->invariantReport->invariantCount);
         self::assertSame(0, $result->postImport->invariantReport->checkCount);
         self::assertSame(1, $result->publishedFileCount);
 
