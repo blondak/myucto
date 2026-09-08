@@ -27,12 +27,12 @@ final class AccountingArchiveCatalogTest extends TestCase
 
         $export = $catalog->forExport();
         $restore = $catalog->forRestore();
-        self::assertCount(57, $export);
+        self::assertCount(58, $export);
         self::assertSame('supplier', $export[0]->name);
-        self::assertSame('exchange_rates', $export[56]->name);
+        self::assertSame('exchange_rates', $export[57]->name);
         self::assertSame('supplier', $restore[0]->name);
         self::assertSame('currencies', $restore[3]->name);
-        self::assertSame('exchange_rates', $restore[56]->name);
+        self::assertSame('exchange_rates', $restore[57]->name);
 
         $exportNames = array_map(
             static fn (AccountingArchiveTable $table): string => $table->name,
@@ -89,6 +89,33 @@ final class AccountingArchiveCatalogTest extends TestCase
         self::assertNotNull($bankStatement);
         self::assertSame(TenantDataPolicy::GlobalReference, $bankStatement->policy);
         self::assertSame('bank_statement_relationships', $bankStatement->selector);
+    }
+
+    public function testStockLocalesPrecedeTranslatedPayloadsOnRestore(): void
+    {
+        $restoreNames = array_map(
+            static fn (AccountingArchiveTable $table): string => $table->name,
+            (new AccountingArchiveCatalog(
+                TenantDataRegistryFactory::draftV1(),
+            ))->forRestore(),
+        );
+        $locales = array_search('stock_locales', $restoreNames, true);
+        $categoryTranslations = array_search(
+            'stock_category_i18n',
+            $restoreNames,
+            true,
+        );
+        $itemTranslations = array_search(
+            'stock_item_i18n',
+            $restoreNames,
+            true,
+        );
+
+        self::assertIsInt($locales);
+        self::assertIsInt($categoryTranslations);
+        self::assertIsInt($itemTranslations);
+        self::assertLessThan($categoryTranslations, $locales);
+        self::assertLessThan($itemTranslations, $locales);
     }
 
     public function testCatalogRejectsMissingProjectionMetadata(): void

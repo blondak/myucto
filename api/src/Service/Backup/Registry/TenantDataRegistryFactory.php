@@ -101,6 +101,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupStockItemFeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemPricesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemTagsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockLocalesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockMediaProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockTagsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossApplicationsProjection;
@@ -448,6 +449,7 @@ final class TenantDataRegistryFactory
         'stock_items',
         'manufacturers',
         'stock_media',
+        'stock_locales',
         'stock_categories',
         'stock_category_i18n',
         'stock_item_categories',
@@ -512,6 +514,7 @@ final class TenantDataRegistryFactory
         'stock_items',
         'manufacturers',
         'stock_media',
+        'stock_locales',
         'stock_categories',
         'stock_category_i18n',
         'stock_item_categories',
@@ -660,6 +663,7 @@ final class TenantDataRegistryFactory
         'stock_items',
         'manufacturers',
         'stock_media',
+        'stock_locales',
         'stock_categories',
         'stock_category_i18n',
         'stock_item_categories',
@@ -728,6 +732,8 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_item_prices') {
                 $details['natural_key'] = ['stock_item_id', 'currency_code'];
+            } elseif ($table === 'stock_locales') {
+                $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_tags') {
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'tax_losses') {
@@ -2478,6 +2484,8 @@ final class TenantDataRegistryFactory
             'stock_item_tags' =>
                 CompanyBackupStockItemTagsProjection::dataColumns(),
             'stock_items' => CompanyBackupStockItemsProjection::dataColumns(),
+            'stock_locales' =>
+                CompanyBackupStockLocalesProjection::dataColumns(),
             'stock_media' => CompanyBackupStockMediaProjection::dataColumns(),
             'stock_tags' => CompanyBackupStockTagsProjection::dataColumns(),
             'tax_loss_applications' =>
@@ -2651,6 +2659,8 @@ final class TenantDataRegistryFactory
             'stock_item_tags' =>
                 CompanyBackupStockItemTagsProjection::references(),
             'stock_items' => CompanyBackupStockItemsProjection::references(),
+            'stock_locales' =>
+                CompanyBackupStockLocalesProjection::references(),
             'stock_media' => CompanyBackupStockMediaProjection::references(),
             'stock_tags' => CompanyBackupStockTagsProjection::references(),
             'tax_loss_applications' =>
