@@ -144,6 +144,7 @@ final class MatchSuggestionService
             $stmt->execute([$suggestionId, $supplierId]);
             $suggestion = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($suggestion === false) throw new MatchSuggestionException('not_found', 'Návrh nebyl nalezen.', 404);
+            BankMatchArchivedDocuments::assertAcceptable($suggestion);
             if ((string) $suggestion['status'] !== 'pending') throw new MatchSuggestionException('already_reviewed', 'Návrh už byl vyřízen.', 409);
             $candidates = json_decode((string) $suggestion['candidates_json'], true, 512, JSON_THROW_ON_ERROR);
             if (!isset($candidates[$candidateIndex]) || !is_array($candidates[$candidateIndex])) {

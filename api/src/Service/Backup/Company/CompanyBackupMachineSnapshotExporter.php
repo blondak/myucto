@@ -103,13 +103,14 @@ final readonly class CompanyBackupMachineSnapshotExporter
                     $objects = [];
                     $sourceFiles = [];
                     $temporarySourceFiles = [];
+                    $exportSource = new CompanyBackupBankHistoryRowSource($source, $backupId);
                     foreach (CompanyBackupDataInventory::payloadDefinitions($registry) as $index => $definition) {
                         $filePath = $resolvedDirectory . DIRECTORY_SEPARATOR
                             . 'company-data-' . bin2hex(random_bytes(16)) . '.jsonl';
                         $object = $this->jsonlWriter->write(
                             $definition,
                             $index + 1,
-                            $source->rows($snapshot, $supplierId, $definition),
+                            $exportSource->rows($snapshot, $supplierId, $definition),
                             $filePath,
                         );
                         $createdFiles[] = $filePath;

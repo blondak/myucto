@@ -194,6 +194,11 @@ jednoznačný součet více dokladů. Návrh od **35 %** se může zobrazit k ru
 posouzení. Překlep ve VS, přeplatek, rozdíl odpovídající poplatku, rozdílná měna
 nebo proforma automatické potvrzení vždy blokují bez ohledu na skóre.
 
+Archivní návrh s odkazem na nedostupný doklad nelze přijmout. Historická
+identita dokladu se uchovává odděleně od živých vazeb a neaktivní návrh se
+nevrací mezi návrhy k potvrzení. Nové párování vybírá pouze existující doklady;
+archivní záznam sám nevytváří platbu ani nemění částky.
+
 Když nabídka nesedí, pokračuj klasickým ručním výběrem:
 
 1. Klik **Spárovat** → otevře se modal s vyhledávačem.

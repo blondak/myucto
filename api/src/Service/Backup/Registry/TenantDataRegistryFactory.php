@@ -124,6 +124,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupBankTransferMatchesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSupplierBankAccountsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyMapProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyObservationsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchAuditProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchSuggestionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockDocumentLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLandedCostsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockTakesProjection;
@@ -152,6 +154,8 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
+        'bank_match_audit' => 'bank',
+        'bank_match_suggestions' => 'bank',
         'bank_counterparty_map' => 'bank',
         'bank_counterparty_observations' => 'bank',
         'bank_transfer_matches' => 'bank',
@@ -1548,6 +1552,19 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'bank_match_audit' || $table === 'bank_match_suggestions') {
+            $audit = $table === 'bank_match_audit';
+            return ['company_backup' => [
+                'data_columns' => $audit ? CompanyBackupBankMatchAuditProjection::dataColumns()
+                    : CompanyBackupBankMatchSuggestionsProjection::dataColumns(),
+                'references' => $audit ? CompanyBackupBankMatchAuditProjection::references()
+                    : CompanyBackupBankMatchSuggestionsProjection::references(),
+                'embedded_references' => $audit ? CompanyBackupBankMatchAuditProjection::embeddedReferences()
+                    : CompanyBackupBankMatchSuggestionsProjection::embeddedReferences(),
+                'generated_columns' => $audit ? [] : ['pending_tx'],
+                'omit_columns' => [], 'restore_overrides' => [],
+            ]];
+        }
         if ($table === 'bank_statements' || $table === 'bank_transactions') {
             $statement = $table === 'bank_statements';
             return [

@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankEmailNoticeRepository;
 use MyInvoice\Service\Backup\Company\CompanyBackupPreparedImportRow;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankHistoryRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupSourceIdentityProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlInsertWriter;
@@ -18,6 +19,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Bank\EmailNotice\ParsedBankEmailNotice;
 use MyInvoice\Service\Bank\StatementMatcher;
+use MyInvoice\Service\Bank\Match\MatchSuggestionService;
+use MyInvoice\Service\Bank\Match\MatchSuggestionException;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -30,6 +33,7 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
     private Connection $db;
     private BankEmailNoticeRepository $repository;
     private StatementMatcher $matcher;
+    private MatchSuggestionService $suggestions;
     private int $supplierId = 0;
     private int $otherSupplierId = 0;
     /** @var list<int> */
@@ -46,6 +50,7 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
             $this->db = $container->get(Connection::class);
             $this->repository = $container->get(BankEmailNoticeRepository::class);
             $this->matcher = $container->get(StatementMatcher::class);
+            $this->suggestions = $container->get(MatchSuggestionService::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -365,6 +370,112 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
             );
             self::assertSame($restoredStatement, $replay['statement_id']);
             self::assertSame($restoredTransaction, $replay['transaction_id']);
+        } finally {
+            $pdo->rollBack();
+            $pdo->prepare('SET SESSION transaction_isolation = ?')->execute([$previousIsolation]);
+        }
+    }
+
+    public function testArchivedSuggestionCannotBeAcceptedEvenWithReactivatedStatus(): void
+    {
+        $created = $this->repository->createTransactionFromNotice($this->supplierId,
+            new ParsedBankEmailNotice(variableSymbol: '2099071404', amount: 10, currency: 'CZK',
+                postedAt: '2099-07-14', recipientAccount: self::ACCOUNT . '/0100',
+                counterpartyAccount: '1000000005', counterpartyBank: '0100',
+                counterpartyName: 'Syntetická protistrana', message: 'Archived suggestion'),
+            'imap-1:<archived-candidate@example.test>', 0.05, $this->matcher, 'CZK');
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO bank_match_suggestions
+            (supplier_id, bank_transaction_id, kind, reason, candidates_json, top_score,
+             status, archived_document_references)
+            VALUES (?, ?, 'single', 'no_vs', ?, 0.800, 'pending', '{}')")
+            ->execute([$this->supplierId, $created['transaction_id'],
+                '[{"type":"invoice","invoice_id":null,"invoice_ids":null,"purchase_invoice_id":null}]']);
+        $id = (int) $pdo->lastInsertId();
+        try {
+            $this->suggestions->accept($id, $this->supplierId, 0, 0);
+            self::fail('Archivní návrh nesmí být přijat.');
+        } catch (MatchSuggestionException $e) {
+            self::assertSame('archived_candidate', $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
+        self::assertFalse($pdo->inTransaction());
+    }
+
+    public function testCompanyHistorySqlRoundTripDoesNotReconnectMissingDocumentIds(): void
+    {
+        $notice = new ParsedBankEmailNotice(variableSymbol: '2099071405', amount: 10, currency: 'CZK',
+            postedAt: '2099-07-14', recipientAccount: self::ACCOUNT . '/0100',
+            counterpartyAccount: '1000000005', counterpartyBank: '0100',
+            counterpartyName: 'Syntetická protistrana', message: 'History roundtrip');
+        $original = $this->repository->createTransactionFromNotice($this->supplierId, $notice,
+            'imap-1:<history-roundtrip@example.test>', 0.05, $this->matcher, 'CZK');
+        $target = $this->repository->createTransactionFromNotice($this->otherSupplierId, $notice,
+            'imap-2:<history-roundtrip@example.test>', 0.05, $this->matcher, 'CZK');
+        $pdo = $this->db->pdo();
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM invoices WHERE id = 2147483001')->fetchColumn());
+        $previousIsolation = (string) $pdo->query('SELECT @@transaction_isolation')->fetchColumn();
+        $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("INSERT INTO bank_match_suggestions
+                (supplier_id, bank_transaction_id, kind, reason, candidates_json, top_score, status)
+                VALUES (?, ?, 'split', 'no_vs', ?, 0.800, 'pending')")
+                ->execute([$this->supplierId, $original['transaction_id'],
+                    '[{"type":"split","invoice_ids":[2147483001],"display":{"amount":10}}]']);
+            $suggestionId = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO bank_match_audit
+                (supplier_id, bank_transaction_id, decision, invoice_ids) VALUES (?, ?, 'suggest', '[2147483001]')")
+                ->execute([$this->supplierId, $original['transaction_id']]);
+            $auditId = (int) $pdo->lastInsertId();
+            $reader = new CompanyBackupTableSchemaReader();
+            $source = new CompanyBackupBankHistoryRowSource(new CompanyBackupSqlRowSource(),
+                '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1');
+            foreach (['bank_match_audit' => $auditId, 'bank_match_suggestions' => $suggestionId] as $table => $id) {
+                $definition = TenantDataRegistryFactory::draftV1()->definition('table:' . $table);
+                self::assertNotNull($definition);
+                $projection = CompanyBackupTableProjection::fromDefinition($definition);
+                $row = null;
+                foreach ($source->rows($pdo, $this->supplierId, $definition) as $candidate) {
+                    if ((int) $candidate['id'] === $id) {
+                        $row = $candidate;
+                        break;
+                    }
+                }
+                self::assertNotNull($row);
+                $projection->assertCompleteSourceRow($row);
+                self::assertNotNull($row['archived_document_references']);
+                $identity = CompanyBackupSourceIdentityProjection::fromDefinition($definition);
+                $originalIdentity = $identity->identityForRow($row);
+                $mapped = $projection->references->remap($row,
+                    fn (CompanyBackupReference $reference, array $key): array => match ($reference->target) {
+                        'table:supplier' => [$this->otherSupplierId],
+                        'table:bank_transactions' => [$target['transaction_id']],
+                        default => throw new \LogicException('Neočekávaná živá vazba.'),
+                    });
+                $metadata = $reader->readImportMetadata($pdo, $projection);
+                self::assertNotNull($metadata->autoIncrement);
+                $reservation = CompanyBackupSqlPrimaryKeyReservation::reserve($pdo, $projection,
+                    $metadata->autoIncrement, 1);
+                $mapped['id'] = $reservation->next();
+                $reservation->finish();
+                $writer = new CompanyBackupSqlInsertWriter($pdo, $definition, $reader->read($pdo, $projection), 1);
+                $writer->insert(new CompanyBackupPreparedImportRow($mapped, $originalIdentity,
+                    $identity->identityForRow($mapped)));
+                $writer->finish();
+                $copy = $pdo->query('SELECT * FROM ' . $table . ' WHERE id = ' . $mapped['id'])->fetch(PDO::FETCH_ASSOC);
+                self::assertSame($row['archived_document_references'], $copy['archived_document_references']);
+                self::assertSame($this->otherSupplierId, (int) $copy['supplier_id']);
+                if ($table === 'bank_match_suggestions') {
+                    self::assertSame('superseded', $copy['status']);
+                    self::assertNull($copy['pending_tx']);
+                    self::assertSame([null], json_decode($copy['candidates_json'], true, 512, JSON_THROW_ON_ERROR)[0]['invoice_ids']);
+                } else {
+                    self::assertSame('[null]', $copy['invoice_ids']);
+                }
+            }
+            self::assertSame('pending', $pdo->query('SELECT status FROM bank_match_suggestions WHERE id = ' . $suggestionId)->fetchColumn());
+            self::assertSame('[2147483001]', $pdo->query('SELECT invoice_ids FROM bank_match_audit WHERE id = ' . $auditId)->fetchColumn());
         } finally {
             $pdo->rollBack();
             $pdo->prepare('SET SESSION transaction_isolation = ?')->execute([$previousIsolation]);
