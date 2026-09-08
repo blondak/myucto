@@ -98,6 +98,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockFeeTypesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemFeesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockItemPricesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemTagsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockMediaProjection;
@@ -725,6 +726,8 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['supplier_id', 'sku'];
             } elseif ($table === 'stock_fee_types') {
                 $details['natural_key'] = ['supplier_id', 'code'];
+            } elseif ($table === 'stock_item_prices') {
+                $details['natural_key'] = ['stock_item_id', 'currency_code'];
             } elseif ($table === 'stock_tags') {
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'tax_losses') {
@@ -2470,6 +2473,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockFeeTypesProjection::dataColumns(),
             'stock_item_fees' =>
                 CompanyBackupStockItemFeesProjection::dataColumns(),
+            'stock_item_prices' =>
+                CompanyBackupStockItemPricesProjection::dataColumns(),
             'stock_item_tags' =>
                 CompanyBackupStockItemTagsProjection::dataColumns(),
             'stock_items' => CompanyBackupStockItemsProjection::dataColumns(),
@@ -2641,6 +2646,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockFeeTypesProjection::references(),
             'stock_item_fees' =>
                 CompanyBackupStockItemFeesProjection::references(),
+            'stock_item_prices' =>
+                CompanyBackupStockItemPricesProjection::references(),
             'stock_item_tags' =>
                 CompanyBackupStockItemTagsProjection::references(),
             'stock_items' => CompanyBackupStockItemsProjection::references(),
