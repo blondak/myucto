@@ -2767,6 +2767,67 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testStockItemTagsRemapBothCompositeKeyOwners(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_item_tags');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'supplier_id',
+            'stock_item_id',
+            'tag_id',
+        ];
+
+        $projection->assertRuntimeSchema(
+            $columns,
+            [],
+            ['stock_item_id', 'tag_id'],
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [],
+                [
+                    new CompanyBackupForeignKey(
+                        ['stock_item_id'],
+                        'stock_items',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['tag_id'],
+                        'stock_tags',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame(TenantDataPolicy::TenantOwned, $definition->policy);
+        self::assertSame(
+            ['stock_item_id', 'tag_id'],
+            $definition->details['primary_key'] ?? null,
+        );
+        self::assertArrayNotHasKey('natural_key', $definition->details);
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'stock_item_id->stock_items:id',
+                'supplier_id->supplier:id',
+                'tag_id->stock_tags:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
