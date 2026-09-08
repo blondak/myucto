@@ -779,6 +779,31 @@ final class CompanyBackupReferenceSetTest extends TestCase
         );
     }
 
+    public function testAcceptsDirectGlobalNaturalKeyButRejectsOtherColumns(): void
+    {
+        $registry = new TenantDataRegistry(1, [
+            $this->definition('countries', TenantDataPolicy::GlobalReference,
+                ['natural_key' => ['iso2']]),
+        ]);
+        foreach (['iso2', 'name'] as $targetColumn) {
+            $references = CompanyBackupReferenceSet::fromArray([[
+                'columns' => ['country_code'], 'target' => 'table:countries',
+                'target_columns' => [$targetColumn], 'mapping' => 'global_natural_key',
+                'constraint' => 'optional', 'nullable_columns' => [], 'fallbacks' => [],
+            ]], 'table:clients');
+            if ($targetColumn === 'name') {
+                $this->expectException(CompanyBackupDataSourceException::class);
+                $references->assertRegistryTargets($registry);
+                continue;
+            }
+            $references->assertRegistryTargets($registry);
+            self::assertSame(['country_code' => 'CZ'], $references->remap(
+                ['country_code' => 'CZ'],
+                static fn (CompanyBackupReference $reference, array $values): array => $values,
+            ));
+        }
+    }
+
     public function testRejectsGlobalIdTargetWithoutNaturalKey(): void
     {
         $references = CompanyBackupReferenceSet::fromArray(

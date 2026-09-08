@@ -78,6 +78,19 @@ final class CompanyBackupRowReferenceTransformerTest extends TestCase
         $map->close();
     }
 
+    public function testMapsDirectGlobalNaturalKeyWithoutReplacingItWithNumericId(): void
+    {
+        $map = $this->identityMap();
+        $transformer = new CompanyBackupRowReferenceTransformer($map, $this->resolutionPlan());
+        $restored = $transformer->transform($this->projection('iso2'), [
+            'id' => 501, 'supplier_id' => 7, 'employee_id' => 31,
+            'country_id' => 'CZ', 'approved_by' => 9, 'is_active' => 1,
+        ]);
+        self::assertSame('CZ', $restored['country_id']);
+        self::assertSame(71, $restored['supplier_id']);
+        $map->close();
+    }
+
     public function testAppliesExplicitNullActorDecision(): void
     {
         $map = $this->identityMap();
@@ -166,7 +179,7 @@ final class CompanyBackupRowReferenceTransformerTest extends TestCase
         $map->close();
     }
 
-    private function projection(): CompanyBackupTableProjection
+    private function projection(string $countryTargetColumn = 'id'): CompanyBackupTableProjection
     {
         return CompanyBackupTableProjection::fromDefinition(
             new TenantDataDefinition(
@@ -205,7 +218,7 @@ final class CompanyBackupRowReferenceTransformerTest extends TestCase
                             $this->reference(
                                 ['country_id'],
                                 'table:countries',
-                                ['id'],
+                                [$countryTargetColumn],
                                 CompanyBackupReferenceMapping::GlobalNaturalKey,
                             ),
                             $this->reference(

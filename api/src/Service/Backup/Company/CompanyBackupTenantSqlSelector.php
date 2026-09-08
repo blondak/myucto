@@ -195,9 +195,15 @@ final class CompanyBackupTenantSqlSelector
         CompanyBackupTableProjection $table,
         int $supplierId,
     ): CompanyBackupSqlSelection {
-        $this->assertOwnershipKeys($table, ['sources', 'strategy']);
+        $targetColumn = array_key_exists('target_column', $table->ownership)
+            ? $table->ownership['target_column'] : 'id';
+        $this->assertOwnershipKeys($table, array_key_exists('target_column', $table->ownership)
+            ? ['sources', 'strategy', 'target_column']
+            : ['sources', 'strategy']);
         $sources = $table->ownership['sources'] ?? null;
-        if ($table->primaryKey !== ['id']
+        if (!is_string($targetColumn)
+            || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $targetColumn) !== 1
+            || $table->primaryKey !== ['id']
             || !is_array($sources)
             || !array_is_list($sources)
             || $sources === []
@@ -205,7 +211,7 @@ final class CompanyBackupTenantSqlSelector
         ) {
             throw $this->error($table, 'data_ownership_reference_sources_invalid');
         }
-        $this->assertDataColumns($table, ['id']);
+        $this->assertDataColumns($table, ['id', $targetColumn]);
 
         $conditions = [];
         $params = [];
@@ -243,7 +249,7 @@ final class CompanyBackupTenantSqlSelector
             $previousSignature = $signature;
 
             $alias = '_tenant_reference_' . $index;
-            $conditions[] = self::column(self::SOURCE_ALIAS, 'id')
+            $conditions[] = self::column(self::SOURCE_ALIAS, $targetColumn)
                 . ' IN (SELECT ' . self::column($alias, $referenceColumn)
                 . ' FROM ' . self::quoteIdentifier($sourceTable, $table->registryKey)
                 . ' AS ' . self::quoteIdentifier($alias, $table->registryKey)

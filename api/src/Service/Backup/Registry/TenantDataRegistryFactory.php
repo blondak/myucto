@@ -125,6 +125,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSupplierBankAccountsProjection
 use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyMapProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyObservationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchAuditProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankPostingRulesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchSuggestionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockDocumentLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLandedCostsProjection;
@@ -154,6 +155,7 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
+        'bank_posting_rules' => 'bank',
         'bank_match_audit' => 'bank',
         'bank_match_suggestions' => 'bank',
         'bank_counterparty_map' => 'bank',
@@ -864,6 +866,37 @@ final class TenantDataRegistryFactory
             );
         }
         $definitions[] = new TenantDataDefinition(
+            'table:bank_rule_templates',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::GlobalReference,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'], 'natural_key' => ['template_key'],
+                'feature_group' => 'bank', 'secrets' => [],
+                'ownership' => [
+                    'strategy' => 'tenant_reference_sources',
+                    'target_column' => 'template_key',
+                    'sources' => [[
+                        'table' => 'bank_posting_rules',
+                        'reference_column' => 'system_template_key',
+                        'supplier_column' => 'supplier_id',
+                    ]],
+                ],
+                'company_backup' => [
+                    // Globální payload je jen podklad lookupu, nikdy INSERT šablony.
+                    'data_columns' => [
+                        'id', 'template_key', 'name_cs', 'name_en', 'direction',
+                        'operation_type', 'counterparty_bank', 'counterparty_prefix',
+                        'vs_placeholder', 'message_contains', 'rule_key',
+                        'default_priority', 'sort_order', 'is_active',
+                    ],
+                    'references' => [], 'embedded_references' => [],
+                    'generated_columns' => [], 'omit_columns' => [],
+                    'restore_overrides' => [],
+                ],
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
             'table:countries',
             TenantDataObjectKind::Table,
             TenantDataPolicy::GlobalReference,
@@ -1552,6 +1585,16 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'bank_posting_rules') {
+            return ['company_backup' => [
+                'data_columns' => CompanyBackupBankPostingRulesProjection::dataColumns(),
+                'references' => CompanyBackupBankPostingRulesProjection::references(),
+                'embedded_references' => [], 'generated_columns' => [], 'omit_columns' => [],
+                'restore_overrides' => [
+                    'is_active' => ['value' => 0, 'reason' => 'disable_after_restore'],
+                ],
+            ]];
+        }
         if ($table === 'bank_match_audit' || $table === 'bank_match_suggestions') {
             $audit = $table === 'bank_match_audit';
             return ['company_backup' => [

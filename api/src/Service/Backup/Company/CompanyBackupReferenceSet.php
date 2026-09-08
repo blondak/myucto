@@ -339,8 +339,10 @@ final readonly class CompanyBackupReferenceSet
                     $naturalKey !== null && $reference->targetColumns === $naturalKey,
                 CompanyBackupReferenceMapping::TenantId =>
                     $reference->targetColumns === $primaryKey || $tenantScopedPrimaryKey,
+                CompanyBackupReferenceMapping::GlobalNaturalKey =>
+                    $reference->targetColumns === $primaryKey
+                    || ($naturalKey !== null && $reference->targetColumns === $naturalKey),
                 CompanyBackupReferenceMapping::TenantIdOrZero,
-                CompanyBackupReferenceMapping::GlobalNaturalKey,
                 CompanyBackupReferenceMapping::Actor,
                 CompanyBackupReferenceMapping::CredentialDecision =>
                     $reference->targetColumns === $primaryKey,

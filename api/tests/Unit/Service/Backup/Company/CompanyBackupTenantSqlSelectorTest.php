@@ -107,6 +107,49 @@ final class CompanyBackupTenantSqlSelectorTest extends TestCase
         self::assertSame([13, 13, 13], $rates->params);
     }
 
+    public function testSelectsOnlyTemplatesReferencedByTenantNaturalKey(): void
+    {
+        $selection = (new CompanyBackupTenantSqlSelector())->select($this->projection(
+            'bank_rule_templates', TenantDataPolicy::GlobalReference,
+            [
+                'strategy' => 'tenant_reference_sources', 'target_column' => 'template_key',
+                'sources' => [[
+                    'table' => 'bank_posting_rules', 'reference_column' => 'system_template_key',
+                    'supplier_column' => 'supplier_id',
+                ]],
+            ], ['id', 'template_key'],
+        ), 17);
+        $database = new \PDO('sqlite::memory:');
+        $database->exec('CREATE TABLE bank_rule_templates (id INTEGER, template_key TEXT)');
+        $database->exec('CREATE TABLE bank_posting_rules (supplier_id INTEGER, system_template_key TEXT)');
+        $database->exec("INSERT INTO bank_rule_templates VALUES (1, 'own'), (2, 'foreign'), (3, 'unused')");
+        $database->exec("INSERT INTO bank_posting_rules VALUES (17, 'own'), (18, 'foreign'), (17, NULL)");
+        $statement = $database->prepare('SELECT id FROM bank_rule_templates AS _company_source WHERE ' . $selection->where);
+        $statement->execute($selection->params);
+        self::assertSame([1], $statement->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    public function testRejectsInvalidOrUnexportedReferenceTargetColumn(): void
+    {
+        foreach (['missing', 'bad-name', null, []] as $column) {
+            try {
+                (new CompanyBackupTenantSqlSelector())->select($this->projection(
+                    'bank_rule_templates', TenantDataPolicy::GlobalReference,
+                    [
+                        'strategy' => 'tenant_reference_sources', 'target_column' => $column,
+                        'sources' => [[
+                            'table' => 'bank_posting_rules', 'reference_column' => 'system_template_key',
+                            'supplier_column' => 'supplier_id',
+                        ]],
+                    ], ['id', 'template_key'],
+                ), 17);
+                self::fail('Neplatný cílový sloupec nesmí projít.');
+            } catch (CompanyBackupDataSourceException) {
+                self::assertTrue(true);
+            }
+        }
+    }
+
     public function testBuildsGlobalRowsReferencedBySelectedTenant(): void
     {
         $selection = (new CompanyBackupTenantSqlSelector())->select($this->projection(
