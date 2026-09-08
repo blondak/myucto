@@ -95,6 +95,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSecretStorage;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossApplicationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
@@ -712,6 +713,8 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['file_hash'];
             } elseif ($table === 'exchange_rates') {
                 $details['natural_key'] = ['rate_date', 'currency_code'];
+            } elseif ($table === 'stock_items') {
+                $details['natural_key'] = ['supplier_id', 'sku'];
             } elseif ($table === 'tax_losses') {
                 $details['natural_key'] = [
                     'supplier_id',
@@ -2430,6 +2433,7 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningProfilesProjection::dataColumns(),
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::dataColumns(),
+            'stock_items' => CompanyBackupStockItemsProjection::dataColumns(),
             'tax_loss_applications' =>
                 CompanyBackupTaxLossApplicationsProjection::dataColumns(),
             'tax_losses' => CompanyBackupTaxLossesProjection::dataColumns(),
@@ -2591,6 +2595,7 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningProfilesProjection::references(),
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::references(),
+            'stock_items' => CompanyBackupStockItemsProjection::references(),
             'tax_loss_applications' =>
                 CompanyBackupTaxLossApplicationsProjection::references(),
             'tax_losses' => CompanyBackupTaxLossesProjection::references(),

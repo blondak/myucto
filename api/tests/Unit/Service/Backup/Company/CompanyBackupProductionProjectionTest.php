@@ -2469,6 +2469,93 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testStockItemsDeclareCompletePayloadAndReferences(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_items');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'sku',
+            'name',
+            'item_type',
+            'manufacturer_id',
+            'unit',
+            'ean',
+            'vat_rate_id',
+            'sale_price_without_vat',
+            'min_qty',
+            'is_active',
+            'note',
+            'created_at',
+            'updated_at',
+            'warranty_months',
+            'delivery_days',
+            'export_eshop',
+            'is_stocked',
+            'weight_g',
+            'pricing_base',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [
+                    'manufacturer_id',
+                    'ean',
+                    'vat_rate_id',
+                    'sale_price_without_vat',
+                    'min_qty',
+                    'note',
+                    'warranty_months',
+                    'delivery_days',
+                    'weight_g',
+                ],
+                [
+                    new CompanyBackupForeignKey(
+                        ['manufacturer_id'],
+                        'manufacturers',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['vat_rate_id'],
+                        'vat_rates',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['supplier_id', 'sku'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'manufacturer_id->manufacturers:id',
+                'supplier_id->supplier:id',
+                'vat_rate_id->vat_rates:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            CompanyBackupReferenceMapping::GlobalNaturalKey,
+            $projection->references->references[2]->mapping,
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
