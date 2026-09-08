@@ -125,6 +125,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . 'supplier_id BIGINT UNSIGNED NOT NULL,'
             . 'parent_id BIGINT UNSIGNED NULL,'
             . 'code VARCHAR(64) NOT NULL,'
+            . "updated_at TIMESTAMP NOT NULL DEFAULT '2020-01-01 12:00:00' ON UPDATE CURRENT_TIMESTAMP,"
             . 'UNIQUE KEY uq_roundtrip_supplier_code (supplier_id, code)'
             . ') ENGINE=InnoDB',
         );
@@ -266,24 +267,28 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'supplier_id' => 7,
                 'parent_id' => null,
                 'code' => 'existing-parent',
+                'updated_at' => '2020-01-01 12:00:00',
             ],
             [
                 'id' => 32,
                 'supplier_id' => 7,
                 'parent_id' => 31,
                 'code' => 'existing-child',
+                'updated_at' => '2020-01-01 12:00:00',
             ],
             [
                 'id' => 33,
                 'supplier_id' => 8,
                 'parent_id' => null,
                 'code' => 'restored-parent',
+                'updated_at' => '2021-01-01 12:00:00',
             ],
             [
                 'id' => 34,
                 'supplier_id' => 8,
                 'parent_id' => 33,
                 'code' => 'restored-child',
+                'updated_at' => '2022-01-01 12:00:00',
             ],
         ], $this->recordRows($pdo));
         $restoredLogo = $this->root . DIRECTORY_SEPARATOR . 'live'
@@ -312,11 +317,13 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'supplier_id' => 7,
                 'parent_id' => null,
                 'code' => 'restored-parent',
+                'updated_at' => '2021-01-01 12:00:00',
             ], [
                 'id' => 32,
                 'supplier_id' => 7,
                 'parent_id' => 31,
                 'code' => 'restored-child',
+                'updated_at' => '2022-01-01 12:00:00',
             ]],
         ];
         $objects = [];
@@ -400,7 +407,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 $this->tableDefinition(
                     'table:' . $this->recordsTable,
                     TenantDataPolicy::TenantOwned,
-                    ['id', 'supplier_id', 'parent_id', 'code'],
+                    ['id', 'supplier_id', 'parent_id', 'code', 'updated_at'],
                     [
                         'strategy' => 'supplier_id',
                         'column' => 'supplier_id',
@@ -544,12 +551,12 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         ], $rows);
     }
 
-    /** @return list<array{id:int,supplier_id:int,parent_id:?int,code:string}> */
+    /** @return list<array{id:int,supplier_id:int,parent_id:?int,code:string,updated_at:string}> */
     private function recordRows(PDO $pdo): array
     {
         $rows = $this->fetchRows(
             $pdo,
-            'SELECT id, supplier_id, parent_id, code FROM `'
+            'SELECT id, supplier_id, parent_id, code, updated_at FROM `'
                 . $this->recordsTable . '` ORDER BY id',
         );
         return array_map(static fn (array $row): array => [
@@ -559,6 +566,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 ? null
                 : (int) $row['parent_id'],
             'code' => (string) $row['code'],
+            'updated_at' => (string) $row['updated_at'],
         ], $rows);
     }
 

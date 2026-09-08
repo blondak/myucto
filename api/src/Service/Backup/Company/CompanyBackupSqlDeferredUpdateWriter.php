@@ -78,6 +78,15 @@ final class CompanyBackupSqlDeferredUpdateWriter
             fn (string $column): string => $this->quote($column) . ' = ?',
             $this->deferredColumns->columns,
         );
+        if ($driver === 'mysql') {
+            // Explicitní zachování hodnot potlačí ON UPDATE CURRENT_TIMESTAMP.
+            // Název časového sloupce není pevný; chráníme všechny ostatní
+            // obnovené sloupce, nikoli jen konvenční updated_at.
+            foreach (array_diff($this->projection->dataColumns, $this->deferredColumns->columns) as $column) {
+                $quoted = $this->quote($column);
+                $assignments[] = $quoted . ' = ' . $quoted;
+            }
+        }
         $comparison = $driver === 'mysql' ? ' <=> ?' : ' IS ?';
         $guardColumns = [
             ...$this->projection->primaryKey,
