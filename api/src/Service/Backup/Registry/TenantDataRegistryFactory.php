@@ -126,6 +126,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyMapProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyObservationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchAuditProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankPostingRulesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankEmailImapSettingsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupExternalBankAccountMappingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankPostingSuggestionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxAdvanceSchedulesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchSuggestionsProjection;
@@ -157,6 +159,8 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
+        'bank_email_imap_settings' => 'bank',
+        'external_bank_account_mappings' => 'bank',
         'bank_posting_rules' => 'bank',
         'bank_posting_suggestions' => 'bank',
         'bank_match_audit' => 'bank',
@@ -284,6 +288,7 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<string>> */
     private const COMPANY_BACKUP_NATURAL_KEYS = [
+        'external_bank_account_mappings' => ['supplier_id', 'provider', 'external_account_id'],
         'bank_counterparty_map' => ['supplier_id', 'client_bank_account_id', 'side'],
         'bank_counterparty_observations' => ['map_id', 'bank_transaction_id'],
         'supplier_bank_accounts' => ['supplier_id', 'account_canonical', 'bank_code_norm'],
@@ -1588,6 +1593,21 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'bank_email_imap_settings' || $table === 'external_bank_account_mappings') {
+            $imap = $table === 'bank_email_imap_settings';
+            return ['company_backup' => [
+                'data_columns' => $imap ? CompanyBackupBankEmailImapSettingsProjection::dataColumns()
+                    : CompanyBackupExternalBankAccountMappingsProjection::dataColumns(),
+                'references' => $imap ? CompanyBackupBankEmailImapSettingsProjection::references()
+                    : CompanyBackupExternalBankAccountMappingsProjection::references(),
+                'preserved_identifiers' => $imap ? ['email_auth_serv_id']
+                    : ['external_account_id', 'external_bank_id', 'external_currency_id'],
+                'embedded_references' => [], 'generated_columns' => [], 'omit_columns' => [],
+                'restore_overrides' => $imap ? [
+                    'enabled' => ['value' => 0, 'reason' => 'disable_after_restore'],
+                ] : [],
+            ]];
+        }
         if ($table === 'bank_posting_suggestions' || $table === 'tax_advance_schedules') {
             $suggestion = $table === 'bank_posting_suggestions';
             return ['company_backup' => [
@@ -3145,6 +3165,14 @@ final class TenantDataRegistryFactory
     /** @return array<string,array<string,mixed>> */
     private static function secretPolicies(string $table): array
     {
+        if ($table === 'bank_email_imap_settings') {
+            return [
+                'password_enc' => [
+                    'policy' => TenantSecretPolicy::OptionalCredential->value,
+                    'storage' => CompanyBackupSecretStorage::ApplicationEncrypted->value,
+                ],
+            ];
+        }
         if ($table === 'supplier') {
             return self::supplierSecretPolicies();
         }

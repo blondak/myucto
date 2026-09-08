@@ -295,6 +295,60 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         );
     }
 
+    public function testBankImapCredentialsRequireExplicitSelectionAndScannerStaysDisabled(): void
+    {
+        $this->assertProductionProjectionMatchesSchema('bank_email_imap_settings', ['password_enc', 'enabled']);
+        $this->assertProductionProjectionMatchesSchema('external_bank_account_mappings', ['external_account_id', 'currency_id']);
+        $pdo = $this->db->pdo();
+        $encryption = new SecretEncryption(new Config(['app' => [
+            'secret_encryption_key' => base64_encode(random_bytes(32)),
+        ]]));
+        $password = 'synthetic-' . bin2hex(random_bytes(12));
+        $insert = $pdo->prepare('INSERT INTO bank_email_imap_settings
+            (supplier_id, name, enabled, host, username, password_enc, email_auth_serv_id)
+            VALUES (?, ?, 1, ?, ?, ?, ?)');
+        $ids = [];
+        foreach ([$this->supplierId, $this->foreignSupplierId] as $supplier) {
+            $insert->execute([$supplier, 'Synthetic mailbox', 'imap.example.test',
+                'synthetic@example.test', $encryption->encrypt($password), 'auth.example.test']);
+            $ids[] = (int) $pdo->lastInsertId();
+        }
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:bank_email_imap_settings');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows($pdo, $this->supplierId, $definition), false);
+        self::assertCount(1, $rows);
+        self::assertSame($ids[0], $rows[0]['id']);
+        self::assertArrayNotHasKey('password_enc', $rows[0]);
+        self::assertSame('auth.example.test', $rows[0]['email_auth_serv_id']);
+        self::assertSame(0, $projection->restoreOverrides->apply($rows[0])['enabled']);
+        self::assertSame(1, (int) $pdo->query('SELECT enabled FROM bank_email_imap_settings WHERE id = ' . $ids[0])->fetchColumn());
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        $snapshot = TenantDataRegistrySnapshot::fromRegistry(
+            new TenantDataRegistry(1, [$definition], [$profile]), $profile);
+        self::assertSame([], CompanyBackupSecretSelection::none($snapshot)->entries());
+        foreach ($ids as $id) {
+            $selection = CompanyBackupSecretSelection::fromArray([
+                'registry_fingerprint' => $snapshot->fingerprint,
+                'entries' => [[ 'registry_key' => $definition->key, 'scope' => 'column',
+                    'name' => 'password_enc', 'primary_key' => ['id' => $id] ]],
+            ], $snapshot);
+            $secretProjection = \MyInvoice\Service\Backup\Company\CompanyBackupOptionalSecretProjection::fromSelection(
+                $definition, $selection->entries());
+            try {
+                $values = iterator_to_array((new \MyInvoice\Service\Backup\Company\CompanyBackupSqlOptionalSecretSource($encryption))
+                    ->values($pdo, $this->supplierId, $secretProjection), false);
+                self::assertSame($ids[0], $id);
+                self::assertCount(1, $values);
+                self::assertSame($password, $values[0]->plaintext());
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame($ids[1], $id);
+                self::assertSame('secret_selected_value_missing', $e->errorCode);
+            }
+        }
+    }
+
     public function testProductionEmailProfilesProjectionMatchesSchema(): void
     {
         $this->assertProductionProjectionMatchesSchema(
@@ -309,6 +363,31 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
                 'created_by',
             ],
         );
+    }
+
+    public function testExternalBankMappingsKeepRemoteIdsWithoutCopyingForeignTenant(): void
+    {
+        $pdo = $this->db->pdo();
+        $insert = $pdo->prepare('INSERT INTO external_bank_account_mappings
+            (supplier_id, provider, external_account_id, external_bank_id, external_currency_id, sync_status)
+            VALUES (?, ?, ?, ?, ?, ?)');
+        foreach ([$this->supplierId, $this->foreignSupplierId] as $supplier) {
+            $insert->execute([$supplier, 'idoklad', 'synthetic-account', 'synthetic-bank', 'synthetic-currency', 'unmatched']);
+        }
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:external_bank_account_mappings');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $projection->assertRegistryTargets($registry);
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows($pdo, $this->supplierId, $definition), false);
+        self::assertCount(1, $rows);
+        $projection->assertCompleteSourceRow($rows[0]);
+        $mapped = $projection->references->remap($rows[0], fn (): array => [$this->foreignSupplierId]);
+        self::assertSame($this->foreignSupplierId, $mapped['supplier_id']);
+        self::assertNull($mapped['currency_id']);
+        foreach (['external_account_id', 'external_bank_id', 'external_currency_id', 'sync_status'] as $column) {
+            self::assertSame($rows[0][$column], $mapped[$column]);
+        }
     }
 
     public function testStreamsEmailProfilesWithoutCredentialsAndDisablesThem(): void
