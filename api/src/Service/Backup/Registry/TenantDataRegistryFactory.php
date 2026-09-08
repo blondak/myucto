@@ -111,6 +111,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupStockItemCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemFeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemI18nProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemPricesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockItemPromoPricesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemTagsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemVendorsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
@@ -918,16 +919,18 @@ final class TenantDataRegistryFactory
                 ...self::companyBackupProjection('expense_categories'),
             ],
         );
-        // Objednávky nejsou účetní případy; patří do úplné zálohy firmy.
+        // Objednávky a akční ceny nejsou účetní případy; patří do úplné zálohy firmy.
         foreach ([
             'purchase_orders' => CompanyBackupPurchaseOrdersProjection::class,
             'purchase_order_lines' => CompanyBackupPurchaseOrderLinesProjection::class,
             'purchase_order_invoice_links' => CompanyBackupPurchaseOrderInvoiceLinksProjection::class,
+            'stock_item_promo_prices' => CompanyBackupStockItemPromoPricesProjection::class,
         ] as $table => $projection) {
             $naturalKey = match ($table) {
                 'purchase_order_lines' => ['order_id', 'line_no'],
                 'purchase_order_invoice_links' => ['order_id', 'purchase_invoice_id'],
                 // Rozpracovaná objednávka nemá číslo; nullable UNIQUE není identita.
+                // Akční ceny povolují překryvy; karta a měna nejsou unikátní.
                 default => null,
             };
             $definitions[] = new TenantDataDefinition(

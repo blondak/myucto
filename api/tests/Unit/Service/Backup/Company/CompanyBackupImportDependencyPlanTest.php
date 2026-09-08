@@ -587,7 +587,8 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
                 [$this->reference(['supplier_id'], 'table:supplier')],
             );
         }
-        foreach (['vat_rates', 'purchase_orders', 'purchase_order_lines', 'purchase_order_invoice_links'] as $table) {
+        foreach (['vat_rates', 'purchase_orders', 'purchase_order_lines',
+            'purchase_order_invoice_links', 'stock_item_promo_prices'] as $table) {
             $definition = $production->definition('table:' . $table);
             self::assertNotNull($definition);
             $definitions[] = $definition;
@@ -614,6 +615,10 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
             $positions['table:purchase_invoices'],
         );
         self::assertSame(['table:vat_rates'], $plan->globalRegistryKeys());
+        self::assertLessThan(
+            $positions['table:stock_item_promo_prices'],
+            $positions['table:stock_items'],
+        );
     }
 
     public function testStockInventoryCyclesAreDeferredButLinesFollowTheirDocuments(): void
