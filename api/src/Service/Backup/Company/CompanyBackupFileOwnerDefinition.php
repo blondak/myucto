@@ -98,8 +98,10 @@ final readonly class CompanyBackupFileOwnerDefinition
 
     private static function validStoredPrefix(string $value): bool
     {
-        if ($value === ''
-            || strlen($value) > 1_024
+        if ($value === '') {
+            return true;
+        }
+        if (strlen($value) > 1_024
             || !str_ends_with($value, '/')
             || str_starts_with($value, '/')
             || str_contains($value, '\\')

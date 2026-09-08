@@ -98,6 +98,43 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
         self::assertTrue($database->rollBack());
     }
 
+    public function testPreservesContentHashWhileRemappingTenantFilesystemPath(): void
+    {
+        $database = $this->database();
+        $snapshot = $this->contentSnapshot();
+        $sha256 = str_repeat('a', 64);
+        self::assertTrue($database->beginTransaction());
+        $map = new CompanyBackupSqlFilePathMap(
+            $database,
+            $this->contentInventory($snapshot, $sha256),
+            $snapshot,
+            $snapshot,
+        );
+
+        $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7],
+            ['id' => 41],
+            true,
+        );
+        $media = $map->transform(
+            $this->projection($snapshot, 'table:stock_media'),
+            ['id' => 31, 'supplier_id' => 7, 'storage_key' => $sha256],
+            ['id' => 91, 'supplier_id' => 41, 'storage_key' => $sha256],
+            true,
+        );
+
+        self::assertSame($sha256, $media['storage_key']);
+        $map->finish();
+        self::assertSame(
+            'sup-41/aa/' . $sha256,
+            $map->publicationPlan()->entries[0]->targetPath,
+        );
+        $map->close();
+        self::assertTrue($database->inTransaction());
+        self::assertTrue($database->rollBack());
+    }
+
     public function testFinishRejectsManifestOwnerMissingFromDatabaseStream(): void
     {
         $database = $this->database();
@@ -267,6 +304,82 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
         );
     }
 
+    private function contentSnapshot(): TenantDataRegistrySnapshot
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        $supplier = new TenantDataDefinition(
+            'table:supplier',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRoot,
+            [$profile],
+            [
+                'primary_key' => ['id'],
+                'ownership' => [
+                    'strategy' => 'selected_supplier',
+                    'column' => 'id',
+                ],
+                'secrets' => [],
+                'company_backup' => $this->tableProjection(['id']),
+            ],
+        );
+        $media = new TenantDataDefinition(
+            'table:stock_media',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [$profile],
+            [
+                'primary_key' => ['id'],
+                'ownership' => [
+                    'strategy' => 'supplier_id',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [],
+                'company_backup' => $this->tableProjection(
+                    [
+                        'id',
+                        'supplier_id',
+                        'storage_key',
+                    ],
+                    [[
+                        'columns' => ['supplier_id'],
+                        'constraint' => 'required',
+                        'fallbacks' => [],
+                        'mapping' => 'tenant_id',
+                        'nullable_columns' => [],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                    ]],
+                ),
+            ],
+        );
+        $area = new TenantDataDefinition(
+            'file-area:document-content',
+            TenantDataObjectKind::FileArea,
+            TenantDataPolicy::TenantOwned,
+            [$profile],
+            [
+                'file_policy' => 'required',
+                'path_policy' => 'supplier_content_hash',
+                'file_owners' => [[
+                    'registry_key' => 'table:stock_media',
+                    'column' => 'storage_key',
+                    'path' => [],
+                    'stored_prefix' => '',
+                ]],
+                'ownership' => ['strategy' => 'database_references'],
+                'storage_subdirectory' => 'documents',
+            ],
+        );
+        return TenantDataRegistrySnapshot::fromRegistry(
+            new TenantDataRegistry(
+                1,
+                [$supplier, $media, $area],
+                [$profile],
+            ),
+            $profile,
+        );
+    }
+
     private function inventory(
         TenantDataRegistrySnapshot $snapshot,
     ): CompanyBackupFileInventory {
@@ -299,6 +412,33 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
                         'registry_key' => 'table:supplier',
                         'primary_key' => ['id' => 7],
                         'column' => 'logo_path',
+                        'path' => [],
+                    ]],
+                ]],
+            ]],
+        ], $snapshot);
+    }
+
+    private function contentInventory(
+        TenantDataRegistrySnapshot $snapshot,
+        string $sha256,
+    ): CompanyBackupFileInventory {
+        return CompanyBackupFileInventory::fromArray([
+            'format' => CompanyBackupFileInventory::FORMAT,
+            'version' => CompanyBackupFileInventory::VERSION,
+            'areas' => [[
+                'registry_key' => 'file-area:document-content',
+                'order' => 1,
+                'entries' => [[
+                    'source_path' => 'sup-7/aa/' . $sha256,
+                    'archive_path' => 'files/document-content/' . $sha256,
+                    'state' => 'present',
+                    'bytes' => 1,
+                    'sha256' => $sha256,
+                    'owners' => [[
+                        'registry_key' => 'table:stock_media',
+                        'primary_key' => ['id' => 31],
+                        'column' => 'storage_key',
                         'path' => [],
                     ]],
                 ]],

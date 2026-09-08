@@ -843,6 +843,51 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testDocumentContentAreaRegistersStockMediaHashOwner(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('file-area:document-content');
+        self::assertNotNull($definition);
+
+        $area = CompanyBackupFileAreaProjection::fromDefinition(
+            $definition,
+            $registry,
+        );
+        $sha256 = str_repeat('a', 64);
+        $sourcePath = 'sup-7/aa/' . $sha256;
+
+        self::assertSame('required', $area->policy->value);
+        self::assertSame('supplier_content_hash', $area->pathPolicy->value);
+        self::assertSame('documents', $area->storageSubdirectory);
+        self::assertSame(
+            ['table:stock_media:storage_key:[]'],
+            array_map(
+                static fn ($owner): string => $owner->signature(),
+                $area->owners->owners,
+            ),
+        );
+        self::assertSame('', $area->owners->owners[0]->storedPrefix);
+        self::assertSame(
+            $sourcePath,
+            $area->pathPolicy->sourcePath($sha256, 7),
+        );
+        self::assertSame(
+            $sha256,
+            $area->pathPolicy->storedRelativePath($sourcePath, 7),
+        );
+        self::assertSame(
+            'sup-41/aa/' . $sha256,
+            $area->pathPolicy->restoreTargetPath($sourcePath, 7, 41),
+        );
+        self::assertSame(
+            $sha256,
+            $area->pathPolicy->expectedContentSha256($sourcePath, 7),
+        );
+        self::assertFalse(
+            $area->pathPolicy->accepts('sup-7/ff/' . $sha256, 7),
+        );
+    }
+
     public function testCurrenciesHaveFirstExplicitProductionColumnProjection(): void
     {
         $definition = TenantDataRegistryFactory::draftV1()->definition('table:currencies');

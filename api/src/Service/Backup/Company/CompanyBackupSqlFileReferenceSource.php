@@ -89,7 +89,10 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
                     $key[$column] = $row[$column];
                 }
                 try {
-                    $sourcePath = $owner->relativeSourcePath($storedPath);
+                    $sourcePath = $area->pathPolicy->sourcePath(
+                        $owner->relativeSourcePath($storedPath),
+                        $supplierId,
+                    );
                 } catch (\InvalidArgumentException $e) {
                     throw $this->error(
                         'file_reference_path_invalid',

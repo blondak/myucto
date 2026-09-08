@@ -1197,6 +1197,25 @@ final class TenantDataRegistryFactory
             ],
         );
         $definitions[] = new TenantDataDefinition(
+            'file-area:document-content',
+            TenantDataObjectKind::FileArea,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'feature_group' => 'stock',
+                'file_policy' => 'required',
+                'path_policy' => 'supplier_content_hash',
+                'file_owners' => [[
+                    'registry_key' => 'table:stock_media',
+                    'column' => 'storage_key',
+                    'path' => [],
+                    'stored_prefix' => '',
+                ]],
+                'ownership' => ['strategy' => 'database_references'],
+                'storage_subdirectory' => 'documents',
+            ],
+        );
+        $definitions[] = new TenantDataDefinition(
             'file-area:supplier-logos',
             TenantDataObjectKind::FileArea,
             TenantDataPolicy::TenantOwned,

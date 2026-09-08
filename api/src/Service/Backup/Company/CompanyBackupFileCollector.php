@@ -73,6 +73,20 @@ final readonly class CompanyBackupFileCollector
                     ];
                     continue;
                 }
+                $expectedContentSha256 = $projection->pathPolicy
+                    ->expectedContentSha256($sourcePath, $supplierId);
+                if (is_string($expectedContentSha256)
+                    && !hash_equals(
+                        $expectedContentSha256,
+                        $fingerprint['sha256'],
+                    )
+                ) {
+                    throw $this->sourceError(
+                        'file_source_content_mismatch',
+                        $projection,
+                        $sourcePath,
+                    );
+                }
 
                 $extension = strtolower((string) pathinfo($sourcePath, PATHINFO_EXTENSION));
                 $suffix = preg_match('/^[a-z0-9]{1,10}$/D', $extension) === 1

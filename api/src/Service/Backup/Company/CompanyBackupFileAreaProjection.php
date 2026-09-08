@@ -47,6 +47,15 @@ final readonly class CompanyBackupFileAreaProjection
                 $definition,
                 $registry,
             );
+            foreach ($owners->owners as $owner) {
+                if (($pathPolicy === CompanyBackupFilePathPolicy::SupplierContentHash)
+                    !== ($owner->storedPrefix === '')
+                ) {
+                    throw new \InvalidArgumentException(
+                        'Content-addressed vlastník nemá jednoznačné kódování.',
+                    );
+                }
+            }
         } catch (\InvalidArgumentException $e) {
             throw new CompanyBackupFileSourceException(
                 'file_area_metadata_invalid',

@@ -208,15 +208,6 @@ final class CompanyBackupSqlFilePathMap
                     $area->registryKey,
                 );
             }
-            $expected = $owner->storedPrefix . $binding['source_path'];
-            if ($sourceStoredPath !== $expected
-                || $targetStoredPath !== $expected
-            ) {
-                throw self::error(
-                    'file_restore_owner_path_mismatch',
-                    $area->registryKey,
-                );
-            }
             $sourceSupplierId = $this->sourceSupplierId;
             $targetSupplierId = $this->targetSupplierId;
             if (!is_int($sourceSupplierId) || !is_int($targetSupplierId)) {
@@ -226,11 +217,21 @@ final class CompanyBackupSqlFilePathMap
                 );
             }
             try {
+                $expected = $owner->storedPrefix
+                    . $area->pathPolicy->storedRelativePath(
+                        $binding['source_path'],
+                        $sourceSupplierId,
+                    );
                 $targetPath = $area->pathPolicy->restoreTargetPath(
                     $binding['source_path'],
                     $sourceSupplierId,
                     $targetSupplierId,
                 );
+                $targetStoredPathValue = $owner->storedPrefix
+                    . $area->pathPolicy->storedRelativePath(
+                        $targetPath,
+                        $targetSupplierId,
+                    );
             } catch (\InvalidArgumentException $e) {
                 throw self::error(
                     'file_restore_target_path_invalid',
@@ -238,11 +239,19 @@ final class CompanyBackupSqlFilePathMap
                     $e,
                 );
             }
+            if ($sourceStoredPath !== $expected
+                || $targetStoredPath !== $expected
+            ) {
+                throw self::error(
+                    'file_restore_owner_path_mismatch',
+                    $area->registryKey,
+                );
+            }
             $targetRow = $this->replaceStoredPath(
                 $targetRow,
                 $owner,
                 $expected,
-                $owner->storedPrefix . $targetPath,
+                $targetStoredPathValue,
                 $area->registryKey,
             );
             if ($consume) {

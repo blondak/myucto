@@ -150,6 +150,35 @@ final class CompanyBackupSqlFileReferenceSourceTest extends TestCase
         }
     }
 
+    public function testExpandsContentHashOwnerIntoTenantShardPath(): void
+    {
+        $sha256 = str_repeat('a', 64);
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::once())
+            ->method('prepare')
+            ->willReturn($this->statement([[
+                'id' => 31,
+                '_file_source_path' => $sha256,
+            ]]));
+        $registry = $this->contentRegistry();
+        $area = $registry->definition('file-area:document-content');
+        self::assertNotNull($area);
+
+        $references = iterator_to_array(
+            (new CompanyBackupSqlFileReferenceSource())->references(
+                $pdo,
+                7,
+                $area,
+                $registry,
+            ),
+        );
+
+        self::assertCount(1, $references);
+        self::assertSame('sup-7/aa/' . $sha256, $references[0]->sourcePath);
+        self::assertSame('table:stock_media', $references[0]->registryKey);
+        self::assertSame('storage_key', $references[0]->column);
+    }
+
     /** @param list<array<string,mixed>> $rows */
     private function statement(array $rows): PDOStatement
     {
@@ -204,6 +233,36 @@ final class CompanyBackupSqlFileReferenceSourceTest extends TestCase
                         ),
                         $this->owner('table:supplier', 'logo_path'),
                     ],
+                ],
+            ),
+        ]);
+    }
+
+    private function contentRegistry(): TenantDataRegistry
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        return new TenantDataRegistry(1, [
+            $this->table(
+                'stock_media',
+                TenantDataPolicy::TenantOwned,
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+            ),
+            new TenantDataDefinition(
+                'file-area:document-content',
+                TenantDataObjectKind::FileArea,
+                TenantDataPolicy::TenantOwned,
+                [$profile],
+                [
+                    'file_policy' => 'required',
+                    'ownership' => ['strategy' => 'database_references'],
+                    'path_policy' => 'supplier_content_hash',
+                    'storage_subdirectory' => 'documents',
+                    'file_owners' => [[
+                        'registry_key' => 'table:stock_media',
+                        'column' => 'storage_key',
+                        'path' => [],
+                        'stored_prefix' => '',
+                    ]],
                 ],
             ),
         ]);

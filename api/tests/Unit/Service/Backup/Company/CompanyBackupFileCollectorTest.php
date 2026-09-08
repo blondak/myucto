@@ -249,6 +249,75 @@ final class CompanyBackupFileCollectorTest extends TestCase
         }
     }
 
+    public function testCollectsContentAddressedFileWhoseHashMatchesKey(): void
+    {
+        $storage = $this->directory();
+        $contents = 'synthetic-content';
+        $sha256 = hash('sha256', $contents);
+        $shard = substr($sha256, 0, 2);
+        $directory = $this->subdirectory(
+            $storage,
+            'documents/sup-7/' . $shard,
+        );
+        $path = $directory . DIRECTORY_SEPARATOR . $sha256;
+        self::assertSame(strlen($contents), file_put_contents($path, $contents));
+        $source = new ArrayFileReferenceSource([
+            new CompanyBackupFileReference(
+                'sup-7/' . $shard . '/' . $sha256,
+                'table:stock_media',
+                ['id' => 31],
+                'storage_key',
+            ),
+        ]);
+
+        $files = (new CompanyBackupFileCollector($this->roots($storage)))->collect(
+            $this->createStub(PDO::class),
+            $this->contentSnapshot(),
+            7,
+            $source,
+        );
+
+        $entry = $files->inventory->areas[0]->entries[0];
+        self::assertSame('present', $entry->state->value);
+        self::assertSame($sha256, $entry->sha256);
+        self::assertSame(
+            'files/document-content/' . $sha256,
+            $entry->archivePath,
+        );
+        self::assertSame([realpath($path)], array_values($files->sourceFiles));
+    }
+
+    public function testRejectsContentAddressedFileWhoseHashDoesNotMatchKey(): void
+    {
+        $storage = $this->directory();
+        $sha256 = str_repeat('a', 64);
+        $directory = $this->subdirectory($storage, 'documents/sup-7/aa');
+        $path = $directory . DIRECTORY_SEPARATOR . $sha256;
+        self::assertSame(17, file_put_contents($path, 'synthetic-content'));
+        $source = new ArrayFileReferenceSource([
+            new CompanyBackupFileReference(
+                'sup-7/aa/' . $sha256,
+                'table:stock_media',
+                ['id' => 31],
+                'storage_key',
+            ),
+        ]);
+
+        try {
+            (new CompanyBackupFileCollector($this->roots($storage)))->collect(
+                $this->createStub(PDO::class),
+                $this->contentSnapshot(),
+                7,
+                $source,
+            );
+            self::fail('Obsah neodpovídající storage_key nesmí přejít do zálohy.');
+        } catch (CompanyBackupFileSourceException $e) {
+            self::assertSame('file_source_content_mismatch', $e->errorCode);
+            self::assertSame('file-area:document-content', $e->registryKey);
+            self::assertSame('sup-7/aa/' . $sha256, $e->sourcePath);
+        }
+    }
+
     private function snapshot(
         string $filePolicy = 'historical_optional',
         string $pathPolicy = 'relative',
@@ -308,6 +377,42 @@ final class CompanyBackupFileCollectorTest extends TestCase
                         ],
                         'ownership' => ['strategy' => 'database_references'],
                         'storage_subdirectory' => 'supplier-logos',
+                    ],
+                ),
+            ],
+            [$profile],
+        ), $profile);
+    }
+
+    private function contentSnapshot(): TenantDataRegistrySnapshot
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
+            1,
+            [
+                new TenantDataDefinition(
+                    'table:stock_media',
+                    TenantDataObjectKind::Table,
+                    TenantDataPolicy::TenantOwned,
+                    [$profile],
+                    ['primary_key' => ['id']],
+                ),
+                new TenantDataDefinition(
+                    'file-area:document-content',
+                    TenantDataObjectKind::FileArea,
+                    TenantDataPolicy::TenantOwned,
+                    [$profile],
+                    [
+                        'file_policy' => 'required',
+                        'path_policy' => 'supplier_content_hash',
+                        'file_owners' => [[
+                            'registry_key' => 'table:stock_media',
+                            'column' => 'storage_key',
+                            'path' => [],
+                            'stored_prefix' => '',
+                        ]],
+                        'ownership' => ['strategy' => 'database_references'],
+                        'storage_subdirectory' => 'documents',
                     ],
                 ),
             ],
