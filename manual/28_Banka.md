@@ -51,11 +51,14 @@ tlačítko **Nahrát GPC/ABO nebo PDF**.
 
 Vyber soubor (drag & drop nebo klik). Po nahrání:
 
-1. **Kontrola duplicit** — SHA-256 odmítne opakovaný stejný soubor; stabilní otisk
+1. **Kontrola duplicit** — SHA-256 odmítne opakovaný stejný soubor v téže firmě; stabilní otisk
    jednotlivých pohybů navíc přeskočí transakce, které se opakují v překrývajícím
    se denním a měsíčním výpisu. Několik skutečných pohybů se shodným datem,
    částkou, VS a popisem v jednom souboru se přitom zachová jako samostatné
    transakce — rozhoduje i pořadí jejich výskytu v souboru.
+   Jiná firma může mít vlastní nezávislou kopii stejného výpisu i pohybů.
+   Staré výpisy bez přiřazené firmy se automaticky neslučují s výpisy
+   konkrétní firmy; nejprve je potřeba ověřit a vyřešit jejich vlastnictví.
 2. **Validace bankovního účtu** — server zkontroluje, že číslo účtu z hlavičky
    výpisu patří některé z měn aktuálního dodavatele.
 3. **Parsing transakcí** — přečte všechny řádky.

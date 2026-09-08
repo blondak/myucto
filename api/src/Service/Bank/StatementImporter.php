@@ -70,22 +70,6 @@ final class StatementImporter
         $hash = hash('sha256', $rawBytes);
         $pdo = $this->db->pdo();
 
-        // Dedupe
-        $exists = $pdo->prepare('SELECT id FROM bank_statements WHERE file_hash = ?');
-        $exists->execute([$hash]);
-        $existingId = $exists->fetchColumn();
-        if ($existingId !== false) {
-            return [
-                'statement_id' => (int) $existingId,
-                'transactions' => 0,
-                'matched' => 0,
-                'duplicate' => true,
-                'parsed_transactions' => count($parsed['transactions']),
-                'skipped_duplicates' => 0,
-                'warnings' => [],
-            ];
-        }
-
         $h = $parsed['header'];
 
         // GPC header (074) NEMÁ pole pro měnu — máme to jen v 075 transakcích
@@ -119,6 +103,15 @@ final class StatementImporter
         $accountBankCode = $account['bank_code'] ?? $registeredOwner['bank_code'] ?? null;
         $statementCurrency = $accountCurrency
             ?? $this->detectStatementCurrency($parsed['transactions']);
+
+        $existingId = BankStatementDeduplication::find($pdo, $hash, $statementSupplierId);
+        if ($existingId !== null) {
+            return [
+                'statement_id' => $existingId, 'transactions' => 0, 'matched' => 0,
+                'duplicate' => true, 'parsed_transactions' => count($parsed['transactions']),
+                'skipped_duplicates' => 0, 'warnings' => [],
+            ];
+        }
 
         if ($statementSupplierId !== null) {
             $this->ownAccounts?->registerSeen(
@@ -164,7 +157,7 @@ final class StatementImporter
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $findDuplicateTx = $pdo->prepare(
-            'SELECT id FROM bank_transactions WHERE import_fingerprint = ? LIMIT 1'
+            'SELECT id FROM bank_transactions WHERE dedup_scope_id = ? AND import_fingerprint = ? LIMIT 1'
         );
 
         // Bankovní reference je identitou pohybu jen tehdy, když je v souboru JEDINEČNÁ.
@@ -232,7 +225,7 @@ final class StatementImporter
             }
             $alreadyStored = false;
             foreach ($candidates as $candidate) {
-                $findDuplicateTx->execute([$candidate]);
+                $findDuplicateTx->execute([$statementSupplierId ?? 0, $candidate]);
                 if ($findDuplicateTx->fetchColumn() !== false) {
                     $alreadyStored = true;
                     break;
@@ -251,7 +244,7 @@ final class StatementImporter
                 ]);
             } catch (\PDOException $e) {
                 if (($e->errorInfo[0] ?? null) === '23000'
-                    && str_contains($e->getMessage(), 'uq_bt_import_fingerprint')) {
+                    && str_contains($e->getMessage(), 'uq_bt_scope_fingerprint')) {
                     $skipped++;
                     continue;
                 }

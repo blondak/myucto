@@ -744,7 +744,7 @@ final class TenantDataRegistryFactory
             } elseif ($table === 'cost_centers') {
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'bank_statements') {
-                $details['natural_key'] = ['file_hash'];
+                $details['natural_key'] = ['supplier_id', 'file_hash'];
             } elseif ($table === 'exchange_rates') {
                 $details['natural_key'] = ['rate_date', 'currency_code'];
             } elseif ($table === 'manufacturers') {
@@ -1393,8 +1393,8 @@ final class TenantDataRegistryFactory
                 ['strategy' => 'bank_transaction_relationships'],
             ],
             'bank_statements' => [
-                TenantDataPolicy::GlobalReference,
-                ['strategy' => 'bank_statement_relationships'],
+                TenantDataPolicy::TenantOwned,
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
             ],
             'exchange_rates' => [
                 TenantDataPolicy::GlobalReference,

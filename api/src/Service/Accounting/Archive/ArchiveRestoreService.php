@@ -549,14 +549,8 @@ final class ArchiveRestoreService
     }
 
     /**
-     * `bank_statements` NENÍ tenant tabulka svým obsahem — je to celoinstanční
-     * content-addressed dedup (UNIQUE `file_hash`), stejná sémantika jako
-     * {@see \MyInvoice\Service\Bank\StatementImporter} / BankEmailNoticeRepository
-     * (find-or-create podle hashe). Restore firmy do BĚŽÍCÍ instance, kde originální
-     * (nebo jakákoli jiná) firma už tentýž soubor výpisu má naimportovaný, by na
-     * INSERT jinak spadl na UNIQUE constraint — místo insertu se proto řádek se
-     * shodným file_hash namapuje na existující id (žádná duplicita dat, sdílený
-     * `bank_statements` řádek beztak neobsahuje nic tenant-specifického).
+     * Výpis patří obnovené firmě. Shodné bajty v jiné firmě se nesmějí sdílet;
+     * obsahová deduplikace platí jen uvnitř cílového tenanta, stejně jako import.
      *
      * @param array<string,mixed> $row
      * @param array<string,bool> $processedSet
@@ -566,13 +560,13 @@ final class ArchiveRestoreService
     {
         $hash = (string) ($row['file_hash'] ?? '');
         if ($hash !== '') {
-            $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_statements WHERE file_hash = ?');
-            $stmt->execute([$hash]);
-            $existing = $stmt->fetchColumn();
-            if ($existing !== false) {
-                return (int) $existing;
+            $existing = \MyInvoice\Service\Bank\BankStatementDeduplication::find($this->db->pdo(), $hash, $target);
+            if ($existing !== null) {
+                return $existing;
             }
         }
+        // I starý archiv bez sloupce supplier_id musí vytvořit vlastněnou kopii.
+        $row['supplier_id'] = $target;
         [$cols, $vals, $rowDefers] = $this->buildInsert('bank_statements', $row, $target, $processedSet, $warnings);
         if ($rowDefers !== []) {
             // bank_statements nemá tenantovou archivní FK kromě globálního imported_by

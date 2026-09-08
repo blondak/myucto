@@ -35,12 +35,14 @@ final class StatementImporterDuplicateTest extends TestCase
 {
     private Connection $db;
     private StatementImporter $importer;
+    private StatementMatcher $matcher;
     private int $supplierId = 0;
 
     /** @var int[] */
     private array $statementIds = [];
     /** @var int[] */
     private array $currencyIds = [];
+    private ?int $createdSupplierId = null;
 
     private const FILE_NAME = 'TEST-BUG0.gpc';
     /** VS mimo jakoukoli reálnou řadu — import spouští matcher, nesmí trefit ostrý doklad. */
@@ -58,7 +60,7 @@ final class StatementImporterDuplicateTest extends TestCase
             $this->importer = new StatementImporter(
                 $this->db,
                 new GpcParser(),
-                new StatementMatcher($this->db, $c->get(FinalFromProformaCreator::class), null),
+                $this->matcher = new StatementMatcher($this->db, $c->get(FinalFromProformaCreator::class), null),
                 $c->get(EmailNoticeReconciler::class),
             );
         } catch (\Throwable $e) {
@@ -83,6 +85,9 @@ final class StatementImporterDuplicateTest extends TestCase
         }
         foreach ($this->currencyIds as $id) {
             $pdo->prepare('DELETE FROM currencies WHERE id = ?')->execute([$id]);
+        }
+        if ($this->createdSupplierId !== null) {
+            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->createdSupplierId]);
         }
         $this->db->close();
     }
@@ -185,6 +190,90 @@ final class StatementImporterDuplicateTest extends TestCase
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    public function testSameFileAndMovementsBelongToIndependentTenants(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO supplier
+            (company_name, display_name, street, city, zip, country_id, is_vat_payer, email,
+             default_currency_id, default_vat_rate_id, default_payment_due_days, default_hourly_rate, accounting_mode)
+            SELECT 'Synthetic dedup tenant', 'Synthetic dedup tenant', 'Test', 'Test', '10000',
+                   country_id, 0, 'dedup@example.test', default_currency_id, default_vat_rate_id,
+                   default_payment_due_days, default_hourly_rate, accounting_mode
+              FROM supplier WHERE id = ?")->execute([$this->supplierId]);
+        $other = $this->createdSupplierId = (int) $pdo->lastInsertId();
+        self::assertGreaterThan(0, $other);
+        $firstCurrency = $this->registerCurrency('1000000005', '0100');
+        $originalSupplier = $this->supplierId;
+        $this->supplierId = (int) $other;
+        try {
+            $secondCurrency = $this->registerCurrency('1000000005', '0100');
+        } finally {
+            $this->supplierId = $originalSupplier;
+        }
+        $content = $this->gpc('1000000005', ['26701', '26702'], stmtNo: '071');
+        $first = $this->import($content, $firstCurrency);
+        $second = $this->importer->import($content, self::FILE_NAME, null, $secondCurrency);
+        if (!$second['duplicate']) {
+            $this->statementIds[] = $second['statement_id'];
+        }
+        self::assertFalse($second['duplicate'], 'Cizí výpis není duplicita cílové firmy.');
+        self::assertNotSame($first['statement_id'], $second['statement_id']);
+        self::assertSame(2, $first['transactions']);
+        self::assertSame(2, $second['transactions'], 'Globální fingerprint nesmí zahodit cizí pohyby.');
+        $again = $this->importer->import($content, self::FILE_NAME, null, $secondCurrency);
+        self::assertTrue($again['duplicate']);
+        self::assertSame($second['statement_id'], $again['statement_id']);
+        $txId = (int) $pdo->query('SELECT id FROM bank_transactions WHERE statement_id = ' . $second['statement_id'] . ' ORDER BY id LIMIT 1')->fetchColumn();
+        self::assertSame('no_invoice_with_vs', $this->matcher->match($txId)['reason'],
+            'Autoritativní vlastník nesmí být ztracen při shodě účtů dvou firem.');
+    }
+
+    public function testUnknownOwnerIsSeparateAndOwnershipChangeCannotDuplicateMovements(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $hash = hash('sha256', 'synthetic-owner-scope-' . bin2hex(random_bytes(8)));
+            $insert = $pdo->prepare('INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number, statement_date)
+                VALUES (?, ?, ?, ?, ?)');
+            $insert->execute([null, self::FILE_NAME, $hash, '1000000005', '2099-01-31']);
+            $unknown = (int) $pdo->lastInsertId();
+            $insert->execute([$this->supplierId, self::FILE_NAME, $hash, '1000000005', '2099-01-31']);
+            $owned = (int) $pdo->lastInsertId();
+            self::assertSame($unknown, \MyInvoice\Service\Bank\BankStatementDeduplication::find($pdo, $hash, null));
+            self::assertSame($owned, \MyInvoice\Service\Bank\BankStatementDeduplication::find($pdo, $hash, $this->supplierId));
+            $tx = $pdo->prepare('INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, import_fingerprint, dedup_scope_id)
+                VALUES (?, ?, ?, ?, 999999)');
+            $tx->execute([$unknown, '2099-01-31', '1.00', $hash]);
+            $unknownTx = (int) $pdo->lastInsertId();
+            $tx->execute([$owned, '2099-01-31', '1.00', $hash]);
+            $ownedTx = (int) $pdo->lastInsertId();
+            self::assertSame(0, (int) $pdo->query('SELECT dedup_scope_id FROM bank_transactions WHERE id = ' . $unknownTx)->fetchColumn());
+            self::assertSame($this->supplierId, (int) $pdo->query('SELECT dedup_scope_id FROM bank_transactions WHERE id = ' . $ownedTx)->fetchColumn());
+
+            // Jiný hash hlavičky izoluje kolizi pohybů od unikátnosti výpisu.
+            $pdo->prepare('UPDATE bank_statements SET file_hash = ? WHERE id = ?')
+                ->execute([hash('sha256', $hash), $unknown]);
+            try {
+                $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')
+                    ->execute([$this->supplierId, $unknown]);
+                self::fail('Přiřazení vlastníka nesmí vytvořit duplicitní pohyb.');
+            } catch (\PDOException $e) {
+                self::assertSame('23000', $e->errorInfo[0]);
+                self::assertStringContainsString('uq_bt_scope_fingerprint', $e->getMessage());
+            }
+            self::assertNull($pdo->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $unknown)->fetchColumn());
+            $pdo->prepare('DELETE FROM bank_transactions WHERE id = ?')->execute([$ownedTx]);
+            $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')
+                ->execute([$this->supplierId, $unknown]);
+            self::assertSame($this->supplierId, (int) $pdo->query('SELECT dedup_scope_id FROM bank_transactions WHERE id = ' . $unknownTx)->fetchColumn());
+        } finally {
+            $pdo->rollBack();
+        }
+    }
 
     /** @return array{statement_id:int, transactions:int, matched:int, duplicate:bool, parsed_transactions:int, skipped_duplicates:int, warnings:list<array<string,mixed>>} */
     private function import(string $content, ?int $currencyId): array

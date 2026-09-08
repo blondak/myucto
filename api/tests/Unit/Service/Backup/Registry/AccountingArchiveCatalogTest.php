@@ -87,7 +87,7 @@ final class AccountingArchiveCatalogTest extends TestCase
 
         $bankStatement = $catalog->get('bank_statements');
         self::assertNotNull($bankStatement);
-        self::assertSame(TenantDataPolicy::GlobalReference, $bankStatement->policy);
+        self::assertSame(TenantDataPolicy::TenantOwned, $bankStatement->policy);
         self::assertSame('bank_statement_relationships', $bankStatement->selector);
     }
 

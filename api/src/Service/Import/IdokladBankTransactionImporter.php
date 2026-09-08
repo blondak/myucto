@@ -195,9 +195,8 @@ final class IdokladBankTransactionImporter
             $ref, 'iDoklad ' . $month, $hash, $supplierId, (string) $account['account_number'],
             self::text($account['bank_code'] ?? null, 4), (string) $account['currency'], $date,
         ]);
-        $s = $pdo->prepare('SELECT id FROM bank_statements WHERE file_hash = ?');
-        $s->execute([$hash]);
-        return (int) $s->fetchColumn();
+        return \MyInvoice\Service\Bank\BankStatementDeduplication::find($pdo, $hash, $supplierId)
+            ?? throw new \RuntimeException('Importovaný výpis nebyl nalezen v cílové firmě.');
     }
 
     /** @param array<string,mixed> $movement */

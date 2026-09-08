@@ -538,8 +538,8 @@ final class BankEmailNoticeRepository
         // Měsíční výpis: avíza pro stejný účet/měnu/měsíc se sbírají do jednoho
         // bank_statements (source=email_notice), ať seznam výpisů nezaplaví 1 řádek/avízo.
         // Tenant je součástí klíče i SQL scope: stejné číslo účtu může být ve více
-        // firmách a globální uq_bs_hash nesmí sloučit jejich avíza do cizího výpisu.
-        // Deterministický file_hash + UNIQUE uq_bs_hash = atomický find-or-create.
+        // firmách. Tenantový hash zachovává kompatibilitu starších avíz;
+        // UNIQUE uq_bs_scope_hash zajišťuje atomický find-or-create uvnitř firmy.
         $ym = preg_match('/^\d{4}-\d{2}/', (string) $notice->postedAt, $mm) === 1 ? $mm[0] : date('Y-m');
         $legacyMonthKey = $account . '|' . ($bankCode ?? '') . '|' . $currency . '|' . $ym;
         $monthKey = $supplierId . '|' . $legacyMonthKey;

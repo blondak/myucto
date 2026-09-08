@@ -34,8 +34,8 @@ use PDO;
  * padalo do auto_partial a faktura zůstávala neoznačena jako paid.
  *
  * Multi-supplier: VS je unique per (supplier_id, varsymbol). Matcher určuje
- * supplier_id z bank_statement.account_number → currencies.account_number → supplier_id.
- * Pokud žádná currency neodpovídá účtu (bank statement nepatří žádnému supplierovi),
+ * autoritativní bank_statements.supplier_id; pouze u legacy NULL odvozuje
+ * vlastníka z jednoznačného účtu. Pokud žádná currency neodpovídá účtu,
  * vrátí 'unmatched/unknown_supplier'.
  */
 final class StatementMatcher
@@ -223,7 +223,7 @@ final class StatementMatcher
         $pdo = $this->db->pdo();
         $tx = $pdo->prepare(
             'SELECT bt.*, bs.account_number AS recipient_account, bs.bank_code AS recipient_bank,
-                    bs.currency AS statement_currency
+                    bs.currency AS statement_currency, bs.supplier_id AS statement_supplier_id
                FROM bank_transactions bt
                JOIN bank_statements   bs ON bs.id = bt.statement_id
               WHERE bt.id = ?'
@@ -257,8 +257,11 @@ final class StatementMatcher
         // Porovnává se i domácí část IBANu (#109) — cizoměnové účty bývají evidované
         // jen IBANem (viz schema currencies), GPC ale nese domácí číslo účtu; bez toho
         // EUR výpis skončil jako unknown_supplier_for_account a nikdy se nespároval.
-        $supplierIds = [];
-        if (!empty($row['recipient_account'])) {
+        // Stejně jako EmailNoticeReconciler respektujeme autoritativního vlastníka.
+        // Kopie účtu v obnovené firmě nesmí zneplatnit ani přesměrovat párování.
+        $ownerId = (int) ($row['statement_supplier_id'] ?? 0);
+        $supplierIds = $ownerId > 0 ? [$ownerId] : [];
+        if ($ownerId === 0 && !empty($row['recipient_account'])) {
             $stmt = $pdo->query(
                 'SELECT supplier_id, account_number, iban, bank_code FROM currencies
                   WHERE account_number IS NOT NULL OR iban IS NOT NULL'

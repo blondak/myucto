@@ -334,9 +334,10 @@ final class BankStatementAction
     private function statementWithPdfHash(string $pdfHash, int $sid): ?int
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id FROM bank_statements WHERE pdf_hash = ? OR file_hash = ? ORDER BY id LIMIT 20'
+            'SELECT id FROM bank_statements WHERE (supplier_id = ? OR supplier_id IS NULL)
+              AND (pdf_hash = ? OR file_hash = ?) ORDER BY id'
         );
-        $stmt->execute([$pdfHash, $pdfHash]);
+        $stmt->execute([$sid, $pdfHash, $pdfHash]);
         foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $id) {
             if ($this->ownership->statementOwned((int) $id, $sid)) {
                 return (int) $id;
@@ -1537,6 +1538,7 @@ final class BankStatementAction
         $postingByTx = $this->loadPostingInfo($sid, $txIds);
 
         foreach ($transactions as &$t) {
+            unset($t['dedup_scope_id']); // Interní materializace unikátnosti není API pole.
             $t['id'] = (int) $t['id'];
             $t['amount'] = (float) $t['amount'];
             $t['balance'] = isset($t['balance']) ? (float) $t['balance'] : null;

@@ -220,14 +220,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
             $archivedBankInvoice['approval_token_expires_at'] ?? null,
         );
 
-        // Originální bank_statements řádek smaž PO exportu (cascade smaže i
-        // bank_transactions/payment_matches originálu) — jinak by find-or-create dedup
-        // (stejný file_hash, cíleně přidaný proti UNIQUE kolizi, viz importBankStatement)
-        // vždy „úspěšně" namapoval na PŮVODNÍ (dosud existující) řádek i BEZ opraveného
-        // remapu, a test by tak neodlišil opravený kód od chybného (oba by dali stejné
-        // číslo). Smazáním se vynutí, že restore MUSÍ vložit genuinně NOVÝ řádek — pokud
-        // by byl FK ponechán na starém (smazaném) id, INSERT by tvrdě spadl na FK constraint.
-        $this->db->pdo()->exec('DELETE FROM bank_statements WHERE id = ' . $oldStatementId);
+        // Původní firma zůstává beze změny; nový výpis nesmí sdílet její ID.
 
         $report = $this->restore->restore($zipPath);
         $newSid = (int) $report['new_supplier_id'];
@@ -314,11 +307,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         )->fetchColumn();
         self::assertSame($newBankInvoiceId, (int) $newBt['matched_invoice_id'], 'bank_transactions.matched_invoice_id ukazuje na fakturu NOVÉ firmy.');
 
-        // 9) Dedup pojistka: bank_statements je celoinstanční content-addressed tabulka
-        // (UNIQUE file_hash) — restore STEJNÉHO archivu podruhé (simulace obnovy do běžící
-        // instance, kde stejný výpis díky prvnímu restoru z kroku 8 už existuje) nesmí
-        // spadnout na UNIQUE constraint a musí sdílet TENTÝŽ řádek (find-or-create), ne
-        // selhat celou transakcí.
+        // Opakovaná obnova musí vytvořit další nezávislou tenantovou kopii.
         $hashStmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_statements WHERE file_hash = ?');
         $hashStmt->execute([$bankHash]);
         $countBefore = (int) $hashStmt->fetchColumn();
@@ -330,7 +319,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
 
         $hashStmt->execute([$bankHash]);
         $countAfter = (int) $hashStmt->fetchColumn();
-        self::assertSame($countBefore, $countAfter, 'Druhá obnova sdílí existující bank_statements řádek (dedup dle file_hash), nevytváří duplicitu.');
+        self::assertSame($countBefore + 1, $countAfter, 'Každá obnovená firma vlastní samostatný výpis.');
 
         $match2 = $this->db->pdo()->query(
             "SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = {$newSid2}"
@@ -339,7 +328,10 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $bt2 = $this->db->pdo()->query(
             'SELECT statement_id FROM bank_transactions WHERE id = ' . (int) $match2['bank_transaction_id']
         )->fetch(PDO::FETCH_ASSOC);
-        self::assertSame($newStatementId, (int) $bt2['statement_id'], 'Třetí firma sdílí stejný dedupovaný bank_statements řádek jako druhá.');
+        self::assertNotSame($newStatementId, (int) $bt2['statement_id'], 'Výpisy obnovených firem se nesmějí sdílet.');
+        $owner = $this->db->pdo()->prepare('SELECT supplier_id FROM bank_statements WHERE id = ?');
+        $owner->execute([(int) $bt2['statement_id']]);
+        self::assertSame($newSid2, (int) $owner->fetchColumn());
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -406,11 +398,11 @@ final class ArchiveRestoreRoundTripTest extends TestCase
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO bank_statements
-                (file_name, file_hash, account_number, bank_code, currency, statement_date,
+                (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date,
                  prev_balance, curr_balance, credit_total, debit_total, transaction_count)
-             VALUES (?, ?, "1234567890/0100", "0100", "CZK", ?, 0, 5000, 5000, 0, 1)'
+             VALUES (?, ?, ?, "1000000005/0100", "0100", "CZK", ?, 0, 5000, 5000, 0, 1)'
         );
-        $stmt->execute(['vypis-' . $hash . '.gpc', $hash, self::YEAR . '-06-18']);
+        $stmt->execute([$this->supplierId, 'vypis-' . $hash . '.gpc', $hash, self::YEAR . '-06-18']);
         return (int) $this->db->pdo()->lastInsertId();
     }
 
