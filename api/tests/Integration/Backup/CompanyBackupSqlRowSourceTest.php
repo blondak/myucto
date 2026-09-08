@@ -349,6 +349,20 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         }
     }
 
+    public function testExcludedSecurityDefinitionsMatchRealPrimaryKeys(): void
+    {
+        $query = $this->db->pdo()->prepare('SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?
+            ORDER BY ORDINAL_POSITION');
+        foreach ([
+            ...\MyInvoice\Service\Backup\Registry\CompanyBackupInstanceSecurityDefinitions::definitions(),
+            ...\MyInvoice\Service\Backup\Registry\CompanyBackupLookupCacheDefinitions::definitions(),
+        ] as $definition) {
+            $query->execute([$definition->name(), 'PRIMARY']);
+            self::assertSame($definition->details['primary_key'], $query->fetchAll(PDO::FETCH_COLUMN), $definition->key);
+        }
+    }
+
     public function testProductionEmailProfilesProjectionMatchesSchema(): void
     {
         $this->assertProductionProjectionMatchesSchema(

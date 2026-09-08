@@ -739,7 +739,10 @@ final class TenantDataRegistryFactory
     public static function draftV1(): TenantDataRegistry
     {
         self::assertArchiveOrders();
-        $definitions = [];
+        $definitions = [
+            ...CompanyBackupInstanceSecurityDefinitions::definitions(),
+            ...CompanyBackupLookupCacheDefinitions::definitions(),
+        ];
         foreach (self::ACCOUNTING_ARCHIVE_EXPORT_ORDER as $exportIndex => $table) {
             $restoreIndex = array_search($table, self::ACCOUNTING_ARCHIVE_RESTORE_ORDER, true);
             if ($restoreIndex === false) {
