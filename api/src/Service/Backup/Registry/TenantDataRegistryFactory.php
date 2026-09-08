@@ -102,6 +102,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupStockItemFeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemI18nProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemPricesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemTagsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockItemVendorsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLocalesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockMediaProjection;
@@ -741,6 +742,8 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['stock_item_id', 'currency_code'];
             } elseif ($table === 'stock_item_i18n') {
                 $details['natural_key'] = ['stock_item_id', 'locale'];
+            } elseif ($table === 'stock_item_vendors') {
+                $details['natural_key'] = ['stock_item_id', 'client_id'];
             } elseif ($table === 'stock_locales') {
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_tags') {
@@ -2496,6 +2499,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockItemPricesProjection::dataColumns(),
             'stock_item_tags' =>
                 CompanyBackupStockItemTagsProjection::dataColumns(),
+            'stock_item_vendors' =>
+                CompanyBackupStockItemVendorsProjection::dataColumns(),
             'stock_items' => CompanyBackupStockItemsProjection::dataColumns(),
             'stock_locales' =>
                 CompanyBackupStockLocalesProjection::dataColumns(),
@@ -2675,6 +2680,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockItemPricesProjection::references(),
             'stock_item_tags' =>
                 CompanyBackupStockItemTagsProjection::references(),
+            'stock_item_vendors' =>
+                CompanyBackupStockItemVendorsProjection::references(),
             'stock_items' => CompanyBackupStockItemsProjection::references(),
             'stock_locales' =>
                 CompanyBackupStockLocalesProjection::references(),

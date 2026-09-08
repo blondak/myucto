@@ -3172,6 +3172,88 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testStockItemVendorsDeclareCompleteOfferAndNaturalKey(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_item_vendors');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'stock_item_id',
+            'client_id',
+            'vendor_sku',
+            'purchase_price',
+            'currency_code',
+            'delivery_days',
+            'stock_qty',
+            'availability_state',
+            'stock_qty_updated_at',
+            'is_preferred',
+            'note',
+            'updated_at',
+            'min_order_qty',
+            'package_qty',
+            'price_valid_to',
+            'data_source',
+            'is_active',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [
+                    'vendor_sku',
+                    'purchase_price',
+                    'delivery_days',
+                    'stock_qty',
+                    'stock_qty_updated_at',
+                    'note',
+                    'min_order_qty',
+                    'package_qty',
+                    'price_valid_to',
+                ],
+                [
+                    new CompanyBackupForeignKey(
+                        ['client_id'],
+                        'clients',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['stock_item_id'],
+                        'stock_items',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame(TenantDataPolicy::TenantOwned, $definition->policy);
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['stock_item_id', 'client_id'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'client_id->clients:id',
+                'stock_item_id->stock_items:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
