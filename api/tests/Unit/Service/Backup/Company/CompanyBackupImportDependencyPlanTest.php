@@ -616,6 +616,51 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         self::assertSame(['table:vat_rates'], $plan->globalRegistryKeys());
     }
 
+    public function testStockInventoryCyclesAreDeferredButLinesFollowTheirDocuments(): void
+    {
+        $production = TenantDataRegistryFactory::draftV1();
+        $definitions = [
+            $this->table('table:supplier', TenantDataPolicy::TenantRoot, ['id']),
+            $this->table('table:users', TenantDataPolicy::InstanceOwned, ['id']),
+        ];
+        foreach (['warehouses', 'stock_items', 'invoices', 'invoice_items',
+            'purchase_invoices', 'purchase_invoice_items', 'purchase_orders',
+            'purchase_order_lines', 'journal_entries'] as $table) {
+            $definitions[] = $this->table(
+                'table:' . $table, TenantDataPolicy::TenantOwned, ['id', 'supplier_id'],
+                [$this->reference(['supplier_id'], 'table:supplier')],
+            );
+        }
+        foreach (['stock_documents', 'stock_document_lines', 'stock_landed_costs',
+            'stock_takes', 'stock_take_lines'] as $table) {
+            $definition = $production->definition('table:' . $table);
+            self::assertNotNull($definition);
+            $definitions[] = $definition;
+        }
+        $snapshot = $this->snapshot($definitions);
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot, $this->inventory($snapshot, ['table:supplier' => 1]),
+        );
+        $positions = [];
+        foreach ($plan->insertBatches() as $index => $batch) {
+            foreach ($batch as $key) {
+                $positions[$key] = $index;
+            }
+        }
+        foreach (['stock_document_lines', 'stock_landed_costs'] as $child) {
+            self::assertLessThan($positions['table:' . $child], $positions['table:stock_documents']);
+        }
+        self::assertLessThan($positions['table:stock_take_lines'], $positions['table:stock_takes']);
+        $deferred = array_map(
+            static fn ($dependency): string => $dependency->toArray()['signature'],
+            $plan->deferredDependencies(),
+        );
+        foreach (['stock_take_id->stock_takes:id', 'reversal_document_id->stock_documents:id',
+            'receipt_document_id->stock_documents:id', 'issue_document_id->stock_documents:id'] as $signature) {
+            self::assertContains($signature, $deferred);
+        }
+    }
+
     public function testRequiresExactlyOneTenantRootRow(): void
     {
         $snapshot = $this->snapshot([
