@@ -472,6 +472,7 @@ final readonly class CompanyBackupImportDependencyPlan
                     CompanyBackupImportDependencyKind::EmbeddedHash,
                     CompanyBackupImportDependencyKind::Hash,
                 ], true)
+                && !CompanyBackupSupplierCurrencyCycle::matches($dependency)
                 && !($precomputedPersonHashes
                     && in_array($dependency->kind, [
                         CompanyBackupImportDependencyKind::EmbeddedHash,

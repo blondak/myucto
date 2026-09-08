@@ -468,6 +468,21 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         )));
     }
 
+    public function testSupplierCurrencyCycleKeepsFutureIdentityButInsertsSupplierFirst(): void
+    {
+        $snapshot = $this->snapshot([
+            $this->table('table:supplier', TenantDataPolicy::TenantRoot, ['id', 'default_currency_id'],
+                references: [$this->reference(['default_currency_id'], 'table:currencies')]),
+            $this->table('table:currencies', TenantDataPolicy::TenantOwned, ['id', 'supplier_id'],
+                references: [$this->reference(['supplier_id'], 'table:supplier')]),
+        ]);
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry($snapshot,
+            $this->inventory($snapshot, ['table:supplier' => 1, 'table:currencies' => 1]));
+        self::assertSame([['table:supplier'], ['table:currencies']], $plan->insertBatches());
+        self::assertSame([], $plan->deferredDependencies());
+        self::assertCount(2, $plan->dependencies());
+    }
+
     public function testRejectsNonDeferrableCycle(): void
     {
         $snapshot = $this->snapshot([

@@ -197,6 +197,14 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $filePaths,
             );
             $filePaths->finish();
+            foreach ($plan->dependencies() as $dependency) {
+                if (CompanyBackupSupplierCurrencyCycle::matches($dependency)) {
+                    CompanyBackupSupplierCurrencyCycle::assertComplete($this->database, $supplierId,
+                        (new CompanyBackupTableSchemaReader())->readReferences($this->database,
+                            $contexts['tables']['table:supplier']['projection']));
+                    break;
+                }
+            }
             $protectedSecretCount = $secrets?->consumedValueCount() ?? 0;
             $secrets?->finish();
             $result = new CompanyBackupDatabaseImportResult(
@@ -541,6 +549,13 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
     ): array {
         $insertedRows = 0;
         $supplierId = null;
+        $supplierCurrencyCycle = false;
+        foreach ($plan->dependencies() as $dependency) {
+            if (CompanyBackupSupplierCurrencyCycle::matches($dependency)) {
+                $supplierCurrencyCycle = true;
+                break;
+            }
+        }
         foreach ($plan->insertBatches() as $batch) {
             foreach ($batch as $registryKey) {
                 $context = $tables[$registryKey] ?? null;
@@ -578,6 +593,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                         $projection,
                         $preparer,
                         $writer,
+                        $supplierCurrencyCycle,
                         $hashes,
                         $hashMapper,
                         $hashReferenceMapper,
@@ -605,7 +621,12 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                             $row,
                             $prepared,
                         ) ?? [];
-                        $writer->insert($prepared, $protected);
+                        if ($supplierCurrencyCycle && $definition->key === 'table:supplier') {
+                            CompanyBackupSupplierCurrencyCycle::insert($this->database,
+                                static fn () => $writer->insert($prepared, $protected));
+                        } else {
+                            $writer->insert($prepared, $protected);
+                        }
                         $hashes->addRow($projection, $row, $prepared->row);
                         if ($definition->policy === TenantDataPolicy::TenantRoot) {
                             $id = $prepared->targetIdentity->primaryKey->values['id']

@@ -11,6 +11,10 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Backup\Company\CompanyBackupCredentialSecretBundle;
 use MyInvoice\Service\Backup\Company\CompanyBackupCredentialTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupSupplierCurrencyCycle;
+use MyInvoice\Service\Backup\Company\CompanyBackupForeignKey;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableReferenceSchema;
+use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileAreaRootResolver;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
@@ -360,6 +364,160 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         ] as $definition) {
             $query->execute([$definition->name(), 'PRIMARY']);
             self::assertSame($definition->details['primary_key'], $query->fetchAll(PDO::FETCH_COLUMN), $definition->key);
+        }
+    }
+
+    public function testSupplierCurrencyCycleRestoresChecksAndValidatesEveryRootForeignKey(): void
+    {
+        $pdo = $this->db->pdo();
+        $futureCurrency = 2147482000;
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM currencies WHERE id = ' . $futureCurrency)->fetchColumn());
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM countries WHERE id = 0')->fetchColumn());
+        $references = new CompanyBackupTableReferenceSchema([], [
+            new CompanyBackupForeignKey(['country_id'], 'countries', ['id']),
+            new CompanyBackupForeignKey(['default_currency_id'], 'currencies', ['id']),
+            new CompanyBackupForeignKey(['default_vat_rate_id'], 'vat_rates', ['id']),
+        ]);
+        $insert = function (int $currency, ?int $country = null) use ($pdo): int {
+            $id = 0;
+            CompanyBackupSupplierCurrencyCycle::insert($pdo, function () use ($pdo, $currency, $country, &$id): void {
+                self::assertSame(0, (int) $pdo->query('SELECT @@SESSION.foreign_key_checks')->fetchColumn());
+                $pdo->prepare('INSERT INTO supplier
+                    (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)
+                    SELECT ?, street, city, zip, COALESCE(?, country_id), ?, ?, default_vat_rate_id
+                    FROM supplier WHERE id = ?')->execute([
+                        'Synthetic currency cycle', $country, 'cycle@example.test', $currency, $this->supplierId,
+                    ]);
+                $id = (int) $pdo->lastInsertId();
+            });
+            self::assertSame(1, (int) $pdo->query('SELECT @@SESSION.foreign_key_checks')->fetchColumn());
+            return $id;
+        };
+        $root = $insert($futureCurrency);
+        try {
+            CompanyBackupSupplierCurrencyCycle::assertComplete($pdo, $root, $references);
+            self::fail('Chybějící měna nesmí projít.');
+        } catch (CompanyBackupImportWriteException $e) {
+            self::assertSame('import_supplier_currency_unresolved', $e->errorCode);
+        }
+        $pdo->prepare('INSERT INTO currencies (id, supplier_id, code, label, symbol, name_cs, name_en)
+            VALUES (?, ?, ?, ?, ?, ?, ?)')->execute([$futureCurrency, $root, 'CZK', 'Synthetic', 'Kč', 'Synthetic', 'Synthetic']);
+        CompanyBackupSupplierCurrencyCycle::assertComplete($pdo, $root, $references);
+        $foreignRoot = $insert($futureCurrency);
+        try {
+            CompanyBackupSupplierCurrencyCycle::assertComplete($pdo, $foreignRoot, $references);
+            self::fail('Cizí výchozí měna nesmí projít.');
+        } catch (CompanyBackupImportWriteException $e) {
+            self::assertSame('import_supplier_currency_unresolved', $e->errorCode);
+        }
+        $badRoot = $insert($futureCurrency + 1, 0);
+        $pdo->prepare('INSERT INTO currencies (id, supplier_id, code, label, symbol, name_cs, name_en)
+            VALUES (?, ?, ?, ?, ?, ?, ?)')->execute([$futureCurrency + 1, $badRoot, 'CZK', 'Synthetic', 'Kč', 'Synthetic', 'Synthetic']);
+        try {
+            CompanyBackupSupplierCurrencyCycle::assertComplete($pdo, $badRoot, $references);
+            self::fail('Zapnutí FK samo neopraví chybný odkaz na zemi.');
+        } catch (CompanyBackupImportWriteException $e) {
+            self::assertSame('import_supplier_foreign_key_unresolved', $e->errorCode);
+            self::assertSame('country_id', $e->column);
+        }
+        // Vyšší vrstva při chybě importu vrací celou transakci, ne jen poslední INSERT.
+        $pdo->rollBack();
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $root)->fetchColumn());
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM currencies WHERE id = ' . $futureCurrency)->fetchColumn());
+        self::assertSame(1, (int) $pdo->query('SELECT @@SESSION.foreign_key_checks')->fetchColumn());
+    }
+
+    public function testSupplierCycleRestoresChecksWhenInsertThrows(): void
+    {
+        $pdo = $this->db->pdo();
+        $expected = new \RuntimeException('Synthetic INSERT failure');
+        try {
+            CompanyBackupSupplierCurrencyCycle::insert($pdo, static function () use ($expected): never { throw $expected; });
+            self::fail('Chyba INSERTu musí propagovat do rollback vrstvy.');
+        } catch (\RuntimeException $e) {
+            self::assertSame($expected, $e);
+        }
+        self::assertTrue($pdo->inTransaction());
+        self::assertSame(1, (int) $pdo->query('SELECT @@SESSION.foreign_key_checks')->fetchColumn());
+        $pdo->exec('SET SESSION FOREIGN_KEY_CHECKS = 0');
+        try {
+            CompanyBackupSupplierCurrencyCycle::insert($pdo, static function (): never { self::fail('INSERT nesmí běžet.'); });
+            self::fail('Import nesmí převzít připojení s již vypnutými FK.');
+        } catch (CompanyBackupImportWriteException $e) {
+            self::assertSame('import_supplier_cycle_checks_disabled', $e->errorCode);
+        } finally {
+            $pdo->exec('SET SESSION FOREIGN_KEY_CHECKS = 1');
+        }
+    }
+
+    public function testSupplierCycleValidationUsesCurrentReadAndLocksReferencedRow(): void
+    {
+        $pdo = $this->db->pdo();
+        $source = $pdo->query('SELECT country_id, default_currency_id, default_vat_rate_id
+            FROM supplier WHERE id = ' . $this->supplierId)->fetch(PDO::FETCH_ASSOC);
+        $pdo->rollBack();
+        $other = Connection::withoutSharedTestConnection(
+            static fn () => new Connection(Config::load(dirname(__DIR__, 4))));
+        $otherPdo = $other->pdo();
+        $table = 'company_backup_fk_' . bin2hex(random_bytes(6));
+        // Izolovaný číselník modeluje libovolnou další fyzickou FK kořene;
+        // souběžné mazání nesmí zasáhnout sdílené countries ani jiné firmy.
+        $otherPdo->exec('CREATE TABLE `' . $table . '` (id INT UNSIGNED PRIMARY KEY) ENGINE=InnoDB');
+        try {
+            $otherPdo->prepare('INSERT INTO `' . $table . '` (id) VALUES (?)')->execute([$source['country_id']]);
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $pdo->beginTransaction();
+            $root = $this->createSupplier($pdo, 'Synthetic FK race', 'race@example.test',
+                (int) $source['country_id'], (int) $source['default_currency_id'], (int) $source['default_vat_rate_id']);
+            $pdo->prepare('INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en)
+                VALUES (?, ?, ?, ?, ?, ?)')->execute([$root, 'CZK', 'Synthetic', 'Kč', 'Synthetic', 'Synthetic']);
+            $currency = (int) $pdo->lastInsertId();
+            $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([$currency, $root]);
+            self::assertSame(1, (int) $pdo->query('SELECT COUNT(*) FROM `' . $table . '`')->fetchColumn());
+            $otherPdo->exec('DELETE FROM `' . $table . '`');
+            self::assertSame(1, (int) $pdo->query('SELECT COUNT(*) FROM `' . $table . '`')->fetchColumn(),
+                'Běžný SELECT stále vidí smazaný řádek v původním snapshotu.');
+            $references = new CompanyBackupTableReferenceSchema([], [
+                new CompanyBackupForeignKey(['country_id'], $table, ['id']),
+            ]);
+            try {
+                CompanyBackupSupplierCurrencyCycle::assertComplete($pdo, $root, $references);
+                self::fail('Smazaný cíl nesmí projít jen díky starému snapshotu.');
+            } catch (CompanyBackupImportWriteException $e) {
+                // MariaDB může místo prázdného current read ohlásit konflikt snapshotu.
+                self::assertContains($e->errorCode, [
+                    'import_supplier_foreign_key_unresolved', 'import_supplier_foreign_key_check_failed',
+                ]);
+                if ($e->getPrevious() instanceof \PDOException) {
+                    self::assertSame(1020, $e->getPrevious()->errorInfo[1]);
+                }
+            }
+            // Neúspěšný current read může držet gap lock, proto začneme nový průchod.
+            $pdo->rollBack();
+            $otherPdo->prepare('INSERT INTO `' . $table . '` (id) VALUES (?)')->execute([$source['country_id']]);
+            $pdo->beginTransaction();
+            $root = $this->createSupplier($pdo, 'Synthetic FK lock', 'lock@example.test',
+                (int) $source['country_id'], (int) $source['default_currency_id'], (int) $source['default_vat_rate_id']);
+            $pdo->prepare('INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en)
+                VALUES (?, ?, ?, ?, ?, ?)')->execute([$root, 'CZK', 'Synthetic', 'Kč', 'Synthetic', 'Synthetic']);
+            $currency = (int) $pdo->lastInsertId();
+            $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([$currency, $root]);
+            CompanyBackupSupplierCurrencyCycle::assertComplete($pdo, $root, $references);
+            $otherPdo->exec('SET SESSION innodb_lock_wait_timeout = 1');
+            try {
+                $otherPdo->exec('DELETE FROM `' . $table . '`');
+                self::fail('Ověřený FK cíl musí zůstat zamknutý do konce transakce.');
+            } catch (\PDOException $e) {
+                self::assertSame(1205, $e->errorInfo[1]);
+            }
+            $pdo->rollBack();
+            self::assertSame(1, $otherPdo->exec('DELETE FROM `' . $table . '`'));
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $otherPdo->exec('DROP TABLE `' . $table . '`');
+            $other->close();
         }
     }
 
