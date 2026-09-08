@@ -523,6 +523,9 @@ final readonly class CompanyBackupTableProjection
      */
     public function inspectCompleteSourceRow(array $row, callable $visitor): void
     {
+        if ($this->registryKey === 'table:supplier') {
+            CompanyBackupSupplierProjection::assertSourceRow($row);
+        }
         if ($this->registryKey === 'table:bank_posting_rules') {
             try {
                 CompanyBackupBankRuleHistory::assertRow($row);

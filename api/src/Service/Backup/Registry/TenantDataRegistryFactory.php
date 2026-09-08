@@ -128,6 +128,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchAuditProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankPostingRulesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankEmailImapSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupExternalBankAccountMappingsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSupplierProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankPostingSuggestionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxAdvanceSchedulesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchSuggestionsProjection;
@@ -1596,6 +1597,16 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'supplier') {
+            return ['company_backup' => [
+                'data_columns' => CompanyBackupSupplierProjection::dataColumns(),
+                'references' => CompanyBackupSupplierProjection::references(),
+                'embedded_references' => CompanyBackupSupplierProjection::embeddedReferences(),
+                'restore_overrides' => CompanyBackupSupplierProjection::restoreOverrides(),
+                'preserved_identifiers' => ['data_box_id'],
+                'generated_columns' => [], 'omit_columns' => [],
+            ]];
+        }
         if ($table === 'bank_email_imap_settings' || $table === 'external_bank_account_mappings') {
             $imap = $table === 'bank_email_imap_settings';
             return ['company_backup' => [

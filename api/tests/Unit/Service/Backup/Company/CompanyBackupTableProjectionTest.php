@@ -913,7 +913,7 @@ final class CompanyBackupTableProjectionTest extends TestCase
 
     public function testProductionDraftCannotBeStreamedBeforeColumnInventoryIsExplicit(): void
     {
-        $definition = TenantDataRegistryFactory::draftV1()->definition('table:supplier');
+        $definition = TenantDataRegistryFactory::draftV1()->definition('table:income_tax_returns');
         self::assertNotNull($definition);
 
         try {

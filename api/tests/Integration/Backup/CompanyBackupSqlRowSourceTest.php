@@ -15,6 +15,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSupplierCurrencyCycle;
 use MyInvoice\Service\Backup\Company\CompanyBackupForeignKey;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableReferenceSchema;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
+use MyInvoice\Service\Backup\Company\CompanyBackupProtectedSecretProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlProtectedSecretSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileAreaRootResolver;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
@@ -425,6 +427,51 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $root)->fetchColumn());
         self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM currencies WHERE id = ' . $futureCurrency)->fetchColumn());
         self::assertSame(1, (int) $pdo->query('SELECT @@SESSION.foreign_key_checks')->fetchColumn());
+    }
+
+    public function testProductionSupplierProjectionKeepsSettingsAndExcludesSecrets(): void
+    {
+        $salt = hex2bin(str_repeat('00ff', 16));
+        self::assertIsString($salt);
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:supplier');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $reader = new CompanyBackupTableSchemaReader();
+        $schema = $reader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema($schema->columns, $schema->generatedColumns,
+            $schema->primaryKey, $schema->binaryColumns);
+        $this->db->pdo()->prepare('UPDATE supplier SET auto_send_reminders = 1,
+            auto_generate_recurring = 1, auto_post_invoices = 1, ai_assist_enabled = 1,
+            default_prices_include_vat = 1, ai_pseudo_salt = ?,
+            ai_dpa_confirmations = ?, idoklad_client_id = ? WHERE id = ?')->execute([
+                $salt, '{"anthropic":{"confirmed_at":"2026-01-01T12:00:00Z","user_id":9}}',
+                'synthetic-client-id', $this->supplierId,
+            ]);
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource())->rows(
+            $this->db->pdo(), $this->supplierId, $definition));
+        self::assertCount(1, $rows);
+        self::assertSame($this->supplierId, $rows[0]['id']);
+        self::assertNotSame($this->foreignSupplierId, $rows[0]['id']);
+        self::assertSame(1, $rows[0]['default_prices_include_vat']);
+        self::assertSame(1, $rows[0]['auto_send_reminders']);
+        self::assertSame(9, json_decode($rows[0]['ai_dpa_confirmations'], true)['anthropic']['user_id']);
+        self::assertArrayNotHasKey('ai_pseudo_salt', $rows[0]);
+        self::assertArrayNotHasKey('idoklad_client_id', $rows[0]);
+        $restored = $projection->restoreOverrides->apply($rows[0]);
+        self::assertSame(0, $restored['auto_send_reminders']);
+        self::assertSame(0, $restored['auto_generate_recurring']);
+        self::assertSame(0, $restored['auto_post_invoices']);
+        self::assertSame(0, $restored['ai_assist_enabled']);
+        self::assertSame(1, $restored['default_prices_include_vat']);
+        $protected = iterator_to_array((new CompanyBackupSqlProtectedSecretSource(
+            new SecretEncryption(new Config(['app' => ['pepper' => 'synthetic-supplier-backup-pepper']]))
+        ))->values($this->db->pdo(), $this->supplierId,
+            CompanyBackupProtectedSecretProjection::fromDefinition($definition)));
+        self::assertCount(1, $protected);
+        self::assertSame('ai_pseudo_salt', $protected[0]->name);
+        self::assertSame(['id' => $this->supplierId], $protected[0]->primaryKey);
+        self::assertSame($salt, $protected[0]->plaintext());
     }
 
     public function testSupplierCycleRestoresChecksWhenInsertThrows(): void
