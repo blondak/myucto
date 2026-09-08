@@ -20,6 +20,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupExpenseCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupInvoiceSettlementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupJournalEntryLinesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupManufacturersProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupOffsetAgreementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollAbsencesProjection;
@@ -713,6 +714,8 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['file_hash'];
             } elseif ($table === 'exchange_rates') {
                 $details['natural_key'] = ['rate_date', 'currency_code'];
+            } elseif ($table === 'manufacturers') {
+                $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_items') {
                 $details['natural_key'] = ['supplier_id', 'sku'];
             } elseif ($table === 'tax_losses') {
@@ -2416,6 +2419,8 @@ final class TenantDataRegistryFactory
             'journal_entries' => CompanyBackupJournalEntriesProjection::dataColumns(),
             'journal_entry_lines' =>
                 CompanyBackupJournalEntryLinesProjection::dataColumns(),
+            'manufacturers' =>
+                CompanyBackupManufacturersProjection::dataColumns(),
             'offset_agreement_items' =>
                 CompanyBackupOffsetAgreementItemsProjection::dataColumns(),
             'offset_agreements' =>
@@ -2578,6 +2583,7 @@ final class TenantDataRegistryFactory
                 CompanyBackupInvoiceSettlementsProjection::references(),
             'journal_entries' => CompanyBackupJournalEntriesProjection::references(),
             'journal_entry_lines' => CompanyBackupJournalEntryLinesProjection::references(),
+            'manufacturers' => CompanyBackupManufacturersProjection::references(),
             'offset_agreement_items' =>
                 CompanyBackupOffsetAgreementItemsProjection::references(),
             'offset_agreements' =>
