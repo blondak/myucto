@@ -2828,6 +2828,240 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testStockAttributesDeclareCompletePayloadAndNaturalKey(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_attributes');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'code',
+            'name',
+            'data_type',
+            'unit',
+            'is_filterable',
+            'is_multivalue',
+            'display_order',
+            'archived',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['unit'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame(TenantDataPolicy::TenantOwned, $definition->policy);
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['supplier_id', 'code'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            ['supplier_id->supplier:id'],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
+    public function testStockAttributeOptionsRemapAttributeAndNaturalKey(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_attribute_options');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'attribute_id',
+            'code',
+            'label',
+            'display_order',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [],
+                [
+                    new CompanyBackupForeignKey(
+                        ['attribute_id'],
+                        'stock_attributes',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['attribute_id', 'code'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'attribute_id->stock_attributes:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
+    public function testStockAttributeI18nRemapsEitherTranslatedOwner(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_attribute_i18n');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'attribute_id',
+            'option_id',
+            'locale',
+            'label',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['attribute_id', 'option_id'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['attribute_id'],
+                        'stock_attributes',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['option_id'],
+                        'stock_attribute_options',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertArrayNotHasKey('natural_key', $definition->details);
+        self::assertSame(
+            [
+                'attribute_id->stock_attributes:id',
+                'option_id->stock_attribute_options:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['attribute_id'],
+            $projection->references->references[0]->nullableColumns,
+        );
+        self::assertSame(
+            ['option_id'],
+            $projection->references->references[1]->nullableColumns,
+        );
+    }
+
+    public function testStockItemAttributeValuesRemapTypedValueOwners(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition(
+            'table:stock_item_attribute_values',
+        );
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'stock_item_id',
+            'attribute_id',
+            'option_id',
+            'value_text',
+            'value_num',
+            'value_bool',
+            'display_order',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['option_id', 'value_text', 'value_num', 'value_bool'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['attribute_id'],
+                        'stock_attributes',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['option_id'],
+                        'stock_attribute_options',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['stock_item_id'],
+                        'stock_items',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertArrayNotHasKey('natural_key', $definition->details);
+        self::assertSame(
+            [
+                'attribute_id->stock_attributes:id',
+                'option_id->stock_attribute_options:id',
+                'stock_item_id->stock_items:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['option_id'],
+            $projection->references->references[1]->nullableColumns,
+        );
+    }
+
     public function testStockFeeTypesDeclareCompletePayloadAndReferences(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();

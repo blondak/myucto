@@ -96,8 +96,12 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSecretStorage;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockAttributeI18nProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockAttributeOptionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockAttributesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockCurrenciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockFeeTypesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockItemAttributeValuesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemFeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemI18nProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemPricesProjection;
@@ -737,6 +741,10 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['supplier_id', 'sku'];
             } elseif ($table === 'stock_currencies') {
                 $details['natural_key'] = ['supplier_id', 'code'];
+            } elseif ($table === 'stock_attributes') {
+                $details['natural_key'] = ['supplier_id', 'code'];
+            } elseif ($table === 'stock_attribute_options') {
+                $details['natural_key'] = ['attribute_id', 'code'];
             } elseif ($table === 'stock_fee_types') {
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_item_prices') {
@@ -2488,6 +2496,12 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningProfilesProjection::dataColumns(),
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::dataColumns(),
+            'stock_attribute_i18n' =>
+                CompanyBackupStockAttributeI18nProjection::dataColumns(),
+            'stock_attribute_options' =>
+                CompanyBackupStockAttributeOptionsProjection::dataColumns(),
+            'stock_attributes' =>
+                CompanyBackupStockAttributesProjection::dataColumns(),
             'stock_currencies' =>
                 CompanyBackupStockCurrenciesProjection::dataColumns(),
             'stock_fee_types' =>
@@ -2496,6 +2510,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockItemFeesProjection::dataColumns(),
             'stock_item_i18n' =>
                 CompanyBackupStockItemI18nProjection::dataColumns(),
+            'stock_item_attribute_values' =>
+                CompanyBackupStockItemAttributeValuesProjection::dataColumns(),
             'stock_item_prices' =>
                 CompanyBackupStockItemPricesProjection::dataColumns(),
             'stock_item_tags' =>
@@ -2670,6 +2686,12 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningProfilesProjection::references(),
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::references(),
+            'stock_attribute_i18n' =>
+                CompanyBackupStockAttributeI18nProjection::references(),
+            'stock_attribute_options' =>
+                CompanyBackupStockAttributeOptionsProjection::references(),
+            'stock_attributes' =>
+                CompanyBackupStockAttributesProjection::references(),
             'stock_currencies' =>
                 CompanyBackupStockCurrenciesProjection::references(),
             'stock_fee_types' =>
@@ -2678,6 +2700,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockItemFeesProjection::references(),
             'stock_item_i18n' =>
                 CompanyBackupStockItemI18nProjection::references(),
+            'stock_item_attribute_values' =>
+                CompanyBackupStockItemAttributeValuesProjection::references(),
             'stock_item_prices' =>
                 CompanyBackupStockItemPricesProjection::references(),
             'stock_item_tags' =>
