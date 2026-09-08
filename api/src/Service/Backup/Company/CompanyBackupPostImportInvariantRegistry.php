@@ -65,6 +65,7 @@ final readonly class CompanyBackupPostImportInvariantRegistry
                 $rows,
                 $limits,
             ),
+            new CompanyBackupStockLevelBalancePostImportInvariant(),
         ]);
     }
 

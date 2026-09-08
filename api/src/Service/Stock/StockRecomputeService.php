@@ -108,7 +108,7 @@ final class StockRecomputeService
             // transparentní vůči replayi → hodnotová neutralita §4.4 platí i po
             // zpětném pohybu, který změnil průměr (review CRITICAL 2). Stornované
             // doklady se navíc nikdy nepřepisují (§3.5 immutabilita).
-            $frozen = $line['is_reversal'] || (($line['status'] ?? '') === 'reversed');
+            $frozen = $line['is_reversal'] || $line['status'] === 'reversed';
             if ($frozen) {
                 $lineValueC = StockValuation::valueToC($line['value_total']);
                 if ($lineValueC > $valueC) {
@@ -156,7 +156,8 @@ final class StockRecomputeService
             $newUnitCost   = StockValuation::microToDecimal($res['lineUnitCostMicro']);
             $newValueTotal = StockValuation::cToDecimal($res['lineValueC']);
             if (StockValuation::valueToC($line['value_total']) !== $res['lineValueC']
-                || $this->unitCostMicro($line['unit_cost']) !== $res['lineUnitCostMicro']
+                || StockValuation::unitCostToMicro($line['unit_cost'])
+                    !== $res['lineUnitCostMicro']
             ) {
                 $this->docs->updateLineValuation(
                     $supplierId,
@@ -234,11 +235,5 @@ final class StockRecomputeService
         $stmt->execute([$supplierId]);
         $mode = $stmt->fetchColumn();
         return $mode !== false && (string) $mode === 'double_entry';
-    }
-
-    /** DECIMAL(15,6) string → micro int (porovnání uloženého vs. přepočteného). */
-    private function unitCostMicro(string $unitCost): int
-    {
-        return (int) round((float) $unitCost * StockValuation::MICRO);
     }
 }

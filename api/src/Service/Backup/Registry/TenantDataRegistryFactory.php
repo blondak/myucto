@@ -105,6 +105,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupStockItemTagsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemVendorsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLocalesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockLevelsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockMediaProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockTagsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossApplicationsProjection;
@@ -2504,6 +2505,7 @@ final class TenantDataRegistryFactory
             'stock_items' => CompanyBackupStockItemsProjection::dataColumns(),
             'stock_locales' =>
                 CompanyBackupStockLocalesProjection::dataColumns(),
+            'stock_levels' => CompanyBackupStockLevelsProjection::dataColumns(),
             'stock_media' => CompanyBackupStockMediaProjection::dataColumns(),
             'stock_tags' => CompanyBackupStockTagsProjection::dataColumns(),
             'tax_loss_applications' =>
@@ -2685,6 +2687,7 @@ final class TenantDataRegistryFactory
             'stock_items' => CompanyBackupStockItemsProjection::references(),
             'stock_locales' =>
                 CompanyBackupStockLocalesProjection::references(),
+            'stock_levels' => CompanyBackupStockLevelsProjection::references(),
             'stock_media' => CompanyBackupStockMediaProjection::references(),
             'stock_tags' => CompanyBackupStockTagsProjection::references(),
             'tax_loss_applications' =>

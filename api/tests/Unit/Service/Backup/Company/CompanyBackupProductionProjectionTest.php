@@ -3254,6 +3254,71 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testStockLevelsDeclareCompleteMaterializedBalance(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_levels');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'supplier_id',
+            'warehouse_id',
+            'stock_item_id',
+            'qty',
+            'value_total',
+            'avg_unit_cost',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema(
+            $columns,
+            [],
+            ['supplier_id', 'warehouse_id', 'stock_item_id'],
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [],
+                [
+                    new CompanyBackupForeignKey(
+                        ['stock_item_id'],
+                        'stock_items',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['warehouse_id'],
+                        'warehouses',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame(TenantDataPolicy::TenantOwned, $definition->policy);
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['supplier_id', 'warehouse_id', 'stock_item_id'],
+            $definition->details['primary_key'] ?? null,
+        );
+        self::assertArrayNotHasKey('natural_key', $definition->details);
+        self::assertSame(
+            [
+                'stock_item_id->stock_items:id',
+                'supplier_id->supplier:id',
+                'warehouse_id->warehouses:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();

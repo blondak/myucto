@@ -135,6 +135,12 @@ final class StockValuation
         return (int) round((float) $value * self::VAL_SCALE);
     }
 
+    /** DECIMAL(15,6) string/float → mikrojednotky (int). */
+    public static function unitCostToMicro(string|float|int $unitCost): int
+    {
+        return (int) round((float) $unitCost * self::MICRO);
+    }
+
     /** Haléře (int) → přesný DECIMAL(15,2) string (bez plovoucí chyby). */
     public static function cToDecimal(int $valueC): string
     {
