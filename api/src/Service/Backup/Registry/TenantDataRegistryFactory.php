@@ -97,6 +97,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockFeeTypesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockItemFeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemTagsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockMediaProjection;
@@ -2467,6 +2468,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningSettingsProjection::dataColumns(),
             'stock_fee_types' =>
                 CompanyBackupStockFeeTypesProjection::dataColumns(),
+            'stock_item_fees' =>
+                CompanyBackupStockItemFeesProjection::dataColumns(),
             'stock_item_tags' =>
                 CompanyBackupStockItemTagsProjection::dataColumns(),
             'stock_items' => CompanyBackupStockItemsProjection::dataColumns(),
@@ -2636,6 +2639,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningSettingsProjection::references(),
             'stock_fee_types' =>
                 CompanyBackupStockFeeTypesProjection::references(),
+            'stock_item_fees' =>
+                CompanyBackupStockItemFeesProjection::references(),
             'stock_item_tags' =>
                 CompanyBackupStockItemTagsProjection::references(),
             'stock_items' => CompanyBackupStockItemsProjection::references(),

@@ -2885,6 +2885,63 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testStockItemFeesDeclareCompletePayloadAndOwners(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_item_fees');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'stock_item_id',
+            'fee_type_id',
+            'amount',
+            'currency_code',
+            'vat_included',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [],
+                [
+                    new CompanyBackupForeignKey(
+                        ['fee_type_id'],
+                        'stock_fee_types',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['stock_item_id'],
+                        'stock_items',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame(TenantDataPolicy::TenantOwned, $definition->policy);
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertArrayNotHasKey('natural_key', $definition->details);
+        self::assertSame(
+            [
+                'fee_type_id->stock_fee_types:id',
+                'stock_item_id->stock_items:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
