@@ -126,6 +126,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyMapProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyObservationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchAuditProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankPostingRulesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankPostingSuggestionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTaxAdvanceSchedulesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankMatchSuggestionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockDocumentLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLandedCostsProjection;
@@ -156,6 +158,7 @@ final class TenantDataRegistryFactory
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
         'bank_posting_rules' => 'bank',
+        'bank_posting_suggestions' => 'bank',
         'bank_match_audit' => 'bank',
         'bank_match_suggestions' => 'bank',
         'bank_counterparty_map' => 'bank',
@@ -1585,6 +1588,20 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'bank_posting_suggestions' || $table === 'tax_advance_schedules') {
+            $suggestion = $table === 'bank_posting_suggestions';
+            return ['company_backup' => [
+                'data_columns' => $suggestion
+                    ? CompanyBackupBankPostingSuggestionsProjection::dataColumns()
+                    : CompanyBackupTaxAdvanceSchedulesProjection::dataColumns(),
+                'references' => $suggestion
+                    ? CompanyBackupBankPostingSuggestionsProjection::references()
+                    : CompanyBackupTaxAdvanceSchedulesProjection::references(),
+                'preserved_identifiers' => $suggestion ? ['batch_id'] : [],
+                'embedded_references' => [], 'generated_columns' => $suggestion ? ['pending_tx'] : [],
+                'omit_columns' => [], 'restore_overrides' => [],
+            ]];
+        }
         if ($table === 'bank_posting_rules') {
             return ['company_backup' => [
                 'data_columns' => CompanyBackupBankPostingRulesProjection::dataColumns(),

@@ -482,6 +482,103 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
         }
     }
 
+    public function testCompanyPostingSqlRoundTripPreservesPaymentsAndRemapsSuggestionChain(): void
+    {
+        $notice = new ParsedBankEmailNotice(variableSymbol: '2099071406', amount: 125, currency: 'CZK',
+            postedAt: '2099-07-14', recipientAccount: self::ACCOUNT . '/0100',
+            counterpartyAccount: '1000000005', counterpartyBank: '0100',
+            counterpartyName: 'Syntetická protistrana', message: 'Posting roundtrip');
+        $original = $this->repository->createTransactionFromNotice($this->supplierId, $notice,
+            'imap-1:<posting-roundtrip@example.test>', 0.05, $this->matcher, 'CZK');
+        $target = $this->repository->createTransactionFromNotice($this->otherSupplierId, $notice,
+            'imap-2:<posting-roundtrip@example.test>', 0.05, $this->matcher, 'CZK');
+        $pdo = $this->db->pdo();
+        $previousIsolation = (string) $pdo->query('SELECT @@transaction_isolation')->fetchColumn();
+        $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("INSERT INTO bank_posting_rules
+                (supplier_id, name, direction, message_contains, debit_account_code, credit_account_code, mode)
+                VALUES (?, 'Synthetic rule', 'outgoing', 'synthetic', '341', '221', 'auto')")
+                ->execute([$this->supplierId]);
+            $ruleId = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO tax_advance_schedules
+                (supplier_id, taxpayer_type, advance_kind, period_year, seq_no, amount, due_date,
+                 status, paid_amount, paid_on, matched_transaction_id, match_confidence)
+                VALUES (?, 'po', 'tax', 2099, 1, 150, '2099-07-14', 'paid', 125, '2099-07-14', ?, 'uncertain')")
+                ->execute([$this->supplierId, $original['transaction_id']]);
+            $scheduleId = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO bank_posting_suggestions
+                (supplier_id, bank_transaction_id, rule_id, source, debit_account_code, credit_account_code,
+                 amount, status, tax_advance_schedule_id, batch_id, snoozed_until, snooze_reason)
+                VALUES (?, ?, ?, 'schedule', '341', '221', 125, 'blocked', ?, ?, '2099-08-01', 'synthetic')")
+                ->execute([$this->supplierId, $original['transaction_id'], $ruleId, $scheduleId,
+                    '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1']);
+            $suggestionId = (int) $pdo->lastInsertId();
+            $reader = new CompanyBackupTableSchemaReader();
+            $source = new CompanyBackupSqlRowSource();
+            $restoredIds = [];
+            foreach (['bank_posting_rules' => $ruleId, 'tax_advance_schedules' => $scheduleId,
+                'bank_posting_suggestions' => $suggestionId] as $table => $id) {
+                $definition = TenantDataRegistryFactory::draftV1()->definition('table:' . $table);
+                self::assertNotNull($definition);
+                $projection = CompanyBackupTableProjection::fromDefinition($definition);
+                $projection->assertRegistryTargets(TenantDataRegistryFactory::draftV1());
+                $row = null;
+                foreach ($source->rows($pdo, $this->supplierId, $definition) as $candidate) {
+                    if ((int) $candidate['id'] === $id) {
+                        $row = $candidate;
+                        break;
+                    }
+                }
+                self::assertNotNull($row);
+                self::assertArrayNotHasKey('pending_tx', $row);
+                $projection->assertCompleteSourceRow($row);
+                $identity = CompanyBackupSourceIdentityProjection::fromDefinition($definition);
+                $originalIdentity = $identity->identityForRow($row);
+                $mapped = $projection->references->remap($row,
+                    fn (CompanyBackupReference $reference, array $key): array => match ($reference->target) {
+                        'table:supplier' => [$this->otherSupplierId],
+                        'table:bank_transactions' => [$target['transaction_id']],
+                        'table:chart_of_accounts' => [$this->otherSupplierId, $key[1]],
+                        'table:bank_posting_rules' => [$restoredIds['bank_posting_rules']],
+                        'table:tax_advance_schedules' => [$restoredIds['tax_advance_schedules']],
+                        default => throw new \LogicException('Neočekávaná živá vazba.'),
+                    });
+                $mapped = $projection->restoreOverrides->apply($mapped);
+                $metadata = $reader->readImportMetadata($pdo, $projection);
+                self::assertNotNull($metadata->autoIncrement);
+                $reservation = CompanyBackupSqlPrimaryKeyReservation::reserve($pdo, $projection,
+                    $metadata->autoIncrement, 1);
+                $mapped['id'] = $reservation->next();
+                $reservation->finish();
+                $writer = new CompanyBackupSqlInsertWriter($pdo, $definition, $reader->read($pdo, $projection), 1);
+                $writer->insert(new CompanyBackupPreparedImportRow($mapped, $originalIdentity,
+                    $identity->identityForRow($mapped)));
+                $writer->finish();
+                $restoredIds[$table] = $mapped['id'];
+                $stored = $pdo->query('SELECT * FROM ' . $table . ' WHERE id = ' . $mapped['id'])
+                    ->fetch(PDO::FETCH_ASSOC);
+                foreach ($mapped as $column => $value) {
+                    self::assertSame($value, $stored[$column], $table . '.' . $column);
+                }
+                if ($table === 'bank_posting_rules') {
+                    self::assertSame(0, $stored['is_active']);
+                } elseif ($table === 'bank_posting_suggestions') {
+                    self::assertSame($target['transaction_id'], $stored['pending_tx']);
+                } else {
+                    self::assertSame('150.00', $stored['amount']);
+                    self::assertSame('125.00', $stored['paid_amount']);
+                    self::assertSame('uncertain', $stored['match_confidence']);
+                }
+            }
+            self::assertSame(1, (int) $pdo->query('SELECT is_active FROM bank_posting_rules WHERE id = ' . $ruleId)->fetchColumn());
+        } finally {
+            $pdo->rollBack();
+            $pdo->prepare('SET SESSION transaction_isolation = ?')->execute([$previousIsolation]);
+        }
+    }
+
     private function cloneSupplier(): int
     {
         $clone = $this->db->pdo()->prepare(
