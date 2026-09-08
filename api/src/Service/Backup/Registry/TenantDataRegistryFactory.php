@@ -98,6 +98,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossApplicationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupWarehousesProjection;
 
 /** Produkční sestavení registru; company_backup zůstává během inventury draft. */
 final class TenantDataRegistryFactory
@@ -717,6 +718,8 @@ final class TenantDataRegistryFactory
                     'taxpayer_type',
                     'origin_year',
                 ];
+            } elseif ($table === 'warehouses') {
+                $details['natural_key'] = ['supplier_id', 'code'];
             }
             $definitions[] = new TenantDataDefinition(
                 'table:' . $table,
@@ -2431,6 +2434,7 @@ final class TenantDataRegistryFactory
                 CompanyBackupTaxLossApplicationsProjection::dataColumns(),
             'tax_losses' => CompanyBackupTaxLossesProjection::dataColumns(),
             'vat_rates' => CompanyBackupVatRatesProjection::dataColumns(),
+            'warehouses' => CompanyBackupWarehousesProjection::dataColumns(),
             default => self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null,
         };
         if ($columns === null) {
@@ -2590,6 +2594,7 @@ final class TenantDataRegistryFactory
             'tax_loss_applications' =>
                 CompanyBackupTaxLossApplicationsProjection::references(),
             'tax_losses' => CompanyBackupTaxLossesProjection::references(),
+            'warehouses' => CompanyBackupWarehousesProjection::references(),
             'accounting_document_series' => [
                 self::companyBackupTenantIdOrZeroReference(
                     'register_id',
