@@ -97,6 +97,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockMediaProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossApplicationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
@@ -2458,6 +2459,7 @@ final class TenantDataRegistryFactory
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::dataColumns(),
             'stock_items' => CompanyBackupStockItemsProjection::dataColumns(),
+            'stock_media' => CompanyBackupStockMediaProjection::dataColumns(),
             'tax_loss_applications' =>
                 CompanyBackupTaxLossApplicationsProjection::dataColumns(),
             'tax_losses' => CompanyBackupTaxLossesProjection::dataColumns(),
@@ -2621,6 +2623,7 @@ final class TenantDataRegistryFactory
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::references(),
             'stock_items' => CompanyBackupStockItemsProjection::references(),
+            'stock_media' => CompanyBackupStockMediaProjection::references(),
             'tax_loss_applications' =>
                 CompanyBackupTaxLossApplicationsProjection::references(),
             'tax_losses' => CompanyBackupTaxLossesProjection::references(),

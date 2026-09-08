@@ -17,6 +17,7 @@ use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use PHPUnit\Framework\TestCase;
 
@@ -502,6 +503,73 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
             self::assertSame('table:alpha', $e->registryKey);
             self::assertNull($e->targetRegistryKey);
         }
+    }
+
+    public function testProductionStockMediaCycleDefersOnlyNullableBackEdges(): void
+    {
+        $production = TenantDataRegistryFactory::draftV1();
+        $definitions = [
+            $this->table(
+                'table:supplier',
+                TenantDataPolicy::TenantRoot,
+                ['id'],
+            ),
+        ];
+        foreach ([
+            'table:vat_rates',
+            'table:manufacturers',
+            'table:stock_items',
+            'table:stock_media',
+        ] as $key) {
+            $definition = $production->definition($key);
+            self::assertNotNull($definition);
+            $definitions[] = $definition;
+        }
+        $snapshot = $this->snapshot($definitions);
+
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot, ['table:supplier' => 1]),
+        );
+        $cycle = array_values(array_filter(
+            $plan->dependencies(),
+            static fn ($dependency): bool => in_array(
+                $dependency->sourceRegistryKey . '->'
+                    . $dependency->targetRegistryKey,
+                [
+                    'table:manufacturers->table:stock_media',
+                    'table:stock_items->table:manufacturers',
+                    'table:stock_media->table:stock_items',
+                ],
+                true,
+            ),
+        ));
+
+        self::assertSame(
+            [
+                'table:manufacturers->table:stock_media' => true,
+                'table:stock_items->table:manufacturers' => true,
+                'table:stock_media->table:stock_items' => false,
+            ],
+            array_column(array_map(
+                static fn ($dependency): array => [
+                    'edge' => $dependency->sourceRegistryKey . '->'
+                        . $dependency->targetRegistryKey,
+                    'deferred' => $dependency->deferred,
+                ],
+                $cycle,
+            ), 'deferred', 'edge'),
+        );
+        $positions = [];
+        foreach ($plan->insertBatches() as $index => $batch) {
+            foreach ($batch as $registryKey) {
+                $positions[$registryKey] = $index;
+            }
+        }
+        self::assertLessThan(
+            $positions['table:stock_media'],
+            $positions['table:stock_items'],
+        );
     }
 
     public function testRequiresExactlyOneTenantRootRow(): void

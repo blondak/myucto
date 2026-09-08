@@ -2659,6 +2659,69 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         self::assertTrue($projection->allowsDeferredUpdates);
     }
 
+    public function testStockMediaDeclareCompletePayloadAndOwners(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_media');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'stock_item_id',
+            'media_type',
+            'storage_key',
+            'original_name',
+            'mime_type',
+            'size_bytes',
+            'title',
+            'alt_text',
+            'display_order',
+            'is_primary',
+            'export_eshop',
+            'created_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [
+                    'original_name',
+                    'mime_type',
+                    'size_bytes',
+                    'title',
+                    'alt_text',
+                ],
+                [
+                    new CompanyBackupForeignKey(
+                        ['stock_item_id'],
+                        'stock_items',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame(TenantDataPolicy::TenantOwned, $definition->policy);
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'stock_item_id->stock_items:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();
