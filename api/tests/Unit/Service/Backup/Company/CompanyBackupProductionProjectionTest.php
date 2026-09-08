@@ -2313,6 +2313,114 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testTaxLossesDeclareCompletePayloadAndSourceReturn(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:tax_losses');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'taxpayer_type',
+            'origin_year',
+            'amount',
+            'source_return_id',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['source_return_id'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['supplier_id', 'taxpayer_type', 'origin_year'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'source_return_id->income_tax_returns:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            CompanyBackupReferenceConstraint::Optional,
+            $projection->references->references[0]->constraint,
+        );
+    }
+
+    public function testTaxLossApplicationsDeclareCompletePayloadAndReferences(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:tax_loss_applications');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'taxpayer_type',
+            'loss_id',
+            'applied_year',
+            'applied_return_id',
+            'amount',
+            'created_at',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['applied_return_id'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['loss_id'],
+                        'tax_losses',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'applied_return_id->income_tax_returns:id',
+                'loss_id->tax_losses:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            CompanyBackupReferenceConstraint::Optional,
+            $projection->references->references[0]->constraint,
+        );
+    }
+
     public function testInvoiceSettlementsDeclareDocumentsPostingAndActor(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();

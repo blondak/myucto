@@ -95,6 +95,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSecretStorage;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossApplicationsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTaxLossesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupVatRatesProjection;
 
 /** Produkční sestavení registru; company_backup zůstává během inventury draft. */
@@ -709,6 +711,12 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['file_hash'];
             } elseif ($table === 'exchange_rates') {
                 $details['natural_key'] = ['rate_date', 'currency_code'];
+            } elseif ($table === 'tax_losses') {
+                $details['natural_key'] = [
+                    'supplier_id',
+                    'taxpayer_type',
+                    'origin_year',
+                ];
             }
             $definitions[] = new TenantDataDefinition(
                 'table:' . $table,
@@ -2419,6 +2427,9 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningProfilesProjection::dataColumns(),
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::dataColumns(),
+            'tax_loss_applications' =>
+                CompanyBackupTaxLossApplicationsProjection::dataColumns(),
+            'tax_losses' => CompanyBackupTaxLossesProjection::dataColumns(),
             'vat_rates' => CompanyBackupVatRatesProjection::dataColumns(),
             default => self::COMPANY_BACKUP_DATA_COLUMNS[$table] ?? null,
         };
@@ -2576,6 +2587,9 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningProfilesProjection::references(),
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::references(),
+            'tax_loss_applications' =>
+                CompanyBackupTaxLossApplicationsProjection::references(),
+            'tax_losses' => CompanyBackupTaxLossesProjection::references(),
             'accounting_document_series' => [
                 self::companyBackupTenantIdOrZeroReference(
                     'register_id',
