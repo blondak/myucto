@@ -139,6 +139,87 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
         );
         self::assertSame($first['statement_id'], $duplicate['statement_id']);
         self::assertSame($first['transaction_id'], $duplicate['transaction_id']);
+        $reconnected = $this->repository->createTransactionFromNotice(
+            $this->supplierId, $notice, 'imap-999:<shared-message@example.test>',
+            0.05, $this->matcher, 'CZK',
+        );
+        self::assertSame($first['transaction_id'], $reconnected['transaction_id'],
+            'Nové ID IMAP konfigurace nesmí vytvořit druhou úhradu stejné zprávy.');
+    }
+
+    public function testRestoredIdentitySurvivesNewTenantAndImapIdsIncludingMonthlyStatement(): void
+    {
+        $notice = new ParsedBankEmailNotice(
+            variableSymbol: '2099071499', amount: 12.34, currency: 'CZK',
+            postedAt: '2099-07-14', recipientAccount: self::ACCOUNT . '/0100',
+            counterpartyAccount: '1000000005', counterpartyBank: '0100',
+            counterpartyName: 'Synthetic restore', message: 'Restore identity test',
+        );
+        $first = $this->repository->createTransactionFromNotice(
+            $this->supplierId, $notice, 'imap-7:<restore@example.test>', 0.05, $this->matcher, 'CZK',
+        );
+        $pdo = $this->db->pdo();
+        // Jako při obnově: nová lokální ID, původní auditní reference a stabilní identita.
+        $pdo->prepare('INSERT INTO bank_statements
+            (supplier_id, source, source_ref, external_identity, file_name, file_hash,
+             account_number, bank_code, currency, statement_date, transaction_count)
+            SELECT ?, source, source_ref, external_identity, file_name, file_hash,
+                   account_number, bank_code, currency, statement_date, transaction_count
+              FROM bank_statements WHERE id = ?')->execute([$this->otherSupplierId, $first['statement_id']]);
+        $restoredStatement = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO bank_transactions
+            (statement_id, source, source_ref, external_identity, posted_at, amount, currency, variable_symbol)
+            SELECT ?, source, source_ref, external_identity, posted_at, amount, currency, variable_symbol
+              FROM bank_transactions WHERE id = ?')->execute([$restoredStatement, $first['transaction_id']]);
+        $restoredTransaction = (int) $pdo->lastInsertId();
+        $reconnected = $this->repository->createTransactionFromNotice(
+            $this->otherSupplierId, $notice, 'imap-901:<restore@example.test>', 0.05, $this->matcher, 'CZK',
+        );
+        self::assertSame($restoredTransaction, $reconnected['transaction_id']);
+        self::assertSame($restoredStatement, $reconnected['statement_id']);
+        $newMessage = $this->repository->createTransactionFromNotice(
+            $this->otherSupplierId, $notice, 'imap-901:<new@example.test>', 0.05, $this->matcher, 'CZK',
+        );
+        self::assertNotSame($restoredTransaction, $newMessage['transaction_id']);
+        self::assertSame($restoredStatement, $newMessage['statement_id']);
+        self::assertSame(2, (int) $pdo->query('SELECT COUNT(*) FROM bank_transactions WHERE statement_id = ' . $restoredStatement)->fetchColumn());
+        self::assertSame(1, (int) $pdo->query('SELECT COUNT(*) FROM bank_transactions WHERE statement_id = ' . $first['statement_id'])->fetchColumn());
+    }
+
+    public function testIdokladRestoredMovementAndMonthIgnoreOldSupplierPrefix(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare('INSERT INTO bank_statements
+                (supplier_id, source, source_ref, external_identity, file_name, file_hash,
+                 account_number, bank_code, currency, statement_date)
+                VALUES (?, "idoklad", ?, "idoklad-month:99:2099-07", "synthetic", ?,
+                        "1000000005", "0100", "CZK", "2099-07-14")')
+                ->execute([$this->otherSupplierId, $this->supplierId . ':99:2099-07',
+                    hash('sha256', 'synthetic-restored-month-' . $this->otherSupplierId)]);
+            $statementId = (int) $pdo->lastInsertId();
+            $pdo->prepare('INSERT INTO bank_transactions
+                (source, source_ref, external_identity, statement_id, posted_at, amount)
+                VALUES ("idoklad", ?, "idoklad:123", ?, "2099-07-14", 12.34)')
+                ->execute([$this->supplierId . ':123', $statementId]);
+            $class = new \ReflectionClass(\MyInvoice\Service\Import\IdokladBankTransactionImporter::class);
+            $importer = $class->newInstanceWithoutConstructor();
+            $exists = $class->getMethod('exists');
+            self::assertTrue($exists->invoke($importer, $pdo, $this->otherSupplierId,
+                $this->otherSupplierId . ':123', 'idoklad:123'));
+            self::assertFalse($exists->invoke($importer, $pdo, $this->supplierId,
+                $this->supplierId . ':123', 'idoklad:123'));
+            self::assertFalse($exists->invoke($importer, $pdo, $this->otherSupplierId,
+                $this->otherSupplierId . ':124', 'idoklad:124'));
+            $month = $class->getMethod('statement');
+            self::assertSame($statementId, $month->invoke($importer, $pdo,
+                $this->otherSupplierId, 99, '2099-07-15',
+                ['account_number' => '1000000005', 'bank_code' => '0100', 'currency' => 'CZK']));
+            self::assertSame('2099-07-15', $pdo->query('SELECT statement_date FROM bank_statements WHERE id = ' . $statementId)->fetchColumn());
+        } finally {
+            $pdo->rollBack();
+        }
     }
 
     public function testMatchedTransactionKeepsPostprocessErrorOnlyAsWarning(): void

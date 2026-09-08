@@ -1538,7 +1538,7 @@ final class BankStatementAction
         $postingByTx = $this->loadPostingInfo($sid, $txIds);
 
         foreach ($transactions as &$t) {
-            unset($t['dedup_scope_id']); // Interní materializace unikátnosti není API pole.
+            unset($t['dedup_scope_id'], $t['external_identity']); // Interní deduplikace není API pole.
             $t['id'] = (int) $t['id'];
             $t['amount'] = (float) $t['amount'];
             $t['balance'] = isset($t['balance']) ? (float) $t['balance'] : null;

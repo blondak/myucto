@@ -36,7 +36,8 @@ final class IdokladBankTransactionImporter
                 continue;
             }
             $sourceRef = $supplierId . ':' . $externalId;
-            if ($this->exists($pdo, $sourceRef)) {
+            $externalIdentity = \MyInvoice\Service\Bank\BankExternalImportIdentity::idoklad($externalId);
+            if ($this->exists($pdo, $supplierId, $sourceRef, $externalIdentity)) {
                 $result['skipped']++;
                 continue;
             }
@@ -68,12 +69,12 @@ final class IdokladBankTransactionImporter
                 $statementId = $this->statement($pdo, $supplierId, $externalAccountId, $date, $account);
                 $pdo->prepare(
                 "INSERT INTO bank_transactions
-                    (source, source_ref, statement_id, posted_at, amount, currency,
+                    (source, source_ref, external_identity, statement_id, posted_at, amount, currency,
                      variable_symbol, constant_symbol, specific_symbol, counterparty_account,
                      counterparty_bank, counterparty_name, description, bank_ref)
-                 VALUES ('idoklad', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                 VALUES ('idoklad', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )->execute([
-                $sourceRef, $statementId, $date, number_format($amount, 2, '.', ''),
+                $sourceRef, $externalIdentity, $statementId, $date, number_format($amount, 2, '.', ''),
                 (string) $account['currency'], self::text($movement['VariableSymbol'] ?? null, 20),
                 self::text($movement['ConstantSymbol'] ?? null, 10), self::text($movement['SpecificSymbol'] ?? null, 20),
                 self::text($movement['PartnerAccountNumber'] ?? null, 40),
@@ -128,10 +129,11 @@ final class IdokladBankTransactionImporter
         return (int) ($movement['MovementType'] ?? 1) < 0 ? -$amount : $amount;
     }
 
-    private function exists(PDO $pdo, string $externalId): bool
+    private function exists(PDO $pdo, int $supplierId, string $sourceRef, string $externalIdentity): bool
     {
-        $s = $pdo->prepare("SELECT 1 FROM bank_transactions WHERE source = 'idoklad' AND source_ref = ? LIMIT 1");
-        $s->execute([$externalId]);
+        $s = $pdo->prepare("SELECT 1 FROM bank_transactions WHERE source = 'idoklad'
+            AND dedup_scope_id = ? AND (external_identity = ? OR source_ref = ?) LIMIT 1");
+        $s->execute([$supplierId, $externalIdentity, $sourceRef]);
         return (bool) $s->fetchColumn();
     }
 
@@ -184,19 +186,21 @@ final class IdokladBankTransactionImporter
         $month = substr($date, 0, 7);
         $ref = $supplierId . ':' . $externalAccountId . ':' . $month;
         $hash = hash('sha256', 'idoklad:' . $ref);
+        $externalIdentity = \MyInvoice\Service\Bank\BankExternalImportIdentity::idokladMonth($externalAccountId, $month);
         $pdo->prepare(
             "INSERT INTO bank_statements
-                (source, source_ref, file_name, file_hash, supplier_id, account_number, bank_code, currency, statement_date)
-             VALUES ('idoklad', ?, ?, ?, ?, ?, ?, ?, ?)
+                (source, source_ref, external_identity, file_name, file_hash, supplier_id, account_number, bank_code, currency, statement_date)
+             VALUES ('idoklad', ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
+                id = LAST_INSERT_ID(id),
+                external_identity = VALUES(external_identity),
                 supplier_id = VALUES(supplier_id),
                 statement_date = GREATEST(statement_date, VALUES(statement_date))"
         )->execute([
-            $ref, 'iDoklad ' . $month, $hash, $supplierId, (string) $account['account_number'],
+            $ref, $externalIdentity, 'iDoklad ' . $month, $hash, $supplierId, (string) $account['account_number'],
             self::text($account['bank_code'] ?? null, 4), (string) $account['currency'], $date,
         ]);
-        return \MyInvoice\Service\Bank\BankStatementDeduplication::find($pdo, $hash, $supplierId)
-            ?? throw new \RuntimeException('Importovaný výpis nebyl nalezen v cílové firmě.');
+        return (int) $pdo->lastInsertId();
     }
 
     /** @param array<string,mixed> $movement */

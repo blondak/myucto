@@ -535,6 +535,38 @@ final class BankEmailNoticeRepository
                 : $notice->currency
         );
 
+        $externalIdentity = \MyInvoice\Service\Bank\BankExternalImportIdentity::email($sourceRef);
+        $transactionSourceRef = 'supplier-' . $supplierId . ':' . hash('sha256', $sourceRef);
+        $dupStmt = $pdo->prepare(
+            "SELECT bt.id, bt.statement_id, bt.external_identity
+               FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.source = 'email_notice' AND bs.supplier_id = ?
+                AND (bt.external_identity = ? OR bt.source_ref IN (?, ?))
+              ORDER BY bt.id LIMIT 2"
+        );
+        $dupStmt->execute([$supplierId, $externalIdentity, $transactionSourceRef, $sourceRef]);
+        $existingRows = $dupStmt->fetchAll(\PDO::FETCH_ASSOC);
+        if (count($existingRows) > 1) {
+            throw new \RuntimeException('Nejednoznačná historická identita bankovního avíza.');
+        }
+        if ($existingRows !== []) {
+            $existing = $existingRows[0];
+            if ($existing['external_identity'] !== null && $existing['external_identity'] !== $externalIdentity) {
+                throw new \RuntimeException('Historická reference avíza má odlišnou externí identitu.');
+            }
+            $transactionId = (int) $existing['id'];
+            if ($existing['external_identity'] === null) {
+                $pdo->prepare('UPDATE bank_transactions SET external_identity = ? WHERE id = ? AND external_identity IS NULL')
+                    ->execute([$externalIdentity, $transactionId]);
+            }
+            return [
+                'statement_id' => (int) $existing['statement_id'],
+                'transaction_id' => $transactionId,
+                'match_result' => $matcher->match($transactionId),
+            ];
+        }
+
         // Měsíční výpis: avíza pro stejný účet/měnu/měsíc se sbírají do jednoho
         // bank_statements (source=email_notice), ať seznam výpisů nezaplaví 1 řádek/avízo.
         // Tenant je součástí klíče i SQL scope: stejné číslo účtu může být ve více
@@ -545,15 +577,17 @@ final class BankEmailNoticeRepository
         $monthKey = $supplierId . '|' . $legacyMonthKey;
         $fileHash = hash('sha256', 'email-notice-monthly:' . $monthKey);
         $legacyFileHash = hash('sha256', 'email-notice-monthly:' . $legacyMonthKey);
+        $statementExternalIdentity = \MyInvoice\Service\Bank\BankExternalImportIdentity::emailMonth($account, $bankCode, $currency, $ym);
 
         $findStmt = $pdo->prepare(
             'SELECT id
                FROM bank_statements
-              WHERE supplier_id = ? AND file_hash IN (?, ?)
+              WHERE supplier_id = ? AND source = \'email_notice\'
+                AND (external_identity = ? OR file_hash IN (?, ?))
               ORDER BY (file_hash = ?) DESC
               LIMIT 1'
         );
-        $findStmt->execute([$supplierId, $fileHash, $legacyFileHash, $fileHash]);
+        $findStmt->execute([$supplierId, $statementExternalIdentity, $fileHash, $legacyFileHash, $fileHash]);
         $found = $findStmt->fetchColumn();
         if ($found !== false) {
             $statementId = (int) $found;
@@ -561,12 +595,13 @@ final class BankEmailNoticeRepository
             try {
                 $pdo->prepare(
                     'INSERT INTO bank_statements
-                        (source, source_ref, file_name, file_hash, supplier_id, account_number, bank_code, currency, statement_date,
+                        (source, source_ref, external_identity, file_name, file_hash, supplier_id, account_number, bank_code, currency, statement_date,
                          transaction_count, matched_count, imported_by)
-                     VALUES (?,?,?,?,?,?,?,?,?,0,0,NULL)'
+                     VALUES (?,?,?,?,?,?,?,?,?,?,0,0,NULL)'
                 )->execute([
                     'email_notice',
                     'imap-monthly:' . $monthKey,
+                    $statementExternalIdentity,
                     'Email avíza ' . $ym,
                     $fileHash,
                     $supplierId,
@@ -579,7 +614,7 @@ final class BankEmailNoticeRepository
             } catch (\PDOException $e) {
                 // Souběh — jiný běh výpis mezitím založil; načti existující.
                 if ($e->getCode() === '23000') {
-                    $findStmt->execute([$supplierId, $fileHash, $legacyFileHash, $fileHash]);
+                    $findStmt->execute([$supplierId, $statementExternalIdentity, $fileHash, $legacyFileHash, $fileHash]);
                     $statementId = (int) $findStmt->fetchColumn();
                 } else {
                     throw $e;
@@ -587,41 +622,15 @@ final class BankEmailNoticeRepository
             }
         }
 
-        // Idempotence (#161): re-scan téhož avíza (typicky po smazání processed-message
-        // záznamu přes „Smazat záznam", což odstraní dedup na úrovni zprávy) nesmí založit
-        // druhou transakci. source_ref nese message_id (nebo fallback hash) → je per-avízo
-        // stabilní. Ukládaný klíč obsahuje tenant + hash reference; legacy raw
-        // reference se hledá jen uvnitř stejného supplier scope. Najdeme-li
-        // existující, jen re-matchujeme a vrátíme ji.
-        $transactionSourceRef = 'supplier-' . $supplierId . ':' . hash('sha256', $sourceRef);
-        $dupStmt = $pdo->prepare(
-            "SELECT bt.id, bt.statement_id
-               FROM bank_transactions bt
-               JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bt.source = 'email_notice'
-                AND bs.supplier_id = ?
-                AND bt.source_ref IN (?, ?)
-              LIMIT 1"
-        );
-        $dupStmt->execute([$supplierId, $transactionSourceRef, $sourceRef]);
-        $existing = $dupStmt->fetch(\PDO::FETCH_ASSOC);
-        if ($existing !== false) {
-            $transactionId = (int) $existing['id'];
-            return [
-                'statement_id' => (int) $existing['statement_id'],
-                'transaction_id' => $transactionId,
-                'match_result' => $matcher->match($transactionId),
-            ];
-        }
-
         $pdo->prepare(
             'INSERT INTO bank_transactions
-                (source, source_ref, statement_id, posted_at, amount, balance, currency, variable_symbol, constant_symbol,
+                (source, source_ref, external_identity, statement_id, posted_at, amount, balance, currency, variable_symbol, constant_symbol,
                  counterparty_account, counterparty_bank, counterparty_name, description, bank_ref, match_tolerance)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute([
             'email_notice',
             $transactionSourceRef,
+            $externalIdentity,
             $statementId,
             $notice->postedAt,
             $notice->amount,

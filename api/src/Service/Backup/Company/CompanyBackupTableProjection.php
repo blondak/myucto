@@ -523,6 +523,7 @@ final readonly class CompanyBackupTableProjection
      */
     public function inspectCompleteSourceRow(array $row, callable $visitor): void
     {
+        CompanyBackupBankImportIdentityGuard::assertRow($this->registryKey, $row);
         $this->visitSourceReferences($row, $visitor);
         $this->hashReferences->assertSourceRow($row);
         $this->embeddedHashReferences->assertSourceRow($row);

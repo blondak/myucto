@@ -59,6 +59,12 @@ Vyber soubor (drag & drop nebo klik). Po nahrání:
    Jiná firma může mít vlastní nezávislou kopii stejného výpisu i pohybů.
    Staré výpisy bez přiřazené firmy se automaticky neslučují s výpisy
    konkrétní firmy; nejprve je potřeba ověřit a vyřešit jejich vlastnictví.
+   U e-mailových avíz a iDokladu se uchovává také externí identita pohybu,
+   nezávislá na místním ID firmy nebo IMAP konfigurace. Po ručním opětovném
+   napojení stejného zdroje tak již evidované pohyby zůstávají rozpoznatelné.
+   U starších avíz lze identitu doplnit z původní reference nebo záznamu
+   zpracované zprávy; samotný jednosměrný hash po odstranění těchto údajů
+   není dostatečný důkaz a systém jejich identitu neodhaduje.
 2. **Validace bankovního účtu** — server zkontroluje, že číslo účtu z hlavičky
    výpisu patří některé z měn aktuálního dodavatele.
 3. **Parsing transakcí** — přečte všechny řádky.

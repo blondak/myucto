@@ -292,9 +292,10 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         self::assertNotSame($oldBtId, $newBtId, 'payment_matches.bank_transaction_id po obnově NEukazuje na starou (cizí) bankovní transakci.');
 
         $newBt = $this->db->pdo()->query(
-            "SELECT statement_id, matched_invoice_id FROM bank_transactions WHERE id = {$newBtId}"
+            "SELECT statement_id, matched_invoice_id, external_identity FROM bank_transactions WHERE id = {$newBtId}"
         )->fetch(PDO::FETCH_ASSOC);
         self::assertNotFalse($newBt, 'Nová bankovní transakce existuje.');
+        self::assertSame('idoklad:209799', $newBt['external_identity']);
         $newStatementId = (int) $newBt['statement_id'];
         self::assertNotSame($oldStatementId, $newStatementId, 'bank_transactions.statement_id po obnově NEukazuje na starý (cizí) výpis.');
 
@@ -398,9 +399,9 @@ final class ArchiveRestoreRoundTripTest extends TestCase
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO bank_statements
-                (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date,
+                (supplier_id, source, external_identity, file_name, file_hash, account_number, bank_code, currency, statement_date,
                  prev_balance, curr_balance, credit_total, debit_total, transaction_count)
-             VALUES (?, ?, ?, "1000000005/0100", "0100", "CZK", ?, 0, 5000, 5000, 0, 1)'
+             VALUES (?, "idoklad", "idoklad-month:99:2097-06", ?, ?, "1000000005/0100", "0100", "CZK", ?, 0, 5000, 5000, 0, 1)'
         );
         $stmt->execute([$this->supplierId, 'vypis-' . $hash . '.gpc', $hash, self::YEAR . '-06-18']);
         return (int) $this->db->pdo()->lastInsertId();
@@ -410,8 +411,8 @@ final class ArchiveRestoreRoundTripTest extends TestCase
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO bank_transactions
-                (statement_id, posted_at, amount, currency, variable_symbol, matched_invoice_id, match_status, matched_by)
-             VALUES (?, ?, ?, "CZK", "20970002", ?, "manual", ?)'
+                (source, external_identity, statement_id, posted_at, amount, currency, variable_symbol, matched_invoice_id, match_status, matched_by)
+             VALUES ("idoklad", "idoklad:209799", ?, ?, ?, "CZK", "20970002", ?, "manual", ?)'
         );
         $stmt->execute([$statementId, self::YEAR . '-06-18', $amount, $invoiceId, $this->userId]);
         return (int) $this->db->pdo()->lastInsertId();
