@@ -572,6 +572,50 @@ final class CompanyBackupImportDependencyPlanTest extends TestCase
         );
     }
 
+    public function testPurchaseOrdersRestoreBeforeLinesAndInvoiceLinks(): void
+    {
+        $production = TenantDataRegistryFactory::draftV1();
+        $definitions = [
+            $this->table('table:supplier', TenantDataPolicy::TenantRoot, ['id']),
+            $this->table('table:users', TenantDataPolicy::InstanceOwned, ['id']),
+        ];
+        foreach (['clients', 'currencies', 'warehouses', 'stock_items', 'purchase_invoices'] as $table) {
+            $definitions[] = $this->table(
+                'table:' . $table,
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id'],
+                [$this->reference(['supplier_id'], 'table:supplier')],
+            );
+        }
+        foreach (['vat_rates', 'purchase_orders', 'purchase_order_lines', 'purchase_order_invoice_links'] as $table) {
+            $definition = $production->definition('table:' . $table);
+            self::assertNotNull($definition);
+            $definitions[] = $definition;
+        }
+        $snapshot = $this->snapshot($definitions);
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry(
+            $snapshot,
+            $this->inventory($snapshot, ['table:supplier' => 1]),
+        );
+        $positions = [];
+        foreach ($plan->insertBatches() as $index => $batch) {
+            foreach ($batch as $key) {
+                $positions[$key] = $index;
+            }
+        }
+        foreach (['clients', 'currencies', 'warehouses'] as $parent) {
+            self::assertLessThan($positions['table:purchase_orders'], $positions['table:' . $parent]);
+        }
+        foreach (['purchase_order_lines', 'purchase_order_invoice_links'] as $child) {
+            self::assertLessThan($positions['table:' . $child], $positions['table:purchase_orders']);
+        }
+        self::assertLessThan(
+            $positions['table:purchase_order_invoice_links'],
+            $positions['table:purchase_invoices'],
+        );
+        self::assertSame(['table:vat_rates'], $plan->globalRegistryKeys());
+    }
+
     public function testRequiresExactlyOneTenantRootRow(): void
     {
         $snapshot = $this->snapshot([

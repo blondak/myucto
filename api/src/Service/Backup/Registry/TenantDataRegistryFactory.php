@@ -87,6 +87,9 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPayrollTravelCompensationLinks
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollWorkCalendarsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPdfSignatureOutputSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupProjectsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPurchaseOrdersProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPurchaseOrderLinesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupPurchaseOrderInvoiceLinksProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupRevenueCategoriesProjection;
@@ -906,6 +909,43 @@ final class TenantDataRegistryFactory
                 ...self::companyBackupProjection('expense_categories'),
             ],
         );
+        // Objednávky nejsou účetní případy; patří do úplné zálohy firmy.
+        foreach ([
+            'purchase_orders' => CompanyBackupPurchaseOrdersProjection::class,
+            'purchase_order_lines' => CompanyBackupPurchaseOrderLinesProjection::class,
+            'purchase_order_invoice_links' => CompanyBackupPurchaseOrderInvoiceLinksProjection::class,
+        ] as $table => $projection) {
+            $naturalKey = match ($table) {
+                'purchase_order_lines' => ['order_id', 'line_no'],
+                'purchase_order_invoice_links' => ['order_id', 'purchase_invoice_id'],
+                // Rozpracovaná objednávka nemá číslo; nullable UNIQUE není identita.
+                default => null,
+            };
+            $definitions[] = new TenantDataDefinition(
+                'table:' . $table,
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantOwned,
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+                [
+                    'primary_key' => ['id'],
+                    ...($naturalKey === null ? [] : ['natural_key' => $naturalKey]),
+                    'feature_group' => 'stock',
+                    'ownership' => [
+                        'strategy' => 'supplier_id',
+                        'column' => 'supplier_id',
+                    ],
+                    'secrets' => [],
+                    'company_backup' => [
+                        'data_columns' => $projection::dataColumns(),
+                        'embedded_references' => [],
+                        'generated_columns' => [],
+                        'omit_columns' => [],
+                        'references' => $projection::references(),
+                        'restore_overrides' => [],
+                    ],
+                ],
+            );
+        }
         $definitions[] = new TenantDataDefinition(
             'table:invoice_settlements',
             TenantDataObjectKind::Table,
