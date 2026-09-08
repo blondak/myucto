@@ -120,6 +120,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupStockLevelsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockDocumentsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankStatementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankTransactionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankTransferMatchesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSupplierBankAccountsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockDocumentLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLandedCostsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockTakesProjection;
@@ -148,6 +150,8 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
+        'bank_transfer_matches' => 'bank',
+        'supplier_bank_accounts' => 'bank',
         'payroll_absences' => 'payroll',
         'payroll_average_earning_snapshots' => 'payroll',
         'payroll_business_trip_free_meals' => 'payroll',
@@ -267,6 +271,7 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<string>> */
     private const COMPANY_BACKUP_NATURAL_KEYS = [
+        'supplier_bank_accounts' => ['supplier_id', 'account_canonical', 'bank_code_norm'],
         'payroll_average_earning_snapshots' => [
             'supplier_id',
             'employment_id',
@@ -2540,6 +2545,8 @@ final class TenantDataRegistryFactory
             'asset_improvements' =>
                 CompanyBackupAssetImprovementsProjection::dataColumns(),
             'assets' => CompanyBackupAssetsProjection::dataColumns(),
+            'bank_transfer_matches' => CompanyBackupBankTransferMatchesProjection::dataColumns(),
+            'supplier_bank_accounts' => CompanyBackupSupplierBankAccountsProjection::dataColumns(),
             'branding_profiles' =>
                 CompanyBackupBrandingProfilesProjection::dataColumns(),
             'cash_document_vat_lines' =>
@@ -2816,6 +2823,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockLocalesProjection::references(),
             'stock_levels' => CompanyBackupStockLevelsProjection::references(),
             'stock_documents' => CompanyBackupStockDocumentsProjection::references(),
+            'bank_transfer_matches' => CompanyBackupBankTransferMatchesProjection::references(),
+            'supplier_bank_accounts' => CompanyBackupSupplierBankAccountsProjection::references(),
             'stock_document_lines' => CompanyBackupStockDocumentLinesProjection::references(),
             'stock_landed_costs' => CompanyBackupStockLandedCostsProjection::references(),
             'stock_takes' => CompanyBackupStockTakesProjection::references(),
