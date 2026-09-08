@@ -7,6 +7,15 @@ namespace MyInvoice\Tests\Integration\Bank;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankEmailNoticeRepository;
+use MyInvoice\Service\Backup\Company\CompanyBackupPreparedImportRow;
+use MyInvoice\Service\Backup\Company\CompanyBackupReference;
+use MyInvoice\Service\Backup\Company\CompanyBackupSourceIdentityProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlInsertWriter;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlPrimaryKeyReservation;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Bank\EmailNotice\ParsedBankEmailNotice;
 use MyInvoice\Service\Bank\StatementMatcher;
 use PDO;
@@ -268,6 +277,98 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
         self::assertSame('processed_success', $row['effective_status']);
         self::assertTrue($row['matched']);
         self::assertSame('no headers found', $row['error_message']);
+    }
+
+    public function testCompanyBankWritersPreserveBinaryFilesAndDeriveNewTenantScope(): void
+    {
+        $notice = new ParsedBankEmailNotice(
+            variableSymbol: '2099071403', amount: 123.45, currency: 'CZK',
+            postedAt: '2099-07-14', recipientAccount: self::ACCOUNT . '/0100',
+            counterpartyAccount: '1000000005', counterpartyBank: '0100',
+            counterpartyName: 'Syntetická protistrana', message: 'Company bank projection',
+        );
+        $created = $this->repository->createTransactionFromNotice(
+            $this->supplierId, $notice, 'imap-1:<company-writer@example.test>',
+            0.05, $this->matcher, 'CZK',
+        );
+        $pdo = $this->db->pdo();
+        $registry = TenantDataRegistryFactory::draftV1();
+        $reader = new CompanyBackupTableSchemaReader();
+        $source = new CompanyBackupSqlRowSource();
+        $binary = "synthetic\x00\xff\x80\r\n";
+        $restoredStatement = 0;
+        $restoredTransaction = 0;
+        $previousIsolation = (string) $pdo->query('SELECT @@transaction_isolation')->fetchColumn();
+        $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare('UPDATE bank_statements SET file_content = ?, pdf_content = ? WHERE id = ?')
+                ->execute([$binary, $binary, $created['statement_id']]);
+            foreach (['bank_statements' => $created['statement_id'],
+                'bank_transactions' => $created['transaction_id']] as $table => $sourceId) {
+                $definition = $registry->definition('table:' . $table);
+                self::assertNotNull($definition);
+                $projection = CompanyBackupTableProjection::fromDefinition($definition);
+                $projection->assertRegistryTargets($registry);
+                $row = null;
+                foreach ($source->rows($pdo, $this->supplierId, $definition) as $candidate) {
+                    if ((int) $candidate['id'] === $sourceId) {
+                        $row = $candidate;
+                        break;
+                    }
+                }
+                self::assertNotNull($row);
+                self::assertArrayNotHasKey('dedup_scope_id', $row);
+                $projection->assertCompleteSourceRow($row);
+                if ($table === 'bank_statements') {
+                    self::assertSame(bin2hex($binary), $row['file_content']);
+                    self::assertSame(bin2hex($binary), $row['pdf_content']);
+                }
+                $identity = CompanyBackupSourceIdentityProjection::fromDefinition($definition);
+                $original = $identity->identityForRow($row);
+                $mapped = $projection->references->remap($row,
+                    fn (CompanyBackupReference $reference, array $key): ?array => match ($reference->target) {
+                        'table:supplier' => [$this->otherSupplierId],
+                        'table:bank_statements' => [$restoredStatement],
+                        'table:users' => null,
+                        default => throw new \LogicException('Neočekávaná testovací vazba.'),
+                    },
+                );
+                $metadata = $reader->readImportMetadata($pdo, $projection);
+                self::assertNotNull($metadata->autoIncrement);
+                $reservation = CompanyBackupSqlPrimaryKeyReservation::reserve(
+                    $pdo, $projection, $metadata->autoIncrement, 1,
+                );
+                $mapped['id'] = $reservation->next();
+                $reservation->finish();
+                $writer = new CompanyBackupSqlInsertWriter($pdo, $definition, $reader->read($pdo, $projection), 1);
+                $writer->insert(new CompanyBackupPreparedImportRow(
+                    $mapped, $original, $identity->identityForRow($mapped),
+                ));
+                $writer->finish();
+                $stored = $pdo->query('SELECT * FROM ' . $table . ' WHERE id = ' . $mapped['id'])
+                    ->fetch(PDO::FETCH_ASSOC);
+                self::assertSame($this->otherSupplierId, (int) $stored['dedup_scope_id']);
+                foreach ($mapped as $column => $value) {
+                    $expected = isset($projection->columnCodecs[$column]) ? $binary : $value;
+                    self::assertSame($expected, $stored[$column], $table . '.' . $column);
+                }
+                if ($table === 'bank_statements') {
+                    $restoredStatement = $mapped['id'];
+                } else {
+                    $restoredTransaction = $mapped['id'];
+                }
+            }
+            $replay = $this->repository->createTransactionFromNotice(
+                $this->otherSupplierId, $notice, 'imap-999:<company-writer@example.test>',
+                0.05, $this->matcher, 'CZK',
+            );
+            self::assertSame($restoredStatement, $replay['statement_id']);
+            self::assertSame($restoredTransaction, $replay['transaction_id']);
+        } finally {
+            $pdo->rollBack();
+            $pdo->prepare('SET SESSION transaction_isolation = ?')->execute([$previousIsolation]);
+        }
     }
 
     private function cloneSupplier(): int

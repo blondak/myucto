@@ -118,6 +118,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupStockItemsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLocalesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLevelsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockDocumentsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankStatementsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankTransactionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockDocumentLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLandedCostsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockTakesProjection;
@@ -1390,7 +1392,7 @@ final class TenantDataRegistryFactory
             ],
             'bank_transactions' => [
                 TenantDataPolicy::TenantOwnedIndirect,
-                ['strategy' => 'bank_transaction_relationships'],
+                self::foreignKeyPath('statement_id', 'bank_statements'),
             ],
             'bank_statements' => [
                 TenantDataPolicy::TenantOwned,
@@ -1533,6 +1535,28 @@ final class TenantDataRegistryFactory
      */
     private static function companyBackupProjection(string $table): array
     {
+        if ($table === 'bank_statements' || $table === 'bank_transactions') {
+            $statement = $table === 'bank_statements';
+            return [
+                'company_backup' => [
+                    'data_columns' => $statement
+                        ? CompanyBackupBankStatementsProjection::dataColumns()
+                        : CompanyBackupBankTransactionsProjection::dataColumns(),
+                    'column_codecs' => $statement
+                        ? ['file_content' => 'binary_hex', 'pdf_content' => 'binary_hex'] : [],
+                    // Výpis musí mít vlastníka již při INSERTu, jinak koliduje ve scope 0.
+                    'deferred_updates' => !$statement,
+                    'embedded_references' => [],
+                    'generated_columns' => $statement ? ['dedup_scope_id'] : [],
+                    'omit_columns' => $statement ? []
+                        : ['dedup_scope_id' => 'derived_by_trigger_from_remapped_statement'],
+                    'references' => $statement
+                        ? CompanyBackupBankStatementsProjection::references()
+                        : CompanyBackupBankTransactionsProjection::references(),
+                    'restore_overrides' => [],
+                ],
+            ];
+        }
         if ($table === 'payroll_absences') {
             return [
                 'company_backup' => [
