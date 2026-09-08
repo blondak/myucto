@@ -30,12 +30,15 @@ final readonly class CompanyBackupRestoreCoordinator
 
     private CompanyBackupFilePublisher $publisher;
 
+    private CompanyBackupPostImportMaterializerRegistry $materializers;
+
     public function __construct(
         private PDO $database,
         ?CompanyBackupDatabaseImport $importer = null,
         ?CompanyBackupPostImportValidator $postImport = null,
         ?CompanyBackupFileRestoreStager $stager = null,
         ?CompanyBackupFilePublisher $publisher = null,
+        ?CompanyBackupPostImportMaterializerRegistry $materializers = null,
     ) {
         $this->importer = $importer
             ?? new CompanyBackupDatabaseImporter($database);
@@ -43,6 +46,8 @@ final readonly class CompanyBackupRestoreCoordinator
             ?? new CompanyBackupRegistryPostImportValidator();
         $this->stager = $stager ?? new CompanyBackupFileRestoreStager();
         $this->publisher = $publisher ?? new CompanyBackupFilePublisher();
+        $this->materializers = $materializers
+            ?? CompanyBackupPostImportMaterializerRegistry::production();
     }
 
     public function restore(
@@ -74,6 +79,12 @@ final readonly class CompanyBackupRestoreCoordinator
                 $preflight,
                 $decisions,
                 $sensitiveData,
+            );
+            $this->assertTransaction('restore_transaction_lost');
+            $this->materializers->materialize(
+                $this->database,
+                $databaseResult->supplierId,
+                $source->targetRegistry(),
             );
             $this->assertTransaction('restore_transaction_lost');
             $source->close();

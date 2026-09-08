@@ -99,9 +99,12 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockAttributeI18nProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockAttributeOptionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockAttributesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockCategoriesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockCategoryI18nProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockCurrenciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockFeeTypesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemAttributeValuesProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockItemCategoriesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemFeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemI18nProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemPricesProjection;
@@ -745,6 +748,10 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_attribute_options') {
                 $details['natural_key'] = ['attribute_id', 'code'];
+            } elseif ($table === 'stock_categories') {
+                $details['natural_key'] = ['supplier_id', 'code'];
+            } elseif ($table === 'stock_category_i18n') {
+                $details['natural_key'] = ['category_id', 'locale'];
             } elseif ($table === 'stock_fee_types') {
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_item_prices') {
@@ -2502,6 +2509,10 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockAttributeOptionsProjection::dataColumns(),
             'stock_attributes' =>
                 CompanyBackupStockAttributesProjection::dataColumns(),
+            'stock_categories' =>
+                CompanyBackupStockCategoriesProjection::dataColumns(),
+            'stock_category_i18n' =>
+                CompanyBackupStockCategoryI18nProjection::dataColumns(),
             'stock_currencies' =>
                 CompanyBackupStockCurrenciesProjection::dataColumns(),
             'stock_fee_types' =>
@@ -2512,6 +2523,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockItemI18nProjection::dataColumns(),
             'stock_item_attribute_values' =>
                 CompanyBackupStockItemAttributeValuesProjection::dataColumns(),
+            'stock_item_categories' =>
+                CompanyBackupStockItemCategoriesProjection::dataColumns(),
             'stock_item_prices' =>
                 CompanyBackupStockItemPricesProjection::dataColumns(),
             'stock_item_tags' =>
@@ -2539,6 +2552,9 @@ final class TenantDataRegistryFactory
             : [];
         $references = self::companyBackupReferences($table);
         $restoreOverrides = self::companyBackupRestoreOverrides($table);
+        $omitColumns = $table === 'stock_categories'
+            ? CompanyBackupStockCategoriesProjection::omitColumns()
+            : [];
         $polymorphicReferences = match ($table) {
             'journal_entries' =>
                 CompanyBackupJournalEntriesProjection::polymorphicReferences(),
@@ -2578,7 +2594,7 @@ final class TenantDataRegistryFactory
                 'data_columns' => $columns,
                 'embedded_references' => $embeddedReferences,
                 'generated_columns' => [],
-                'omit_columns' => [],
+                'omit_columns' => $omitColumns,
                 'references' => $references,
                 'restore_overrides' => $restoreOverrides,
             ],
@@ -2692,6 +2708,10 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockAttributeOptionsProjection::references(),
             'stock_attributes' =>
                 CompanyBackupStockAttributesProjection::references(),
+            'stock_categories' =>
+                CompanyBackupStockCategoriesProjection::references(),
+            'stock_category_i18n' =>
+                CompanyBackupStockCategoryI18nProjection::references(),
             'stock_currencies' =>
                 CompanyBackupStockCurrenciesProjection::references(),
             'stock_fee_types' =>
@@ -2702,6 +2722,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockItemI18nProjection::references(),
             'stock_item_attribute_values' =>
                 CompanyBackupStockItemAttributeValuesProjection::references(),
+            'stock_item_categories' =>
+                CompanyBackupStockItemCategoriesProjection::references(),
             'stock_item_prices' =>
                 CompanyBackupStockItemPricesProjection::references(),
             'stock_item_tags' =>

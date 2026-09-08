@@ -2877,6 +2877,198 @@ final class CompanyBackupProductionProjectionTest extends TestCase
         );
     }
 
+    public function testStockCategoriesRebuildDerivedTreeCoordinates(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_categories');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $runtimeColumns = [
+            'id',
+            'supplier_id',
+            'parent_id',
+            'code',
+            'name',
+            'path',
+            'depth',
+            'display_order',
+            'export_eshop',
+            'archived',
+            'created_at',
+            'updated_at',
+        ];
+        $dataColumns = [
+            'id',
+            'supplier_id',
+            'parent_id',
+            'code',
+            'name',
+            'display_order',
+            'export_eshop',
+            'archived',
+            'created_at',
+            'updated_at',
+        ];
+
+        $projection->assertRuntimeSchema($runtimeColumns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['parent_id'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['parent_id'],
+                        'stock_categories',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($dataColumns, $projection->dataColumns);
+        self::assertSame(
+            [
+                'depth' => 'derived_from_remapped_category_tree',
+                'path' => 'derived_from_remapped_category_tree',
+            ],
+            $projection->omitColumns,
+        );
+        self::assertSame(
+            ['supplier_id', 'code'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'parent_id->stock_categories:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+        self::assertSame(
+            ['parent_id'],
+            $projection->references->references[0]->nullableColumns,
+        );
+    }
+
+    public function testStockCategoryI18nRemapsCategoryOwner(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_category_i18n');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'id',
+            'supplier_id',
+            'category_id',
+            'locale',
+            'name',
+            'description',
+            'seo_slug',
+        ];
+
+        $projection->assertRuntimeSchema($columns, [], ['id']);
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                ['description', 'seo_slug'],
+                [
+                    new CompanyBackupForeignKey(
+                        ['category_id'],
+                        'stock_categories',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertSame(
+            ['category_id', 'locale'],
+            $definition->details['natural_key'] ?? null,
+        );
+        self::assertSame(
+            [
+                'category_id->stock_categories:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
+    public function testStockItemCategoriesRemapCompositePrimaryKey(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        $definition = $registry->definition('table:stock_item_categories');
+        self::assertNotNull($definition);
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $columns = [
+            'supplier_id',
+            'stock_item_id',
+            'category_id',
+            'is_primary',
+            'display_order',
+        ];
+
+        $projection->assertRuntimeSchema(
+            $columns,
+            [],
+            ['stock_item_id', 'category_id'],
+        );
+        $projection->references->assertRegistryTargets($registry);
+        $projection->references->assertRuntimeSchema(
+            new CompanyBackupTableReferenceSchema(
+                [],
+                [
+                    new CompanyBackupForeignKey(
+                        ['category_id'],
+                        'stock_categories',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['stock_item_id'],
+                        'stock_items',
+                        ['id'],
+                    ),
+                    new CompanyBackupForeignKey(
+                        ['supplier_id'],
+                        'supplier',
+                        ['id'],
+                    ),
+                ],
+            ),
+        );
+
+        self::assertSame($columns, $projection->dataColumns);
+        self::assertArrayNotHasKey('natural_key', $definition->details);
+        self::assertSame(
+            [
+                'category_id->stock_categories:id',
+                'stock_item_id->stock_items:id',
+                'supplier_id->supplier:id',
+            ],
+            array_map(
+                static fn ($reference): string => $reference->signature(),
+                $projection->references->references,
+            ),
+        );
+    }
+
     public function testStockAttributeOptionsRemapAttributeAndNaturalKey(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();

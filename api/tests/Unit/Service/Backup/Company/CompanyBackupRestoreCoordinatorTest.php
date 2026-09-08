@@ -26,6 +26,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPostImportException;
 use MyInvoice\Service\Backup\Company\CompanyBackupPostImportInvariant;
 use MyInvoice\Service\Backup\Company\CompanyBackupPostImportInvariantRegistry;
 use MyInvoice\Service\Backup\Company\CompanyBackupPostImportInvariantReport;
+use MyInvoice\Service\Backup\Company\CompanyBackupPostImportMaterializer;
+use MyInvoice\Service\Backup\Company\CompanyBackupPostImportMaterializerRegistry;
 use MyInvoice\Service\Backup\Company\CompanyBackupPostImportValidator;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupRegistryPostImportValidator;
@@ -106,6 +108,78 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
             'synthetic-logo',
             file_get_contents($this->target($liveRoot)),
         );
+    }
+
+    public function testMaterializesDerivedStateBeforePostImportValidation(): void
+    {
+        [$source, $preflight, $decisions, $plan] = $this->context();
+        $phases = new CoordinatorRestorePhaseLog();
+        $materializers = CompanyBackupPostImportMaterializerRegistry::fromMaterializers([
+            new CoordinatorPostImportMaterializer($phases),
+        ]);
+        [$coordinator, $stagingRoot, $liveRoot] = $this->coordinator(
+            new CoordinatorDatabaseImporter($this->database, $plan),
+            new CoordinatorPostImportValidator(phases: $phases),
+            $materializers,
+        );
+
+        $coordinator->restore(
+            $source,
+            self::BACKUP_ID,
+            $preflight,
+            $decisions,
+            $this->sensitiveData(),
+        );
+
+        self::assertSame(['materialize', 'validate'], $phases->phases);
+        self::assertFalse($this->database->inTransaction());
+        self::assertSame(1, $this->markerCount());
+        self::assertSame([], $this->entries($stagingRoot));
+        self::assertFileExists($this->target($liveRoot));
+    }
+
+    public function testMaterializerFailureRollsBackBeforePublishingFiles(): void
+    {
+        [$source, $preflight, $decisions, $plan] = $this->context();
+        $failure = new \DomainException('synthetic_materializer_failure');
+        $materializers = CompanyBackupPostImportMaterializerRegistry::fromMaterializers([
+            new CoordinatorPostImportMaterializer(
+                new CoordinatorRestorePhaseLog(),
+                $failure,
+            ),
+        ]);
+        [$coordinator, $stagingRoot, $liveRoot] = $this->coordinator(
+            new CoordinatorDatabaseImporter($this->database, $plan),
+            new CoordinatorPostImportValidator(),
+            $materializers,
+        );
+
+        try {
+            $coordinator->restore(
+                $source,
+                self::BACKUP_ID,
+                $preflight,
+                $decisions,
+                $this->sensitiveData(),
+            );
+            self::fail('Chybná materializace nesmí být commitnuta.');
+        } catch (CompanyBackupPostImportException $e) {
+            self::assertSame(
+                'post_import_materializer_failed',
+                $e->errorCode,
+            );
+            self::assertSame(
+                'materializer:synthetic.derived-state',
+                $e->registryKey,
+            );
+            self::assertSame($failure, $e->getPrevious());
+        }
+
+        self::assertFalse($this->database->inTransaction());
+        self::assertSame(0, $this->markerCount());
+        self::assertSame([], $this->entries($stagingRoot));
+        self::assertSame([], $this->entries($liveRoot));
+        self::assertSame(1, $source->closes);
     }
 
     public function testPartialDatabaseImportFailureRollsBackAndCleansStaging(): void
@@ -608,6 +682,7 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
     private function coordinator(
         CompanyBackupDatabaseImport $importer,
         CompanyBackupPostImportValidator $validator,
+        ?CompanyBackupPostImportMaterializerRegistry $materializers = null,
     ): array {
         $stagingRoot = $this->root('staging');
         $liveRoot = $this->root('live');
@@ -622,6 +697,7 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
                 new CompanyBackupFilePublisher(
                     new CoordinatorFileAreaRootResolver($liveRoot),
                 ),
+                $materializers,
             ),
             $stagingRoot,
             $liveRoot,
@@ -765,6 +841,7 @@ final class CoordinatorPostImportValidator implements CompanyBackupPostImportVal
     public function __construct(
         private readonly ?\Throwable $failure = null,
         private readonly bool $commitTransaction = false,
+        private readonly ?CoordinatorRestorePhaseLog $phases = null,
     ) {}
 
     public function validate(
@@ -774,6 +851,9 @@ final class CoordinatorPostImportValidator implements CompanyBackupPostImportVal
         CompanyBackupDatabaseImportResult $result,
     ): CompanyBackupPostImportValidationResult {
         $this->calls++;
+        if ($this->phases !== null) {
+            $this->phases->phases[] = 'validate';
+        }
         if ($this->commitTransaction) {
             if (!$database->commit()) {
                 throw new \RuntimeException(
@@ -800,6 +880,49 @@ final class CoordinatorPostImportValidator implements CompanyBackupPostImportVal
             1,
             0,
         );
+    }
+}
+
+/** @internal */
+final class CoordinatorRestorePhaseLog
+{
+    /** @var list<string> */
+    public array $phases = [];
+}
+
+/** @internal */
+final readonly class CoordinatorPostImportMaterializer implements
+    CompanyBackupPostImportMaterializer
+{
+    public function __construct(
+        private CoordinatorRestorePhaseLog $phases,
+        private ?\Throwable $failure = null,
+    ) {}
+
+    public function id(): string
+    {
+        return 'synthetic.derived-state';
+    }
+
+    public function materialize(
+        PDO $database,
+        int $supplierId,
+        TenantDataRegistrySnapshot $registry,
+    ): int {
+        if (!$database->inTransaction()
+            || $supplierId !== 41
+            || $registry->profile
+                !== TenantDataRegistry::COMPANY_BACKUP_PROFILE
+        ) {
+            throw new \LogicException(
+                'Syntetická materializace nedostala platný kontext.',
+            );
+        }
+        $this->phases->phases[] = 'materialize';
+        if ($this->failure instanceof \Throwable) {
+            throw $this->failure;
+        }
+        return 1;
     }
 }
 
