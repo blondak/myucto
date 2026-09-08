@@ -27,12 +27,12 @@ final class AccountingArchiveCatalogTest extends TestCase
 
         $export = $catalog->forExport();
         $restore = $catalog->forRestore();
-        self::assertCount(58, $export);
+        self::assertCount(59, $export);
         self::assertSame('supplier', $export[0]->name);
-        self::assertSame('exchange_rates', $export[57]->name);
+        self::assertSame('exchange_rates', $export[58]->name);
         self::assertSame('supplier', $restore[0]->name);
         self::assertSame('currencies', $restore[3]->name);
-        self::assertSame('exchange_rates', $restore[57]->name);
+        self::assertSame('exchange_rates', $restore[58]->name);
 
         $exportNames = array_map(
             static fn (AccountingArchiveTable $table): string => $table->name,
@@ -116,6 +116,25 @@ final class AccountingArchiveCatalogTest extends TestCase
         self::assertIsInt($itemTranslations);
         self::assertLessThan($categoryTranslations, $locales);
         self::assertLessThan($itemTranslations, $locales);
+    }
+
+    public function testStockCurrenciesPrecedeMonetaryPayloadsOnRestore(): void
+    {
+        $restoreNames = array_map(
+            static fn (AccountingArchiveTable $table): string => $table->name,
+            (new AccountingArchiveCatalog(
+                TenantDataRegistryFactory::draftV1(),
+            ))->forRestore(),
+        );
+        $currencies = array_search('stock_currencies', $restoreNames, true);
+        $fees = array_search('stock_item_fees', $restoreNames, true);
+        $prices = array_search('stock_item_prices', $restoreNames, true);
+
+        self::assertIsInt($currencies);
+        self::assertIsInt($fees);
+        self::assertIsInt($prices);
+        self::assertLessThan($fees, $currencies);
+        self::assertLessThan($prices, $currencies);
     }
 
     public function testCatalogRejectsMissingProjectionMetadata(): void

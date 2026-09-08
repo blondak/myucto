@@ -96,6 +96,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSecretStorage;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningCredentialsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningProfilesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSigningSettingsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupStockCurrenciesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockFeeTypesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemFeesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockItemPricesProjection;
@@ -460,6 +461,7 @@ final class TenantDataRegistryFactory
         'stock_attribute_i18n',
         'stock_item_attribute_values',
         'stock_fee_types',
+        'stock_currencies',
         'stock_item_fees',
         'stock_item_prices',
         'stock_item_vendors',
@@ -525,6 +527,7 @@ final class TenantDataRegistryFactory
         'stock_attribute_i18n',
         'stock_item_attribute_values',
         'stock_fee_types',
+        'stock_currencies',
         'stock_item_fees',
         'stock_item_prices',
         'stock_item_vendors',
@@ -674,6 +677,7 @@ final class TenantDataRegistryFactory
         'stock_attribute_i18n',
         'stock_item_attribute_values',
         'stock_fee_types',
+        'stock_currencies',
         'stock_item_fees',
         'stock_item_prices',
         'stock_item_vendors',
@@ -728,6 +732,8 @@ final class TenantDataRegistryFactory
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_items') {
                 $details['natural_key'] = ['supplier_id', 'sku'];
+            } elseif ($table === 'stock_currencies') {
+                $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_fee_types') {
                 $details['natural_key'] = ['supplier_id', 'code'];
             } elseif ($table === 'stock_item_prices') {
@@ -2475,6 +2481,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningProfilesProjection::dataColumns(),
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::dataColumns(),
+            'stock_currencies' =>
+                CompanyBackupStockCurrenciesProjection::dataColumns(),
             'stock_fee_types' =>
                 CompanyBackupStockFeeTypesProjection::dataColumns(),
             'stock_item_fees' =>
@@ -2650,6 +2658,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupSigningProfilesProjection::references(),
             'signing_settings' =>
                 CompanyBackupSigningSettingsProjection::references(),
+            'stock_currencies' =>
+                CompanyBackupStockCurrenciesProjection::references(),
             'stock_fee_types' =>
                 CompanyBackupStockFeeTypesProjection::references(),
             'stock_item_fees' =>
