@@ -122,6 +122,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupBankStatementsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankTransactionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupBankTransferMatchesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSupplierBankAccountsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyMapProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupBankCounterpartyObservationsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockDocumentLinesProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockLandedCostsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupStockTakesProjection;
@@ -150,6 +152,8 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,string> */
     private const COMPANY_BACKUP_ONLY_REFERENCE_TARGETS = [
+        'bank_counterparty_map' => 'bank',
+        'bank_counterparty_observations' => 'bank',
         'bank_transfer_matches' => 'bank',
         'supplier_bank_accounts' => 'bank',
         'payroll_absences' => 'payroll',
@@ -271,6 +275,8 @@ final class TenantDataRegistryFactory
 
     /** @var array<string,list<string>> */
     private const COMPANY_BACKUP_NATURAL_KEYS = [
+        'bank_counterparty_map' => ['supplier_id', 'client_bank_account_id', 'side'],
+        'bank_counterparty_observations' => ['map_id', 'bank_transaction_id'],
         'supplier_bank_accounts' => ['supplier_id', 'account_canonical', 'bank_code_norm'],
         'payroll_average_earning_snapshots' => [
             'supplier_id',
@@ -1062,16 +1068,14 @@ final class TenantDataRegistryFactory
         );
         foreach (self::COMPANY_BACKUP_ONLY_REFERENCE_TARGETS as $table => $featureGroup) {
             $projection = self::companyBackupProjection($table);
+            [$policy, $ownership] = self::classification($table);
             $details = [
                 'primary_key' => ['id'],
                 ...(isset(self::COMPANY_BACKUP_NATURAL_KEYS[$table]) ? [
                     'natural_key' => self::COMPANY_BACKUP_NATURAL_KEYS[$table],
                 ] : []),
                 'feature_group' => $featureGroup,
-                'ownership' => [
-                    'strategy' => 'supplier_id',
-                    'column' => 'supplier_id',
-                ],
+                'ownership' => $ownership,
                 ...(isset(self::COMPANY_BACKUP_REFERENCE_KEYS[$table]) ? [
                     'reference_keys' => self::COMPANY_BACKUP_REFERENCE_KEYS[$table],
                 ] : []),
@@ -1083,7 +1087,7 @@ final class TenantDataRegistryFactory
             $definitions[] = new TenantDataDefinition(
                 'table:' . $table,
                 TenantDataObjectKind::Table,
-                TenantDataPolicy::TenantOwned,
+                $policy,
                 [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
                 $details,
             );
@@ -1398,6 +1402,10 @@ final class TenantDataRegistryFactory
             'bank_transactions' => [
                 TenantDataPolicy::TenantOwnedIndirect,
                 self::foreignKeyPath('statement_id', 'bank_statements'),
+            ],
+            'bank_counterparty_observations' => [
+                TenantDataPolicy::TenantOwnedIndirect,
+                self::foreignKeyPath('map_id', 'bank_counterparty_map'),
             ],
             'bank_statements' => [
                 TenantDataPolicy::TenantOwned,
@@ -2545,6 +2553,8 @@ final class TenantDataRegistryFactory
             'asset_improvements' =>
                 CompanyBackupAssetImprovementsProjection::dataColumns(),
             'assets' => CompanyBackupAssetsProjection::dataColumns(),
+            'bank_counterparty_map' => CompanyBackupBankCounterpartyMapProjection::dataColumns(),
+            'bank_counterparty_observations' => CompanyBackupBankCounterpartyObservationsProjection::dataColumns(),
             'bank_transfer_matches' => CompanyBackupBankTransferMatchesProjection::dataColumns(),
             'supplier_bank_accounts' => CompanyBackupSupplierBankAccountsProjection::dataColumns(),
             'branding_profiles' =>
@@ -2823,6 +2833,8 @@ final class TenantDataRegistryFactory
                 CompanyBackupStockLocalesProjection::references(),
             'stock_levels' => CompanyBackupStockLevelsProjection::references(),
             'stock_documents' => CompanyBackupStockDocumentsProjection::references(),
+            'bank_counterparty_map' => CompanyBackupBankCounterpartyMapProjection::references(),
+            'bank_counterparty_observations' => CompanyBackupBankCounterpartyObservationsProjection::references(),
             'bank_transfer_matches' => CompanyBackupBankTransferMatchesProjection::references(),
             'supplier_bank_accounts' => CompanyBackupSupplierBankAccountsProjection::references(),
             'stock_document_lines' => CompanyBackupStockDocumentLinesProjection::references(),

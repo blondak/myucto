@@ -32,8 +32,8 @@ final class CompanyBackupClientBankAccountsProjection
     }
 
     /**
-     * Poslední bankovní transakce patří do nepřímo vlastněného výřezu;
-     * tenantový selector ji zahrnuje právě přes tuto nullable vazbu.
+     * Poslední bankovní transakce musí patřit do výpisu vlastněného firmou;
+     * tato nullable vazba nesmí rozšířit výběr o cizí či nevlastněný výpis.
      *
      * @return list<array{
      *   columns:list<string>,
