@@ -492,6 +492,12 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
             'imap-1:<posting-roundtrip@example.test>', 0.05, $this->matcher, 'CZK');
         $target = $this->repository->createTransactionFromNotice($this->otherSupplierId, $notice,
             'imap-2:<posting-roundtrip@example.test>', 0.05, $this->matcher, 'CZK');
+        $deleted = $this->repository->createTransactionFromNotice($this->supplierId,
+            new ParsedBankEmailNotice(variableSymbol: '2099061406', amount: 10, currency: 'CZK',
+                postedAt: '2099-06-14', recipientAccount: self::ACCOUNT . '/0100',
+                counterpartyAccount: '1000000005', counterpartyBank: '0100',
+                counterpartyName: 'Syntetická protistrana', message: 'Deleted rejection'),
+            'imap-1:<deleted-rejection@example.test>', 0.05, $this->matcher, 'CZK');
         $pdo = $this->db->pdo();
         $previousIsolation = (string) $pdo->query('SELECT @@transaction_isolation')->fetchColumn();
         $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
@@ -502,6 +508,12 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
                 VALUES (?, 'Synthetic rule', 'outgoing', 'synthetic', '341', '221', 'auto')")
                 ->execute([$this->supplierId]);
             $ruleId = (int) $pdo->lastInsertId();
+            $pdo->prepare('UPDATE bank_posting_rules SET last_rejected_tx_id = ?, rejected_streak = 2 WHERE id = ?')
+                ->execute([$deleted['transaction_id'], $ruleId]);
+            // Stejná kaskáda jako při smazání výpisu; pouze syntetický fixture v rollback transakci.
+            $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$deleted['statement_id']]);
+            self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM bank_transactions WHERE id = '
+                . $deleted['transaction_id'])->fetchColumn());
             $pdo->prepare("INSERT INTO tax_advance_schedules
                 (supplier_id, taxpayer_type, advance_kind, period_year, seq_no, amount, due_date,
                  status, paid_amount, paid_on, matched_transaction_id, match_confidence)
@@ -516,7 +528,8 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
                     '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1']);
             $suggestionId = (int) $pdo->lastInsertId();
             $reader = new CompanyBackupTableSchemaReader();
-            $source = new CompanyBackupSqlRowSource();
+            $source = new CompanyBackupBankHistoryRowSource(new CompanyBackupSqlRowSource(),
+                '0191f7a0-7c22-7bd1-8cd4-6e18cb55b8a1');
             $restoredIds = [];
             foreach (['bank_posting_rules' => $ruleId, 'tax_advance_schedules' => $scheduleId,
                 'bank_posting_suggestions' => $suggestionId] as $table => $id) {
@@ -564,6 +577,10 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
                 }
                 if ($table === 'bank_posting_rules') {
                     self::assertSame(0, $stored['is_active']);
+                    self::assertNull($stored['last_rejected_tx_id']);
+                    self::assertSame(2, $stored['rejected_streak']);
+                    self::assertSame($deleted['transaction_id'], json_decode(
+                        $stored['archived_rejected_transactions'], true, 16, JSON_THROW_ON_ERROR)['transactions'][0]['id']);
                 } elseif ($table === 'bank_posting_suggestions') {
                     self::assertSame($target['transaction_id'], $stored['pending_tx']);
                 } else {
@@ -573,6 +590,8 @@ final class BankEmailNoticeRepositoryTenantTest extends TestCase
                 }
             }
             self::assertSame(1, (int) $pdo->query('SELECT is_active FROM bank_posting_rules WHERE id = ' . $ruleId)->fetchColumn());
+            self::assertSame($deleted['transaction_id'], (int) $pdo->query(
+                'SELECT last_rejected_tx_id FROM bank_posting_rules WHERE id = ' . $ruleId)->fetchColumn());
         } finally {
             $pdo->rollBack();
             $pdo->prepare('SET SESSION transaction_isolation = ?')->execute([$previousIsolation]);

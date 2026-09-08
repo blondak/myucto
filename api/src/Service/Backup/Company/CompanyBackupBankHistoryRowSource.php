@@ -17,7 +17,8 @@ final readonly class CompanyBackupBankHistoryRowSource implements CompanyBackupD
     public function rows(PDO $snapshot, int $supplierId, TenantDataDefinition $definition): iterable
     {
         $rows = $this->source->rows($snapshot, $supplierId, $definition);
-        if (!in_array($definition->key, ['table:bank_match_audit', 'table:bank_match_suggestions'], true)) {
+        if (!in_array($definition->key, ['table:bank_match_audit', 'table:bank_match_suggestions',
+            'table:bank_posting_rules'], true)) {
             return $rows;
         }
         return $this->archiveRows($snapshot, $supplierId, $definition, $rows);
@@ -34,6 +35,19 @@ final readonly class CompanyBackupBankHistoryRowSource implements CompanyBackupD
                 if (($row['supplier_id'] ?? null) !== $supplierId) {
                     throw new \InvalidArgumentException('Historie má jiného vlastníka.');
                 }
+                if ($definition->key === 'table:bank_posting_rules') {
+                    yield CompanyBackupBankRuleHistory::detachMissing($row, $this->backupId,
+                        static function (int $id) use ($snapshot): ?int {
+                            $query = $snapshot->prepare('SELECT bs.supplier_id FROM bank_transactions tx
+                                LEFT JOIN bank_statements bs ON bs.id = tx.statement_id WHERE tx.id = ?');
+                            $query->execute([$id]);
+                            $owner = $query->fetchColumn();
+                            $query->closeCursor();
+                            // Existující legacy pohyb bez vlastníka není chybějící pohyb.
+                            return $owner === false ? null : (int) $owner;
+                        });
+                    continue;
+                }
                 yield BankMatchArchivedDocuments::detachMissing(substr($definition->key, 6), $row,
                     $this->backupId, static function (string $table, int $id) use ($snapshot): ?int {
                         if (!in_array($table, ['invoices', 'purchase_invoices'], true)) {
@@ -47,7 +61,8 @@ final readonly class CompanyBackupBankHistoryRowSource implements CompanyBackupD
                     });
             } catch (\Throwable $e) {
                 throw new CompanyBackupDataSourceException('data_bank_history_invalid',
-                    $definition->key, BankMatchArchivedDocuments::COLUMN, $e);
+                    $definition->key, $definition->key === 'table:bank_posting_rules'
+                        ? CompanyBackupBankRuleHistory::COLUMN : BankMatchArchivedDocuments::COLUMN, $e);
             }
         }
     }

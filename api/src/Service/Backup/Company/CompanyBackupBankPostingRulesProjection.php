@@ -39,6 +39,7 @@ final class CompanyBackupBankPostingRulesProjection
             'applies_currency',
             'counterparty_prefix',
             'approved_streak',
+            'archived_rejected_transactions',
         ];
     }
 

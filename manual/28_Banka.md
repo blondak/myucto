@@ -491,6 +491,11 @@ pravidla (3× po sobě u různých transakcí) ho samo **deaktivuje** — na to 
 upozorní hláška při odmítnutí; pravidlo pak najdeš v seznamu vypnuté a můžeš ho
 opravit nebo smazat.
 
+Při obnově zálohy zůstávají bankovní pravidla vypnutá a jejich statistiky se
+zachovávají. Pokud poslední odmítnutý pohyb již neexistuje, jeho původní
+identita se uchová jen v archivní historii. Nepoužívá se jako živý odkaz
+na jiný pohyb ani nebrání pozdějšímu ručnímu zapnutí pravidla.
+
 Nesedí-li žádné aktivní pravidlo, ale MyÚčto najde v posledním roce **jedinou
 stejnou dvouřádkovou kontaci** už dřív zaúčtovanou pro stejný protiúčet (a
 sedí-li VS, je-li vyplněný), nabídne rovnou **naučený návrh** — i bez

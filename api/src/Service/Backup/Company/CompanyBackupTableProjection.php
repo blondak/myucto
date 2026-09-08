@@ -523,6 +523,14 @@ final readonly class CompanyBackupTableProjection
      */
     public function inspectCompleteSourceRow(array $row, callable $visitor): void
     {
+        if ($this->registryKey === 'table:bank_posting_rules') {
+            try {
+                CompanyBackupBankRuleHistory::assertRow($row);
+            } catch (\Throwable $e) {
+                throw new CompanyBackupDataSourceException('data_bank_history_invalid',
+                    $this->registryKey, CompanyBackupBankRuleHistory::COLUMN, $e);
+            }
+        }
         if (in_array($this->registryKey, ['table:bank_match_audit', 'table:bank_match_suggestions'], true)) {
             try {
                 \MyInvoice\Service\Bank\Match\BankMatchArchivedDocuments::assertRow($this->name, $row);
