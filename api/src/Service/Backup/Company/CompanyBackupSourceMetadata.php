@@ -30,6 +30,7 @@ final readonly class CompanyBackupSourceMetadata
             );
         }
 
+        $bankWarning = CompanyBackupBankWarning::export()['message'];
         return <<<TXT
 MyÚčto — přenositelná záloha firmy
 
@@ -42,6 +43,9 @@ obnovit. Heslo není uloženo uvnitř archivu ani v tomto souboru.
 Strojová data a jejich formát popisuje manifest.json. Integritu všech položek
 lze ověřit podle CHECKSUMS.txt. Pro bezpečnou obnovu použijte stejnou nebo
 novější podporovanou verzi MyÚčta a nejprve spusťte preflight.
+
+Upozornění k bankovním účtům:
+{$bankWarning}
 
 Do rozbaleného obsahu nezasahujte; změna libovolné položky poruší kontrolní
 součty a MyÚčto takový balíček odmítne.

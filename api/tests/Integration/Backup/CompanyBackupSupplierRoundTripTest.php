@@ -75,6 +75,8 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
     public function testEncryptedArchiveRestoresRealSupplierGraphAndKeepsSourceUnchanged(bool $withSalt): void
     {
         $pdo = $this->connection->pdo();
+        self::assertSame('19-1000000005/0100',
+            (new \MyInvoice\Service\Payment\CzechBankAccountValidator())->normalize('19-1000000005 / 0100'));
         $registry = $this->registry();
         $country = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ'")->fetchColumn();
         $vat = (int) $pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
@@ -99,9 +101,16 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $domainBefore = $pdo->query('SELECT * FROM supplier_domains WHERE id = ' . $domainId)->fetch(PDO::FETCH_ASSOC);
         $pdo->prepare('INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en,
             account_number, bank_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')->execute([
-                $supplier, 'CZK', 'Synthetic account', 'Kč', 'Synthetic', 'Synthetic', '1000000005', '0100',
+                $supplier, 'CZK', 'Synthetic account', 'Kč', 'Synthetic', 'Synthetic', '19-1000000005', '0100',
             ]);
         $currency = (int) $pdo->lastInsertId();
+        $statementHash = hash('sha256', 'synthetic-legacy-' . bin2hex(random_bytes(8)));
+        $pdo->prepare("INSERT INTO bank_statements (supplier_id, source, file_name, file_hash,
+            account_number, bank_code, currency, statement_number, statement_date,
+            prev_balance, curr_balance, transaction_count)
+            VALUES (NULL, 'gpc', 'synthetic.gpc', ?, '19-1000000005', '0100', 'CZK', 'SYN-1', '2026-01-01', 0, 0, 0)")
+            ->execute([$statementHash]);
+        $legacyStatementId = (int) $pdo->lastInsertId();
         $pdo->prepare('INSERT INTO branding_profiles (supplier_id, name) VALUES (?, ?)')
             ->execute([$supplier, 'Synthetic branding']);
         $branding = (int) $pdo->lastInsertId();
@@ -117,7 +126,20 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $validation = new Backup\CompanyBackupTechnicalValidation($inspection, $registry,
             self::APP_VERSION, Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
         $preflight = (new Backup\CompanyBackupDataPreflight())->inspect($archive, self::PASSWORD, $validation, $pdo);
-        self::assertSame(6, $preflight->rowCount);
+        self::assertSame(7, $preflight->rowCount);
+        self::assertTrue($preflight->bankAccountCollision);
+        self::assertSame([Backup\CompanyBackupBankWarning::collision()], $preflight->toArray()['warnings']);
+        // Simulace jiného cíle: pouze lookup čítače vlastních účtů je prázdný.
+        // Zdrojové strojové JSONL i technická validace zůstávají identické.
+        $pdo->exec('CREATE TEMPORARY TABLE currencies (supplier_id INT, account_number VARCHAR(30), iban VARCHAR(34))');
+        try {
+            $cleanPreflight = (new Backup\CompanyBackupDataPreflight())->inspect($archive, self::PASSWORD, $validation, $pdo);
+            self::assertFalse($cleanPreflight->bankAccountCollision);
+            self::assertSame([], $cleanPreflight->toArray()['warnings']);
+            self::assertNotSame($preflight->bindingSha256, $cleanPreflight->bindingSha256);
+        } finally {
+            $pdo->exec('DROP TEMPORARY TABLE currencies');
+        }
         self::assertCount(2, $preflight->externalReferences->requirements);
         $choices = [];
         foreach ($preflight->externalReferences->requirements as $requirement) {
@@ -148,7 +170,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         }
         self::assertTrue($pdo->inTransaction(), 'Commit patří až koordinátoru, ne importéru.');
         self::assertNotSame($supplier, $result->supplierId);
-        self::assertSame(3, $result->insertedRows);
+        self::assertSame(4, $result->insertedRows);
         self::assertSame(2, $result->mappedGlobalRows);
         self::assertNotNull($result->manualConfiguration);
         self::assertSame([['hostname' => $hostname, 'purpose' => 'all',
@@ -160,7 +182,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertSame($domainBefore,
             $pdo->query('SELECT * FROM supplier_domains WHERE id = ' . $domainId)->fetch(PDO::FETCH_ASSOC));
         $postImport = (new Backup\CompanyBackupRegistryPostImportValidator())->validate($pdo, $source, $preflight, $result);
-        self::assertSame(3, $postImport->checkedTenantRows);
+        self::assertSame(4, $postImport->checkedTenantRows);
         self::assertSame($result->manualConfiguration->bindingSha256(), $postImport->manualConfigurationBindingSha256);
         $committedShape = new Backup\CompanyBackupRestoreResult($result, $postImport, 0);
         self::assertSame($result->manualConfiguration, $committedShape->database->manualConfiguration);
@@ -180,6 +202,10 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertSame(1, (int) $restored['default_prices_include_vat']);
         self::assertSame('2021-01-01 12:00:00', $restored['updated_at']);
         self::assertSame($before, $this->supplierRow($pdo, $supplier));
+        self::assertNull($pdo->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $legacyStatementId)->fetchColumn());
+        $statementQuery = $pdo->prepare('SELECT supplier_id FROM bank_statements WHERE file_hash = ? AND supplier_id = ?');
+        $statementQuery->execute([$statementHash, $result->supplierId]);
+        self::assertSame($result->supplierId, (int) $statementQuery->fetchColumn());
         self::assertSame(1, (int) $pdo->query('SELECT @@SESSION.foreign_key_checks')->fetchColumn());
         $pdo->prepare("INSERT INTO supplier_domains (supplier_id, hostname, verification_token)
             VALUES (?, ?, ?)")->execute([$result->supplierId, 'unexpected-' . $hostname, str_repeat('e', 64)]);
@@ -210,7 +236,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         // Úplná uzavřená testovací podmnožina, produkční definice beze změn.
         foreach (['supplier', 'currencies', 'branding_profiles', 'email_profiles',
             'signing_profiles', 'countries', 'vat_rates', 'users', 'supplier_domains',
-            'supplier_domain_login_requests'] as $table) {
+            'supplier_domain_login_requests', 'bank_statements'] as $table) {
             $definition = $draft->definition('table:' . $table);
             self::assertNotNull($definition);
             $definitions[] = $definition;

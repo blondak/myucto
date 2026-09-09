@@ -28,6 +28,13 @@ nastavuješ stejně jako pro PDF faktury, QR platby a GPC výpisy:
 Nastavení bankovních avíz je oddělené níže, aby se běžné bankovní údaje
 nemíchaly s parsery a IMAP účty.
 
+**Obnova zálohy a stejné účty:** prázdná firma není totéž co prázdná instance.
+Pokud vedle původní firmy vznikne obnovená kopie se stejným účtem, historické
+výpisy bez uloženého vlastníka (`supplier_id`) mohou přestat být jednoznačně
+přiřaditelné. Preferuj obnovu do jiné instance. Doplnění vlastníka pouze do
+zálohy chrání obnovené výpisy, ale nemění historická data původní firmy.
+Varování před touto kolizí není zákaz obnovy ani automatická oprava zdroje.
+
 ### 29.1.1 Stavy na účtech
 
 Záložka **Stavy na účtech** zobrazuje každý bankovní účet samostatně podle

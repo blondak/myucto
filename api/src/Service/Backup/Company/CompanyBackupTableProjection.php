@@ -526,6 +526,13 @@ final readonly class CompanyBackupTableProjection
      */
     public function inspectCompleteSourceRow(array $row, callable $visitor): void
     {
+        if ($this->registryKey === 'table:bank_statements'
+            && ($this->ownership['strategy'] ?? null) === 'bank_statement_owner'
+            && ($row['supplier_id'] ?? null) === null
+        ) {
+            throw new CompanyBackupDataSourceException('data_bank_statement_owner_missing',
+                $this->registryKey, 'supplier_id');
+        }
         if ($this->policy === TenantDataPolicy::ManualConfiguration) {
             CompanyBackupManualConfiguration::domain($row);
         }

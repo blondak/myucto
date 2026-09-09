@@ -4571,6 +4571,8 @@ paths:
         read. Vrací nejvýše 20 nejnovějších jobů. Odpověď nikdy neobsahuje
         transientní heslo, registry fingerprint, fyzickou cestu archivu,
         interní chybovou zprávu ani identifikátor autora. API token se odmítá.
+        Pole warnings upozorňuje na riziko obnovy vedle firmy se stejným
+        bankovním účtem; upozornění neblokuje export ani obnovu.
       security:
         - SessionCookie: []
       responses:
@@ -18981,7 +18983,7 @@ components:
         [backup_id, status, processed_steps, total_steps, cancel_requested,
          error_code, artifact_name, size_bytes, sha256, entry_count, expires_at,
          started_at, finished_at, created_at, updated_at, downloadable,
-         cancellable, deletable]
+         cancellable, deletable, warnings]
       properties:
         backup_id:
           type: string
@@ -18993,6 +18995,10 @@ components:
         processed_steps: { type: integer, minimum: 0 }
         total_steps: { type: [integer, "null"], minimum: 1 }
         cancel_requested: { type: boolean }
+        warnings:
+          type: array
+          description: Neblokující upozornění k obnově na instanci se stejnými bankovními účty.
+          items: { $ref: '#/components/schemas/CompanyBackupWarning' }
         error_code:
           type: [string, "null"]
           pattern: '^[a-z][a-z0-9_]{2,63}$'
@@ -19018,6 +19024,16 @@ components:
           type: boolean
           description: Job má validní metadata fyzického archivu k odstranění.
 
+    CompanyBackupWarning:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [bank_account_restore_same_instance_risk, bank_account_restore_target_collision]
+        message: { type: string }
+
     CompanyBackupCreateRequest:
       type: object
       additionalProperties: false
@@ -19042,13 +19058,16 @@ components:
     CompanyBackupCreateResponse:
       type: object
       additionalProperties: false
-      required: [backup_id, status]
+      required: [backup_id, status, warnings]
       properties:
         backup_id:
           type: string
           format: uuid
           pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
         status: { type: string, const: queued }
+        warnings:
+          type: array
+          items: { $ref: '#/components/schemas/CompanyBackupWarning' }
 
     CompanyBackupCreationError:
       type: object

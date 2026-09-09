@@ -25,6 +25,26 @@ final class CompanyBackupTenantSqlSelector
         if (!is_string($strategy)) {
             throw $this->error($table, 'data_ownership_invalid');
         }
+        if ($strategy === 'bank_statement_owner') {
+            $this->assertOwnershipKeys($table, ['strategy']);
+            if ($table->name === 'bank_statements' && $table->policy === TenantDataPolicy::TenantOwned) {
+                $this->assertDataColumns($table, ['supplier_id', 'account_number', 'bank_code']);
+                return new CompanyBackupSqlSelection(
+                    \MyInvoice\Repository\BankStatementOwnershipResolver::sql(self::SOURCE_ALIAS),
+                    \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
+                );
+            }
+            if ($table->name === 'bank_transactions' && $table->policy === TenantDataPolicy::TenantOwnedIndirect) {
+                $this->assertDataColumns($table, ['statement_id']);
+                return new CompanyBackupSqlSelection(
+                    'EXISTS (SELECT 1 FROM bank_statements AS _backup_statement WHERE '
+                    . self::column(self::SOURCE_ALIAS, 'statement_id') . ' = _backup_statement.id AND '
+                    . \MyInvoice\Repository\BankStatementOwnershipResolver::sql('_backup_statement') . ')',
+                    \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
+                );
+            }
+            throw $this->error($table, 'data_ownership_invalid');
+        }
         if ($table->policy === TenantDataPolicy::TenantRoot
             && $strategy === 'selected_supplier'
             && $table->name === 'supplier'

@@ -143,7 +143,7 @@ final class BankStatementOwnershipResolver
         );
         $stmt->execute(self::params($supplierId));
 
-        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+        return array_values(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []));
     }
 
     /**
@@ -154,6 +154,16 @@ final class BankStatementOwnershipResolver
      */
     public function accountClaimedByOtherSupplier(int $supplierId, ?string $accountNumber, ?string $iban = null): bool
     {
+        return self::accountClaimedByOtherSupplierIn($this->db->pdo(), $supplierId, $accountNumber, $iban);
+    }
+
+    /** Stejná kontrola nad transakcí preflightu bez otevírání dalšího spojení. */
+    public static function accountClaimedByOtherSupplierIn(
+        PDO $database,
+        int $supplierId,
+        ?string $accountNumber,
+        ?string $iban = null,
+    ): bool {
         $keys = self::canonicalKeys($accountNumber, $iban);
         if ($keys === []) {
             return false;
@@ -176,7 +186,7 @@ final class BankStatementOwnershipResolver
             $params[] = $key;
             $params[] = $key;
         }
-        $stmt = $this->db->pdo()->prepare(
+        $stmt = $database->prepare(
             'SELECT 1 FROM currencies bso_cur
               WHERE bso_cur.supplier_id IS NOT NULL' . $exclude . '
                 AND (' . implode(' OR ', $conditions) . ')

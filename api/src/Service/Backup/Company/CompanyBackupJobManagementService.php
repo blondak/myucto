@@ -160,6 +160,7 @@ final readonly class CompanyBackupJobManagementService implements CompanyBackupJ
                 : null,
             'cancel_requested' => (bool) ($job['cancel_requested'] ?? false),
             'error_code' => $errorCode,
+            'warnings' => [CompanyBackupBankWarning::export()],
             'artifact_name' => $artifact?->downloadName,
             'size_bytes' => $artifact?->bytes,
             'sha256' => $artifact?->sha256,

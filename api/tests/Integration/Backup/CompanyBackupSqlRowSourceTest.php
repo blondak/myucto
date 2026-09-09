@@ -369,6 +369,61 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         }
     }
 
+    public function testLegacyBankOwnershipIsMaterializedOnlyInSnapshotAndSharedByTransactions(): void
+    {
+        $pdo = $this->db->pdo();
+        $account = (new \MyInvoice\Service\Payment\CzechBankAccountValidator())->parse('19-1000000005 / 0100');
+        $pdo->exec('CREATE TEMPORARY TABLE currencies (supplier_id INT, account_number VARCHAR(30), bank_code VARCHAR(4))
+            DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+        try {
+            $addCurrency = $pdo->prepare('INSERT INTO currencies VALUES (?, ?, ?)');
+            $addCurrency->execute([$this->supplierId, $account['account_number'], $account['bank_code']]);
+            $insert = $pdo->prepare("INSERT INTO bank_statements (supplier_id, source, file_name, file_hash,
+                account_number, bank_code, currency, statement_number, statement_date,
+                prev_balance, curr_balance, transaction_count)
+                VALUES (?, 'gpc', 'synthetic.gpc', ?, ?, ?, 'CZK', 'SYN-1', '2026-01-01', 0, 10.29, 1)");
+            $addTransaction = $pdo->prepare("INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, description, import_fingerprint)
+                VALUES (?, '2026-01-01', 10.29, 'CZK', 'Synthetic backup transaction', ?)");
+            $ids = [];
+            $transactionIds = [];
+            foreach ([
+                'owned' => [$this->supplierId, '0100'],
+                'foreign' => [$this->foreignSupplierId, '0100'],
+                'legacy' => [null, '0100'],
+                'wrong_bank' => [null, '0800'],
+            ] as $name => [$supplier, $bank]) {
+                $insert->execute([$supplier, hash('sha256', random_bytes(32)), $account['account_number'], $bank]);
+                $ids[$name] = (int) $pdo->lastInsertId();
+                $addTransaction->execute([$ids[$name], hash('sha256', random_bytes(32))]);
+                $transactionIds[$name] = (int) $pdo->lastInsertId();
+            }
+            $registry = TenantDataRegistryFactory::draftV1();
+            $statements = $registry->definition('table:bank_statements');
+            $transactions = $registry->definition('table:bank_transactions');
+            self::assertNotNull($statements);
+            self::assertNotNull($transactions);
+            $source = new CompanyBackupSqlRowSource(batchSize: 1);
+            $rows = iterator_to_array($source->rows($pdo, $this->supplierId, $statements), false);
+            self::assertSame([$ids['owned'], $ids['legacy']], array_column($rows, 'id'));
+            self::assertSame([$this->supplierId, $this->supplierId], array_column($rows, 'supplier_id'));
+            $movements = iterator_to_array($source->rows($pdo, $this->supplierId, $transactions), false);
+            self::assertSame([$transactionIds['owned'], $transactionIds['legacy']], array_column($movements, 'id'));
+            self::assertSame(['10.29', '10.29'], array_column($movements, 'amount'));
+            self::assertNull($pdo->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $ids['legacy'])->fetchColumn());
+
+            $addCurrency->execute([$this->foreignSupplierId, $account['account_number'], $account['bank_code']]);
+            $rows = iterator_to_array($source->rows($pdo, $this->supplierId, $statements), false);
+            self::assertSame([$ids['owned']], array_column($rows, 'id'), 'Nejednoznačný legacy vlastník se nehádá.');
+            $movements = iterator_to_array($source->rows($pdo, $this->supplierId, $transactions), false);
+            self::assertSame([$transactionIds['owned']], array_column($movements, 'id'));
+            $foreign = iterator_to_array($source->rows($pdo, $this->foreignSupplierId, $statements), false);
+            self::assertSame([$ids['foreign']], array_column($foreign, 'id'));
+        } finally {
+            $pdo->exec('DROP TEMPORARY TABLE currencies');
+        }
+    }
+
     public function testSupplierCurrencyCycleRestoresChecksAndValidatesEveryRootForeignKey(): void
     {
         $pdo = $this->db->pdo();

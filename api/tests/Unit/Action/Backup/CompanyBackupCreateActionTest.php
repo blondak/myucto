@@ -168,6 +168,7 @@ final class CompanyBackupCreateActionTest extends TestCase
         self::assertSame(201, $response->getStatusCode());
         self::assertSame(self::BACKUP_ID, $payload['backup_id'] ?? null);
         self::assertSame('queued', $payload['status'] ?? null);
+        self::assertSame([\MyInvoice\Service\Backup\Company\CompanyBackupBankWarning::export()], $payload['warnings']);
         self::assertStringNotContainsString(
             self::PASSWORD,
             (string) $response->getBody(),

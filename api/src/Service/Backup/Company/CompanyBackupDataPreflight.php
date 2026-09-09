@@ -52,6 +52,7 @@ final readonly class CompanyBackupDataPreflight
                 : null;
             $aggregateRootCount = 0;
             $rowCount = 0;
+            $bankAccountCollision = false;
             foreach ($validation->inspection->dataInventory->objects as $object) {
                 $context = $contexts[$object->registryKey];
                 $source->consumeRows(
@@ -63,8 +64,18 @@ final readonly class CompanyBackupDataPreflight
                         $aggregateIndex,
                         &$aggregateRootCount,
                         &$rowCount,
+                        &$bankAccountCollision,
+                        $database,
                     ): void {
                         $index->add($context['identity']->identityForRow($row));
+                        if (!$bankAccountCollision && $object->registryKey === 'table:currencies') {
+                            $account = $row['account_number'] ?? null;
+                            $iban = $row['iban'] ?? null;
+                            $bankAccountCollision = \MyInvoice\Repository\BankStatementOwnershipResolver::accountClaimedByOtherSupplierIn(
+                                $database, 0, is_string($account) ? $account : null,
+                                is_string($iban) ? $iban : null,
+                            );
+                        }
                         if ($aggregateIndex !== null) {
                             if ($object->registryKey === self::STATUTORY_PERSON) {
                                 $aggregateIndex->addPerson($row);
@@ -132,6 +143,7 @@ final readonly class CompanyBackupDataPreflight
                 $referenceOccurrenceCount,
                 $validation->targetRegistryFingerprint,
                 $validation->bindingSha256,
+                $bankAccountCollision,
             );
         } catch (\Throwable $e) {
             $failure = $e;

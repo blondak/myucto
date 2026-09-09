@@ -535,6 +535,7 @@ final class CompanyBackupJobStoreTest extends TestCase
         $completed = $management->detail($completedId, $this->supplierId);
         self::assertTrue($completed['downloadable']);
         self::assertTrue($completed['deletable']);
+        self::assertSame([\MyInvoice\Service\Backup\Company\CompanyBackupBankWarning::export()], $completed['warnings']);
         self::assertFalse($completed['cancellable']);
         self::assertSame(str_repeat('b', 64), $completed['sha256']);
         self::assertSame(

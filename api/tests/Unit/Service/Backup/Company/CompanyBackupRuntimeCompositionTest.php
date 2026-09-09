@@ -65,6 +65,7 @@ final class CompanyBackupRuntimeCompositionTest extends TestCase
         self::assertSame('CTI-MNE.txt', CompanyBackupArchiveLayout::README);
         self::assertStringContainsString(self::BACKUP_ID, $readme);
         self::assertStringContainsString($version, $readme);
+        self::assertStringContainsString(\MyInvoice\Service\Backup\Company\CompanyBackupBankWarning::export()['message'], $readme);
     }
 
     private function removeDirectory(string $directory): void

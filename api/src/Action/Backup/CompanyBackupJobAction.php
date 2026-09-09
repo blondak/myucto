@@ -130,6 +130,7 @@ final readonly class CompanyBackupJobAction
         return Json::ok($response, [
             'backup_id' => $backupId,
             'status' => 'queued',
+            'warnings' => [\MyInvoice\Service\Backup\Company\CompanyBackupBankWarning::export()],
         ], 201);
     }
 

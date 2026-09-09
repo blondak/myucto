@@ -1451,7 +1451,7 @@ final class TenantDataRegistryFactory
             ],
             'bank_transactions' => [
                 TenantDataPolicy::TenantOwnedIndirect,
-                self::foreignKeyPath('statement_id', 'bank_statements'),
+                ['strategy' => 'bank_statement_owner'],
             ],
             'bank_counterparty_observations' => [
                 TenantDataPolicy::TenantOwnedIndirect,
@@ -1459,7 +1459,7 @@ final class TenantDataRegistryFactory
             ],
             'bank_statements' => [
                 TenantDataPolicy::TenantOwned,
-                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                ['strategy' => 'bank_statement_owner'],
             ],
             'exchange_rates' => [
                 TenantDataPolicy::GlobalReference,

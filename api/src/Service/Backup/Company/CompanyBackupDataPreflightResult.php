@@ -23,6 +23,7 @@ final readonly class CompanyBackupDataPreflightResult
         public int $referenceOccurrenceCount,
         public string $targetRegistryFingerprint,
         public string $technicalValidationBindingSha256,
+        public bool $bankAccountCollision = false,
     ) {
         if ($rowCount < 0
             || $identityCount !== $rowCount
@@ -54,6 +55,7 @@ final readonly class CompanyBackupDataPreflightResult
             'source_key_count' => $sourceKeyCount,
             'source_index_bytes' => $sourceIndexBytes,
             'reference_occurrence_count' => $referenceOccurrenceCount,
+            ...($bankAccountCollision ? ['bank_account_collision' => true] : []),
         ]);
     }
 
@@ -73,6 +75,7 @@ final readonly class CompanyBackupDataPreflightResult
             'source_index_bytes' => $this->sourceIndexBytes,
             'reference_occurrence_count' => $this->referenceOccurrenceCount,
             'binding_sha256' => $this->bindingSha256,
+            'warnings' => $this->bankAccountCollision ? [CompanyBackupBankWarning::collision()] : [],
         ];
     }
 }

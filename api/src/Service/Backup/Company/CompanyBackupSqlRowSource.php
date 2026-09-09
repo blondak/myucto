@@ -42,7 +42,7 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
 
         $offset = 0;
         while (true) {
-            $page = $this->fetchPage($snapshot, $projection, $selection, $offset);
+            $page = $this->fetchPage($snapshot, $projection, $selection, $offset, $supplierId);
             foreach ($page as $row) {
                 yield $row;
             }
@@ -66,6 +66,7 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
         CompanyBackupTableProjection $projection,
         CompanyBackupSqlSelection $selection,
         int $offset,
+        int $supplierId,
     ): array {
         $columns = implode(', ', array_map(
             static fn (string $column): string => '`'
@@ -108,6 +109,14 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
                     'data_row_shape_invalid',
                     $projection->registryKey,
                 );
+            }
+            if ($projection->name === 'bank_statements'
+                && ($projection->ownership['strategy'] ?? null) === 'bank_statement_owner'
+                && $row['supplier_id'] === null
+            ) {
+                // SQL už ověřilo jediného vlastníka přes bankovní SSOT.
+                // Materializuje se jen snapshot, zdrojový výpis zůstává nedotčený.
+                $row['supplier_id'] = $supplierId;
             }
             $result[] = $this->encodeColumns($row, $projection);
         }
