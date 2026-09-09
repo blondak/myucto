@@ -63,6 +63,23 @@ final class CompanyBackupDataPreflightTest extends TestCase
         }
     }
 
+    public function testRejectsSubmissionCorrelationCollisionFromEncryptedArchive(): void
+    {
+        $this->database->exec('CREATE TABLE submission_outbox (correlation_reference TEXT UNIQUE)');
+        [$archive, $validation] = $this->archive(countryReference: 7, submission: true);
+        $preflight = new CompanyBackupDataPreflight($this->limits());
+        self::assertSame(4, $preflight->inspect($archive, self::PASSWORD, $validation, $this->database)->rowCount);
+        $this->database->exec("INSERT INTO submission_outbox VALUES ('SYNTHETIC-ISDS-001')");
+        try {
+            $preflight->inspect($archive, self::PASSWORD, $validation, $this->database);
+            self::fail('Kontrola archivu musí odmítnout cílovou kolizi.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('submission_correlation_collision', $e->errorCode);
+        }
+        self::assertSame(0, $this->temporaryIndexCount());
+        self::assertSame('unchanged', $this->sentinelValue());
+    }
+
     public function testBuildsIndexThenNormalizesCompleteReferenceGraph(): void
     {
         [$archive, $validation] = $this->archive(countryReference: 7);
@@ -286,9 +303,10 @@ final class CompanyBackupDataPreflightTest extends TestCase
         int $countryReference,
         bool $statutoryAggregate = false,
         bool $breakStatutoryAggregate = true,
+        bool $submission = false,
     ): array
     {
-        $registry = $this->registry($statutoryAggregate);
+        $registry = $this->registry($statutoryAggregate, $submission);
         $snapshot = TenantDataRegistrySnapshot::fromRegistry(
             $registry,
             TenantDataRegistry::COMPANY_BACKUP_PROFILE,
@@ -312,6 +330,11 @@ final class CompanyBackupDataPreflightTest extends TestCase
                 'name' => 'Synthetic supplier',
             ]]),
         ];
+        if ($submission) {
+            $payloads['table:submission_outbox'] = self::jsonl([[
+                'id' => 61, 'supplier_id' => 42, 'correlation_reference' => 'SYNTHETIC-ISDS-001',
+            ]]);
+        }
         if ($statutoryAggregate) {
             $person = $this->statutoryPerson();
             $relationship = $this->statutoryRelationship();
@@ -417,7 +440,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
         ];
     }
 
-    private function registry(bool $statutoryAggregate = false): TenantDataRegistry
+    private function registry(bool $statutoryAggregate = false, bool $submission = false): TenantDataRegistry
     {
         $definitions = [
             $this->tableDefinition(
@@ -530,6 +553,10 @@ final class CompanyBackupDataPreflightTest extends TestCase
                     'supplier_id',
                 ],
             );
+        }
+        if ($submission) {
+            $definitions[] = $this->tableDefinition('submission_outbox', TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'correlation_reference'], preservedIdentifiers: ['supplier_id']);
         }
         return new TenantDataRegistry(
             1,

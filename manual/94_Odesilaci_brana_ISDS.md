@@ -64,6 +64,12 @@ Ruční načtení doručených zpráv, firemní přístupy a náhradní ruční 
 
 ## 94.6 Řešení potíží
 
+Chyba `submission_correlation_collision` při kontrole obnovy znamená,
+že cílová instance již obsahuje stejnou korelační značku podání. Obnova
+se zastaví: značka propojuje podání se skutečnou zprávou ISDS a nesmí se
+přegenerovat. Použijte cíl bez této kolize; existující podání kvůli obnově
+nemažte. Nejde o neblokující varování jako při shodě bankovního účtu.
+
 - **Brána není nabízena:** zkontrolujte prostředí, aktivaci registrace a platnost certifikátu.
 - **ISDS odmítne certifikát:** ověřte, že PFX/P12 obsahuje soukromý klíč a patří ke stejné registraci aplikace.
 - **Návrat skončí chybou:** zkontrolujte přesnou HTTPS callback adresu v ISDS a platnost krátkodobé relace.

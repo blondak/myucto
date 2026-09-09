@@ -633,6 +633,10 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                             $row,
                             $prepared,
                         ) ?? [];
+                        // Preflight mohl proběhnout před vznikem dalšího podání na cíli.
+                        CompanyBackupSubmissionCorrelationGuard::assertAvailable(
+                            $this->database, $definition->key, $prepared->row,
+                        );
                         if ($supplierCurrencyCycle && $definition->key === 'table:supplier') {
                             CompanyBackupSupplierCurrencyCycle::insert($this->database,
                                 static fn () => $writer->insert($prepared, $protected));
