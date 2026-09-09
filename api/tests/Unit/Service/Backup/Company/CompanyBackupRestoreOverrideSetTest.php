@@ -75,6 +75,16 @@ final class CompanyBackupRestoreOverrideSetTest extends TestCase
     /** @return iterable<string,array{array<mixed>}> */
     public static function invalidMetadata(): iterable
     {
+        foreach ([null, [], ['column' => 'missing', 'values' => ['pending']],
+            ['column' => 'id', 'values' => [1]],
+            ['column' => 'automation_level', 'values' => []],
+            ['column' => 'automation_level', 'values' => ['pending', 'pending']],
+            ['column' => 'automation_level', 'values' => [['pending']]],
+            ['column' => 'automation_level', 'values' => ['pending'], 'extra' => true]] as $index => $condition) {
+            yield 'invalid condition ' . $index => [[
+                'automation_level' => ['value' => 'off', 'reason' => 'restore_review', 'when' => $condition],
+            ]];
+        }
         yield 'unknown column' => [[
             'missing' => ['value' => 0, 'reason' => 'disable_after_restore'],
         ]];

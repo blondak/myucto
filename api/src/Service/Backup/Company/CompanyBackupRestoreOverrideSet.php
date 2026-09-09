@@ -61,6 +61,10 @@ final readonly class CompanyBackupRestoreOverrideSet
                 $registryKey,
                 $column,
             );
+            $condition = $overrides[$column]->whenColumn;
+            if ($condition !== null && (!isset($exported[$condition]) || isset($protected[$condition]))) {
+                throw new CompanyBackupDataSourceException('data_restore_override_column_invalid', $registryKey, $condition);
+            }
         }
         ksort($overrides, SORT_STRING);
         return new self($registryKey, $overrides);
@@ -72,6 +76,7 @@ final readonly class CompanyBackupRestoreOverrideSet
      */
     public function apply(array $row): array
     {
+        $original = $row;
         foreach ($this->overrides as $column => $override) {
             if (!array_key_exists($column, $row)) {
                 throw new CompanyBackupDataSourceException(
@@ -79,6 +84,15 @@ final readonly class CompanyBackupRestoreOverrideSet
                     $this->registryKey,
                     $column,
                 );
+            }
+            if ($override->whenColumn !== null) {
+                if (!array_key_exists($override->whenColumn, $original)) {
+                    throw new CompanyBackupDataSourceException('data_restore_override_column_missing',
+                        $this->registryKey, $override->whenColumn);
+                }
+                if (!in_array($original[$override->whenColumn], $override->whenValues, true)) {
+                    continue;
+                }
             }
             $row[$column] = $override->value;
         }
