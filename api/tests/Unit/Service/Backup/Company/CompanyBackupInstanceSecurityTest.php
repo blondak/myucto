@@ -34,7 +34,8 @@ final class CompanyBackupInstanceSecurityTest extends TestCase
         $registry = TenantDataRegistryFactory::draftV1();
         foreach (['api_tokens', 'api_token_ips', 'sessions', 'password_resets', 'login_attempts',
             'trusted_devices', 'webauthn_ceremonies', 'webauthn_credentials', 'mfa_step_up_proofs',
-            'supplier_domain_login_requests'] as $table) {
+            'supplier_domain_login_requests', 'rate_limit_counters', 'roles', 'role_permissions',
+            'work_report_link_codes', 'work_report_link_sessions'] as $table) {
             $definition = $registry->definition('table:' . $table);
             self::assertNotNull($definition);
             self::assertSame(TenantDataPolicy::InstanceOwned, $definition->policy);

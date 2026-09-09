@@ -16,11 +16,16 @@ final class CompanyBackupInstanceSecurityDefinitions
             'login_attempts' => 'instance_login_rate_limit_state',
             'mfa_step_up_proofs' => 'instance_purpose_bound_step_up_proofs',
             'password_resets' => 'instance_account_recovery_tokens',
+            'rate_limit_counters' => 'instance_request_rate_limit_windows',
+            'role_permissions' => 'instance_role_permission_assignments',
+            'roles' => 'instance_authorization_roles_not_tenant_configuration',
             'sessions' => 'instance_browser_sessions_and_step_up_proofs',
             'supplier_domain_login_requests' => 'instance_domain_login_authorization_requests',
             'trusted_devices' => 'instance_trusted_browser_credentials',
             'webauthn_ceremonies' => 'instance_ephemeral_webauthn_challenges',
             'webauthn_credentials' => 'instance_user_passkey_registrations',
+            'work_report_link_codes' => 'instance_work_report_one_time_email_codes',
+            'work_report_link_sessions' => 'instance_work_report_verified_browser_sessions',
         ];
         $definitions = [];
         foreach ($reasons as $table => $reason) {
@@ -30,6 +35,8 @@ final class CompanyBackupInstanceSecurityDefinitions
                 ['primary_key' => match ($table) {
                     'webauthn_ceremonies' => ['flow_token_hash'],
                     'mfa_step_up_proofs' => ['token_hash'],
+                    'rate_limit_counters' => ['bucket_key', 'window_start'],
+                    'role_permissions' => ['role_id', 'permission_key'],
                     default => ['id'],
                 }, 'feature_group' => 'identity', 'reason' => $reason],
             );
