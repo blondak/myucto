@@ -116,8 +116,20 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $branding = (int) $pdo->lastInsertId();
         $pdo->prepare('UPDATE supplier SET default_currency_id = ?, default_branding_profile_id = ?,
             updated_at = ? WHERE id = ?')->execute([$currency, $branding, '2021-01-01 12:00:00', $supplier]);
+        $pdo->prepare('UPDATE supplier SET purchase_invoice_number_format = ?, updated_at = ? WHERE id = ?')
+            ->execute(['{PP}{YY}{MM}{CCC}', '2021-01-01 12:00:00', $supplier]);
         $before = $this->supplierRow($pdo, $supplier);
         $historyBefore = $this->createHistory($pdo, $supplier);
+        $pdo->prepare("INSERT INTO purchase_invoice_counters (supplier_id, period, last_number)
+            VALUES (?, 'ALL', 0), (?, '2021', 731), (?, '202101', 42)")
+            ->execute([$supplier, $supplier, $supplier]);
+        $counterRows = static function (int $owner) use ($pdo): array {
+            $query = $pdo->prepare('SELECT period, last_number FROM purchase_invoice_counters
+                WHERE supplier_id = ? ORDER BY period');
+            $query->execute([$owner]);
+            return $query->fetchAll(PDO::FETCH_ASSOC);
+        };
+        $countersBefore = $counterRows($supplier);
         $supplierCount = (int) $pdo->query('SELECT COUNT(*) FROM supplier')->fetchColumn();
         $archive = $this->archive($pdo, $registry, $supplier);
         $inspection = (new Backup\CompanyBackupArchiveInspector(
@@ -127,7 +139,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $validation = new Backup\CompanyBackupTechnicalValidation($inspection, $registry,
             self::APP_VERSION, Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
         $preflight = (new Backup\CompanyBackupDataPreflight())->inspect($archive, self::PASSWORD, $validation, $pdo);
-        self::assertSame(23, $preflight->rowCount);
+        self::assertSame(26, $preflight->rowCount);
         self::assertTrue($preflight->bankAccountCollision);
         self::assertSame([Backup\CompanyBackupBankWarning::collision()], $preflight->toArray()['warnings']);
         // Simulace jiného cíle: pouze lookup čítače vlastních účtů je prázdný.
@@ -171,7 +183,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         }
         self::assertTrue($pdo->inTransaction(), 'Commit patří až koordinátoru, ne importéru.');
         self::assertNotSame($supplier, $result->supplierId);
-        self::assertSame(20, $result->insertedRows);
+        self::assertSame(23, $result->insertedRows);
         self::assertSame(2, $result->mappedGlobalRows);
         self::assertNotNull($result->manualConfiguration);
         self::assertSame([['hostname' => $hostname, 'purpose' => 'all',
@@ -183,7 +195,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertSame($domainBefore,
             $pdo->query('SELECT * FROM supplier_domains WHERE id = ' . $domainId)->fetch(PDO::FETCH_ASSOC));
         $postImport = (new Backup\CompanyBackupRegistryPostImportValidator())->validate($pdo, $source, $preflight, $result);
-        self::assertSame(20, $postImport->checkedTenantRows);
+        self::assertSame(23, $postImport->checkedTenantRows);
         self::assertSame($result->manualConfiguration->bindingSha256(), $postImport->manualConfigurationBindingSha256);
         $committedShape = new Backup\CompanyBackupRestoreResult($result, $postImport, 0);
         self::assertSame($result->manualConfiguration, $committedShape->database->manualConfiguration);
@@ -203,6 +215,9 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertSame(1, (int) $restored['default_prices_include_vat']);
         self::assertSame('2021-01-01 12:00:00', $restored['updated_at']);
         self::assertSame($before, $this->supplierRow($pdo, $supplier));
+        self::assertCount(3, $countersBefore);
+        self::assertSame($countersBefore, $counterRows($result->supplierId));
+        self::assertSame($countersBefore, $counterRows($supplier));
         foreach ($historyBefore as $table => $originalRows) {
             self::assertSame($originalRows, $this->historyRows($pdo, $table, $supplier));
             $restoredRows = $this->historyRows($pdo, $table, $result->supplierId);
@@ -237,6 +252,10 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $statementQuery->execute([$statementHash, $result->supplierId]);
         self::assertSame($result->supplierId, (int) $statementQuery->fetchColumn());
         self::assertSame(1, (int) $pdo->query('SELECT @@SESSION.foreign_key_checks')->fetchColumn());
+        $purchaseNumbers = new \MyInvoice\Repository\PurchaseInvoiceRepository($this->connection,
+            new \MyInvoice\Repository\TaxConstantsRepository($this->connection));
+        self::assertSame('PF2101043', $purchaseNumbers->nextVarsymbol($result->supplierId, '202101'));
+        self::assertSame($countersBefore, $counterRows($supplier));
         $pdo->prepare("INSERT INTO supplier_domains (supplier_id, hostname, verification_token)
             VALUES (?, ?, ?)")->execute([$result->supplierId, 'unexpected-' . $hostname, str_repeat('e', 64)]);
         try {
@@ -267,7 +286,8 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         foreach (['supplier', 'currencies', 'branding_profiles', 'email_profiles',
             'signing_profiles', 'countries', 'vat_rates', 'users', 'supplier_domains',
             'supplier_domain_login_requests', 'bank_statements', 'supplier_accounting_modes',
-            'supplier_osvc_month_statuses', 'supplier_vat_status_history', 'tax_advance_overrides'] as $table) {
+            'supplier_osvc_month_statuses', 'supplier_vat_status_history', 'tax_advance_overrides',
+            'purchase_invoice_counters'] as $table) {
             $definition = $draft->definition('table:' . $table);
             self::assertNotNull($definition);
             $definitions[] = $definition;

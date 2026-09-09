@@ -742,6 +742,7 @@ final class TenantDataRegistryFactory
         self::assertArchiveOrders();
         $definitions = [
             ...CompanyBackupSupplierHistoryDefinitions::definitions(),
+            CompanyBackupPurchaseCounterDefinition::definition(),
             ...CompanyBackupTaxProfileDefinitions::definitions(),
             CompanyBackupSupplierDomainsDefinition::definition(),
             ...CompanyBackupInstanceSecurityDefinitions::definitions(),

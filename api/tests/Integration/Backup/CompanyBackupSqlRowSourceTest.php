@@ -396,10 +396,28 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
 
     public function testSupplierHistoryProjectionsMatchCompleteLiveSchema(): void
     {
+        $this->assertProductionProjectionMatchesSchema('purchase_invoice_counters', ['supplier_id', 'period']);
         foreach ([...\MyInvoice\Service\Backup\Registry\CompanyBackupSupplierHistoryDefinitions::definitions(),
             ...\MyInvoice\Service\Backup\Registry\CompanyBackupTaxProfileDefinitions::definitions()] as $definition) {
             $this->assertProductionProjectionMatchesSchema($definition->name(), $definition->details['primary_key']);
         }
+    }
+
+    public function testPurchaseCountersPreserveEmptyAndHistoricPeriodsWithoutForeignRows(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO purchase_invoice_counters (supplier_id, period, last_number)
+            VALUES (?, 'ALL', 0), (?, '202101', 42), (?, '202101', 999)")
+            ->execute([$this->supplierId, $this->supplierId, $this->foreignSupplierId]);
+        $definition = TenantDataRegistryFactory::draftV1()->definition('table:purchase_invoice_counters');
+        self::assertNotNull($definition);
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+            $pdo, $this->supplierId, $definition,
+        ));
+        self::assertSame([
+            ['supplier_id' => $this->supplierId, 'period' => '202101', 'last_number' => 42],
+            ['supplier_id' => $this->supplierId, 'period' => 'ALL', 'last_number' => 0],
+        ], $rows);
     }
 
     public function testLegacyBankOwnershipIsMaterializedOnlyInSnapshotAndSharedByTransactions(): void
