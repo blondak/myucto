@@ -12,18 +12,18 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
 {
     private const DERIVED_OMISSION = 'rederived_from_protected_secret';
 
-    /** @var list<CompanyBackupProtectedSecretMaterialization> */
+    /** @var list<CompanyBackupProtectedSecretMaterialization|CompanyBackupRawSecretMaterialization> */
     public array $materializations;
 
-    /** @var array<string,CompanyBackupProtectedSecretMaterialization> */
+    /** @var array<string,CompanyBackupProtectedSecretMaterialization|CompanyBackupRawSecretMaterialization> */
     private array $bySecretColumn;
 
     /** @var list<string> */
     private array $primaryKey;
 
     /**
-     * @param list<CompanyBackupProtectedSecretMaterialization> $materializations
-     * @param array<string,CompanyBackupProtectedSecretMaterialization> $bySecretColumn
+     * @param list<CompanyBackupProtectedSecretMaterialization|CompanyBackupRawSecretMaterialization> $materializations
+     * @param array<string,CompanyBackupProtectedSecretMaterialization|CompanyBackupRawSecretMaterialization> $bySecretColumn
      * @param list<string> $primaryKey
      */
     private function __construct(
@@ -64,30 +64,44 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
         $materializations = [];
         $bySecretColumn = [];
         foreach ($metadata as $value) {
-            $materialization = CompanyBackupProtectedSecretMaterialization::fromArray(
-                $value,
-                $registryKey,
-            );
+            $materialization = is_array($value) && ($value['materializer'] ?? null) === 'raw_bytes_v1'
+                ? CompanyBackupRawSecretMaterialization::fromArray($value, $registryKey)
+                : CompanyBackupProtectedSecretMaterialization::fromArray($value, $registryKey);
             $secretColumn = $materialization->secretColumn;
             if (isset($bySecretColumn[$secretColumn])) {
                 throw self::metadataError($registryKey, $secretColumn);
             }
-            self::assertCoordinates(
-                $materialization,
-                $data,
-                $primary,
-                $ownership,
-            );
-            self::assertSecretContract(
-                $materialization,
-                $secretPolicies,
-                $secretMetadata,
-            );
+            if ($materialization instanceof CompanyBackupRawSecretMaterialization) {
+                $storage = CompanyBackupSecretStorageContract::fromMetadata(
+                    $secretMetadata[$secretColumn] ?? null, $registryKey, $secretColumn,
+                );
+                if (!isset($data[$materialization->tenantIdColumn])
+                    || isset($data[$secretColumn]) || isset($omitColumns[$secretColumn])
+                    || ($ownership['column'] ?? null) !== $materialization->tenantIdColumn
+                    || !in_array($ownership['strategy'] ?? null, ['selected_supplier', 'supplier_id'], true)
+                    || ($secretPolicies[$secretColumn] ?? null) !== TenantSecretPolicy::ProtectedDomainSecret
+                    || $storage->storage !== CompanyBackupSecretStorage::Raw
+                ) {
+                    throw self::metadataError($registryKey, $secretColumn);
+                }
+            } else {
+                self::assertCoordinates(
+                    $materialization,
+                    $data,
+                    $primary,
+                    $ownership,
+                );
+                self::assertSecretContract(
+                    $materialization,
+                    $secretPolicies,
+                    $secretMetadata,
+                );
+            }
             foreach ($materialization->targetColumns as $role => $column) {
                 if (isset($claimedOutputs[$column])) {
                     throw self::metadataError($registryKey, $column);
                 }
-                if ($role !== 'ciphertext'
+                if (!$materialization instanceof CompanyBackupRawSecretMaterialization && $role !== 'ciphertext'
                     && ($omitColumns[$column] ?? null) !== self::DERIVED_OMISSION
                 ) {
                     throw self::metadataError($registryKey, $column);
@@ -107,8 +121,8 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
         usort(
             $ordered,
             static fn (
-                CompanyBackupProtectedSecretMaterialization $left,
-                CompanyBackupProtectedSecretMaterialization $right,
+                CompanyBackupProtectedSecretMaterialization|CompanyBackupRawSecretMaterialization $left,
+                CompanyBackupProtectedSecretMaterialization|CompanyBackupRawSecretMaterialization $right,
             ): int => strcmp($left->signature(), $right->signature()),
         );
         if ($ordered !== $materializations) {
@@ -126,7 +140,7 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
     /**
      * @param array<string,mixed> $sourceRow
      * @param array<string,mixed> $targetRow
-     * @return array<string,string>
+     * @return array<string,string|null>
      */
     public function materialize(
         CompanyBackupSecretValue $value,
@@ -158,6 +172,9 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
             if (array_key_exists($column, $targetRow)) {
                 throw $this->valueError($materialization->secretColumn);
             }
+        }
+        if ($materialization instanceof CompanyBackupRawSecretMaterialization) {
+            return $materialization->materialize($value, $targetRow);
         }
         $tenantId = $targetRow[$materialization->tenantIdColumn] ?? null;
         $entityId = $targetRow[$materialization->entityIdColumn] ?? null;
@@ -227,6 +244,9 @@ final readonly class CompanyBackupProtectedSecretMaterializationSet
             if (!array_key_exists($column, $sourceRow)) {
                 throw $this->valueError($secretColumn);
             }
+        }
+        if ($materialization instanceof CompanyBackupRawSecretMaterialization) {
+            return $materialization->materialize(null, $targetRow);
         }
         foreach ($materialization->targetColumns as $column) {
             if (array_key_exists($column, $targetRow)) {

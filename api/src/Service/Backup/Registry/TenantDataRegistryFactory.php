@@ -1582,6 +1582,9 @@ final class TenantDataRegistryFactory
      *       masked:string
      *     },
      *     tenant_id_column:string
+     *   }|array{
+     *     materializer:'raw_bytes_v1',secret_column:string,tenant_id_column:string,
+     *     nullable:bool,bytes:int
      *   }>,
      *   restore_overrides:array<string,array{value:string|int|bool|null,reason:string}>,
      *   references:list<array{
@@ -1603,6 +1606,10 @@ final class TenantDataRegistryFactory
                 'references' => CompanyBackupSupplierProjection::references(),
                 'embedded_references' => CompanyBackupSupplierProjection::embeddedReferences(),
                 'restore_overrides' => CompanyBackupSupplierProjection::restoreOverrides(),
+                'protected_secret_materializations' => [[
+                    'materializer' => 'raw_bytes_v1', 'secret_column' => 'ai_pseudo_salt',
+                    'tenant_id_column' => 'id', 'nullable' => true, 'bytes' => 32,
+                ]],
                 'preserved_identifiers' => ['data_box_id'],
                 'generated_columns' => [], 'omit_columns' => [],
             ]];

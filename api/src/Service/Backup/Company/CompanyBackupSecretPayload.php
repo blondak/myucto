@@ -224,6 +224,9 @@ final readonly class CompanyBackupSecretPayload
                     $name,
                     $definition['primary_key'],
                 );
+                if ($scope === CompanyBackupSecretScope::Column && $policy === TenantSecretPolicy::ProtectedDomainSecret) {
+                    self::assertRawMaterialization($value, $registry);
+                }
                 if ($scope === CompanyBackupSecretScope::CredentialVariant) {
                     $credentialDefinition = $registry->registry->definition(
                         $registryKey,
@@ -288,6 +291,28 @@ final readonly class CompanyBackupSecretPayload
             $declarations,
             $registry->fingerprint,
         );
+    }
+
+    private static function assertRawMaterialization(
+        CompanyBackupSecretValue $value,
+        TenantDataRegistrySnapshot $registry,
+    ): void {
+        $definition = $registry->registry->definition($value->registryKey);
+        $contracts = $definition?->details['company_backup']['protected_secret_materializations'] ?? [];
+        if (!is_array($contracts) || !array_is_list($contracts)) {
+            throw new CompanyBackupSecretPayloadException('secret_payload_scope_mismatch');
+        }
+        foreach ($contracts as $contract) {
+            if (!is_array($contract) || ($contract['materializer'] ?? null) !== 'raw_bytes_v1'
+                || ($contract['secret_column'] ?? null) !== $value->name) {
+                continue;
+            }
+            try {
+                CompanyBackupRawSecretMaterialization::fromArray($contract, $value->registryKey)->assertValue($value);
+            } catch (CompanyBackupDataSourceException $e) {
+                throw new CompanyBackupSecretPayloadException('secret_payload_value_invalid', $e);
+            }
+        }
     }
 
     /** @return list<CompanyBackupSecretValue> */
