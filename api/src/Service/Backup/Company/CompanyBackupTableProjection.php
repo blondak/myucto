@@ -113,6 +113,9 @@ final readonly class CompanyBackupTableProjection
     public static function fromDefinition(TenantDataDefinition $definition): self
     {
         $registryKey = $definition->key;
+        if ($definition->policy === TenantDataPolicy::ManualConfiguration) {
+            CompanyBackupManualConfiguration::assertDefinition($definition);
+        }
         if ($definition->kind !== TenantDataObjectKind::Table
             || !$definition->hasProfile(TenantDataRegistry::COMPANY_BACKUP_PROFILE)
             || !$definition->policy->hasMachineDataPayload()
@@ -523,6 +526,9 @@ final readonly class CompanyBackupTableProjection
      */
     public function inspectCompleteSourceRow(array $row, callable $visitor): void
     {
+        if ($this->policy === TenantDataPolicy::ManualConfiguration) {
+            CompanyBackupManualConfiguration::domain($row);
+        }
         if ($this->registryKey === 'table:supplier') {
             CompanyBackupSupplierProjection::assertSourceRow($row);
         }

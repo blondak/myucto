@@ -741,6 +741,7 @@ final class TenantDataRegistryFactory
     {
         self::assertArchiveOrders();
         $definitions = [
+            CompanyBackupSupplierDomainsDefinition::definition(),
             ...CompanyBackupInstanceSecurityDefinitions::definitions(),
             ...CompanyBackupLookupCacheDefinitions::definitions(),
         ];

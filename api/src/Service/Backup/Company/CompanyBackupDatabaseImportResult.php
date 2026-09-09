@@ -18,6 +18,7 @@ final readonly class CompanyBackupDatabaseImportResult
         public int $hashMappingCount,
         public int $protectedSecretCount,
         public CompanyBackupFilePublicationPlan $filePublicationPlan,
+        public ?CompanyBackupManualConfiguration $manualConfiguration = null,
     ) {
         if ($supplierId < 1
             || $filePublicationPlan->targetSupplierId !== $supplierId
@@ -32,7 +33,7 @@ final readonly class CompanyBackupDatabaseImportResult
                 $protectedSecretCount,
             ) < 0
             || $updatedRows > $deferredRows
-            || $mappedGlobalRows + $insertedRows !== $identityCount
+            || $mappedGlobalRows + $insertedRows + ($manualConfiguration?->rowCount() ?? 0) !== $identityCount
             || $sourceKeyCount < $identityCount
         ) {
             throw new \InvalidArgumentException(

@@ -77,6 +77,10 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
             || $publication->targetSupplierId !== $result->supplierId
             || $result->identityCount !== $preflight->identityCount
             || $result->sourceKeyCount !== $preflight->sourceKeyCount
+            || ($result->manualConfiguration !== null && !hash_equals(
+                $source->technicalValidationBindingSha256(),
+                $result->manualConfiguration->technicalValidationBindingSha256,
+            ))
         ) {
             throw self::error('post_import_context_mismatch');
         }
@@ -103,8 +107,9 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
         $checkedTables = 0;
         $checkedTenantRows = 0;
         $mappedGlobalRows = 0;
+        $manualRows = 0;
         foreach ($inventory->objects as $object) {
-            $accountedRows = $checkedTenantRows + $mappedGlobalRows;
+            $accountedRows = $checkedTenantRows + $mappedGlobalRows + $manualRows;
             if ($accountedRows > $preflight->rowCount
                 || $object->rows > $preflight->rowCount - $accountedRows
             ) {
@@ -131,6 +136,7 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
                 TenantDataPolicy::TenantRoot,
                 TenantDataPolicy::TenantOwned,
                 TenantDataPolicy::TenantOwnedIndirect,
+                TenantDataPolicy::ManualConfiguration,
             ], true)) {
                 throw self::error(
                     'post_import_registry_contract_invalid',
@@ -138,6 +144,12 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
                 );
             }
 
+            $isManual = $definition->policy === TenantDataPolicy::ManualConfiguration;
+            $expectedRows = $isManual ? 0 : $object->rows;
+            if ($isManual) {
+                CompanyBackupManualConfiguration::assertDefinition($definition);
+                $manualRows += $object->rows;
+            }
             $actualRows = 0;
             try {
                 foreach ($this->rows->rows(
@@ -146,7 +158,7 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
                     $definition,
                 ) as $_row) {
                     $actualRows++;
-                    if ($actualRows > $object->rows) {
+                    if ($actualRows > $expectedRows) {
                         throw self::error(
                             'post_import_row_count_mismatch',
                             $object->registryKey,
@@ -169,7 +181,7 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
                 );
             }
             self::assertTransaction($database, $object->registryKey);
-            if ($actualRows !== $object->rows) {
+            if ($actualRows !== $expectedRows) {
                 throw self::error(
                     'post_import_row_count_mismatch',
                     $object->registryKey,
@@ -192,7 +204,8 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
         }
         if ($checkedTenantRows !== $result->insertedRows
             || $mappedGlobalRows !== $result->mappedGlobalRows
-            || $checkedTenantRows + $mappedGlobalRows !== $preflight->rowCount
+            || $checkedTenantRows + $mappedGlobalRows + $manualRows !== $preflight->rowCount
+            || $manualRows !== ($result->manualConfiguration?->rowCount() ?? 0)
             || $presentFiles !== $publication->presentEntryCount()
             || $missingFiles !== $publication->missingEntryCount()
             || count($publication->entries) !== $presentFiles + $missingFiles
@@ -217,6 +230,7 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
             $mappedGlobalRows,
             $presentFiles,
             $missingFiles,
+            $result->manualConfiguration?->bindingSha256(),
         );
     }
 

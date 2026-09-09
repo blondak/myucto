@@ -98,6 +98,9 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
             lockTargets: true,
         ))->resolve($decisions, $preflight, $targetRegistry);
 
+        $manualConfiguration = CompanyBackupManualConfiguration::collect($source, $this->limits);
+        $manualRows = $manualConfiguration->rowCount();
+        $manualKeys = $manualConfiguration->sourceKeyCount;
         $identities = null;
         $hashes = null;
         $filePaths = null;
@@ -145,9 +148,9 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $resolutions,
                 $identities,
             );
-            if ($identities->identityCount() !== $preflight->identityCount
-                || $identities->entryCount() !== $preflight->sourceKeyCount
-                || $mappedGlobalRows + $preallocatedRows
+            if ($identities->identityCount() + $manualRows !== $preflight->identityCount
+                || $identities->entryCount() + $manualKeys !== $preflight->sourceKeyCount
+                || $mappedGlobalRows + $preallocatedRows + $manualRows
                     !== $preflight->rowCount
             ) {
                 throw self::error('import_identity_count_mismatch');
@@ -178,7 +181,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $statutoryResults,
             );
             if ($insertedRows !== $preallocatedRows
-                || $mappedGlobalRows + $insertedRows !== $preflight->rowCount
+                || $mappedGlobalRows + $insertedRows + $manualRows !== $preflight->rowCount
             ) {
                 throw self::error('import_row_count_mismatch');
             }
@@ -213,11 +216,12 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $insertedRows,
                 $deferredRows,
                 $updatedRows,
-                $identities->identityCount(),
-                $identities->entryCount(),
+                $identities->identityCount() + $manualRows,
+                $identities->entryCount() + $manualKeys,
                 $hashes->mappingCount(),
                 $protectedSecretCount,
                 $filePaths->publicationPlan(),
+                $manualRows > 0 ? $manualConfiguration : null,
             );
         } catch (\Throwable $e) {
             $failure = $e;

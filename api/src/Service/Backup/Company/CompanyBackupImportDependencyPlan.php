@@ -123,6 +123,10 @@ final readonly class CompanyBackupImportDependencyPlan
             }
             $projections[$object->registryKey] = $projection;
 
+            if ($definition->policy === TenantDataPolicy::ManualConfiguration) {
+                continue;
+            }
+
             if ($definition->policy === TenantDataPolicy::GlobalReference) {
                 $globalRegistryKeys[] = $object->registryKey;
                 continue;

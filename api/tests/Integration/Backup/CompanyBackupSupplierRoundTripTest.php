@@ -90,6 +90,13 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
                 $country, $vat, $existingCurrency, $withSalt ? 1 : 0, $salt,
             ]);
         $supplier = (int) $pdo->lastInsertId();
+        $hostname = 'synthetic-' . bin2hex(random_bytes(8)) . '.example.test';
+        $pdo->prepare("INSERT INTO supplier_domains (supplier_id, hostname, purpose, status,
+            is_primary_portal, is_primary_public, verification_token, created_by)
+            VALUES (?, ?, 'all', 'active', 1, 1, ?, ?)")
+            ->execute([$supplier, $hostname, str_repeat('d', 64), $actor]);
+        $domainId = (int) $pdo->lastInsertId();
+        $domainBefore = $pdo->query('SELECT * FROM supplier_domains WHERE id = ' . $domainId)->fetch(PDO::FETCH_ASSOC);
         $pdo->prepare('INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en,
             account_number, bank_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')->execute([
                 $supplier, 'CZK', 'Synthetic account', 'Kč', 'Synthetic', 'Synthetic', '1000000005', '0100',
@@ -110,7 +117,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $validation = new Backup\CompanyBackupTechnicalValidation($inspection, $registry,
             self::APP_VERSION, Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
         $preflight = (new Backup\CompanyBackupDataPreflight())->inspect($archive, self::PASSWORD, $validation, $pdo);
-        self::assertSame(5, $preflight->rowCount);
+        self::assertSame(6, $preflight->rowCount);
         self::assertCount(2, $preflight->externalReferences->requirements);
         $choices = [];
         foreach ($preflight->externalReferences->requirements as $requirement) {
@@ -143,6 +150,20 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertNotSame($supplier, $result->supplierId);
         self::assertSame(3, $result->insertedRows);
         self::assertSame(2, $result->mappedGlobalRows);
+        self::assertNotNull($result->manualConfiguration);
+        self::assertSame([['hostname' => $hostname, 'purpose' => 'all',
+            'is_primary_portal' => true, 'is_primary_public' => true]], $result->manualConfiguration->domains);
+        self::assertSame(2, $result->manualConfiguration->sourceKeyCount);
+        self::assertCount(3, $result->manualConfiguration->toArray()['required_actions']);
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM supplier_domains WHERE supplier_id = '
+            . $result->supplierId)->fetchColumn());
+        self::assertSame($domainBefore,
+            $pdo->query('SELECT * FROM supplier_domains WHERE id = ' . $domainId)->fetch(PDO::FETCH_ASSOC));
+        $postImport = (new Backup\CompanyBackupRegistryPostImportValidator())->validate($pdo, $source, $preflight, $result);
+        self::assertSame(3, $postImport->checkedTenantRows);
+        self::assertSame($result->manualConfiguration->bindingSha256(), $postImport->manualConfigurationBindingSha256);
+        $committedShape = new Backup\CompanyBackupRestoreResult($result, $postImport, 0);
+        self::assertSame($result->manualConfiguration, $committedShape->database->manualConfiguration);
         self::assertSame($withSalt ? 1 : 0, $result->protectedSecretCount);
         self::assertSame($supplierCount + 1, (int) $pdo->query('SELECT COUNT(*) FROM supplier')->fetchColumn());
         $restored = $this->supplierRow($pdo, $result->supplierId);
@@ -160,6 +181,15 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertSame('2021-01-01 12:00:00', $restored['updated_at']);
         self::assertSame($before, $this->supplierRow($pdo, $supplier));
         self::assertSame(1, (int) $pdo->query('SELECT @@SESSION.foreign_key_checks')->fetchColumn());
+        $pdo->prepare("INSERT INTO supplier_domains (supplier_id, hostname, verification_token)
+            VALUES (?, ?, ?)")->execute([$result->supplierId, 'unexpected-' . $hostname, str_repeat('e', 64)]);
+        try {
+            (new Backup\CompanyBackupRegistryPostImportValidator())->validate($pdo, $source, $preflight, $result);
+            self::fail('Ani neaktivní doménová vazba nesmí vzniknout při obnově.');
+        } catch (Backup\CompanyBackupPostImportException $e) {
+            self::assertSame('post_import_row_count_mismatch', $e->errorCode);
+            self::assertSame('table:supplier_domains', $e->registryKey);
+        }
         $pdo->rollBack();
         self::assertSame([], $this->supplierRow($pdo, $result->supplierId));
         self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM currencies WHERE id = '
@@ -179,7 +209,8 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $definitions = [];
         // Úplná uzavřená testovací podmnožina, produkční definice beze změn.
         foreach (['supplier', 'currencies', 'branding_profiles', 'email_profiles',
-            'signing_profiles', 'countries', 'vat_rates', 'users'] as $table) {
+            'signing_profiles', 'countries', 'vat_rates', 'users', 'supplier_domains',
+            'supplier_domain_login_requests'] as $table) {
             $definition = $draft->definition('table:' . $table);
             self::assertNotNull($definition);
             $definitions[] = $definition;

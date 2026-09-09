@@ -22,8 +22,11 @@ final readonly class CompanyBackupPostImportValidationResult
         public int $mappedGlobalRows,
         public int $presentFileCount,
         public int $missingFileCount,
+        public ?string $manualConfigurationBindingSha256 = null,
     ) {
         if ($supplierId < 1
+            || ($manualConfigurationBindingSha256 !== null
+                && preg_match('/^[0-9a-f]{64}$/D', $manualConfigurationBindingSha256) !== 1)
             || preg_match(
                 '/^sha256:[0-9a-f]{64}$/D',
                 $targetRegistryFingerprint,
@@ -65,6 +68,9 @@ final readonly class CompanyBackupPostImportValidationResult
             'mapped_global_rows' => $mappedGlobalRows,
             'present_file_count' => $presentFileCount,
             'missing_file_count' => $missingFileCount,
+            ...($manualConfigurationBindingSha256 === null ? [] : [
+                'manual_configuration_binding_sha256' => $manualConfigurationBindingSha256,
+            ]),
         ]);
     }
 }

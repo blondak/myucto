@@ -84,6 +84,7 @@ final readonly class CompanyBackupSourceIdentityProjection
             TenantDataPolicy::TenantRoot,
             TenantDataPolicy::TenantOwned,
             TenantDataPolicy::TenantOwnedIndirect,
+            TenantDataPolicy::ManualConfiguration,
         ], true)
             && isset($exported['supplier_id'])
             && !in_array('supplier_id', $projection->primaryKey, true)

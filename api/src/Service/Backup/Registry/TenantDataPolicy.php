@@ -10,6 +10,7 @@ enum TenantDataPolicy: string
     case TenantRoot = 'tenant_root';
     case TenantOwned = 'tenant_owned';
     case TenantOwnedIndirect = 'tenant_owned_indirect';
+    case ManualConfiguration = 'manual_configuration';
     case TenantRelation = 'tenant_relation';
     case GlobalReference = 'global_reference';
     case InstanceOwned = 'instance_owned';
@@ -26,6 +27,7 @@ enum TenantDataPolicy: string
             self::TenantRoot,
             self::TenantOwned,
             self::TenantOwnedIndirect,
+            self::ManualConfiguration,
             self::GlobalReference => true,
             self::TenantRelation,
             self::InstanceOwned,

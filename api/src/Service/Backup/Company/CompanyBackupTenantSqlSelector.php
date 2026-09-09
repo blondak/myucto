@@ -35,7 +35,8 @@ final class CompanyBackupTenantSqlSelector
                 [$supplierId],
             );
         }
-        if ($table->policy === TenantDataPolicy::TenantOwned
+        if (in_array($table->policy, [TenantDataPolicy::TenantOwned,
+                TenantDataPolicy::ManualConfiguration], true)
             && $strategy === 'supplier_id'
         ) {
             $column = $this->directColumn($table, 'supplier_id');

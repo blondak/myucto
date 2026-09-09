@@ -77,6 +77,11 @@ final readonly class CompanyBackupDataInventory
                 $required[$registryKey],
                 $index + 1,
             );
+            if ($required[$registryKey]->policy === \MyInvoice\Service\Backup\Registry\TenantDataPolicy::ManualConfiguration
+                && $object->rows > CompanyBackupManualConfiguration::MAX_DOMAINS
+            ) {
+                throw new \InvalidArgumentException('Ruční konfigurace překračuje limit domén.');
+            }
             $objects[] = $object;
             $objectsByRegistryKey[$registryKey] = $object;
         }

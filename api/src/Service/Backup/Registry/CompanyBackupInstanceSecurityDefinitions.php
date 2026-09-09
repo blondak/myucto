@@ -17,6 +17,7 @@ final class CompanyBackupInstanceSecurityDefinitions
             'mfa_step_up_proofs' => 'instance_purpose_bound_step_up_proofs',
             'password_resets' => 'instance_account_recovery_tokens',
             'sessions' => 'instance_browser_sessions_and_step_up_proofs',
+            'supplier_domain_login_requests' => 'instance_domain_login_authorization_requests',
             'trusted_devices' => 'instance_trusted_browser_credentials',
             'webauthn_ceremonies' => 'instance_ephemeral_webauthn_challenges',
             'webauthn_credentials' => 'instance_user_passkey_registrations',
