@@ -24,11 +24,13 @@ final readonly class CompanyBackupDataPreflightResult
         public string $targetRegistryFingerprint,
         public string $technicalValidationBindingSha256,
         public bool $bankAccountCollision = false,
+        public CompanyBackupSkippedInvoiceCounters $skippedInvoiceCounters = new CompanyBackupSkippedInvoiceCounters(),
     ) {
         if ($rowCount < 0
             || $identityCount !== $rowCount
             || $sourceKeyCount < $identityCount
             || $sourceIndexBytes < 0
+            || $skippedInvoiceCounters->count() > $rowCount
             || $referenceOccurrenceCount < $externalReferences->occurrenceCount
             || preg_match(
                 '/^sha256:[0-9a-f]{64}$/D',
@@ -56,6 +58,7 @@ final readonly class CompanyBackupDataPreflightResult
             'source_index_bytes' => $sourceIndexBytes,
             'reference_occurrence_count' => $referenceOccurrenceCount,
             ...($bankAccountCollision ? ['bank_account_collision' => true] : []),
+            ...($skippedInvoiceCounters->count() > 0 ? ['skipped_invoice_counters' => $skippedInvoiceCounters->toArray()] : []),
         ]);
     }
 
@@ -75,7 +78,8 @@ final readonly class CompanyBackupDataPreflightResult
             'source_index_bytes' => $this->sourceIndexBytes,
             'reference_occurrence_count' => $this->referenceOccurrenceCount,
             'binding_sha256' => $this->bindingSha256,
-            'warnings' => $this->bankAccountCollision ? [CompanyBackupBankWarning::collision()] : [],
+            'warnings' => [...($this->bankAccountCollision ? [CompanyBackupBankWarning::collision()] : []),
+                ...$this->skippedInvoiceCounters->warnings()],
         ];
     }
 }

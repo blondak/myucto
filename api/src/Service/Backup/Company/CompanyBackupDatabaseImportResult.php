@@ -19,6 +19,7 @@ final readonly class CompanyBackupDatabaseImportResult
         public int $protectedSecretCount,
         public CompanyBackupFilePublicationPlan $filePublicationPlan,
         public ?CompanyBackupManualConfiguration $manualConfiguration = null,
+        public CompanyBackupSkippedInvoiceCounters $skippedInvoiceCounters = new CompanyBackupSkippedInvoiceCounters(),
     ) {
         if ($supplierId < 1
             || $filePublicationPlan->targetSupplierId !== $supplierId
@@ -33,7 +34,8 @@ final readonly class CompanyBackupDatabaseImportResult
                 $protectedSecretCount,
             ) < 0
             || $updatedRows > $deferredRows
-            || $mappedGlobalRows + $insertedRows + ($manualConfiguration?->rowCount() ?? 0) !== $identityCount
+            || $mappedGlobalRows + $insertedRows + ($manualConfiguration?->rowCount() ?? 0)
+                + $skippedInvoiceCounters->count() !== $identityCount
             || $sourceKeyCount < $identityCount
         ) {
             throw new \InvalidArgumentException(

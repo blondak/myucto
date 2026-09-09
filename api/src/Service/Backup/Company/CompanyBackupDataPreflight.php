@@ -100,7 +100,41 @@ final readonly class CompanyBackupDataPreflight
                 $this->limits,
             );
             $referenceOccurrenceCount = 0;
+            $skippedCounters = [];
             foreach ($validation->inspection->dataInventory->objects as $object) {
+                if ($object->registryKey === CompanyBackupInvoiceCounterKey::REGISTRY_KEY) {
+                    $definition = $validation->inspection->sourceRegistry->registry->definition($object->registryKey);
+                    if ($definition === null) {
+                        throw new CompanyBackupPreflightException('counter_skip_contract_mismatch', $object->registryKey);
+                    }
+                    CompanyBackupSkippedInvoiceCounters::assertDefinition($definition);
+                    $projection = CompanyBackupTableProjection::fromDefinition($definition);
+                    $source->consumeRows($object->registryKey, function (array $row) use (
+                        $index, $integrity, $collector, $projection, &$skippedCounters, &$referenceOccurrenceCount,
+                    ): void {
+                        $orphan = CompanyBackupSkippedInvoiceCounters::isOrphan($row, $index);
+                        // Kořen firmy se ověřuje i u vynechané řady; výjimka se týká jen dvou os.
+                        $projection->visitSourceReferences($row, function (CompanyBackupReferenceOccurrence $occurrence) use (
+                            $orphan, $integrity, $collector, &$referenceOccurrenceCount,
+                        ): void {
+                            if ($orphan && $occurrence->sourceColumn !== 'supplier_id') {
+                                return;
+                            }
+                            if (++$referenceOccurrenceCount > $this->limits->maxReferenceOccurrences) {
+                                throw new CompanyBackupPreflightException('source_reference_occurrence_limit_exceeded', $occurrence->sourceRegistryKey);
+                            }
+                            $collector->accept($integrity->normalize($occurrence));
+                        });
+                        if ($orphan) {
+                            if (count($skippedCounters) >= CompanyBackupSkippedInvoiceCounters::MAX_ROWS) {
+                                throw new CompanyBackupPreflightException('counter_skip_limit_exceeded', CompanyBackupInvoiceCounterKey::REGISTRY_KEY);
+                            }
+                            $skippedCounters[] = CompanyBackupSourceKey::fromRow(CompanyBackupInvoiceCounterKey::REGISTRY_KEY,
+                                CompanyBackupInvoiceCounterKey::COLUMNS, $row);
+                        }
+                    });
+                    continue;
+                }
                 $source->consumeRows(
                     $object->registryKey,
                     static function (array $row) use (
@@ -144,6 +178,7 @@ final readonly class CompanyBackupDataPreflight
                 $validation->targetRegistryFingerprint,
                 $validation->bindingSha256,
                 $bankAccountCollision,
+                new CompanyBackupSkippedInvoiceCounters($skippedCounters),
             );
         } catch (\Throwable $e) {
             $failure = $e;

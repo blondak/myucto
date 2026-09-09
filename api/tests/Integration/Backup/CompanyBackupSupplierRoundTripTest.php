@@ -130,6 +130,31 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
             return $query->fetchAll(PDO::FETCH_ASSOC);
         };
         $countersBefore = $counterRows($supplier);
+        $clientInsert = $pdo->prepare('INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $clientInsert->execute([$supplier, 'Synthetic counter client', 'Test 1', 'Praha', '11000', $country, $currency]);
+        $client = (int) $pdo->lastInsertId();
+        $clientInsert->execute([$supplier, 'Synthetic deleted client', 'Test 1', 'Praha', '11000', $country, $currency]);
+        $deletedClient = (int) $pdo->lastInsertId();
+        $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$deletedClient]);
+        $categories = new \MyInvoice\Repository\RevenueCategoryRepository($this->connection);
+        $category = $categories->create($supplier, ['code' => 'SYN', 'label' => 'Synthetic category']);
+        $deletedCategory = $categories->create($supplier, ['code' => 'SYN-OLD', 'label' => 'Synthetic deleted category']);
+        self::assertTrue($categories->delete($deletedCategory, $supplier)['deleted']);
+        $counterInsert = $pdo->prepare("INSERT INTO invoice_counters
+            (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number)
+            VALUES (?, ?, ?, 'invoice', 'ALL', ?)");
+        foreach ([[0, 0, 0], [$client, 0, 12], [0, $category, 34], [$client, $category, 56],
+            [$deletedClient, 0, 78], [0, $deletedCategory, 90]] as [$clientId, $categoryId, $number]) {
+            $counterInsert->execute([$supplier, $clientId, $categoryId, $number]);
+        }
+        $invoiceCounterRows = static function (int $owner) use ($pdo): array {
+            $query = $pdo->prepare('SELECT client_id, revenue_category_id, invoice_type, period, last_number
+                FROM invoice_counters WHERE supplier_id = ? ORDER BY last_number');
+            $query->execute([$owner]);
+            return $query->fetchAll(PDO::FETCH_ASSOC);
+        };
+        $invoiceCountersBefore = $invoiceCounterRows($supplier);
         $supplierCount = (int) $pdo->query('SELECT COUNT(*) FROM supplier')->fetchColumn();
         $archive = $this->archive($pdo, $registry, $supplier);
         $inspection = (new Backup\CompanyBackupArchiveInspector(
@@ -138,17 +163,19 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         ))->inspect($archive, self::PASSWORD, self::APP_VERSION, Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
         $validation = new Backup\CompanyBackupTechnicalValidation($inspection, $registry,
             self::APP_VERSION, Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
+        self::assertSame(6, $inspection->dataInventory->object('table:invoice_counters')->rows);
         $preflight = (new Backup\CompanyBackupDataPreflight())->inspect($archive, self::PASSWORD, $validation, $pdo);
-        self::assertSame(26, $preflight->rowCount);
+        self::assertSame(34, $preflight->rowCount);
         self::assertTrue($preflight->bankAccountCollision);
-        self::assertSame([Backup\CompanyBackupBankWarning::collision()], $preflight->toArray()['warnings']);
+        self::assertSame(2, $preflight->skippedInvoiceCounters->count());
+        self::assertSame([Backup\CompanyBackupBankWarning::collision(), ...$preflight->skippedInvoiceCounters->warnings()], $preflight->toArray()['warnings']);
         // Simulace jiného cíle: pouze lookup čítače vlastních účtů je prázdný.
         // Zdrojové strojové JSONL i technická validace zůstávají identické.
         $pdo->exec('CREATE TEMPORARY TABLE currencies (supplier_id INT, account_number VARCHAR(30), iban VARCHAR(34))');
         try {
             $cleanPreflight = (new Backup\CompanyBackupDataPreflight())->inspect($archive, self::PASSWORD, $validation, $pdo);
             self::assertFalse($cleanPreflight->bankAccountCollision);
-            self::assertSame([], $cleanPreflight->toArray()['warnings']);
+            self::assertSame($preflight->skippedInvoiceCounters->warnings(), $cleanPreflight->toArray()['warnings']);
             self::assertNotSame($preflight->bindingSha256, $cleanPreflight->bindingSha256);
         } finally {
             $pdo->exec('DROP TEMPORARY TABLE currencies');
@@ -183,7 +210,8 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         }
         self::assertTrue($pdo->inTransaction(), 'Commit patří až koordinátoru, ne importéru.');
         self::assertNotSame($supplier, $result->supplierId);
-        self::assertSame(23, $result->insertedRows);
+        self::assertSame(29, $result->insertedRows);
+        self::assertSame($preflight->skippedInvoiceCounters->toArray(), $result->skippedInvoiceCounters->toArray());
         self::assertSame(2, $result->mappedGlobalRows);
         self::assertNotNull($result->manualConfiguration);
         self::assertSame([['hostname' => $hostname, 'purpose' => 'all',
@@ -195,7 +223,8 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertSame($domainBefore,
             $pdo->query('SELECT * FROM supplier_domains WHERE id = ' . $domainId)->fetch(PDO::FETCH_ASSOC));
         $postImport = (new Backup\CompanyBackupRegistryPostImportValidator())->validate($pdo, $source, $preflight, $result);
-        self::assertSame(23, $postImport->checkedTenantRows);
+        self::assertSame(29, $postImport->checkedTenantRows);
+        self::assertSame($preflight->skippedInvoiceCounters->bindingSha256(), $postImport->skippedInvoiceCountersBindingSha256);
         self::assertSame($result->manualConfiguration->bindingSha256(), $postImport->manualConfigurationBindingSha256);
         $committedShape = new Backup\CompanyBackupRestoreResult($result, $postImport, 0);
         self::assertSame($result->manualConfiguration, $committedShape->database->manualConfiguration);
@@ -218,6 +247,28 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertCount(3, $countersBefore);
         self::assertSame($countersBefore, $counterRows($result->supplierId));
         self::assertSame($countersBefore, $counterRows($supplier));
+        $restoredInvoiceCounters = $invoiceCounterRows($result->supplierId);
+        self::assertSame($invoiceCountersBefore, $invoiceCounterRows($supplier));
+        self::assertCount(4, $restoredInvoiceCounters);
+        self::assertSame([0, 12, 34, 56], array_column($restoredInvoiceCounters, 'last_number'));
+        $newClient = (int) $pdo->query('SELECT id FROM clients WHERE supplier_id = ' . $result->supplierId)->fetchColumn();
+        $newCategory = (int) $pdo->query('SELECT id FROM revenue_categories WHERE supplier_id = ' . $result->supplierId)->fetchColumn();
+        self::assertNotSame($client, $newClient);
+        self::assertNotSame($category, $newCategory);
+        self::assertSame([0, $newClient, 0, $newClient], array_column($restoredInvoiceCounters, 'client_id'));
+        self::assertSame([0, 0, $newCategory, $newCategory], array_column($restoredInvoiceCounters, 'revenue_category_id'));
+        $pdo->prepare("INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number)
+            VALUES (?, ?, 0, 'credit_note', 'CHECK', 90)")->execute([$result->supplierId, $deletedClient]);
+        try {
+            (new Backup\CompanyBackupRegistryPostImportValidator())->validate($pdo, $source, $preflight, $result);
+            self::fail('Vynechaná řada nesmí být v obnovené firmě přítomná.');
+        } catch (Backup\CompanyBackupPostImportException $e) {
+            self::assertSame('post_import_row_count_mismatch', $e->errorCode);
+        } finally {
+            $pdo->prepare("DELETE FROM invoice_counters WHERE supplier_id = ? AND client_id = ?
+                AND revenue_category_id = 0 AND invoice_type = 'credit_note' AND period = 'CHECK'")
+                ->execute([$result->supplierId, $deletedClient]);
+        }
         foreach ($historyBefore as $table => $originalRows) {
             self::assertSame($originalRows, $this->historyRows($pdo, $table, $supplier));
             $restoredRows = $this->historyRows($pdo, $table, $result->supplierId);
@@ -287,7 +338,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
             'signing_profiles', 'countries', 'vat_rates', 'users', 'supplier_domains',
             'supplier_domain_login_requests', 'bank_statements', 'supplier_accounting_modes',
             'supplier_osvc_month_statuses', 'supplier_vat_status_history', 'tax_advance_overrides',
-            'purchase_invoice_counters'] as $table) {
+            'purchase_invoice_counters', 'invoice_counters', 'clients', 'revenue_categories', 'expense_categories'] as $table) {
             $definition = $draft->definition('table:' . $table);
             self::assertNotNull($definition);
             $definitions[] = $definition;

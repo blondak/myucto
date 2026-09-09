@@ -397,6 +397,8 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
     public function testSupplierHistoryProjectionsMatchCompleteLiveSchema(): void
     {
         $this->assertProductionProjectionMatchesSchema('purchase_invoice_counters', ['supplier_id', 'period']);
+        $this->assertProductionProjectionMatchesSchema('invoice_counters',
+            \MyInvoice\Service\Backup\Company\CompanyBackupInvoiceCounterKey::COLUMNS);
         foreach ([...\MyInvoice\Service\Backup\Registry\CompanyBackupSupplierHistoryDefinitions::definitions(),
             ...\MyInvoice\Service\Backup\Registry\CompanyBackupTaxProfileDefinitions::definitions()] as $definition) {
             $this->assertProductionProjectionMatchesSchema($definition->name(), $definition->details['primary_key']);

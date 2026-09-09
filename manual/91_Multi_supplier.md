@@ -174,6 +174,14 @@ firemní identitu, jen drobně označuje použitou platformu.
 V detailu dodavatele najdeš sekci **Číslování faktur** se šablonami pro každý
 typ dokladu a volbou cyklu, kdy se pořadové číslo resetuje.
 
+Přenositelná záloha firmy uchovává uložené čítače vystavených i přijatých
+faktur, včetně historických období; neodvozuje je z maxima dochovaných
+dokladů. Při obnově se vynechají pouze osiřelé řady vystavených faktur,
+jejichž klient nebo kategorie v záloze chybí. Kontrola před obnovou uvede
+varování s počtem vynechaných řad. Zdrojová firma ani obsah zálohy se nemění
+a nevytvářejí se náhradní klienti nebo kategorie. Obecné řady firmy bez
+klientského či kategoriálního omezení se obnovují normálně.
+
 **Šablony (per typ dokladu):**
 
 | Pole | Co zadat |

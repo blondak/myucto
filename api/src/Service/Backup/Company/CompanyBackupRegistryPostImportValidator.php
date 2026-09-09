@@ -77,6 +77,7 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
             || $publication->targetSupplierId !== $result->supplierId
             || $result->identityCount !== $preflight->identityCount
             || $result->sourceKeyCount !== $preflight->sourceKeyCount
+            || $result->skippedInvoiceCounters->toArray() !== $preflight->skippedInvoiceCounters->toArray()
             || ($result->manualConfiguration !== null && !hash_equals(
                 $source->technicalValidationBindingSha256(),
                 $result->manualConfiguration->technicalValidationBindingSha256,
@@ -108,8 +109,9 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
         $checkedTenantRows = 0;
         $mappedGlobalRows = 0;
         $manualRows = 0;
+        $skippedRows = 0;
         foreach ($inventory->objects as $object) {
-            $accountedRows = $checkedTenantRows + $mappedGlobalRows + $manualRows;
+            $accountedRows = $checkedTenantRows + $mappedGlobalRows + $manualRows + $skippedRows;
             if ($accountedRows > $preflight->rowCount
                 || $object->rows > $preflight->rowCount - $accountedRows
             ) {
@@ -146,6 +148,12 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
 
             $isManual = $definition->policy === TenantDataPolicy::ManualConfiguration;
             $expectedRows = $isManual ? 0 : $object->rows;
+            $skipped = $preflight->skippedInvoiceCounters->count($object->registryKey);
+            if ($skipped > 0) {
+                CompanyBackupSkippedInvoiceCounters::assertDefinition($definition);
+                $expectedRows -= $skipped;
+                $skippedRows += $skipped;
+            }
             if ($isManual) {
                 CompanyBackupManualConfiguration::assertDefinition($definition);
                 $manualRows += $object->rows;
@@ -204,7 +212,8 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
         }
         if ($checkedTenantRows !== $result->insertedRows
             || $mappedGlobalRows !== $result->mappedGlobalRows
-            || $checkedTenantRows + $mappedGlobalRows + $manualRows !== $preflight->rowCount
+            || $checkedTenantRows + $mappedGlobalRows + $manualRows + $skippedRows !== $preflight->rowCount
+            || $skippedRows !== $preflight->skippedInvoiceCounters->count()
             || $manualRows !== ($result->manualConfiguration?->rowCount() ?? 0)
             || $presentFiles !== $publication->presentEntryCount()
             || $missingFiles !== $publication->missingEntryCount()
@@ -231,6 +240,7 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
             $presentFiles,
             $missingFiles,
             $result->manualConfiguration?->bindingSha256(),
+            $result->skippedInvoiceCounters->bindingSha256(),
         );
     }
 

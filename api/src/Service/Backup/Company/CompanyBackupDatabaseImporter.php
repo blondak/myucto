@@ -101,6 +101,8 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         $manualConfiguration = CompanyBackupManualConfiguration::collect($source, $this->limits);
         $manualRows = $manualConfiguration->rowCount();
         $manualKeys = $manualConfiguration->sourceKeyCount;
+        $skips = $preflight->skippedInvoiceCounters;
+        $skippedRows = $skips->count();
         $identities = null;
         $hashes = null;
         $filePaths = null;
@@ -147,10 +149,11 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $plan,
                 $resolutions,
                 $identities,
+                $skips,
             );
-            if ($identities->identityCount() + $manualRows !== $preflight->identityCount
-                || $identities->entryCount() + $manualKeys !== $preflight->sourceKeyCount
-                || $mappedGlobalRows + $preallocatedRows + $manualRows
+            if ($identities->identityCount() + $manualRows + $skippedRows !== $preflight->identityCount
+                || $identities->entryCount() + $manualKeys + $skippedRows !== $preflight->sourceKeyCount
+                || $mappedGlobalRows + $preallocatedRows + $manualRows + $skippedRows
                     !== $preflight->rowCount
             ) {
                 throw self::error('import_identity_count_mismatch');
@@ -179,9 +182,10 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $secrets,
                 $filePaths,
                 $statutoryResults,
+                $skips,
             );
             if ($insertedRows !== $preallocatedRows
-                || $mappedGlobalRows + $insertedRows + $manualRows !== $preflight->rowCount
+                || $mappedGlobalRows + $insertedRows + $manualRows + $skippedRows !== $preflight->rowCount
             ) {
                 throw self::error('import_row_count_mismatch');
             }
@@ -198,6 +202,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $hashMapper,
                 $hashReferenceMapper,
                 $filePaths,
+                $skips,
             );
             $filePaths->finish();
             foreach ($plan->dependencies() as $dependency) {
@@ -216,12 +221,13 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $insertedRows,
                 $deferredRows,
                 $updatedRows,
-                $identities->identityCount() + $manualRows,
-                $identities->entryCount() + $manualKeys,
+                $identities->identityCount() + $manualRows + $skippedRows,
+                $identities->entryCount() + $manualKeys + $skippedRows,
                 $hashes->mappingCount(),
                 $protectedSecretCount,
                 $filePaths->publicationPlan(),
                 $manualRows > 0 ? $manualConfiguration : null,
+                $skips,
             );
         } catch (\Throwable $e) {
             $failure = $e;
@@ -424,6 +430,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         CompanyBackupImportDependencyPlan $plan,
         CompanyBackupReferenceResolutionPlan $resolutions,
         CompanyBackupTargetIdentityMap $identities,
+        CompanyBackupSkippedInvoiceCounters $skips,
     ): int {
         $preallocated = 0;
         foreach ($plan->identityBatches() as $batch) {
@@ -462,7 +469,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                     $plan,
                     $this->limits,
                 );
-                $consumed = $source->consumeRows(
+                $consumed = $skips->consumeRows($source,
                     $registryKey,
                     static function (array $row) use (
                         $preallocator,
@@ -550,6 +557,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         ?CompanyBackupProtectedSecretRestoreMaterializer $secrets,
         CompanyBackupSqlFilePathMap $filePaths,
         ?CompanyBackupPayrollStatutoryResultSetImportPreparer $statutoryResults,
+        CompanyBackupSkippedInvoiceCounters $skips,
     ): array {
         $insertedRows = 0;
         $supplierId = null;
@@ -587,10 +595,10 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                     $this->database,
                     $definition,
                     $schema,
-                    $object->rows,
+                    $object->rows - $skips->count($registryKey),
                     $this->limits,
                 );
-                $consumed = $source->consumeRows(
+                $consumed = $skips->consumeRows($source,
                     $registryKey,
                     function (array $row) use (
                         $definition,
@@ -689,6 +697,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         callable $hashMapper,
         callable $hashReferenceMapper,
         CompanyBackupSqlFilePathMap $filePaths,
+        CompanyBackupSkippedInvoiceCounters $skips,
     ): array {
         $processed = 0;
         $updated = 0;
@@ -725,10 +734,10 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                     $definition,
                     $schema,
                     $plan,
-                    $object->rows,
+                    $object->rows - $skips->count($registryKey),
                     $this->limits,
                 );
-                $consumed = $source->consumeRows(
+                $consumed = $skips->consumeRows($source,
                     $registryKey,
                     static function (array $row) use (
                         $preparer,

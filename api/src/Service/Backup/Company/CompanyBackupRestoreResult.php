@@ -19,6 +19,7 @@ final readonly class CompanyBackupRestoreResult
         $publication = $database->filePublicationPlan;
         if ($postImport->supplierId !== $database->supplierId
             || $postImport->manualConfigurationBindingSha256 !== $database->manualConfiguration?->bindingSha256()
+            || $postImport->skippedInvoiceCountersBindingSha256 !== $database->skippedInvoiceCounters->bindingSha256()
             || !hash_equals(
                 $postImport->targetRegistryFingerprint,
                 $publication->registryFingerprint,

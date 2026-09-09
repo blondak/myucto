@@ -23,8 +23,11 @@ final readonly class CompanyBackupPostImportValidationResult
         public int $presentFileCount,
         public int $missingFileCount,
         public ?string $manualConfigurationBindingSha256 = null,
+        public ?string $skippedInvoiceCountersBindingSha256 = null,
     ) {
         if ($supplierId < 1
+            || ($skippedInvoiceCountersBindingSha256 !== null
+                && preg_match('/^[0-9a-f]{64}$/D', $skippedInvoiceCountersBindingSha256) !== 1)
             || ($manualConfigurationBindingSha256 !== null
                 && preg_match('/^[0-9a-f]{64}$/D', $manualConfigurationBindingSha256) !== 1)
             || preg_match(
@@ -70,6 +73,9 @@ final readonly class CompanyBackupPostImportValidationResult
             'missing_file_count' => $missingFileCount,
             ...($manualConfigurationBindingSha256 === null ? [] : [
                 'manual_configuration_binding_sha256' => $manualConfigurationBindingSha256,
+            ]),
+            ...($skippedInvoiceCountersBindingSha256 === null ? [] : [
+                'skipped_invoice_counters_binding_sha256' => $skippedInvoiceCountersBindingSha256,
             ]),
         ]);
     }

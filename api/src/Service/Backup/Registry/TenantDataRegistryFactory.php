@@ -743,6 +743,7 @@ final class TenantDataRegistryFactory
         $definitions = [
             ...CompanyBackupSupplierHistoryDefinitions::definitions(),
             CompanyBackupPurchaseCounterDefinition::definition(),
+            CompanyBackupInvoiceCounterDefinition::definition(),
             ...CompanyBackupTaxProfileDefinitions::definitions(),
             CompanyBackupSupplierDomainsDefinition::definition(),
             ...CompanyBackupInstanceSecurityDefinitions::definitions(),
