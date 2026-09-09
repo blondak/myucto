@@ -90,6 +90,7 @@ final readonly class CompanyBackupSourceKey
                 || is_int($value)
                     && ($column === 'id' || str_ends_with($column, '_id'))
                     && $value < 1
+                    && !($value === 0 && CompanyBackupInvoiceCounterKey::permitsZero($registryKey, $values, $column))
             ) {
                 throw new CompanyBackupPreflightException(
                     'source_key_value_invalid',
