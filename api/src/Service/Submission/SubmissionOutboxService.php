@@ -165,6 +165,8 @@ final readonly class SubmissionOutboxService
             throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
         }
 
+        SubmissionRestoreReview::assertDispatchAllowed($row);
+
         // ── Brána idempotence ──
         // `claimForSending` má v UPDATE podmínku `dispatch_state = 'ready'`,
         // takže uspěje právě jednou. Druhý požadavek dostane null a odejde
@@ -512,6 +514,9 @@ final readonly class SubmissionOutboxService
         if ($row === null) {
             throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
         }
+        // Po přenosu nemusí cílový přístup vidět původní odeslané zprávy.
+        // Prázdný probe proto nesmí přepsat neověřený výsledek na „neodešlo“.
+        SubmissionRestoreReview::assertDispatchAllowed($row);
         // `sending` je tu schválně vedle `send_uncertain`. Když proces zemře
         // (fatální chyba, restart poolu, výpadek) mezi voláním kanálu a zápisem
         // výsledku, zůstane řádek viset v `sending` — a to je přesně tentýž

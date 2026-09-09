@@ -208,7 +208,8 @@ final class SubmissionOutboxRepository
             'UPDATE ' . self::TABLE . '
                 SET dispatch_state = \'sending\', confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
                     row_version = row_version + 1
-              WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\''
+              WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\' AND '
+                . \MyInvoice\Service\Submission\SubmissionRestoreReview::sqlAllowsDispatch()
         );
         $stmt->execute([$confirmedBy, $supplierId, $id]);
         if ($stmt->rowCount() !== 1) {
@@ -376,6 +377,8 @@ final class SubmissionOutboxRepository
      */
     public function claimForManualSending(int $supplierId, int $id, int $confirmedBy): ?array
     {
+        // Ruční cesta pouze eviduje již odeslanou zprávu s doloženým ID,
+        // nic neposílá. Musí umožnit i dořešení review_required po obnově.
         $this->assertAvailable();
         $stmt = $this->db->pdo()->prepare(
             'UPDATE ' . self::TABLE . '
@@ -416,7 +419,8 @@ final class SubmissionOutboxRepository
                 SET dispatch_state = \'sending\', dispatch_mode = \'gateway\',
                     confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
                     row_version = row_version + 1
-              WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\''
+              WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\' AND '
+                . \MyInvoice\Service\Submission\SubmissionRestoreReview::sqlAllowsDispatch()
         );
         $stmt->execute([$confirmedBy, $supplierId, $id]);
         if ($stmt->rowCount() !== 1) {

@@ -153,6 +153,31 @@ final class IsdsGatewayDispatchServiceTest extends TestCase
 
     // ═══════════════════════ izolace tenantů ═══════════════════════
 
+    public function testRestoreReviewBlocksStartResumeAndCallbackBeforeNetwork(): void
+    {
+        $id = $this->enqueue($this->supplierId, $this->recipientId);
+        $started = $this->service->start($this->supplierId, $id, $this->userId);
+        $this->db->pdo()->prepare('UPDATE submission_outbox SET last_error_code = ?, last_error_message = ?, row_version = row_version + 1 WHERE id = ?')
+            ->execute([\MyInvoice\Service\Submission\SubmissionRestoreReview::CODE,
+                \MyInvoice\Service\Submission\SubmissionRestoreReview::MESSAGE, $id]);
+        $before = $this->outbox->find($this->supplierId, $id);
+        foreach ([
+            fn () => $this->service->start($this->supplierId, $id, $this->userId),
+            fn () => $this->service->complete($this->supplierId, $this->userId, $started['app_token'], 'SYN-RESTORE-CALLBACK'),
+        ] as $operation) {
+            try {
+                $operation();
+                self::fail('Obnovená komunikace musí nejprve projít ruční kontrolou.');
+            } catch (SubmissionChannelException $e) {
+                self::assertSame(\MyInvoice\Service\Submission\SubmissionRestoreReview::CODE, $e->errorCode);
+                self::assertSame(409, $e->httpStatus);
+            }
+        }
+        self::assertSame([], $this->client->exchangedSessions);
+        self::assertSame([], $this->client->pushedConcepts);
+        self::assertSame($before, $this->outbox->find($this->supplierId, $id));
+    }
+
     /**
      * Jádro celého modulu: zpráva jedné firmy se nesmí odeslat pod identitou
      * druhé.

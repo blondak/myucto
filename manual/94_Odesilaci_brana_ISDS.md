@@ -69,3 +69,4 @@ Ruční načtení doručených zpráv, firemní přístupy a náhradní ruční 
 - **Návrat skončí chybou:** zkontrolujte přesnou HTTPS callback adresu v ISDS a platnost krátkodobé relace.
 - **Uživatel nevidí očekávanou přihlašovací metodu:** nabídku metod řídí ISDS; MyÚčto ji nemůže garantovat ani vynutit.
 - **Výsledek je neurčitý:** nepokoušejte se odeslat stejný formulář znovu, dokud neověříte stav přímo v datové schránce.
+- **Podání vyžaduje kontrolu po obnově zálohy:** označení neověřeného výsledku blokuje přímé odeslání i zahájení a pokračování přes bránu. Nelze ani určit neodeslání pouhým dohledáním zprávy přes přístup cílové instance, který nemusí vidět původní schránku. Nejprve ověřte odeslané zprávy v původní datové schránce. Pokud zpráva skutečně odešla, můžete ručně zaevidovat její doložené ID; tento zápis nic znovu neposílá. Samotná blokace není potvrzením odeslání ani důkazem, že zpráva neodešla.

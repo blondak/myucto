@@ -112,6 +112,62 @@ final class SubmissionOutboxServiceTest extends TestCase
         self::assertSame($first['row']['id'], $second['row']['id']);
     }
 
+    /** @return iterable<string,array{string}> */
+    public static function restoreReviewCodes(): iterable
+    {
+        yield 'canonical' => [\MyInvoice\Service\Submission\SubmissionRestoreReview::CODE];
+        yield 'uppercase' => [strtoupper(\MyInvoice\Service\Submission\SubmissionRestoreReview::CODE)];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('restoreReviewCodes')]
+    public function testRestoreReviewBlocksNetworkClaimsButAllowsRecordingVerifiedSentMessage(string $code): void
+    {
+        $row = $this->enqueue()['row'];
+        $id = (int) $row['id'];
+        $this->db->pdo()->prepare('UPDATE submission_outbox SET last_error_code = ?, last_error_message = ?, row_version = row_version + 1 WHERE id = ?')
+            ->execute([$code,
+                \MyInvoice\Service\Submission\SubmissionRestoreReview::MESSAGE, $id]);
+        $before = $this->outbox->find($this->supplierId, $id);
+        self::assertNull($this->outbox->claimForSending($this->supplierId, $id, $this->userId));
+        self::assertNull($this->outbox->claimForGatewaySending($this->supplierId, $id, $this->userId));
+        try {
+            $this->service->confirmAndSend($this->supplierId, $id, $this->userId, $this->context());
+            self::fail('Neověřená obnova nesmí zahájit síťové odeslání.');
+        } catch (\MyInvoice\Service\Submission\Channel\SubmissionChannelException $e) {
+            self::assertSame(\MyInvoice\Service\Submission\SubmissionRestoreReview::CODE, $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
+        self::assertSame($before, $this->outbox->find($this->supplierId, $id));
+        self::assertNull($before['confirmed_by']);
+        self::assertNull($before['confirmed_at']);
+        self::assertSame([], $this->transport->sentMessages);
+
+        $recorded = $this->service->markSentManually($this->supplierId, $id, $this->userId,
+            'SYN-RESTORE-VERIFIED', new \DateTimeImmutable('2026-01-01 12:00:00'));
+        self::assertTrue($recorded['recorded']);
+        self::assertSame('sent', $recorded['row']['dispatch_state']);
+        self::assertSame('SYN-RESTORE-VERIFIED', $recorded['row']['external_message_id']);
+        self::assertNull($recorded['row']['last_error_code']);
+        self::assertSame([], $this->transport->sentMessages);
+    }
+
+    public function testRestoredSendingCannotBeDeclaredNotSentByTargetMailbox(): void
+    {
+        $id = (int) $this->enqueue()['row']['id'];
+        self::assertNotNull($this->outbox->claimForSending($this->supplierId, $id, $this->userId));
+        $this->db->pdo()->prepare('UPDATE submission_outbox SET last_error_code = ?, row_version = row_version + 1 WHERE id = ?')
+            ->execute([\MyInvoice\Service\Submission\SubmissionRestoreReview::CODE, $id]);
+        $before = $this->outbox->find($this->supplierId, $id);
+        try {
+            $this->service->resolveUncertain($this->supplierId, $id, $this->context());
+            self::fail('Cílová schránka nemůže prokázat neodeslání na původní instanci.');
+        } catch (\MyInvoice\Service\Submission\Channel\SubmissionChannelException $e) {
+            self::assertSame(\MyInvoice\Service\Submission\SubmissionRestoreReview::CODE, $e->errorCode);
+        }
+        self::assertSame($before, $this->outbox->find($this->supplierId, $id));
+        self::assertSame([], $this->transport->sentMessages);
+    }
+
     public function testAutomationCanOnlyPrepareNeverSend(): void
     {
         $row = $this->enqueue()['row'];

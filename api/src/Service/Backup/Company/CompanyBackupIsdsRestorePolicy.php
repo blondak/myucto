@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Company;
 
+use MyInvoice\Service\Submission\SubmissionRestoreReview;
+
 /** Stav komunikace po přenosu nelze dovozovat z výsledku na původní instanci. */
 final class CompanyBackupIsdsRestorePolicy
 {
-    public const REVIEW_REQUIRED = 'company_backup_isds_review_required';
-    public const MESSAGE = 'Po obnově zálohy není výsledek rozpracovaného odeslání ověřený. '
-        . 'Před případným opakováním zkontrolujte odeslané zprávy v datové schránce.';
+    public const REVIEW_REQUIRED = SubmissionRestoreReview::CODE;
+    public const MESSAGE = SubmissionRestoreReview::MESSAGE;
 
     /** @return array<string,array<string,mixed>> */
     public static function gatewayOverrides(): array

@@ -93,6 +93,7 @@ final readonly class IsdsGatewayDispatchService
         if ($row === null) {
             throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
         }
+        \MyInvoice\Service\Submission\SubmissionRestoreReview::assertDispatchAllowed($row);
         if ((string) $row['channel'] !== self::CHANNEL) {
             throw new SubmissionChannelException(
                 'isds_gateway_not_applicable',
@@ -213,6 +214,12 @@ final readonly class IsdsGatewayDispatchService
         // ⚠️ PŘED jakýmkoli síťovým voláním. Cizí token nesmí spotřebovat
         // sessionId ani vložit koncept.
         $this->assertOwnership($session, $supplierId, $userId);
+
+        $outbox = $this->outbox->find($supplierId, (int) $session['outbox_id']);
+        if ($outbox === null) {
+            throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
+        }
+        \MyInvoice\Service\Submission\SubmissionRestoreReview::assertDispatchAllowed($outbox);
 
         $registration = $this->registrations->load((string) $session['environment']);
         $outboxId = (int) $session['outbox_id'];
