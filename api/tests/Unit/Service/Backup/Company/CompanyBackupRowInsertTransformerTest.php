@@ -16,6 +16,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
 use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupPolymorphicReferenceTransform;
 use MyInvoice\Service\Backup\Company\CompanyBackupPreparedDeferredUpdate;
+use MyInvoice\Service\Backup\Company\CompanyBackupPreallocatedImportRowPreparer;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
@@ -23,6 +24,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupReferenceResolutionPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupRowReferenceTransformer;
 use MyInvoice\Service\Backup\Company\CompanyBackupRowTransformException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSourceIdentity;
+use MyInvoice\Service\Backup\Company\CompanyBackupSourceIdentityProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupSourceKey;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlDeferredUpdateWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlTargetIdentityMap;
@@ -61,6 +63,46 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
                 . 'embedded_digest BLOB NOT NULL, polymorphic_id INTEGER NULL,'
                 . 'source_type TEXT NOT NULL, is_active INTEGER NOT NULL)',
         );
+    }
+
+    public function testCompositePrimaryKeyIsMappedOnceInBothImportPasses(): void
+    {
+        $supplier = $this->definition('table:supplier', TenantDataPolicy::TenantRoot, ['id']);
+        $targets = $this->definition('table:targets', TenantDataPolicy::TenantOwned,
+            ['id', 'supplier_id'], references: [$this->reference(['supplier_id'], 'table:supplier')]);
+        $children = $this->definition('table:synthetic_children', TenantDataPolicy::TenantOwned,
+            ['target_id', 'slot', 'supplier_id', 'next_id'], references: [
+                $this->reference(['next_id'], 'table:targets', nullableColumns: ['next_id']),
+                $this->reference(['supplier_id'], 'table:supplier'),
+                $this->reference(['target_id'], 'table:targets'),
+            ], primaryKey: ['target_id', 'slot']);
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        $snapshot = TenantDataRegistrySnapshot::fromRegistry(
+            new TenantDataRegistry(1, [$supplier, $targets, $children], [$profile]), $profile,
+        );
+        $plan = CompanyBackupImportDependencyPlan::fromRegistry($snapshot, $this->inventory($snapshot));
+        $resolutions = $this->emptyResolutionPlan($snapshot);
+        $map = new CompanyBackupSqlTargetIdentityMap($this->database);
+        $source = ['target_id' => 11, 'slot' => 2, 'supplier_id' => 7, 'next_id' => 99];
+        $target = ['target_id' => 111, 'slot' => 2, 'supplier_id' => 71, 'next_id' => 999];
+        foreach ([[$supplier, ['id' => 7], ['id' => 71]],
+            [$targets, ['id' => 11, 'supplier_id' => 7], ['id' => 111, 'supplier_id' => 71]],
+            [$targets, ['id' => 99, 'supplier_id' => 7], ['id' => 999, 'supplier_id' => 71]],
+            [$children, $source, $target]] as [$definition, $before, $after]) {
+            $identity = CompanyBackupSourceIdentityProjection::fromDefinition($definition);
+            $map->add($identity->identityForRow($before), $identity->identityForRow($after));
+        }
+        $map->seal();
+        try {
+            $insert = (new CompanyBackupPreallocatedImportRowPreparer($children, $map, $resolutions, $plan))->prepare($source);
+            self::assertSame(array_replace($target, ['next_id' => null]), $insert->row);
+            $update = (new CompanyBackupDeferredRowPreparer($children, $map, $resolutions, $plan))->prepare($source);
+            self::assertSame(['target_id' => 111, 'slot' => 2], $update->targetPrimaryKey->values);
+            self::assertSame(['next_id' => null], $update->beforeValues);
+            self::assertSame(['next_id' => 999], $update->afterValues);
+        } finally {
+            $map->close();
+        }
     }
 
     public function testMapsEagerReferencesAndNullsOnlyPlannedDeferredShapes(): void
@@ -718,6 +760,7 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
      * @param list<array<string,mixed>> $derivedHashes
      * @param list<array<string,mixed>> $polymorphicReferences
      * @param array<string,mixed> $restoreOverrides
+     * @param list<string> $primaryKey
      */
     private function definition(
         string $key,
@@ -730,6 +773,7 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
         array $derivedHashes = [],
         array $polymorphicReferences = [],
         array $restoreOverrides = [],
+        array $primaryKey = ['id'],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             $key,
@@ -737,7 +781,7 @@ final class CompanyBackupRowInsertTransformerTest extends TestCase
             $policy,
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
             [
-                'primary_key' => ['id'],
+                'primary_key' => $primaryKey,
                 'ownership' => $policy === TenantDataPolicy::TenantRoot
                     ? ['strategy' => 'selected_supplier', 'column' => 'id']
                     : ['strategy' => 'supplier_id', 'column' => 'supplier_id'],

@@ -88,10 +88,10 @@ final readonly class CompanyBackupPreallocatedImportRowPreparer
             );
         }
 
-        $targetSeed = $sourceRow;
-        foreach ($primaryMatch->targetPrimaryKey->values as $column => $value) {
-            $targetSeed[$column] = $value;
-        }
+        $targetSeed = $this->projection->seedPreallocatedPrimaryKey(
+            $sourceRow,
+            $primaryMatch->targetPrimaryKey,
+        );
         $rowMapper = $this->filePaths === null
             ? null
             : fn (array $row): array => $this->filePaths->transform(

@@ -119,6 +119,31 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         }
     }
 
+    public function testTaxProfileChildMonthsDoNotLeakAcrossSuppliers(): void
+    {
+        $pdo = $this->db->pdo();
+        $children = $pdo->prepare('INSERT INTO tax_profile_children
+            (supplier_id, year, first_name, last_name, birth_date)
+            VALUES (?, 2021, ?, ?, ?)');
+        $months = $pdo->prepare('INSERT INTO tax_profile_child_months
+            (child_id, month, child_order, ztpp, claimed) VALUES (?, ?, 1, 0, 1)');
+        $children->execute([$this->supplierId, 'Synthetic', 'Own child', '2015-01-01']);
+        $ownChild = (int) $pdo->lastInsertId();
+        $months->execute([$ownChild, 1]);
+        $months->execute([$ownChild, 2]);
+        $children->execute([$this->foreignSupplierId, 'Synthetic', 'Foreign child', '2015-02-01']);
+        $foreignChild = (int) $pdo->lastInsertId();
+        $months->execute([$foreignChild, 1]);
+        $definition = TenantDataRegistryFactory::draftV1()->definition('table:tax_profile_child_months');
+        self::assertNotNull($definition);
+        $rows = iterator_to_array((new CompanyBackupSqlRowSource(batchSize: 1))->rows(
+            $pdo, $this->supplierId, $definition,
+        ));
+        self::assertCount(2, $rows);
+        self::assertSame([$ownChild, $ownChild], array_map(static fn (array $row): int => (int) $row['child_id'], $rows));
+        self::assertSame([1, 2], array_map(static fn (array $row): int => (int) $row['month'], $rows));
+    }
+
     public function testStreamsOnlyRowsOwnedBySelectedSupplier(): void
     {
         $pdo = $this->db->pdo();
@@ -366,6 +391,14 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         ] as $definition) {
             $query->execute([$definition->name(), 'PRIMARY']);
             self::assertSame($definition->details['primary_key'], $query->fetchAll(PDO::FETCH_COLUMN), $definition->key);
+        }
+    }
+
+    public function testSupplierHistoryProjectionsMatchCompleteLiveSchema(): void
+    {
+        foreach ([...\MyInvoice\Service\Backup\Registry\CompanyBackupSupplierHistoryDefinitions::definitions(),
+            ...\MyInvoice\Service\Backup\Registry\CompanyBackupTaxProfileDefinitions::definitions()] as $definition) {
+            $this->assertProductionProjectionMatchesSchema($definition->name(), $definition->details['primary_key']);
         }
     }
 

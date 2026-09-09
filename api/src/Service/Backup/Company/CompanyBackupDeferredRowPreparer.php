@@ -110,10 +110,10 @@ final readonly class CompanyBackupDeferredRowPreparer
             );
         }
 
-        $targetSeed = $sourceRow;
-        foreach ($match->targetPrimaryKey->values as $column => $value) {
-            $targetSeed[$column] = $value;
-        }
+        $targetSeed = $this->projection->seedPreallocatedPrimaryKey(
+            $sourceRow,
+            $match->targetPrimaryKey,
+        );
         $stableHashMapper = $this->stableHashMapper($hashMapper);
         $stableHashReferenceMapper = $this->stableHashReferenceMapper(
             $hashReferenceMapper,

@@ -117,6 +117,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $pdo->prepare('UPDATE supplier SET default_currency_id = ?, default_branding_profile_id = ?,
             updated_at = ? WHERE id = ?')->execute([$currency, $branding, '2021-01-01 12:00:00', $supplier]);
         $before = $this->supplierRow($pdo, $supplier);
+        $historyBefore = $this->createHistory($pdo, $supplier);
         $supplierCount = (int) $pdo->query('SELECT COUNT(*) FROM supplier')->fetchColumn();
         $archive = $this->archive($pdo, $registry, $supplier);
         $inspection = (new Backup\CompanyBackupArchiveInspector(
@@ -126,7 +127,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $validation = new Backup\CompanyBackupTechnicalValidation($inspection, $registry,
             self::APP_VERSION, Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
         $preflight = (new Backup\CompanyBackupDataPreflight())->inspect($archive, self::PASSWORD, $validation, $pdo);
-        self::assertSame(7, $preflight->rowCount);
+        self::assertSame(23, $preflight->rowCount);
         self::assertTrue($preflight->bankAccountCollision);
         self::assertSame([Backup\CompanyBackupBankWarning::collision()], $preflight->toArray()['warnings']);
         // Simulace jiného cíle: pouze lookup čítače vlastních účtů je prázdný.
@@ -170,7 +171,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         }
         self::assertTrue($pdo->inTransaction(), 'Commit patří až koordinátoru, ne importéru.');
         self::assertNotSame($supplier, $result->supplierId);
-        self::assertSame(4, $result->insertedRows);
+        self::assertSame(20, $result->insertedRows);
         self::assertSame(2, $result->mappedGlobalRows);
         self::assertNotNull($result->manualConfiguration);
         self::assertSame([['hostname' => $hostname, 'purpose' => 'all',
@@ -182,7 +183,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertSame($domainBefore,
             $pdo->query('SELECT * FROM supplier_domains WHERE id = ' . $domainId)->fetch(PDO::FETCH_ASSOC));
         $postImport = (new Backup\CompanyBackupRegistryPostImportValidator())->validate($pdo, $source, $preflight, $result);
-        self::assertSame(4, $postImport->checkedTenantRows);
+        self::assertSame(20, $postImport->checkedTenantRows);
         self::assertSame($result->manualConfiguration->bindingSha256(), $postImport->manualConfigurationBindingSha256);
         $committedShape = new Backup\CompanyBackupRestoreResult($result, $postImport, 0);
         self::assertSame($result->manualConfiguration, $committedShape->database->manualConfiguration);
@@ -202,6 +203,35 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         self::assertSame(1, (int) $restored['default_prices_include_vat']);
         self::assertSame('2021-01-01 12:00:00', $restored['updated_at']);
         self::assertSame($before, $this->supplierRow($pdo, $supplier));
+        foreach ($historyBefore as $table => $originalRows) {
+            self::assertSame($originalRows, $this->historyRows($pdo, $table, $supplier));
+            $restoredRows = $this->historyRows($pdo, $table, $result->supplierId);
+            self::assertCount(count($originalRows), $restoredRows);
+            foreach ($originalRows as $index => $original) {
+                self::assertNotSame($original['id'], $restoredRows[$index]['id']);
+                self::assertSame($result->supplierId, (int) $restoredRows[$index]['supplier_id']);
+                unset($original['id'], $original['supplier_id']);
+                unset($restoredRows[$index]['id'], $restoredRows[$index]['supplier_id']);
+                self::assertSame($original, $restoredRows[$index]);
+            }
+        }
+        $modes = new \MyInvoice\Repository\AccountingModeRepository($this->connection);
+        self::assertSame('tax_evidence', $modes->forYear($result->supplierId, 2026));
+        self::assertSame('double_entry', $modes->forYear($result->supplierId, 2030));
+        self::assertSame(['is_vat_payer' => false, 'is_identified' => true],
+            \MyInvoice\Service\Vat\VatStatusService::flagsAt($pdo, $result->supplierId, '2026-12-31'));
+        self::assertSame(['is_vat_payer' => true, 'is_identified' => false],
+            \MyInvoice\Service\Vat\VatStatusService::flagsAt($pdo, $result->supplierId, '2030-01-01'));
+        $profileReader = new \MyInvoice\Repository\TaxProfileRepository($this->connection);
+        $sourceProfile = $profileReader->find($supplier, 2021);
+        $targetProfile = $profileReader->find($result->supplierId, 2021);
+        self::assertNotNull($sourceProfile);
+        self::assertNotNull($targetProfile);
+        self::assertCount(2, $targetProfile['activities']);
+        self::assertCount(1, $targetProfile['children']);
+        self::assertSame($sourceProfile['children'][0]['months'], $targetProfile['children'][0]['months']);
+        self::assertCount(2, $targetProfile['children'][0]['months']);
+        self::assertNotSame($sourceProfile['children'][0]['id'], $targetProfile['children'][0]['id']);
         self::assertNull($pdo->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $legacyStatementId)->fetchColumn());
         $statementQuery = $pdo->prepare('SELECT supplier_id FROM bank_statements WHERE file_hash = ? AND supplier_id = ?');
         $statementQuery->execute([$statementHash, $result->supplierId]);
@@ -236,11 +266,13 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         // Úplná uzavřená testovací podmnožina, produkční definice beze změn.
         foreach (['supplier', 'currencies', 'branding_profiles', 'email_profiles',
             'signing_profiles', 'countries', 'vat_rates', 'users', 'supplier_domains',
-            'supplier_domain_login_requests', 'bank_statements'] as $table) {
+            'supplier_domain_login_requests', 'bank_statements', 'supplier_accounting_modes',
+            'supplier_osvc_month_statuses', 'supplier_vat_status_history', 'tax_advance_overrides'] as $table) {
             $definition = $draft->definition('table:' . $table);
             self::assertNotNull($definition);
             $definitions[] = $definition;
         }
+        array_push($definitions, ...\MyInvoice\Service\Backup\Registry\CompanyBackupTaxProfileDefinitions::definitions());
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(1, $definitions,
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE]), TenantDataRegistry::COMPANY_BACKUP_PROFILE);
     }
@@ -287,5 +319,72 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $query = $pdo->prepare('SELECT * FROM supplier WHERE id = ?');
         $query->execute([$supplier]);
         return $query->fetch(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /** @return array<string,list<array<string,mixed>>> */
+    private function createHistory(PDO $pdo, int $supplier): array
+    {
+        $pdo->prepare("INSERT INTO supplier_accounting_modes (supplier_id, effective_from, accounting_mode)
+            VALUES (?, '2020-01-01', 'tax_evidence'), (?, '2030-01-01', 'double_entry')")
+            ->execute([$supplier, $supplier]);
+        $pdo->prepare("INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer,
+            is_identified, annual_deduction_percent, note)
+            VALUES (?, '2020-01-01', 0, 0, NULL, 'Synthetic nonpayer'),
+                (?, '2022-01-01', 0, 1, NULL, 'Synthetic identified'),
+                (?, '2030-01-01', 1, 0, 37.50, 'Synthetic future payer')")
+            ->execute([$supplier, $supplier, $supplier]);
+        $pdo->prepare("INSERT INTO supplier_osvc_month_statuses (supplier_id, year, month, activity_status,
+            social_participates, health_minimum_applies, state_insured, employed, new_osvc, assessment_base, note)
+            VALUES (?, 2021, 1, 'main', 1, 1, 0, 0, 1, 1234.56, 'Synthetic main'),
+                (?, 2021, 2, 'secondary', 0, 0, 1, 1, 0, NULL, 'Synthetic secondary')")
+            ->execute([$supplier, $supplier]);
+        $pdo->prepare("INSERT INTO tax_advance_overrides (supplier_id, taxpayer_type, advance_kind, period_year,
+            effective_from, effective_to, amount, periodicity, source, note, created_at, updated_at)
+            VALUES (?, 'fo', 'tax', 2021, '2021-01-01', '2021-06-30', 123.45, 'quarterly', 'fu_decision',
+                'Synthetic limited decision', '2020-12-01 12:00:00', '2020-12-01 12:00:00'),
+                (?, 'fo', 'tax', 2021, '2021-07-01', NULL, 0, 'none', 'manual',
+                'Synthetic zero advance', '2021-06-01 12:00:00', '2021-06-01 12:00:00')")
+            ->execute([$supplier, $supplier]);
+        $result = [];
+        $pdo->prepare("INSERT INTO tax_profiles (supplier_id, year, activity_rate, use_actual_expenses,
+            actual_expenses, mortgage_interest, mortgage_pre_2021, mortgage_months, sickness_insured,
+            sickness_monthly_base, dip_contrib, long_term_care, disability_12_months, donations)
+            VALUES (?, 2021, '80', 1, 12345.67, 4321.09, 1, 6, 1, 17000, 321.09, 42.01, 3, 900.99)")
+            ->execute([$supplier]);
+        $pdo->prepare("INSERT INTO tax_profile_activities (supplier_id, year, name, nace_code, expense_mode,
+            expense_rate, income_amount, expense_amount, active_months, allocation_note, order_index)
+            VALUES (?, 2021, 'Synthetic activity A', '620100', 'actual', 60, 10000.50, 100.75, 6, 'Synthetic allocation A', 1),
+                (?, 2021, 'Synthetic activity B', '620200', 'pausal', 40, 20000.25, 0, 3, 'Synthetic allocation B', 2)")
+            ->execute([$supplier, $supplier]);
+        $pdo->prepare("INSERT INTO tax_profile_children (supplier_id, year, first_name, last_name, birth_date,
+            shared_household_proved, other_parent_not_claimed_proved, evidence_ref, order_index)
+            VALUES (?, 2021, 'Synthetic', 'Child', '2015-01-01', 1, 1, 'Synthetic paper evidence C', 1)")
+            ->execute([$supplier]);
+        $child = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO tax_profile_child_months (child_id, month, child_order, ztpp, claimed)
+            VALUES (?, 1, 1, 0, 1), (?, 2, 2, 1, 0)')->execute([$child, $child]);
+        $pdo->prepare("INSERT INTO tax_profile_spouse_claims (supplier_id, year, first_name, last_name,
+            birth_date, eligible_months, ztpp, own_income, income_proved, shared_household_proved,
+            child_under_three_proved, evidence_ref)
+            VALUES (?, 2021, 'Synthetic', 'Spouse', '1990-01-01', 4, 1, 1234.56, 1, 1, 1, 'Synthetic paper evidence S')")
+            ->execute([$supplier]);
+        foreach ([...\MyInvoice\Service\Backup\Registry\CompanyBackupSupplierHistoryDefinitions::definitions(),
+            ...\MyInvoice\Service\Backup\Registry\CompanyBackupTaxProfileDefinitions::definitions()] as $definition) {
+            if ($definition->name() === 'tax_profile_child_months') {
+                continue;
+            }
+            $result[$definition->name()] = $this->historyRows($pdo, $definition->name(), $supplier);
+        }
+        return $result;
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function historyRows(PDO $pdo, string $table, int $supplier): array
+    {
+        $query = $pdo->prepare('SELECT * FROM '
+            . Backup\CompanyBackupTenantSqlSelector::quoteIdentifier($table, 'table:' . $table)
+            . ' WHERE supplier_id = ? ORDER BY id');
+        $query->execute([$supplier]);
+        return $query->fetchAll(PDO::FETCH_ASSOC);
     }
 }

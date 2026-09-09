@@ -784,6 +784,36 @@ final readonly class CompanyBackupTableProjection
     }
 
     /**
+     * Před remapem dosadí rezervované vlastní ID, ale FK části primárního
+     * klíče ponechá ve zdrojových souřadnicích. Jinak by se mapovaly dvakrát.
+     *
+     * @param array<string,mixed> $sourceRow
+     * @return array<string,mixed>
+     */
+    public function seedPreallocatedPrimaryKey(
+        array $sourceRow,
+        CompanyBackupSourceKey $targetPrimaryKey,
+    ): array {
+        if ($targetPrimaryKey->registryKey !== $this->registryKey
+            || $targetPrimaryKey->columns !== $this->primaryKey
+        ) {
+            throw new \LogicException('Preallocated primary key does not match projection.');
+        }
+        $referenceColumns = [];
+        foreach ($this->identityColumnReferences($this->primaryKey) as $reference) {
+            foreach ($reference->columns as $column) {
+                $referenceColumns[$column] = true;
+            }
+        }
+        foreach ($targetPrimaryKey->values as $column => $value) {
+            if (!isset($referenceColumns[$column])) {
+                $sourceRow[$column] = $value;
+            }
+        }
+        return $sourceRow;
+    }
+
+    /**
      * Přemapuje všechny deklarované tvary referencí jedním normalizovaným
      * mapperem a vnější pečetě ověří před první změnou a obnoví až nakonec.
      *
