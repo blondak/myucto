@@ -222,11 +222,12 @@ final class MoneyS3Reconciler
                 $scalar($ledger($kind, $prefix, $sign), [$ctx->supplierId, $periodId])];
             $other[$key] = (int) $scalar($docs($table, $expr, $kind, $prefix, false), [$ctx->supplierId, $periodId]);
         }
+        // Jen korunové výpisy: pohyby účtu v cizí měně jsou v té měně, deník v Kč.
         $bankDocs = $pdo->prepare(
             "SELECT COALESCE(SUM(t.amount), 0)
                FROM bank_transactions t
                JOIN bank_statements s ON s.id = t.statement_id
-              WHERE s.supplier_id = ?
+              WHERE s.supplier_id = ? AND s.currency = 'CZK'
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN journal_entries e ON e.id = k.entry_id AND e.supplier_id = k.supplier_id
                             WHERE k.supplier_id = s.supplier_id AND k.doc_type = 'bank' AND k.doc_id = t.id AND e.period_id = ?)
@@ -235,7 +236,12 @@ final class MoneyS3Reconciler
         $bankDocs->execute([$ctx->supplierId, $periodId]);
         $rows[] = ['bank',
             round((float) $bankDocs->fetchColumn(), 2),
-            $scalar($ledger('bank_transaction', '221', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END", false), [$ctx->supplierId, $periodId])];
+            $scalar($ledger('bank_transaction', '221', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END", false)
+                . " AND EXISTS (SELECT 1 FROM journal_entry_document_links kc
+                                  JOIN bank_transactions tc ON tc.id = kc.doc_id
+                                  JOIN bank_statements sc ON sc.id = tc.statement_id
+                                 WHERE kc.supplier_id = l.supplier_id AND kc.entry_id = e.id AND kc.doc_type = 'bank' AND sc.currency = 'CZK')",
+                [$ctx->supplierId, $periodId])];
 
         $out = [];
         foreach ($rows as [$key, $documents, $journal]) {

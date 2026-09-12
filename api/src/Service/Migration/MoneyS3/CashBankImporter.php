@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Bank\StatementBalanceService;
 use PDO;
 
 /**
@@ -189,33 +190,38 @@ final class CashBankImporter
 
         $existingStatements = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_STATEMENT);
         $existingTx = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION);
+        // Výpis převzatý z Money je výpis se stavem účtu (zdroj `import`): záložka Stavy na
+        // účtech ho bere jako kotvu zůstatku a jde z něj vytvořit GPC. Money čísluje výpisy
+        // u každého účtu v roce (`Vypis`) — převod je založí stejně.
         $insertStatement = $pdo->prepare(
             'INSERT INTO bank_statements
                 (supplier_id, source, file_name, file_hash, account_number, bank_code,
                  currency, statement_number, statement_date, transaction_count, imported_by)
-             VALUES (?, "import", ?, ?, ?, ?, "CZK", ?, ?, ?, ?)'
+             VALUES (?, "import", ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertTx = $pdo->prepare(
             'INSERT INTO bank_transactions
                 (source, source_ref, statement_id, posted_at, amount, currency, variable_symbol,
                  counterparty_name, description, bank_ref, import_fingerprint)
-             VALUES ("statement", ?, ?, ?, ?, "CZK", ?, ?, ?, ?, ?)'
+             VALUES ("statement", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $touchStatement = $pdo->prepare(
             'UPDATE bank_statements SET transaction_count = transaction_count + ?, statement_date = GREATEST(statement_date, ?)
               WHERE id = ? AND supplier_id = ?'
         );
-        // Stav na účtu: Money výpis nemá, ale účet banky v deníku ano — počáteční stav je
-        // otevírací zápis období, konečný stav zůstatek účtu na konci roku (bez uzávěrky).
-        // Jen korunové účty: pohyby v cizí měně převod vede v Kč, stav účtu by nesouhlasil.
-        $accountBalance = $pdo->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN e.source_type = 'opening' THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END), 0) AS opening,
-                    COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS closing
+        // Stav korunového účtu na začátku roku = otevírací zápis účtu banky v deníku; dál
+        // se počítá po pohybech výpisů. Účet v cizí měně deník v té měně nevede — počáteční
+        // stav je součet pohybů účtu ze všech předchozích let zálohy ({@see foreignOpenings()}).
+        $ledgerOpening = $pdo->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND e.period_id = ? AND l.account_id = ? AND e.source_type <> 'closing'"
+              WHERE l.supplier_id = ? AND e.period_id = ? AND l.account_id = ? AND e.source_type = 'opening'"
         );
-        $setBalances = $pdo->prepare('UPDATE bank_statements SET prev_balance = ?, curr_balance = ? WHERE id = ? AND supplier_id = ?');
+        $setBalances = $pdo->prepare(
+            'UPDATE bank_statements SET prev_balance = ?, curr_balance = ?, credit_total = ?, debit_total = ? WHERE id = ? AND supplier_id = ?'
+        );
+        $foreignOpenings = self::foreignOpenings($ctx, $accounts);
 
         foreach ($byStatement as $statementKey => $rows) {
             [$yearText, $code] = explode('|', $statementKey, 2);
@@ -230,86 +236,176 @@ final class CashBankImporter
                 }
                 continue;
             }
-            $dates = [];
-            foreach ($rows as $r) {
-                $d = InvoiceImporter::date($r, ['DatUcPr', 'DatPlat']);
-                if ($d !== null) {
-                    $dates[] = $d;
+            $meta = $accounts[$code] ?? ['number' => '', 'bank' => '', 'iban' => '', 'primary' => '', 'currency' => 'CZK', 'year' => 0];
+            $currency = $meta['currency'];
+            $running = null;
+            if ($currency === 'CZK') {
+                $primary = AccountCode::fromMoney($meta['primary']);
+                $accountId = $primary !== null ? ($ctx->accountIds[$primary] ?? null) : null;
+                $periodId = $ctx->periods[$year]['id'] ?? null;
+                if ($accountId !== null && $periodId !== null) {
+                    $ledgerOpening->execute([$ctx->supplierId, $periodId, $accountId]);
+                    $running = StatementBalanceService::cents(number_format((float) $ledgerOpening->fetchColumn(), 2, '.', ''));
                 }
-            }
-            sort($dates);
-            $lastDate = $dates === [] ? sprintf('%04d-12-31', $year) : $dates[count($dates) - 1];
-
-            $statementId = $existingStatements[$statementKey] ?? null;
-            if ($statementId === null) {
-                $meta = $accounts[$code] ?? ['number' => '', 'bank' => '', 'iban' => ''];
-                $name = sprintf('money-s3-%s-%d.import', preg_replace('/[^A-Za-z0-9_-]/', '_', $code), $year);
-                $insertStatement->execute([
-                    $ctx->supplierId,
-                    $name,
-                    hash('sha256', 'money-s3|' . $ctx->supplierId . '|' . $code . '|' . $year),
-                    mb_substr($meta['number'] !== '' ? $meta['number'] : $code, 0, 40),
-                    $meta['bank'] !== '' ? mb_substr($meta['bank'], 0, 4) : null,
-                    mb_substr('MS3/' . $code . '/' . $year, 0, 20),
-                    $lastDate,
-                    0,
-                    $ctx->userId > 0 ? $ctx->userId : null,
-                ]);
-                $statementId = (int) $pdo->lastInsertId();
-                $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_STATEMENT, $statementKey, $statementId, $ctx->runId);
-                $p->count(self::STEP_BANK, 'statements');
+            } elseif (isset($foreignOpenings[$code][$year])) {
+                $running = $foreignOpenings[$code][$year];
             }
 
-            $added = 0;
+            $groups = [];
             foreach ($rows as $i => $r) {
-                $docNo = trim((string) $r['Doklad']);
-                $txKey = $txKeys[$statementKey][$i];
-                if (isset($existingTx[$txKey])) {
-                    $ctx->bankTransactions[$txKey] = $existingTx[$txKey];
-                    $p->count(self::STEP_BANK, 'existing');
-                    continue;
-                }
-                // Výdej = odchozí platba, na výpisu se znaménkem minus.
-                $amount = round(abs((float) ($r['Celkem'] ?? 0)), 2);
-                if (((int) ($r['Vydej'] ?? 0)) === 1) {
-                    $amount = -$amount;
-                }
-                $insertTx->execute([
-                    mb_substr($docNo, 0, 190),
-                    $statementId,
-                    InvoiceImporter::date($r, ['DatPlat', 'DatUcPr']) ?? $lastDate,
-                    number_format($amount, 2, '.', ''),
-                    mb_substr(trim((string) ($r['VarSym'] ?? '')), 0, 20) ?: null,
-                    mb_substr(trim((string) ($r['AdNazev'] ?? '')), 0, 190) ?: null,
-                    mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
-                    mb_substr($docNo, 0, 40),
-                    hash('sha256', 'money-s3|' . $ctx->supplierId . '|' . $txKey),
-                ]);
-                $id = (int) $pdo->lastInsertId();
-                $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
-                $ctx->bankTransactions[$txKey] = $id;
-                $added++;
-                $p->count(self::STEP_BANK, 'transactions');
+                $groups[(int) ($r['Vypis'] ?? 0)][] = $i;
             }
-            if ($added > 0) {
-                $touchStatement->execute([$added, $lastDate, $statementId, $ctx->supplierId]);
-            }
-            $meta = $accounts[$code] ?? null;
-            $primary = $meta !== null ? AccountCode::fromMoney($meta['primary']) : null;
-            $accountId = $primary !== null ? ($ctx->accountIds[$primary] ?? null) : null;
-            $periodId = $ctx->periods[$year]['id'] ?? null;
-            if ($meta !== null && $meta['currency'] === 'CZK' && $accountId !== null && $periodId !== null) {
-                $accountBalance->execute([$ctx->supplierId, $periodId, $accountId]);
-                $balance = $accountBalance->fetch(\PDO::FETCH_ASSOC) ?: ['opening' => 0, 'closing' => 0];
-                $setBalances->execute([
-                    number_format((float) $balance['opening'], 2, '.', ''),
-                    number_format((float) $balance['closing'], 2, '.', ''),
-                    $statementId, $ctx->supplierId,
-                ]);
-                $p->count(self::STEP_BANK, 'balances');
+            ksort($groups);
+            // Výpis z dřívějšího převodu (jeden za rok) zůstává — pohyby už jsou v něm.
+            $legacyStatementId = $existingStatements[$statementKey] ?? null;
+            foreach ($groups as $vypis => $indexes) {
+                $dates = [];
+                foreach ($indexes as $i) {
+                    $d = InvoiceImporter::date($rows[$i], ['DatPlat', 'DatUcPr']);
+                    if ($d !== null) {
+                        $dates[] = $d;
+                    }
+                }
+                sort($dates);
+                $lastDate = $dates === [] ? sprintf('%04d-12-31', $year) : $dates[count($dates) - 1];
+
+                $mapKey = $statementKey . '|' . $vypis;
+                $statementId = $legacyStatementId ?? ($existingStatements[$mapKey] ?? null);
+                if ($statementId === null) {
+                    $label = $vypis > 0 ? sprintf('%s/%d/%d', $code, $year, $vypis) : sprintf('%s/%d', $code, $year);
+                    $insertStatement->execute([
+                        $ctx->supplierId,
+                        sprintf('money-s3-%s.import', preg_replace('/[^A-Za-z0-9_-]/', '_', $label)),
+                        hash('sha256', 'money-s3|' . $ctx->supplierId . '|' . $mapKey),
+                        mb_substr($meta['number'] !== '' ? $meta['number'] : $code, 0, 40),
+                        $meta['bank'] !== '' ? mb_substr($meta['bank'], 0, 4) : null,
+                        $currency,
+                        mb_substr($label, 0, 20),
+                        $lastDate,
+                        0,
+                        $ctx->userId > 0 ? $ctx->userId : null,
+                    ]);
+                    $statementId = (int) $pdo->lastInsertId();
+                    $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_STATEMENT, $mapKey, $statementId, $ctx->runId);
+                    $p->count(self::STEP_BANK, 'statements');
+                }
+
+                $added = 0;
+                $credit = 0;
+                $debit = 0;
+                foreach ($indexes as $i) {
+                    $r = $rows[$i];
+                    $docNo = trim((string) $r['Doklad']);
+                    $txKey = $txKeys[$statementKey][$i];
+                    [$amount, $czk] = self::transactionAmount($r, $currency);
+                    $cents = StatementBalanceService::cents(number_format($amount, 2, '.', ''));
+                    if ($cents >= 0) {
+                        $credit += $cents;
+                    } else {
+                        $debit -= $cents;
+                    }
+                    if (isset($existingTx[$txKey])) {
+                        $ctx->bankTransactions[$txKey] = $existingTx[$txKey];
+                        if ($currency !== 'CZK') {
+                            $ctx->bankTransactionCzk[$existingTx[$txKey]] = $czk;
+                        }
+                        $p->count(self::STEP_BANK, 'existing');
+                        continue;
+                    }
+                    $insertTx->execute([
+                        mb_substr($docNo, 0, 190),
+                        $statementId,
+                        InvoiceImporter::date($r, ['DatPlat', 'DatUcPr']) ?? $lastDate,
+                        number_format($amount, 2, '.', ''),
+                        $currency,
+                        mb_substr(trim((string) ($r['VarSym'] ?? '')), 0, 20) ?: null,
+                        mb_substr(trim((string) ($r['AdNazev'] ?? '')), 0, 190) ?: null,
+                        mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
+                        mb_substr($docNo, 0, 40),
+                        hash('sha256', 'money-s3|' . $ctx->supplierId . '|' . $txKey),
+                    ]);
+                    $id = (int) $pdo->lastInsertId();
+                    $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
+                    $ctx->bankTransactions[$txKey] = $id;
+                    if ($currency !== 'CZK') {
+                        $ctx->bankTransactionCzk[$id] = $czk;
+                    }
+                    $added++;
+                    $p->count(self::STEP_BANK, 'transactions');
+                }
+                if ($added > 0) {
+                    $touchStatement->execute([$added, $lastDate, $statementId, $ctx->supplierId]);
+                }
+                if ($running !== null && $legacyStatementId === null) {
+                    $closing = $running + $credit - $debit;
+                    $setBalances->execute([
+                        number_format($running / 100, 2, '.', ''),
+                        number_format($closing / 100, 2, '.', ''),
+                        number_format($credit / 100, 2, '.', ''),
+                        number_format($debit / 100, 2, '.', ''),
+                        $statementId, $ctx->supplierId,
+                    ]);
+                    $running = $closing;
+                    $p->count(self::STEP_BANK, 'balances');
+                }
             }
         }
         $p->finish(self::STEP_BANK);
+    }
+
+    /**
+     * Částka pohybu v měně účtu a v Kč. Výdej = odchozí platba (minus). Pohyb účtu v cizí
+     * měně nese Money ve valutách (`ValutyKUhr`), `Celkem` je přepočet v Kč.
+     *
+     * @param array<string,mixed> $r
+     * @return array{0:float,1:float} [částka v měně účtu, částka v Kč]
+     */
+    private static function transactionAmount(array $r, string $currency): array
+    {
+        $sign = ((int) ($r['Vydej'] ?? 0)) === 1 ? -1 : 1;
+        $czk = round(abs((float) ($r['Celkem'] ?? 0)), 2);
+        if ($currency === 'CZK') {
+            return [$sign * $czk, $sign * $czk];
+        }
+        $foreign = abs((float) ($r['ValutyKUhr'] ?? 0)) ?: abs((float) ($r['ValutyZak0'] ?? 0));
+        if ($foreign === 0.0 && (float) ($r['Kurs'] ?? 0) > 0) {
+            $foreign = $czk / (float) $r['Kurs'] * max(1.0, (float) ($r['PocetJedn'] ?? 1));
+        }
+        return [$sign * round($foreign, 2), $sign * $czk];
+    }
+
+    /**
+     * Počáteční stav účtů v cizí měně po letech (v haléřích té měny): součet pohybů účtu
+     * ze všech dřívějších let zálohy, včetně let, které se nepřevádějí.
+     *
+     * @param array<string,array{currency:string}> $accounts
+     * @return array<string,array<int,int>> kód účtu => rok => počáteční stav
+     */
+    private static function foreignOpenings(ImportContext $ctx, array $accounts): array
+    {
+        $byYear = [];
+        foreach ($ctx->backup->rowsAcrossYears('BankKnih') as $r) {
+            $code = trim((string) ($r['Ucet'] ?? ''));
+            // Roky před převáděným obdobím v mapě adresářů nejsou — rok dá datum pohybu.
+            $date = InvoiceImporter::date($r, ['DatUcPr', 'DatPlat']);
+            $year = $ctx->dirYears[$r['__dir']] ?? ($date !== null ? (int) substr($date, 0, 4) : null);
+            $currency = $accounts[$code]['currency'] ?? 'CZK';
+            if ($currency === 'CZK' || $year === null || trim((string) ($r['Doklad'] ?? '')) === '') {
+                continue;
+            }
+            [$amount] = self::transactionAmount($r, $currency);
+            $byYear[$code][$year] = ($byYear[$code][$year] ?? 0) + StatementBalanceService::cents(number_format($amount, 2, '.', ''));
+        }
+        $out = [];
+        foreach ($byYear as $code => $years) {
+            ksort($years);
+            $running = 0;
+            foreach ($years as $year => $sum) {
+                $out[$code][$year] = $running;
+                $running += $sum;
+            }
+        }
+        return $out;
     }
 
     /**

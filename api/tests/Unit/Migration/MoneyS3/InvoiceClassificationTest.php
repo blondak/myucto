@@ -73,6 +73,18 @@ final class InvoiceClassificationTest extends TestCase
         self::assertNull(Ms3VatCode::resolve('19Ř40,41', true), 'Řádek odpočtu na výstupní straně je chyba členění.');
     }
 
+    public function testReverseChargeFromInternalDocumentLines(): void
+    {
+        self::assertSame(['code' => '24e', 'deduction' => 'reduced'], Ms3VatCode::reverseCharge('19Ř05,06', '19Ř43,44 K'));
+        self::assertSame(['code' => '23', 'deduction' => 'full'], Ms3VatCode::reverseCharge('19Ř03,04', '19Ř43,44'));
+        self::assertSame(['code' => '5', 'deduction' => 'full'], Ms3VatCode::reverseCharge('19Ř10,11_S', '19Ř43,44P', '4'));
+        self::assertSame(['code' => '24', 'deduction' => 'none'], Ms3VatCode::reverseCharge('19Ř12,13', null));
+        self::assertNull(Ms3VatCode::reverseCharge('19Ř10,11_S', '19Ř42   P', '4'), 'Odpočet z dovozu k tuzemskému přenosu převod neodhaduje.');
+        self::assertNull(Ms3VatCode::reverseCharge('19Ř40,41', '19Ř43,44'));
+        self::assertTrue(Ms3VatCode::isReverseChargeOutput('19Ř10,11_S'));
+        self::assertFalse(Ms3VatCode::isReverseChargeOutput('19Ř43,44 K'));
+    }
+
     public function testPaymentMethodFromMoneyLabel(): void
     {
         self::assertSame('bank_transfer', InvoiceImporter::paymentMethod('převodem'));

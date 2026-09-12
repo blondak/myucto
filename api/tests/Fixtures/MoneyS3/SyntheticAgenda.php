@@ -77,7 +77,7 @@ final class SyntheticAgenda
     ];
     private const BANK_FIELDS = [
         ['Doklad', 'C', 10], ['Ucet', 'C', 6], ['Vydej', 'B', 1], ['DatUcPr', 'D', 2], ['DatPlat', 'D', 2], ['Celkem', 'E', 10],
-        ['VarSym', 'C', 10], ['AdNazev', 'C', 60], ['Popis', 'C', 50],
+        ['VarSym', 'C', 10], ['AdNazev', 'C', 60], ['Popis', 'C', 50], ['Vypis', 'L', 4],
     ];
     private const RULE_FIELDS = [['Zkrat', 'C', 6], ['Popis', 'C', 40], ['UcMD', 'C', 6], ['UcD', 'C', 6]];
 
@@ -163,6 +163,8 @@ final class SyntheticAgenda
                 ['Cislo' => 3, 'Nazev' => 'Odběratel Beta a.s.', 'ICO' => self::CUSTOMER_ICO, 'DIC' => 'CZ' . self::CUSTOMER_ICO,
                     'Ulice' => 'Ukázková 7', 'Misto' => 'Ostrava', 'PSC' => '702 00'],
                 ['Cislo' => 4, 'Nazev' => 'Smazaný partner', 'ICO' => '', 'Del' => 1],
+                ['Cislo' => 5, 'Nazev' => 'Lieferant Gamma GmbH', 'ICO' => '', 'DIC' => 'DE123456789',
+                    'Ulice' => 'Musterstraße 1', 'Misto' => 'Berlin', 'PSC' => '10115'],
             ]),
             'AdUcBan.DAT' => Ms3FixtureWriter::table([['CisPartn', 'L', 4], ['Ucet', 'C', 20], ['KodBanky', 'C', 4]], [
                 ['CisPartn' => 2, 'Ucet' => '1000000005', 'KodBanky' => '0100'],
@@ -222,9 +224,9 @@ final class SyntheticAgenda
                 ['Doklad' => 'PV24001', 'Pokl' => 'PO', 'Vydej' => 1, 'PrKont' => 'PV001', 'DatVyst' => '2024-04-01', 'DatUcPr' => '2024-04-01', 'Popis' => 'Nákup materiálu', 'Celkem' => 1500.0, 'BarCode' => '90000201'],
             ]),
             'ROK.001/BankKnih.DAT' => Ms3FixtureWriter::table(self::BANK_FIELDS, [
-                ['Doklad' => 'BV24001', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2024-02-20', 'DatPlat' => '2024-02-20', 'Celkem' => 12100.0, 'VarSym' => '2024017', 'AdNazev' => 'Dodavatel Alfa s.r.o.', 'Popis' => 'Úhrada FP24001'],
-                ['Doklad' => 'BP24002', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2024-03-20', 'DatPlat' => '2024-03-20', 'Celkem' => 24200.0, 'VarSym' => '2024001', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada FV24001'],
-                ['Doklad' => 'BP24003', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2024-06-30', 'DatPlat' => '2024-06-30', 'Celkem' => 50.0, 'Popis' => 'Vratka poplatku'],
+                ['Doklad' => 'BV24001', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2024-02-20', 'DatPlat' => '2024-02-20', 'Celkem' => 12100.0, 'VarSym' => '2024017', 'AdNazev' => 'Dodavatel Alfa s.r.o.', 'Popis' => 'Úhrada FP24001', 'Vypis' => 1],
+                ['Doklad' => 'BP24002', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2024-03-20', 'DatPlat' => '2024-03-20', 'Celkem' => 24200.0, 'VarSym' => '2024001', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada FV24001', 'Vypis' => 2],
+                ['Doklad' => 'BP24003', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2024-06-30', 'DatPlat' => '2024-06-30', 'Celkem' => 50.0, 'Popis' => 'Vratka poplatku', 'Vypis' => 3],
             ]),
 
             'ROK.002/UcOsnova.DAT' => Ms3FixtureWriter::table(self::CHART_FIELDS, $chart),
@@ -268,6 +270,9 @@ final class SyntheticAgenda
                 ['Cislo' => 21, 'Zdroj' => 'PK', 'Doklad' => 'PP25001', 'Datum' => '2025-03-01', 'Popis' => 'Vratka tržby', 'UcMD' => '211000', 'UcD' => '602000', 'Castka' => -200.0],
                 ['Cislo' => 24, 'Zdroj' => 'PK', 'Doklad' => 'PV25002', 'Datum' => '2025-06-02', 'DatPlnDPH' => '2025-06-02', 'Popis' => 'Tankování', 'UcMD' => '501100', 'UcD' => '211000', 'Castka' => 100.0],
                 ['Cislo' => 25, 'Zdroj' => 'PK', 'Doklad' => 'PV25002', 'Datum' => '2025-06-02', 'DatPlnDPH' => '2025-06-02', 'Popis' => 'DPH tankování', 'UcMD' => '343100', 'UcD' => '211000', 'Castka' => 21.0],
+                ['Cislo' => 26, 'Zdroj' => 'FP', 'Doklad' => 'FP25005', 'Datum' => '2025-07-10', 'DatPlnDPH' => '2025-07-10', 'Popis' => 'Licence ze zahraničí', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 1000.0],
+                // Samovyměření: odpočet i povinnost na 343 stejnou částkou.
+                ['Cislo' => 27, 'Zdroj' => 'ID', 'Doklad' => 'ICH25001', 'Datum' => '2025-07-10', 'DatPlnDPH' => '2025-07-10', 'Popis' => 'RCH k FP25005', 'UcMD' => '343100', 'UcD' => '343200', 'Castka' => 210.0],
                 ['Cislo' => 22, 'Zdroj' => 'FP', 'Doklad' => 'DZ25001', 'Datum' => '2025-03-02', 'DatPlnDPH' => '2025-03-02', 'Popis' => 'DPH ze zálohy', 'UcMD' => '343100', 'UcD' => '314000', 'Castka' => 210.0],
             ]),
             'ROK.002/PFaktury.DAT' => Ms3FixtureWriter::table(self::PURCHASE_FIELDS, [
@@ -294,6 +299,11 @@ final class SyntheticAgenda
                 ['Mena' => 'EUR', 'PocetJedn' => 1, 'Kurs' => 25.0, 'Doklad' => 'FP25004', 'PrijatDokl' => 'EU-2025-001', 'VarSymbol' => '2025013',
                     'Zaklad_2' => 2500.0, 'DPH_2' => 525.0, 'CelkemSDPH' => 3025.0, 'Popis' => 'Licence v cizí měně'] + $purchaseDates('2025-04-15') + $vendor,
                 // Money čísluje řadu každý rok od začátku: FP24001 je i v roce 2024.
+                // Licence z EU: faktura mimo přiznání, DPH samovyměřuje interní doklad ICH25001.
+                ['KodDPH' => '19Ř00P', 'Doklad' => 'FP25005', 'PrijatDokl' => 'DE-2025-001', 'VarSymbol' => '2025014',
+                    'D_ICO' => '', 'D_DIC' => 'DE123456789', 'D_Nazev' => 'Lieferant Gamma GmbH', 'D_Ulice' => 'Musterstraße 1',
+                    'D_Mesto' => 'Berlin', 'D_Psc' => '10115', 'Druh' => 'N', 'Uhrada' => 'převodem',
+                    'Zaklad_0' => 1000.0, 'CelkemSDPH' => 1000.0, 'Popis' => 'Licence ze zahraničí'] + $purchaseDates('2025-07-10'),
                 ['Doklad' => 'FP24001', 'PrijatDokl' => 'DF-2025-020', 'VarSymbol' => '2025020',
                     'Zaklad_2' => 300.0, 'DPH_2' => 63.0, 'CelkemSDPH' => 363.0, 'Popis' => 'Drobné služby'] + $purchaseDates('2025-05-06') + $vendor,
             ]),
@@ -317,6 +327,21 @@ final class SyntheticAgenda
             // Odpočet FP25001 Money přesunulo do února (doklad došel po podání přiznání za leden).
             'ROK.002/UcPrvDPH.DAT' => Ms3FixtureWriter::table([['Doklad', 'C', 10], ['DatumD', 'D', 2], ['DatPln', 'D', 2], ['Cleneni', 'C', 12]], [
                 ['Doklad' => 'FP25001', 'DatumD' => '2025-01-15', 'DatPln' => '2025-02-03', 'Cleneni' => self::KOD_DPH_PURCHASE],
+            ]),
+            // Samovyměření k licenci z EU (FP25005) vede Money interním dokladem: výstup
+            // ř. 5 (přijetí služby z EU) a zrcadlový odpočet ř. 43 s kráceným nárokem.
+            'ROK.002/IntDokl.DAT' => Ms3FixtureWriter::table([
+                ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['DatUcPr', 'D', 2], ['DatUplDPH', 'D', 2],
+                ['Cleneni', 'C', 12], ['ZaklZS', 'E', 10], ['DPHZS', 'E', 10],
+            ], [
+                ['Cislo' => 1, 'Doklad' => 'ICH25001', 'Popis' => 'RCH k FP25005', 'DatUcPr' => '2025-07-10', 'DatUplDPH' => '2025-07-10',
+                    'Cleneni' => '19Ř00P', 'ZaklZS' => 2000.0, 'DPHZS' => 420.0],
+            ]),
+            'ROK.002/PolUcDID.DAT' => Ms3FixtureWriter::table([
+                ['CISLO', 'L', 4], ['Cena', 'E', 10], ['SazbaDPH', 'E', 10], ['PocetMJ', 'E', 10], ['Cleneni', 'C', 12], ['PredmPln', 'C', 2],
+            ], [
+                ['CISLO' => 1, 'Cena' => 1000.0, 'SazbaDPH' => 21.0, 'PocetMJ' => 1.0, 'Cleneni' => '19Ř05,06'],
+                ['CISLO' => 1, 'Cena' => 1000.0, 'SazbaDPH' => 21.0, 'PocetMJ' => 1.0, 'Cleneni' => '19Ř43,44 K'],
             ]),
             'ROK.002/BankKnih.DAT' => Ms3FixtureWriter::table(self::BANK_FIELDS, [
                 ['Doklad' => 'BV25001', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-12-31', 'DatPlat' => '2025-12-31', 'Celkem' => 100.0, 'Popis' => 'Poplatek za vedení účtu'],

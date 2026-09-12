@@ -116,7 +116,7 @@ final class StatementBalanceService
         foreach ($statements as $row) {
             $date = substr((string) $row['statement_date'], 0, 10);
             if ($date >= $from) break;
-            if (in_array($row['source'], ['gpc', 'pdf'], true) && $row['curr_balance'] !== null) $anchorDate = $date;
+            if (BankStatementSource::isBalanceAnchor((string) $row['source']) && $row['curr_balance'] !== null) $anchorDate = $date;
         }
         return $anchorDate ?? '1000-01-01';
     }
@@ -154,7 +154,7 @@ final class StatementBalanceService
             if ($date > $to) continue;
             if ($row['curr_balance'] !== null || $row['prev_balance'] !== null) $hasKnownBalance = true;
             if ($row['source'] === 'bank_api' && $row['has_pdf'] && $date >= $from) $unverifiedPdf = true;
-            if (!in_array($row['source'], ['gpc', 'pdf'], true) || $row['curr_balance'] === null) continue;
+            if (!BankStatementSource::isBalanceAnchor((string) $row['source']) || $row['curr_balance'] === null) continue;
             $balance = self::cents($row['curr_balance']);
             if ($row['prev_balance'] !== null && $row['credit_total'] !== null && $row['debit_total'] !== null
                 && self::cents($row['prev_balance']) + self::cents($row['credit_total']) - self::cents($row['debit_total']) !== $balance) {

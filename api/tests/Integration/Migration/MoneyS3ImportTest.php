@@ -126,11 +126,15 @@ final class MoneyS3ImportTest extends TestCase
         // 7 dokladů; smazaný doklad FP24099 se nepřenese.
         self::assertSame(8, $this->rowCount('journal_entries', $supplierId, "YEAR(entry_date) = 2024 AND source_type <> 'closing'"));
         self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "document_no = 'FP24099'"));
-        // Zálohová ZF24001 se převede (nezaúčtovaná), koncept RC-2024-001 z uzavřeného roku ne.
-        self::assertSame(11, $this->rowCount('purchase_invoices', $supplierId));
+        // Zálohová ZF24001 se převede (nezaúčtovaná), koncept RC-2024-001 z uzavřeného roku ne;
+        // přibyla licence z EU FP25005 se samovyměřením.
+        self::assertSame(12, $this->rowCount('purchase_invoices', $supplierId));
         self::assertSame(3, $this->rowCount('invoices', $supplierId));
         self::assertSame(4, $this->rowCount('cash_documents', $supplierId));
-        self::assertSame(2, $this->rowCount('clients', $supplierId));
+        self::assertSame(3, $this->rowCount('clients', $supplierId));
+        // Zahraniční partner má zemi podle DIČ — jinak by dodání do EU chybělo v souhrnném hlášení.
+        self::assertSame(1, $this->rowCount('clients', $supplierId,
+            "dic = 'DE123456789' AND country_id = (SELECT id FROM countries WHERE iso2 = 'DE')"));
         self::assertSame(2, $this->rowCount('payment_matches', $supplierId));
         // Čárový kód z Money (BarCode) je klíč pro připojení naskenovaných příloh.
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "external_barcode = '90000101'"));
@@ -165,9 +169,20 @@ final class MoneyS3ImportTest extends TestCase
         $ledger = $this->container(VatLedgerService::class);
         $rows = $ledger->rows($supplierId, '2025-01-01', '2025-12-31');
         $vat = ['purchase' => 0.0, 'sale' => 0.0];
+        $selfAssessed = [];
         foreach ($rows as $r) {
+            if (!empty($r['is_reverse_charge'])) {
+                $selfAssessed[] = $r;
+                continue;
+            }
             $vat[$r['source']] = ($vat[$r['source']] ?? 0.0) + (float) $r['vat_czk'];
         }
+        // Licence z EU FP25005: samovyměření z interního dokladu ICH25001 — přijetí služby
+        // z EU (ř. 5) a zrcadlový odpočet ve sloupci krácený (ř. 43k), 21 % z 1 000.
+        self::assertCount(1, $selfAssessed, json_encode($selfAssessed, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame(['24e', '5', '43k'], [$selfAssessed[0]['code'], $selfAssessed[0]['dphdp3_line'], $selfAssessed[0]['dphdp3_line_secondary']]);
+        self::assertEqualsWithDelta(210.0, (float) $selfAssessed[0]['vat_czk'], 0.001);
+        self::assertSame('2025-07-10', $selfAssessed[0]['tax_date']);
         // FP25001 1 050 + FP25002 210 + FP24001 z roku 2025 63 + pokladna PV25002 21
         // + daňový doklad k záloze DZ25001 210 + doklad v EUR FP25004 525 − dobropis DP25001 105.
         self::assertEqualsWithDelta(1974.0, $vat['purchase'], 0.001, json_encode($rows, JSON_UNESCAPED_UNICODE) ?: '');
@@ -490,19 +505,33 @@ final class MoneyS3ImportTest extends TestCase
     }
 
     /**
-     * Money výpis se stavem účtu nemá; stav se dopočte z účtu banky v deníku (otevírací
-     * zápis a zůstatek na konci roku), jinak je záložka Stavy na účtech prázdná.
+     * Money čísluje výpisy u každého účtu v roce (`Vypis`); převod je založí stejně a každý
+     * nese počáteční a konečný stav — začátek roku z otevíracího zápisu účtu banky v deníku,
+     * dál po pohybech. Převzatý výpis je výpis se zůstatkem: vidí ho záložka Stavy na účtech
+     * a jde z něj vytvořit GPC.
      */
-    public function testImportedBankStatementCarriesBalancesFromLedger(): void
+    public function testImportedBankStatementsFollowMoneyNumberingWithBalances(): void
     {
         $supplierId = $this->supplier();
         $this->import($supplierId);
 
-        $stmt = $this->db->pdo()->prepare("SELECT prev_balance, curr_balance FROM bank_statements WHERE supplier_id = ? AND statement_number = 'MS3/BU/2024'");
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, statement_number, currency, prev_balance, curr_balance FROM bank_statements
+              WHERE supplier_id = ? AND statement_number LIKE 'BU/2024/%' ORDER BY statement_date, id"
+        );
         $stmt->execute([$supplierId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        self::assertEqualsWithDelta(50000.0, (float) $row['prev_balance'], 0.001);
-        self::assertEqualsWithDelta(62150.0, (float) $row['curr_balance'], 0.001);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame(['BU/2024/1', 'BU/2024/2', 'BU/2024/3'], array_column($rows, 'statement_number'));
+        self::assertSame(
+            [[50000.0, 37900.0], [37900.0, 62100.0], [62100.0, 62150.0]],
+            array_map(static fn (array $r): array => [(float) $r['prev_balance'], (float) $r['curr_balance']], $rows)
+        );
+        self::assertSame('CZK', $rows[0]['currency']);
+
+        $snapshot = $this->container(\MyInvoice\Service\Bank\StatementBalanceService::class)->snapshot($supplierId, (int) $rows[1]['id']);
+        self::assertSame('confirmed', $snapshot['status'], json_encode($snapshot, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertEqualsWithDelta(62100.0, (float) $snapshot['closing'], 0.001);
+        self::assertStringStartsWith('074', $this->container(\MyInvoice\Service\Bank\GpcExporter::class)->export($snapshot));
         self::assertSame(1, $this->rowCount('currencies', $supplierId, "code = 'CZK' AND account_number = '3000000004'"),
             'Účet firmy se bere z posledního roku agendy (při shodě první účet).');
     }

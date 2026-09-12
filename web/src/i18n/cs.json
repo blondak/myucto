@@ -23513,6 +23513,7 @@
       "ambiguous": "úhrad nejednoznačných",
       "unposted_review_skipped": "nezaúčtovaných konceptů z uzavřených let vynecháno",
       "claim_shifted": "odpočtů přesunutých do pozdějšího období",
+      "self_assessed": "faktur se samovyměřením DPH z interních dokladů",
       "zero_amount": "nulových dokladů vynecháno",
       "with_vat": "dokladů s DPH",
       "balances": "stavů výpisů z deníku",

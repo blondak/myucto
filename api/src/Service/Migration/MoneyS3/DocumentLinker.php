@@ -97,7 +97,12 @@ final class DocumentLinker
         $bankByDoc = [];
         foreach ($ctx->bankTransactions as $key => $id) {
             [$year, $docNo] = explode('|', (string) $key, 3);
-            $bankByDoc[$docNo][] = self::candidate($txRow, $id, (int) $year, $ctx->supplierId);
+            $candidate = self::candidate($txRow, $id, (int) $year, $ctx->supplierId);
+            // Pohyb eurového účtu je v eurech, faktury z Money v Kč — porovnává se částka v Kč.
+            if (isset($ctx->bankTransactionCzk[$id])) {
+                $candidate['amount'] = $ctx->bankTransactionCzk[$id];
+            }
+            $bankByDoc[$docNo][] = $candidate;
         }
         $cashByDoc = [];
         foreach ($ctx->cashDocuments as $key => $id) {

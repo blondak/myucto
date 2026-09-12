@@ -74,6 +74,8 @@ final class InvoiceImporter
              VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $claimShifts = $this->claimShifts($ctx);
+        $selfAssessed = $this->selfAssessments($ctx);
+        $usedSelfAssessments = [];
         $duplicate = $pdo->prepare(
             'SELECT 1 FROM purchase_invoices
               WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ? LIMIT 1'
@@ -122,6 +124,19 @@ final class InvoiceImporter
                 $p->count(self::STEP_PURCHASE, 'unposted_review_skipped');
                 continue;
             }
+            $taxDate = self::date($r, ['PlnenoDPH']) ?? $issue;
+            $selfAssessment = $review ? null : self::pickSelfAssessment($selfAssessed, $docNo, $year);
+            if ($selfAssessment !== null) {
+                $usedSelfAssessments[$selfAssessment['key']] = true;
+                if ($selfAssessment['error'] !== null) {
+                    $p->warn(self::STEP_PURCHASE, 'self_assessment_review', "Faktura {$docNo} ({$year}): samovyměření z interního dokladu {$selfAssessment['doc']} převod nezařadí ({$selfAssessment['error']}), DPH doplňte ručně.", ['document_no' => $docNo, 'year' => $year]);
+                } else {
+                    // Samovyměření se vykazuje ke dni z interního dokladu (datum uplatnění DPH).
+                    $taxDate = $selfAssessment['date'] ?? $taxDate;
+                    [$amounts, $class] = $this->applySelfAssessment($selfAssessment, $amounts, $class, $taxDate);
+                    $p->count(self::STEP_PURCHASE, 'self_assessed');
+                }
+            }
             $paidAt = self::date($r, ['Uhrazeno']);
             // Zálohovou fakturu Money neúčtuje — v MyÚčtu je přijatá, ne zaúčtovaná.
             $unbooked = $review || $class['kind'] === 'advance';
@@ -142,7 +157,7 @@ final class InvoiceImporter
                     $vendorNumber,
                     $class['kind'],
                     $issue,
-                    self::date($r, ['PlnenoDPH']) ?? $issue,
+                    $taxDate,
                     self::date($r, ['Splatno']) ?? $issue,
                     $claimDate ?? (self::date($r, ['Doruceno', 'DatUcPr']) ?? $issue),
                     $claimDate !== null ? 'manual' : 'import',
@@ -183,7 +198,7 @@ final class InvoiceImporter
                     trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
                     $item['base'], $item['rate_id'], $item['rate'],
                     $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
-                    $class['code'],
+                    $item['code'] ?? $class['code'],
                 ]);
             }
             if ($claimDate !== null) {
@@ -193,6 +208,18 @@ final class InvoiceImporter
             $ctx->purchaseInvoices[$key] = $id;
             $p->count(self::STEP_PURCHASE, 'created');
             $this->reportNumberAndReview($ctx, self::STEP_PURCHASE, $docNo, $year, $number, $class['reasons']);
+        }
+        $unlinked = [];
+        foreach ($selfAssessed as $byYear) {
+            foreach ($byYear as $sa) {
+                if (!isset($usedSelfAssessments[$sa['key']]) && count($unlinked) < ImportProtocol::LIST_LIMIT) {
+                    $unlinked[] = $sa['doc'];
+                }
+            }
+        }
+        if ($unlinked !== []) {
+            $p->warn(self::STEP_PURCHASE, 'self_assessment_unlinked', count($unlinked) . ' interních dokladů se samovyměřením DPH nejde přiřadit k převedené faktuře ('
+                . implode(', ', array_slice($unlinked, 0, 20)) . '). Jejich DPH doplňte ručně.', ['documents' => $unlinked]);
         }
         $p->finish(self::STEP_PURCHASE);
     }
@@ -458,6 +485,118 @@ final class InvoiceImporter
             $out[($docDate !== null ? (int) substr($docDate, 0, 4) : $year - 1) . '|' . $docNo] = $claim;
         }
         return $out;
+    }
+
+    /**
+     * Samovyměření DPH, které Money vede interním dokladem (`IntDokl`, řádky `PolUcDID`)
+     * k faktuře v přenesené povinnosti — pořízení z EU, služby ze zahraničí, dovoz,
+     * tuzemský přenos. Faktura sama má členění mimo přiznání; výstup (ř. 3–13) a zrcadlový
+     * odpočet (ř. 43/44) nese interní doklad. Faktura se pozná z popisu („RCH k PFZ…").
+     *
+     * @return array<string,array<int,array{key:string,doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,deduction:string,error:?string}>>
+     *   číslo faktury (''= nepoznaná) => rok interního dokladu => samovyměření
+     */
+    private function selfAssessments(ImportContext $ctx): array
+    {
+        $lines = [];
+        foreach ($ctx->backup->rowsAcrossYears('PolUcDID') as $l) {
+            $lines[$l['__dir'] . '|' . (int) ($l['CISLO'] ?? 0)][] = $l;
+        }
+        $out = [];
+        if ($lines === []) {
+            return $out;
+        }
+        foreach ($ctx->backup->rowsAcrossYears('IntDokl') as $h) {
+            $year = $ctx->yearOf($h);
+            $docNo = trim((string) ($h['Doklad'] ?? ''));
+            $docLines = $lines[$h['__dir'] . '|' . (int) ($h['Cislo'] ?? 0)] ?? [];
+            if ($year === null || $docNo === '' || $docLines === []) {
+                continue;
+            }
+            $mirror = null;
+            $output = [];
+            foreach ($docLines as $l) {
+                $code = trim((string) ($l['Cleneni'] ?? ''));
+                if (Ms3VatCode::isReverseChargeOutput($code)) {
+                    $output[] = $l;
+                } elseif (preg_match('/^\d{2}Ř\s*4[234]/u', $code) === 1) {
+                    $mirror ??= $code;
+                }
+            }
+            if ($output === []) {
+                continue;
+            }
+            $entry = ['key' => $year . '|' . $docNo, 'doc' => $docNo, 'date' => self::date($h, ['DatUplDPH', 'DatPln', 'DatUcPr']),
+                'lines' => [], 'deduction' => 'full', 'error' => null];
+            foreach ($output as $l) {
+                $resolved = Ms3VatCode::reverseCharge((string) $l['Cleneni'], $mirror, (string) ($l['PredmPln'] ?? ''));
+                if ($resolved === null) {
+                    $entry['error'] = sprintf('členění „%s“ / „%s“', trim((string) $l['Cleneni']), (string) $mirror);
+                    break;
+                }
+                $entry['lines'][] = [
+                    'base' => round((float) ($l['Cena'] ?? 0) * (((float) ($l['PocetMJ'] ?? 0)) ?: 1.0), 2),
+                    'rate' => (float) ($l['SazbaDPH'] ?? 0),
+                    'code' => $resolved['code'],
+                ];
+                $entry['deduction'] = $resolved['deduction'];
+            }
+            // „RCH k PFZ190001" — první číslo dokladu v popisu (písmena + číslice).
+            $ref = preg_match('/\b([A-Z]{1,5}\d{4,})\b/u', (string) ($h['Popis'] ?? ''), $m) === 1 ? $m[1] : '';
+            $out[$ref][$year] = $entry;
+        }
+        return $out;
+    }
+
+    /**
+     * Samovyměření k faktuře: interní doklad z roku faktury, z následujícího (faktura
+     * z prosince samovyměřená v lednu) nebo z předchozího.
+     *
+     * @param array<string,array<int,array<string,mixed>>> $selfAssessed
+     * @return array<string,mixed>|null
+     */
+    private static function pickSelfAssessment(array $selfAssessed, string $docNo, int $year): ?array
+    {
+        foreach ([$year, $year + 1, $year - 1] as $y) {
+            if (isset($selfAssessed[$docNo][$y])) {
+                return $selfAssessed[$docNo][$y];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Položky faktury se samovyměřením = řádky interního dokladu (základ, sazba a kód
+     * zařazení podle výstupního řádku), nárok na odpočet podle zrcadlového řádku. Money
+     * samovyměřuje kurzem ke dni plnění, takže základ se od částky faktury může lišit —
+     * rozdíl zůstane jako položka bez DPH a bez kódu, aby doklad seděl na závazek.
+     * Hlavička kód nenese: položka rozdílu by jinak zdědila kód přenesené povinnosti.
+     *
+     * @param array<string,mixed> $sa
+     * @param array{items:list<array<string,mixed>>,base:float,vat:float,total:float,rounding:float} $amounts
+     * @param array{reasons:list<string>,vat_deduction:string,code:?string,kind:string} $class
+     * @return array{0:array<string,mixed>,1:array<string,mixed>}
+     */
+    private function applySelfAssessment(array $sa, array $amounts, array $class, string $taxDate): array
+    {
+        $items = [];
+        $base = 0.0;
+        foreach ($sa['lines'] as $line) {
+            $items[] = ['base' => $line['base'], 'rate' => $line['rate'], 'vat' => 0.0,
+                'rate_id' => $this->rateId($line['rate'], $taxDate), 'code' => $line['code']];
+            $base += $line['base'];
+        }
+        $diff = round($amounts['total'] - $base, 2);
+        if (abs($diff) >= 0.01) {
+            $items[] = ['base' => $diff, 'rate' => 0.0, 'vat' => 0.0, 'rate_id' => $this->rateId(0.0, $taxDate), 'code' => null];
+        }
+        $amounts['items'] = $items;
+        $amounts['base'] = $amounts['total'];
+        $amounts['vat'] = 0.0;
+        $amounts['rounding'] = 0.0;
+        $class['vat_deduction'] = $sa['deduction'];
+        $class['code'] = null;
+        return [$amounts, $class];
     }
 
     /** Způsob úhrady z Money (volný text `Uhrada`, viz {@see \MyInvoice\Service\Export\MoneyS3XmlExporter}). */

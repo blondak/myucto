@@ -69,4 +69,52 @@ final class Ms3VatCode
         $saleCode = count($rows) === 1 ? (self::SALE_CODES[$rows[0] . '|' . $suffix] ?? null) : null;
         return $saleCode === null ? null : ['in_return' => true, 'code' => $saleCode, 'deduction' => 'full'];
     }
+
+    /** Řádek samovyměření na výstupu (ř. 3–13) na interním dokladu Money. */
+    public static function isReverseChargeOutput(string $code): bool
+    {
+        return preg_match('/^\d{2}Ř\s*(03,04|05,06|07,08|10,11|12,13)/u', trim($code)) === 1;
+    }
+
+    /**
+     * Samovyměření z interního dokladu Money: výstupní řádek (ř. 3/5/7/10/12) určí kód
+     * zařazení, zrcadlový řádek odpočtu (ř. 43,44 s příponou jako u ř. 40,41) nárok.
+     * Tuzemský přenos (ř. 10) rozliší předmět plnění z řádku dokladu (4 stavební práce,
+     * 5 odpad, 3 nemovitost). Bez zrcadlového řádku odpočet nebyl ('none').
+     *
+     * @return array{code:string, deduction:'full'|'reduced'|'none'}|null null = převod nezařadí
+     */
+    public static function reverseCharge(string $output, ?string $mirror, string $subject = ''): ?array
+    {
+        if (preg_match('/^\d{2}Ř\s*(03,04|05,06|07,08|10,11|12,13)(_S)?\s*$/u', trim($output), $m) !== 1) {
+            return null;
+        }
+        $code = match ($m[1]) {
+            '03,04' => '23',
+            '05,06' => '24e',
+            '07,08' => '25',
+            '12,13' => '24',
+            default => match (trim($subject)) {
+                '', '4' => '5',
+                '5' => '5c',
+                '3' => '5d',
+                default => null,
+            },
+        };
+        if ($code === null) {
+            return null;
+        }
+        if ($mirror === null || trim($mirror) === '') {
+            return ['code' => $code, 'deduction' => 'none'];
+        }
+        if (preg_match('/^\d{2}Ř\s*43,44\s*([A-Z]*)$/u', trim($mirror), $mm) !== 1) {
+            return null;
+        }
+        $deduction = match ($mm[1]) {
+            '', 'M', 'P' => 'full',
+            'K', 'MK', 'PK' => 'reduced',
+            default => null,
+        };
+        return $deduction === null ? null : ['code' => $code, 'deduction' => $deduction];
+    }
 }

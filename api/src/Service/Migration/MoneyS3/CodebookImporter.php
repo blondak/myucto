@@ -229,7 +229,9 @@ final class CodebookImporter
             mb_substr($data['street'] !== '' ? $data['street'] : '-', 0, 190),
             mb_substr($data['city'] !== '' ? $data['city'] : '-', 0, 120),
             mb_substr($data['zip'] !== '' ? str_replace(' ', '', $data['zip']) : '-', 0, 10),
-            $defaults['country_id'],
+            // Zahraniční partner: země podle předpony DIČ — jinak by dodání do EU chybělo
+            // v souhrnném hlášení a samovyměření by se bralo jako tuzemské.
+            $this->countryFromVatId($dic) ?? $defaults['country_id'],
             $data['email'] !== '' ? mb_substr($data['email'], 0, 190) : null,
             $data['phone'] !== '' ? mb_substr($data['phone'], 0, 40) : null,
             $defaults['currency_id'],
@@ -239,6 +241,25 @@ final class CodebookImporter
             $data['note'],
         ]);
         return (int) $pdo->lastInsertId();
+    }
+
+    /** @var array<string,?int> ISO kód země => countries.id */
+    private array $countryIds = [];
+
+    /** Země partnera podle předpony DIČ (EL = Řecko); tuzemské, chybějící nebo neznámé → null. */
+    private function countryFromVatId(string $dic): ?int
+    {
+        if (preg_match('/^([A-Z]{2})[0-9A-Z]/', $dic, $m) !== 1 || $m[1] === 'CZ') {
+            return null;
+        }
+        $iso = $m[1] === 'EL' ? 'GR' : $m[1];
+        if (!array_key_exists($iso, $this->countryIds)) {
+            $stmt = $this->db->pdo()->prepare('SELECT id FROM countries WHERE iso2 = ? LIMIT 1');
+            $stmt->execute([$iso]);
+            $id = $stmt->fetchColumn();
+            $this->countryIds[$iso] = $id === false ? null : (int) $id;
+        }
+        return $this->countryIds[$iso];
     }
 
     /** @return array{currency_id:int,country_id:int} */
