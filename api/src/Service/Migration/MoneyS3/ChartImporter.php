@@ -13,8 +13,9 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
  * Firma má osnovu ze standardní šablony MyÚčta; analytiky z Money se pod ni doplní
  * (`042000` → `042.000` pod syntetikou `042`) s názvem z `UcOsnova.DAT`. Existující účet
  * se stejným kódem se použije tak, jak je. Syntetika, kterou šablona nemá, se založí
- * s typem převzatým od sourozence ze stejné skupiny (první dvě číslice) — bez sourozence
- * typ účtu (aktivum/pasivum/náklad) odhadovat nejde a převod skončí chybou.
+ * s typem převzatým od sourozence ze stejné skupiny (první dvě číslice), jinak ze stejné
+ * třídy — bez sourozence typ účtu (aktivum/pasivum/náklad) odhadovat nejde a převod
+ * skončí chybou.
  */
 final class ChartImporter
 {
@@ -44,6 +45,9 @@ final class ChartImporter
 
         $used = [];
         foreach ($ctx->backup->rowsAcrossYears('UcDenik') as $r) {
+            if (Ms3Journal::isYearEndClosing($r)) {
+                continue;
+            }
             foreach (['UcMD', 'UcD'] as $k) {
                 $code = trim((string) ($r[$k] ?? ''));
                 if ($code !== '') {
@@ -98,11 +102,16 @@ final class ChartImporter
      */
     private function createSynthetic(ImportContext $ctx, string $synthetic, array $names): ?array
     {
+        // Sourozenec ze skupiny, jinak ze třídy: skupiny zrušené osnovou od roku 2016
+        // (61x změna stavu zásob) ve starých letech agendy zůstávají a šablona je nemá,
+        // přitom třída 5/6 typ účtu určuje jednoznačně.
         $sibling = null;
-        foreach ($this->accounts->listForTenant($ctx->supplierId, true) as $row) {
-            if (!empty($row['is_synthetic']) && str_starts_with((string) $row['account_code'], substr($synthetic, 0, 2))) {
-                $sibling = $row;
-                break;
+        foreach ([2, 1] as $prefix) {
+            foreach ($this->accounts->listForTenant($ctx->supplierId, true) as $row) {
+                if (!empty($row['is_synthetic']) && str_starts_with((string) $row['account_code'], substr($synthetic, 0, $prefix))) {
+                    $sibling = $row;
+                    break 2;
+                }
             }
         }
         if ($sibling === null) {

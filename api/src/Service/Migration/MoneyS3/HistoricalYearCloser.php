@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClosingRepository;
+use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 
 /**
@@ -211,9 +212,54 @@ final class HistoricalYearCloser
             throw new MoneyS3Exception('closing_steps_incomplete', 'průvodce uzávěrkou nedovolí uzavřít' . ($pending !== [] ? ' (nehotové kroky: ' . implode(', ', $pending) . ')' : '') . '.');
         }
 
-        $result = $this->closing->closeBooks($supplierId, $periodId, $rv(), $meta);
+        $reason = $this->unpostedFromMoney($ctx, $periodId);
+        $result = $this->closing->closeBooks($supplierId, $periodId, $rv(), $meta, $reason !== null, $reason);
         $this->closing->openNext($supplierId, $periodId, $rv(), $meta);
         return $result;
+    }
+
+    /**
+     * Důvod pro uzavření knih s nezaúčtovanými doklady, nebo null. Money rok uzavřelo i
+     * s doklady, které v deníku nemají zápis (převod je hlásí jako doklady bez zápisu);
+     * MyÚčto by kvůli nim historický rok neuzavřelo nikdy. Výjimka platí JEN tehdy, když
+     * jsou všechny nezaúčtované doklady převzaté z Money — doklad založený v MyÚčtu dál
+     * blokuje. Průvodce ji zaznamená do auditu i do závěrkového balíčku.
+     */
+    private function unpostedFromMoney(ImportContext $ctx, int $periodId): ?string
+    {
+        $period = null;
+        foreach ($ctx->periods as $p) {
+            if ((int) $p['id'] === $periodId) {
+                $period = $p;
+            }
+        }
+        if ($period === null) {
+            return null;
+        }
+        $ids = [
+            MoneyS3ImportRepository::KIND_INVOICE => array_column($this->repo->unpostedInvoices($ctx->supplierId, $period['starts_on'], $period['ends_on']), 'id'),
+            MoneyS3ImportRepository::KIND_PURCHASE_INVOICE => array_column($this->repo->unpostedPurchases($ctx->supplierId, $period['starts_on'], $period['ends_on']), 'id'),
+        ];
+        $total = count($ids[MoneyS3ImportRepository::KIND_INVOICE]) + count($ids[MoneyS3ImportRepository::KIND_PURCHASE_INVOICE]);
+        if ($total === 0) {
+            return null;
+        }
+        $mapped = 0;
+        foreach ($ids as $kind => $list) {
+            if ($list === []) {
+                continue;
+            }
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT COUNT(DISTINCT target_id) FROM money_s3_import_map
+                  WHERE supplier_id = ? AND kind = ? AND target_id IN (' . implode(',', array_fill(0, count($list), '?')) . ')'
+            );
+            $stmt->execute(array_merge([$ctx->supplierId, $kind], array_map('intval', $list)));
+            $mapped += (int) $stmt->fetchColumn();
+        }
+        if ($mapped !== $total) {
+            return null;
+        }
+        return "Převod z Money S3: {$total} dokladů převzatých z Money nemá v deníku Money zápis, Money rok uzavřelo bez nich.";
     }
 
     private function abortIfClosing(ImportContext $ctx, int $periodId): void

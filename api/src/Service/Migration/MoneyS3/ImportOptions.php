@@ -16,6 +16,7 @@ final class ImportOptions
      * @param list<string> $relatedPartyIcos IČO partnerů, které se v adresáři označí jako spřízněné osoby
      * @param array<int,string> $moneyReports rok => cesta k obratové předvaze vyexportované z Money (CSV)
      * @param bool $confirmedIco uživatel výslovně potvrdil, že záloha patří firmě, i když to IČO ověřit nejde
+     * @param int|null $fromYear první převáděný účetní rok; starší roky zálohy (a jejich doklady) se vynechají
      */
     public function __construct(
         public readonly string $mode = self::MODE_DRY_RUN,
@@ -24,12 +25,16 @@ final class ImportOptions
         public readonly array $relatedPartyIcos = [],
         public readonly array $moneyReports = [],
         public readonly bool $confirmedIco = false,
+        public readonly ?int $fromYear = null,
     ) {
         if (!in_array($mode, [self::MODE_DRY_RUN, self::MODE_IMPORT], true)) {
             throw new MoneyS3Exception('invalid_mode', 'Neznámý režim převodu.');
         }
         if ($firstPeriodStart !== null && preg_match('/^\d{4}-\d{2}-\d{2}$/', $firstPeriodStart) !== 1) {
             throw new MoneyS3Exception('invalid_first_period_start', 'Začátek prvního účetního období čeká datum RRRR-MM-DD.');
+        }
+        if ($fromYear !== null && ($fromYear < 1990 || $fromYear > 2100)) {
+            throw new MoneyS3Exception('invalid_from_year', 'První převáděný rok musí být mezi lety 1990 a 2100.');
         }
     }
 
@@ -48,6 +53,7 @@ final class ImportOptions
             'related_party_icos' => $this->relatedPartyIcos,
             'money_reports' => array_map('intval', array_keys($this->moneyReports)),
             'confirmed_ico' => $this->confirmedIco,
+            'from_year' => $this->fromYear,
         ];
     }
 }

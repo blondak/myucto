@@ -14,10 +14,26 @@ final class Ms3Journal
     /** Zdroj řádku deníku, kterým Money označuje počáteční stavy. */
     public const OPENING_SOURCE = 'XP';
 
+    /** Zdroj řádku deníku, kterým Money označuje uzávěrkové zápisy roku (převod na 702/710). */
+    public const YEAR_END_CLOSING_SOURCE = 'XZ';
+
     /** @param array<string,mixed> $row */
     public static function isOpening(array $row): bool
     {
         return trim((string) ($row['Zdroj'] ?? '')) === self::OPENING_SOURCE;
+    }
+
+    /**
+     * Uzávěrka roku v Money: konečné stavy rozvahových účtů na 702 a výsledkové účty přes
+     * 710. Převod ji nepřebírá — rok uzavře průvodce uzávěrkou MyÚčta ({@see HistoricalYearCloser})
+     * proti počátečním stavům dalšího roku z Money. Převzatá by konečné stavy vynulovala
+     * a uzávěrka MyÚčta by pak nesouhlasila s počátečními stavy ani nešla provést.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function isYearEndClosing(array $row): bool
+    {
+        return strtoupper(trim((string) ($row['Zdroj'] ?? ''))) === self::YEAR_END_CLOSING_SOURCE;
     }
 
     /**

@@ -89,6 +89,29 @@ final class StatementSeedTest extends TestCase
         self::assertSame([], $missing, 'Výsledkové účty šablony bez zásahu v mapě VZZ: ' . implode(', ', $missing));
     }
 
+    /**
+     * Převod z jiného programu zakládá syntetiky podle jeho osnovy (směrná osnova, starší
+     * osnova před rokem 2016). Bez zásahu v mapě by jejich zůstatek ve výkazech chyběl
+     * a rozvaha by nesouhlasila.
+     */
+    public function testLegacyAndStandardChartAccountsOutsideTemplateAreMapped(): void
+    {
+        $bs = $this->mapPrefixes($this->bsVersionId);
+        $is = $this->mapPrefixes($this->isVersionId);
+        $missing = [];
+        foreach (['094', '260', '350', '360', '374', '375', '376', '377'] as $code) {
+            if (!$this->covered($code, $bs)) {
+                $missing[] = $code;
+            }
+        }
+        foreach (['600', '611', '612', '613', '614', '621', '622', '623', '624', '640', '667'] as $code) {
+            if (!$this->covered($code, $is)) {
+                $missing[] = $code;
+            }
+        }
+        self::assertSame([], $missing, 'Účty mimo šablonu bez zásahu v mapě výkazů: ' . implode(', ', $missing));
+    }
+
     public function testNoMappedPrefixStartsWithClass7(): void
     {
         $stmt = $this->db->pdo()->prepare(

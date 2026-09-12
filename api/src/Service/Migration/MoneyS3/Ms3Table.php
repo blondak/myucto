@@ -247,9 +247,12 @@ final class Ms3Table
             }
             // Money drží v souboru i režijní záznamy: hlavičku free-listu a smazané
             // sloty. Nepoznají se podle obsahu (bývají plné pseudonáhodných bajtů),
-            // ale podle vlastních příznaků `Free` / `Del`. Smazané doklady do sestav
-            // Money nepatří, takže je správné je vynechat i při převodu.
-            if (!empty($row['Free']) || !empty($row['Del'])) {
+            // ale podle vlastních příznaků `Free` / `Del`. Doklady (faktury) mají
+            // místo `Del` příznak `FlagDel`: smazaná faktura v souboru zůstává a její
+            // číslo řada přidělí znovu, takže vedle ní bývá živý doklad téhož čísla.
+            // Smazané doklady do sestav Money nepatří, takže je správné je vynechat
+            // i při převodu.
+            if (!empty($row['Free']) || !empty($row['Del']) || !empty($row['FlagDel'])) {
                 $this->skippedDeleted++;
                 continue;
             }

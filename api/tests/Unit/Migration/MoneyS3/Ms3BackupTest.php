@@ -127,7 +127,7 @@ final class Ms3BackupTest extends TestCase
         self::assertSame([2024, 2025], $info->fiscalYears());
         self::assertSame(3, $info->partners);
         self::assertSame(4, $info->years[0]['opening_rows']);
-        self::assertSame(1, $info->years[0]['purchase_invoices']);
+        self::assertSame(3, $info->years[0]['purchase_invoices']);
         self::assertSame([], $info->warnings);
     }
 }

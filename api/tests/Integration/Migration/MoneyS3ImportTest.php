@@ -18,6 +18,7 @@ use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
+use MyInvoice\Service\Migration\MoneyS3\AgendaInfo;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3Exception;
@@ -125,15 +126,21 @@ final class MoneyS3ImportTest extends TestCase
         // 7 dokladů; smazaný doklad FP24099 se nepřenese.
         self::assertSame(8, $this->rowCount('journal_entries', $supplierId, "YEAR(entry_date) = 2024 AND source_type <> 'closing'"));
         self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "document_no = 'FP24099'"));
-        self::assertSame(8, $this->rowCount('purchase_invoices', $supplierId));
+        self::assertSame(10, $this->rowCount('purchase_invoices', $supplierId));
         self::assertSame(3, $this->rowCount('invoices', $supplierId));
-        self::assertSame(2, $this->rowCount('cash_documents', $supplierId));
+        self::assertSame(4, $this->rowCount('cash_documents', $supplierId));
         self::assertSame(2, $this->rowCount('clients', $supplierId));
         self::assertSame(2, $this->rowCount('payment_matches', $supplierId));
         // Čárový kód z Money (BarCode) je klíč pro připojení naskenovaných příloh.
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "external_barcode = '90000101'"));
         self::assertSame(1, $this->rowCount('cash_documents', $supplierId, "external_barcode = '90000201'"));
-        self::assertSame([], $protocol->get('orphans'));
+        // FP24002 Money nezaúčtovalo — doklad je, zápis v deníku ne.
+        self::assertSame([['purchase_invoice', 2024, 'FP24002']],
+            array_map(static fn (array $o): array => [$o['type'], $o['year'], $o['document_no']], $protocol->get('orphans')));
+        // DZ25001 Money účtuje jen 343/314 a FP25002 placenou kartou včetně úhrady (321 nulový) —
+        // do kontroly dokladů proti 321 nepatří, vykážou se zvlášť.
+        $documents2025 = array_column($reconciliation[1]['documents'], null, 'key');
+        self::assertSame(2, $documents2025['purchase_invoices']['other_accounts']);
 
         $tb = $this->container(TrialBalanceService::class)->build($supplierId, $this->periodId($supplierId, 2024), null, null, false);
         $rows = array_column($tb['rows'], null, 'account_code');
@@ -159,20 +166,21 @@ final class MoneyS3ImportTest extends TestCase
             $vat[$r['source']] = ($vat[$r['source']] ?? 0.0) + (float) $r['vat_czk'];
         }
         // FP25001 1 050 + konečná FP25002 210 + FP24001 z roku 2025 63; vydaná jen FV25001.
-        self::assertEqualsWithDelta(1323.0, $vat['purchase'], 0.001, json_encode($rows, JSON_UNESCAPED_UNICODE) ?: '');
+        // + DPH 21 z pokladního nákupu PV25002 (tuzemské členění 19Ř40,41).
+        self::assertEqualsWithDelta(1344.0, $vat['purchase'], 0.001, json_encode($rows, JSON_UNESCAPED_UNICODE) ?: '');
         self::assertEqualsWithDelta(210.0, $vat['sale'], 0.001);
 
         $drafts = $this->db->pdo()->prepare(
             "SELECT vendor_invoice_number FROM purchase_invoices WHERE supplier_id = ? AND status = 'draft' ORDER BY vendor_invoice_number"
         );
         $drafts->execute([$supplierId]);
-        self::assertSame(['DB-2025-001', 'EU-2025-001', 'RC-2025-001', 'ZF-2025-001'], $drafts->fetchAll(PDO::FETCH_COLUMN));
+        self::assertSame(['DB-2025-001', 'DZ-2025-001', 'EU-2025-001', 'RC-2025-001', 'ZF-2025-001'], $drafts->fetchAll(PDO::FETCH_COLUMN));
         self::assertSame(1, $this->rowCount('invoices', $supplierId, "status = 'draft' AND varsymbol = 'ZV25001'"));
         self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "status = 'draft' AND booked_at IS NOT NULL"),
             'Koncept k ruční kontrole nesmí být zamčený jako zaúčtovaný.');
 
         $steps = array_column($protocol->toArray()['steps'], null, 'key');
-        self::assertSame(4, $steps['purchase_invoices']['counts']['review'] ?? 0);
+        self::assertSame(5, $steps['purchase_invoices']['counts']['review'] ?? 0);
         self::assertSame(1, $steps['issued_invoices']['counts']['review'] ?? 0);
         self::assertContains('needs_review', array_column($steps['purchase_invoices']['messages'], 'code'));
     }
@@ -263,6 +271,225 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(['entry_date' => '2025-01-01', 'fiscal_year' => 2025], ['entry_date' => $row['entry_date'], 'fiscal_year' => (int) $row['fiscal_year']]);
         self::assertSame(1, $this->rowCount('journal_entries', $supplierId, "entry_date = '2024-12-31' AND source_type <> 'closing'"),
             'Z deníku Money patří na 31. 12. 2024 jen ID24001 (uzávěrkový zápis roku je vlastní zápis MyÚčta).');
+    }
+
+    /**
+     * Smazaná faktura zůstává v souboru Money s příznakem `FlagDel` a její číslo řada
+     * přidělí znovu. Převod ji nesmí vzít jako druhý doklad téhož čísla — mapa by hlásila
+     * konflikt a zastavila celý převod.
+     */
+    public function testDeletedInvoiceWithReusedNumberIsSkipped(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-003'"));
+        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'SMAZ-2025-001'"));
+    }
+
+    /**
+     * Money vede v knize roku i doklad s datem z vedlejšího roku a počítá ho do obratů
+     * toho roku. Zápis jde k prvnímu dni období, původní datum zůstává jako datum dokladu.
+     */
+    public function testEntryDatedOutsideItsBookYearIsPostedAtPeriodBoundary(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT e.entry_date, e.document_date, p.fiscal_year FROM journal_entries e JOIN accounting_periods p ON p.id = e.period_id
+              WHERE e.supplier_id = ? AND e.document_no = 'ID25002'"
+        );
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertSame(['entry_date' => '2025-01-01', 'document_date' => '2024-12-31', 'fiscal_year' => 2025],
+            ['entry_date' => $row['entry_date'], 'document_date' => $row['document_date'], 'fiscal_year' => (int) $row['fiscal_year']]);
+        $journal = array_column($protocol->toArray()['steps'], null, 'key')['journal'];
+        self::assertContains('entry_date_outside_year', array_column($journal['messages'], 'code'));
+    }
+
+    /**
+     * Skupinu 61 osnova od roku 2016 nemá, šablona MyÚčta taky ne. Typ účtu se převezme
+     * od sourozence ze stejné třídy (6 = výnosy), jinak by převod staré agendy skončil.
+     */
+    public function testSyntheticFromRetiredGroupTakesTypeFromAccountClass(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT account_code, account_type FROM chart_of_accounts WHERE supplier_id = ? AND account_code IN ('602', '613', '613.000') ORDER BY account_code"
+        );
+        $stmt->execute([$supplierId]);
+        $types = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $types[(string) $r['account_code']] = (string) $r['account_type'];
+        }
+        self::assertSame(['602', '613', '613.000'], array_map('strval', array_keys($types)));
+        self::assertSame($types['602'], $types['613']);
+        self::assertSame($types['602'], $types['613.000']);
+    }
+
+    /**
+     * Uzávěrkové zápisy Money (zdroj XZ) převádějí konečné stavy na 702/710. Převzaté by
+     * vynulovaly konečné stavy roku a uzávěrka MyÚčta by nesouhlasila s počátečními stavy
+     * dalšího roku — rok by zůstal otevřený.
+     */
+    public function testMoneyYearEndClosingIsNotImported(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame('closed', array_column($protocol->get('closing'), null, 'year')[2024]['status']);
+        self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "description = 'Účetní závěrka roku 2024'"));
+        $journal = array_column($protocol->toArray()['steps'], null, 'key')['journal'];
+        self::assertContains('year_end_closing_skipped', array_column($journal['messages'], 'code'));
+    }
+
+    /**
+     * Záporný pokladní příjem je vratka (peníze odešly) — jde jako výdej, jinak by pokladna
+     * nesouhlasila s deníkem. Nulový doklad MyÚčto nepřijme a v pokladně nemá účinek.
+     */
+    public function testNegativeCashReceiptBecomesExpenseAndZeroIsSkipped(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rowCount('cash_documents', $supplierId, "doc_number = 'PP25001' AND doc_type = 'out' AND total_amount = 200"));
+        self::assertSame(0, $this->rowCount('cash_documents', $supplierId, "doc_number = 'PP25002'"));
+        $cash = array_column($protocol->toArray()['steps'], null, 'key')['cash'];
+        self::assertSame(1, $cash['counts']['zero_amount'] ?? 0);
+    }
+
+    /**
+     * Money rok uzavřelo i s fakturou, kterou nezaúčtovalo. Průvodce uzávěrkou MyÚčta by
+     * kvůli ní historický rok neuzavřel nikdy — u dokladů převzatých z Money proto uzavře
+     * knihy s výjimkou a důvodem (audit + závěrkový balíček).
+     */
+    public function testHistoricalYearClosesDespiteDocumentMoneyLeftUnposted(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame('closed', array_column($protocol->get('closing'), null, 'year')[2024]['status']);
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2024-099' AND status <> 'draft'"));
+    }
+
+    /**
+     * Money dovolí ručně přepsat počáteční stavy, takže konečné stavy roku nemusí navazovat
+     * na další rok. Uzávěrka MyÚčta takový rok neuzavře a s ním ani žádný pozdější — kontrola
+     * před převodem to musí říct předem a doporučit rok, od kterého roky navazují.
+     */
+    public function testBrokenYearChainIsReportedWithSuggestedStartYear(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/reclass.lz', SyntheticAgenda::filesWithOpeningReclass());
+        $backup = Ms3Backup::extract($this->tmp . '/reclass.lz', $this->tmp . '/reclass');
+
+        $preflight = $this->importer->preflight($supplierId, $backup, AgendaInfo::fromBackup($backup), new ImportOptions());
+
+        $byCode = array_column($preflight, null, 'code');
+        self::assertSame('warning', $byCode['opening_chain_break']['level'] ?? null, json_encode($preflight, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame(['year' => 2024, 'next' => 2025], array_intersect_key($byCode['opening_chain_break']['context'], ['year' => 0, 'next' => 0]));
+        self::assertEqualsWithDelta(100.0, $byCode['opening_chain_break']['context']['accounts']['211000'], 0.001);
+        self::assertSame(2025, $byCode['suggested_from_year']['context']['from_year'] ?? null);
+
+        $clean = $this->importer->preflight($supplierId, $this->backup(), AgendaInfo::fromBackup($this->backup()), new ImportOptions());
+        self::assertNotContains('opening_chain_break', array_column($clean, 'code'));
+    }
+
+    /**
+     * „Převést od roku": starší roky i jejich doklady se vynechají, první převedený rok
+     * s počátečními stavy začíná 1. 1. a převod je bez chyb.
+     */
+    public function testFromYearSkipsOlderYearsAndTheirDocuments(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(), new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], [], false, 2025));
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $stmt = $this->db->pdo()->prepare('SELECT fiscal_year, starts_on FROM accounting_periods WHERE supplier_id = ? ORDER BY fiscal_year');
+        $stmt->execute([$supplierId]);
+        self::assertSame([['fiscal_year' => 2025, 'starts_on' => '2025-01-01']], array_map(
+            static fn (array $r): array => ['fiscal_year' => (int) $r['fiscal_year'], 'starts_on' => (string) $r['starts_on']],
+            $stmt->fetchAll(PDO::FETCH_ASSOC)
+        ));
+        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number IN ('DF-2024-017', 'DF-2024-099')"));
+        self::assertSame(0, $this->rowCount('invoices', $supplierId, "varsymbol = 'FV24001'"));
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-020'"));
+    }
+
+    /**
+     * Předvaha může sedět na haléř, a přesto výkaz nevyjde: účet, který mapa výkazů nezná
+     * (syntetika založená podle osnovy Money), ve výkazech chybí. Rekonciliace to musí
+     * odhalit a účet jmenovat.
+     */
+    public function testUnmappedAccountFailsBalanceSheetCheck(): void
+    {
+        $supplierId = $this->supplier();
+        $this->db->pdo()->exec("DELETE FROM statement_account_map WHERE account_prefix = '325'");
+
+        $protocol = $this->import($supplierId);
+
+        $year2024 = array_column($protocol->get('reconciliation'), null, 'year')[2024];
+        self::assertFalse(array_column($year2024['checks'], 'ok', 'key')['balance_sheet_balanced']);
+        self::assertSame(['325'], array_column($year2024['unmapped_accounts'], 'account'));
+    }
+
+    /**
+     * Pokladní nákup s DPH (tankování, PHM) je v Money v přiznání i v deníku na 343. Převzatý
+     * bez DPH by v přiznání chyběl a kontrola obratu 343 by přiznání zablokovala.
+     */
+    public function testCashDocumentVatGoesToVatLedger(): void
+    {
+        $supplierId = $this->supplier();
+        $this->import($supplierId);
+
+        self::assertSame(1, $this->rowCount('cash_documents', $supplierId, "doc_number = 'PV25002' AND vat_mode = 'vat'"));
+        $rows = $this->container(VatLedgerService::class)->rows($supplierId, '2025-06-01', '2025-06-30');
+        $cash = array_values(array_filter($rows, static fn (array $r): bool => ($r['document_number'] ?? $r['doc_number'] ?? '') === 'PV25002' || str_contains(json_encode($r) ?: '', 'PV25002')));
+        self::assertCount(1, $cash, json_encode($rows, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertEqualsWithDelta(21.0, (float) $cash[0]['vat_czk'], 0.001);
+        self::assertSame('purchase', $cash[0]['source']);
+    }
+
+    /**
+     * Money výpis se stavem účtu nemá; stav se dopočte z účtu banky v deníku (otevírací
+     * zápis a zůstatek na konci roku), jinak je záložka Stavy na účtech prázdná.
+     */
+    public function testImportedBankStatementCarriesBalancesFromLedger(): void
+    {
+        $supplierId = $this->supplier();
+        $this->import($supplierId);
+
+        $stmt = $this->db->pdo()->prepare("SELECT prev_balance, curr_balance FROM bank_statements WHERE supplier_id = ? AND statement_number = 'MS3/BU/2024'");
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertEqualsWithDelta(50000.0, (float) $row['prev_balance'], 0.001);
+        self::assertEqualsWithDelta(62150.0, (float) $row['curr_balance'], 0.001);
+        self::assertSame(1, $this->rowCount('currencies', $supplierId, "code = 'CZK' AND account_number = '3000000004'"),
+            'Účet firmy se bere z posledního roku agendy (při shodě první účet).');
+    }
+
+    /**
+     * Záloha/proforma, kterou Money v historickém roce nezaúčtovalo, se nepřevádí — v uzavřeném
+     * roce by jen visela jako koncept. V posledním roce (ZF25001) zůstává ke kontrole.
+     */
+    public function testUnpostedReviewDocumentFromHistoricalYearIsSkipped(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'ZF-2024-001'"));
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'ZF-2025-001' AND status = 'draft'"));
+        $steps = array_column($protocol->toArray()['steps'], null, 'key');
+        self::assertSame(1, $steps['purchase_invoices']['counts']['unposted_review_skipped'] ?? 0);
     }
 
     public function testRepeatedImportCreatesNothingNew(): void

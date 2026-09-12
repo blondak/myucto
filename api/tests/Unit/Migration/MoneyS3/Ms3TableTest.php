@@ -69,6 +69,25 @@ final class Ms3TableTest extends TestCase
         self::assertSame(1, $table->skippedDeleted());
     }
 
+    /**
+     * Faktury mají místo `Del` příznak `FlagDel`. Smazaná faktura v souboru zůstává a řada
+     * její číslo přidělí znovu — bez přeskočení by převod narazil na dva doklady téhož čísla.
+     */
+    public function testSkipsDocumentsFlaggedAsDeleted(): void
+    {
+        $raw = Ms3FixtureWriter::table([['Doklad', 'C', 10], ['FlagDel', 'B', 1]], [
+            ['Doklad' => 'FP25012', 'FlagDel' => 1],
+            ['Doklad' => 'FP25012'],
+            ['Doklad' => 'FP25013'],
+        ]);
+        $table = Ms3Table::fromString($raw, 'PFAKTURY');
+        $rows = iterator_to_array($table->rows(), false);
+
+        self::assertSame(['FP25012', 'FP25013'], array_column($rows, 'Doklad'));
+        self::assertSame(0, $rows[0]['FlagDel']);
+        self::assertSame(1, $table->skippedDeleted());
+    }
+
     public function testEmptyTableHasNoData(): void
     {
         $table = Ms3Table::fromString(Ms3FixtureWriter::table([['Doklad', 'C', 10]], []), 'T');

@@ -40,6 +40,9 @@ final class ImportContext
     /** @var list<int> klienti převedených vydaných faktur (přepočet statistik po převodu) */
     public array $statsClients = [];
 
+    /** @var array<string,true>|null "rok|zdroj|číslo dokladu" dokladů, které má deník Money (líně) */
+    public ?array $journalDocuments = null;
+
     public ?int $runId = null;
 
     /** @var (callable(string,int,int):void)|null */

@@ -50,7 +50,10 @@ final class CashBankImporter
                 (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
                  partner_name, partner_ic, partner_dic, description, vat_mode, total_amount, currency_code,
                  rule_key, external_barcode, status, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "none", ?, "CZK", ?, ?, "posted", ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "CZK", ?, ?, "posted", ?)'
+        );
+        $insertVat = $pdo->prepare(
+            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount) VALUES (?, ?, ?, ?)'
         );
         // Každá pokladna má vlastní číselnou řadu — stejné číslo v další pokladně téhož
         // roku dostane klíč s kódem pokladny (první si ponechá „rok|číslo").
@@ -85,7 +88,22 @@ final class CashBankImporter
             if ($numberTaken->fetchColumn() !== false) {
                 $number = mb_substr($docNo . '/' . $year, 0, 30);
             }
-            $isOut = ((int) ($r['Vydej'] ?? 0)) === 1;
+            $amount = round((float) ($r['Celkem'] ?? 0), 2);
+            if ($amount === 0.0) {
+                // Nulový doklad nemá v pokladně účinek a MyÚčto ho nepřijme (částka > 0).
+                $p->count(self::STEP_CASH, 'zero_amount');
+                continue;
+            }
+            // Záporný příjem je výdej a naopak (vratka v pokladně) — jen tak sedí 211 na deník.
+            $isOut = (((int) ($r['Vydej'] ?? 0)) === 1) !== ($amount < 0);
+            $vatLines = self::vatLines($r, $amount < 0);
+            $cleneni = trim((string) ($r['Cleneni'] ?? ''));
+            if ($vatLines !== [] && !InvoiceImporter::isDomesticVatCode($cleneni, !$isOut)) {
+                // Mimo tuzemské plnění (PDP, EU, bez nároku) převod DPH neodhaduje — doklad
+                // zůstane bez DPH a účetní ho doplní; v deníku z Money DPH je.
+                $p->warn(self::STEP_CASH, 'cash_vat_review', "Pokladní doklad {$docNo} ({$year}): členění DPH „{$cleneni}“ převod nepřebírá, DPH doplňte ručně.", ['document_no' => $docNo, 'year' => $year]);
+                $vatLines = [];
+            }
             $rule = mb_substr(trim((string) ($r['PrKont'] ?? '')), 0, 64);
             $ruleKey = null;
             if ($rule !== '') {
@@ -104,12 +122,19 @@ final class CashBankImporter
                 mb_substr(CodebookImporter::ico((string) ($r['AdICO'] ?? '')), 0, 20) ?: null,
                 mb_substr(strtoupper(str_replace(' ', '', trim((string) ($r['AdDIC'] ?? '')))), 0, 20) ?: null,
                 mb_substr(trim((string) ($r['Popis'] ?? '')) ?: $docNo, 0, 255),
-                round(abs((float) ($r['Celkem'] ?? 0)), 2),
+                $vatLines === [] ? 'none' : 'vat',
+                abs($amount),
                 $ruleKey,
                 mb_substr(trim((string) ($r['BarCode'] ?? '')), 0, 64) ?: null,
                 $ctx->userId > 0 ? $ctx->userId : null,
             ]);
             $id = (int) $pdo->lastInsertId();
+            foreach ($vatLines as $line) {
+                $insertVat->execute([$id, $line['rate'], $line['base'], $line['vat']]);
+            }
+            if ($vatLines !== []) {
+                $p->count(self::STEP_CASH, 'with_vat');
+            }
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_CASH_DOCUMENT, $key, $id, $ctx->runId);
             $ctx->cashDocuments[$key] = $id;
             $p->count(self::STEP_CASH, 'created');
@@ -125,10 +150,14 @@ final class CashBankImporter
         foreach ($ctx->backup->rowsAcrossYears('SzUcPokl') as $r) {
             $code = trim((string) ($r['Zkrat'] ?? ''));
             if ($code !== '' && strtoupper(trim((string) ($r['UcPokl'] ?? ''))) === 'U') {
+                // Pozdější rok přepíše dřívější — firma mohla banku mezitím změnit.
                 $accounts[$code] = [
                     'number' => trim((string) ($r['Ucet'] ?? '')),
                     'bank' => trim((string) ($r['BKod'] ?? '')),
                     'iban' => trim((string) ($r['IBAN'] ?? '')),
+                    'primary' => trim((string) ($r['PrimUcet'] ?? '')),
+                    'currency' => self::currency((string) ($r['Mena'] ?? '')),
+                    'year' => (int) ($ctx->yearOf($r) ?? 0),
                 ];
             }
         }
@@ -169,6 +198,17 @@ final class CashBankImporter
             'UPDATE bank_statements SET transaction_count = transaction_count + ?, statement_date = GREATEST(statement_date, ?)
               WHERE id = ? AND supplier_id = ?'
         );
+        // Stav na účtu: Money výpis nemá, ale účet banky v deníku ano — počáteční stav je
+        // otevírací zápis období, konečný stav zůstatek účtu na konci roku (bez uzávěrky).
+        // Jen korunové účty: pohyby v cizí měně převod vede v Kč, stav účtu by nesouhlasil.
+        $accountBalance = $pdo->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN e.source_type = 'opening' THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END), 0) AS opening,
+                    COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS closing
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND e.period_id = ? AND l.account_id = ? AND e.source_type <> 'closing'"
+        );
+        $setBalances = $pdo->prepare('UPDATE bank_statements SET prev_balance = ?, curr_balance = ? WHERE id = ? AND supplier_id = ?');
 
         foreach ($byStatement as $statementKey => $rows) {
             [$yearText, $code] = explode('|', $statementKey, 2);
@@ -244,13 +284,53 @@ final class CashBankImporter
                 $added++;
                 $p->count(self::STEP_BANK, 'transactions');
             }
-            if ($added > 0 && isset($existingStatements[$statementKey])) {
+            if ($added > 0) {
                 $touchStatement->execute([$added, $lastDate, $statementId, $ctx->supplierId]);
-            } elseif ($added > 0) {
-                $touchStatement->execute([$added, $lastDate, $statementId, $ctx->supplierId]);
+            }
+            $meta = $accounts[$code] ?? null;
+            $primary = $meta !== null ? AccountCode::fromMoney($meta['primary']) : null;
+            $accountId = $primary !== null ? ($ctx->accountIds[$primary] ?? null) : null;
+            $periodId = $ctx->periods[$year]['id'] ?? null;
+            if ($meta !== null && $meta['currency'] === 'CZK' && $accountId !== null && $periodId !== null) {
+                $accountBalance->execute([$ctx->supplierId, $periodId, $accountId]);
+                $balance = $accountBalance->fetch(\PDO::FETCH_ASSOC) ?: ['opening' => 0, 'closing' => 0];
+                $setBalances->execute([
+                    number_format((float) $balance['opening'], 2, '.', ''),
+                    number_format((float) $balance['closing'], 2, '.', ''),
+                    $statementId, $ctx->supplierId,
+                ]);
+                $p->count(self::STEP_BANK, 'balances');
             }
         }
         $p->finish(self::STEP_BANK);
+    }
+
+    /**
+     * DPH pokladního dokladu po sazbách: snížená (`ZaklSS`/`DPHSS`, sazba `SSazba`),
+     * základní (`ZaklZS`/`DPHZS`, `ZSazba`) a další sazby `Zaklad_3…6`/`DPH_3…6`
+     * (`SazbaDPH_3…6`). Jen řádky s daní — nulová sazba do evidence DPH nejde. Záporný
+     * doklad se převádí s opačným směrem, proto se znaménko částek obrací.
+     *
+     * @param array<string,mixed> $r
+     * @return list<array{rate:float,base:float,vat:float}>
+     */
+    private static function vatLines(array $r, bool $negative): array
+    {
+        $slots = [['ZaklSS', 'DPHSS', 'SSazba'], ['ZaklZS', 'DPHZS', 'ZSazba']];
+        for ($i = 3; $i <= 6; $i++) {
+            $slots[] = ['Zaklad_' . $i, 'DPH_' . $i, 'SazbaDPH_' . $i];
+        }
+        $sign = $negative ? -1 : 1;
+        $out = [];
+        foreach ($slots as [$baseField, $vatField, $rateField]) {
+            $vat = round((float) ($r[$vatField] ?? 0), 2);
+            $rate = (float) ($r[$rateField] ?? 0);
+            if ($vat === 0.0 || $rate <= 0.0) {
+                continue;
+            }
+            $out[] = ['rate' => $rate, 'base' => round($sign * (float) ($r[$baseField] ?? 0), 2), 'vat' => round($sign * $vat, 2)];
+        }
+        return $out;
     }
 
     /**
@@ -317,25 +397,43 @@ final class CashBankImporter
     }
 
     /**
-     * Skutečné číslo účtu firmy zná Money. Doplní se na korunový účet firmy jen tehdy,
-     * když tam žádné není — vyplněný účet převod nepřepisuje.
+     * Skutečné číslo účtu firmy zná Money. Na měnový účet firmy (CZK, EUR…) se doplní účet
+     * v té měně z POSLEDNÍHO roku agendy (banku mohla firma změnit) jen tehdy, když tam žádné
+     * není — vyplněný účet převod nepřepisuje.
      *
-     * @param array<string,array{number:string,bank:string,iban:string}> $accounts
+     * @param array<string,array{number:string,bank:string,iban:string,currency:string,year:int}> $accounts
      */
     private function fillOwnAccount(int $supplierId, array $accounts): void
     {
-        $primary = $accounts !== [] ? reset($accounts) : null;
-        if ($primary === null || $primary['number'] === '') {
-            return;
+        $best = [];
+        foreach ($accounts as $a) {
+            if ($a['number'] === '') {
+                continue;
+            }
+            $current = $best[$a['currency']] ?? null;
+            if ($current === null || $a['year'] > $current['year']) {
+                $best[$a['currency']] = $a;
+            }
         }
-        $this->db->pdo()->prepare(
+        $update = $this->db->pdo()->prepare(
             "UPDATE currencies SET account_number = ?, bank_code = ?, iban = COALESCE(iban, ?)
-              WHERE supplier_id = ? AND code = 'CZK' AND (account_number IS NULL OR account_number = '')"
-        )->execute([
-            mb_substr($primary['number'], 0, 30),
-            $primary['bank'] !== '' ? mb_substr($primary['bank'], 0, 4) : null,
-            $primary['iban'] !== '' ? mb_substr($primary['iban'], 0, 34) : null,
-            $supplierId,
-        ]);
+              WHERE supplier_id = ? AND code = ? AND (account_number IS NULL OR account_number = '')"
+        );
+        foreach ($best as $currency => $a) {
+            $update->execute([
+                mb_substr($a['number'], 0, 30),
+                $a['bank'] !== '' ? mb_substr($a['bank'], 0, 4) : null,
+                $a['iban'] !== '' ? mb_substr($a['iban'], 0, 34) : null,
+                $supplierId,
+                $currency,
+            ]);
+        }
+    }
+
+    /** Měna pokladny/účtu z Money (prázdná = domácí). */
+    private static function currency(string $mena): string
+    {
+        $m = strtoupper(trim($mena));
+        return in_array($m, ['', 'KČ', 'CZK'], true) ? 'CZK' : $m;
     }
 }

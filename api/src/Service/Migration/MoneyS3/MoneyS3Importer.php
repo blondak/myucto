@@ -109,8 +109,24 @@ final class MoneyS3Importer
         }
 
         $plan = $this->journal->plan($backup, $options);
-        if ($plan === []) {
+        if ($plan === [] && $options->fromYear !== null) {
+            $add('error', 'from_year_empty', "Od roku {$options->fromYear} záloha nemá žádný účetní rok — není co převést.", ['from_year' => $options->fromYear]);
+        } elseif ($plan === []) {
             $add('error', 'no_journal', 'Záloha neobsahuje účetní deník — není co převést.');
+        }
+        $breaks = $this->journal->chainBreaks($backup, $options);
+        foreach ($breaks as $b) {
+            $code = (string) array_key_first($b['accounts']);
+            $add('warning', 'opening_chain_break', sprintf(
+                $b['next_has_opening']
+                    ? 'Konečné stavy roku %d nesedí v Money na počáteční stavy roku %d (%d účtů, např. %s: %s Kč). Rok %1$d a všechny pozdější proto nepůjde uzavřít.'
+                    : 'Rok %2$d nemá v Money počáteční stavy, konečné stavy roku %1$d na něj nenavazují (%3$d účtů, např. %4$s: %5$s Kč). Rok %1$d a všechny pozdější proto nepůjde uzavřít.',
+                $b['year'], $b['next'], count($b['accounts']), $code, number_format($b['accounts'][$code], 2, ',', ' ')
+            ), ['year' => $b['year'], 'next' => $b['next'], 'accounts' => array_slice($b['accounts'], 0, 20, true)]);
+        }
+        if ($breaks !== []) {
+            $suggested = $breaks[count($breaks) - 1]['next'];
+            $add('info', 'suggested_from_year', "Roky od {$suggested} v Money navazují — převod od roku {$suggested} (volba „Převést od roku“) půjde celý uzavřít. Starší roky zůstanou v archivu Money.", ['from_year' => $suggested]);
         }
         foreach ($plan as $item) {
             if (!$item['calendar']) {

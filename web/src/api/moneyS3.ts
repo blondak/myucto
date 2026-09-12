@@ -52,6 +52,21 @@ export interface MoneyS3Upload {
   reports: number[]
 }
 
+/** Záloha se ještě nahrává po částech nebo ji server na pozadí rozbaluje a čte. */
+export interface MoneyS3UploadPending {
+  token: string
+  status: 'uploading' | 'processing' | 'failed'
+  file_name: string
+  size: number
+  received: number
+  job_id: number | null
+  error: string | null
+}
+
+export function isUploadReady(upload: MoneyS3Upload | MoneyS3UploadPending): upload is MoneyS3Upload {
+  return 'agenda' in upload
+}
+
 export type MoneyS3Triple = [number, number, number]
 
 export interface MoneyS3Diff {
@@ -119,9 +134,58 @@ export interface MoneyS3StartParams {
   first_period_start: string | null
   /** Záloha patří firmě, i když to IČO ověřit nejde (chybí v záloze nebo ve firmě). */
   confirm_ico?: boolean
+  /** První převáděný účetní rok; starší roky zálohy se vynechají. */
+  from_year?: number | null
 }
 
 const BASE = '/admin/imports/money-s3'
+const CHUNK_ATTEMPTS = 3
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * Záloha agendy má stovky megabajtů až gigabajty — víc, než PHP a webserver přijmou
+ * jedním požadavkem. Posílá se proto po částech; každá část se při výpadku až třikrát
+ * zopakuje a 409 od serveru říká, kolik dat už má, takže se naváže bez duplicit.
+ * Po poslední části server zálohu zpracuje na pozadí (stav přes `show`).
+ */
+async function uploadChunked(
+  file: File,
+  onProgress?: (sent: number, total: number) => void,
+  onStarted?: (token: string) => void,
+): Promise<{ token: string; job_id: number | null }> {
+  const init = (await api.post<{ token: string; chunk_size: number }>(`${BASE}/uploads/chunked`, { file_name: file.name, size: file.size })).data
+  onStarted?.(init.token)
+  let offset = 0
+  onProgress?.(0, file.size)
+  while (offset < file.size) {
+    const start = offset
+    const end = Math.min(file.size, start + init.chunk_size)
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const fd = new FormData()
+        fd.append('offset', String(start))
+        fd.append('chunk', file.slice(start, end), file.name)
+        offset = (await api.post<{ received: number }>(`${BASE}/uploads/${init.token}/chunks`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })).data.received
+        break
+      } catch (error: any) {
+        const status = Number(error?.response?.status ?? 0)
+        const received = Number(error?.response?.data?.error?.received)
+        if (status === 409 && Number.isFinite(received) && received !== start) {
+          offset = received
+          break
+        }
+        const retryable = status === 0 || status === 408 || status === 429 || status >= 500
+        if (!retryable || attempt >= CHUNK_ATTEMPTS) throw error
+        await wait(1000 * attempt)
+      }
+    }
+    onProgress?.(offset, file.size)
+  }
+  return (await api.post<{ token: string; job_id: number | null }>(`${BASE}/uploads/${init.token}/complete`, {})).data
+}
 
 export const moneyS3Api = {
   upload: (file: File): Promise<MoneyS3Upload> => {
@@ -129,8 +193,9 @@ export const moneyS3Api = {
     fd.append('backup', file, file.name)
     return api.post<MoneyS3Upload>(`${BASE}/uploads`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
   },
-  show: (token: string): Promise<MoneyS3Upload> =>
-    api.get<MoneyS3Upload>(`${BASE}/uploads/${token}`).then(r => r.data),
+  uploadChunked,
+  show: (token: string): Promise<MoneyS3Upload | MoneyS3UploadPending> =>
+    api.get<MoneyS3Upload | MoneyS3UploadPending>(`${BASE}/uploads/${token}`).then(r => r.data),
   attachReport: (token: string, year: number, file: File): Promise<{ year: number; accounts: number; skipped_lines: number }> => {
     const fd = new FormData()
     fd.append('year', String(year))

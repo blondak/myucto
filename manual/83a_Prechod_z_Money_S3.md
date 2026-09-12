@@ -19,6 +19,9 @@ oprávněními otevře průvodce přímým odkazem `/imports/money-s3`.
   Jedna záloha obsahuje všechny roky agendy.
 - Soubor nahrajte tak, jak ho Money vytvořilo, nerozbalený. Přijímá se i stejný
   soubor s příponou `.zip`.
+- Záloha může mít až 4 GB. Průvodce ji posílá po částech a ukazuje průběh
+  v procentech; při výpadku spojení část zopakuje a naváže tam, kde server
+  data má. Stránku nechte během nahrávání otevřenou.
 - Elektronický archiv dokumentů z Money záloha nepřenese (Money ho ukládá
   šifrovaně). Skeny dokladů připojíte zvlášť v `Dokumenty → Skeny k dokladům`.
 - Záloha obsahuje celé účetnictví firmy. Nahraný soubor aplikace po 7 dnech bez
@@ -87,7 +90,8 @@ bankovních účtech nebo ve dvou pokladnách.
 ## 83a.3 Postup
 
 1. **Záloha agendy.** Nahrajte soubor `.lz`. Průvodce ho rozbalí (jen datové
-   soubory agendy) a načte.
+   soubory agendy) a načte. Rozbalení a načtení běží na serveru na pozadí,
+   u velké zálohy i několik minut; obnovení stránky mezitím průvodce nepřeruší.
 2. **Náhled a volby.** Zkontrolujte firmu, IČO, verzi Money a účetní roky.
    Kontrola před převodem zastaví převod, když:
    - záloha patří firmě s jiným IČO,

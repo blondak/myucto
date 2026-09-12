@@ -75,6 +75,9 @@ final class JournalImporter
             ];
         }
         usort($plan, static fn (array $a, array $b): int => $a['year'] <=> $b['year']);
+        if ($options->fromYear !== null) {
+            $plan = array_values(array_filter($plan, static fn (array $p): bool => $p['year'] >= $options->fromYear));
+        }
 
         // První účetní období firmy založené během roku začíná dnem vzniku, ne 1. 1. —
         // jinak nesedí zdaňovací období proti podanému přiznání. Money den vzniku v záloze
@@ -168,14 +171,22 @@ final class JournalImporter
         $rows = $table !== null ? iterator_to_array($table->rows(), false) : [];
 
         $groups = [];
+        $closingRows = 0;
         foreach ($rows as $r) {
+            if (Ms3Journal::isYearEndClosing($r)) {
+                $closingRows++;
+                continue;
+            }
             $groups[Ms3Journal::groupKey($r)][] = $r;
+        }
+        if ($closingRows > 0) {
+            $p->info(self::STEP, 'year_end_closing_skipped', "Rok {$year}: uzávěrkové zápisy z Money ({$closingRows} řádků) se nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.", ['year' => $year]);
         }
 
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY);
         $stats = [
             'year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0,
-            'skipped_rows' => 0, 'swapped_rows' => 0, 'deleted_rows' => $table?->skippedDeleted() ?? 0,
+            'skipped_rows' => 0, 'swapped_rows' => 0, 'deleted_rows' => $table?->skippedDeleted() ?? 0, 'moved' => [],
         ];
         $now = date('Y-m-d H:i:s');
         $done = 0;
@@ -224,12 +235,22 @@ final class JournalImporter
             PostingService::assertBalanced($lines);
 
             $entryDate = $isOpening ? $period['starts_on'] : (string) ($first['Datum'] ?? '');
-            if ($entryDate === '' || $entryDate < $period['starts_on'] || $entryDate > $period['ends_on']) {
+            $documentDate = $isOpening ? null : (((string) ($first['DatPlnDPH'] ?? '')) ?: null);
+            if ($entryDate === '') {
                 $p->error(self::STEP, 'entry_outside_period', sprintf(
-                    'Doklad %s má datum %s mimo účetní období %d — nepřenesen.',
-                    trim((string) ($first['Doklad'] ?? '')), $entryDate ?: '(prázdné)', $year
+                    'Doklad %s nemá datum zápisu — nepřenesen.',
+                    trim((string) ($first['Doklad'] ?? ''))
                 ), ['year' => $year, 'document_no' => trim((string) ($first['Doklad'] ?? ''))]);
                 continue;
+            }
+            // Money vede v knize roku i doklad s datem z vedlejšího roku (faktura z 31. 12.
+            // zaúčtovaná až v novém roce) a do obratů toho roku ho počítá. MyÚčto zápis mimo
+            // hranice období nepřijme, takže jde na první (poslední) den období a původní
+            // datum zůstává jako datum dokladu — obraty roku tak sedí na sestavy z Money.
+            if ($entryDate < $period['starts_on'] || $entryDate > $period['ends_on']) {
+                $documentDate ??= $entryDate;
+                $entryDate = $entryDate < $period['starts_on'] ? $period['starts_on'] : $period['ends_on'];
+                $stats['moved'][] = trim((string) ($first['Doklad'] ?? '')) ?: $groupKey;
             }
             $docNo = $isOpening ? null : (mb_substr(trim((string) ($first['Doklad'] ?? '')), 0, 50) ?: null);
             $description = $isOpening
@@ -240,7 +261,7 @@ final class JournalImporter
                 'supplier_id' => $ctx->supplierId,
                 'period_id' => $period['id'],
                 'entry_date' => $entryDate,
-                'document_date' => $isOpening ? null : (((string) ($first['DatPlnDPH'] ?? '')) ?: null),
+                'document_date' => $documentDate,
                 'document_no' => $docNo,
                 'description' => mb_substr($description, 0, 255),
                 'source_type' => $isOpening ? 'opening' : Ms3Journal::sourceType((string) ($first['Zdroj'] ?? '')),
@@ -266,10 +287,76 @@ final class JournalImporter
         if ($stats['swapped_rows'] > 0) {
             $p->info(self::STEP, 'negative_amounts', "Rok {$year}: {$stats['swapped_rows']} řádků se zápornou částkou přeneseno s prohozenými stranami (účetně totéž).", ['year' => $year]);
         }
+        $moved = $stats['moved'];
+        unset($stats['moved']);
+        $stats['moved_entries'] = count($moved);
+        if ($moved !== []) {
+            $p->warn(self::STEP, 'entry_date_outside_year', sprintf(
+                'Rok %d: %d dokladů s datem mimo rok (Money je vede v knize roku %d) zaúčtováno k hranici období, původní datum zůstává jako datum dokladu: %s.',
+                $year, count($moved), $year, implode(', ', array_slice($moved, 0, 10)) . (count($moved) > 10 ? ', …' : '')
+            ), ['year' => $year, 'documents' => $moved]);
+        }
         if (abs($stats['debit'] - $stats['credit']) >= 0.005) {
             $p->error(self::STEP, 'journal_unbalanced', "Rok {$year}: Σ MD ≠ Σ D.", ['year' => $year]);
         }
         return $stats;
+    }
+
+    /**
+     * Místa, kde v Money nenavazují roky: konečné stavy roku (počáteční stavy + deník bez
+     * uzávěrky XZ) nesedí na počáteční stavy dalšího roku. Money to dovolí (počáteční stavy
+     * jdou přepsat ručně, starý rok může být v agendě jen zčásti), uzávěrka MyÚčta ne —
+     * rok s rozdílem nepůjde uzavřít a s ním ani žádný pozdější. Porovnávají se rozvahové
+     * účty tříd 0–4 bez 43x (výsledek hospodaření přechází do dalšího roku až uzávěrkou)
+     * a bez 70x.
+     *
+     * @return list<array{year:int,next:int,next_has_opening:bool,accounts:array<string,float>}>
+     */
+    public function chainBreaks(Ms3Backup $backup, ImportOptions $options): array
+    {
+        $years = [];
+        foreach ($this->plan($backup, $options) as $item) {
+            $table = $backup->table('UcDenik', $backup->dir() . DIRECTORY_SEPARATOR . $item['dir']);
+            $opening = [];
+            $closing = [];
+            foreach ($table !== null ? $table->rows() : [] as $r) {
+                if (Ms3Journal::isYearEndClosing($r)) {
+                    continue;
+                }
+                $effect = Ms3Journal::effect($r);
+                if ($effect === null) {
+                    continue;
+                }
+                foreach ([[$effect['debit'], 1], [$effect['credit'], -1]] as [$code, $sign]) {
+                    $code = (string) $code;
+                    if ($code === '' || $code[0] > '4' || str_starts_with($code, '43')) {
+                        continue;
+                    }
+                    if (Ms3Journal::isOpening($r)) {
+                        $opening[$code] = ($opening[$code] ?? 0.0) + $sign * $effect['amount'];
+                    }
+                    $closing[$code] = ($closing[$code] ?? 0.0) + $sign * $effect['amount'];
+                }
+            }
+            $years[] = ['year' => $item['year'], 'opening' => $opening, 'closing' => $closing, 'has_opening' => $item['has_opening']];
+        }
+
+        $breaks = [];
+        for ($i = 0, $n = count($years) - 1; $i < $n; $i++) {
+            [$cur, $next] = [$years[$i], $years[$i + 1]];
+            $diffs = [];
+            foreach (array_unique(array_merge(array_keys($cur['closing']), array_keys($next['opening']))) as $code) {
+                $diff = round(($cur['closing'][$code] ?? 0.0) - ($next['opening'][$code] ?? 0.0), 2);
+                if (abs($diff) >= 0.005) {
+                    $diffs[(string) $code] = $diff;
+                }
+            }
+            if ($diffs !== []) {
+                uasort($diffs, static fn (float $a, float $b): int => abs($b) <=> abs($a));
+                $breaks[] = ['year' => $cur['year'], 'next' => $next['year'], 'next_has_opening' => $next['has_opening'], 'accounts' => $diffs];
+            }
+        }
+        return $breaks;
     }
 
     /**

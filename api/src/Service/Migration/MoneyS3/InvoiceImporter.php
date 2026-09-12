@@ -118,6 +118,10 @@ final class InvoiceImporter
             $amounts = $this->amounts($ctx, self::STEP_PURCHASE, $docNo, $r, self::date($r, ['PlnenoDPH']) ?? $issue);
             $class = self::classify($r, false, $amounts['vat']);
             $review = $class['reasons'] !== [];
+            if ($review && self::historicalUnposted($ctx, $year, 'FP', $docNo)) {
+                $p->count(self::STEP_PURCHASE, 'unposted_review_skipped');
+                continue;
+            }
             $paidAt = self::date($r, ['Uhrazeno']);
             $vendorNumber = mb_substr(trim((string) ($r['PrijatDokl'] ?? '')) ?: (trim((string) ($r['VarSymbol'] ?? '')) ?: $docNo), 0, 50);
             $duplicate->execute([$ctx->supplierId, $vendorId, $vendorNumber, $issue]);
@@ -382,13 +386,47 @@ final class InvoiceImporter
      *
      * @return list<int>|null null = kód neodpovídá tvaru „RRŘřádky"
      */
-    private static function vatReturnRows(string $code): ?array
+    public static function vatReturnRows(string $code): ?array
     {
         if (preg_match('/^\d{2}Ř\s*([0-9][0-9 ,]*?)\s*[A-Z]?$/u', $code, $m) !== 1) {
             return null;
         }
         $rows = array_map('intval', preg_split('/[\s,]+/', trim($m[1]), -1, PREG_SPLIT_NO_EMPTY) ?: []);
         return $rows === [] ? null : array_values(array_unique($rows));
+    }
+
+    /**
+     * Doklad k ruční kontrole (záloha, proforma, nejisté DPH), který Money v historickém roce
+     * vůbec nezaúčtovalo. Do uzavřeného roku nic nepřidá — v účetnictví ani v DPH není —
+     * a jen by zaplevelil koncepty; převod ho přeskočí. V posledním (otevřeném) roce se
+     * převezme, záloha tam ještě může být rozpracovaná.
+     */
+    private static function historicalUnposted(ImportContext $ctx, int $year, string $source, string $docNo): bool
+    {
+        if ($ctx->periods === [] || $year >= max(array_keys($ctx->periods))) {
+            return false;
+        }
+        if ($ctx->journalDocuments === null) {
+            $ctx->journalDocuments = [];
+            foreach ($ctx->backup->rowsAcrossYears('UcDenik') as $row) {
+                $y = $ctx->yearOf($row);
+                if ($y !== null) {
+                    $ctx->journalDocuments[$y . '|' . strtoupper(trim((string) ($row['Zdroj'] ?? ''))) . '|' . trim((string) ($row['Doklad'] ?? ''))] = true;
+                }
+            }
+        }
+        return !isset($ctx->journalDocuments[$year . '|' . $source . '|' . $docNo]);
+    }
+
+    /**
+     * Členění DPH z Money je jen tuzemské plnění v základní/snížené sazbě (ř. 1–2 na výstupu,
+     * ř. 40–41 na vstupu) — jediné, které převod bere do DPH automaticky. Stejné pravidlo
+     * pro faktury ({@see classify()}) i pokladnu ({@see CashBankImporter}).
+     */
+    public static function isDomesticVatCode(string $code, bool $issued): bool
+    {
+        $rows = self::vatReturnRows(trim($code));
+        return $rows !== null && array_diff($rows, $issued ? self::DOMESTIC_SALE_ROWS : self::DOMESTIC_PURCHASE_ROWS) === [];
     }
 
     /** Způsob úhrady z Money (volný text `Uhrada`, viz {@see \MyInvoice\Service\Export\MoneyS3XmlExporter}). */

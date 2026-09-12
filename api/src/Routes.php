@@ -2348,6 +2348,9 @@ final class Routes
             \MyInvoice\Action\Admin\Import\DeleteImportBatchAction::class);
         // Průvodce „Přechod z Money S3" — záloha agendy, náhled, zkouška nanečisto, převod, protokoly.
         $app->post   ('/api/admin/imports/money-s3/uploads', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'upload']);
+        $app->post   ('/api/admin/imports/money-s3/uploads/chunked', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'initChunked']);
+        $app->post   ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'chunk']);
+        $app->post   ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}/complete', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'complete']);
         $app->get    ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'show']);
         $app->post   ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}/reports', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'attachReport']);
         $app->post   ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}/start', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'start']);

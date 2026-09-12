@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Fixtures\MoneyS3;
 
+use MyInvoice\Service\Migration\MoneyS3\Ms3Table;
+
 /**
  * Syntetická agenda Money S3 — dva účetní roky vymyšlené firmy.
  *
@@ -22,7 +24,12 @@ namespace MyInvoice\Tests\Fixtures\MoneyS3;
  *     přijatá i vydaná (jiný `Druh` než `N`) vedle konečné faktury, dobropis, doklad
  *     s členěním DPH přenesené daňové povinnosti a faktura v cizí měně,
  *   - číslo dokladu z roku 2024 znovu v roce 2025 (Money čísluje řadu každý rok od
- *     začátku) a úhrada kartou (`Uhrada`).
+ *     začátku) a úhrada kartou (`Uhrada`),
+ *   - smazaná faktura (`FlagDel`) se stejným číslem jako živá, doklad knihy 2025 s datem
+ *     31. 12. 2024 a účet ze skupiny 61, kterou osnova od roku 2016 nemá,
+ *   - uzávěrka roku 2024 z Money (zdroj XZ), pokladní příjem se zápornou částkou (vratka)
+ *     a nulový pokladní doklad,
+ *   - faktura 2024, kterou Money nezaúčtovalo, a daňový doklad k záloze účtovaný mimo 321.
  *
  * Hodnoty v {@see trialBalanceCsv()} jsou spočtené ručně, ne z definice níže —
  * rekonciliace proti nim proto kontroluje celý řetěz nezávisle.
@@ -48,7 +55,7 @@ final class SyntheticAgenda
         ['Zaklad_0', 'E', 10], ['Zaklad_1', 'E', 10], ['Zaklad_2', 'E', 10], ['SazbaDPH1', 'E', 10], ['SazbaDPH2', 'E', 10],
         ['DPH_1', 'E', 10], ['DPH_2', 'E', 10],
         ['CelkemSDPH', 'E', 10], ['Uhrazeno', 'D', 2], ['UDoklad', 'C', 10], ['Popis', 'C', 50], ['BarCode', 'C', 20],
-        ['Mena', 'C', 3], ['PocetJedn', 'L', 4], ['Kurs', 'E', 10], ['Neuctovat', 'B', 1],
+        ['Mena', 'C', 3], ['PocetJedn', 'L', 4], ['Kurs', 'E', 10], ['Neuctovat', 'B', 1], ['FlagDel', 'B', 1],
     ];
     private const ISSUED_FIELDS = [
         ['Doklad', 'C', 10], ['Storno', 'B', 1], ['VarSymbol', 'C', 10], ['O_ICO', 'C', 12], ['O_DIC', 'C', 14], ['O_Nazev', 'C', 60],
@@ -66,7 +73,7 @@ final class SyntheticAgenda
     private const CASH_FIELDS = [
         ['Doklad', 'C', 10], ['Pokl', 'C', 6], ['Vydej', 'B', 1], ['PrKont', 'C', 6], ['DatVyst', 'D', 2], ['DatUplDPH', 'D', 2],
         ['DatUcPr', 'D', 2], ['AdNazev', 'C', 60], ['AdICO', 'C', 12], ['AdDIC', 'C', 14], ['Popis', 'C', 50], ['Celkem', 'E', 10],
-        ['BarCode', 'C', 20],
+        ['BarCode', 'C', 20], ['Cleneni', 'C', 12], ['ZSazba', 'E', 10], ['ZaklZS', 'E', 10], ['DPHZS', 'E', 10],
     ];
     private const BANK_FIELDS = [
         ['Doklad', 'C', 10], ['Ucet', 'C', 6], ['Vydej', 'B', 1], ['DatUcPr', 'D', 2], ['DatPlat', 'D', 2], ['Celkem', 'E', 10],
@@ -109,6 +116,7 @@ final class SyntheticAgenda
             ['Ucet' => '221001', 'Nazev' => 'Běžný účet'],
             ['Ucet' => '221002', 'Nazev' => 'Druhý běžný účet'],
             ['Ucet' => '311000', 'Nazev' => 'Odběratelé'],
+            ['Ucet' => '314000', 'Nazev' => 'Poskytnuté zálohy'],
             ['Ucet' => '321000', 'Nazev' => 'Dodavatelé'],
             ['Ucet' => '325000', 'Nazev' => 'Ostatní závazky'],
             ['Ucet' => '343100', 'Nazev' => 'DPH na vstupu'],
@@ -119,6 +127,7 @@ final class SyntheticAgenda
             ['Ucet' => '518000', 'Nazev' => 'Ostatní služby'],
             ['Ucet' => '568000', 'Nazev' => 'Ostatní finanční náklady'],
             ['Ucet' => '602000', 'Nazev' => 'Tržby z prodeje služeb'],
+            ['Ucet' => '613000', 'Nazev' => 'Změna stavu výrobků'],
             ['Ucet' => '701000', 'Nazev' => 'Počáteční účet rozvažný'],
         ];
         $registers = [
@@ -178,6 +187,9 @@ final class SyntheticAgenda
                 ['Cislo' => 9, 'Zdroj' => 'PK', 'Doklad' => 'PV24001', 'Datum' => '2024-04-01', 'Popis' => 'Nákup materiálu', 'UcMD' => '501100', 'UcD' => '211000', 'Castka' => 1500.0],
                 ['Cislo' => 10, 'Zdroj' => 'BK', 'Doklad' => 'BP24003', 'Datum' => '2024-06-30', 'Popis' => 'Vratka poplatku', 'UcMD' => '568000', 'UcD' => '221001', 'Castka' => -50.0],
                 ['Cislo' => 11, 'Zdroj' => 'ID', 'Doklad' => 'ID24001', 'Datum' => '2024-12-31', 'Popis' => 'Dohadná položka', 'UcMD' => '518000', 'UcD' => '325000', 'Castka' => 300.0],
+                // Uzávěrka roku v Money (zdroj XZ) — převod ji nepřebírá, rok uzavře MyÚčto.
+                ['Cislo' => 12, 'Zdroj' => 'XZ', 'Datum' => '2024-12-31', 'Popis' => 'Účetní závěrka roku 2024', 'UcMD' => '702000', 'UcD' => '211000', 'Castka' => 8500.0],
+                ['Cislo' => 13, 'Zdroj' => 'XZ', 'Datum' => '2024-12-31', 'Popis' => 'Účetní závěrka roku 2024', 'UcMD' => '710000', 'UcD' => '518000', 'Castka' => 10300.0],
             ], 13),
             'ROK.001/PFaktury.DAT' => Ms3FixtureWriter::table(self::PURCHASE_FIELDS, [
                 $vendor + [
@@ -186,6 +198,14 @@ final class SyntheticAgenda
                     'Zaklad_2' => 10000.0, 'DPH_2' => 2100.0, 'CelkemSDPH' => 12100.0,
                     'Uhrazeno' => '2024-02-20', 'UDoklad' => 'BV24001', 'Popis' => 'Účetní služby', 'BarCode' => '90000101',
                 ],
+                // Zálohová faktura 2024, kterou Money nikdy nezaúčtovalo — do uzavřeného roku nepatří.
+                ['Druh' => 'Z', 'Doklad' => 'ZF24001', 'PrijatDokl' => 'ZF-2024-001', 'VarSymbol' => '2024201',
+                    'Zaklad_2' => 500.0, 'DPH_2' => 105.0, 'CelkemSDPH' => 605.0, 'Popis' => 'Záloha 2024'] + $purchaseDates('2024-10-01') + $vendor,
+                // Doklad, který Money nezaúčtovalo (v deníku není) a přesto rok uzavřelo.
+                $vendor + [
+                    'Doklad' => 'FP24002', 'PrijatDokl' => 'DF-2024-099', 'VarSymbol' => '2024099',
+                    'Zaklad_2' => 400.0, 'DPH_2' => 84.0, 'CelkemSDPH' => 484.0, 'Popis' => 'Nezaúčtovaná faktura',
+                ] + $purchaseDates('2024-11-15'),
             ]),
             'ROK.001/VFaktury.DAT' => Ms3FixtureWriter::table(self::ISSUED_FIELDS, [
                 $customer + [
@@ -223,6 +243,8 @@ final class SyntheticAgenda
                 // Zálohové faktury ZF25001 / ZV25001 Money nezaúčtovává — v deníku nejsou.
                 ['Cislo' => 6, 'Zdroj' => 'FP', 'Doklad' => 'FP25002', 'Datum' => '2025-03-10', 'DatPlnDPH' => '2025-03-10', 'Popis' => 'Vyúčtování služeb', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 1000.0],
                 ['Cislo' => 7, 'Zdroj' => 'FP', 'Doklad' => 'FP25002', 'Datum' => '2025-03-10', 'DatPlnDPH' => '2025-03-10', 'Popis' => 'Vyúčtování služeb', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => 210.0],
+                // Placeno kartou z pokladny: Money účtuje úhradu v tomtéž dokladu, 321 vyjde nulový.
+                ['Cislo' => 23, 'Zdroj' => 'FP', 'Doklad' => 'FP25002', 'Datum' => '2025-03-10', 'Popis' => 'Úhrada kartou', 'UcMD' => '321000', 'UcD' => '211000', 'Castka' => 1210.0],
                 ['Cislo' => 8, 'Zdroj' => 'FP', 'Doklad' => 'DP25001', 'Datum' => '2025-03-20', 'DatPlnDPH' => '2025-03-20', 'Popis' => 'Dobropis služeb', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => -500.0],
                 ['Cislo' => 9, 'Zdroj' => 'FP', 'Doklad' => 'DP25001', 'Datum' => '2025-03-20', 'DatPlnDPH' => '2025-03-20', 'Popis' => 'Dobropis služeb', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => -105.0],
                 ['Cislo' => 10, 'Zdroj' => 'FP', 'Doklad' => 'FP25003', 'Datum' => '2025-04-05', 'DatPlnDPH' => '2025-04-05', 'Popis' => 'Stavební práce', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 2000.0],
@@ -235,6 +257,15 @@ final class SyntheticAgenda
                 ['Cislo' => 17, 'Zdroj' => 'FV', 'Doklad' => 'FV25001', 'Datum' => '2025-05-20', 'DatPlnDPH' => '2025-05-20', 'Popis' => 'Poradenství', 'UcMD' => '311000', 'UcD' => '343200', 'Castka' => 210.0],
                 // Číselná řada druhého účtu má stejné číslo dokladu jako řada prvního účtu.
                 ['Cislo' => 18, 'Zdroj' => 'BK', 'Doklad' => 'BV25001', 'Datum' => '2025-11-30', 'Popis' => 'Poplatek druhého účtu', 'UcMD' => '568000', 'UcD' => '221002', 'Castka' => 40.0],
+                // Doklad s datem z předchozího roku, který Money vede v knize roku 2025.
+                ['Cislo' => 19, 'Zdroj' => 'ID', 'Doklad' => 'ID25002', 'Datum' => '2024-12-31', 'Popis' => 'Náklad zaúčtovaný po uzávěrce', 'UcMD' => '518000', 'UcD' => '325000', 'Castka' => 200.0],
+                // Skupina 61 ze staré osnovy (před rokem 2016), kterou šablona MyÚčta nemá.
+                ['Cislo' => 20, 'Zdroj' => 'ID', 'Doklad' => 'ID25003', 'Datum' => '2025-06-30', 'Popis' => 'Změna stavu výrobků', 'UcMD' => '501100', 'UcD' => '613000', 'Castka' => 150.0],
+                // Příjmový doklad se zápornou částkou = vratka, peníze z pokladny odešly.
+                ['Cislo' => 21, 'Zdroj' => 'PK', 'Doklad' => 'PP25001', 'Datum' => '2025-03-01', 'Popis' => 'Vratka tržby', 'UcMD' => '211000', 'UcD' => '602000', 'Castka' => -200.0],
+                ['Cislo' => 24, 'Zdroj' => 'PK', 'Doklad' => 'PV25002', 'Datum' => '2025-06-02', 'DatPlnDPH' => '2025-06-02', 'Popis' => 'Tankování', 'UcMD' => '501100', 'UcD' => '211000', 'Castka' => 100.0],
+                ['Cislo' => 25, 'Zdroj' => 'PK', 'Doklad' => 'PV25002', 'Datum' => '2025-06-02', 'DatPlnDPH' => '2025-06-02', 'Popis' => 'DPH tankování', 'UcMD' => '343100', 'UcD' => '211000', 'Castka' => 21.0],
+                ['Cislo' => 22, 'Zdroj' => 'FP', 'Doklad' => 'DZ25001', 'Datum' => '2025-03-02', 'DatPlnDPH' => '2025-03-02', 'Popis' => 'DPH ze zálohy', 'UcMD' => '343100', 'UcD' => '314000', 'Castka' => 210.0],
             ]),
             'ROK.002/PFaktury.DAT' => Ms3FixtureWriter::table(self::PURCHASE_FIELDS, [
                 $vendor + [
@@ -245,7 +276,13 @@ final class SyntheticAgenda
                 // Zálohová faktura (jiný druh než běžná `N`) — daňový doklad je až konečná FP25002.
                 ['Druh' => 'Z', 'Doklad' => 'ZF25001', 'PrijatDokl' => 'ZF-2025-001', 'VarSymbol' => '2025101',
                     'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Záloha na služby'] + $purchaseDates('2025-03-01') + $vendor,
-                ['Uhrada' => 'kartou', 'Doklad' => 'FP25002', 'PrijatDokl' => 'DF-2025-010', 'VarSymbol' => '2025010',
+                // Daňový doklad k poskytnuté záloze: Money ho účtuje jen 343/314, na 321 nejde.
+            ['Druh' => 'L', 'Doklad' => 'DZ25001', 'PrijatDokl' => 'DZ-2025-001', 'VarSymbol' => '2025102',
+                'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Daňový doklad k záloze'] + $purchaseDates('2025-03-02') + $vendor,
+            // Smazaná faktura (`FlagDel`): řada její číslo přidělila znovu živé FP25001.
+            ['FlagDel' => 1, 'Doklad' => 'FP25001', 'PrijatDokl' => 'SMAZ-2025-001', 'VarSymbol' => '2025901',
+                'Zaklad_2' => 700.0, 'DPH_2' => 147.0, 'CelkemSDPH' => 847.0, 'Popis' => 'Smazaný doklad'] + $purchaseDates('2025-01-10') + $vendor,
+            ['Uhrada' => 'kartou', 'Doklad' => 'FP25002', 'PrijatDokl' => 'DF-2025-010', 'VarSymbol' => '2025010',
                     'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Vyúčtování služeb'] + $purchaseDates('2025-03-10') + $vendor,
                 ['Dobropis' => 1, 'Doklad' => 'DP25001', 'PrijatDokl' => 'DB-2025-001', 'VarSymbol' => '2025011',
                     'Zaklad_2' => -500.0, 'DPH_2' => -105.0, 'CelkemSDPH' => -605.0, 'Popis' => 'Dobropis služeb'] + $purchaseDates('2025-03-20') + $vendor,
@@ -265,6 +302,13 @@ final class SyntheticAgenda
             ]),
             'ROK.002/PoklKnih.DAT' => Ms3FixtureWriter::table(self::CASH_FIELDS, [
                 ['Doklad' => 'PV25001', 'Pokl' => 'PO', 'Vydej' => 1, 'PrKont' => 'PV001', 'DatVyst' => '2025-02-01', 'DatUcPr' => '2025-02-01', 'Popis' => 'Kancelářské potřeby', 'Celkem' => 800.0],
+                ['Doklad' => 'PP25001', 'Pokl' => 'PO', 'Vydej' => 0, 'DatVyst' => '2025-03-01', 'DatUcPr' => '2025-03-01', 'Popis' => 'Vratka tržby', 'Celkem' => -200.0],
+                // Nákup s DPH za hotové (tankování) — DPH z pokladny patří do přiznání.
+                ['Doklad' => 'PV25002', 'Pokl' => 'PO', 'Vydej' => 1, 'DatVyst' => '2025-06-02', 'DatUplDPH' => '2025-06-02', 'DatUcPr' => '2025-06-02',
+                    'AdNazev' => 'Čerpací stanice Gama s.r.o.', 'Popis' => 'Tankování', 'Celkem' => 121.0,
+                    'Cleneni' => self::KOD_DPH_PURCHASE, 'ZSazba' => 21.0, 'ZaklZS' => 100.0, 'DPHZS' => 21.0],
+                // Nulový doklad nemá v pokladně účinek ani zápis v deníku.
+                ['Doklad' => 'PP25002', 'Pokl' => 'PO', 'Vydej' => 0, 'DatVyst' => '2025-03-02', 'DatUcPr' => '2025-03-02', 'Popis' => 'Stornovaná tržba', 'Celkem' => 0.0],
             ]),
             'ROK.002/BankKnih.DAT' => Ms3FixtureWriter::table(self::BANK_FIELDS, [
                 ['Doklad' => 'BV25001', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-12-31', 'DatPlat' => '2025-12-31', 'Celkem' => 100.0, 'Popis' => 'Poplatek za vedení účtu'],
@@ -275,6 +319,45 @@ final class SyntheticAgenda
         $files['ROK.001/UcDenik.MDT'] = str_repeat("\x5A", 64);
         $files['Dokumenty.s3db'] = str_repeat("\xA5", 128);
         return $files;
+    }
+
+    /**
+     * Agenda, ve které roky v Money nenavazují: počáteční stavy 2025 přesouvají 100 Kč
+     * z pokladny na účet (ruční přepis PS v Money), konečné stavy 2024 zůstávají.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithOpeningReclass(): array
+    {
+        $files = self::files();
+        $rows = iterator_to_array(Ms3Table::fromString($files['ROK.002/UcDenik.DAT'], 'UCDENIK')->rows(), false);
+        foreach ($rows as &$r) {
+            if ($r['Zdroj'] === 'XP' && $r['UcMD'] === '211000') {
+                $r['Castka'] = 8400.0;
+            } elseif ($r['Zdroj'] === 'XP' && $r['UcMD'] === '221001') {
+                $r['Castka'] = 62250.0;
+            }
+        }
+        unset($r);
+        $files['ROK.002/UcDenik.DAT'] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, $rows);
+        return $files;
+    }
+
+    /**
+     * Záloha agendy z daných souborů (varianty agendy pro jednotlivé testy).
+     *
+     * @param array<string,string> $files
+     */
+    public static function writeLzFiles(string $path, array $files): void
+    {
+        $zip = new \ZipArchive();
+        if ($zip->open($path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+            throw new \RuntimeException("Nelze vytvořit {$path}");
+        }
+        foreach ($files as $name => $content) {
+            $zip->addFromString($name, $content);
+        }
+        $zip->close();
     }
 
     /** Agenda rozbalená do adresáře (jak ji vidí převod po rozbalení zálohy). */

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { moneyS3Api, type MoneyS3Run, type MoneyS3Upload } from '@/api/moneyS3'
+import { isUploadReady, moneyS3Api, type MoneyS3Run, type MoneyS3Upload } from '@/api/moneyS3'
 import { cancelImportJob, fetchImportJob, type FileImportJob } from '@/api/imports'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
@@ -28,6 +28,7 @@ const upload = ref<MoneyS3Upload | null>(null)
 const file = ref<File | null>(null)
 const closeHistory = ref(true)
 const firstPeriodStart = ref('')
+const fromYear = ref<number | null>(null)
 const job = ref<FileImportJob | null>(null)
 const jobMode = ref<'dry_run' | 'import' | null>(null)
 const run = ref<MoneyS3Run | null>(null)
@@ -38,7 +39,11 @@ const confirmed = ref(false)
 const confirmIco = ref(false)
 const dryRunPassed = ref(false)
 const reportBusy = ref<number | null>(null)
+// Nahrávání po částech (procenta) a následné zpracování zálohy serverem na pozadí.
+const uploadPercent = ref<number | null>(null)
+const processing = ref(false)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
+let disposed = false
 
 function readToken(): string | null {
   try { return sessionStorage.getItem(TOKEN_KEY) } catch { return null }
@@ -93,18 +98,49 @@ function onFile(event: Event): void {
 async function doUpload(): Promise<void> {
   if (!file.value) return
   busy.value = true
+  uploadPercent.value = 0
   try {
-    upload.value = await moneyS3Api.upload(file.value)
-    writeToken(upload.value.token)
-    dryRunPassed.value = false
-    confirmed.value = false
-    confirmIco.value = false
-    run.value = null
-    currentStep.value = 2
+    const { token } = await moneyS3Api.uploadChunked(
+      file.value,
+      (sent, total) => { uploadPercent.value = total > 0 ? Math.floor(sent / total * 100) : 100 },
+      started => writeToken(started),
+    )
+    uploadPercent.value = null
+    await waitForUpload(token)
   } catch (error: any) {
+    writeToken(null)
     toast.error(errorMessage(error, t('money_s3.upload_failed')))
   } finally {
+    uploadPercent.value = null
     busy.value = false
+  }
+}
+
+/** Polluje stav nahrané zálohy, dokud ji server nerozbalí a nenačte (nebo nenahlásí chybu). */
+async function waitForUpload(token: string): Promise<void> {
+  processing.value = true
+  try {
+    while (!disposed) {
+      const result = await moneyS3Api.show(token)
+      if (isUploadReady(result)) {
+        upload.value = result
+        dryRunPassed.value = false
+        confirmed.value = false
+        confirmIco.value = false
+        run.value = null
+        currentStep.value = 2
+        return
+      }
+      if (result.status !== 'processing') {
+        // 'uploading' po obnovení stránky: soubor v prohlížeči už není, nahrávání nejde dokončit.
+        writeToken(null)
+        toast.error(result.status === 'failed' ? (result.error || t('money_s3.upload_failed')) : t('money_s3.upload_interrupted'))
+        return
+      }
+      await new Promise<void>(resolve => { pollTimer = setTimeout(resolve, 2000) })
+    }
+  } finally {
+    processing.value = false
   }
 }
 
@@ -144,6 +180,7 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
       close_history: closeHistory.value,
       first_period_start: firstPeriodStart.value || null,
       confirm_ico: confirmIco.value,
+      from_year: fromYear.value,
     })
     jobMode.value = mode
     run.value = null
@@ -210,8 +247,7 @@ async function load(): Promise<void> {
     const token = readToken()
     if (token) {
       try {
-        upload.value = await moneyS3Api.show(token)
-        currentStep.value = 2
+        await waitForUpload(token)
       } catch {
         writeToken(null)
       }
@@ -232,7 +268,7 @@ async function load(): Promise<void> {
 const actions = computed<ActionItem[]>(() => {
   const blocked = preflightErrors.value.length > 0
   if (currentStep.value === 1) return [
-    { key: 'upload', label: busy.value ? t('money_s3.uploading') : t('money_s3.upload'), icon: 'upload', tier: 'primary', variant: 'primary', disabled: !file.value, disabledReason: t('money_s3.choose_file_first'), loading: busy.value, run: doUpload },
+    { key: 'upload', label: busy.value ? (uploadPercent.value !== null ? t('money_s3.uploading_percent', { percent: uploadPercent.value }) : t('money_s3.uploading')) : t('money_s3.upload'), icon: 'upload', tier: 'primary', variant: 'primary', disabled: !file.value, disabledReason: t('money_s3.choose_file_first'), loading: busy.value, run: doUpload },
   ]
   if (currentStep.value === 2) return [
     { key: 'continue', label: t('money_s3.continue'), icon: 'check', tier: 'primary', variant: 'primary', disabled: blocked, disabledReason: t('money_s3.preflight_blocked'), run: () => { currentStep.value = 3 } },
@@ -260,7 +296,10 @@ const actions = computed<ActionItem[]>(() => {
 })
 
 onMounted(load)
-onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
+onBeforeUnmount(() => {
+  disposed = true
+  if (pollTimer) clearTimeout(pollTimer)
+})
 </script>
 
 <template>
@@ -286,7 +325,7 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
     </ol>
 
     <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
-      <div v-if="busy && !upload && currentStep === 1 && !file" class="py-12 text-center text-neutral-400">{{ t('common.loading') }}</div>
+      <div v-if="busy && !upload && currentStep === 1 && !file && !processing" class="py-12 text-center text-neutral-400">{{ t('common.loading') }}</div>
 
       <template v-else-if="currentStep === 1">
         <h2 class="mb-1 text-lg font-semibold">{{ t('money_s3.upload_title') }}</h2>
@@ -299,8 +338,19 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
         </div>
         <label class="block max-w-xl text-sm font-medium">
           {{ t('money_s3.choose_file') }}
-          <input type="file" accept=".lz,.zip" class="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm" data-testid="backup-input" @change="onFile" />
+          <input type="file" accept=".lz,.zip" class="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm" data-testid="backup-input" :disabled="busy" @change="onFile" />
         </label>
+        <div v-if="uploadPercent !== null || processing" class="mt-4 max-w-xl space-y-2 rounded-md border border-primary-200 bg-primary-50/50 px-3 py-3" data-testid="backup-progress">
+          <div class="text-sm font-medium text-primary-700">
+            {{ processing ? t('money_s3.processing') : t('money_s3.uploading_percent', { percent: uploadPercent ?? 0 }) }}
+          </div>
+          <div class="h-2 overflow-hidden rounded-full bg-primary-100">
+            <div class="h-full bg-primary-500 transition-all duration-300"
+              :class="processing ? 'w-1/3 animate-pulse' : ''"
+              :style="processing ? undefined : { width: (uploadPercent ?? 0) + '%' }"></div>
+          </div>
+          <p class="text-xs text-neutral-500">{{ processing ? t('money_s3.processing_hint') : t('money_s3.uploading_hint') }}</p>
+        </div>
       </template>
 
       <template v-else-if="currentStep === 2 && agenda">
@@ -368,6 +418,13 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
           <DateInput v-model="firstPeriodStart" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3" />
         </label>
         <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.first_period_start_hint') }}</p>
+        <label class="mb-1 block max-w-xs text-sm font-medium">{{ t('money_s3.from_year') }}
+          <select v-model="fromYear" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm" data-testid="from-year">
+            <option :value="null">{{ t('money_s3.from_year_all') }}</option>
+            <option v-for="y in agenda.years.filter(y => y.fiscal_year !== null)" :key="y.dir" :value="y.fiscal_year">{{ y.fiscal_year }}</option>
+          </select>
+        </label>
+        <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.from_year_hint') }}</p>
 
         <h3 class="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('money_s3.reports_title') }}</h3>
         <p class="mb-3 text-sm text-neutral-500">{{ t('money_s3.reports_hint') }}</p>
