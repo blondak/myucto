@@ -112,7 +112,8 @@ final class JournalAttachmentStorage
         if (is_file($diskPath)) {
             // Stejný obsah už na disku je (dedup) — zahoď temp.
             @unlink($tmpPath);
-        } elseif (!@rename($tmpPath, $diskPath)) {
+        } else {
+            // Kopie, ne rename(): důvod viz DocumentStorage (práva dočasné složky by zůstala).
             if (!@copy($tmpPath, $diskPath)) {
                 @unlink($tmpPath);
                 throw new DocumentException('store_failed', 'Nepodařilo se uložit soubor na disk.', 500);

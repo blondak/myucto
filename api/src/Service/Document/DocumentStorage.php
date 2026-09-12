@@ -220,7 +220,9 @@ final class DocumentStorage
         if (is_file($diskPath)) {
             // Stejný obsah už existuje (dedup) — zahoď temp.
             @unlink($tmpPath);
-        } elseif (!@rename($tmpPath, $diskPath)) {
+        } else {
+            // Kopie, ne rename(): přesunutý soubor si nese práva dočasné složky (Windows ACL,
+            // na Linuxu 0600 z tempnam) a webserver by ho pak neotevřel. Kopie dědí práva úložiště.
             if (!@copy($tmpPath, $diskPath)) {
                 @unlink($tmpPath);
                 throw new DocumentException('store_failed', 'Nepodařilo se uložit soubor na disk.', 500);

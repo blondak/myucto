@@ -57,7 +57,11 @@ final class DocumentFileAction
         if (!is_file($path)) {
             return Json::error($response, 'not_found', 'Náhled nenalezen.', 404);
         }
-        $stream = new Stream(fopen($path, 'rb'));
+        $handle = @fopen($path, 'rb');
+        if ($handle === false) {
+            return Json::error($response, 'not_found', 'Náhled nelze přečíst.', 404);
+        }
+        $stream = new Stream($handle);
         return $response
             ->withStatus(200)
             ->withHeader('Content-Type', 'image/jpeg')
@@ -152,7 +156,11 @@ final class DocumentFileAction
         $serveMime = $canInline ? $mime : 'application/octet-stream';
         $disposition = ($canInline ? 'inline' : 'attachment') . "; filename=\"{$safe}\"";
 
-        $stream = new Stream(fopen($path, 'rb'));
+        $handle = @fopen($path, 'rb');
+        if ($handle === false) {
+            return Json::error($response, 'file_unreadable', 'Soubor dokumentu nelze přečíst, zkontrolujte oprávnění k úložišti.', 500);
+        }
+        $stream = new Stream($handle);
         return $response
             ->withStatus(200)
             ->withHeader('Content-Type', $serveMime)
