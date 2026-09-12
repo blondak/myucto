@@ -557,6 +557,10 @@ final class MoneyS3ImportTest extends TestCase
         self::assertStringStartsWith('074', $this->container(\MyInvoice\Service\Bank\GpcExporter::class)->export($snapshot));
         self::assertSame(1, $this->rowCount('currencies', $supplierId, "code = 'CZK' AND account_number = '3000000004'"),
             'Účet firmy se bere z posledního roku agendy (při shodě první účet).');
+        // Účet je v evidenci účtů firmy s analytikou podle Money (PrimUcet 221001 → 221.001),
+        // jinak záložka Kontace zůstane prázdná a pohyby nemají kam se zaúčtovat.
+        self::assertSame(1, $this->rowCount('supplier_bank_accounts', $supplierId,
+            "account_number = '3000000004' AND analytic_suffix = '001' AND label = 'Běžný účet' AND currency = 'CZK'"));
     }
 
     /**
@@ -585,6 +589,8 @@ final class MoneyS3ImportTest extends TestCase
             [[100.0, 140.0], [140.0, 120.0]],
             array_map(static fn (array $r): array => [(float) $r['prev_balance'], (float) $r['curr_balance']], $rows)
         );
+        self::assertSame(1, $this->rowCount('supplier_bank_accounts', $supplierId,
+            "account_number = '5000000003' AND analytic_suffix = '003' AND currency = 'EUR' AND label = 'Devizový účet'"));
     }
 
     /**

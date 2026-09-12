@@ -157,6 +157,69 @@ final class SupplierBankAccountRepository
     }
 
     /**
+     * Vlastní účet převzatý z jiného účetního programu: číslo, měna, název a analytika
+     * 221.xxx podle toho programu. Pohyby na té analytice patří právě tomuto účtu, takže
+     * tady (na rozdíl od automatického přidělování v BankAnalyticAssigner) je převzetí
+     * analytiky i s historií správně. Existující účet si své údaje ponechá, doplní se jen
+     * chybějící; analytiku, kterou drží jiný účet firmy, nepřebírá. Účet, který drží jiná
+     * firma, se nezaeviduje (stejná pojistka jako {@see registerSeen()}).
+     *
+     * @return int|null id účtu; null = číslo nejde kanonizovat nebo patří jiné firmě
+     */
+    public function registerImported(
+        int $supplierId,
+        string $accountNumber,
+        ?string $bankCode,
+        ?string $iban,
+        string $currency,
+        string $label,
+        ?string $suffix,
+    ): ?int {
+        $iban = $iban !== null && trim($iban) !== '' ? trim($iban) : null;
+        $canonical = AccountNumberNormalizer::canonical($accountNumber, $iban);
+        if ($canonical === null || $this->ownership->accountClaimedByOtherSupplier($supplierId, $accountNumber, $iban)) {
+            return null;
+        }
+        $bank = AccountNumberNormalizer::canonicalBankCode($bankCode);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO supplier_bank_accounts
+                (supplier_id, label, account_number, bank_code, bank_code_norm, iban, currency,
+                 account_canonical, kind, source, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, "current", "statement", 1)
+             ON DUPLICATE KEY UPDATE
+                label = IF(label IS NULL OR label = "" OR label LIKE "Účet %", VALUES(label), label),
+                iban = COALESCE(iban, VALUES(iban)),
+                currency = COALESCE(currency, VALUES(currency)),
+                is_active = 1'
+        )->execute([
+            $supplierId,
+            mb_substr($label, 0, 100),
+            $accountNumber,
+            $bank,
+            $bank ?? '',
+            $iban,
+            strtoupper($currency),
+            $canonical,
+        ]);
+        $stmt = $pdo->prepare(
+            'SELECT id, analytic_suffix FROM supplier_bank_accounts
+              WHERE supplier_id = ? AND account_canonical = ? AND bank_code_norm = ?'
+        );
+        $stmt->execute([$supplierId, $canonical, $bank ?? '']);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $id = (int) $row['id'];
+        if ($suffix !== null && preg_match('/^[0-9]{1,6}$/', $suffix) === 1
+            && ($row['analytic_suffix'] ?? '') === '' && $this->findBySuffix($supplierId, $suffix) === null) {
+            $this->assignSuffix($supplierId, $id, $suffix);
+        }
+        return $id;
+    }
+
+    /**
      * `currencies` řádek firmy — prověřený zdroj čísla účtu / IBANu pro
      * {@see registerSeen()}. Cizí (nebo neexistující) id vrací null, takže se
      * spadne zpátky na hodnotu od volajícího, kterou ještě prověří claim guard.

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Bank\StatementBalanceService;
 use PDO;
 
@@ -28,6 +29,7 @@ final class CashBankImporter
     public function __construct(
         private readonly Connection $db,
         private readonly MoneyS3ImportRepository $map,
+        private readonly SupplierBankAccountRepository $bankAccounts,
     ) {}
 
     public function importCash(ImportContext $ctx): void
@@ -169,6 +171,7 @@ final class CashBankImporter
                 // Pozdější rok přepíše dřívější — firma mohla banku mezitím změnit.
                 $accounts[$code] = [
                     'rates' => $rates,
+                    'label' => trim((string) ($r['Popis'] ?? '')),
                     'number' => trim((string) ($r['Ucet'] ?? '')),
                     'bank' => trim((string) ($r['BKod'] ?? '')),
                     'iban' => trim((string) ($r['IBAN'] ?? '')),
@@ -182,6 +185,7 @@ final class CashBankImporter
         // blokoval vystavování dokladů firmy (cizí klíč na měnu) až do konce zkoušky.
         if (!$ctx->options->isDryRun()) {
             $this->fillOwnAccount($ctx->supplierId, $accounts);
+            $this->registerBankAccounts($ctx, $accounts);
         }
 
         $byStatement = [];
@@ -603,6 +607,33 @@ final class CashBankImporter
                 $supplierId,
                 $currency,
             ]);
+        }
+    }
+
+    /**
+     * Vlastní bankovní účty z Money do evidence účtů firmy (záložka Kontace): bez nich
+     * se pohyby banky po převodu nemají kam zaúčtovat. Analytika 221.xxx se bere z
+     * primárního účtu Money (`PrimUcet`), název z popisu účtu.
+     *
+     * @param array<string,array{number:string,bank:string,iban:string,primary:string,currency:string,label:string}> $accounts
+     */
+    private function registerBankAccounts(ImportContext $ctx, array $accounts): void
+    {
+        foreach ($accounts as $code => $a) {
+            $number = $a['number'] !== '' ? $a['number'] : $a['iban'];
+            if ($number === '') {
+                continue;
+            }
+            $primary = AccountCode::fromMoney($a['primary']);
+            $this->bankAccounts->registerImported(
+                $ctx->supplierId,
+                $number,
+                $a['bank'] !== '' ? $a['bank'] : null,
+                $a['iban'] !== '' ? $a['iban'] : null,
+                $a['currency'],
+                $a['label'] !== '' ? $a['label'] : 'Účet ' . $code,
+                $primary !== null && str_starts_with($primary, '221.') ? substr($primary, 4) : null,
+            );
         }
     }
 
