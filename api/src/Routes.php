@@ -3089,6 +3089,8 @@ final class Routes
         // opt-in přes supplier.stock_enabled a má vlastní PermissionMiddleware pravidla.
         // Specifické cesty PŘED generickými /{id}.
         $app->group('/api/stock', function ($g) {
+            $g->post  ('/intrastat/preview',            [\MyInvoice\Action\Intrastat\IntrastatAction::class, 'preview']);
+            $g->post  ('/intrastat/export',             [\MyInvoice\Action\Intrastat\IntrastatAction::class, 'export']);
             $g->get   ('/warehouses',                   [\MyInvoice\Action\Stock\WarehouseAction::class, 'list']);
             $g->post  ('/warehouses',                   [\MyInvoice\Action\Stock\WarehouseAction::class, 'create']);
             $g->get   ('/warehouses/{id:[0-9]+}',       [\MyInvoice\Action\Stock\WarehouseAction::class, 'get']);

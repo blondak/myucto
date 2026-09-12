@@ -42,6 +42,7 @@ vi.mock('@/api/clients', () => ({
 
 vi.mock('@/api/codebooks', () => ({
   codebooksApi: {
+    countries: vi.fn(async () => [{ id: 1, iso2: 'DE', iso3: 'DEU', name_cs: 'Německo', name_en: 'Germany', is_eu: true }]),
     vatRates: vi.fn(async () => []),
     units: vi.fn(async () => []),
   },
@@ -88,6 +89,11 @@ const product = {
   vat_rate_id: null,
   sale_price_without_vat: null,
   min_qty: null,
+  intrastat_cn8_code: '27101981',
+  intrastat_country_of_origin: 'CZ',
+  intrastat_net_mass_kg: '1.250',
+  intrastat_supplementary_unit: 'PCE',
+  intrastat_supplementary_unit_coefficient: '1.000000',
   is_active: true,
   note: null,
   manufacturer_id: null,
@@ -390,5 +396,28 @@ describe('ItemEditor připravené jazyky a měny', () => {
     await tabs[0]!.trigger('keydown', { key: 'ArrowRight' })
     expect(wrapper.findAll('button[role="tab"]')[1]!.attributes('aria-selected')).toBe('true')
     expect(wrapper.find('[role="tabpanel"]').attributes('id')).toContain('panel-general')
+  })
+
+  it('na záložce Intrastat načte a uloží normalizované údaje skladové karty', async () => {
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+    const intrastatTab = wrapper.findAll('button[role="tab"]').find(button => button.text() === 'stock.items.intrastat.tab')!
+    await intrastatTab.trigger('click')
+
+    expect((wrapper.get('[data-test="intrastat-cn8"]').element as HTMLInputElement).value).toBe('27101981')
+    await wrapper.get('[data-test="intrastat-country"]').setValue('DE')
+    await wrapper.get('[data-test="intrastat-unit"]').setValue('PCE')
+    await wrapper.get('[data-test="intrastat-coefficient"]').setValue('2.5')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.saveProductEditor).toHaveBeenCalledWith(42, expect.objectContaining({
+      item: expect.objectContaining({
+        intrastat_cn8_code: '27101981',
+        intrastat_country_of_origin: 'DE',
+        intrastat_supplementary_unit: 'PCE',
+        intrastat_supplementary_unit_coefficient: 2.5,
+      }),
+    }))
   })
 })

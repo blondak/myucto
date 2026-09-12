@@ -228,7 +228,8 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // 2) Scope
         if (in_array($method, self::READ_METHODS, true)
             || ($method === 'POST' && (in_array($path, ['/api/catalog/products/batch', '/api/catalog/prices/batch', '/api/catalog/exports'], true)
-                || preg_match('#^/api/stock/items/[0-9]+/neighbors$#', $path) === 1))) {
+                || preg_match('#^/api/stock/items/[0-9]+/neighbors$#', $path) === 1
+                || preg_match('#^/api/stock/intrastat/(preview|export)$#', $path) === 1))) {
             return $handler->handle($request);
         }
 

@@ -22,7 +22,9 @@ final class StockItemRepository
     private const COLUMNS =
         'id, supplier_id, sku, name, item_type, manufacturer_id, unit, tracking_mode, ean, vat_rate_id,
          sale_price_without_vat, min_qty, warranty_months, delivery_days, export_eshop,
-         is_stocked, weight_g, pricing_base, is_active, lifecycle_status, retired_at, note, row_version, created_at, updated_at';
+         is_stocked, weight_g, intrastat_cn8_code, intrastat_country_of_origin, intrastat_net_mass_kg,
+         intrastat_supplementary_unit, intrastat_supplementary_unit_coefficient,
+         pricing_base, is_active, lifecycle_status, retired_at, note, row_version, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -479,8 +481,10 @@ final class StockItemRepository
         $pdo->prepare(
             'INSERT INTO stock_items
                 (supplier_id, sku, name, item_type, unit, tracking_mode, ean, vat_rate_id,
-                 sale_price_without_vat, min_qty, is_active, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 sale_price_without_vat, min_qty, intrastat_cn8_code, intrastat_country_of_origin,
+                 intrastat_net_mass_kg, intrastat_supplementary_unit,
+                 intrastat_supplementary_unit_coefficient, is_active, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (string) $data['sku'],
@@ -492,6 +496,12 @@ final class StockItemRepository
             isset($data['vat_rate_id']) ? (int) $data['vat_rate_id'] : null,
             isset($data['sale_price_without_vat']) ? (string) $data['sale_price_without_vat'] : null,
             isset($data['min_qty']) ? (string) $data['min_qty'] : null,
+            $data['intrastat_cn8_code'] ?? null,
+            $data['intrastat_country_of_origin'] ?? null,
+            isset($data['intrastat_net_mass_kg']) ? (string) $data['intrastat_net_mass_kg'] : null,
+            $data['intrastat_supplementary_unit'] ?? null,
+            isset($data['intrastat_supplementary_unit_coefficient'])
+                ? (string) $data['intrastat_supplementary_unit_coefficient'] : null,
             (int) ($data['is_active'] ?? true),
             $data['note'] ?? null,
         ]);
@@ -509,6 +519,11 @@ final class StockItemRepository
             'UPDATE stock_items SET
                 sku = ?, name = ?, item_type = ?, unit = ?, tracking_mode = COALESCE(?, tracking_mode), ean = ?, vat_rate_id = ?,
                 sale_price_without_vat = ?, min_qty = ?,
+                intrastat_cn8_code = CASE WHEN ? THEN ? ELSE intrastat_cn8_code END,
+                intrastat_country_of_origin = CASE WHEN ? THEN ? ELSE intrastat_country_of_origin END,
+                intrastat_net_mass_kg = CASE WHEN ? THEN ? ELSE intrastat_net_mass_kg END,
+                intrastat_supplementary_unit = CASE WHEN ? THEN ? ELSE intrastat_supplementary_unit END,
+                intrastat_supplementary_unit_coefficient = CASE WHEN ? THEN ? ELSE intrastat_supplementary_unit_coefficient END,
                 is_active = CASE WHEN lifecycle_status = \'ready\' THEN ? ELSE 0 END, note = ?,
                 row_version = row_version + 1
               WHERE id = ? AND supplier_id = ?'
@@ -523,6 +538,17 @@ final class StockItemRepository
             isset($data['vat_rate_id']) ? (int) $data['vat_rate_id'] : null,
             isset($data['sale_price_without_vat']) ? (string) $data['sale_price_without_vat'] : null,
             isset($data['min_qty']) ? (string) $data['min_qty'] : null,
+            (int) array_key_exists('intrastat_cn8_code', $data),
+            $data['intrastat_cn8_code'] ?? null,
+            (int) array_key_exists('intrastat_country_of_origin', $data),
+            $data['intrastat_country_of_origin'] ?? null,
+            (int) array_key_exists('intrastat_net_mass_kg', $data),
+            isset($data['intrastat_net_mass_kg']) ? (string) $data['intrastat_net_mass_kg'] : null,
+            (int) array_key_exists('intrastat_supplementary_unit', $data),
+            $data['intrastat_supplementary_unit'] ?? null,
+            (int) array_key_exists('intrastat_supplementary_unit_coefficient', $data),
+            isset($data['intrastat_supplementary_unit_coefficient'])
+                ? (string) $data['intrastat_supplementary_unit_coefficient'] : null,
             (int) ($data['is_active'] ?? true),
             $data['note'] ?? null,
             $id,
@@ -538,6 +564,11 @@ final class StockItemRepository
             'UPDATE stock_items SET
                 sku = ?, name = ?, item_type = ?, unit = ?, tracking_mode = COALESCE(?, tracking_mode), ean = ?, vat_rate_id = ?,
                 sale_price_without_vat = ?, min_qty = ?,
+                intrastat_cn8_code = CASE WHEN ? THEN ? ELSE intrastat_cn8_code END,
+                intrastat_country_of_origin = CASE WHEN ? THEN ? ELSE intrastat_country_of_origin END,
+                intrastat_net_mass_kg = CASE WHEN ? THEN ? ELSE intrastat_net_mass_kg END,
+                intrastat_supplementary_unit = CASE WHEN ? THEN ? ELSE intrastat_supplementary_unit END,
+                intrastat_supplementary_unit_coefficient = CASE WHEN ? THEN ? ELSE intrastat_supplementary_unit_coefficient END,
                 is_active = CASE WHEN lifecycle_status = \'ready\' THEN ? ELSE 0 END, note = ?,
                 row_version = row_version + 1
               WHERE id = ? AND supplier_id = ? AND row_version = ?'
@@ -552,6 +583,17 @@ final class StockItemRepository
             isset($data['vat_rate_id']) ? (int) $data['vat_rate_id'] : null,
             isset($data['sale_price_without_vat']) ? (string) $data['sale_price_without_vat'] : null,
             isset($data['min_qty']) ? (string) $data['min_qty'] : null,
+            (int) array_key_exists('intrastat_cn8_code', $data),
+            $data['intrastat_cn8_code'] ?? null,
+            (int) array_key_exists('intrastat_country_of_origin', $data),
+            $data['intrastat_country_of_origin'] ?? null,
+            (int) array_key_exists('intrastat_net_mass_kg', $data),
+            isset($data['intrastat_net_mass_kg']) ? (string) $data['intrastat_net_mass_kg'] : null,
+            (int) array_key_exists('intrastat_supplementary_unit', $data),
+            $data['intrastat_supplementary_unit'] ?? null,
+            (int) array_key_exists('intrastat_supplementary_unit_coefficient', $data),
+            isset($data['intrastat_supplementary_unit_coefficient'])
+                ? (string) $data['intrastat_supplementary_unit_coefficient'] : null,
             (int) ($data['is_active'] ?? true),
             $data['note'] ?? null,
             $id,

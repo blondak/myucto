@@ -13740,6 +13740,65 @@ paths:
       responses:
         '200': { description: Smazáno }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/stock/intrastat/preview:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Stock]
+      summary: Náhled hlášení Intrastat pro InstatEvo
+      description: |
+        Sestaví náhled z posted skladových pohybů za měsíc. Zahrne jen pohyby
+        zboží mezi aktuální firmou a partnerem v jiné zemi EU. POST je čtecí
+        operace a stačí pro něj PAT se scope `read` a oprávnění `stock` pro čtení.
+        Řádky s chybějícím KN8, zemí původu, hmotností, vazbou na fakturu, kurzem
+        nebo DIČ partnera u odeslání zůstanou v náhledu s chybou.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntrastatRequest'
+      responses:
+        '200':
+          description: Náhled včetně validačních chyb a varování.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntrastatPreview'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/stock/intrastat/export:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Stock]
+      summary: Export Intrastat CSV pro InstatEvo
+      description: |
+        Vrátí UTF-8 CSV bez záhlaví podle dvacetisloupcové struktury Celní správy
+        platné od 1. 1. 2026. Oddělovač je středník. Export je povolen jen pokud
+        stejný náhled neobsahuje žádnou chybu. POST je čtecí operace a přijímá PAT
+        se scope `read`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntrastatRequest'
+      responses:
+        '200':
+          description: Soubor připravený pro import do InstatEvo.
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            text/csv:
+              schema: { type: string, contentMediaType: text/csv }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: Neplatné parametry nebo chyby na řádcích náhledu.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/stock/warehouses:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14065,6 +14124,22 @@ paths:
                   type:
                   - string
                   - 'null'
+                intrastat_cn8_code:
+                  type: [string, 'null']
+                  pattern: '^[0-9]{8}$'
+                intrastat_country_of_origin:
+                  type: [string, 'null']
+                  pattern: '^[A-Z]{2}$'
+                intrastat_net_mass_kg:
+                  type: [string, number, 'null']
+                  minimum: 0.001
+                intrastat_supplementary_unit:
+                  type: [string, 'null']
+                  enum: [CTM, NEL, CCT, GRM, GFI, KHO, KPO, KPH, KMA, KNI, KSH, KNE, KPP, KSD, KUR, MWH, LTR, LPA, MTR, MTK, MTQ, MQM, NPR, PCE, CEN, MIL, TJO, ZZZ, null]
+                  description: Kód doplňkové jednotky. U ZZZ se koeficient nevyplňuje.
+                intrastat_supplementary_unit_coefficient:
+                  type: [string, number, 'null']
+                  exclusiveMinimum: 0
                 is_active:
                   type: boolean
                   default: true
@@ -14116,6 +14191,11 @@ paths:
                 vat_rate_id: { type: [integer, "null"] }
                 sale_price_without_vat: { type: [string, "null"] }
                 min_qty: { type: [string, "null"] }
+                intrastat_cn8_code: { type: [string, "null"], pattern: '^[0-9]{8}$' }
+                intrastat_country_of_origin: { type: [string, "null"], pattern: '^[A-Z]{2}$' }
+                intrastat_net_mass_kg: { type: [string, number, "null"], minimum: 0.001 }
+                intrastat_supplementary_unit: { type: [string, "null"], enum: [CTM, NEL, CCT, GRM, GFI, KHO, KPO, KPH, KMA, KNI, KSH, KNE, KPP, KSD, KUR, MWH, LTR, LPA, MTR, MTK, MTQ, MQM, NPR, PCE, CEN, MIL, TJO, ZZZ, null] }
+                intrastat_supplementary_unit_coefficient: { type: [string, number, "null"], exclusiveMinimum: 0 }
                 is_active: { type: boolean }
                 note: { type: [string, "null"] }
       responses:
@@ -19843,6 +19923,110 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    IntrastatRequest:
+      type: object
+      required: [period, direction]
+      properties:
+        period:
+          type: string
+          pattern: '^20[2-9][0-9]-(0[1-9]|1[0-2])$'
+          example: '2026-09'
+          description: Měsíc hlášení, nejdříve 2026-01.
+        direction:
+          type: string
+          enum: [arrival, dispatch]
+          description: Přijetí nebo odeslání zboží.
+        transaction_code:
+          type: string
+          enum: ['11', '12']
+          default: '11'
+        transport_mode:
+          type: string
+          enum: ['2', '3', '4', '5', '7', '8', '9']
+          default: '3'
+        delivery_terms:
+          type: string
+          enum: [K, L, M, N]
+          default: K
+        record_type:
+          type: string
+          enum: [ST]
+          default: ST
+        statistical_code:
+          type: string
+          pattern: '^(|[0-9]{2})$'
+          default: ''
+        note_1:
+          type: string
+          maxLength: 256
+          default: ''
+    IntrastatIssue:
+      type: object
+      required: [severity, code, message]
+      properties:
+        severity: { type: string, enum: [error, warning] }
+        code: { type: string }
+        message: { type: string }
+        row_number: { type: integer, minimum: 1 }
+    IntrastatSourceDocument:
+      type: object
+      required: [id, number, date, line_id, type]
+      properties:
+        id: { type: integer, format: int64 }
+        number: { type: [string, "null"] }
+        date: { type: string, format: date }
+        line_id: { type: integer, format: int64 }
+        type: { type: string, enum: [receipt, issue] }
+    IntrastatRow:
+      type: object
+      required: [row_number, source_document, partner_name, partner_country, partner_vat_id, cn8_code, country_of_origin, description, quantity, net_mass_kg, supplementary_unit, supplementary_quantity, invoiced_value, issues]
+      properties:
+        row_number: { type: integer, minimum: 1 }
+        source_document: { $ref: '#/components/schemas/IntrastatSourceDocument' }
+        partner_name: { type: string }
+        partner_country: { type: string, pattern: '^[A-Z]{2}$' }
+        partner_vat_id: { type: string, description: Prázdné u přijetí. }
+        cn8_code: { type: string }
+        country_of_origin: { type: string }
+        description: { type: string, maxLength: 80 }
+        quantity: { type: [string, "null"], pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        net_mass_kg: { type: [string, "null"], pattern: '^[0-9]+(?:\.[0-9]{1,3})?$' }
+        supplementary_unit: { type: [string, "null"] }
+        supplementary_quantity: { type: [string, "null"], pattern: '^[0-9]+(?:\.[0-9]{1,3})?$' }
+        invoiced_value: { type: [integer, "null"], description: Celé CZK bez DPH. }
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/IntrastatIssue' }
+    IntrastatPreview:
+      type: object
+      required: [period, direction, defaults, summary, rows, issues]
+      properties:
+        period: { type: string }
+        direction: { type: string, enum: [arrival, dispatch] }
+        defaults:
+          type: object
+          required: [transaction_code, transport_mode, delivery_terms, record_type, statistical_code]
+          properties:
+            transaction_code: { type: string }
+            transport_mode: { type: string }
+            delivery_terms: { type: string }
+            record_type: { type: string }
+            statistical_code: { type: string }
+        summary:
+          type: object
+          required: [row_count, error_count, warning_count, total_net_mass_kg, total_invoiced_value]
+          properties:
+            row_count: { type: integer, minimum: 0 }
+            error_count: { type: integer, minimum: 0 }
+            warning_count: { type: integer, minimum: 0 }
+            total_net_mass_kg: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+            total_invoiced_value: { type: integer, minimum: 0 }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/IntrastatRow' }
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/IntrastatIssue' }
     LegalProvisionLedgerSummary:
       type: object
       description: Podklady tabulky C DPPO; tvorba za období se rozlišuje od konečného stavu.
@@ -20522,6 +20706,19 @@ components:
           type: string
         avg_unit_cost:
           type: string
+        intrastat_cn8_code:
+          type: [string, 'null']
+          pattern: '^[0-9]{8}$'
+        intrastat_country_of_origin:
+          type: [string, 'null']
+          pattern: '^[A-Z]{2}$'
+        intrastat_net_mass_kg:
+          type: [string, 'null']
+        intrastat_supplementary_unit:
+          type: [string, 'null']
+          enum: [CTM, NEL, CCT, GRM, GFI, KHO, KPO, KPH, KMA, KNI, KSH, KNE, KPP, KSD, KUR, MWH, LTR, LPA, MTR, MTK, MTQ, MQM, NPR, PCE, CEN, MIL, TJO, ZZZ, null]
+        intrastat_supplementary_unit_coefficient:
+          type: [string, 'null']
         master:
           type: [object, 'null']
           description: Neprodejný master varianty, pokud je karta připojena.

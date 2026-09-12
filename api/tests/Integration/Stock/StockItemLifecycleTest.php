@@ -44,7 +44,13 @@ final class StockItemLifecycleTest extends StockTestCase
         $warehouseId = $this->warehouse($sid, 'LIFE-DUP');
         $sourceId = $this->item($sid, 'LIFE-SOURCE', 'material');
         $this->db->pdo()->prepare(
-            'UPDATE stock_items SET unit = "kg", ean = "1234567890123", min_qty = 7, note = "původní", weight_g = 123, export_eshop = 1 WHERE supplier_id = ? AND id = ?'
+            'UPDATE stock_items
+                SET unit = "kg", ean = "1234567890123", min_qty = 7, note = "původní",
+                    weight_g = 123, export_eshop = 1, intrastat_cn8_code = "84713000",
+                    intrastat_country_of_origin = "DE", intrastat_net_mass_kg = 1.275,
+                    intrastat_supplementary_unit = "PCE",
+                    intrastat_supplementary_unit_coefficient = 2.500000
+              WHERE supplier_id = ? AND id = ?'
         )->execute([$sid, $sourceId]);
         $this->db->pdo()->prepare(
             'INSERT INTO stock_media (supplier_id, stock_item_id, storage_key, original_name) VALUES (?, ?, "synthetic-key", "synthetic.png")'
@@ -65,6 +71,11 @@ final class StockItemLifecycleTest extends StockTestCase
         self::assertSame('kg', $copy['unit']);
         self::assertSame('7.000', $copy['min_qty']);
         self::assertSame('původní', $copy['note']);
+        self::assertSame('84713000', $copy['intrastat_cn8_code']);
+        self::assertSame('DE', $copy['intrastat_country_of_origin']);
+        self::assertSame('1.275', $copy['intrastat_net_mass_kg']);
+        self::assertSame('PCE', $copy['intrastat_supplementary_unit']);
+        self::assertSame('2.500000', $copy['intrastat_supplementary_unit_coefficient']);
         self::assertNull($copy['ean']);
         self::assertNull($copy['manufacturer_id']);
         self::assertNull($copy['weight_g']);
@@ -81,8 +92,14 @@ final class StockItemLifecycleTest extends StockTestCase
         $this->db->pdo()->prepare(
             'INSERT INTO stock_locales (supplier_id, code, name, display_order, is_default) VALUES (?, "en", "English", 0, 1)'
         )->execute([$sid]);
-        $this->db->pdo()->prepare('UPDATE stock_items SET unit = "bal", note = "snapshot" WHERE supplier_id = ? AND id = ?')
-            ->execute([$sid, $sourceId]);
+        $this->db->pdo()->prepare(
+            'UPDATE stock_items
+                SET unit = "bal", note = "snapshot", intrastat_cn8_code = "27160000",
+                    intrastat_country_of_origin = "QV", intrastat_net_mass_kg = 0.001,
+                    intrastat_supplementary_unit = "ZZZ",
+                    intrastat_supplementary_unit_coefficient = NULL
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$sid, $sourceId]);
         $this->db->pdo()->prepare(
             'INSERT INTO stock_item_i18n (supplier_id, stock_item_id, locale, name, description, seo_slug) VALUES (?, ?, "en", "Snapshot name", "Snapshot description", "source-slug")'
         )->execute([$sid, $sourceId]);
@@ -103,7 +120,15 @@ final class StockItemLifecycleTest extends StockTestCase
         self::assertArrayNotHasKey('content', $template);
         self::assertArrayNotHasKey('content_json', $template);
 
-        $this->db->pdo()->prepare('UPDATE stock_items SET unit = "ks", note = "pozdější změna", sale_price_without_vat = 99, row_version = row_version + 1 WHERE supplier_id = ? AND id = ?')
+        $this->db->pdo()->prepare(
+            'UPDATE stock_items
+                SET unit = "ks", note = "pozdější změna", sale_price_without_vat = 99,
+                    intrastat_cn8_code = NULL, intrastat_country_of_origin = NULL,
+                    intrastat_net_mass_kg = NULL, intrastat_supplementary_unit = NULL,
+                    intrastat_supplementary_unit_coefficient = NULL,
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )
             ->execute([$sid, $sourceId]);
         $this->db->pdo()->prepare('UPDATE stock_item_i18n SET name = "Changed" WHERE supplier_id = ? AND stock_item_id = ?')
             ->execute([$sid, $sourceId]);
@@ -122,6 +147,11 @@ final class StockItemLifecycleTest extends StockTestCase
         self::assertFalse($created['export_eshop']);
         self::assertSame('bal', $created['unit']);
         self::assertSame('snapshot', $created['note']);
+        self::assertSame('27160000', $created['intrastat_cn8_code']);
+        self::assertSame('QV', $created['intrastat_country_of_origin']);
+        self::assertSame('0.001', $created['intrastat_net_mass_kg']);
+        self::assertSame('ZZZ', $created['intrastat_supplementary_unit']);
+        self::assertNull($created['intrastat_supplementary_unit_coefficient']);
         self::assertSame('25.00', $created['sale_price_without_vat']);
         self::assertSame('Snapshot name', $i18n['name']);
         self::assertSame('Snapshot description', $i18n['description']);

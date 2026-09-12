@@ -245,6 +245,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'stock/takes',            name: 'stock-takes',           component: () => import('@/pages/stock/TakeWizard.vue'),   meta: { requiresStock: true } },
       { path: 'stock/takes/:id(\\d+)',  name: 'stock-take-detail',     component: () => import('@/pages/stock/TakeWizard.vue'),   meta: { requiresStock: true } },
       { path: 'stock/reports',          name: 'stock-reports',         component: () => import('@/pages/stock/Reports.vue'),      meta: { requiresStock: true } },
+      { path: 'stock/intrastat',        name: 'stock-intrastat',       component: () => import('@/pages/stock/IntrastatExport.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'stock/assemblies',       name: 'stock-assemblies',      component: () => import('@/pages/stock/ProductAssemblies.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'eshop/sets/:id(\\d+)',  name: 'eshop-set-editor',      component: () => import('@/pages/eshop/ProductSetEditor.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'eshop/jobs',             name: 'eshop-jobs',            component: () => import('@/pages/stock/CatalogJobs.vue'),  meta: { requiresStock: true, requiresSupplier: true } },

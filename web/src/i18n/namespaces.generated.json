@@ -682,6 +682,9 @@
       "imports",
       "stock"
     ],
+    "stock-intrastat": [
+      "stock"
+    ],
     "stock-assemblies": [
       "stock"
     ],

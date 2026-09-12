@@ -10,6 +10,7 @@ use MyInvoice\Repository\StockItemPromoPriceRepository;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockItemVendorRepository;
 use MyInvoice\Service\Eshop\Pricing\PriceWriteService;
+use MyInvoice\Service\Stock\StockItemIntrastatValidator;
 use MyInvoice\Support\Slugifier;
 
 final class ProductEditorService
@@ -24,6 +25,7 @@ final class ProductEditorService
         private readonly StockItemPriceRepository $priceRepository,
         private readonly StockItemPromoPriceRepository $promoRepository,
         private readonly StockItemVendorRepository $vendorRepository,
+        private readonly StockItemIntrastatValidator $intrastat,
     ) {}
 
     /**
@@ -155,6 +157,7 @@ final class ProductEditorService
             'vat_rate_id' => $this->intOrNull($input['vat_rate_id'] ?? null),
             'sale_price_without_vat' => $this->decimalOrNull($input['sale_price_without_vat'] ?? null),
             'min_qty' => $this->decimalOrNull($input['min_qty'] ?? null),
+            ...$this->intrastat->normalize($input, $existing),
             'is_active' => (bool) ($input['is_active'] ?? true),
             'note' => $this->stringOrNull($input['note'] ?? null),
         ];

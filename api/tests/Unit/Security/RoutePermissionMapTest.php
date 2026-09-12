@@ -68,6 +68,8 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/accounting/setup-assistant/jobs/7/rollback', 'accounting.journal.post', AccessLevel::WRITE],
             ['DELETE', '/api/accounting/setup-assistant/jobs/7/snapshot', 'accounting.journal.post', AccessLevel::WRITE],
             ['POST', '/api/stock/takes/4/close', 'stock.close', AccessLevel::WRITE],
+            ['POST', '/api/stock/intrastat/preview', 'stock', AccessLevel::READ],
+            ['POST', '/api/stock/intrastat/export', 'stock', AccessLevel::READ],
             ['GET', '/api/settings/currencies', 'settings.bank_accounts', AccessLevel::READ],
             ['POST', '/api/settings/currencies', 'settings.bank_accounts', AccessLevel::WRITE],
             ['GET', '/api/settings/email-branding/preview', 'settings.branding', AccessLevel::READ],

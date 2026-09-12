@@ -803,7 +803,8 @@
         "1815_drop_leftover_migration_procedures.sql",
         "1816_payroll_work_summary_compensatory_time_off.sql",
         "1817_payroll_absence_childbirth_dates.sql",
-        "1818_payroll_child_claim_credit_status.sql"
+        "1818_payroll_child_claim_credit_status.sql",
+        "1819_stock_item_intrastat.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -17642,6 +17643,11 @@
                 "ean": "varchar(20) NULL DEFAULT NULL",
                 "export_eshop": "tinyint(1) NOT NULL DEFAULT 0",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "intrastat_cn8_code": "char(8) NULL DEFAULT NULL",
+                "intrastat_country_of_origin": "char(2) NULL DEFAULT NULL",
+                "intrastat_net_mass_kg": "decimal(14,3) NULL DEFAULT NULL",
+                "intrastat_supplementary_unit": "char(3) NULL DEFAULT NULL",
+                "intrastat_supplementary_unit_coefficient": "decimal(18,6) NULL DEFAULT NULL",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
                 "is_stocked": "tinyint(1) NOT NULL DEFAULT 1",
                 "item_type": "enum('material','goods','product') NOT NULL DEFAULT 'goods'",
@@ -17680,6 +17686,10 @@
                 "fk_si_vat": "(vat_rate_id) -> vat_rates (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
+                "chk_stock_items_intrastat_cn8": "`intrastat_cn8_code` is null or `intrastat_cn8_code` regexp '^[0-9]{8}$'",
+                "chk_stock_items_intrastat_net_mass": "`intrastat_net_mass_kg` is null or `intrastat_net_mass_kg` > 0",
+                "chk_stock_items_intrastat_origin": "`intrastat_country_of_origin` is null or `intrastat_country_of_origin` regexp '^[A-Z]{2}$'",
+                "chk_stock_items_intrastat_supplementary": "`intrastat_supplementary_unit` is null and `intrastat_supplementary_unit_coefficient` is null or `intrastat_supplementary_unit` = 'ZZZ' and `intrastat_supplementary_unit_coefficient` is null or `intrastat_supplementary_unit` regexp '^[A-Z0-9]{3}$' and `intrastat_supplementary_unit` <> 'ZZZ' and `intrastat_supplementary_unit_coefficient` > 0",
                 "chk_stock_items_row_version": "`row_version` > 0"
             }
         },
