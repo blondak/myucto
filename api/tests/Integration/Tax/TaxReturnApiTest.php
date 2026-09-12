@@ -260,8 +260,9 @@ final class TaxReturnApiTest extends TestCase
 
     public function testHistoricalDppoWithoutExactConstantsIsRejected(): void
     {
-        $args = ['type' => 'po', 'year' => '2023'];
-        [$req, $res] = $this->req('GET', '/api/tax-return/po/2023');
+        // Konstanty má aplikace pro roky 2019–2026 (TaxConstants); rok 2030 API přijme, ale nezná.
+        $args = ['type' => 'po', 'year' => '2030'];
+        [$req, $res] = $this->req('GET', '/api/tax-return/po/2030');
         $r = $this->action->get($req, $res, $args);
         self::assertSame(422, $r->getStatusCode());
         self::assertSame('missing_tax_constants', $this->json($r)['error']['code']);

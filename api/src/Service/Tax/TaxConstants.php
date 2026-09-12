@@ -1126,9 +1126,10 @@ final class TaxConstants
             'mortgage_cap_pre2021' => 300000,
             'mortgage_pre2021_cutoff' => '2020-12-31',
             'pension_cap'  => 48000,
-            // Do konce 2024 existoval jediný registrační limit DPH; oba klíče proto nesou tutéž hodnotu.
-            'vat_limit_low'  => 2000000,
-            'vat_limit_high' => 2000000,
+            // Do konce 2024 existoval jediný registrační limit DPH (1 mil. Kč za 12 měsíců,
+            // § 6 ZDPH ve znění do 2024); oba klíče proto nesou tutéž hodnotu. 2 mil. až od 2025.
+            'vat_limit_low'  => 1000000,
+            'vat_limit_high' => 1000000,
             'vat_rate_standard' => 21.0,
             // NV č. 351/2013 Sb., § 2 — zákonný úrok z prodlení = 2týdenní repo sazba ČNB
             // platná k prvnímu dni pololetí, v němž prodlení VZNIKLO, ZVÝŠENÁ o tolik
@@ -1138,8 +1139,8 @@ final class TaxConstants
             // fallback {@see \MyInvoice\Service\Penalty\PenaltyInterestCalculator::SURCHARGE_POINTS}.
             'penalty_repo_surcharge_points' => 8.0,
             // § 99a odst. 1 ZDPH — obrat za předcházející kalendářní rok, do kterého
-            // si plátce může zvolit čtvrtletní zdaňovací období.
-            'vat_quarterly_turnover_limit' => 15000000,
+            // si plátce může zvolit čtvrtletní zdaňovací období (10 mil. do 2024, 15 mil. od 2025).
+            'vat_quarterly_turnover_limit' => 10000000,
             'vat_rate_reduced'  => 12.0,
             'kh_item_threshold' => 10000,
             // § 4 z. č. 254/2004 Sb., o omezení plateb v hotovosti — jedna platba téhož dne

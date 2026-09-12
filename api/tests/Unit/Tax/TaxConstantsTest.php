@@ -26,8 +26,11 @@ final class TaxConstantsTest extends TestCase
         self::assertSame(263802, $c['health_min_base']);
         self::assertSame(18900, $c['minimum_wage']);
         self::assertSame(113400, $c['child_bonus_min_income']);
-        self::assertSame(2000000, $c['vat_limit_low']);
-        self::assertSame(2000000, $c['vat_limit_high']);
+        // Registrační limit 2 mil. a čtvrtletní období do 15 mil. platí až od 1. 1. 2025
+        // (novela ZDPH 2025); v roce 2024 platil jediný limit 1 mil. a čtvrtletí do 10 mil.
+        self::assertSame(1000000, $c['vat_limit_low']);
+        self::assertSame(1000000, $c['vat_limit_high']);
+        self::assertSame(10000000, $c['vat_quarterly_turnover_limit']);
         self::assertSame(12.0, $c['vat_rate_reduced']);
         self::assertSame(8000, $c['sickness_min_monthly_base']);
     }
