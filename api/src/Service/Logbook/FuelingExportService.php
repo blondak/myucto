@@ -167,10 +167,12 @@ final class FuelingExportService
     private function num(float $n): string { return number_format($n, 2, ',', ' '); }
     private function money(float $n, string $ccy): string { return number_format($n, 2, ',', ' ') . ' ' . ($ccy ?: 'CZK'); }
 
-    /** Tachometr: vlastní stav, jinak orientační z knihy jízd (prefix ≈), jinak prázdné. */
+    /** Tachometr: vlastní stav, jinak orientační z knihy jízd; odhad nese prefix ≈, jinak prázdné. */
     private function odo(array $t): string
     {
-        if (($t['odometer'] ?? null) !== null) return number_format((int) $t['odometer'], 0, ',', ' ');
+        if (($t['odometer'] ?? null) !== null) {
+            return (!empty($t['odometer_is_estimate']) ? '≈ ' : '') . number_format((int) $t['odometer'], 0, ',', ' ');
+        }
         if (($t['odometer_estimated'] ?? null) !== null) return '≈ ' . number_format((int) $t['odometer_estimated'], 0, ',', ' ');
         return '';
     }

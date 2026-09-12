@@ -217,6 +217,8 @@ export const ICONS = {
   funnel:           'M4 4h16l-6.4 7.5v5.9l-3.2 1.9v-7.8L4 4z',
   // Mzdy — dovolená / nepřítomnost se plánuje v kalendáři.
   calendar:         'M8 7V3m8 4V3M4 11h16M5 21h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z',
+  // Kniha jízd: stav tachometru.
+  gauge:            'M5.64 18.36a9 9 0 1 1 12.72 0M12 14l4-4M12 14h.01',
 } as const
 
 export type ActionIcon = keyof typeof ICONS
