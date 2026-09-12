@@ -5,7 +5,7 @@ podporovaný PDF výpis** z banky. Systém pohyby deduplikuje, nabídne jejich
 párování s doklady a v podvojném účetnictví připraví bezpečné zaúčtování.
 
 Návrhy zaúčtování, položky vyžadující zásah a historii automatických rozhodnutí
-najdete souhrnně v kapitole [Automat účtování](46_Automat.md).
+najdete souhrnně v kapitole [Automat účtování](49_Automat.md).
 
 V rozbalovacím menu konkrétního pohybu je akce **Vytvořit účtovací pravidlo**.
 Předvyplní údaje protistrany a text pohybu; podmínky i účty můžete upravit.
@@ -440,7 +440,7 @@ Setup:
 ## 28.7 Automatické zaúčtování spárovaných plateb (jen podvojné účetnictví)
 
 Firmám vedoucím **podvojné účetnictví** MyÚčto po každém spárování/importu rovnou
-nabídne (a u opakovaných plateb i samo vytvoří) zápis do [Účetního deníku](45_Ucetni_denik.md).
+nabídne (a u opakovaných plateb i samo vytvoří) zápis do [Účetního deníku](48_Ucetni_denik.md).
 Daňová evidence žádný deník nemá — u ní se tato sekce, záložky ani tlačítka
 vůbec nezobrazují a bankovní modul funguje jen jako párování plateb popsané
 výše.
@@ -475,15 +475,15 @@ něco jiného:
 Přeúčtování hlídá tytéž bankovní podmínky jako ruční zaúčtování: pohyb na účtu 221
 musí sedět na částku z výpisu a bankovní noha se sama doplní na analytiku vlastního
 účtu výpisu. Celý postup i chování v zamčeném období popisuje
-[§ 45.8.2](45_Ucetni_denik.md#4582-preuctovani-z-dokladu-sekce-zauctovani).
+[§ 48.8.2](48_Ucetni_denik.md#4882-preuctovani-z-dokladu-sekce-zauctovani).
 
 Automaticky zaúčtovanou transakci od ručního zápisu odliší odznak **Automaticky**.
 U návrhů je v přehledu vidět také stručné **Proč** — například název pravidla nebo
 informace, že návrh vznikl ze shody platby. Podrobné auditní vysvětlení hotového zápisu
 — tedy jestli za kontací stojí **pravidlo účtování**, vestavěné rozpoznání, naučená
 kontace, předkontace `payment.*` u spárované platby, nebo ruční přeúčtování — najdeš
-po jeho rozbalení v [Účetním deníku](45_Ucetni_denik.md), viz
-[§ 45.8.3](45_Ucetni_denik.md#4583-podle-ceho-se-uctovalo).
+po jeho rozbalení v [Účetním deníku](48_Ucetni_denik.md), viz
+[§ 48.8.3](48_Ucetni_denik.md#4883-podle-ceho-se-uctovalo).
 
 ### 28.7.1 Spárované platby faktur — přímý zápis
 
@@ -492,7 +492,7 @@ sloučená úhrada — [§ 28.4](#284-detail-vypisu)), MyÚčto se ji hned pokus
 zaúčtovat. Konkrétní zápis závisí na typu dokladu:
 
 - **běžná vydaná faktura** → **MD 221 Bankovní účty / D 311 Odběratelé**
-  (skutečné účty bere z [předkontace](88_Ucetni_nastroje.md#883-predkontace)
+  (skutečné účty bere z [předkontace](92_Ucetni_nastroje.md#923-predkontace)
   `payment.receivable.bank`, pokud ji máš upravenou),
 - **běžná přijatá faktura** → **MD 321 Dodavatelé / D 221** (`payment.payable.bank`),
 - **zálohová (proforma) faktura** → **MD 221 / D 324 Přijaté zálohy** (inkaso zálohy)
@@ -507,7 +507,7 @@ zaúčtovat. Konkrétní zápis závisí na typu dokladu:
 > **Každý bankovní účet má svou analytiku.** Účet 221 se nikdy nepoužívá plochý:
 > bankovní strana zápisu padá na analytiku toho účtu, ze kterého je výpis —
 > **221.100**, **221.200**, **221.300** … (o tečkovaném zápisu viz
-> [§ 81.3.1](81_Ucetni_osnova.md#8131-teckovany-zapis-analytik)).
+> [§ 84.3.1](84_Ucetni_osnova.md#8431-teckovany-zapis-analytik)).
 > Číslo se přiděluje automaticky (první volné,
 > které v účtovém rozvrhu nekoliduje) a najdeš i změníš ho v
 > **Nastavení → Bankovní účty → Kontace účtů**. Díky tomu sedí zůstatek každé
@@ -528,7 +528,7 @@ Než se zápis vytvoří, MyÚčto ověří:
 - transakce je buď v **CZK**, nebo — u spárované platby — ve **stejné cizí měně jako
   faktura** (viz [cizoměnové spárované platby](#28711-cizomenove-sparovane-platby-kurzovy-rozdil) níže),
 - **běžná** faktura/přijatá faktura má svůj **vlastní zaúčtovaný předpis** v
-  [Účetním deníku](45_Ucetni_denik.md) (a ten není stornovaný) — bez
+  [Účetním deníku](48_Ucetni_denik.md) (a ten není stornovaný) — bez
   zaúčtovaného předpisu se platba jen spáruje, ale nezaúčtuje. **Zálohová (proforma)
   faktura ani zálohová přijatá faktura** tuto podmínku nemají — nejsou daňový doklad,
   takže žádný „svůj" předpis v deníku ani nemají, a účtují se rovnou podle výše,
@@ -577,7 +577,7 @@ nemusí být variabilní symbol a CZK částka se může lišit podle kurzu kare
   přepočtená pevným měsíčním/ročním kurzem firmy, pokud je zvolený, jinak kurzem
   ČNB ke dni bankovní transakce,
 - rozdíl mezi oběma jde na **563** (kurzová ztráta) nebo **663** (kurzový zisk) —
-  stejné účty jako u ročního [kurzového přecenění](45_Ucetni_denik.md).
+  stejné účty jako u ročního [kurzového přecenění](48_Ucetni_denik.md).
 
 U platby stejnou cizí měnou fungují i částečné a sloučené úhrady (poměrná část na
 alokaci). CZK karetní platba za cizoměnový doklad se automaticky účtuje jen při
@@ -588,7 +588,7 @@ zůstává: **křížová cizí měna** (faktura v EUR placená v USD), **CZK do
 měnou** a **zálohová (proforma) faktura / zálohová přijatá faktura v cizí měně**.
 Valutová pokladna umí samostatné hotovostní prodeje, nákupy a ostatní pohyby,
 ale úhradu cizoměnové faktury z pokladny záměrně blokuje; viz
-[Pokladna](30_Pokladna.md).
+[Pokladna](31_Pokladna.md).
 
 Historické spárované transakce zaúčtuje správce příkazem
 `php api/bin/backfill-bank-posting.php --supplier=<ID> --apply`. Bez `--apply` se
@@ -704,7 +704,7 @@ nepřebírá.
 Rozpoznaný odvod se zobrazí ve frontě s kontací **336/341/342/343/345 proti
 221**, údajem **Jistota** a lidským vysvětlením. Platba i vratka **DPH** míří na
 zúčtovací analytiku **343.900** — tedy přesně na účet, na kterém po měsíčním
-zúčtování DPH ([§ 81.3.3](81_Ucetni_osnova.md#8133-mesicni-zuctovani-dph)) leží
+zúčtování DPH ([§ 84.3.3](84_Ucetni_osnova.md#8433-mesicni-zuctovani-dph)) leží
 skutečný závazek vůči finančnímu úřadu; firma bez analytik účtuje jako dřív na
 holou 343. Nejasný odvod zůstane pouze
 návrhem. Pokud na zúčtovacím účtu chybí zaúčtovaný předpis nebo jeho kreditní

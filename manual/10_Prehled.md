@@ -224,9 +224,9 @@ Widget **Daňový kalendář** (pod dlaždicemi, vedle nadcházejících záloh)
 blížící se daňové termíny aktuálního dodavatele do jednoho seznamu:
 
 - **DPH přiznání** a **Kontrolní hlášení** — dle periodicity dodavatele
-  (měsíčně / čtvrtletně, viz [§ 36](36_Vykazy_DPH.md)).
+  (měsíčně / čtvrtletně, viz [§ 36](39_Vykazy_DPH.md)).
 - **Souhrnné hlášení** — jen pokud má firma za předchozí měsíc EU B2B plnění.
-- **Zálohy na daň a pojistné** — z [Daně z příjmů § Zálohy na daň a pojistné](38_Dan_z_prijmu.md#384-zalohy-na-dan-a-pojistne),
+- **Zálohy na daň a pojistné** — z [Daně z příjmů § Zálohy na daň a pojistné](41_Dan_z_prijmu.md#414-zalohy-na-dan-a-pojistne),
   s částkou a stavem *naplánováno* / *zaplaceno*.
 - **Roční přiznání DPFO/DPPO** — standardní termíny (papírově 1. 4.,
   elektronicky začátkem května, posunuto z 1. 5. na nejbližší pracovní den).
@@ -266,11 +266,11 @@ Widget kombinuje víc typů položek, každá se zobrazí jen když má co hlás
 | Zaplať dodavatelům | Přijaté faktury po splatnosti se skutečným zůstatkem po odečtení banky a zápočtů | `Přijaté faktury` (filtr po splatnosti) |
 | Zkontroluj koncepty přijatých faktur | Rozpracované koncepty PF | [Přijaté faktury](23_Prijate_faktury.md) (filtr koncept) |
 | **Zaúčtuj doklady** | Jen podvojné účetnictví — viz [§ 10.10.1](#10101-zauctuj-doklady) | Filtrovaný seznam FV/PF/banka |
-| **Zkontroluj integritu deníku** | Jen podvojné účetnictví — viz [§ 10.10.2](#10102-zkontroluj-integritu-deniku) | [Účetní deník](45_Ucetni_denik.md) |
-| Termín DPH / KH | Blíží se nebo uplynul termín podání | [Výkazy DPH](36_Vykazy_DPH.md) |
-| Souhrnné hlášení za uplynulý měsíc | Termín SH | [Souhrnné hlášení](39_Souhrnne_hlaseni.md) |
+| **Zkontroluj integritu deníku** | Jen podvojné účetnictví — viz [§ 10.10.2](#10102-zkontroluj-integritu-deniku) | [Účetní deník](48_Ucetni_denik.md) |
+| Termín DPH / KH | Blíží se nebo uplynul termín podání | [Výkazy DPH](39_Vykazy_DPH.md) |
+| Souhrnné hlášení za uplynulý měsíc | Termín SH | [Souhrnné hlášení](42_Souhrnne_hlaseni.md) |
 | Kontaktuj neaktivní klienty | Klienti bez aktivity delší dobu (churn risk) | [Zisk](11_Zisk.md) |
-| **Odešli měsíční hlášení** | Připravené měsíční hlášení (JMHZ) čeká na odeslání ČSSZ, viz [§ 10.10.3](#10103-odesli-mesicni-hlaseni) | [Podání a hlášení](68_Podani_a_hlaseni.md) |
+| **Odešli měsíční hlášení** | Připravené měsíční hlášení (JMHZ) čeká na odeslání ČSSZ, viz [§ 10.10.3](#10103-odesli-mesicni-hlaseni) | [Podání a hlášení](71_Podani_a_hlaseni.md) |
 
 Každá položka má menu se **skrytím** (na den / týden / natrvalo / historicky) —
 pokud si něco odklikneš, dole se objeví odkaz **„Obnovit skrytá (N)"**, kterým
@@ -306,11 +306,11 @@ funguje, popisují kapitoly [Faktury](14_Faktury.md) a
 
 Taky jen podvojné účetnictví. Na rozdíl od ostatních položek nepočítá nic
 naživo — čte poslední uložený běh **nočního kontrolního jobu** (viz
-[§ 45.10 Kontrola integrity deníku](45_Ucetni_denik.md#4510-kontrola-integrity-deniku-nocni-job)),
+[§ 48.10 Kontrola integrity deníku](48_Ucetni_denik.md#4810-kontrola-integrity-deniku-nocni-job)),
 aby dotaz na dashboard zůstal levný. Pokud job našel nesrovnalost mezi doklady
 a deníkem, položka se zobrazí se závažností **vysoká** a počtem nálezů v
 popisku. Klik — na hlavním řádku i na kterémkoli štítku rozpadu — vede vždy na
-[Účetní deník](45_Ucetni_denik.md); appka nemá samostatnou stránku s výpisem
+[Účetní deník](48_Ucetni_denik.md); appka nemá samostatnou stránku s výpisem
 jednotlivých nálezů; ty najdeš jen přes CLI (viz § 45.10).
 
 ### 10.10.3 Odešli měsíční hlášení
@@ -327,7 +327,7 @@ a to je chyba, která se sama ničím neprojeví. Proto hlášení visí mezi ú
 tak dlouho, dokud je skutečně neodešleš.
 
 Položka **zmizí odesláním, ne přijetím** - na protokol z ČSSZ se nečeká, ten
-sleduješ dál v [Podání a hlášení](68_Podani_a_hlaseni.md). Nabízí se jen ostré
+sleduješ dál v [Podání a hlášení](71_Podani_a_hlaseni.md). Nabízí se jen ostré
 prostředí a jen kanál ČSSZ: testovací podání nikdo podávat nemusí a podání na
 portál zdravotní pojišťovny aplikace odeslat neumí, protože žádná ze sedmi
 pojišťoven nemá zveřejněné strojové rozhraní. Vyzývat k úkonu, který se odsud
@@ -341,16 +341,16 @@ vyplnit, než začneš fakturovat. Vidí ho každý, kdo smí zapisovat.
 
 | Krok | Vede na |
 |---|---|
-| Údaje o firmě | [Nastavení → Údaje firmy](92_Nastaveni.md) (`/admin/settings?tab=company`) |
+| Údaje o firmě | [Nastavení → Údaje firmy](96_Nastaveni.md) (`/admin/settings?tab=company`) |
 | Daně a účetnictví | Nastavení → Daně a účetnictví (`/admin/settings?tab=accounting`) |
 | Bankovní účty | [Banka → Účty](28_Banka.md) |
-| Vzhled faktur a logo | [Brandingové profily](92_Nastaveni.md#9212-brandingove-profily) |
+| Vzhled faktur a logo | [Brandingové profily](96_Nastaveni.md#9612-brandingove-profily) |
 | Přidat další firmy | Jen licence na víc firem, dokud v ní zbývá místo — Systém → Firmy (`/admin/suppliers`) |
 | Číselné řady a doklady | Nastavení → Fakturace (`/admin/settings?tab=documents`) |
-| Číselné řady deníku | Jen podvojné účetnictví — [Účetní nástroje](88_Ucetni_nastroje.md) |
+| Číselné řady deníku | Jen podvojné účetnictví — [Účetní nástroje](92_Ucetni_nastroje.md) |
 | Avíza plateb z e-mailů | [Banka → Bankovní avíza z e-mailu](28_Banka.md) (`/bank?tab=email`) |
-| Datová schránka | [Firma → Datová schránka](92_Nastaveni.md#9217-datova-schranka) (`/admin/databox`) |
-| Uživatelé a role | [Uživatelé](92_Nastaveni.md#922-uzivatele) |
+| Datová schránka | [Firma → Datová schránka](96_Nastaveni.md#9617-datova-schranka) (`/admin/databox`) |
+| Uživatelé a role | [Uživatelé](96_Nastaveni.md#962-uzivatele) |
 | První klient / první faktura | [Klienti](18_Klienti.md) · [Faktury](14_Faktury.md) |
 
 Kroky se **odškrtávají ručně** — aplikace nic nekontroluje a odškrtnutí nemá

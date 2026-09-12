@@ -52,7 +52,7 @@ describe('PayrollGuide', () => {
     const wrapper = mountGuide()
     await nextTick()
 
-    expect(wrapper.find('a[href="/manual?ch=58_Uplne_mzdy"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/manual?ch=61_Uplne_mzdy"]').exists()).toBe(true)
     const settings = wrapper.findAll('a')
       .find(link => link.attributes('data-to') === '{"name":"payroll-settings"}')
     expect(settings).toBeDefined()

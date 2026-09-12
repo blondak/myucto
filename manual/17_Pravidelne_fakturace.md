@@ -136,7 +136,7 @@ snapshotu uložit bez jeho výslovného obnovení.
 
 #### Režim OSS na položce šablony
 
-Má-li firma [zapnutý režim OSS](40_OSS.md#4031-zapnuti-rezimu-a-platnost-registrace),
+Má-li firma [zapnutý režim OSS](43_OSS.md#4331-zapnuti-rezimu-a-platnost-registrace),
 je u každého řádku šablony zaškrtávátko **OSS**. Po zaškrtnutí se pod řádkem otevře
 proužek se **státem spotřeby**, **typem sazby** a **typem plnění** — přesně jako na
 řádku faktury. Sazba DPH pak nabízí i sazby cizích států, aby OSS řádek mohl nést
@@ -159,7 +159,7 @@ vlastnosti konkrétního dokladu k jeho datu plnění a dopočítá je až gener
 > a povinně dostane příznak **k ručnímu posouzení** — přeřazení proti rozhodnutí
 > člověka nesmí být tiché. Bez toho by řádek nespadl do žádného přiznání: z OSS
 > podání by ho vyřadila platnost registrace, z tuzemského přiznání OSS příznak.
-> Podrobně [§ 40.3.5](40_OSS.md#4045-rozdily-mezi-kanaly).
+> Podrobně [§ 43.3.5](43_OSS.md#4345-rozdily-mezi-kanaly).
 
 **Placeholdery období** — do popisu položky (a do poznámek nad/pod
 položkami šablony) lze vložit tokeny, které se při **každém vygenerování** faktury

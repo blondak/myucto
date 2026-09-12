@@ -115,7 +115,7 @@ onMounted(() => {
     </p>
     <p class="mt-1 text-xs text-neutral-600">
       {{ t('payroll.guide.manual_note') }}
-      <a href="/manual?ch=58_Uplne_mzdy" class="font-medium text-payroll-700 underline">
+      <a href="/manual?ch=61_Uplne_mzdy" class="font-medium text-payroll-700 underline">
         {{ t('payroll.guide.manual_link') }}
       </a>
     </p>

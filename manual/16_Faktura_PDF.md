@@ -100,12 +100,12 @@ původní proformy.
 ### 16.1.3 Zaúčtování do deníku
 
 Vystavení faktury a její zaúčtování jsou **dva oddělené kroky** — vystavená
-faktura sama o sobě do [Účetního deníku](45_Ucetni_denik.md) nic nezapíše.
+faktura sama o sobě do [Účetního deníku](48_Ucetni_denik.md) nic nezapíše.
 Tlačítko **Zaúčtovat** (sekundární, vedle hlavní platební/upomínkové akce) se
 zobrazí jen firmám v režimu **podvojné účetnictví**, dokud faktura nemá
 ikonu **Zaúčtováno** (text a datum jsou v tooltipu) a není v konceptu ani stornu. Klikem se zeptá na
 potvrzení („Zaúčtovat doklad do účetního deníku?") a vytvoří zápis podle
-[předkontace](88_Ucetni_nastroje.md#883-predkontace).
+[předkontace](92_Ucetni_nastroje.md#923-predkontace).
 Po úspěchu se detail obnoví, badge se změní na **Zaúčtováno** (s datem v
 tooltipu) a v menu s dalšími akcemi se objeví **Zobrazit v deníku** — proklik
 rovnou na vzniklý zápis.
@@ -120,9 +120,9 @@ Pokud zaúčtování selže, appka zobrazí konkrétní důvod místo obecné ch
 | Doklad nemá řádky k zaúčtování | Faktura je proforma, záloha nebo storno — ty se neúčtují (proforma až po vyúčtování). |
 | Doklad v cizí měně nemá vyplněný směnný kurz | Doplň kurz k datu účetního případu na faktuře. |
 | Pro datum dokladu neexistuje účetní období | Založ období v **Nástroje → Uzávěrka**. |
-| Účetní období je uzavřené | Do uzavřeného období nelze účtovat — viz [Uzávěrka](87_Uzaverka.md). |
+| Účetní období je uzavřené | Do uzavřeného období nelze účtovat — viz [Uzávěrka](91_Uzaverka.md). |
 | Účetní zápis není vyvážený (MD ≠ Dal) | Zkontroluj předkontaci a částky dokladu. |
-| V účtové osnově chybí potřebný účet | Chybí nebo je deaktivovaný účet v předkontaci — doplň/aktivuj v [Účtovém rozvrhu](81_Ucetni_osnova.md). |
+| V účtové osnově chybí potřebný účet | Chybí nebo je deaktivovaný účet v předkontaci — doplň/aktivuj v [Účtovém rozvrhu](84_Ucetni_osnova.md). |
 | Zápis dokladu je stornovaný | Opravu zaúčtuj **novým** zápisem, ne přepisem stornovaného. |
 | Doklad nebyl nalezen / neexistuje | Faktura mezitím byla smazána nebo změnila stav — obnov stránku. |
 
@@ -134,19 +134,19 @@ chyby: {err}"* s konkrétní hláškou u každého selhaného čísla dokladu. D
 omezená na **500 dokladů** — větší výběr rozděl.
 
 **Automatické zaúčtování při vystavení** (volitelné, nastavuje admin) —
-viz [§ 92.11 Automatické zaúčtování](92_Nastaveni.md#9211-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
+viz [§ 96.11 Automatické zaúčtování](96_Nastaveni.md#9611-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
 
 **Sekce Zaúčtování na detailu.** U zaúčtované faktury se pod položkami rozbalí sekce
 **Zaúčtování** s kontací tak, jak je v deníku. Kromě odkazu **Otevřít v deníku** má:
 
-- **Podle čeho se účtovalo** — [předkontaci](88_Ucetni_nastroje.md#883-predkontace),
+- **Podle čeho se účtovalo** — [předkontaci](92_Ucetni_nastroje.md#923-predkontace),
   ze které kontace vznikla (u vydané faktury podle klíče výnosu na hlavičce, výchozí
   `invoice.services.issued`), její účty MD/Dal a jestli platí firemní, nebo systémové
   výchozí nastavení. Tlačítko **Upravit předkontaci** otevře rovnou ten jeden klíč
-  v Nástrojích. Podrobně [§ 45.8.3](45_Ucetni_denik.md#4583-podle-ceho-se-uctovalo).
+  v Nástrojích. Podrobně [§ 48.8.3](48_Ucetni_denik.md#4883-podle-ceho-se-uctovalo).
 - **Přeúčtovat** (admin/účetní) — opraví kontaci, která v deníku už je. V otevřeném
   období se zápis přepíše, v zamčeném nebo uzavřeném vznikne storno a nový zápis;
-  viz [§ 45.8.2](45_Ucetni_denik.md#4582-preuctovani-z-dokladu-sekce-zauctovani).
+  viz [§ 48.8.2](48_Ucetni_denik.md#4882-preuctovani-z-dokladu-sekce-zauctovani).
 
 ## 16.2 PDF struktura
 
@@ -262,7 +262,7 @@ Tlačítko **Odeslat e-mailem** (na detailu faktury). E-mail jde na:
 - `+ zakazka.fakturacni_emaily[]` (až 3 dodatečné adresy)
 
 Předmět + tělo e-mailu se vezme ze šablony `invoice_new` (CZ / EN podle jazyka
-klienta) — viz [92. Nastavení](92_Nastaveni.md).
+klienta) — viz [96. Nastavení](96_Nastaveni.md).
 
 Po odeslání:
 
@@ -313,7 +313,7 @@ Odchozí e-maily lze volitelně podepisovat S/MIME certifikátem. Nastavuje se v
 Podpis se aplikuje až na sestavený e-mail včetně příloh; příjemce ho ověří v
 běžném e-mailovém klientovi.
 
-Detail nastavení je v [kapitole 74. Elektronické podpisy](95_Elektronicke_podpisy.md).
+Detail nastavení je v [kapitole 74. Elektronické podpisy](100_Elektronicke_podpisy.md).
 
 ## 16.5 Web faktura (trvalý veřejný odkaz)
 

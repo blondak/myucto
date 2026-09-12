@@ -8,7 +8,7 @@ se přihlašuje do stejného MyÚčto.cz, jen s výrazně užší nabídkou menu
 které se po zaúčtování uzamknou proti dalším úpravám.
 
 > [!NOTE]
-> Role **client** je jiná kategorie než **readonly** (viz [§ 92.2.2 Role](92_Nastaveni.md#9222-role-a-opravneni)).
+> Role **client** je jiná kategorie než **readonly** (viz [§ 96.2.2 Role](96_Nastaveni.md#9622-role-a-opravneni)).
 > Readonly je interní pracovník firmy, který smí jen číst a exportovat cokoliv.
 > Client je naopak externí osoba (majitel firmy, na kterou účetní vede agendu),
 > která **smí vystavovat a upravovat vlastní doklady**, ale nevidí nic z účetnictví,
@@ -19,7 +19,7 @@ které se po zaúčtování uzamknou proti dalším úpravám.
 ## 9.1 Kdo roli client dostane a jak
 
 Uživatele s klientskou rolí zakládá výhradně **superadmin** v **Systém →
-Uživatelé** (stejný formulář jako u ostatních rolí, viz [§ 92.2 Uživatelé](92_Nastaveni.md#922-uzivatele)):
+Uživatelé** (stejný formulář jako u ostatních rolí, viz [§ 96.2 Uživatelé](96_Nastaveni.md#962-uzivatele)):
 
 1. V poli **Role** se zvolí aktivní role typu **client**.
 2. V sekci přiřazení firem se našeptávačem přidají firmy, ke kterým má klient
@@ -35,7 +35,7 @@ Uživatelé** (stejný formulář jako u ostatních rolí, viz [§ 92.2 Uživate
 
 > [!TIP]
 > Heslo, 2FA a **Můj profil** fungují pro klienta stejně jako pro ostatní role
-> (viz [§ 92.3](92_Nastaveni.md#923-muj-profil)) — klient si po prvním přihlášení
+> (viz [§ 96.3](96_Nastaveni.md#963-muj-profil)) — klient si po prvním přihlášení
 > může nastavit vlastní 2FA, pokud to instalace vyžaduje.
 
 ## 9.2 Menu klienta — jen zlomek aplikace
@@ -138,7 +138,7 @@ U plátců DPH karta **DPH** ukáže aktuální období, daň na výstupu, daň 
 výslednou daňovou povinnost (nebo nadměrný odpočet) a termín podání. U neplátců
 se místo toho zobrazí informace „Firma není plátce DPH." Vedle karta **Daňové
 termíny** vypisuje blížící se termíny v okně 35 dní dopředu (barevně podle
-závažnosti) — souvisí s [§ 36 Výkazy DPH](36_Vykazy_DPH.md).
+závažnosti) — souvisí s [§ 36 Výkazy DPH](39_Vykazy_DPH.md).
 
 ### 9.3.5 Pruh „Účetní čeká na doklady"
 
@@ -207,7 +207,7 @@ doklad nezamyká — přeznačení „zaplaceno" není účetní úkon), ale př
 Pro účetní a admina funguje zámek jinak — otevřené období smí upravovat vždy,
 u uzavřeného období dostanou informativní chybu místo tichého zamítnutí a admin
 si může úpravu vynutit (s automatickým záznamem do historie akcí). Detaily
-vynucené editace řeší [§ 55 Bezpečnost — RBAC](97_Bezpecnost.md).
+vynucené editace řeší [§ 55 Bezpečnost — RBAC](102_Bezpecnost.md).
 
 ## 9.6 Náhled portálu pro účetní a admina
 
@@ -401,4 +401,4 @@ tedy přístup ani nedává, ani nebere.
 
 Neznámý, neověřený, deaktivovaný nebo účelově nekompatibilní hostname nikdy
 nezobrazí data firmy. Postup ověření a aktivace popisuje
-[§ 92.16 Vlastní domény](92_Nastaveni.md#9216-vlastni-domeny-klientskeho-rozhrani).
+[§ 96.16 Vlastní domény](96_Nastaveni.md#9616-vlastni-domeny-klientskeho-rozhrani).

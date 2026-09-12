@@ -303,7 +303,7 @@ foreach (glob($dstDir . '/*.html') as $oldHtml) {
 // Generate chapter HTMLs
 // ============================================================================
 
-// Glob NNN[a-z]?_*.md (e.g. 01_Uvod.md, 101_MCP_server.md, 999_Reseni_problemu.md)
+// Glob NNN[a-z]?_*.md (e.g. 01_Uvod.md, 106_MCP_server.md, 999_Reseni_problemu.md)
 $files = glob($srcDir . '/[0-9][0-9]*_*.md');
 usort($files, fn ($a, $b) => strnatcmp(basename($a), basename($b)));
 

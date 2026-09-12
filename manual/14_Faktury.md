@@ -46,11 +46,11 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Neuhrazené k datu | Datum — vypíše doklady vystavené do zvoleného dne, u kterých k tomu dni nebyla uhrazena celá částka |
 | Kategorie tržby | Výběr několika kategorií najednou + přepínač **Zobrazit jen vybrané / Skrýt vybrané** — viz níže |
 | Zaúčtování | Vše / Zaúčtováno / Nezaúčtováno — jen podvojné účetnictví, viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku) |
-| Místo plnění (OSS) | Vše / Nejisté místo plnění (OSS) / Nejisté — v OSS podání / Nejisté — v tuzemsku. Vypíše doklady s řádkem, u kterého si systém není jistý místem plnění — viz [§ 35.5](35_Fakturujeme.md#355-zahranicni-fakturace-eu-oss-a-treti-zeme). Filtr je vidět, i když OSS zapnuté nemáš. |
+| Místo plnění (OSS) | Vše / Nejisté místo plnění (OSS) / Nejisté — v OSS podání / Nejisté — v tuzemsku. Vypíše doklady s řádkem, u kterého si systém není jistý místem plnění — viz [§ 38.5](38_Fakturujeme.md#385-zahranicni-fakturace-eu-oss-a-treti-zeme). Filtr je vidět, i když OSS zapnuté nemáš. |
 | Hledat | Volný text — varsymbol, popis položky, jméno klienta |
 
 Filtr **Zaúčtování** jde do URL (sdílitelný odkaz) a do [uložených
-filtrů](92_Nastaveni.md#929-ulozene-filtry-a-predvolby-zobrazeni); promítne se
+filtrů](96_Nastaveni.md#969-ulozene-filtry-a-predvolby-zobrazeni); promítne se
 i do CSV exportu (řádky, ale ne samostatný sloupec — export neobsahuje
 příznak zaúčtování).
 
@@ -59,7 +59,7 @@ dívá na **dnešní** stav dokladu, kdežto „Neuhrazené k datu" na stav **k
 historickému dni** (např. „kdo mi k 30. 6. dlužil"). Doklad zaplacený až po
 tomto dni se proto ve výpisu objeví (k danému dni ještě nebyl uhrazen), i
 když má dnes stav „Zaplaceno". Používá stejnou definici úhrady jako
-[Saldokonto](53_Saldokonto.md), takže si obě sestavy neodporují.
+[Saldokonto](56_Saldokonto.md), takže si obě sestavy neodporují.
 
 #### Kategorie tržby
 
@@ -76,7 +76,7 @@ dokud mezi skrytými nezaškrtneš právě **Bez kategorie**. V seznamu jsou i a
 kategorie — visí na starých fakturách, takže bez nich by je nešlo dohledat ani skrýt.
 
 Filtr se zapisuje do URL i do [uložených
-filtrů](92_Nastaveni.md#929-ulozene-filtry-a-predvolby-zobrazeni) včetně režimu, takže
+filtrů](96_Nastaveni.md#969-ulozene-filtry-a-predvolby-zobrazeni) včetně režimu, takže
 si pohled „prodej bez předplatného" uložíš a příště vyvoláš jedním klikem.
 
 #### Nejisté místo plnění (OSS)
@@ -95,7 +95,7 @@ U dokladu v seznamu je vidět, který otazník nese: štítek **OSS ?** u varsym
 oba štítky.
 
 Jak oba stavy vznikají a co s každým z nich dělat, popisuje
-[§ 40.4](40_OSS.md#405-plneni-k-rucnimu-posouzeni).
+[§ 43.4](43_OSS.md#435-plneni-k-rucnimu-posouzeni).
 
 Filtr se zapisuje do URL i do uložených filtrů. Souhrnná volba **Nejisté místo
 plnění (OSS)** zobrazí oba dílčí stavy najednou, takže se žádný nejistý doklad
@@ -188,7 +188,7 @@ Typický měsíc:
 ### 14.3.2 Hromadné nastavení OSS
 
 Po migraci nebo po importu zůstanou desítky až stovky řádků, u kterých je potřeba
-doplnit nebo opravit údaje k [režimu OSS](40_OSS.md). Proklikat je po jednom není
+doplnit nebo opravit údaje k [režimu OSS](43_OSS.md). Proklikat je po jednom není
 reálné, proto má seznam faktur hromadnou akci **Nastavit OSS (N)**.
 
 Nejdřív si vyber doklady (typicky přes filtr **Místo plnění (OSS)** —
@@ -219,7 +219,7 @@ zhasnutí příznaku přesouvá daň na ř. 1 českého přiznání, takže proj
 číselník sazeb států OSS sazbu v zemi dodavatele potvrdí.
 
 Úplný seznam důvodů přeskočení, pravidla pro vypnutí OSS a chování dávky při chybě
-popisuje [§ 40.5](40_OSS.md#406-hromadna-editace-oss).
+popisuje [§ 43.5](43_OSS.md#436-hromadna-editace-oss).
 
 ## 14.4 Ikony stavu (legenda)
 

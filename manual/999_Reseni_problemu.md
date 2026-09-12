@@ -97,7 +97,7 @@ php api/bin/reset-mfa.php tvuj@email.cz
 
 Reset vypne TOTP, odvolá passkeys, smaže důvěryhodná zařízení, čekající
 ověřovací procesy i záložní kódy a invaliduje všechny session. Detail včetně
-Docker příkazů je v [§ 97.2.4](97_Bezpecnost.md#9724-obnova-pristupu). Neupravuj
+Docker příkazů je v [§ 102.2.4](102_Bezpecnost.md#10224-obnova-pristupu). Neupravuj
 jen sloupce TOTP ručně v databázi: ponechal bys aktivní další faktory a session.
 
 ### 999.1.8 Diagnostika `app.url`
@@ -170,7 +170,7 @@ Stav s `routing_compatible: false` se v serverovém logu hlásí jako
 `configuration.app_url_unusable` pouze se stabilními poli `state` a
 `reason_code`. Log záměrně neobsahuje nastavenou URL ani žádnou její odvozenou
 část. Umístění logu určuje `logging.path`; provozní souhrn je také v
-[§ 97.2.1](97_Bezpecnost.md#provozni-diagnostika-canonical-appurl).
+[§ 102.2.1](102_Bezpecnost.md#provozni-diagnostika-canonical-appurl).
 
 ### 999.1.9 Varování `secret_encryption_key` (špatná délka klíče)
 
@@ -259,7 +259,7 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 
 ### 999.3.3 DKIM podpis se nedaří aktivovat
 
-1. Vygeneruj klíče: viz [§ 97.8](97_Bezpecnost.md#978-dkim-podpis-e-mailu).
+1. Vygeneruj klíče: viz [§ 102.8](102_Bezpecnost.md#1028-dkim-podpis-e-mailu).
 2. Publikuj DNS TXT — počkej 5–60 minut na propagaci.
 3. Ověř DKIM přes [mxtoolbox.com](https://mxtoolbox.com/dkim.aspx).
 4. Až DNS funguje, zapni v `cfg.php → smtp.dkim.enabled => true`.
@@ -447,8 +447,8 @@ Legislativní pravidla** ověř období účinnosti a stav všech dotčených ob
 v detailu revize potom projdi konkrétní blokery. Chybějící rok se nesmí nahradit
 nejbližší sadou pravidel. Výsledek neopravuj ručním přepsáním vypočtených částek
 a nepoužívej jej jako jediný podklad pro výplatu nebo podání. Podrobný postup je
-v kapitolách [Mzdové běhy](63_Mzdove_behy.md) a
-[Legislativní pravidla mezd](75_Legislativni_pravidla_mezd.md).
+v kapitolách [Mzdové běhy](66_Mzdove_behy.md) a
+[Legislativní pravidla mezd](78_Legislativni_pravidla_mezd.md).
 
 ### 999.6.9 Odkaz do EPO po otevření zmizel
 

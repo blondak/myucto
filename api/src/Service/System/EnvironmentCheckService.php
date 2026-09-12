@@ -700,7 +700,7 @@ final class EnvironmentCheckService
             $uploadStatus,
             'upload_max_filesize=' . ($ini['upload_max_filesize'] ?? '?') . ', post_max_size=' . ($ini['post_max_size'] ?? '?'),
             'post_max_size >= upload_max_filesize >= ' . self::humanBytes($docMax),
-            '31_Dokumenty',
+            '32_Dokumenty',
             ['upload_bytes' => $upload, 'post_bytes' => $post, 'documents_max_bytes' => $docMax]
         );
 
@@ -742,7 +742,7 @@ final class EnvironmentCheckService
             !$opcacheOn || $validateTs === '1' ? self::STATUS_OK : self::STATUS_WARN,
             $validateTs === '1' ? 'zapnuto' : 'vypnuto',
             'zapnuto, nebo restart PHP po každé aktualizaci',
-            '98_Aktualizace'
+            '103_Aktualizace'
         );
 
         // --- Databáze ---
@@ -857,7 +857,7 @@ final class EnvironmentCheckService
             $pendingCount === null ? self::STATUS_SKIP : ($pendingCount > 0 ? self::STATUS_FAIL : self::STATUS_OK),
             $pendingCount === null ? '?' : (string) $pendingCount,
             '0',
-            '98_Aktualizace',
+            '103_Aktualizace',
             ['pending' => array_slice((array) ($mig['pending'] ?? []), 0, 20)]
         );
 
@@ -915,7 +915,7 @@ final class EnvironmentCheckService
             !$isProd || empty($runtime['app_debug']) ? self::STATUS_OK : self::STATUS_WARN,
             !empty($runtime['app_debug']) ? 'zapnuto' : 'vypnuto',
             'vypnuto v produkci',
-            '97_Bezpecnost'
+            '102_Bezpecnost'
         );
 
         $level = strtolower((string) ($runtime['logging_level'] ?? 'info'));
@@ -924,7 +924,7 @@ final class EnvironmentCheckService
             $isProd && $level === 'debug' ? self::STATUS_FAIL : self::STATUS_OK,
             $level,
             'info a výš v produkci',
-            '97_Bezpecnost'
+            '102_Bezpecnost'
         );
 
         // --- Verze aplikace ---
@@ -938,7 +938,7 @@ final class EnvironmentCheckService
                 $hasUpdate ? self::STATUS_WARN : self::STATUS_OK,
                 (string) ($status['current'] ?? '?'),
                 (string) ($status['latest'] ?? ($status['current'] ?? '?')),
-                '98_Aktualizace',
+                '103_Aktualizace',
                 [
                     'current'     => $status['current'] ?? null,
                     'latest'      => $status['latest'] ?? null,
