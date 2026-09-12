@@ -7,7 +7,7 @@
  * skeny firmy k žádnému dokladu nesedí a které připojené doklady se liší od
  * vytěženého skenu. Pod dávkou je přehled rozporů celé firmy.
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import {
@@ -21,7 +21,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { btnFilled, btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import AttachmentDiscrepancyTable from '@/components/documents/AttachmentDiscrepancyTable.vue'
 import AttachmentDiscrepanciesPanel from '@/components/documents/AttachmentDiscrepanciesPanel.vue'
 import AttachmentCheckReview from '@/components/documents/AttachmentCheckReview.vue'
@@ -54,7 +54,11 @@ async function onReviewed() {
   void firmPanel.value?.reload()
 }
 
+const SCAN_FILE_RE = /\.(pdf|jpe?g|jfif|png|webp|heic|tiff?|zip)$/i
+
 const picked = ref<File[]>([])
+const fileInput = ref<HTMLInputElement | null>(null)
+const dragging = ref(false)
 const selectedTargets = ref<ScanTargetType[]>(['purchase_invoice'])
 const dateFrom = ref('')
 const dateTo = ref('')
@@ -143,9 +147,43 @@ function poll(id: number) {
   timer = setTimeout(tick, 1000)
 }
 
+function setPicked(files: File[]) {
+  const accepted = files.filter(f => SCAN_FILE_RE.test(f.name))
+  if (accepted.length < files.length) toast.warning(t('scan_attach.dropzone_skipped', { n: files.length - accepted.length }))
+  if (accepted.length > 0) picked.value = accepted
+}
+
 function onPick(e: Event) {
   const input = e.target as HTMLInputElement
-  picked.value = Array.from(input.files ?? [])
+  setPicked(Array.from(input.files ?? []))
+  input.value = ''
+}
+
+function pickFiles() {
+  if (uploading.value) return
+  fileInput.value?.click()
+}
+
+// Hlavní akce formulář vždy otevře a rovnou nabídne výběr souborů; přepínání
+// by formulář, který je bez dávek otevřený už po načtení, prvním klikem zavřelo.
+async function openPicker() {
+  showForm.value = true
+  await nextTick()
+  pickFiles()
+}
+
+function onDragEnter() {
+  if (!uploading.value) dragging.value = true
+}
+
+function onDragLeave(e: DragEvent) {
+  if (e.target === e.currentTarget) dragging.value = false
+}
+
+function onDrop(e: DragEvent) {
+  dragging.value = false
+  if (uploading.value) return
+  setPicked(Array.from(e.dataTransfer?.files ?? []))
 }
 
 async function submit() {
@@ -260,7 +298,7 @@ const actions = computed<ActionItem[]>(() => [
     key: 'new', label: t('scan_attach.action_new'), icon: 'upload',
     tier: 'primary', variant: 'primary',
     show: canUpload.value, disabled: uploading.value,
-    run: () => { showForm.value = !showForm.value },
+    run: () => { void openPicker() },
   },
   {
     key: 'resume', label: t('scan_attach.action_resume'), icon: 'cycle',
@@ -345,11 +383,21 @@ onUnmounted(stopPolling)
       <h2 class="font-medium text-neutral-900">{{ t('scan_attach.form_title') }}</h2>
 
       <div>
-        <label class="block text-sm font-medium text-neutral-700 mb-1" for="scan-files">{{ t('scan_attach.form_files') }}</label>
-        <input id="scan-files" type="file" multiple accept=".pdf,.jpg,.jpeg,.jfif,.png,.webp,.heic,.tif,.tiff,.zip"
-          class="block w-full text-sm" :disabled="uploading" @change="onPick" />
-        <p class="text-xs text-neutral-500 mt-1">{{ t('scan_attach.form_files_hint') }}</p>
-        <p v-if="picked.length" class="text-xs text-neutral-700 mt-1">{{ t('scan_attach.form_selected', { n: picked.length, size: fmtSize(pickedSize) }) }}</p>
+        <div class="block text-sm font-medium text-neutral-700 mb-1">{{ t('scan_attach.form_files') }}</div>
+        <div data-testid="scan-dropzone" role="button" tabindex="0" :aria-label="t('scan_attach.dropzone_hint')"
+          class="rounded-lg border-2 border-dashed transition-colors px-4 py-6 text-center"
+          :class="uploading ? 'border-primary-300 bg-primary-50/50 cursor-wait'
+            : dragging ? 'border-primary-500 bg-primary-50'
+              : 'border-neutral-300 bg-neutral-50 hover:border-primary-400 hover:bg-primary-50/30 cursor-pointer'"
+          @click="pickFiles" @keydown.enter.prevent="pickFiles" @keydown.space.prevent="pickFiles"
+          @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
+          <input id="scan-files" ref="fileInput" type="file" multiple accept=".pdf,.jpg,.jpeg,.jfif,.png,.webp,.heic,.tif,.tiff,.zip"
+            class="hidden" tabindex="-1" :disabled="uploading" @change="onPick" @click.stop />
+          <svg class="w-8 h-8 mx-auto mb-2 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+          <p class="text-sm text-neutral-700">{{ dragging ? t('scan_attach.dropzone_active') : t('scan_attach.dropzone_hint') }}</p>
+          <p class="text-xs text-neutral-500 mt-1">{{ t('scan_attach.form_files_hint') }}</p>
+        </div>
+        <p v-if="picked.length" class="text-sm text-neutral-700 mt-2">{{ t('scan_attach.form_selected', { n: picked.length, size: fmtSize(pickedSize) }) }}</p>
       </div>
 
       <div>
@@ -395,6 +443,10 @@ onUnmounted(stopPolling)
         <button type="button" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="!canSubmit" @click="submit">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
           {{ uploading ? t('scan_attach.uploading', { done: uploadDone, total: uploadTotal }) : t('scan_attach.form_submit') }}
+        </button>
+        <button v-if="batches.length > 0" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="uploading" @click="showForm = false">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          {{ t('scan_attach.form_close') }}
         </button>
       </div>
     </div>
