@@ -151,6 +151,67 @@ final class JournalDocumentLinkTest extends BankPostingTestCase
         self::assertArrayNotHasKey($lonelyManual, $map);
     }
 
+    public function testEntryLinkedToItsOwnDocumentDoesNotRepeatItself(): void
+    {
+        // Převod z Money S3 váže každý zápis i na jeho VLASTNÍ zdrojový doklad
+        // (banka BV… → bank_transactions téhož pohybu). Panel pak ukazoval tentýž
+        // zápis ještě dvakrát: jako „Navázaný doklad" (vlastní pohyb) a jako
+        // „Navázaný zápis" (zpětná hrana z pohybu na sebe) — účetní to čte jako
+        // dvojí zaúčtování.
+        $vendorId  = $this->client('Dodavatel DL zdroj');
+        $advanceId = $this->purchaseInvoice('DL-ZF-0001', $vendorId, 500.0, 'advance');
+        $txId      = $this->transaction($this->statement(), -500.0);
+        $this->paymentMatch($txId, $advanceId, 500.0);
+        $bankEntry = $this->postPredpis('bank', $txId, '321', '221', 500.0);
+        $this->repo->add($bankEntry, $this->supplierId, 'bank', $txId, 'Převzato z Money S3', $this->userId);
+
+        $items = $this->related($bankEntry)['items'];
+        self::assertCount(1, $items, 'Zápis nesmí v panelu vidět sám sebe.');
+        self::assertSame('purchase_invoice', $items[0]['source_type']);
+        self::assertSame($advanceId, $items[0]['source_id']);
+        self::assertSame('document', $items[0]['relation']);
+        foreach ($items as $it) {
+            self::assertNotSame($bankEntry, $it['entry_id'], 'Vlastní zápis se vrátil jako protějšek.');
+        }
+
+        // Evidence vazby zůstává — seznam „Vazba na doklad" ji dál ukáže a dá zrušit.
+        self::assertCount(1, $this->links->documentLinks($this->supplierId, $bankEntry));
+    }
+
+    public function testEntryOfLinkedDocumentIsNotRepeatedAsLinkedEntry(): void
+    {
+        // Bankovní zápis hradí fakturu (odvozená hrana) A zároveň je na ni ručně
+        // navázaný. Z faktury jde o JEDEN protějšek — úhradu i s jejím zápisem;
+        // druhá položka „Navázaný zápis" s týmiž řádky je duplicita.
+        $clientId  = $this->client('Odběratel DL dvojí hrana');
+        $invoiceId = $this->saleInvoice('DL0010', $clientId, 400.0);
+        $txId      = $this->transaction($this->statement(), 400.0);
+        $this->invoicePayment($invoiceId, $txId, 400.0);
+        $invoiceEntry = $this->postPredpis('invoice', $invoiceId, '311', '604', 400.0);
+        $bankEntry    = $this->postPredpis('bank', $txId, '221', '311', 400.0);
+        $this->repo->add($bankEntry, $this->supplierId, 'invoice', $invoiceId, null, $this->userId);
+        // Skutečně jiný zápis navázaný na fakturu zůstat musí.
+        $manualEntry = $this->manualEntry();
+        $this->repo->add($manualEntry, $this->supplierId, 'invoice', $invoiceId, null, $this->userId);
+
+        $items = $this->related($invoiceEntry)['items'];
+        $entryIds = array_map(static fn (array $it): ?int => $it['entry_id'], $items);
+        self::assertSame(1, count(array_keys($entryIds, $bankEntry, true)), 'Zápis úhrady se v panelu opakuje.');
+        self::assertContains($manualEntry, $entryIds, 'Jiný navázaný zápis se ztratil.');
+        self::assertCount(2, $items);
+    }
+
+    public function testLinkToOwnDocumentAloneGivesNoBadge(): void
+    {
+        $txId      = $this->transaction($this->statement(), 250.0);
+        $bankEntry = $this->postPredpis('bank', $txId, '221', '604', 250.0);
+        $this->repo->add($bankEntry, $this->supplierId, 'bank', $txId, 'Převzato z Money S3', $this->userId);
+
+        self::assertSame([], $this->related($bankEntry)['items']);
+        $map = $this->links->hasRelatedMap($this->supplierId, [$this->journal->find($bankEntry, $this->supplierId)]);
+        self::assertArrayNotHasKey($bankEntry, $map, 'Odznak svítí, ale panel je prázdný.');
+    }
+
     public function testForeignAndUnknownDocumentsAreRejected(): void
     {
         $manualEntry = $this->manualEntry();
