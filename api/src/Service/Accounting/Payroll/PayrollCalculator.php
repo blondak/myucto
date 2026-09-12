@@ -142,6 +142,15 @@ final class PayrollCalculator
                 'Roční konstanty neobsahují mzdové sazby (klíč `payroll`).'
             );
         }
+        // Do 31. 12. 2020 byla základem zálohy superhrubá mzda (§ 6 odst. 12 ZDP) a nad
+        // 4× průměrné mzdy se přičítalo solidární zvýšení z hrubé mzdy. Rozpad níž umí
+        // jen hrubou mzdu — tichý výpočet by dal jinou zálohu, než jakou plátce srazil.
+        if (!empty($p['super_gross_base'])) {
+            throw new \DomainException(
+                'Záloha na daň se v tomto roce počítala ze superhrubé mzdy; tuto mzdovou '
+                . 'rekapitulaci modul nepočítá. Mzdy za toto období převezměte z původního systému.'
+            );
+        }
         $minimumWage = (float) ($c['minimum_wage'] ?? 0);
         if ($minimumWage <= 0) {
             throw new \InvalidArgumentException('Roční konstanty neobsahují minimální mzdu.');

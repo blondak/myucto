@@ -51,7 +51,7 @@ final class TaxConstantsUsageGuardTest extends TestCase
      *
      * @var list<int>
      */
-    private const YEARS = [2024, 2025, 2026];
+    private const YEARS = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
 
     public function testEveryTaxConstantHasAConsumer(): void
     {

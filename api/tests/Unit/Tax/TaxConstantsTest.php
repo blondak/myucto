@@ -118,12 +118,170 @@ final class TaxConstantsTest extends TestCase
         self::assertSame(array_keys(TaxConstants::forYear(2025)), array_keys(TaxConstants::forYear(2024)));
     }
 
+    /**
+     * Import historického účetnictví (od 2019) potřebuje dobové sady. Ročník bez
+     * sady by v repository tiše spadl na nejbližší známý rok 2024 — tedy DPPO 21 %
+     * místo 19 %, sleva 30 840 místo 24 840 a minimální mzda 18 900.
+     */
+    public function testHistoricalYearsHaveTheFullKeySetOf2024(): void
+    {
+        $reference = array_keys(TaxConstants::forYear(2024));
+        foreach ([2019, 2020, 2021, 2022, 2023] as $year) {
+            self::assertContains($year, TaxConstants::availableYears());
+            $c = TaxConstants::forYear($year);
+            self::assertSame($year, $c['year']);
+            self::assertSame($reference, array_keys($c), "Sada {$year} musí mít klíče i pořadí jako 2024.");
+        }
+    }
+
+    /**
+     * Ověřené dobové hodnoty (NV o minimální mzdě, NV o VVZ/průměrné mzdě, ČSSZ, ZDP
+     * ve znění daného roku). Průměrná mzda: 2019 32 699, 2020 34 835, 2021 35 441,
+     * 2022 38 911, 2023 40 324 Kč.
+     */
+    public function testVerifiedHistoricalValues(): void
+    {
+        $expected = [
+            2019 => [
+                'corporate_tax_rate' => 0.19, 'credit_taxpayer' => 24840, 'minimum_wage' => 13350,
+                'child_credits' => [15204, 19404, 24204], 'social_max_base' => 1569552,
+                'tax_rate_high' => 0.22, 'tax_high_threshold' => 1569552, 'advance_tax_high_threshold' => 130796,
+                'social_min_base_main' => 98100, 'social_min_base_secondary' => 39240,
+                'social_secondary_participation_threshold' => 78476, 'health_min_base' => 196194,
+                'child_bonus_min_income' => 80100, 'fixed_asset_limit' => 40000,
+                'filing_duty_income_limit' => 15000, 'filing_duty_other_income_limit' => 6000,
+                'donation_cap_fo_pct' => 0.15, 'donation_cap_po_pct' => 0.10,
+                'sickness_participation_threshold' => 3000, 'sickness_min_monthly_base' => 6000,
+                'sickness_rate' => 0.023, 'pension_cap' => 24000, 'mortgage_cap' => 300000,
+                'm1_depreciation_limit' => 0,
+            ],
+            2020 => [
+                'corporate_tax_rate' => 0.19, 'credit_taxpayer' => 24840, 'minimum_wage' => 14600,
+                'child_credits' => [15204, 19404, 24204], 'social_max_base' => 1672080,
+                'tax_rate_high' => 0.22, 'tax_high_threshold' => 1672080, 'advance_tax_high_threshold' => 139340,
+                'social_min_base_main' => 104508, 'social_min_base_secondary' => 41808,
+                'social_secondary_participation_threshold' => 83603, 'health_min_base' => 209010,
+                'child_bonus_min_income' => 87600, 'fixed_asset_limit' => 40000,
+                'filing_duty_income_limit' => 15000, 'filing_duty_other_income_limit' => 6000,
+                'donation_cap_fo_pct' => 0.30, 'donation_cap_po_pct' => 0.30,
+                'sickness_participation_threshold' => 3000, 'sickness_min_monthly_base' => 6000,
+                'sickness_rate' => 0.021, 'pension_cap' => 24000, 'mortgage_cap' => 300000,
+                'm1_depreciation_limit' => 0,
+            ],
+            2021 => [
+                'corporate_tax_rate' => 0.19, 'credit_taxpayer' => 27840, 'minimum_wage' => 15200,
+                'child_credits' => [15204, 22320, 27840], 'social_max_base' => 1701168,
+                'tax_rate_high' => 0.23, 'tax_high_threshold' => 1701168, 'advance_tax_high_threshold' => 141764,
+                'social_min_base_main' => 106332, 'social_min_base_secondary' => 42540,
+                'social_secondary_participation_threshold' => 85058, 'health_min_base' => 212646,
+                'child_bonus_min_income' => 91200, 'fixed_asset_limit' => 80000,
+                'filing_duty_income_limit' => 15000, 'filing_duty_other_income_limit' => 6000,
+                'donation_cap_fo_pct' => 0.30, 'donation_cap_po_pct' => 0.30,
+                'sickness_participation_threshold' => 3500, 'sickness_min_monthly_base' => 7000,
+                'sickness_rate' => 0.021, 'pension_cap' => 24000, 'mortgage_cap' => 150000,
+                'm1_depreciation_limit' => 0,
+            ],
+            2022 => [
+                'corporate_tax_rate' => 0.19, 'credit_taxpayer' => 30840, 'minimum_wage' => 16200,
+                'child_credits' => [15204, 22320, 27840], 'social_max_base' => 1867728,
+                'tax_rate_high' => 0.23, 'tax_high_threshold' => 1867728, 'advance_tax_high_threshold' => 155644,
+                'social_min_base_main' => 116736, 'social_min_base_secondary' => 46704,
+                'social_secondary_participation_threshold' => 93387, 'health_min_base' => 233466,
+                'child_bonus_min_income' => 97200, 'fixed_asset_limit' => 80000,
+                'filing_duty_income_limit' => 15000, 'filing_duty_other_income_limit' => 6000,
+                'donation_cap_fo_pct' => 0.30, 'donation_cap_po_pct' => 0.30,
+                'sickness_participation_threshold' => 3500, 'sickness_min_monthly_base' => 7000,
+                'sickness_rate' => 0.021, 'pension_cap' => 24000, 'mortgage_cap' => 150000,
+                'm1_depreciation_limit' => 0,
+            ],
+            2023 => [
+                'corporate_tax_rate' => 0.19, 'credit_taxpayer' => 30840, 'minimum_wage' => 17300,
+                'child_credits' => [15204, 22320, 27840], 'social_max_base' => 1935552,
+                'tax_rate_high' => 0.23, 'tax_high_threshold' => 1935552, 'advance_tax_high_threshold' => 161296,
+                'social_min_base_main' => 120972, 'social_min_base_secondary' => 48396,
+                'social_secondary_participation_threshold' => 96777, 'health_min_base' => 241944,
+                'child_bonus_min_income' => 103800, 'fixed_asset_limit' => 80000,
+                'filing_duty_income_limit' => 50000, 'filing_duty_other_income_limit' => 20000,
+                'donation_cap_fo_pct' => 0.30, 'donation_cap_po_pct' => 0.30,
+                'sickness_participation_threshold' => 4000, 'sickness_min_monthly_base' => 8000,
+                'sickness_rate' => 0.021, 'pension_cap' => 24000, 'mortgage_cap' => 150000,
+                'm1_depreciation_limit' => 0,
+            ],
+        ];
+        foreach ($expected as $year => $values) {
+            $c = TaxConstants::forYear($year);
+            foreach ($values as $key => $value) {
+                self::assertSame($value, $c[$key], "{$key} {$year}");
+            }
+            self::assertSame(0.50, $c['social_assessment_pct'], "social_assessment_pct {$year}");
+            self::assertSame(1000000, $c['vat_limit_low'], "vat_limit_low {$year}");
+            self::assertSame(1000000, $c['vat_limit_high'], "vat_limit_high {$year}");
+            self::assertSame(10000000, $c['vat_quarterly_turnover_limit'], "vat_quarterly_turnover_limit {$year}");
+            self::assertSame(21.0, $c['vat_rate_standard'], "vat_rate_standard {$year}");
+            self::assertSame(15.0, $c['vat_rate_reduced'], "vat_rate_reduced {$year}");
+            self::assertSame(9000000, $c['entity_category_thresholds']['micro']['assets_net'], "micro {$year}");
+            self::assertSame(1000000000, $c['entity_category_thresholds']['medium']['net_turnover'], "medium {$year}");
+            self::assertSame(0.15, $c['withholding_rate'], "withholding_rate {$year}");
+            self::assertSame(10000, $c['dpp_withholding_limit'], "dpp_withholding_limit {$year}");
+            self::assertTrue($c['dpp_withholding_limit_inclusive'], "dpp_withholding_limit_inclusive {$year}");
+        }
+        self::assertSame(0.21, TaxConstants::forYear(2024)['corporate_tax_rate']);
+        self::assertSame('04-01', TaxConstants::forYear(2019)['filing_deadlines']['dpfo_electronic']);
+        self::assertSame('06-03', TaxConstants::forYear(2020)['filing_deadlines']['insurance_electronic']);
+    }
+
+    /**
+     * Paušální režim (§ 2a ZDP) existuje od 2021; do 2022 měl jedinou zálohu a limit
+     * příjmů 1 mil. Kč, tři pásma až od 2023. Roky bez režimu nesmí nabídnout paušál
+     * s nulovou zálohou.
+     */
+    public function testPausalRegimeHistory(): void
+    {
+        foreach ([2019, 2020] as $year) {
+            $c = TaxConstants::forYear($year);
+            self::assertSame([], $c['pausal_monthly'], "pausal_monthly {$year}");
+            self::assertSame([], $c['pausal_annual'], "pausal_annual {$year}");
+            self::assertSame([], $c['band_ceilings'], "band_ceilings {$year}");
+        }
+        self::assertSame(['band1' => 65628, 'band2' => 65628, 'band3' => 65628], TaxConstants::forYear(2021)['pausal_annual']);
+        self::assertSame(['band1' => 71928, 'band2' => 71928, 'band3' => 71928], TaxConstants::forYear(2022)['pausal_annual']);
+        self::assertSame(['band1' => 74496, 'band2' => 192000, 'band3' => 312000], TaxConstants::forYear(2023)['pausal_annual']);
+        self::assertSame(
+            ['band1' => 1000000, 'band2' => 1000000, 'band3' => 1000000],
+            TaxConstants::forYear(2022)['band_ceilings'][80],
+        );
+        self::assertSame(TaxConstants::forYear(2024)['band_ceilings'], TaxConstants::forYear(2023)['band_ceilings']);
+    }
+
+    /**
+     * Do 31. 12. 2020 se záloha ze závislé činnosti počítala ze superhrubé mzdy a
+     * starší mzdová rekapitulace umí jen hrubou. Počítat 2019/2020 z hrubé by dalo
+     * tiše špatnou zálohu — kalkulátor musí takový ročník odmítnout.
+     */
+    public function testSuperGrossYearsAreRefusedByLegacyPayrollCalculator(): void
+    {
+        foreach ([2019, 2020] as $year) {
+            try {
+                \MyInvoice\Service\Accounting\Payroll\PayrollCalculator::compute(30000.0, TaxConstants::forYear($year));
+                self::fail("Mzdový rozpad {$year} (superhrubá mzda) musí být odmítnut.");
+            } catch (\DomainException $e) {
+                self::assertStringContainsString('superhrub', $e->getMessage());
+            }
+        }
+
+        $b = \MyInvoice\Service\Accounting\Payroll\PayrollCalculator::compute(30000.0, TaxConstants::forYear(2021));
+        self::assertSame(1950, $b['employee_social']); // 6,5 % — nemocenské zaměstnance až od 2024
+        self::assertSame(1350, $b['employee_health']);
+        self::assertSame(4500, $b['advance_tax']);     // 15 % z hrubé
+        self::assertSame(7440, $b['employer_social']); // 24,8 %
+    }
+
     public function testAvailableYearsAndUnknownYearRejection(): void
     {
         self::assertContains(2024, TaxConstants::availableYears());
         self::assertContains(2025, TaxConstants::availableYears());
         self::assertContains(2026, TaxConstants::availableYears());
-        foreach ([2023, 2027, 9999] as $year) {
+        foreach ([2018, 2027, 9999] as $year) {
             try {
                 TaxConstants::forYear($year);
                 self::fail('Neznámý rok ' . $year . ' musí být odmítnut.');
