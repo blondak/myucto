@@ -157,7 +157,8 @@ final class FuelingRepository
     /**
      * Insert z parseru faktury — idempotentní (UNIQUE(supplier_id, dedup_hash)). Při duplicitě
      * DOPLNÍ dříve chybějící litry / jednotkovou cenu (re-sken doplní starší záznamy bez množství),
-     * ale NIKDY nepřepíše už vyplněné hodnoty (COALESCE drží existující).
+     * ale NIKDY nepřepíše už vyplněné hodnoty (COALESCE drží existující). Výjimkou je odhadnutý
+     * tachometr (`odometer_is_estimate`), který skutečný stav z dokladu nahradí.
      *
      * Vrací: >0 = id nově vloženého; -1 = doplněn existující; 0 = beze změny (true duplicate).
      */
@@ -168,7 +169,8 @@ final class FuelingRepository
             . ' ON DUPLICATE KEY UPDATE
                   quantity   = COALESCE(quantity, VALUES(quantity)),
                   unit_price = COALESCE(unit_price, VALUES(unit_price)),
-                  odometer   = COALESCE(odometer, VALUES(odometer)),
+                  odometer   = IF(odometer IS NULL OR odometer_is_estimate = 1, COALESCE(VALUES(odometer), odometer), odometer),
+                  odometer_is_estimate = IF(odometer_is_estimate = 1 AND VALUES(odometer) IS NOT NULL, 0, odometer_is_estimate),
                   car_assigned_by = IF(car_id IS NULL AND VALUES(car_id) IS NOT NULL, VALUES(car_assigned_by), car_assigned_by),
                   car_id     = COALESCE(car_id, VALUES(car_id)),
                   card_last4 = COALESCE(card_last4, VALUES(card_last4)),
@@ -188,16 +190,19 @@ final class FuelingRepository
         $b = $this->bind($supplierId, $data, null);
         // bind() pořadí viz insertSql(); pro UPDATE vynecháme supplier_id (idx 0), created_by (poslední),
         // a NEpřepisujeme source/dedup_hash/source_* (ruční editace nemění provenienci).
+        // Příznak odhadu zůstane jen při beze změny uloženém stavu tachometru; MariaDB
+        // přiřazuje zleva, proto se porovnává dřív, než se odometer přepíše.
         $stmt = $this->db->pdo()->prepare(
             'UPDATE fuelings
                 SET car_id = ?, fueled_date = ?, fueled_time = ?, fuel_type = ?, quantity = ?, unit = ?,
                     unit_price = ?, amount_without_vat = ?, amount_vat = ?, amount_with_vat = ?, currency = ?,
+                    odometer_is_estimate = IF(odometer <=> ?, odometer_is_estimate, 0),
                     odometer = ?, station = ?, vendor_id = ?, receipt_number = ?, note = ?
               WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([
             $b[1], $b[2], $b[3], $b[4], $b[5], $b[6], $b[7], $b[8], $b[9], $b[10], $b[11],
-            $b[12], $b[13], $b[14], $b[18], $b[20],
+            $b[12], $b[12], $b[13], $b[14], $b[18], $b[20],
             $id, $supplierId,
         ]);
         return $stmt->rowCount() >= 0;
@@ -273,8 +278,8 @@ final class FuelingRepository
 
     /**
      * Doplní u existujícího tankování jen CHYBĚJÍCÍ údaje — vyplněné hodnoty nikdy
-     * nepřepíše (stejné pravidlo jako insertScanned při duplicitě). Vrací true, když
-     * se něco doplnilo.
+     * nepřepíše (stejné pravidlo jako insertScanned při duplicitě, včetně výjimky pro
+     * odhadnutý tachometr). Vrací true, když se něco doplnilo.
      *
      * @param array<string,mixed> $data klíče jako pro insertScanned()
      */
@@ -290,8 +295,9 @@ final class FuelingRepository
                     unit_price         = COALESCE(unit_price, ?),
                     amount_without_vat = COALESCE(amount_without_vat, ?),
                     amount_vat         = COALESCE(amount_vat, ?),
-                    odometer           = COALESCE(odometer, ?),
-                    station            = COALESCE(station, ?),
+                    odometer           = IF(odometer IS NULL OR odometer_is_estimate = 1, COALESCE(?, odometer), odometer),
+                    odometer_is_estimate = IF(odometer_is_estimate = 1 AND ? IS NOT NULL, 0, odometer_is_estimate),
+                    station           = COALESCE(station, ?),
                     vendor_id          = COALESCE(vendor_id, ?),
                     receipt_number     = COALESCE(receipt_number, ?),
                     car_assigned_by    = IF(car_id IS NULL AND ? IS NOT NULL, ?, car_assigned_by),
@@ -304,12 +310,26 @@ final class FuelingRepository
               WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([
-            $b[3], $b[4], $b[5], $b[7], $b[8], $b[9], $b[12], $b[13], $b[14], $b[18],
+            $b[3], $b[4], $b[5], $b[7], $b[8], $b[9], $b[12], $b[12], $b[13], $b[14], $b[18],
             $b[1], in_array($carMethod, self::CAR_METHODS, true) ? $carMethod : null,
             $b[1], $b[27],
             $b[16], $b[23], $b[24], $b[25],
             $id, $supplierId,
         ]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Zapíše odhadnutý stav tachometru, a to jen tankování, které stav nemá (zadaný nikdy
+     * nepřepíše). Vrací true, když se zapsalo.
+     */
+    public function setEstimatedOdometer(int $id, int $supplierId, int $odometer): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE fuelings SET odometer = ?, odometer_is_estimate = 1
+              WHERE id = ? AND supplier_id = ? AND odometer IS NULL'
+        );
+        $stmt->execute([max(0, $odometer), $id, $supplierId]);
         return $stmt->rowCount() > 0;
     }
 
@@ -496,6 +516,7 @@ final class FuelingRepository
             'amount_with_vat'            => (float) $r['amount_with_vat'],
             'currency'                   => (string) $r['currency'],
             'odometer'                   => $r['odometer'] !== null ? (int) $r['odometer'] : null,
+            'odometer_is_estimate'       => !empty($r['odometer_is_estimate']),
             'odometer_estimated'         => isset($r['odometer_estimated']) && $r['odometer_estimated'] !== null ? (int) $r['odometer_estimated'] : null,
             'station'                    => $r['station'] !== null ? (string) $r['station'] : null,
             'vendor_id'                  => $r['vendor_id'] !== null ? (int) $r['vendor_id'] : null,

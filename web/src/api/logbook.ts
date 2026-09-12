@@ -139,6 +139,8 @@ export interface Fueling {
   amount_with_vat: number
   currency: string
   odometer: number | null
+  /** Stav `odometer` doplnila aplikace odhadem (ne skutečný údaj). */
+  odometer_is_estimate?: boolean
   odometer_estimated: number | null
   station: string | null
   vendor_id: number | null
@@ -190,11 +192,22 @@ export interface FuelingWarningCar {
   missing: Array<{ id: number; date: string }>
   regressions: Array<{ id: number; date: string; odometer: number; prev_id: number | null; prev_date: string | null; prev_odometer: number }>
   vat_mismatches: Array<{ id: number; date: string; direction: 'over' | 'under'; doc_percent: number; car_percent: number }>
+  /** Kolik chybějících stavů jde doplnit odhadem; reason = proč u zbytku ne. */
+  odometer_estimate?: { estimable: number; reason: FuelingEstimateReason | null }
 }
+
+export type FuelingEstimateReason = 'no_known_odometer' | 'single_known_date' | 'inconsistent_series'
 
 export interface FuelingWarnings {
   cars: FuelingWarningCar[]
-  totals: { missing: number; regressions: number; vat_mismatches: number }
+  totals: { missing: number; regressions: number; vat_mismatches: number; estimable?: number }
+}
+
+export interface FuelingOdometerEstimateResult {
+  filled: number
+  filled_ids: number[]
+  totals: { missing: number; estimable: number }
+  cars: Array<{ car_id: number; registration: string; missing: number; estimable: number; reason: FuelingEstimateReason | null; filled?: number }>
 }
 
 export interface FuelingImportRow {
@@ -484,6 +497,8 @@ export const logbookApi = {
   },
   fuelingWarnings: (params?: Record<string, string | number>) =>
     api.get<FuelingWarnings>('/logbook/fuelings/warnings', { params }).then(r => r.data),
+  estimateFuelingOdometers: (data: { car_id?: number | null; year?: number | null; dry_run?: boolean }) =>
+    api.post<FuelingOdometerEstimateResult>('/logbook/fuelings/estimate-odometers', data).then(r => r.data),
   fuelingLinkCandidates: (params: { type: Exclude<FuelingLinkType, 'purchase_invoice'>; date: string; amount?: number; q?: string }) =>
     api.get<FuelingLinkCandidate[]>('/logbook/fuelings/link-candidates', { params }).then(r => r.data),
   listDrivers: () => api.get<LogbookDriver[]>('/logbook/drivers').then(r => r.data),

@@ -15,6 +15,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Logbook\FuelingLinkCandidates;
 use MyInvoice\Service\Logbook\FuelingOdometerEstimator;
+use MyInvoice\Service\Logbook\FuelingOdometerFill;
 use MyInvoice\Service\Logbook\FuelingOdometerWarnings;
 use MyInvoice\Service\Logbook\VehicleResolver;
 use MyInvoice\Support\Pagination;
@@ -29,6 +30,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PUT    /api/logbook/fuelings/{id}
  *   DELETE /api/logbook/fuelings/{id}
  *   GET    /api/logbook/fuelings/warnings        — chybějící / nesouvislý tachometr, nesoulad odpočtu DPH
+ *   POST   /api/logbook/fuelings/estimate-odometers - doplní odhad tachometru tam, kde chybí ({car_id?, year?, dry_run?})
  *   GET    /api/logbook/fuelings/link-candidates — doklady k navázání (?type=&date=&amount=&q=)
  */
 final class FuelingsAction
@@ -47,6 +49,7 @@ final class FuelingsAction
         private readonly FuelingOdometerWarnings $warnings,
         private readonly FuelingLinkCandidates $linkCandidates,
         private readonly VehicleResolver $vehicles,
+        private readonly FuelingOdometerFill $odometerFill,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -81,7 +84,56 @@ final class FuelingsAction
         $q = $request->getQueryParams();
         $carId = !empty($q['car_id']) ? (int) $q['car_id'] : null;
         $year = !empty($q['year']) ? (int) $q['year'] : null;
-        return Json::ok($response, $this->warnings->forTenant($supplierId, $carId, $year));
+        $result = $this->warnings->forTenant($supplierId, $carId, $year);
+
+        // Kolik chybějících stavů jde doplnit odhadem, a u vozu, kde nejde, proč.
+        $byCar = [];
+        $result['totals']['estimable'] = 0;
+        if ($result['totals']['missing'] > 0) {
+            $preview = $this->odometerFill->preview($supplierId, $carId, $year);
+            foreach ($preview['cars'] as $c) $byCar[$c['car_id']] = $c;
+            $result['totals']['estimable'] = $preview['totals']['estimable'];
+        }
+        foreach ($result['cars'] as &$c) {
+            $p = $byCar[$c['car_id']] ?? null;
+            $c['odometer_estimate'] = ['estimable' => $p['estimable'] ?? 0, 'reason' => $p['reason'] ?? null];
+        }
+        unset($c);
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Doplní odhad tachometru tankováním bez stavu (vybrané vozidlo / rok, jinak všechna).
+     * Zadané stavy nikdy nepřepíše; `dry_run` jen spočítá, co by se doplnilo.
+     */
+    public function estimateOdometers(Request $request, Response $response): Response
+    {
+        $supplierId = SupplierGuard::currentId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
+        $carId = $this->intOrNull($body['car_id'] ?? null);
+        if ($carId !== null && $this->cars->find($carId, $supplierId) === null) {
+            return Json::error($response, 'validation_failed', 'Auto neexistuje.', 400);
+        }
+        $year = $this->intOrNull($body['year'] ?? null);
+        if ($year !== null && ($year < 1900 || $year > 2999)) {
+            return Json::error($response, 'validation_failed', 'Neplatný rok.', 400);
+        }
+        if (!empty($body['dry_run'])) {
+            return Json::ok($response, ['filled' => 0, 'filled_ids' => []] + $this->odometerFill->preview($supplierId, $carId, $year));
+        }
+
+        $result = $this->odometerFill->apply($supplierId, $carId, $year);
+        if ($result['filled'] > 0) {
+            $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+            $this->logger->log('fueling.odometer_estimated', $this->userId($request), 'fueling', null, [
+                'car_id'    => $carId,
+                'year'      => $year,
+                'filled'    => $result['filled'],
+                'estimates' => $result['estimates'],
+            ], $ip, $request->getHeaderLine('User-Agent'), $supplierId);
+        }
+        unset($result['estimates']);
+        return Json::ok($response, $result);
     }
 
     public function linkCandidates(Request $request, Response $response): Response

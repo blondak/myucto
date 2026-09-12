@@ -656,6 +656,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/logbook/.*/import#', 'logbook.import', AccessLevel::WRITE],
         ['DELETE', '#^/api/logbook(/|$)#', 'logbook.delete', AccessLevel::WRITE],
         ['GET', '#^/api/logbook(/|$)#', 'logbook', AccessLevel::READ],
+        // Doplnění odhadu tachometru mění tankování, proto stejné právo jako jejich úprava.
+        ['POST', '#^/api/logbook/fuelings/estimate-odometers$#', 'logbook.write', AccessLevel::WRITE],
         ['*', '#^/api/logbook(/|$)#', 'logbook.write', AccessLevel::WRITE],
 
         ['GET', '#^/api/settings/bank-connections/kb-plus/(registration|oauth)/callback$#', 'settings.bank_accounts', AccessLevel::WRITE],

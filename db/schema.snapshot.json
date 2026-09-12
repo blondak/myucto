@@ -806,7 +806,8 @@
         "1818_payroll_child_claim_credit_status.sql",
         "1819_stock_item_intrastat.sql",
         "1820_vat_rates_historical_2004_2012.sql",
-        "1821_statement_map_legacy_accounts.sql"
+        "1821_statement_map_legacy_accounts.sql",
+        "1823_fueling_odometer_estimate.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -4369,6 +4370,7 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "note": "text NULL DEFAULT NULL",
                 "odometer": "int(10) unsigned NULL DEFAULT NULL",
+                "odometer_is_estimate": "tinyint(1) NOT NULL DEFAULT 0",
                 "quantity": "decimal(10,3) NULL DEFAULT NULL",
                 "raw_text": "varchar(500) NULL DEFAULT NULL",
                 "receipt_number": "varchar(40) NULL DEFAULT NULL",

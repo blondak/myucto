@@ -13,7 +13,7 @@ import { cashApi } from '@/api/cash'
 import { useAuthStore } from '@/stores/auth'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -161,6 +161,33 @@ function warningParts(c: FuelingWarnings['cars'][number]): string {
   return parts.join(' · ')
 }
 
+// Doplnění odhadu tachometru (respektuje filtr vozidla a roku jako panel upozornění).
+const estimating = ref(false)
+const estimable = computed(() => warnings.value?.totals.estimable ?? 0)
+const showEstimate = computed(() => canWrite.value && (warnings.value?.totals.missing ?? 0) > 0)
+function estimateReason(c: FuelingWarnings['cars'][number]): string {
+  const r = c.odometer_estimate?.reason
+  return c.missing.length && r ? t(`logbook_fuel.estimate_reason.${r}`) : ''
+}
+async function estimateOdometers() {
+  if (blockDemoMutation() || estimable.value === 0) return
+  if (!confirm(t('logbook_fuel.estimate_confirm', { n: estimable.value }))) return
+  estimating.value = true
+  try {
+    const r = await logbookApi.estimateFuelingOdometers({
+      car_id: filterCar.value ? Number(filterCar.value) : null,
+      year: yearFilter.value ? Number(yearFilter.value) : null,
+    })
+    toast.success(t('logbook_fuel.estimate_done', { n: r.filled }))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message ?? t('common.error'))
+  } finally { estimating.value = false }
+}
+function estimateBadge(f: Fueling): string {
+  return t('logbook_fuel.badge_estimate', { km: (f.odometer ?? 0).toLocaleString('cs-CZ') })
+}
+
 // ── Vazby na doklad (proklik v seznamu) ─────────────────────────
 interface RowLink { key: string; to?: string; href?: string; label: string; title: string }
 function rowLinks(f: Fueling): RowLink[] {
@@ -236,6 +263,7 @@ async function downloadExport(format: 'xlsx' | 'pdf') {
 const open = ref(false)
 const saving = ref(false)
 const odometerHint = ref<number | null>(null) // orientační tachometr z knihy jízd
+const odometerIsEstimate = ref(false) // uložený stav je odhad aplikace
 const draft = reactive<FuelingPayload & { id: number }>({
   id: 0, car_id: null, fueled_date: appIsoDate(), fueled_time: '',
   fuel_type: '', quantity: null, unit: 'l', unit_price: null, amount_with_vat: 0, currency: 'CZK',
@@ -310,6 +338,7 @@ function newFueling() {
     odometer: null, station: '', note: '',
   })
   odometerHint.value = null
+  odometerIsEstimate.value = false
   initLinks(null)
   open.value = true
 }
@@ -324,6 +353,7 @@ function editFueling(f: Fueling) {
     amount_with_vat: f.amount_with_vat, currency: f.currency, odometer: f.odometer, station: f.station ?? '', note: f.note ?? '',
   })
   odometerHint.value = f.odometer_estimated ?? null
+  odometerIsEstimate.value = f.odometer_is_estimate === true
   initLinks(f)
   open.value = true
 }
@@ -587,14 +617,25 @@ const WARN_ICON = 'M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66
           <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="WARN_ICON"/></svg>
           {{ t('logbook_fuel.warnings_title') }}
         </div>
-        <button type="button" @click="warningsOpen = !warningsOpen"
-          class="cursor-pointer h-7 px-2 text-xs border border-warning-500/40 rounded-md hover:bg-warning-50 inline-flex items-center gap-1 whitespace-nowrap">
-          <svg class="w-3.5 h-3.5 transition-transform" :class="warningsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
-          {{ t('logbook.detail') }}
-        </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <button v-if="showEstimate" type="button" @click="estimateOdometers" :disabled="estimating || estimable === 0"
+            :title="disabledTitle(estimable === 0, t('logbook_fuel.estimate_none'))" :class="btnOutlineSm('warning')">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.gauge" /></svg>
+            {{ t('logbook_fuel.estimate_button') }}<span v-if="estimable > 0" class="opacity-70">({{ estimable }})</span>
+          </button>
+          <button type="button" @click="warningsOpen = !warningsOpen"
+            class="cursor-pointer h-7 px-2 text-xs border border-warning-500/40 rounded-md hover:bg-warning-50 inline-flex items-center gap-1 whitespace-nowrap">
+            <svg class="w-3.5 h-3.5 transition-transform" :class="warningsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            {{ t('logbook.detail') }}
+          </button>
+        </div>
       </div>
+      <p v-if="showEstimate && estimable === 0" :class="BTN_DISABLED_NOTE" class="mt-1">{{ t('logbook_fuel.estimate_none') }}</p>
       <ul class="mt-1 space-y-0.5 text-xs">
-        <li v-for="c in warnings.cars" :key="c.car_id"><span class="font-mono font-medium">{{ c.registration }}</span> — {{ warningParts(c) }}</li>
+        <li v-for="c in warnings.cars" :key="c.car_id">
+          <span class="font-mono font-medium">{{ c.registration }}</span> — {{ warningParts(c) }}
+          <span v-if="estimateReason(c)" class="text-warning-600"> · {{ t('logbook_fuel.estimate_reason_label') }}: {{ estimateReason(c) }}</span>
+        </li>
       </ul>
       <div v-if="warningsOpen" class="mt-2 space-y-2 text-xs">
         <p>{{ t('logbook_fuel.warnings_hint') }}</p>
@@ -657,6 +698,7 @@ const WARN_ICON = 'M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66
                   {{ f.fuel_type || '—' }}
                   <span class="ml-1 text-xs px-1.5 py-0.5 rounded" :class="sourceBadge[f.source] || 'bg-neutral-100 text-neutral-600'">{{ t(`logbook.source.${f.source}`) }}</span>
                   <span v-if="f.odometer_warning" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700" :title="odometerWarningText(f)">⚠ {{ t('logbook_fuel.badge_odometer') }}</span>
+                  <span v-if="f.odometer_is_estimate && f.odometer != null" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 whitespace-nowrap" :title="t('logbook_fuel.badge_estimate_title')">{{ estimateBadge(f) }}</span>
                   <span v-if="f.vat_warning" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700" :title="vatWarningText(f)">⚠ {{ t('logbook_fuel.badge_vat') }}</span>
                   <template v-for="l in rowLinks(f)" :key="l.key">
                     <router-link v-if="l.to" :to="l.to" class="ml-1 text-xs text-primary-600 hover:text-primary-700 hover:underline" :title="l.title">{{ l.label }} ↗</router-link>
@@ -699,8 +741,9 @@ const WARN_ICON = 'M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66
               <span class="font-mono shrink-0">{{ f.car_registration || t('logbook.no_car') }}</span>
             </div>
             <div v-if="carMethodLabel(f)" class="mt-0.5 text-right text-[11px] text-neutral-400" :title="t('logbook_fuel.car_method_title')">{{ carMethodLabel(f) }}</div>
-            <div v-if="f.odometer_warning || f.vat_warning" class="flex flex-wrap gap-1 mt-1">
+            <div v-if="f.odometer_warning || f.vat_warning || (f.odometer_is_estimate && f.odometer != null)" class="flex flex-wrap gap-1 mt-1">
               <span v-if="f.odometer_warning" class="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">⚠ {{ odometerWarningText(f) }}</span>
+              <span v-if="f.odometer_is_estimate && f.odometer != null" class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600" :title="t('logbook_fuel.badge_estimate_title')">{{ estimateBadge(f) }}</span>
               <span v-if="f.vat_warning" class="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">⚠ {{ vatWarningText(f) }}</span>
             </div>
             <div v-if="rowLinks(f).length" class="flex flex-wrap gap-x-3 mt-1">
@@ -776,6 +819,7 @@ const WARN_ICON = 'M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66
                 :placeholder="odometerHint != null ? `≈ ${odometerHint.toLocaleString('cs-CZ')}` : ''"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
               <p v-if="draft.odometer == null && odometerHint != null" class="text-xs text-neutral-400 mt-0.5">{{ t('logbook.odometer_estimate_hint') }}</p>
+              <p v-if="odometerIsEstimate && draft.odometer != null" class="text-xs text-neutral-400 mt-0.5">{{ t('logbook_fuel.estimate_edit_hint') }}</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.amount') }} *</label>

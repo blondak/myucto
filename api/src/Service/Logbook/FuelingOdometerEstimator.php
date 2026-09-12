@@ -122,7 +122,7 @@ final class FuelingOdometerEstimator
     }
 
     /** Jednotka tankování odpovídá elektrickému dobíjení (kWh)? */
-    private static function isElectricUnit(mixed $unit): bool
+    public static function isElectricUnit(mixed $unit): bool
     {
         return stripos((string) ($unit ?? ''), 'kwh') !== false;
     }
@@ -139,7 +139,7 @@ final class FuelingOdometerEstimator
      * @param list<int> $carIds
      * @return array<int, list<array{date:string,time_start:?int,time_end:?int,odo_start:?int,odo_end:?int}>>
      */
-    private function tripsByCar(int $supplierId, array $carIds): array
+    public function tripsByCar(int $supplierId, array $carIds): array
     {
         $in = implode(',', array_fill(0, count($carIds), '?'));
         $stmt = $this->db->pdo()->prepare(
@@ -169,7 +169,7 @@ final class FuelingOdometerEstimator
      * @param list<int> $carIds
      * @return array<int, float>
      */
-    private function consumptionByCar(int $supplierId, array $carIds, bool $electric): array
+    public function consumptionByCar(int $supplierId, array $carIds, bool $electric): array
     {
         $in = implode(',', array_fill(0, count($carIds), '?'));
         $unitCond = $electric

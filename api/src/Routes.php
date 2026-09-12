@@ -3048,6 +3048,7 @@ final class Routes
         $app->get   ('/api/logbook/fuelings/export',      \MyInvoice\Action\Logbook\ExportFuelingsAction::class);
         $app->post  ('/api/logbook/fuelings/import',      \MyInvoice\Action\Logbook\ImportFuelingsAction::class);
         $app->get   ('/api/logbook/fuelings/warnings',    [\MyInvoice\Action\Logbook\FuelingsAction::class, 'warnings']);
+        $app->post  ('/api/logbook/fuelings/estimate-odometers', [\MyInvoice\Action\Logbook\FuelingsAction::class, 'estimateOdometers']);
         $app->get   ('/api/logbook/fuelings/link-candidates', [\MyInvoice\Action\Logbook\FuelingsAction::class, 'linkCandidates']);
         $app->get   ('/api/logbook/drivers',              \MyInvoice\Action\Logbook\LogbookDriversAction::class);
         $app->get   ('/api/logbook/fuel-cash-documents',                    [\MyInvoice\Action\Logbook\FuelCashDocumentsAction::class, 'list']);

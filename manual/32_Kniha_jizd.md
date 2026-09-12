@@ -230,6 +230,25 @@ u některého vozidla:
 vypíše. Tlačítko **Detail** rozbalí konkrétní data a stavy. U dotčených řádků seznamu
 je odznak **⚠ tachometr** / **⚠ DPH** s vysvětlením po najetí myší.
 
+Chybí-li u tankování stav tachometru, nabídne panel tlačítko **Nastav tachometr na
+odhad** s počtem tankování, u kterých jde stav odhadnout. Po potvrzení aplikace doplní
+odhad jen tam, kde tachometr chybí; zadané stavy nikdy nemění. Tlačítko respektuje
+filtr vozidla a roku. Odhad vychází ze skutečných stavů u tankování, z jízd v knize
+jízd a z počátečního stavu vozidla:
+
+- připadá-li tankování na den s jízdou, vezme se začátek nebo konec jízdy (podle času
+  tankování, jinak podle natankovaného množství a spotřeby vozidla),
+- jinak se stav dopočítá mezi nejbližším dřívějším a pozdějším známým stavem; mezi
+  dvěma tankováními se skutečným stavem podle natankovaných litrů (případně částky),
+  jinak podle data,
+- před prvním a za posledním známým stavem se použije průměrný denní nájezd.
+
+Odhad nikdy neporuší návaznost řady: není nižší než dřívější stav ani vyšší než
+pozdější. U vozidla, kde odhad nejde, uvede panel důvod (vozidlo nemá žádný známý
+stav, zná ho jen k jednomu datu, nebo sousední zadané stavy jdou proti sobě).
+Odhadnutý stav nese v seznamu štítek **odhad** a v exportu znak ≈. Přepíšeš-li ho ve
+formuláři skutečnou hodnotou, nebo přijde-li skutečný stav z dokladu, odhad se nahradí.
+
 ### 32.3.7 Přiřazení vozidla
 
 Když tankování vzniká z dokladu nebo importu, aplikace vozidlo určí sama. Rozhoduje
