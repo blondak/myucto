@@ -25,6 +25,11 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
  *  - vyměřovací základ: sociální 55 % zisku, zdravotní 50 % zisku (§7)
  *  - min. roční vyměřovací základ: soc. hlavní 30 % (2024) / 35 % (2025) / 40 % (2026) prům. mzdy,
  *    zdravotní 50 % prům. mzdy × 12
+ *
+ * Ročníky 2019–2023 slouží importu historického účetnictví. Ověřeny k 2026-09 dle
+ * NV o minimální mzdě a o VVZ, ČSSZ (rozhodné částky, minimální zálohy), MF/GFŘ
+ * (paušální daň, slevy) a znění ZDP/ZDPH platného v daném roce. Rok před 2019
+ * sadu nemá a odmítne se stejně jako neznámý budoucí rok.
  */
 final class TaxConstants
 {
@@ -81,6 +86,9 @@ final class TaxConstants
             // Legacy override bez rozvrhu: roční částku ber doslova, měsíční
             // hodnoty jen dopočti pro zobrazení.
             $constants['pausal_monthly'] = PausalSchedule::fromAnnual($year, $constants['pausal_annual'] ?? []);
+            // Ročník bez paušálního režimu (před 2021) nemá ani rozvrh, ani roční
+            // částky — klíč zůstává prázdný, aby sada měla stejné klíče jako ostatní.
+            $constants['pausal_annual'] ??= [];
             return $constants;
         }
         // Rozvrh se ukotví k požadovanému roku: segmenty z jiného roku (fallback na
@@ -374,7 +382,690 @@ final class TaxConstants
         'advance_tax_high' => 0.23,
     ];
 
+    /**
+     * Sazby ze závislé činnosti pro historické ročníky 2019–2023 (před novelou
+     * 349/2023 Sb.): zaměstnanec 6,5 % jen důchodové (nemocenské zaměstnanců až od
+     * 2024), zdravotní 4,5 % + 9 %, zaměstnavatel § 7 odst. 1 písm. a) 24,8 %.
+     * Sada nese hodnotu platnou k 1. 1. roku, stejně jako zrcadlení rulesetu — proto
+     * 2019 zaměstnavatel 25 % (od 1. 7. 2019 24,8 %, zák. 32/2019 Sb. snížil
+     * nemocenské z 2,3 na 2,1 %).
+     *
+     * 2019–2020 byla základem zálohy SUPERHRUBÁ mzda (§ 6 odst. 12 ZDP ve znění do
+     * 31. 12. 2020) a nad 4× průměrné mzdy se přičítalo solidární zvýšení 7 % z hrubé
+     * mzdy. Příznak `super_gross_base` nese ten rozdíl jako data;
+     * {@see \MyInvoice\Service\Accounting\Payroll\PayrollCalculator} umí jen hrubou
+     * mzdu, takový ročník proto odmítne místo tichého výpočtu jiné zálohy.
+     */
+    private const PAYROLL_2019 = [
+        'employee_social' => 0.065,
+        'employee_health' => 0.045,
+        'employer_social' => 0.25,
+        'employer_health' => 0.090,
+        'health_total'    => 0.135,
+        'advance_tax'     => 0.15,
+        'advance_tax_high' => 0.22,
+        'super_gross_base' => true,
+    ];
+
+    private const PAYROLL_2020 = [
+        'employee_social' => 0.065,
+        'employee_health' => 0.045,
+        'employer_social' => 0.248,
+        'employer_health' => 0.090,
+        'health_total'    => 0.135,
+        'advance_tax'     => 0.15,
+        'advance_tax_high' => 0.22,
+        'super_gross_base' => true,
+    ];
+
+    /** Od 2021 záloha z hrubé mzdy, 15 % / 23 % nad 4× průměrné mzdy (zák. 609/2020 Sb.). */
+    private const PAYROLL_2021_2023 = [
+        'employee_social' => 0.065,
+        'employee_health' => 0.045,
+        'employer_social' => 0.248,
+        'employer_health' => 0.090,
+        'health_total'    => 0.135,
+        'advance_tax'     => 0.15,
+        'advance_tax_high' => 0.23,
+    ];
+
     private const TABLE = [
+        // ── Historické ročníky 2019–2023 (import účetnictví z dřívějších systémů) ──
+        // Hodnoty podle znění platného k 1. 1. daného roku; změna uprostřed roku je
+        // u dotčeného klíče v komentáři. Průměrná mzda (NV o VVZ): 2019 32 699,
+        // 2020 34 835, 2021 35 441, 2022 38 911, 2023 40 324 Kč. Do 2023 dále platilo:
+        // minimální VZ OSVČ hlavní 25 % / vedlejší 10 % průměrné mzdy (měsíčně nahoru
+        // na Kč, ročně × 12), vyměřovací základ 50 % zisku, hranice vyšší sazby
+        // 48× průměrné mzdy (4× měsíčně u záloh), DPPO 19 %, registrační limit DPH
+        // 1 000 000 Kč za 12 měsíců, čtvrtletní období DPH do obratu 10 mil. Kč,
+        // snížené sazby DPH 15 % a 10 % (klíč `vat_rate_reduced` nese první z nich).
+        //
+        // Klíče pro instituty zavedené později (§ 46 odst. 1 písm. f) a § 74b ZDPH,
+        // lhůta § 94 v pracovních dnech — vše od 2025) nesou hodnotu roku 2024 jen kvůli
+        // úplnosti sady. Konzumenti je pro starší ročníky nepoužijí: registrační služba
+        // vrací `applicable = false` (limity se rovnají) a korekce se dělají v běžném období.
+        2019 => [
+            'year' => 2019,
+            // Paušální režim (§ 2a ZDP) zavedl až zák. 540/2020 Sb. od 2021. Prázdný
+            // rozvrh znamená „režim neexistoval", ne nulovou zálohu.
+            'pausal_monthly' => [],
+            'band_ceilings' => [],
+            'credit_taxpayer' => 24840,
+            'credit_spouse'   => 24840,
+            'credit_disability_12' => 2520,
+            'credit_disability_3'  => 5040,
+            'credit_ztpp'          => 16140,
+            'child_credits'   => [15204, 19404, 24204],
+            // § 35c odst. 3 — bonus nejméně 100 Kč; do 2020 také nejvýše 60 300 Kč ročně
+            // (strop zrušen od 2021, sada pro něj klíč nemá).
+            'child_bonus_min' => 100,
+            'minimum_wage' => 13350,
+            'payroll' => self::PAYROLL_2019,
+            // § 38h odst. 2 (do 2020) — solidární zvýšení zálohy nad 4× průměrné mzdy.
+            'advance_tax_high_threshold' => 130796, // 4 × 32 699
+
+            'child_bonus_min_income' => 80100, // 6× minimální mzda
+            'spouse_income_limit' => 68000,
+            'spouse_child_max_age' => 3,
+            'fixed_asset_limit' => 40000, // 80 000 Kč až od 2021 (zák. 609/2020 Sb.)
+            // § 38g odst. 1 a 2 ZDP ve znění do 2022.
+            'filing_duty_income_limit' => 15000,
+            'filing_duty_other_income_limit' => 6000,
+            'separate_base_rate' => 0.15,
+            'transition_receivables_max_years' => 9,
+            'tax_loss_carry_years' => 5,
+            // Zpětné uplatnění ztráty (zák. 299/2020 Sb.) šlo i DO roku 2019 — sada se
+            // čte za rok, od jehož základu se ztráta odečítá.
+            'tax_loss_carryback_years' => 2,
+            'tax_loss_carryback_limit' => 30000000,
+            'tax_rate_low'        => 0.15,
+            // Do 2020 solidární zvýšení daně 7 % (§ 16a ZDP) nad 48× průměrné mzdy, tedy
+            // mezní sazba 22 %. U samotného § 7 to sedí přesně; zvýšení se ale počítalo
+            // jen z úhrnu § 6 (ze superhrubé mzdy) a § 7, ne z celého základu.
+            'tax_rate_high'       => 0.22,
+            'tax_high_threshold'  => 1569552, // 48 × 32 699
+            'social_rate'         => 0.292,
+            'health_rate'         => 0.135,
+            'social_assessment_pct' => 0.50,
+            'health_assessment_pct' => 0.50,
+            'social_min_base_main'      => 98100,   // 8 175 × 12
+            'social_min_base_secondary' => 39240,   // 3 270 × 12
+            'social_max_base'           => 1569552, // 48 × 32 699
+            'social_secondary_participation_threshold' => 78476,
+            'health_min_base'           => 196194,  // 50 % × 32 699 × 12
+            'expense_caps' => [30 => 600000, 40 => 800000, 60 => 1200000, 80 => 1600000],
+            // Strop 150 000 Kč platí jen pro bytovou potřebu obstaranou od 2021.
+            'mortgage_cap' => 300000,
+            'mortgage_cap_pre2021' => 300000,
+            'mortgage_pre2021_cutoff' => '2020-12-31',
+            // Do 2023 dva SAMOSTATNÉ stropy po 24 000 Kč (penzijní produkty / soukromé
+            // životní pojištění), společný strop 48 000 Kč až od 2024. Kalkulátory
+            // modelují jen společný strop — životní pojištění vedle penzijka proto
+            // uplatní méně, než zákon dovoloval.
+            'pension_cap'  => 24000,
+            'vat_limit_low'  => 1000000,
+            'vat_limit_high' => 1000000,
+            'vat_rate_standard' => 21.0,
+            'penalty_repo_surcharge_points' => 8.0,
+            'vat_quarterly_turnover_limit' => 10000000,
+            'vat_rate_reduced'  => 15.0,
+            'kh_item_threshold' => 10000,
+            'cash_payment_limit' => 270000,
+            'vat_coefficient_full_threshold_pct' => 95,
+            // Do 30. 6. 2021 platil práh 10 000 EUR jen pro telekomunikační, vysílací
+            // a elektronické služby (MOSS); zasílání zboží mělo prahy jednotlivých států.
+            'oss_threshold_eur' => 10000,
+            'bad_debt_provision_8a_50pct_months' => 18,
+            'bad_debt_provision_8a_100pct_months' => 30,
+            'bad_debt_provision_8c_months' => 12,
+            'bad_debt_provision_8c_limit' => 30000,
+            'receivable_limitation_warning_months' => 36,
+            'bad_debt_small_receivable_limit' => 10000,
+            'bad_debt_small_receivable_debtor_year_limit' => 20000,
+            'bad_debt_small_receivable_months' => 6,
+            'unpaid_liability_aging_months' => 30,
+            'advance_employment_exempt_share' => 0.50,
+            'advance_employment_half_share' => 0.15,
+            's74b_aging_months' => 6,
+            's79_claim_window_months' => 12,
+            'vat_adjustment_period_years' => [5, 10],
+            'vat_adjustment_tolerance_points' => 10,
+            'assessment_period_years' => 3,
+            'simplified_document_limit_with_vat' => 10000,
+            'oss_evidence_retention_years' => 10,
+            // § 94 odst. 1 do 2024: přihláška do 15 dnů po skončení měsíce překročení.
+            'vat_registration_application_deadline_working_days' => 10,
+            'corporate_tax_rate' => 0.19,
+            'withholding_rate'   => 0.15,
+            'dpp_withholding_limit' => 10000,
+            'dpp_withholding_limit_inclusive' => true,
+            'author_fee_withholding_limit' => 10000,
+            // Do 30. 6. 2019 2,3 %, od 1. 7. 2019 2,1 % (zák. 32/2019 Sb.).
+            'sickness_rate'             => 0.023,
+            'sickness_min_monthly_base' => 6000,
+            'sickness_participation_threshold' => 3000,
+            // Zvýšený strop 30 % platí až od 2020 (zák. 299/2020 Sb.).
+            'donation_cap_po_pct' => 0.10,
+            'donation_cap_fo_pct' => 0.15,
+            'donation_min_fo'     => 1000,
+            'donation_min_fo_pct' => 0.02,
+            'donation_min_po' => 2000,
+            'disabled_employee_credit'        => 18000,
+            'disabled_employee_credit_severe' => 60000,
+            'advance_threshold_low'  => 30000,
+            'advance_threshold_high' => 150000,
+            'advance_semiannual_rate' => 0.40,
+            'advance_quarterly_rate' => 0.25,
+            'advance_rounding_step' => 100,
+            'advance_semiannual_months' => [6, 12],
+            'advance_quarterly_months' => [3, 6, 9, 12],
+            // Strop 2 mil. Kč u M1 zavedl až zák. 349/2023 Sb. pro vozidla pořízená od
+            // 2024. Nula = v roce strop neexistoval (strategie odpisů pak nekrátí).
+            'm1_depreciation_limit' => 0,
+            // Okno mimořádných odpisů bezemisních vozidel (od 2024) pořízení v tomto
+            // roce nezahrnuje. Mimořádné odpisy 1. a 2. skupiny pro majetek pořízený
+            // 2020–2023 (zák. 299/2020 Sb. a navazující prodloužení) aplikace nemodeluje.
+            'extraordinary_depreciation' => ['eligible_from' => '2024-01-01', 'eligible_to' => '2028-12-31', 'total_months' => 24, 'phase1_months' => 12, 'phase1_share' => 0.60],
+            'depreciation_straight_rates' => [
+                'basic' => [1 => [20.0,40.0,33.3], 2 => [11.0,22.25,20.0], 3 => [5.5,10.5,10.0], 4 => [2.15,5.15,5.0], 5 => [1.4,3.4,3.4], 6 => [1.02,2.02,2.0]],
+                'p20' => [1 => [40.0,30.0,33.3], 2 => [31.0,17.25,20.0], 3 => [24.4,8.4,10.0]],
+                'p15' => [1 => [35.0,32.5,33.3], 2 => [26.0,18.5,20.0], 3 => [19.0,9.0,10.0]],
+                'p10' => [1 => [30.0,35.0,33.3], 2 => [21.0,19.75,20.0], 3 => [15.4,9.4,10.0]],
+            ],
+            'depreciation_accelerated_coefficients' => [1 => [3,4,3], 2 => [5,6,5], 3 => [10,11,10], 4 => [20,21,20], 5 => [30,31,30], 6 => [50,51,50]],
+            // § 1b zákona o účetnictví před zvýšením limitů pro účetní období od 2024.
+            'entity_category_thresholds' => [
+                'micro' => ['assets_net' => 9000000, 'net_turnover' => 18000000, 'employees' => 10],
+                'small' => ['assets_net' => 100000000, 'net_turnover' => 200000000, 'employees' => 50],
+                'medium' => ['assets_net' => 500000000, 'net_turnover' => 1000000000, 'employees' => 250],
+            ],
+            // Prodloužení lhůty o měsíc při elektronickém podání (§ 136 DŘ) platí až pro
+            // přiznání za 2020, přehledy pojišťovnám se počítají od lhůty přiznání.
+            // Lhůty za rok 2019 navíc posunula opatření k epidemii (prominutí do 1. 7. 2020).
+            'filing_deadlines' => ['dpfo_paper' => '04-01', 'dpfo_electronic' => '04-01', 'advisor' => '07-01', 'insurance_electronic' => '05-01', 'insurance_advisor' => '08-01', 'health_advance_day' => 8, 'tax_advance_day' => 15],
+            'rounding_base_po' => 1000,
+            'rounding_base_fo' => 100,
+        ],
+        2020 => [
+            'year' => 2020,
+            'pausal_monthly' => [],
+            'band_ceilings' => [],
+            'credit_taxpayer' => 24840,
+            'credit_spouse'   => 24840,
+            'credit_disability_12' => 2520,
+            'credit_disability_3'  => 5040,
+            'credit_ztpp'          => 16140,
+            'child_credits'   => [15204, 19404, 24204],
+            'child_bonus_min' => 100,
+            'minimum_wage' => 14600,
+            'payroll' => self::PAYROLL_2020,
+            'advance_tax_high_threshold' => 139340, // 4 × 34 835
+
+            'child_bonus_min_income' => 87600,
+            'spouse_income_limit' => 68000,
+            'spouse_child_max_age' => 3,
+            // Přechodné ustanovení zák. 609/2020 Sb. dovolilo u majetku pořízeného v roce
+            // 2020 zvolit už limit 80 000 Kč; zákonná výchozí hodnota roku je 40 000 Kč.
+            'fixed_asset_limit' => 40000,
+            'filing_duty_income_limit' => 15000,
+            'filing_duty_other_income_limit' => 6000,
+            'separate_base_rate' => 0.15,
+            'transition_receivables_max_years' => 9,
+            'tax_loss_carry_years' => 5,
+            'tax_loss_carryback_years' => 2,
+            'tax_loss_carryback_limit' => 30000000,
+            'tax_rate_low'        => 0.15,
+            'tax_rate_high'       => 0.22, // solidární zvýšení, viz rok 2019
+            'tax_high_threshold'  => 1672080, // 48 × 34 835
+            'social_rate'         => 0.292,
+            'health_rate'         => 0.135,
+            'social_assessment_pct' => 0.50,
+            'health_assessment_pct' => 0.50,
+            'social_min_base_main'      => 104508,  // 8 709 × 12
+            'social_min_base_secondary' => 41808,   // 3 484 × 12
+            'social_max_base'           => 1672080, // 48 × 34 835
+            'social_secondary_participation_threshold' => 83603,
+            'health_min_base'           => 209010,  // 50 % × 34 835 × 12
+            'expense_caps' => [30 => 600000, 40 => 800000, 60 => 1200000, 80 => 1600000],
+            'mortgage_cap' => 300000,
+            'mortgage_cap_pre2021' => 300000,
+            'mortgage_pre2021_cutoff' => '2020-12-31',
+            'pension_cap'  => 24000, // dva samostatné stropy, viz rok 2019
+            'vat_limit_low'  => 1000000,
+            'vat_limit_high' => 1000000,
+            'vat_rate_standard' => 21.0,
+            'penalty_repo_surcharge_points' => 8.0,
+            'vat_quarterly_turnover_limit' => 10000000,
+            'vat_rate_reduced'  => 15.0,
+            'kh_item_threshold' => 10000,
+            'cash_payment_limit' => 270000,
+            'vat_coefficient_full_threshold_pct' => 95,
+            'oss_threshold_eur' => 10000,
+            'bad_debt_provision_8a_50pct_months' => 18,
+            'bad_debt_provision_8a_100pct_months' => 30,
+            'bad_debt_provision_8c_months' => 12,
+            'bad_debt_provision_8c_limit' => 30000,
+            'receivable_limitation_warning_months' => 36,
+            'bad_debt_small_receivable_limit' => 10000,
+            'bad_debt_small_receivable_debtor_year_limit' => 20000,
+            'bad_debt_small_receivable_months' => 6,
+            'unpaid_liability_aging_months' => 30,
+            'advance_employment_exempt_share' => 0.50,
+            'advance_employment_half_share' => 0.15,
+            's74b_aging_months' => 6,
+            's79_claim_window_months' => 12,
+            'vat_adjustment_period_years' => [5, 10],
+            'vat_adjustment_tolerance_points' => 10,
+            'assessment_period_years' => 3,
+            'simplified_document_limit_with_vat' => 10000,
+            'oss_evidence_retention_years' => 10,
+            'vat_registration_application_deadline_working_days' => 10,
+            'corporate_tax_rate' => 0.19,
+            'withholding_rate'   => 0.15,
+            'dpp_withholding_limit' => 10000,
+            'dpp_withholding_limit_inclusive' => true,
+            'author_fee_withholding_limit' => 10000,
+            'sickness_rate'             => 0.021,
+            'sickness_min_monthly_base' => 6000,
+            'sickness_participation_threshold' => 3000,
+            'donation_cap_po_pct' => 0.30,
+            'donation_cap_fo_pct' => 0.30,
+            'donation_min_fo'     => 1000,
+            'donation_min_fo_pct' => 0.02,
+            'donation_min_po' => 2000,
+            'disabled_employee_credit'        => 18000,
+            'disabled_employee_credit_severe' => 60000,
+            'advance_threshold_low'  => 30000,
+            'advance_threshold_high' => 150000,
+            'advance_semiannual_rate' => 0.40,
+            'advance_quarterly_rate' => 0.25,
+            'advance_rounding_step' => 100,
+            'advance_semiannual_months' => [6, 12],
+            'advance_quarterly_months' => [3, 6, 9, 12],
+            'm1_depreciation_limit' => 0,
+            'extraordinary_depreciation' => ['eligible_from' => '2024-01-01', 'eligible_to' => '2028-12-31', 'total_months' => 24, 'phase1_months' => 12, 'phase1_share' => 0.60],
+            'depreciation_straight_rates' => [
+                'basic' => [1 => [20.0,40.0,33.3], 2 => [11.0,22.25,20.0], 3 => [5.5,10.5,10.0], 4 => [2.15,5.15,5.0], 5 => [1.4,3.4,3.4], 6 => [1.02,2.02,2.0]],
+                'p20' => [1 => [40.0,30.0,33.3], 2 => [31.0,17.25,20.0], 3 => [24.4,8.4,10.0]],
+                'p15' => [1 => [35.0,32.5,33.3], 2 => [26.0,18.5,20.0], 3 => [19.0,9.0,10.0]],
+                'p10' => [1 => [30.0,35.0,33.3], 2 => [21.0,19.75,20.0], 3 => [15.4,9.4,10.0]],
+            ],
+            'depreciation_accelerated_coefficients' => [1 => [3,4,3], 2 => [5,6,5], 3 => [10,11,10], 4 => [20,21,20], 5 => [30,31,30], 6 => [50,51,50]],
+            'entity_category_thresholds' => [
+                'micro' => ['assets_net' => 9000000, 'net_turnover' => 18000000, 'employees' => 10],
+                'small' => ['assets_net' => 100000000, 'net_turnover' => 200000000, 'employees' => 50],
+                'medium' => ['assets_net' => 500000000, 'net_turnover' => 1000000000, 'employees' => 250],
+            ],
+            // První přiznání s lhůtou prodlouženou o měsíc při elektronickém podání:
+            // 1. 5. 2021 byla sobota, přiznání tedy 3. 5. a přehled pojišťovně 3. 6. 2021.
+            'filing_deadlines' => ['dpfo_paper' => '04-01', 'dpfo_electronic' => '05-01', 'advisor' => '07-01', 'insurance_electronic' => '06-03', 'insurance_advisor' => '08-01', 'health_advance_day' => 8, 'tax_advance_day' => 15],
+            'rounding_base_po' => 1000,
+            'rounding_base_fo' => 100,
+        ],
+        2021 => [
+            'year' => 2021,
+            // Paušální režim 2021–2022: jediná záloha pro všechny (5 469 Kč/měs) a limit
+            // příjmů 1 000 000 Kč bez ohledu na výdajový paušál. Tři pásma až od 2023,
+            // proto všechna pásma nesou tutéž zálohu i strop.
+            'pausal_monthly' => [
+                ['from' => '2021-01-01', 'band1' => 5469, 'band2' => 5469, 'band3' => 5469],
+            ],
+            'band_ceilings' => [
+                30 => ['band1' => 1000000, 'band2' => 1000000, 'band3' => 1000000],
+                40 => ['band1' => 1000000, 'band2' => 1000000, 'band3' => 1000000],
+                60 => ['band1' => 1000000, 'band2' => 1000000, 'band3' => 1000000],
+                80 => ['band1' => 1000000, 'band2' => 1000000, 'band3' => 1000000],
+            ],
+            'credit_taxpayer' => 27840, // zák. 609/2020 Sb.
+            'credit_spouse'   => 24840,
+            'credit_disability_12' => 2520,
+            'credit_disability_3'  => 5040,
+            'credit_ztpp'          => 16140,
+            // Zvýšení na 2. a 3.+ dítě platí zpětně pro celý rok 2021.
+            'child_credits'   => [15204, 22320, 27840],
+            'child_bonus_min' => 100,
+            'minimum_wage' => 15200,
+            'payroll' => self::PAYROLL_2021_2023,
+            'advance_tax_high_threshold' => 141764, // 4 × 35 441
+
+            'child_bonus_min_income' => 91200,
+            'spouse_income_limit' => 68000,
+            'spouse_child_max_age' => 3,
+            'fixed_asset_limit' => 80000,
+            'filing_duty_income_limit' => 15000,
+            'filing_duty_other_income_limit' => 6000,
+            'separate_base_rate' => 0.15,
+            'transition_receivables_max_years' => 9,
+            'tax_loss_carry_years' => 5,
+            'tax_loss_carryback_years' => 2,
+            'tax_loss_carryback_limit' => 30000000,
+            'tax_rate_low'        => 0.15,
+            'tax_rate_high'       => 0.23, // od 2021, superhrubá mzda zrušena
+            'tax_high_threshold'  => 1701168, // 48 × 35 441
+            'social_rate'         => 0.292,
+            'health_rate'         => 0.135,
+            'social_assessment_pct' => 0.50,
+            'health_assessment_pct' => 0.50,
+            'social_min_base_main'      => 106332,  // 8 861 × 12
+            'social_min_base_secondary' => 42540,   // 3 545 × 12
+            'social_max_base'           => 1701168, // 48 × 35 441
+            'social_secondary_participation_threshold' => 85058,
+            'health_min_base'           => 212646,  // 50 % × 35 441 × 12
+            'expense_caps' => [30 => 600000, 40 => 800000, 60 => 1200000, 80 => 1600000],
+            'mortgage_cap' => 150000,
+            'mortgage_cap_pre2021' => 300000,
+            'mortgage_pre2021_cutoff' => '2020-12-31',
+            'pension_cap'  => 24000, // dva samostatné stropy, viz rok 2019
+            'vat_limit_low'  => 1000000,
+            'vat_limit_high' => 1000000,
+            'vat_rate_standard' => 21.0,
+            'penalty_repo_surcharge_points' => 8.0,
+            'vat_quarterly_turnover_limit' => 10000000,
+            'vat_rate_reduced'  => 15.0,
+            'kh_item_threshold' => 10000,
+            'cash_payment_limit' => 270000,
+            'vat_coefficient_full_threshold_pct' => 95,
+            'oss_threshold_eur' => 10000, // OSS od 1. 7. 2021
+            'bad_debt_provision_8a_50pct_months' => 18,
+            'bad_debt_provision_8a_100pct_months' => 30,
+            'bad_debt_provision_8c_months' => 12,
+            'bad_debt_provision_8c_limit' => 30000,
+            'receivable_limitation_warning_months' => 36,
+            'bad_debt_small_receivable_limit' => 10000,
+            'bad_debt_small_receivable_debtor_year_limit' => 20000,
+            'bad_debt_small_receivable_months' => 6,
+            'unpaid_liability_aging_months' => 30,
+            'advance_employment_exempt_share' => 0.50,
+            'advance_employment_half_share' => 0.15,
+            's74b_aging_months' => 6,
+            's79_claim_window_months' => 12,
+            'vat_adjustment_period_years' => [5, 10],
+            'vat_adjustment_tolerance_points' => 10,
+            'assessment_period_years' => 3,
+            'simplified_document_limit_with_vat' => 10000,
+            'oss_evidence_retention_years' => 10,
+            'vat_registration_application_deadline_working_days' => 10,
+            'corporate_tax_rate' => 0.19,
+            'withholding_rate'   => 0.15,
+            'dpp_withholding_limit' => 10000,
+            'dpp_withholding_limit_inclusive' => true,
+            'author_fee_withholding_limit' => 10000,
+            'sickness_rate'             => 0.021,
+            'sickness_min_monthly_base' => 7000,
+            'sickness_participation_threshold' => 3500,
+            'donation_cap_po_pct' => 0.30,
+            'donation_cap_fo_pct' => 0.30,
+            'donation_min_fo'     => 1000,
+            'donation_min_fo_pct' => 0.02,
+            'donation_min_po' => 2000,
+            'disabled_employee_credit'        => 18000,
+            'disabled_employee_credit_severe' => 60000,
+            'advance_threshold_low'  => 30000,
+            'advance_threshold_high' => 150000,
+            'advance_semiannual_rate' => 0.40,
+            'advance_quarterly_rate' => 0.25,
+            'advance_rounding_step' => 100,
+            'advance_semiannual_months' => [6, 12],
+            'advance_quarterly_months' => [3, 6, 9, 12],
+            'm1_depreciation_limit' => 0,
+            'extraordinary_depreciation' => ['eligible_from' => '2024-01-01', 'eligible_to' => '2028-12-31', 'total_months' => 24, 'phase1_months' => 12, 'phase1_share' => 0.60],
+            'depreciation_straight_rates' => [
+                'basic' => [1 => [20.0,40.0,33.3], 2 => [11.0,22.25,20.0], 3 => [5.5,10.5,10.0], 4 => [2.15,5.15,5.0], 5 => [1.4,3.4,3.4], 6 => [1.02,2.02,2.0]],
+                'p20' => [1 => [40.0,30.0,33.3], 2 => [31.0,17.25,20.0], 3 => [24.4,8.4,10.0]],
+                'p15' => [1 => [35.0,32.5,33.3], 2 => [26.0,18.5,20.0], 3 => [19.0,9.0,10.0]],
+                'p10' => [1 => [30.0,35.0,33.3], 2 => [21.0,19.75,20.0], 3 => [15.4,9.4,10.0]],
+            ],
+            'depreciation_accelerated_coefficients' => [1 => [3,4,3], 2 => [5,6,5], 3 => [10,11,10], 4 => [20,21,20], 5 => [30,31,30], 6 => [50,51,50]],
+            'entity_category_thresholds' => [
+                'micro' => ['assets_net' => 9000000, 'net_turnover' => 18000000, 'employees' => 10],
+                'small' => ['assets_net' => 100000000, 'net_turnover' => 200000000, 'employees' => 50],
+                'medium' => ['assets_net' => 500000000, 'net_turnover' => 1000000000, 'employees' => 250],
+            ],
+            'filing_deadlines' => ['dpfo_paper' => '04-01', 'dpfo_electronic' => '05-02', 'advisor' => '07-01', 'insurance_electronic' => '06-02', 'insurance_advisor' => '08-01', 'health_advance_day' => 8, 'tax_advance_day' => 15],
+            'rounding_base_po' => 1000,
+            'rounding_base_fo' => 100,
+        ],
+        2022 => [
+            'year' => 2022,
+            'pausal_monthly' => [
+                ['from' => '2022-01-01', 'band1' => 5994, 'band2' => 5994, 'band3' => 5994],
+            ],
+            'band_ceilings' => [
+                30 => ['band1' => 1000000, 'band2' => 1000000, 'band3' => 1000000],
+                40 => ['band1' => 1000000, 'band2' => 1000000, 'band3' => 1000000],
+                60 => ['band1' => 1000000, 'band2' => 1000000, 'band3' => 1000000],
+                80 => ['band1' => 1000000, 'band2' => 1000000, 'band3' => 1000000],
+            ],
+            // Zvýšeno zpětně pro celý rok 2022.
+            'credit_taxpayer' => 30840,
+            'credit_spouse'   => 24840,
+            'credit_disability_12' => 2520,
+            'credit_disability_3'  => 5040,
+            'credit_ztpp'          => 16140,
+            'child_credits'   => [15204, 22320, 27840],
+            'child_bonus_min' => 100,
+            'minimum_wage' => 16200,
+            'payroll' => self::PAYROLL_2021_2023,
+            'advance_tax_high_threshold' => 155644, // 4 × 38 911
+
+            'child_bonus_min_income' => 97200,
+            'spouse_income_limit' => 68000,
+            'spouse_child_max_age' => 3,
+            'fixed_asset_limit' => 80000,
+            'filing_duty_income_limit' => 15000,
+            'filing_duty_other_income_limit' => 6000,
+            'separate_base_rate' => 0.15,
+            'transition_receivables_max_years' => 9,
+            'tax_loss_carry_years' => 5,
+            'tax_loss_carryback_years' => 2,
+            'tax_loss_carryback_limit' => 30000000,
+            'tax_rate_low'        => 0.15,
+            'tax_rate_high'       => 0.23,
+            'tax_high_threshold'  => 1867728, // 48 × 38 911
+            'social_rate'         => 0.292,
+            'health_rate'         => 0.135,
+            'social_assessment_pct' => 0.50,
+            'health_assessment_pct' => 0.50,
+            'social_min_base_main'      => 116736,  // 9 728 × 12
+            'social_min_base_secondary' => 46704,   // 3 892 × 12
+            'social_max_base'           => 1867728, // 48 × 38 911
+            'social_secondary_participation_threshold' => 93387,
+            'health_min_base'           => 233466,  // 50 % × 38 911 × 12
+            'expense_caps' => [30 => 600000, 40 => 800000, 60 => 1200000, 80 => 1600000],
+            'mortgage_cap' => 150000,
+            'mortgage_cap_pre2021' => 300000,
+            'mortgage_pre2021_cutoff' => '2020-12-31',
+            'pension_cap'  => 24000, // dva samostatné stropy, viz rok 2019
+            'vat_limit_low'  => 1000000,
+            'vat_limit_high' => 1000000,
+            'vat_rate_standard' => 21.0,
+            'penalty_repo_surcharge_points' => 8.0,
+            'vat_quarterly_turnover_limit' => 10000000,
+            'vat_rate_reduced'  => 15.0,
+            'kh_item_threshold' => 10000,
+            'cash_payment_limit' => 270000,
+            'vat_coefficient_full_threshold_pct' => 95,
+            'oss_threshold_eur' => 10000,
+            'bad_debt_provision_8a_50pct_months' => 18,
+            'bad_debt_provision_8a_100pct_months' => 30,
+            'bad_debt_provision_8c_months' => 12,
+            'bad_debt_provision_8c_limit' => 30000,
+            'receivable_limitation_warning_months' => 36,
+            'bad_debt_small_receivable_limit' => 10000,
+            'bad_debt_small_receivable_debtor_year_limit' => 20000,
+            'bad_debt_small_receivable_months' => 6,
+            'unpaid_liability_aging_months' => 30,
+            'advance_employment_exempt_share' => 0.50,
+            'advance_employment_half_share' => 0.15,
+            's74b_aging_months' => 6,
+            's79_claim_window_months' => 12,
+            'vat_adjustment_period_years' => [5, 10],
+            'vat_adjustment_tolerance_points' => 10,
+            'assessment_period_years' => 3,
+            'simplified_document_limit_with_vat' => 10000,
+            'oss_evidence_retention_years' => 10,
+            'vat_registration_application_deadline_working_days' => 10,
+            'corporate_tax_rate' => 0.19,
+            'withholding_rate'   => 0.15,
+            'dpp_withholding_limit' => 10000,
+            'dpp_withholding_limit_inclusive' => true,
+            'author_fee_withholding_limit' => 10000,
+            'sickness_rate'             => 0.021,
+            'sickness_min_monthly_base' => 7000,
+            'sickness_participation_threshold' => 3500,
+            'donation_cap_po_pct' => 0.30,
+            'donation_cap_fo_pct' => 0.30,
+            'donation_min_fo'     => 1000,
+            'donation_min_fo_pct' => 0.02,
+            'donation_min_po' => 2000,
+            'disabled_employee_credit'        => 18000,
+            'disabled_employee_credit_severe' => 60000,
+            'advance_threshold_low'  => 30000,
+            'advance_threshold_high' => 150000,
+            'advance_semiannual_rate' => 0.40,
+            'advance_quarterly_rate' => 0.25,
+            'advance_rounding_step' => 100,
+            'advance_semiannual_months' => [6, 12],
+            'advance_quarterly_months' => [3, 6, 9, 12],
+            'm1_depreciation_limit' => 0,
+            'extraordinary_depreciation' => ['eligible_from' => '2024-01-01', 'eligible_to' => '2028-12-31', 'total_months' => 24, 'phase1_months' => 12, 'phase1_share' => 0.60],
+            'depreciation_straight_rates' => [
+                'basic' => [1 => [20.0,40.0,33.3], 2 => [11.0,22.25,20.0], 3 => [5.5,10.5,10.0], 4 => [2.15,5.15,5.0], 5 => [1.4,3.4,3.4], 6 => [1.02,2.02,2.0]],
+                'p20' => [1 => [40.0,30.0,33.3], 2 => [31.0,17.25,20.0], 3 => [24.4,8.4,10.0]],
+                'p15' => [1 => [35.0,32.5,33.3], 2 => [26.0,18.5,20.0], 3 => [19.0,9.0,10.0]],
+                'p10' => [1 => [30.0,35.0,33.3], 2 => [21.0,19.75,20.0], 3 => [15.4,9.4,10.0]],
+            ],
+            'depreciation_accelerated_coefficients' => [1 => [3,4,3], 2 => [5,6,5], 3 => [10,11,10], 4 => [20,21,20], 5 => [30,31,30], 6 => [50,51,50]],
+            'entity_category_thresholds' => [
+                'micro' => ['assets_net' => 9000000, 'net_turnover' => 18000000, 'employees' => 10],
+                'small' => ['assets_net' => 100000000, 'net_turnover' => 200000000, 'employees' => 50],
+                'medium' => ['assets_net' => 500000000, 'net_turnover' => 1000000000, 'employees' => 250],
+            ],
+            'filing_deadlines' => ['dpfo_paper' => '04-01', 'dpfo_electronic' => '05-02', 'advisor' => '07-01', 'insurance_electronic' => '06-02', 'insurance_advisor' => '08-01', 'health_advance_day' => 8, 'tax_advance_day' => 15],
+            'rounding_base_po' => 1000,
+            'rounding_base_fo' => 100,
+        ],
+        2023 => [
+            'year' => 2023,
+            // Tři pásma od 2023 (zák. 366/2022 Sb.), podmínky pásem shodné s rokem 2024.
+            'pausal_monthly' => [
+                ['from' => '2023-01-01', 'band1' => 6208, 'band2' => 16000, 'band3' => 26000],
+            ],
+            'band_ceilings' => [
+                30 => ['band1' => 1000000, 'band2' => 1500000, 'band3' => 2000000],
+                40 => ['band1' => 1000000, 'band2' => 1500000, 'band3' => 2000000],
+                60 => ['band1' => 1500000, 'band2' => 2000000, 'band3' => 2000000],
+                80 => ['band1' => 2000000, 'band2' => 2000000, 'band3' => 2000000],
+            ],
+            'credit_taxpayer' => 30840,
+            'credit_spouse'   => 24840,
+            'credit_disability_12' => 2520,
+            'credit_disability_3'  => 5040,
+            'credit_ztpp'          => 16140,
+            'child_credits'   => [15204, 22320, 27840],
+            'child_bonus_min' => 100,
+            'minimum_wage' => 17300,
+            'payroll' => self::PAYROLL_2021_2023,
+            'advance_tax_high_threshold' => 161296, // 4 × 40 324
+
+            'child_bonus_min_income' => 103800,
+            'spouse_income_limit' => 68000,
+            'spouse_child_max_age' => 3,
+            'fixed_asset_limit' => 80000,
+            // § 38g odst. 1 a 2 ZDP — zvýšeno zák. 366/2022 Sb. poprvé za rok 2023.
+            'filing_duty_income_limit' => 50000,
+            'filing_duty_other_income_limit' => 20000,
+            'separate_base_rate' => 0.15,
+            'transition_receivables_max_years' => 9,
+            'tax_loss_carry_years' => 5,
+            'tax_loss_carryback_years' => 2,
+            'tax_loss_carryback_limit' => 30000000,
+            'tax_rate_low'        => 0.15,
+            'tax_rate_high'       => 0.23,
+            'tax_high_threshold'  => 1935552, // 48 × 40 324
+            'social_rate'         => 0.292,
+            'health_rate'         => 0.135,
+            'social_assessment_pct' => 0.50,
+            'health_assessment_pct' => 0.50,
+            'social_min_base_main'      => 120972,  // 10 081 × 12
+            'social_min_base_secondary' => 48396,   // 4 033 × 12
+            'social_max_base'           => 1935552, // 48 × 40 324
+            'social_secondary_participation_threshold' => 96777,
+            'health_min_base'           => 241944,  // 50 % × 40 324 × 12
+            'expense_caps' => [30 => 600000, 40 => 800000, 60 => 1200000, 80 => 1600000],
+            'mortgage_cap' => 150000,
+            'mortgage_cap_pre2021' => 300000,
+            'mortgage_pre2021_cutoff' => '2020-12-31',
+            'pension_cap'  => 24000, // dva samostatné stropy, viz rok 2019
+            'vat_limit_low'  => 1000000,
+            'vat_limit_high' => 1000000,
+            'vat_rate_standard' => 21.0,
+            'penalty_repo_surcharge_points' => 8.0,
+            'vat_quarterly_turnover_limit' => 10000000,
+            'vat_rate_reduced'  => 15.0,
+            'kh_item_threshold' => 10000,
+            'cash_payment_limit' => 270000,
+            'vat_coefficient_full_threshold_pct' => 95,
+            'oss_threshold_eur' => 10000,
+            'bad_debt_provision_8a_50pct_months' => 18,
+            'bad_debt_provision_8a_100pct_months' => 30,
+            'bad_debt_provision_8c_months' => 12,
+            'bad_debt_provision_8c_limit' => 30000,
+            'receivable_limitation_warning_months' => 36,
+            'bad_debt_small_receivable_limit' => 10000,
+            'bad_debt_small_receivable_debtor_year_limit' => 20000,
+            'bad_debt_small_receivable_months' => 6,
+            'unpaid_liability_aging_months' => 30,
+            'advance_employment_exempt_share' => 0.50,
+            'advance_employment_half_share' => 0.15,
+            's74b_aging_months' => 6,
+            's79_claim_window_months' => 12,
+            'vat_adjustment_period_years' => [5, 10],
+            'vat_adjustment_tolerance_points' => 10,
+            'assessment_period_years' => 3,
+            'simplified_document_limit_with_vat' => 10000,
+            'oss_evidence_retention_years' => 10,
+            'vat_registration_application_deadline_working_days' => 10,
+            'corporate_tax_rate' => 0.19,
+            'withholding_rate'   => 0.15,
+            'dpp_withholding_limit' => 10000,
+            'dpp_withholding_limit_inclusive' => true,
+            'author_fee_withholding_limit' => 10000,
+            'sickness_rate'             => 0.021,
+            'sickness_min_monthly_base' => 8000,
+            'sickness_participation_threshold' => 4000,
+            'donation_cap_po_pct' => 0.30,
+            'donation_cap_fo_pct' => 0.30,
+            'donation_min_fo'     => 1000,
+            'donation_min_fo_pct' => 0.02,
+            'donation_min_po' => 2000,
+            'disabled_employee_credit'        => 18000,
+            'disabled_employee_credit_severe' => 60000,
+            'advance_threshold_low'  => 30000,
+            'advance_threshold_high' => 150000,
+            'advance_semiannual_rate' => 0.40,
+            'advance_quarterly_rate' => 0.25,
+            'advance_rounding_step' => 100,
+            'advance_semiannual_months' => [6, 12],
+            'advance_quarterly_months' => [3, 6, 9, 12],
+            'm1_depreciation_limit' => 0,
+            'extraordinary_depreciation' => ['eligible_from' => '2024-01-01', 'eligible_to' => '2028-12-31', 'total_months' => 24, 'phase1_months' => 12, 'phase1_share' => 0.60],
+            'depreciation_straight_rates' => [
+                'basic' => [1 => [20.0,40.0,33.3], 2 => [11.0,22.25,20.0], 3 => [5.5,10.5,10.0], 4 => [2.15,5.15,5.0], 5 => [1.4,3.4,3.4], 6 => [1.02,2.02,2.0]],
+                'p20' => [1 => [40.0,30.0,33.3], 2 => [31.0,17.25,20.0], 3 => [24.4,8.4,10.0]],
+                'p15' => [1 => [35.0,32.5,33.3], 2 => [26.0,18.5,20.0], 3 => [19.0,9.0,10.0]],
+                'p10' => [1 => [30.0,35.0,33.3], 2 => [21.0,19.75,20.0], 3 => [15.4,9.4,10.0]],
+            ],
+            'depreciation_accelerated_coefficients' => [1 => [3,4,3], 2 => [5,6,5], 3 => [10,11,10], 4 => [20,21,20], 5 => [30,31,30], 6 => [50,51,50]],
+            'entity_category_thresholds' => [
+                'micro' => ['assets_net' => 9000000, 'net_turnover' => 18000000, 'employees' => 10],
+                'small' => ['assets_net' => 100000000, 'net_turnover' => 200000000, 'employees' => 50],
+                'medium' => ['assets_net' => 500000000, 'net_turnover' => 1000000000, 'employees' => 250],
+            ],
+            'filing_deadlines' => ['dpfo_paper' => '04-01', 'dpfo_electronic' => '05-02', 'advisor' => '07-01', 'insurance_electronic' => '06-02', 'insurance_advisor' => '08-01', 'health_advance_day' => 8, 'tax_advance_day' => 15],
+            'rounding_base_po' => 1000,
+            'rounding_base_fo' => 100,
+        ],
         2024 => [
             'year' => 2024,
             // Sazba se v roce 2024 neměnila — jediný segment od 1. 1.

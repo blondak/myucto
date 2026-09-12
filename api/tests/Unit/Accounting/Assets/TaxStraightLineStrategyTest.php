@@ -172,6 +172,33 @@ final class TaxStraightLineStrategyTest extends TestCase
         self::assertSame(3000000.0, $this->sumFull($rows), 'ZC jede z full_amount.');
     }
 
+    /**
+     * Strop 2 mil. Kč pro M1 zavedl až konsolidační balíček od 2024. Ročníky, které
+     * ho neznají, nesou `m1_depreciation_limit` = 0 a odpis se krátit nesmí.
+     */
+    public function testM1LimitDoesNotApplyInYearsWithoutIt(): void
+    {
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE tax_constants (year INTEGER PRIMARY KEY, data TEXT NOT NULL)');
+        $conn = new \MyInvoice\Infrastructure\Database\Connection(
+            $this->createStub(\MyInvoice\Infrastructure\Config\Config::class),
+        );
+        (new \ReflectionClass($conn))->getProperty('pdo')->setValue($conn, $pdo);
+        $strategy = new TaxStraightLineStrategy(new \MyInvoice\Repository\TaxConstantsRepository($conn));
+
+        $rows = $strategy->plan($this->ctx([
+            'taxGroup' => 2,
+            'inputPrice' => 3000000.0,
+            'isM1Vehicle' => true,
+            'putIntoUseDate' => '2022-05-15',
+        ]));
+
+        self::assertSame(2022, $rows[0]['fiscal_year']);
+        self::assertSame(330000.0, (float) $rows[0]['amount'], '2022: bez stropu M1, uplatní se celý odpis.');
+        self::assertSame(667500.0, (float) $rows[1]['amount'], '2023: bez stropu M1, uplatní se celý odpis.');
+    }
+
     public function testU9PausedYearShiftsPlanWithoutResidualChange(): void
     {
         $rows = $this->strategy->plan($this->ctx([

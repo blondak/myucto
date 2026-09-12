@@ -160,7 +160,8 @@ final class TaxStraightLineStrategy implements TaxDepreciationStrategyInterface
             $full = min((float) ceil(round($raw, 6)), $zc);
             $amount = $full;
             $note = null;
-            if ($m1Active && $vc > $m1Limit) {
+            // Limit 0 = ročník, který strop M1 ještě neznal (zaveden od 2024).
+            if ($m1Active && $m1Limit > 0 && $vc > $m1Limit) {
                 $k = $m1Limit / $vc;
                 $amount = min((float) ceil(round($full * $k, 6)), max(0.0, $m1Limit - $sumClaimed));
                 $note = '§30e — uplatněná část odpisu koeficientem ' . number_format($m1Limit, 0, ',', ' ') . ' / VC.';

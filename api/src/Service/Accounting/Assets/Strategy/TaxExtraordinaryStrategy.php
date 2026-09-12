@@ -93,7 +93,8 @@ final class TaxExtraordinaryStrategy implements TaxDepreciationStrategyInterface
 
         $y1 = $acquisitionYear;
         $m1Limit = (float) ($yearConstants['m1_depreciation_limit'] ?? 2000000.0);
-        $m1Active = $ctx->isM1Vehicle && !$ctx->m1LimitException && $vc > $m1Limit;
+        // Limit 0 = ročník, který strop M1 ještě neznal (zaveden od 2024).
+        $m1Active = $ctx->isM1Vehicle && !$ctx->m1LimitException && $m1Limit > 0 && $vc > $m1Limit;
         $k = $m1Active ? $m1Limit / $vc : 1.0;
 
         $rows = [];
