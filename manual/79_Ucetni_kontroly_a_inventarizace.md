@@ -159,7 +159,7 @@ Sestava jen hlásí, nic neopravuje.
 Faktury a dobropisy, které mají nastavenou **stejnou číselnou šablonu**, sestava
 posuzuje jako jednu společnou řadu — číslo použité dobropisem se u faktur nehlásí
 jako chybějící a naopak. Má-li klient v nastavení vlastní šablonu číslování
-(`Systém → Dodavatelé → Číslování faktur`), počítá se jako samostatná, nezávislá
+(`Systém → Firmy → Číslování faktur`), počítá se jako samostatná, nezávislá
 řada. Kolize dvou různých šablon (dvě řady vyprodukující stejný VS) hlásí
 samostatná kontrola v nastavení dodavatele — viz **K8** výše.
 

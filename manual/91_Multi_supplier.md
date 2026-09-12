@@ -31,7 +31,7 @@ Při přepnutí:
 
 ## 91.2 Přidání nového dodavatele
 
-V hlavním menu **Systém → Dodavatelé**. Novou firmu může založit superadmin
+V hlavním menu **Systém → Firmy**. Novou firmu může založit superadmin
 nebo uživatel s pevnou rolí **Admin Plus**. Běžná role **Admin** pracuje jen
 s firmami, které jí přidělí superadmin.
 
@@ -101,7 +101,7 @@ Nastavení aktuálně zvolené firmy je v **Firma → Nastavení** rozdělené d
 záložek **Údaje firmy**, **Fakturace**, **Daně a účetnictví** a **Pokročilé**.
 Změny ze všech záložek se ukládají společným tlačítkem dole pod obsahem.
 
-**Systém → Dodavatelé → klik na řádek → Editovat**.
+**Systém → Firmy → klik na řádek → Editovat**.
 
 Záložky:
 
@@ -418,7 +418,7 @@ e-shop číselníky, inventury, sestavy) — podrobně viz [Sklad](33_Sklad.md).
 
 ## 91.7 Smazání dodavatele
 
-Na stránce **Systém → Dodavatelé** (`/admin/suppliers`) má superadmin u každého
+Na stránce **Systém → Firmy** (`/admin/suppliers`) má superadmin u každého
 řádku tlačítko **Smazat**.
 
 > [!WARNING]

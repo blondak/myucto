@@ -12,8 +12,16 @@ import { renderMarkdown } from '@/utils/miniMarkdown'
 const NL = String.fromCharCode(10)
 
 const area = (wrapper: ReturnType<typeof mount>) => wrapper.get<HTMLTextAreaElement>('textarea')
+// Tooltip nese i zkratku („markdown_editor.bold (Ctrl+B)"), tlačítko se hledá podle začátku.
 const button = (wrapper: ReturnType<typeof mount>, title: string) =>
-  wrapper.findAll('button').find(b => b.attributes('title') === title)!
+  wrapper.findAll('button').find(b => (b.attributes('title') ?? '').startsWith(title))!
+
+async function press(wrapper: ReturnType<typeof mount>, init: KeyboardEventInit): Promise<KeyboardEvent> {
+  const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...init })
+  area(wrapper).element.dispatchEvent(event)
+  await nextTick()
+  return event
+}
 
 describe('miniMarkdown', () => {
   it('vykreslí základní značky', () => {
@@ -167,5 +175,124 @@ describe('MarkdownEditor', () => {
 
     await area(wrapper).setValue('# Nadpis\n\n- bod')
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['# Nadpis\n\n- bod'])
+  })
+})
+
+describe('MarkdownEditor — klávesové zkratky', () => {
+  it('Ctrl+B obalí výběr tučně a zkratku pohltí', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'ahoj svete' } })
+    area(wrapper).element.setSelectionRange(5, 10)
+
+    const event = await press(wrapper, { key: 'b', ctrlKey: true })
+    expect(event.defaultPrevented).toBe(true)
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['ahoj **svete**'])
+  })
+
+  it('druhé Ctrl+B tučné písmo sundá, nezdvojí značky', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'ahoj **svete**' } })
+    area(wrapper).element.setSelectionRange(7, 12)
+
+    await press(wrapper, { key: 'b', ctrlKey: true })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['ahoj svete'])
+  })
+
+  it('sundá značku i když je součástí výběru', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'ahoj **svete**' } })
+    area(wrapper).element.setSelectionRange(5, 14)
+
+    await press(wrapper, { key: 'b', ctrlKey: true })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['ahoj svete'])
+  })
+
+  it('kurzíva uvnitř tučného textu tučné nesundá, přidá tučnou kurzívu a zase ji vrátí', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'ahoj **svete**' } })
+    area(wrapper).element.setSelectionRange(7, 12)
+
+    await press(wrapper, { key: 'i', ctrlKey: true })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['ahoj ***svete***'])
+
+    await wrapper.setProps({ modelValue: 'ahoj ***svete***' })
+    area(wrapper).element.setSelectionRange(8, 13)
+    await press(wrapper, { key: 'i', ctrlKey: true })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['ahoj **svete**'])
+  })
+
+  it('Cmd na Macu funguje stejně jako Ctrl', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'kod' } })
+    area(wrapper).element.setSelectionRange(0, 3)
+
+    await press(wrapper, { key: 'e', metaKey: true })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['`kod`'])
+  })
+
+  it('Ctrl+Shift+X přeškrtne', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'staré' } })
+    area(wrapper).element.setSelectionRange(0, 5)
+
+    await press(wrapper, { key: 'X', code: 'KeyX', ctrlKey: true, shiftKey: true })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['~~staré~~'])
+  })
+
+  it('zkratka editoru přebije globální, Ctrl+K a Alt+Q ale projdou k aplikaci', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'web' }, attachTo: document.body })
+    const seen: string[] = []
+    // Globální useHotkey poslouchá na window ve fázi bublání.
+    const globalListener = (e: KeyboardEvent) => seen.push(`${e.ctrlKey ? 'ctrl+' : ''}${e.altKey ? 'alt+' : ''}${e.key}`)
+    window.addEventListener('keydown', globalListener)
+    try {
+      area(wrapper).element.setSelectionRange(0, 3)
+      await press(wrapper, { key: 'b', ctrlKey: true })
+      const palette = await press(wrapper, { key: 'k', ctrlKey: true })
+      await press(wrapper, { key: 'q', altKey: true })
+
+      expect(seen).toEqual(['ctrl+k', 'alt+q'])
+      expect(palette.defaultPrevented).toBe(false)
+      // Ctrl+K v editoru nic nevloží, odkaz je jen na tlačítku.
+      expect(wrapper.emitted('update:modelValue')).toEqual([['**web**']])
+    } finally {
+      window.removeEventListener('keydown', globalListener)
+      wrapper.unmount()
+    }
+  })
+
+  it('Ctrl+Shift+8/7/. udělají odrážku, číslovaný seznam a citaci podle fyzické klávesy', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'bod' } })
+    area(wrapper).element.setSelectionRange(1, 1)
+    // Na české klávesnici je na klávese 8 bez Shiftu „á" — rozhoduje `code`, ne `key`.
+    await press(wrapper, { key: '8', code: 'Digit8', ctrlKey: true, shiftKey: true })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['- bod'])
+
+    await wrapper.setProps({ modelValue: '- bod' })
+    area(wrapper).element.setSelectionRange(3, 3)
+    await press(wrapper, { key: '7', code: 'Digit7', ctrlKey: true, shiftKey: true })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['1. bod'])
+
+    await wrapper.setProps({ modelValue: '1. bod' })
+    area(wrapper).element.setSelectionRange(4, 4)
+    await press(wrapper, { key: ':', code: 'Period', ctrlKey: true, shiftKey: true })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['> bod'])
+  })
+
+  it('cizí zkratky (Ctrl+S) a AltGr (Ctrl+Alt) nechá prohlížeči', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'text' } })
+    area(wrapper).element.setSelectionRange(0, 4)
+
+    expect((await press(wrapper, { key: 's', ctrlKey: true })).defaultPrevented).toBe(false)
+    expect((await press(wrapper, { key: 'b', ctrlKey: true, altKey: true })).defaultPrevented).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('zablokovaný editor na zkratky nereaguje', async () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: 'text', disabled: true } })
+
+    expect((await press(wrapper, { key: 'b', ctrlKey: true })).defaultPrevented).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('tooltip tlačítka ukáže zkratku', () => {
+    const wrapper = mount(MarkdownEditor, { props: { modelValue: '' } })
+
+    expect(button(wrapper, 'markdown_editor.bold').attributes('title')).toMatch(/\((Ctrl\+|⌘)B\)$/)
+    expect(button(wrapper, 'markdown_editor.bullet').attributes('title')).toMatch(/\((Ctrl\+Shift\+|⌘⇧)8\)$/)
   })
 })

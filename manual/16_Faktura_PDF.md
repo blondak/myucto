@@ -282,7 +282,7 @@ Per dodavatel lze nastavit:
 - **Reply-To** — kam má klient odpovědět (např. `fakturace@vzorova-firma.cz` ≠
   technická adresa, ze které jde SMTP)
 
-Nastavuje se v **Systém → Dodavatelé → [tvůj dodavatel] → Editovat**.
+Nastavuje se v **Systém → Firmy → [tvůj dodavatel] → Editovat**.
 
 ### 16.4.4 Volitelné přílohy emailu
 

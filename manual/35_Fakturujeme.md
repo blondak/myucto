@@ -380,7 +380,7 @@ registraci k DPH** — typicky e-shop s lokálním skladem, kde plnění začín
 i končí v jiném státě.
 
 MyÚčto má jeden dodavatelský profil s jedním DIČ. Workaround: založ druhého
-dodavatele (`Nastavení → Dodavatelé → Přidat`) a přepínej mezi nimi přepínačem
+dodavatele (`Systém → Firmy → Přidat`) a přepínej mezi nimi přepínačem
 v hlavičce — viz [91. Více dodavatelů](91_Multi_supplier.md). **Není to
 plnohodnotná multi-jurisdikční podpora**: přiznání k DPH pro každou zemi řeš
 s místní účetní.

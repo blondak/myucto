@@ -3,7 +3,7 @@
 V hlavním menu **Systém** je rozbalovací podmenu se sekcemi pro konfiguraci
 aplikace:
 
-- **Dodavatelé** — viz [91. Multi-supplier](91_Multi_supplier.md)
+- **Firmy** — viz [91. Multi-supplier](91_Multi_supplier.md)
 - **Číselníky** — DPH sazby, země, jednotky a další pomocné seznamy
 - **Uživatelé** — správa lidí, kteří se přihlašují
 - **E-mail šablony** — texty automatických e-mailů
@@ -245,7 +245,7 @@ deaktivovat, smazat ani upravit jejich matici:
 |---|---|
 | **Superadmin** | Plný přístup k firmám i celému systému. Jako jediný spravuje uživatele, role a přiřazení firem. |
 | **Admin** | Může dělat vše v přidělených firmách a pracovat s více firmami, které mu přidělí superadmin. Nemění celosystémové položky v menu Systém. |
-| **Admin Plus** | Má práva role Admin a navíc může v **Systém → Dodavatelé** založit novou firmu. K nové firmě automaticky získá práva Admin. |
+| **Admin Plus** | Má práva role Admin a navíc může v **Systém → Firmy** založit novou firmu. K nové firmě automaticky získá práva Admin. |
 
 U klientské role má položka **Nastavení firmy** záměrně užší význam než interní
 právo **Měnit nastavení firmy**. Úroveň **Zápis** otevře v klientském menu pouze

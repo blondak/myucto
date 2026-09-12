@@ -347,7 +347,7 @@ spolehlivější.
 
 ### 999.5.2 Pohoda XML import vyžaduje kódy
 
-Před exportem nastav v **Systém → Číselníky → Dodavatelé → [tvůj] → záložka Pohoda**:
+Před exportem nastav v **Systém → Firmy → [tvoje firma] → záložka Pohoda**:
 číselnou řadu, středisko, činnost, předkontace. Bez toho Pohoda hlásí varování
 při importu.
 

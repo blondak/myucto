@@ -345,7 +345,7 @@ vyplnit, než začneš fakturovat. Vidí ho každý, kdo smí zapisovat.
 | Daně a účetnictví | Nastavení → Daně a účetnictví (`/admin/settings?tab=accounting`) |
 | Bankovní účty | [Banka → Účty](28_Banka.md) |
 | Vzhled faktur a logo | [Brandingové profily](92_Nastaveni.md#9212-brandingove-profily) |
-| Přidat další firmy | Jen licence na víc firem, dokud v ní zbývá místo — Systém → Dodavatelé (`/admin/suppliers`) |
+| Přidat další firmy | Jen licence na víc firem, dokud v ní zbývá místo — Systém → Firmy (`/admin/suppliers`) |
 | Číselné řady a doklady | Nastavení → Fakturace (`/admin/settings?tab=documents`) |
 | Číselné řady deníku | Jen podvojné účetnictví — [Účetní nástroje](88_Ucetni_nastroje.md) |
 | Avíza plateb z e-mailů | [Banka → Bankovní avíza z e-mailu](28_Banka.md) (`/bank?tab=email`) |

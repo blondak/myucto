@@ -243,6 +243,28 @@ describe('PayrollInsolvency', () => {
     )
   })
 
+  /*
+   * Hláška „Doplňte jej v Nastavení mezd" nechala účetní hledat, kde přesně.
+   * Účet správce je „Jiný příjemce" v Platebních účtech institucí, odkaz vede rovnou tam.
+   */
+  it('links to the institution accounts when no administrator account exists', async () => {
+    m.insolvencyOptions.mockResolvedValue({ ...options, recipient_accounts: [] })
+    m.insolvencyEvidence.mockResolvedValue(evidence({
+      insolvency_institution_account_id: null,
+      insolvency_payment_instruction_id: null,
+    }))
+    const RouterLinkStub = { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' }
+    const wrapper = mount(PayrollInsolvency, { global: { stubs: { RouterLink: RouterLinkStub } } })
+    await flushPromises()
+
+    const target = JSON.stringify({ path: '/payroll/settings', query: { tab: 'institutions' } })
+    const link = wrapper.get('[data-test="insolvency-open-accounts"]')
+    expect(link.attributes('data-to')).toBe(target)
+    const blocked = wrapper.get('[data-test="insolvency-save-blocked"]')
+    expect(blocked.text()).toContain('payroll.insolvency.blocked.account')
+    expect(blocked.find('a').attributes('data-to')).toBe(target)
+  })
+
   it('reloads evidence and options after a row-version conflict', async () => {
     m.saveInsolvencyEvidence.mockRejectedValueOnce({
       response: { data: { error: { code: 'row_version_conflict' } } },

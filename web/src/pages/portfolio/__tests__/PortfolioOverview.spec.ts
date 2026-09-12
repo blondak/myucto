@@ -11,6 +11,8 @@ const m = vi.hoisted(() => ({
   push: vi.fn(),
   setSupplier: vi.fn(),
   currentSupplierId: 2,
+  isSuperadmin: false,
+  isAdminPlusRole: false,
 }))
 
 vi.mock('@/api/portfolio', () => ({ portfolioApi: { overview: m.overview } }))
@@ -30,12 +32,22 @@ vi.mock('@/stores/supplier', () => ({
   }),
 }))
 
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    get isSuperadmin() { return m.isSuperadmin },
+    get isAdminPlusRole() { return m.isAdminPlusRole },
+  }),
+}))
+
 vi.mock('@/components/ui/buttonStyles', () => ({
-  ICONS: { cycle: 'M0 0' },
+  ICONS: { cycle: 'M0 0', factory: 'M0 0' },
   btnOutline: () => 'btn-outline',
+  btnFilled: () => 'btn-filled',
 }))
 
 import PortfolioOverview from '../PortfolioOverview.vue'
+
+const RouterLinkStub = { props: ['to'], template: '<a :href="to"><slot /></a>' }
 
 function company(over: Partial<PortfolioCompany> = {}): PortfolioCompany {
   return {
@@ -65,16 +77,20 @@ function company(over: Partial<PortfolioCompany> = {}): PortfolioCompany {
 
 async function mountWith(c: PortfolioCompany) {
   m.overview.mockResolvedValue({ companies: [c], total: 1, generated_at: '2026-08-02T10:00:00+02:00' })
-  const w = mount(PortfolioOverview)
+  const w = mount(PortfolioOverview, { global: { stubs: { RouterLink: RouterLinkStub } } })
   await flushPromises()
   return w
 }
 
+function resetMocks() {
+  vi.clearAllMocks()
+  m.currentSupplierId = 2
+  m.isSuperadmin = false
+  m.isAdminPlusRole = false
+}
+
 describe('PortfolioOverview — proklik „K doúčtování"', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    m.currentSupplierId = 2
-  })
+  beforeEach(resetMocks)
 
   it('vede na banku, když číslo tvoří jen bankovní pohyby', async () => {
     const w = await mountWith(company({
@@ -131,10 +147,7 @@ describe('PortfolioOverview — proklik „K doúčtování"', () => {
 })
 
 describe('PortfolioOverview — objem dat', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    m.currentSupplierId = 2
-  })
+  beforeEach(resetMocks)
 
   function volumeButton(w: Awaited<ReturnType<typeof mountWith>>, key: string) {
     return w.find('[data-testid="volume"]').findAll('button').find((b) => b.text().includes('portfolio.volume_' + key))
@@ -157,5 +170,32 @@ describe('PortfolioOverview — objem dat', () => {
 
     expect(volumeButton(w, 'journal_entries')).toBeUndefined()
     expect(volumeButton(w, 'cash_documents')).toBeDefined()
+  })
+})
+
+describe('PortfolioOverview — odkaz na správu firem', () => {
+  beforeEach(resetMocks)
+
+  it('superadmin má vedle Obnovit odkaz na Firmy', async () => {
+    m.isSuperadmin = true
+    const w = await mountWith(company())
+
+    const link = w.find('[data-testid="portfolio-companies-link"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href')).toBe('/admin/suppliers')
+    expect(link.text()).toContain('nav.suppliers')
+  })
+
+  it('Admin Plus odkaz vidí také', async () => {
+    m.isAdminPlusRole = true
+    const w = await mountWith(company())
+
+    expect(w.find('[data-testid="portfolio-companies-link"]').exists()).toBe(true)
+  })
+
+  it('účetní bez správy firem odkaz nevidí, stejně jako položku v menu', async () => {
+    const w = await mountWith(company())
+
+    expect(w.find('[data-testid="portfolio-companies-link"]').exists()).toBe(false)
   })
 })

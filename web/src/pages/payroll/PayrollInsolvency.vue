@@ -109,6 +109,9 @@ const saveBlockedReason = computed<string | null>(() => {
   return null
 })
 
+/** Účet správce se zakládá jako „Jiný příjemce" v Platebních účtech institucí (Nastavení mezd). */
+const institutionAccountsLink = { path: '/payroll/settings', query: { tab: 'institutions' } }
+
 function applyLoaded(loadedEvidence: EnforcementMonthEvidence, loadedOptions: InsolvencyOptions) {
   evidence.value = loadedEvidence
   options.value = loadedOptions
@@ -368,7 +371,10 @@ watch([employeeId, period], load, { immediate: true })
               {{ account.institution_name }} · {{ account.bank_account_masked }} · {{ account.currency_code }}
             </option>
           </select>
-          <span v-if="options.recipient_accounts.length === 0" class="mt-1 block text-danger-700">{{ t('payroll.insolvency.no_accounts') }}</span>
+          <span v-if="options.recipient_accounts.length === 0" class="mt-1 block text-danger-700">
+            {{ t('payroll.insolvency.no_accounts') }}
+            <router-link :to="institutionAccountsLink" class="font-medium underline" data-test="insolvency-open-accounts">{{ t('payroll.insolvency.open_institution_accounts') }}</router-link>
+          </span>
         </label>
         <div class="relative lg:col-span-2">
           <label class="text-xs font-medium text-neutral-600" for="insolvency-document-search">{{ t('payroll.insolvency.document') }}</label>
@@ -421,7 +427,10 @@ watch([employeeId, period], load, { immediate: true })
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
           {{ t('payroll.insolvency.cancel') }}
         </button>
-        <p v-if="!canSave && saveBlockedReason && !leavingApprovedInstruction" :class="[BTN_DISABLED_NOTE, 'w-full']" data-test="insolvency-save-blocked">{{ saveBlockedReason }}</p>
+        <p v-if="!canSave && saveBlockedReason && !leavingApprovedInstruction" :class="[BTN_DISABLED_NOTE, 'w-full']" data-test="insolvency-save-blocked">
+          {{ saveBlockedReason }}
+          <router-link v-if="accountId === null && options.recipient_accounts.length === 0" :to="institutionAccountsLink" class="font-medium underline">{{ t('payroll.insolvency.open_institution_accounts') }}</router-link>
+        </p>
       </div>
     </section>
   </div>

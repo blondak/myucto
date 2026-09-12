@@ -5,19 +5,23 @@
  * jen role accountant/admin/readonly (nav gate v AppLayout, route RBAC v BE).
  * Každá firma má vlastní kartu: hlavička, co je potřeba udělat, objem dat.
  */
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { portfolioApi, type PortfolioCompany } from '@/api/portfolio'
 import { useSupplierStore } from '@/stores/supplier'
+import { useAuthStore } from '@/stores/auth'
 import { apiErrorMessage } from '@/api/errors'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PortfolioVolumeChips from './PortfolioVolumeChips.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 const supplierStore = useSupplierStore()
+const auth = useAuthStore()
+// Správa firem je v menu Systém jen pro superadmina a Admin Plus, tlačítko má stejnou viditelnost.
+const canManageCompanies = computed(() => auth.isSuperadmin || auth.isAdminPlusRole)
 
 const companies = ref<PortfolioCompany[]>([])
 const loading = ref(true)
@@ -98,10 +102,16 @@ function periodBadgeClass(status: string): string {
         <h1 class="text-2xl font-semibold">{{ t('portfolio.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('portfolio.subtitle') }}</p>
       </div>
-      <button type="button" @click="load" :class="btnOutline('neutral')" class="whitespace-nowrap">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
-        {{ t('common.refresh') }}
-      </button>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button type="button" @click="load" :class="btnOutline('neutral')" class="whitespace-nowrap">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+          {{ t('common.refresh') }}
+        </button>
+        <router-link v-if="canManageCompanies" to="/admin/suppliers" :class="btnFilled('primary')" class="whitespace-nowrap" data-testid="portfolio-companies-link">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.factory" /></svg>
+          {{ t('nav.suppliers') }}
+        </router-link>
+      </div>
     </div>
 
     <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg p-8 text-center text-sm text-neutral-400">{{ t('common.loading') }}…</div>

@@ -79,7 +79,7 @@ V hlavičce konceptu je pole **Číslo faktury** (resp. „Číslo zálohové fa
 > Pokud chceš číslo změnit, musíš vystavit storno/dobropis a fakturu vystavit
 > znovu pod jiným číslem.
 
-Šablonu pro automatické generování nastavuješ v **Systém → Dodavatelé →
+Šablonu pro automatické generování nastavuješ v **Systém → Firmy →
 [tvůj dodavatel] → Číslování faktur** — viz [§ 91.5.3](91_Multi_supplier.md#9153-cislovani-faktur).
 
 ### 15.2.6 Ceny „s DPH" vs „bez DPH" (brutto / netto režim)
