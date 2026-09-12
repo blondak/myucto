@@ -14,7 +14,8 @@ fakturací a předávají rezervaci do vychystání (§ 33.13).
 
 V menu ho najdeš pod sekcí **Sklad** (zobrazí se jen po zapnutí modulu):
 **Skladové karty**, **Příjemky a výdejky**, **Objednávky dodavatelům**
-(§ 33.11), **U dodavatele** (§ 33.10), **Inventury**, **Sestavy**. Číselník
+(§ 33.11), **U dodavatele** (§ 33.10), **Inventury**, **Sestavy** a
+**Intrastat export** (§ 33.15). Číselník
 **Sklady** (jednotlivé sklady firmy) je záložka na stránce **E-shop** — modul Sklad
 totiž sdílí skladové karty s [e-shopovým modulem](34_Eshop.md) (ceny, kategorie,
 parametry, dodavatelé, přílohy k produktu).
@@ -123,6 +124,34 @@ Po založení karty (jen v režimu úpravy) se zpřístupní i **e-shopové taby
 mutace popisu, kategorie a štítky, parametry, ceny v jednotlivých měnách, dodavatelé
 a přílohy/obrázky. Skladová karta je totiž zároveň produktovou kartou pro e-shop;
 tyto taby popisuje kapitola o e-shopu.
+
+### Údaje skladové karty pro Intrastat
+
+V úpravě uložené skladové karty je záložka **Intrastat**. Údaje z ní se použijí
+pro každý vykazovaný pohyb dané položky:
+
+- **Kód kombinované nomenklatury (KN8)** je osmimístný číselný sazebníkový kód
+  zboží. Zapisuje se včetně případných nul na začátku.
+- **Země původu** je dvoupísmenný kód země, například `CZ` nebo `DE`. Jde o zemi,
+  ve které zboží vzniklo nebo bylo podstatně zpracováno, nikoli automaticky o zemi
+  dodavatele či odběratele. Číselník obsahuje také `QU` pro neznámý původ a `QV`,
+  pokud je znám pouze původ v EU.
+- **Čistá hmotnost (kg)** je kladná hmotnost jedné základní měrné jednotky karty.
+  Lze ji zadat s přesností na tři desetinná místa. Při exportu ji systém vynásobí
+  množstvím skladového pohybu. Pro elektrickou energii s KN8 `27160000` export
+  automaticky použije povinnou konstantu `0,001`.
+- **Doplňková měrná jednotka** je kód jednotky vyžadovaný u příslušného KN8,
+  například `PCE`. Nevyžaduje-li KN8 doplňkovou jednotku, nech pole prázdné. Kód
+  vyber podle aktuální kombinované nomenklatury. `ZZZ` se ukládá bez koeficientu
+  a do CSV se pro něj uvede nula.
+- **Množstevní koeficient** určuje počet doplňkových jednotek na jednu základní
+  měrnou jednotku karty. Lze jej zadat s přesností na šest desetinných míst.
+  Doplňková jednotka a koeficient se kromě kódu `ZZZ` vyplňují nebo mažou vždy
+  společně.
+
+KN8, země původu a čistá hmotnost mohou na kartě zůstat prázdné, dokud se položka
+nemá vykazovat. Jakmile její pohyb vstoupí do Intrastatu, náhled chybějící povinný
+údaj označí jako chybu a nedovolí stáhnout CSV.
 
 Editor při odchodu ze stránky upozorní na neuložené změny. Prázdná připravená
 čeština ani prázdné řádky aktivních prodejních měn se za změnu nepovažují. Lišta
@@ -1135,7 +1164,76 @@ množství nebo cenu, náhled zobrazí konflikt a nic nezaúčtuje. Pro další 
 počáteční stav použijte jiný identifikátor importu. Karty se sledováním šarží nebo
 sériových čísel přijměte ruční příjemkou, kde lze vyplnit úplné alokace.
 
-## 33.15 Omezení a tipy
+## 33.15 Intrastat export pro InstatEvo
+
+Pro podání od **1. 1. 2026** se používá aplikace Celní správy **InstatEvo**, která
+nahradila InstatDesk a InstatOnline. MyÚčto hlášení samo nepodává. Připraví CSV
+v oficiální dvacetisloupcové struktuře pro import do InstatEvo a před stažením
+zkontroluje zdrojové doklady i povinné údaje.
+
+Export otevřeš přes **Sklad > Intrastat export**. Postup je tento:
+
+1. Vyber **referenční období** a **směr pohybu**. Odeslání pracuje s výdejkami
+   navázanými na vydané faktury, přijetí s příjemkami navázanými na přijaté
+   faktury. Nejstarší podporované období je leden 2026.
+2. Nastav **výchozí kód transakce**, **druh dopravy**, **dodací podmínky**,
+   **typ věty** a případný **statistický znak**. Kódy vybírej podle platných
+   číselníků a skutečné povahy vykazovaných obchodů. Výchozí hodnoty jsou pomůcka,
+   nikoli náhrada za toto posouzení. Systém odmítne kódy, které nejsou v aktuálním
+   číselníku podporovaném exportem. Statistický znak je číselný a jeho vazbu na KN8
+   následně ověří InstatEvo.
+
+Export podporuje standardní věty `ST` a běžný prodej nebo nákup s kódem transakce
+`11`, případně přímý obchod se soukromým spotřebitelem s kódem `12`. Vratky,
+zpracování, finanční leasing, malé zásilky a další zvláštní pohyby vyžadují odlišná
+pravidla pro hodnotu či obsah věty a do tohoto exportu zatím nevstupují.
+U odeslání s kódem transakce `12` systém při chybějícím DIČ spotřebitele použije
+oficiální zástupný identifikátor `QV123`.
+3. Klikni na **Zkontrolovat náhled**. Přehled zobrazí počet řádků, chyby,
+   upozornění, celkovou čistou hmotnost a pro každý řádek zdrojový doklad,
+   partnera, KN8, zemi původu, hmotnost, doplňkové množství a fakturovanou hodnotu.
+4. Oprav všechny chyby na skladových kartách, fakturách nebo firemních údajích
+   a vytvoř náhled znovu. Upozornění, například zkrácení dlouhého popisu, stažení
+   neblokují. **Stáhnout CSV pro InstatEvo** se zpřístupní jen u náhledu bez chyb.
+5. Stáhni CSV, klikni na **Otevřít InstatEvo** a v otevřené oficiální aplikaci
+   zvol import z CSV. Vyber stažený soubor, proveď kontroly InstatEvo a hlášení
+   odešli z této aplikace.
+
+Export zahrnuje jen **zaúčtované přeshraniční pohyby zboží uvnitř EU**, které jsou
+navázané na řádek faktury. Tuzemské pohyby, pohyby vůči zemím mimo EU, rozpracované
+doklady a stornované pohyby včetně jejich protidokladů se nevykazují. Převod mezi
+vlastními sklady do exportu nevstupuje.
+
+Stát fyzického odeslání nebo určení se přebírá ze země partnera uložené na faktuře.
+Náhled na tento předpoklad upozorní. U trojstranného obchodu, kdy se stát partnera
+liší od skutečného státu pohybu zboží, je potřeba řádek zkontrolovat v InstatEvo;
+samostatný stát fyzického pohybu se na skladovém dokladu zatím neeviduje.
+
+Fakturovaná hodnota se vykazuje v **CZK**. U faktury v cizí měně proto musí být
+uložen kurz do CZK. Hodnota řádku se poměrně přepočítá podle množství konkrétního
+skladového pohybu. Fakturační řádky nemají samostatné označení, které by spolehlivě
+odlišilo dopravu a jiné vedlejší výdaje od samostatně prodané služby. Export proto
+automaticky započítá jen rozpoznané skladové zboží. Pokud faktura obsahuje jakýkoli
+nenulový řádek nenavázané služby, dopravy, slevy nebo jiné položky, náhled zobrazí
+blokující chybu, i když se více takových řádků hodnotově navzájem vyruší. Jejich
+hodnotu do CSV nepřičte. Takový doklad nelze automaticky
+exportovat, dokud není fakturovaná hodnota zboží jednoznačně určitelná; výkaz je
+potřeba připravit nebo opravit ručně v InstatEvo.
+
+Pro vytvoření úplného řádku musí být k dispozici zejména:
+
+- platné DIČ vykazující firmy a země jejího sídla;
+- země partnera a u odeslání také jeho platné DIČ, případně u transakce `12`
+  zástupný identifikátor `QV123` doplněný systémem;
+- vazba skladového pohybu na příslušný řádek faktury, jeho množství a hodnotu;
+- na skladové kartě platný KN8, země původu a kladná čistá hmotnost;
+- u KN8 s doplňkovou jednotkou také její kód a kladný množstevní koeficient;
+- měna faktury a u cizí měny kurz do CZK.
+
+Změna období, směru nebo některého kódu zruší předchozí náhled. Před každým
+stažením proto vytvoř nový náhled a zkontroluj, že odpovídá aktuálním parametrům.
+
+## 33.16 Omezení a tipy
 
 - Modul podporuje jen **způsob B** účtování zásob (průběžná evidence bez účtování,
   promítnutí do účetnictví až uzávěrkou) — způsob A není v tomto vydání funkční,
@@ -1153,7 +1251,7 @@ sériových čísel přijměte ruční příjemkou, kde lze vyplnit úplné alok
 - Zobrazení karty v e-shopu je nezávislé na jejím skladovém typu — řídí ho
   samostatný příznak **Exportovat do e-shopu** (§ 33.2.3).
 
-### 33.15.1 Co objednávky ještě neumí
+### 33.16.1 Co objednávky ještě neumí
 
 Nákupní část modulu je první vydání a záměrně řeší jen evidenci objednaného
 zboží. Tohle v ní **není**:

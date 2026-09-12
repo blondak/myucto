@@ -1,6 +1,7 @@
 import { api } from './client'
 import type { CatalogJob } from './catalogJobs'
 import type { ProductSetDefinition } from './eshop'
+import { downloadApiFilePost } from '@/utils/downloadFile'
 
 /**
  * Skladová evidence (Epic SKLAD). Money/qty pole jsou DECIMAL uložené na backendu
@@ -42,6 +43,11 @@ export interface StockItem extends StockItemEffectivePrice {
   vat_rate_id: number | null
   sale_price_without_vat: string | null
   min_qty: string | null
+  intrastat_cn8_code?: string | null
+  intrastat_country_of_origin?: string | null
+  intrastat_net_mass_kg?: string | null
+  intrastat_supplementary_unit?: string | null
+  intrastat_supplementary_unit_coefficient?: string | null
   qty?: string
   value_total?: string
   avg_unit_cost?: string
@@ -65,8 +71,68 @@ export interface StockItemPayload {
   vat_rate_id?: number | null
   sale_price_without_vat?: string | number | null
   min_qty?: string | number | null
+  intrastat_cn8_code?: string | null
+  intrastat_country_of_origin?: string | null
+  intrastat_net_mass_kg?: string | number | null
+  intrastat_supplementary_unit?: string | null
+  intrastat_supplementary_unit_coefficient?: string | number | null
   is_active?: boolean
   note?: string | null
+}
+
+export type IntrastatDirection = 'dispatch' | 'arrival'
+export type IntrastatIssueSeverity = 'error' | 'warning'
+
+export interface IntrastatExportRequest {
+  period: string
+  direction: IntrastatDirection
+  transaction_code: string
+  transport_mode: string
+  delivery_terms: string
+  record_type: string
+  statistical_code: string
+}
+
+export interface IntrastatPreviewIssue {
+  severity: IntrastatIssueSeverity
+  code: string
+  message: string
+  row_number?: number | null
+}
+
+export interface IntrastatPreviewRow {
+  row_number: number
+  source_document: {
+    id: number
+    number: string | null
+    date: string
+    line_id: number
+    type: StockDocType
+  }
+  partner_name: string | null
+  partner_country: string
+  partner_vat_id: string
+  cn8_code: string
+  country_of_origin: string
+  description: string
+  quantity: string | null
+  net_mass_kg: string | null
+  supplementary_unit: string | null
+  supplementary_quantity: string | null
+  invoiced_value: number | null
+  issues: IntrastatPreviewIssue[]
+}
+
+export interface IntrastatPreview {
+  summary: {
+    row_count: number
+    error_count: number
+    warning_count: number
+    total_net_mass_kg: string
+    total_invoiced_value: number
+  }
+  rows: IntrastatPreviewRow[]
+  issues: IntrastatPreviewIssue[]
 }
 
 export interface StockItemDuplicateRequest {
@@ -777,6 +843,11 @@ export const stockApi = {
   },
   itemTracking: (id: number) => api.get<StockTrackingOverview>(`/stock/items/${id}/tracking`).then(r => r.data),
   replaceItemUnits: (id: number, units: Array<{ unit_code: string; numerator: number; denominator: number }>) => api.put(`/stock/items/${id}/units`, { units }).then(r => r.data),
+
+  previewIntrastat: (payload: IntrastatExportRequest) =>
+    api.post<IntrastatPreview>('/stock/intrastat/preview', payload).then(r => r.data),
+  exportIntrastat: (payload: IntrastatExportRequest) =>
+    downloadApiFilePost('/stock/intrastat/export', payload, `intrastat-${payload.period}-${payload.direction}.csv`),
 
   // ── Stavy zásob ─────────────────────────────────────────────────────────
   levels: (filters: StockLevelFilters = {}) => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { stockApi, type StockItem, type StockLedgerRow, type StockTrackingOverview } from '@/api/stock'
@@ -24,12 +24,38 @@ const router = useRouter()
 const supplier = useSupplierStore()
 
 const id = computed(() => Number(route.params.id))
+type DetailTab = 'overview' | 'intrastat'
+const detailTabs: DetailTab[] = ['overview', 'intrastat']
+const detailTab = ref<DetailTab>(route.query.tab === 'intrastat' ? 'intrastat' : 'overview')
+const detailTabList = ref<HTMLElement | null>(null)
 const item = ref<StockItem | null>(null)
 const loading = ref(false)
 const duplicateOpen = ref(false)
 const canManageLifecycle = computed(() => auth.canWrite('stock.items.write') && auth.canWrite('eshop.write'))
 const productContext = ref<ProductWithMasterContext | null>(null)
 let contextGeneration = 0
+
+function onDetailTabKey(event: KeyboardEvent, current: DetailTab) {
+  const index = detailTabs.indexOf(current)
+  let next = -1
+  if (event.key === 'ArrowRight') {
+    next = (index + 1) % detailTabs.length
+  } else if (event.key === 'ArrowLeft') {
+    next = (index + detailTabs.length - 1) % detailTabs.length
+  } else if (event.key === 'Home') {
+    next = 0
+  } else if (event.key === 'End') {
+    next = detailTabs.length - 1
+  }
+
+  if (next < 0) return
+
+  event.preventDefault()
+  detailTab.value = detailTabs[next]!
+  void nextTick(() => {
+    detailTabList.value?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus()
+  })
+}
 
 async function loadProductContext() {
   const current = ++contextGeneration
@@ -158,7 +184,13 @@ function toPayload(i: StockItem) {
   return {
     sku: i.sku, name: i.name, item_type: i.item_type, unit: i.unit, tracking_mode: i.tracking_mode, ean: i.ean,
     vat_rate_id: i.vat_rate_id, sale_price_without_vat: i.sale_price_without_vat,
-    min_qty: i.min_qty, is_active: i.is_active, note: i.note,
+    min_qty: i.min_qty,
+    intrastat_cn8_code: i.intrastat_cn8_code,
+    intrastat_country_of_origin: i.intrastat_country_of_origin,
+    intrastat_net_mass_kg: i.intrastat_net_mass_kg,
+    intrastat_supplementary_unit: i.intrastat_supplementary_unit,
+    intrastat_supplementary_unit_coefficient: i.intrastat_supplementary_unit_coefficient,
+    is_active: i.is_active, note: i.note,
   }
 }
 
@@ -225,6 +257,11 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
         </div>
         <ActionBar :actions="actions" />
       </div>
+      <div ref="detailTabList" role="tablist" :aria-label="t('stock.item_detail.tabs_label')" class="mb-4 flex gap-1 overflow-x-auto border-b border-neutral-200">
+        <button type="button" role="tab" :aria-selected="detailTab === 'overview'" :tabindex="detailTab === 'overview' ? 0 : -1" class="cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm transition" :class="detailTab === 'overview' ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'" @click="detailTab = 'overview'" @keydown="onDetailTabKey($event, 'overview')">{{ t('stock.item_detail.tab_overview') }}</button>
+        <button type="button" role="tab" :aria-selected="detailTab === 'intrastat'" :tabindex="detailTab === 'intrastat' ? 0 : -1" class="cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm transition" :class="detailTab === 'intrastat' ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'" @click="detailTab = 'intrastat'" @keydown="onDetailTabKey($event, 'intrastat')">{{ t('stock.items.intrastat.tab') }}</button>
+      </div>
+      <div v-show="detailTab === 'overview'" role="tabpanel">
       <p v-if="item.lifecycle_status === 'retired'" class="mb-4 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800 dark:bg-warning-950/30 dark:text-warning-200">{{ t('stock.lifecycle.retired_hint') }}</p>
       <div v-if="productContext?.master" class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm">
         <div><span class="text-primary-700">{{ t('eshop.inheritance.variant_of') }}</span> <strong>{{ productContext.master.name }}</strong><span v-if="productContext.variant" class="ml-2 text-xs text-neutral-500">{{ t('eshop.inheritance.effective_values') }}</span></div>
@@ -382,6 +419,26 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
             {{ movLoading ? t('common.loading') : t('stock.item_detail.load_more') }}
           </button>
         </div>
+      </div>
+      </div>
+      <div v-show="detailTab === 'intrastat'" role="tabpanel" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="text-base font-semibold text-neutral-900">{{ t('stock.items.intrastat.title') }}</h2>
+            <p class="mt-1 text-sm text-neutral-500">{{ t('stock.items.intrastat.detail_hint') }}</p>
+          </div>
+          <RouterLink v-if="auth.canWrite('stock.items.write')" :to="{ path: `/stock/items/${id}/edit`, query: { tab: 'intrastat' } }" :class="btnOutline('warning')">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 3.487a2.25 2.25 0 0 1 3.182 3.182L8.25 18.463 3.75 19.5l1.037-4.5L16.862 3.487z" /></svg>
+            {{ t('stock.item_detail.edit') }}
+          </RouterLink>
+        </div>
+        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div><dt class="text-xs font-medium text-neutral-500">{{ t('stock.items.intrastat.cn8_code') }}</dt><dd class="mt-1 font-mono text-sm text-neutral-900">{{ item.intrastat_cn8_code || '-' }}</dd></div>
+          <div><dt class="text-xs font-medium text-neutral-500">{{ t('stock.items.intrastat.country_of_origin') }}</dt><dd class="mt-1 font-mono text-sm text-neutral-900">{{ item.intrastat_country_of_origin || '-' }}</dd></div>
+          <div><dt class="text-xs font-medium text-neutral-500">{{ t('stock.items.intrastat.net_mass_kg') }}</dt><dd class="mt-1 font-mono text-sm text-neutral-900">{{ item.intrastat_net_mass_kg ?? '-' }}</dd></div>
+          <div><dt class="text-xs font-medium text-neutral-500">{{ t('stock.items.intrastat.supplementary_unit') }}</dt><dd class="mt-1 font-mono text-sm text-neutral-900">{{ item.intrastat_supplementary_unit || '-' }}</dd></div>
+          <div><dt class="text-xs font-medium text-neutral-500">{{ t('stock.items.intrastat.coefficient') }}</dt><dd class="mt-1 font-mono text-sm text-neutral-900">{{ item.intrastat_supplementary_unit_coefficient ?? '-' }}</dd></div>
+        </dl>
       </div>
     </template>
     <ItemDuplicateDialog v-if="duplicateOpen && item" :item="item" @close="duplicateOpen = false" @created="duplicated" />

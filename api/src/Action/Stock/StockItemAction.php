@@ -19,6 +19,7 @@ use MyInvoice\Service\Stock\StockReportXlsxExporter;
 use MyInvoice\Service\Stock\StockValuation;
 use MyInvoice\Service\Stock\StockItemLifecycleService;
 use MyInvoice\Service\Stock\StockItemDuplicationService;
+use MyInvoice\Service\Stock\StockItemIntrastatValidator;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockItemTemplateService;
 use MyInvoice\Support\Pagination;
@@ -54,6 +55,7 @@ final class StockItemAction
         private readonly StockItemLifecycleService $lifecycle,
         private readonly StockItemDuplicationService $duplication,
         private readonly StockItemTemplateService $templates,
+        private readonly StockItemIntrastatValidator $intrastat,
     ) {}
 
     /**
@@ -470,6 +472,12 @@ final class StockItemAction
             return [[], Json::error($response, 'validation_failed', "tracking_mode musí být 'none', 'lot' nebo 'serial'.", 400)];
         }
 
+        try {
+            $intrastat = $this->intrastat->normalize($body, $existing);
+        } catch (\InvalidArgumentException $e) {
+            return [[], Json::error($response, 'validation_failed', $e->getMessage(), 400)];
+        }
+
         $data = [
             'sku'                    => $sku,
             'name'                   => $name,
@@ -487,6 +495,7 @@ final class StockItemAction
             'min_qty'                => array_key_exists('min_qty', $body)
                 ? (($body['min_qty'] !== null && $body['min_qty'] !== '') ? (string) $body['min_qty'] : null)
                 : ($existing['min_qty'] ?? null),
+            ...$intrastat,
             'is_active'              => array_key_exists('is_active', $body) ? (bool) $body['is_active'] : (bool) ($existing['is_active'] ?? true),
             'note'                   => array_key_exists('note', $body)
                 ? (trim((string) $body['note']) !== '' ? trim((string) $body['note']) : null)

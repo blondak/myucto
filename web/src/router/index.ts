@@ -157,7 +157,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'stock-replenishment': ['stock'],
   'stock-warehouses': ['stock'], 'stock-vendor-offers': ['stock'],
   'stock-assemblies': ['stock'], 'eshop-set-editor': ['eshop'],
-  'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], 'eshop-jobs': ['eshop'], 'eshop-integrations': ['eshop.integrations'], eshop: ['eshop'],
+  'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], 'stock-intrastat': ['stock'], 'eshop-jobs': ['eshop'], 'eshop-integrations': ['eshop.integrations'], eshop: ['eshop'],
   'eshop-product-master-new': ['eshop.write', 'write'], 'eshop-product-master-detail': ['eshop'],
   logbook: ['logbook'], stats: ['dashboard'], 'purchase-stats': ['dashboard'], 'bank-statements': ['bank'], 'bank-detail': ['bank'], gopay: ['bank'],
   'admin-electronic-signatures': ['settings.signing', 'write'], 'admin-databox': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],

@@ -34,7 +34,13 @@ final class StorageQuotaReadOnlyMiddlewareTest extends TestCase
     public function testCatalogReadPostsRemainAvailableAtQuotaLimit(): void
     {
         $middleware = $this->middleware(StorageQuotaState::EXHAUSTED, 100);
-        foreach (['/api/catalog/products/batch', '/api/catalog/prices/batch', '/api/stock/items/42/neighbors'] as $path) {
+        foreach ([
+            '/api/catalog/products/batch',
+            '/api/catalog/prices/batch',
+            '/api/stock/items/42/neighbors',
+            '/api/stock/intrastat/preview',
+            '/api/stock/intrastat/export',
+        ] as $path) {
             self::assertSame(204, $middleware->process($this->request('POST', $path), $this->okHandler())->getStatusCode());
         }
         self::assertSame(StorageQuotaPolicy::HTTP_STATUS, $middleware->process($this->request('POST', '/api/catalog/exports'), $this->okHandler())->getStatusCode());

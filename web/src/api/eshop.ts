@@ -231,6 +231,11 @@ export interface Product {
   vat_rate_id: number | null
   sale_price_without_vat: string | null
   min_qty: string | null
+  intrastat_cn8_code?: string | null
+  intrastat_country_of_origin?: string | null
+  intrastat_net_mass_kg?: string | null
+  intrastat_supplementary_unit?: string | null
+  intrastat_supplementary_unit_coefficient?: string | null
   is_active: boolean
   note: string | null
   // e-shopová pole

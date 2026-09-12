@@ -608,6 +608,7 @@ final class RoutePermissionMap
 
         ['GET', '#^/api/stock(/|$)#', 'stock', AccessLevel::READ],
         ['POST', '#^/api/stock/reports/valuation-jobs$#', 'stock', AccessLevel::READ],
+        ['POST', '#^/api/stock/intrastat/(preview|export)$#', 'stock', AccessLevel::READ],
         // Objednávky dodavatelům. MUSÍ být před `^/api/stock/.*/close$` — jinak by
         // „zavřít nedodaný zbytek objednávky" spadlo pod skladovou uzávěrku
         // (`stock.close`), což je úplně jiné oprávnění — i před catch-all `^/api/stock`.

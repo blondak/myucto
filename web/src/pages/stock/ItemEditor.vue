@@ -28,7 +28,7 @@ import {
   type EshopCurrency,
 } from '@/api/eshop'
 import { clientsApi, type Client } from '@/api/clients'
-import { codebooksApi, type VatRate, type Unit } from '@/api/codebooks'
+import { codebooksApi, type Country, type VatRate, type Unit } from '@/api/codebooks'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
@@ -41,7 +41,7 @@ import ProductRelationsPanel from '@/components/stock/ProductRelationsPanel.vue'
 import ProductVariantInheritance from '@/components/stock/ProductVariantInheritance.vue'
 import type { ProductVariantContext, ProductWithMasterContext } from '@/api/productMasters'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -55,8 +55,8 @@ const canWriteEshop = computed(() => auth.canWrite('eshop.write'))
 const canSaveEditor = computed(() => auth.canWrite('stock.items.write') && (!isEdit.value || canWriteEshop.value))
 
 // ── Taby ────────────────────────────────────────────────────────────────
-type Tab = 'general' | 'languages' | 'master' | 'relations' | 'categories' | 'parameters' | 'prices' | 'vendors' | 'attachments'
-const tabs: Tab[] = ['general', 'languages', 'master', 'relations', 'categories', 'parameters', 'prices', 'vendors', 'attachments']
+type Tab = 'general' | 'intrastat' | 'languages' | 'master' | 'relations' | 'categories' | 'parameters' | 'prices' | 'vendors' | 'attachments'
+const tabs: Tab[] = ['general', 'intrastat', 'languages', 'master', 'relations', 'categories', 'parameters', 'prices', 'vendors', 'attachments']
 const tab = ref<Tab>((tabs as string[]).includes(String(route.query.tab)) ? (route.query.tab as Tab) : 'general')
 watch(tab, (v) => {
   if (route.query.tab !== v) {
@@ -102,6 +102,7 @@ function onTabKey(event: KeyboardEvent, current: Tab) {
 const vatRates = ref<VatRate[]>([])
 const currencies = ref<EshopCurrency[]>([])
 const units = ref<Unit[]>([])
+const countries = ref<Country[]>([])
 const locales = ref<EshopLocale[]>([])
 const manufacturers = ref<Manufacturer[]>([])
 const categories = ref<Category[]>([])
@@ -129,6 +130,11 @@ const form = ref<StockItemPayload>({
   vat_rate_id: null,
   sale_price_without_vat: null,
   min_qty: null,
+  intrastat_cn8_code: null,
+  intrastat_country_of_origin: null,
+  intrastat_net_mass_kg: null,
+  intrastat_supplementary_unit: null,
+  intrastat_supplementary_unit_coefficient: null,
   is_active: true,
   note: null,
 })
@@ -544,10 +550,11 @@ function numOrNull(v: number | null | string): number | null {
 }
 
 async function loadCodebooks() {
-  const [vr, cur, un, loc, mf, cat, tg, attr, vc] = await Promise.all([
+  const [vr, cur, un, countriesList, loc, mf, cat, tg, attr, vc] = await Promise.all([
     codebooksApi.vatRates('CZ').catch(() => []),
     eshopApi.listCurrencies({ active: 1 }).catch(() => [] as EshopCurrency[]),
     codebooksApi.units().catch(() => [] as Unit[]),
+    codebooksApi.countries().catch(() => [] as Country[]),
     eshopApi.listLocales().catch(() => [] as EshopLocale[]),
     eshopApi.listManufacturers().catch(() => []),
     eshopApi.listCategories().catch(() => []),
@@ -558,6 +565,7 @@ async function loadCodebooks() {
   vatRates.value = vr
   currencies.value = cur
   units.value = un
+  countries.value = countriesList
   locales.value = loc
   manufacturers.value = mf
   categories.value = cat
@@ -593,6 +601,11 @@ async function loadProduct(id: number) {
     vat_rate_id: p.vat_rate_id,
     sale_price_without_vat: p.sale_price_without_vat,
     min_qty: p.min_qty,
+    intrastat_cn8_code: p.intrastat_cn8_code,
+    intrastat_country_of_origin: p.intrastat_country_of_origin,
+    intrastat_net_mass_kg: p.intrastat_net_mass_kg,
+    intrastat_supplementary_unit: p.intrastat_supplementary_unit,
+    intrastat_supplementary_unit_coefficient: p.intrastat_supplementary_unit_coefficient,
     is_active: p.is_active,
     note: p.note,
   }
@@ -708,9 +721,26 @@ function buildProductPayload(): Omit<ProductUpdatePayload, 'row_version'> {
   }
 }
 
+function nullableCode(value: string | null | undefined, upper = false): string | null {
+  const normalized = String(value ?? '').trim()
+  return normalized === '' ? null : (upper ? normalized.toUpperCase() : normalized)
+}
+
+function buildItemPayload(): StockItemPayload {
+  const supplementaryUnit = nullableCode(form.value.intrastat_supplementary_unit, true)
+  return {
+    ...form.value,
+    intrastat_cn8_code: nullableCode(form.value.intrastat_cn8_code),
+    intrastat_country_of_origin: nullableCode(form.value.intrastat_country_of_origin, true),
+    intrastat_net_mass_kg: form.value.intrastat_net_mass_kg === '' ? null : form.value.intrastat_net_mass_kg,
+    intrastat_supplementary_unit: supplementaryUnit,
+    intrastat_supplementary_unit_coefficient: supplementaryUnit === 'ZZZ' || form.value.intrastat_supplementary_unit_coefficient === '' ? null : form.value.intrastat_supplementary_unit_coefficient,
+  }
+}
+
 function snapshot(): string {
   return JSON.stringify({
-    item: form.value,
+    item: buildItemPayload(),
     product: buildProductPayload(),
     prices: meaningfulPriceRows().map(pricePayloadFrom),
     promos: promos.value.map(promoPayloadFrom),
@@ -775,7 +805,7 @@ async function submit() {
       const submittedSnapshot = snapshot()
       const payload: ProductEditorPayload = {
         row_version: rowVersion.value,
-        item: form.value,
+        item: buildItemPayload(),
         product: buildProductPayload(),
         prices: meaningfulPriceRows().map(pricePayloadFrom),
         promo_prices: promos.value.map(promoPayloadFrom),
@@ -792,7 +822,7 @@ async function submit() {
       }
     } else {
       const submittedSnapshot = snapshot()
-      const created = await stockApi.createItem(form.value)
+      const created = await stockApi.createItem(buildItemPayload())
       // Po založení přejdi na editaci, kde jsou dostupné e-shopové taby.
       if (snapshot() === submittedSnapshot) {
         markSaved(submittedSnapshot)
@@ -909,6 +939,7 @@ function onImgError(e: Event) {
           ? 'border-primary-600 text-primary-700 font-medium'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ tt === 'general' ? t('eshop.item.tab_general')
+          : tt === 'intrastat' ? t('stock.items.intrastat.tab')
           : tt === 'languages' ? t('eshop.item.tab_languages')
           : tt === 'master' ? t('eshop.item.tab_master')
           : tt === 'relations' ? t('eshop.item.tab_relations')
@@ -1054,6 +1085,57 @@ function onImgError(e: Event) {
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.tag" /></svg>
                 {{ t('eshop.sets.open') }}
               </RouterLink>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ TAB: INTRASTAT ═══════════ -->
+      <div v-if="isEdit" v-show="tab === 'intrastat'" role="tabpanel" :id="`${pageId}-panel-intrastat`" :aria-labelledby="`${pageId}-tab-intrastat`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+        <div class="p-5 space-y-5">
+          <div>
+            <h2 class="text-base font-semibold text-neutral-900">{{ t('stock.items.intrastat.title') }}</h2>
+            <p class="mt-1 text-sm text-neutral-500">{{ t('stock.items.intrastat.hint') }}</p>
+          </div>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.intrastat.cn8_code') }}</label>
+              <input v-model.trim="form.intrastat_cn8_code" data-test="intrastat-cn8" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <p class="mt-1 text-xs text-neutral-500">{{ t('stock.items.intrastat.cn8_hint') }}</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.intrastat.country_of_origin') }}</label>
+              <select v-model="form.intrastat_country_of_origin" data-test="intrastat-country"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+                <option :value="null">{{ t('stock.items.intrastat.country_none') }}</option>
+                <option value="QU">QU - {{ t('stock.items.intrastat.country_unknown') }}</option>
+                <option value="QV">QV - {{ t('stock.items.intrastat.country_eu_unknown') }}</option>
+                <option v-for="country in countries" :key="country.iso2" :value="country.iso2">{{ country.iso2 }} - {{ locale === 'en' ? country.name_en : country.name_cs }}</option>
+              </select>
+              <p class="mt-1 text-xs text-neutral-500">{{ t('stock.items.intrastat.country_hint') }}</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.intrastat.net_mass_kg') }}</label>
+              <input v-model="form.intrastat_net_mass_kg" data-test="intrastat-net-mass" type="number" min="0" step="0.001" inputmode="decimal"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-right focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <p class="mt-1 text-xs text-neutral-500">{{ t('stock.items.intrastat.net_mass_hint') }}</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.intrastat.supplementary_unit') }}</label>
+              <select v-model="form.intrastat_supplementary_unit" data-test="intrastat-unit"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface font-mono focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+                <option :value="null">{{ t('stock.items.intrastat.supplementary_unit_none') }}</option>
+                <option v-for="code in ['CTM', 'NEL', 'CCT', 'GRM', 'GFI', 'KHO', 'KPO', 'KPH', 'KMA', 'KNI', 'KSH', 'KNE', 'KPP', 'KSD', 'KUR', 'MWH', 'LTR', 'LPA', 'MTR', 'MTK', 'MTQ', 'MQM', 'NPR', 'PCE', 'CEN', 'MIL', 'TJO', 'ZZZ']" :key="code" :value="code">{{ code }}</option>
+              </select>
+              <p class="mt-1 text-xs text-neutral-500">{{ t('stock.items.intrastat.supplementary_unit_hint') }}</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.intrastat.coefficient') }}</label>
+              <input v-model="form.intrastat_supplementary_unit_coefficient" data-test="intrastat-coefficient" type="number" min="0" step="0.000001" inputmode="decimal"
+                :disabled="nullableCode(form.intrastat_supplementary_unit, true) === 'ZZZ'"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-right disabled:bg-neutral-100 disabled:text-neutral-500 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <p class="mt-1 text-xs text-neutral-500">{{ t('stock.items.intrastat.coefficient_hint', { unit: form.unit }) }}</p>
             </div>
           </div>
         </div>

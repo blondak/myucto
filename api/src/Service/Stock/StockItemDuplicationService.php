@@ -17,7 +17,11 @@ final class StockItemDuplicationService
     public const SECTIONS = ['core', 'product', 'i18n', 'categories', 'tags', 'attributes', 'fees', 'prices', 'vendors'];
 
     private const ITEM_FIELDS = [
-        'core' => ['item_type', 'unit', 'vat_rate_id', 'min_qty', 'note'],
+        'core' => [
+            'item_type', 'unit', 'vat_rate_id', 'min_qty', 'note',
+            'intrastat_cn8_code', 'intrastat_country_of_origin', 'intrastat_net_mass_kg',
+            'intrastat_supplementary_unit', 'intrastat_supplementary_unit_coefficient',
+        ],
         'product' => ['manufacturer_id', 'warranty_months', 'delivery_days', 'is_stocked', 'weight_g', 'pricing_base'],
     ];
 
@@ -136,6 +140,12 @@ final class StockItemDuplicationService
             'vat_rate_id' => in_array('core', $sections, true) ? ($item['vat_rate_id'] ?? null) : null,
             'sale_price_without_vat' => null,
             'min_qty' => in_array('core', $sections, true) ? ($item['min_qty'] ?? null) : null,
+            'intrastat_cn8_code' => in_array('core', $sections, true) ? ($item['intrastat_cn8_code'] ?? null) : null,
+            'intrastat_country_of_origin' => in_array('core', $sections, true) ? ($item['intrastat_country_of_origin'] ?? null) : null,
+            'intrastat_net_mass_kg' => in_array('core', $sections, true) ? ($item['intrastat_net_mass_kg'] ?? null) : null,
+            'intrastat_supplementary_unit' => in_array('core', $sections, true) ? ($item['intrastat_supplementary_unit'] ?? null) : null,
+            'intrastat_supplementary_unit_coefficient' => in_array('core', $sections, true)
+                ? ($item['intrastat_supplementary_unit_coefficient'] ?? null) : null,
             'is_active' => false,
             'note' => in_array('core', $sections, true) ? ($item['note'] ?? null) : null,
         ]);
