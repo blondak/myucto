@@ -56,7 +56,7 @@ const canSaveEditor = computed(() => auth.canWrite('stock.items.write') && (!isE
 
 // ── Taby ────────────────────────────────────────────────────────────────
 type Tab = 'general' | 'intrastat' | 'languages' | 'master' | 'relations' | 'categories' | 'parameters' | 'prices' | 'vendors' | 'attachments'
-const tabs: Tab[] = ['general', 'intrastat', 'languages', 'master', 'relations', 'categories', 'parameters', 'prices', 'vendors', 'attachments']
+const tabs: Tab[] = ['general', 'languages', 'master', 'relations', 'categories', 'parameters', 'prices', 'vendors', 'attachments', 'intrastat']
 const tab = ref<Tab>((tabs as string[]).includes(String(route.query.tab)) ? (route.query.tab as Tab) : 'general')
 watch(tab, (v) => {
   if (route.query.tab !== v) {
