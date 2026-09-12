@@ -715,8 +715,9 @@ final class VatCrossCheckTest extends TestCase
         self::assertTrue($this->crossCheck->hasBlockingMismatch($findings));
     }
 
-    // (g) krácený nárok § 76 declared-only → nikdy timing_73 (koeficient ≠ přesný explained).
-    public function testReducedDeductionDeclaredOnlyIsNeverTiming(): void
+    // (g) krácený nárok § 76: evidence DPH i předpis 343 nesou PLNOU daň (koeficient se
+    //     uplatní až souhrnně na ř. 52), takže posun odpočtu § 73 je přesný jako u plného nároku.
+    public function testReducedDeductionShiftedClaimIsTiming(): void
     {
         $vend = $this->client('Dodavatel NG', 'CZ22222220');
         $pf = $this->purchase('PF-2048-NG', $vend, '40', 20000.0, 4200.0, 21.0, [
@@ -727,15 +728,36 @@ final class VatCrossCheckTest extends TestCase
         // Zálohový koeficient § 76 — bez něj DPHDP3 builder krácené řádky odmítne.
         $this->db->pdo()->prepare('INSERT INTO vat_coefficients (supplier_id, year, provisional_percent) VALUES (?, ?, 60)')
             ->execute([$this->supplierId, self::YEAR]);
-        // Předpis v červnu se SHODNOU částkou — bez § 76 by šlo o zrcadlový timing.
+        // Předpis v červnu se SHODNOU částkou, odpočet až v červenci (doklad přijat 2. 7.).
         $this->entry343(sprintf('%04d-%02d-15', self::YEAR, self::MONTH), 4200.0, 'debit', 'purchase_invoice', $pf);
+
+        foreach ([self::MONTH, 7] as $month) {
+            $findings = $this->crossCheck->check($this->supplierId, self::YEAR, $month, 'monthly');
+            $acc = $this->findingByCheck($findings, 'account_343_vs_return');
+            self::assertNotNull($acc, "měsíc {$month}");
+            self::assertFalse($acc['blocking'], "měsíc {$month}: posun § 73 u kráceného nároku neblokuje.");
+            self::assertSame('timing_73', $acc['documents'][0]['reason'] ?? null, "měsíc {$month}");
+        }
+    }
+
+    // (g2) poměrný nárok § 75 zůstává bezpečně blokující — procento krácení je per doklad
+    //      a posun § 73 se u něj nevysvětluje.
+    public function testProportionalDeductionShiftedClaimIsNeverTiming(): void
+    {
+        $vend = $this->client('Dodavatel NH', 'CZ22222220');
+        $pf = $this->purchase('PF-2048-NH', $vend, '40', 20000.0, 4200.0, 21.0, [
+            'received_at'        => sprintf('%04d-07-02', self::YEAR),
+            'received_at_source' => 'manual',
+        ]);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET vat_deduction = 'proportional', vat_deduction_percent = 50 WHERE id = ?")->execute([$pf]);
+        $this->entry343(sprintf('%04d-%02d-15', self::YEAR, self::MONTH), 2100.0, 'debit', 'purchase_invoice', $pf);
 
         $findings = $this->crossCheck->check($this->supplierId, self::YEAR, 7, 'monthly');
 
         $acc = $this->findingByCheck($findings, 'account_343_vs_return');
         self::assertNotNull($acc);
-        self::assertTrue($acc['blocking'], '§ 76 doklad se timingem nevysvětluje — bezpečný směr blokuje.');
-        self::assertSame('value_mismatch', $acc['documents'][0]['reason'] ?? null, 'reduced ≠ timing_73.');
+        self::assertTrue($acc['blocking']);
+        self::assertSame('value_mismatch', $acc['documents'][0]['reason'] ?? null);
     }
 
     // ── úhrada / vratka DPH (343 proti bance) se do smíru 343 nezapočítá ───────

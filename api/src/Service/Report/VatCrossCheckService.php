@@ -595,8 +595,10 @@ final class VatCrossCheckService
             if (abs($v['declared']) <= self::EPS && abs($v['booked']) > self::EPS) {
                 // Deník ano, přiznání ne. timing_73 smí dostat JEN doklad, který v claim
                 // období reálně vstoupí do přiznání — tj. splní tytéž filtry jako
-                // fetchPurchases (status, advance, nárok na odpočet); § 75/§ 76 doklady
-                // timing nedostanou nikdy (koeficient dělá explained nepřesným).
+                // fetchPurchases (status, advance, nárok na odpočet). Poměrný nárok § 75
+                // timing nedostane nikdy (procento krácení je per doklad). Krácený nárok
+                // § 76 ano: evidence nese plnou daň (ř. 40k/41k) stejně jako předpis 343
+                // a koeficient se uplatní až souhrnně na ř. 52, takže posun je přesný.
                 $reason = 'extra_entry';
                 if ($type === 'purchase_invoice' && isset($claimInfo[$id])) {
                     $info = $claimInfo[$id];
@@ -605,7 +607,7 @@ final class VatCrossCheckService
                         && ($info['claim_date'] > $end || $info['claim_date'] < $start)
                         && self::entersReturn($info)
                     ) {
-                        if (in_array($info['vat_deduction'], ['reduced', 'proportional'], true)) {
+                        if ($info['vat_deduction'] === 'proportional') {
                             $reason = 'value_mismatch';
                         } else {
                             $reason = 'timing_73';
@@ -626,7 +628,7 @@ final class VatCrossCheckService
                 if (isset($outside[$k])) {
                     $info = $type === 'purchase_invoice' ? ($claimInfo[$id] ?? null) : null;
                     $isTiming = $info !== null
-                        && !in_array($info['vat_deduction'], ['reduced', 'proportional'], true)
+                        && $info['vat_deduction'] !== 'proportional'
                         && abs($outside[$k]['net'] - $v['declared']) <= self::ACCOUNT_343_TOLERANCE;
                     if ($isTiming) {
                         $reason = 'timing_73';

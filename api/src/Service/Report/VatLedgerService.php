@@ -837,17 +837,14 @@ final class VatLedgerService
                 ? (string) $r['doc_number']
                 : '#' . (string) $r['invoice_id'];
             if ($isRc) {
-                // RC samovyměření + krácený nárok současně: ř. 43 (RC mirror odpočet) nemá
-                // v DPHDP3 XSD krácený protějšek → nelze vykázat bez tiché chyby. Explicitní
-                // stop, analogicky PostingService 'rc_partial_deduction_unsupported' (audit B1).
-                throw new PostingException(
-                    'rc_partial_deduction_unsupported',
-                    "Doklad {$docLabel} kombinuje tuzemské samovyměření DPH (reverse charge) s kráceným "
-                        . 'nárokem na odpočet dle § 76 — tuto kombinaci systém nevykazuje automaticky '
-                        . '(ř. 43 nemá krácený protějšek); zaúčtuj a vykaž ji ručně.',
-                );
-            }
-            if ($primaryLine !== null && in_array($primaryLine, ['40', '41', '42'], true)) {
+                // RC samovyměření + krácený nárok: samovyměření na výstupu (ř. 3–13) zůstává
+                // v plné výši, krátí se jen zrcadlový odpočet. Ř. 43/44 má v DPHDP3 sloupec
+                // „Krácený odpočet" (odkr_zdp23/odkr_zdp5) stejně jako ř. 40/41 — krácení
+                // koeficientem pak souhrnně na ř. 52. Snížená sazba (ř. 44k) viz S3 níže.
+                if ($secondaryLine === '43') {
+                    $secondaryLine = '43k';
+                }
+            } elseif ($primaryLine !== null && in_array($primaryLine, ['40', '41', '42'], true)) {
                 $primaryLine .= 'k';
             } elseif ($primaryLine !== null) {
                 // Krácený nárok § 76 má v DPHDP3 XSD protějšek JEN u ř. 40/41/42 (sloupec
@@ -894,8 +891,8 @@ final class VatLedgerService
             if ($primaryLine !== null && isset($reduced[$primaryLine])) {
                 $primaryLine = $reduced[$primaryLine];
             }
-            if ($secondaryLine === '43') {
-                $secondaryLine = '44';
+            if ($secondaryLine === '43' || $secondaryLine === '43k') {
+                $secondaryLine = $secondaryLine === '43' ? '44' : '44k';
             }
         }
 

@@ -1134,7 +1134,9 @@ final class PostingService
             return $this->buildAllocatedPurchaseInvoiceLines($supplierId, $pi, $allocations, $opts);
         }
 
-        if ($vatDeduction !== 'full' && $isRc) {
+        // Krácený nárok § 76 u samovyměření se účtuje jako plný: obě nohy 343 v plné výši,
+        // krácení koeficientem jde až souhrnně přes přiznání (ř. 43k/52), stejně jako u ř. 40k.
+        if (!in_array($vatDeduction, ['full', 'reduced'], true) && $isRc) {
             throw new PostingException(
                 'rc_partial_deduction_unsupported',
                 'Přijatá faktura #' . $purchaseInvoiceId . ' kombinuje tuzemské samovyměření DPH (reverse charge) '
@@ -1143,7 +1145,7 @@ final class PostingService
             );
         }
 
-        if ($vatDeduction === 'full') {
+        if ($vatDeduction === 'full' || $isRc) {
             // received_at do okna jen u ruční PF (received_at_source='manual'), kde ho
             // VatLedgerService zohledňuje v období odpočtu (§ 73/1/a) — jinak by scanner
             // minul řádek zařazený do pozdějšího roku (přelom roku, audit C6').

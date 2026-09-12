@@ -381,7 +381,7 @@ final class DphBookBuilder
         // členění 43 — POHODA (reference DPH_LIST_KH 42026.pdf) řadí "43 ř.012"
         // i "43 ř.043" až ZA sekci 36, ne mezi přijaté 15.xxx. Primary řádek
         // páru proto dostává stejný prefix jako jeho mirror.
-        if ($cls['dphdp3_line'] === '43'
+        if ($cls['dphdp3_line'] === '43' || $cls['dphdp3_line'] === '43k'
             || ($directionScope === 'received' && !empty($cls['dphdp3_line_secondary']))) {
             $sectionPrefix = '43';
         }

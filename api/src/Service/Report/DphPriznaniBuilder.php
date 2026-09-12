@@ -393,17 +393,18 @@ final class DphPriznaniBuilder
             '43' => ['veta' => 4, 'base' => 'nar_zdp23',  'vat' => 'od_zdp23'],
             '44' => ['veta' => 4, 'base' => 'nar_zdp5',   'vat' => 'od_zdp5'],
             '47' => ['veta' => 4, 'base' => 'nar_maj',    'vat' => null],
-            // Veta4 — krácený odpočet § 76 (sloupec „Krácený odpočet", ř.40-42). Klíče
-            // 40k/41k/42k vytváří VatLedgerService pro vat_deduction='reduced'. Základ jde
-            // do TÉHOŽ atributu jako plná verze (pln23/pln5/dov_cu — jediný sdílený sloupec
-            // základu obou variant), daň do krácených atributů odp_tuz23/odp_tuz5/odp_cu
-            // (bez _nar). ř.43 (RC mirror) a ř.45 tu krácenou variantu nemají — ne proto, že
-            // by v XSD chyběla (odkr_zdp23/odkr_zdp5 tam JSOU), ale protože ji generátor
-            // nepodporuje: VatLedgerService kombinaci RC + 'reduced' tvrdě odmítne chybou
-            // reduced_deduction_unsupported_line, takže se sem takový řádek nedostane.
+            // Veta4 — krácený odpočet § 76 (sloupec „Krácený odpočet", ř.40-44). Klíče
+            // 40k/41k/42k (tuzemsko, dovoz) a 43k/44k (zrcadlový odpočet samovyměření)
+            // vytváří VatLedgerService pro vat_deduction='reduced'. Základ jde do TÉHOŽ
+            // atributu jako plná verze (pln23/pln5/dov_cu/nar_zdp23/nar_zdp5 — jediný sdílený
+            // sloupec základu obou variant), daň do krácených atributů (odp_tuz23/odp_tuz5/
+            // odp_cu bez _nar, odkr_zdp23/odkr_zdp5). ř.45 krácenou variantu z klasifikací
+            // nemá (plní se z vlastní evidence).
             '40k' => ['veta' => 4, 'base' => 'pln23',    'vat' => 'odp_tuz23'],
             '41k' => ['veta' => 4, 'base' => 'pln5',     'vat' => 'odp_tuz5'],
             '42k' => ['veta' => 4, 'base' => 'dov_cu',   'vat' => 'odp_cu'],
+            '43k' => ['veta' => 4, 'base' => 'nar_zdp23', 'vat' => 'odkr_zdp23'],
+            '44k' => ['veta' => 4, 'base' => 'nar_zdp5',  'vat' => 'odkr_zdp5'],
         ];
 
         // Base i daň sčítáme NUMERICKY (ne string-set), protože krácené řádky 40k/41k/42k
@@ -1009,9 +1010,7 @@ final class DphPriznaniBuilder
         // ř.46 „Krácený odpočet" (odp_sum_kr). Sum-then-round by se v obdobích s víc krácenými
         // sazbovými buckety (40k i 41k/42k) rozešlo o ≤ (počet bucketů−1) Kč se skutečně
         // podaným ř.46/52 → identita „Σ podaných ř.52 + vypor_odp = roční nárok" by neplatila.
-        $krYear = round((float) ($yl['40k']['vat'] ?? 0.0))
-            + round((float) ($yl['41k']['vat'] ?? 0.0))
-            + round((float) ($yl['42k']['vat'] ?? 0.0));
+        $krYear = self::reducedDeductionVat($yl);
 
         return [
             'final_percent' => $final,
@@ -1094,10 +1093,23 @@ final class DphPriznaniBuilder
         foreach ($periods as $m) {
             $lines = $this->mapper->aggregateForDphPriznani($supplierId, $year, $m, $quarterly ? 'quarterly' : 'monthly');
             // Per-line round, shodně s build() ř.46 (odp_sum_kr) — viz computeAnnualCoefficient.
-            $kr = round((float) ($lines['40k']['vat'] ?? 0.0))
-                + round((float) ($lines['41k']['vat'] ?? 0.0))
-                + round((float) ($lines['42k']['vat'] ?? 0.0));
+            $kr = self::reducedDeductionVat($lines);
             $sum += round($kr * $provisionalPercent / 100);
+        }
+        return $sum;
+    }
+
+    /**
+     * Daň krácených řádků § 76 (sloupec „Krácený odpočet" ř. 40–44) zaokrouhlená PER ŘÁDEK,
+     * shodně s ř. 46 odp_sum_kr v build(). Jediné místo, které ví, které klíče jsou krácené.
+     *
+     * @param array<string, array{vat:float}> $lines
+     */
+    private static function reducedDeductionVat(array $lines): float
+    {
+        $sum = 0.0;
+        foreach (['40k', '41k', '42k', '43k', '44k'] as $key) {
+            $sum += round((float) ($lines[$key]['vat'] ?? 0.0));
         }
         return $sum;
     }

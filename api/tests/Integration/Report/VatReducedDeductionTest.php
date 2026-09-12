@@ -195,20 +195,31 @@ final class VatReducedDeductionTest extends TestCase
         $this->assertSame(0, $xml->DPHDP3->Veta5->count());
     }
 
-    /** (d) RC + reduced současně → tvrdá chyba, ne tichý výpočet. */
-    public function testReverseChargeWithReducedThrows(): void
+    /**
+     * (d) RC + krácený odpočet § 76: samovyměření na výstupu (ř. 10) v plné výši, zrcadlový
+     * odpočet ř. 43 ve sloupci „Krácený odpočet" (odkr_zdp23 — XSD ho má), krácení
+     * koeficientem souhrnně na ř. 52 jako u tuzemského ř. 40k.
+     */
+    public function testReverseChargeWithReducedGoesToReducedColumnOfRow43(): void
     {
         $this->coef->setProvisionalPercent($this->supplierId, self::YEAR, 80);
         $vend = $this->client('Dodavatel RC', $this->czId, 'CZ90000044', vendor: true);
         $this->purchase('R-D', $vend, '5', true, 'invoice', $this->d(6, 10), $this->d(6, 10),
             [[10000, 0, 21]], 'reduced');
 
-        try {
-            $this->dph->build($this->supplierId, self::YEAR, 6, 'monthly');
-            $this->fail('Očekávána chyba: RC + krácený odpočet současně.');
-        } catch (PostingException $e) {
-            $this->assertSame('rc_partial_deduction_unsupported', $e->errorCode, $e->getMessage());
-        }
+        $xml = $this->buildXml(6);
+        $v1 = $xml->DPHDP3->Veta1;
+        $v4 = $xml->DPHDP3->Veta4;
+        $v5 = $xml->DPHDP3->Veta5;
+
+        $this->assertSame('10000', (string) $v1['rez_pren23']);
+        $this->assertSame('2100', (string) $v1['dan_rpren23'], 'samovyměření na výstupu v plné výši');
+        $this->assertSame('10000', (string) $v4['nar_zdp23']);
+        $this->assertSame('', (string) $v4['od_zdp23'], 'krácený odpočet NESMÍ jít do sloupce V plné výši');
+        $this->assertSame('2100', (string) $v4['odkr_zdp23']);
+        $this->assertSame('2100', (string) $v4['odp_sum_kr']);
+        $this->assertSame('80', (string) $v5['koef_p20_nov']);
+        $this->assertSame('1680', (string) $v5['odp_uprav_kf']);
     }
 
     /**

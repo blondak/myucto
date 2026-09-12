@@ -27,7 +27,7 @@ use PHPUnit\Framework\TestCase;
 final class DphLineWhitelistGuardTest extends TestCase
 {
     /** Klíče, které v $lineMap jsou, ale uživatel je nastavovat NESMÍ. */
-    private const FORBIDDEN_FOR_USER = ['33', '34', '40k', '41k', '42k'];
+    private const FORBIDDEN_FOR_USER = ['33', '34', '40k', '41k', '42k', '43k', '44k'];
 
     public function testWhitelistMatchesLineMap(): void
     {
