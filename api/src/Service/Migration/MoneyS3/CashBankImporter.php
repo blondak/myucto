@@ -158,8 +158,17 @@ final class CashBankImporter
         foreach ($ctx->backup->rowsAcrossYears('SzUcPokl') as $r) {
             $code = trim((string) ($r['Zkrat'] ?? ''));
             if ($code !== '' && strtoupper(trim((string) ($r['UcPokl'] ?? ''))) === 'U') {
+                // Kurz počátečního stavu roku (`PSKurz` za `PSMnozstvi` jednotek) — kotva
+                // počátečního stavu účtu v cizí měně ({@see anchorForeignOpenings()}).
+                $rates = $accounts[$code]['rates'] ?? [];
+                $year = (int) ($ctx->yearOf($r) ?? 0);
+                $rate = (float) ($r['PSKurz'] ?? 0) / max(1.0, (float) ($r['PSMnozstvi'] ?? 1));
+                if ($year > 0 && $rate > 0) {
+                    $rates[$year] = $rate;
+                }
                 // Pozdější rok přepíše dřívější — firma mohla banku mezitím změnit.
                 $accounts[$code] = [
+                    'rates' => $rates,
                     'number' => trim((string) ($r['Ucet'] ?? '')),
                     'bank' => trim((string) ($r['BKod'] ?? '')),
                     'iban' => trim((string) ($r['IBAN'] ?? '')),
@@ -190,9 +199,8 @@ final class CashBankImporter
 
         $existingStatements = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_STATEMENT);
         $existingTx = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION);
-        // Výpis převzatý z Money je výpis se stavem účtu (zdroj `import`): záložka Stavy na
-        // účtech ho bere jako kotvu zůstatku a jde z něj vytvořit GPC. Money čísluje výpisy
-        // u každého účtu v roce (`Vypis`) — převod je založí stejně.
+        // Výpis převzatý z Money je měsíční výpis se stavem účtu (zdroj `import`): záložka
+        // Stavy na účtech ho bere jako kotvu zůstatku a jde z něj vytvořit GPC.
         $insertStatement = $pdo->prepare(
             'INSERT INTO bank_statements
                 (supplier_id, source, file_name, file_hash, account_number, bank_code,
@@ -221,7 +229,7 @@ final class CashBankImporter
         $setBalances = $pdo->prepare(
             'UPDATE bank_statements SET prev_balance = ?, curr_balance = ?, credit_total = ?, debit_total = ? WHERE id = ? AND supplier_id = ?'
         );
-        $foreignOpenings = self::foreignOpenings($ctx, $accounts);
+        $foreignOpenings = $this->anchorForeignOpenings($ctx, $accounts, self::foreignOpenings($ctx, $accounts), $ledgerOpening);
 
         foreach ($byStatement as $statementKey => $rows) {
             [$yearText, $code] = explode('|', $statementKey, 2);
@@ -251,14 +259,17 @@ final class CashBankImporter
                 $running = $foreignOpenings[$code][$year];
             }
 
+            // Výpis za měsíc: Money čísluje výpisy (`Vypis`) typicky po dnech, jak je banka
+            // posílá — pro přehled účtu i GPC se pohyby skládají do měsíčních výpisů.
             $groups = [];
             foreach ($rows as $i => $r) {
-                $groups[(int) ($r['Vypis'] ?? 0)][] = $i;
+                $d = InvoiceImporter::date($r, ['DatPlat', 'DatUcPr']);
+                $groups[$d !== null ? (int) substr($d, 5, 2) : 12][] = $i;
             }
             ksort($groups);
             // Výpis z dřívějšího převodu (jeden za rok) zůstává — pohyby už jsou v něm.
             $legacyStatementId = $existingStatements[$statementKey] ?? null;
-            foreach ($groups as $vypis => $indexes) {
+            foreach ($groups as $month => $indexes) {
                 $dates = [];
                 foreach ($indexes as $i) {
                     $d = InvoiceImporter::date($rows[$i], ['DatPlat', 'DatUcPr']);
@@ -267,12 +278,14 @@ final class CashBankImporter
                     }
                 }
                 sort($dates);
-                $lastDate = $dates === [] ? sprintf('%04d-12-31', $year) : $dates[count($dates) - 1];
+                $lastDate = $dates === []
+                    ? (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))->format('Y-m-t')
+                    : $dates[count($dates) - 1];
 
-                $mapKey = $statementKey . '|' . $vypis;
+                $mapKey = $statementKey . '|m' . $month;
                 $statementId = $legacyStatementId ?? ($existingStatements[$mapKey] ?? null);
                 if ($statementId === null) {
-                    $label = $vypis > 0 ? sprintf('%s/%d/%d', $code, $year, $vypis) : sprintf('%s/%d', $code, $year);
+                    $label = sprintf('%s/%d/%02d', $code, $year, $month);
                     $insertStatement->execute([
                         $ctx->supplierId,
                         sprintf('money-s3-%s.import', preg_replace('/[^A-Za-z0-9_-]/', '_', $label)),
@@ -406,6 +419,66 @@ final class CashBankImporter
             }
         }
         return $out;
+    }
+
+    /**
+     * Stav účtu z doby před první knihou zálohy (založení účtu, převod z jiného programu)
+     * pohybem v bance není, součet pohybů ho proto nezná. Deník ho zná: korunový počáteční
+     * stav účtu přepočtený kurzem počátečního stavu z Money (Money účet ke konci roku
+     * přeceňuje). Kotví se poslední rok, pro který deník i kurz jsou — ten se účtuje dál —
+     * a stejný rozdíl se přičte všem rokům, ať výpisy navazují.
+     *
+     * @param array<string,array{currency:string,primary:string,rates?:array<int,float>}> $accounts
+     * @param array<string,array<int,int>> $openings kód účtu => rok => počáteční stav v haléřích měny
+     * @return array<string,array<int,int>>
+     */
+    private function anchorForeignOpenings(ImportContext $ctx, array $accounts, array $openings, \PDOStatement $ledgerOpening): array
+    {
+        foreach ($openings as $code => $years) {
+            $meta = $accounts[$code] ?? null;
+            $primary = $meta !== null ? AccountCode::fromMoney($meta['primary']) : null;
+            $accountId = $primary !== null ? ($ctx->accountIds[$primary] ?? null) : null;
+            if ($meta === null || $meta['currency'] === 'CZK' || $accountId === null) {
+                continue;
+            }
+            $offsets = [];
+            foreach ($years as $year => $movementOpening) {
+                $rate = $meta['rates'][$year] ?? null;
+                $periodId = $ctx->periods[$year]['id'] ?? null;
+                if ($rate === null || $periodId === null) {
+                    continue;
+                }
+                $ledgerOpening->execute([$ctx->supplierId, $periodId, $accountId]);
+                $czk = (float) $ledgerOpening->fetchColumn();
+                $offsets[$year] = (int) round($czk / $rate * 100) - $movementOpening;
+            }
+            if ($offsets === []) {
+                continue;
+            }
+            krsort($offsets);
+            $anchorYear = (int) array_key_first($offsets);
+            $offset = $offsets[$anchorYear];
+            foreach ($offsets as $year => $other) {
+                if (abs($other - $offset) > 1000) {
+                    $ctx->protocol->warn(self::STEP_BANK, 'foreign_opening_inconsistent', sprintf(
+                        'Počáteční stav účtu %s v %s: podle deníku roku %d vychází o %s %s jinak než podle roku %d. Zkontrolujte stavy výpisů.',
+                        $code, $meta['currency'], $year, number_format(abs($other - $offset) / 100, 2, ',', ' '), $meta['currency'], $anchorYear
+                    ));
+                    break;
+                }
+            }
+            if ($offset === 0) {
+                continue;
+            }
+            foreach ($years as $year => $opening) {
+                $openings[$code][$year] = $opening + $offset;
+            }
+            $ctx->protocol->info(self::STEP_BANK, 'foreign_opening_anchored', sprintf(
+                'Účet %s: stav %s %s z doby před první knihou zálohy doplněn podle počátečního stavu v deníku roku %d.',
+                $code, number_format($offset / 100, 2, ',', ' '), $meta['currency'], $anchorYear
+            ));
+        }
+        return $openings;
     }
 
     /**

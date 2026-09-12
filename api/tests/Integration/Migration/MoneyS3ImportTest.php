@@ -528,12 +528,12 @@ final class MoneyS3ImportTest extends TestCase
     }
 
     /**
-     * Money čísluje výpisy u každého účtu v roce (`Vypis`); převod je založí stejně a každý
+     * Pohyby účtu se převedou do měsíčních výpisů (Money čísluje výpisy po dnech) a každý
      * nese počáteční a konečný stav — začátek roku z otevíracího zápisu účtu banky v deníku,
      * dál po pohybech. Převzatý výpis je výpis se zůstatkem: vidí ho záložka Stavy na účtech
      * a jde z něj vytvořit GPC.
      */
-    public function testImportedBankStatementsFollowMoneyNumberingWithBalances(): void
+    public function testImportedBankStatementsAreMonthlyWithBalances(): void
     {
         $supplierId = $this->supplier();
         $this->import($supplierId);
@@ -544,7 +544,7 @@ final class MoneyS3ImportTest extends TestCase
         );
         $stmt->execute([$supplierId]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        self::assertSame(['BU/2024/1', 'BU/2024/2', 'BU/2024/3'], array_column($rows, 'statement_number'));
+        self::assertSame(['BU/2024/02', 'BU/2024/03', 'BU/2024/06'], array_column($rows, 'statement_number'));
         self::assertSame(
             [[50000.0, 37900.0], [37900.0, 62100.0], [62100.0, 62150.0]],
             array_map(static fn (array $r): array => [(float) $r['prev_balance'], (float) $r['curr_balance']], $rows)
@@ -557,6 +557,34 @@ final class MoneyS3ImportTest extends TestCase
         self::assertStringStartsWith('074', $this->container(\MyInvoice\Service\Bank\GpcExporter::class)->export($snapshot));
         self::assertSame(1, $this->rowCount('currencies', $supplierId, "code = 'CZK' AND account_number = '3000000004'"),
             'Účet firmy se bere z posledního roku agendy (při shodě první účet).');
+    }
+
+    /**
+     * Účet v cizí měně: pohyby Money vede ve valutách, ale stav účtu z doby před první
+     * knihou zálohy pohybem není. Počáteční stav proto kotví deník — korunový počáteční
+     * stav účtu přepočtený kurzem počátečního stavu z Money (`PSKurz`) — a výpisy navazují.
+     */
+    public function testForeignAccountOpeningIsAnchoredToLedger(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/foreign.lz', SyntheticAgenda::filesWithForeignAccount());
+        $backup = Ms3Backup::extract($this->tmp . '/foreign.lz', $this->tmp . '/foreign');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT statement_number, currency, prev_balance, curr_balance FROM bank_statements
+              WHERE supplier_id = ? AND statement_number LIKE 'BE/%' ORDER BY statement_date, id"
+        );
+        $stmt->execute([$supplierId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame(['BE/2024/05', 'BE/2025/03'], array_column($rows, 'statement_number'));
+        self::assertSame('EUR', $rows[0]['currency']);
+        // 100 EUR z doby před zálohou + 40 EUR v roce 2024 − 20 EUR v roce 2025.
+        self::assertSame(
+            [[100.0, 140.0], [140.0, 120.0]],
+            array_map(static fn (array $r): array => [(float) $r['prev_balance'], (float) $r['curr_balance']], $rows)
+        );
     }
 
     /**

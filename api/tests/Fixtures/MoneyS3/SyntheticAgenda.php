@@ -69,6 +69,7 @@ final class SyntheticAgenda
     ];
     private const REGISTER_FIELDS = [
         ['Zkrat', 'C', 6], ['Popis', 'C', 40], ['UcPokl', 'C', 1], ['PrimUcet', 'C', 6], ['Ucet', 'C', 20], ['BKod', 'C', 4], ['IBAN', 'C', 34],
+        ['Mena', 'C', 3], ['PSKurz', 'E', 10],
     ];
     private const CASH_FIELDS = [
         ['Doklad', 'C', 10], ['Pokl', 'C', 6], ['Vydej', 'B', 1], ['PrKont', 'C', 6], ['DatVyst', 'D', 2], ['DatUplDPH', 'D', 2],
@@ -78,6 +79,7 @@ final class SyntheticAgenda
     private const BANK_FIELDS = [
         ['Doklad', 'C', 10], ['Ucet', 'C', 6], ['Vydej', 'B', 1], ['DatUcPr', 'D', 2], ['DatPlat', 'D', 2], ['Celkem', 'E', 10],
         ['VarSym', 'C', 10], ['AdNazev', 'C', 60], ['Popis', 'C', 50], ['Vypis', 'L', 4],
+        ['Mena', 'C', 3], ['Kurs', 'E', 10], ['ValutyKUhr', 'E', 10],
     ];
     private const RULE_FIELDS = [['Zkrat', 'C', 6], ['Popis', 'C', 40], ['UcMD', 'C', 6], ['UcD', 'C', 6]];
 
@@ -396,6 +398,49 @@ final class SyntheticAgenda
         }
         unset($r);
         $files['ROK.002/UcDenik.DAT'] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, $rows);
+        return $files;
+    }
+
+    /**
+     * Agenda s účtem v eurech (BE, 221003). Money má na účtu 100 EUR z doby před první
+     * knihou zálohy — pohybem nejsou, jen korunovým počátečním stavem v deníku (kurz 25).
+     * Pohyby: 2024 +40 EUR, 2025 −20 EUR, protiúčet 325000; řetěz let navazuje.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithForeignAccount(): array
+    {
+        $files = self::files();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        foreach (['ROK.001' => 25.0, 'ROK.002' => 25.0] as $dir => $openingRate) {
+            $append($dir . '/UcOsnova.DAT', self::CHART_FIELDS, [['Ucet' => '221003', 'Nazev' => 'Devizový účet EUR']]);
+            $append($dir . '/SzUcPokl.DAT', self::REGISTER_FIELDS, [[
+                'Zkrat' => 'BE', 'Popis' => 'Devizový účet', 'UcPokl' => 'U', 'PrimUcet' => '221003',
+                'Ucet' => '5000000003', 'BKod' => '0100', 'Mena' => 'EUR', 'PSKurz' => $openingRate,
+            ]]);
+        }
+        $append('ROK.001/UcDenik.DAT', self::JOURNAL_FIELDS, [
+            ['Cislo' => -5, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '221003', 'UcD' => '701000', 'Castka' => 2500.0],
+            ['Cislo' => -6, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '701000', 'UcD' => '325000', 'Castka' => 2500.0],
+            ['Cislo' => 30, 'Zdroj' => 'BK', 'Doklad' => 'BE24001', 'Datum' => '2024-05-10', 'Popis' => 'Příjem na devizový účet', 'UcMD' => '221003', 'UcD' => '325000', 'Castka' => 1000.0],
+        ]);
+        $append('ROK.001/BankKnih.DAT', self::BANK_FIELDS, [
+            ['Doklad' => 'BE24001', 'Ucet' => 'BE', 'Vydej' => 0, 'DatUcPr' => '2024-05-10', 'DatPlat' => '2024-05-10', 'Celkem' => 1000.0,
+                'Popis' => 'Příjem na devizový účet', 'Vypis' => 1, 'Mena' => 'EUR', 'Kurs' => 25.0, 'ValutyKUhr' => 40.0],
+        ]);
+        $append('ROK.002/UcDenik.DAT', self::JOURNAL_FIELDS, [
+            ['Cislo' => -8, 'Zdroj' => 'XP', 'Datum' => '2025-01-01', 'Popis' => 'Počáteční stav roku 2025', 'UcMD' => '221003', 'UcD' => '701000', 'Castka' => 3500.0],
+            ['Cislo' => -9, 'Zdroj' => 'XP', 'Datum' => '2025-01-01', 'Popis' => 'Počáteční stav roku 2025', 'UcMD' => '701000', 'UcD' => '325000', 'Castka' => 3500.0],
+            ['Cislo' => 31, 'Zdroj' => 'BK', 'Doklad' => 'BE25001', 'Datum' => '2025-03-10', 'Popis' => 'Výdej z devizového účtu', 'UcMD' => '325000', 'UcD' => '221003', 'Castka' => 500.0],
+        ]);
+        $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [
+            ['Doklad' => 'BE25001', 'Ucet' => 'BE', 'Vydej' => 1, 'DatUcPr' => '2025-03-10', 'DatPlat' => '2025-03-10', 'Celkem' => 500.0,
+                'Popis' => 'Výdej z devizového účtu', 'Vypis' => 1, 'Mena' => 'EUR', 'Kurs' => 25.0, 'ValutyKUhr' => 20.0],
+        ]);
         return $files;
     }
 
