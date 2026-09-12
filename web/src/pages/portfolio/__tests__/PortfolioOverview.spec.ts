@@ -21,6 +21,8 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }) }))
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 
+vi.mock('@/composables/useFormat', () => ({ formatNumber: (n: number) => String(n) }))
+
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({
     get currentSupplierId() { return m.currentSupplierId },
@@ -49,6 +51,14 @@ function company(over: Partial<PortfolioCompany> = {}): PortfolioCompany {
     purchase_drafts: 0,
     period_status: null,
     last_bank_import_at: null,
+    volume: {
+      issued_invoices: 1234,
+      purchase_invoices: 56,
+      bank_statements: 12,
+      bank_transactions: 789,
+      cash_documents: 0,
+      journal_entries: 4321,
+    },
     ...over,
   }
 }
@@ -72,7 +82,7 @@ describe('PortfolioOverview — proklik „K doúčtování"', () => {
       unbooked_breakdown: [{ key: 'bank', count: 7, link: '/bank?tab=posting' }],
     }))
 
-    const cell = w.findAll('tbody td')[2]
+    const cell = w.find('[data-testid="unbooked"]')
     expect(cell.text()).toContain('7')
     await cell.find('button').trigger('click')
 
@@ -85,7 +95,7 @@ describe('PortfolioOverview — proklik „K doúčtování"', () => {
       unbooked_breakdown: [{ key: 'invoices', count: 3, link: '/invoices?booked=0' }],
     }))
 
-    await w.findAll('tbody td')[2].find('button').trigger('click')
+    await w.find('[data-testid="unbooked"]').find('button').trigger('click')
 
     expect(m.push).toHaveBeenCalledWith('/invoices?booked=0')
   })
@@ -99,7 +109,7 @@ describe('PortfolioOverview — proklik „K doúčtování"', () => {
       ],
     }))
 
-    const buttons = w.findAll('tbody td')[2].findAll('button')
+    const buttons = w.find('[data-testid="unbooked"]').findAll('button')
     // 1× celkové číslo + 1 tlačítko na typ
     expect(buttons).toHaveLength(3)
 
@@ -116,6 +126,36 @@ describe('PortfolioOverview — proklik „K doúčtování"', () => {
       unbooked_breakdown: [{ key: 'bank', count: 7, link: '/bank?tab=posting' }],
     }))
 
-    expect(w.findAll('tbody td')[2].findAll('button')).toHaveLength(1)
+    expect(w.find('[data-testid="unbooked"]').findAll('button')).toHaveLength(1)
+  })
+})
+
+describe('PortfolioOverview — objem dat', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.currentSupplierId = 2
+  })
+
+  function volumeButton(w: Awaited<ReturnType<typeof mountWith>>, key: string) {
+    return w.find('[data-testid="volume"]').findAll('button').find((b) => b.text().includes('portfolio.volume_' + key))
+  }
+
+  it('metrika vede na seznam dokladů firmy', async () => {
+    const w = await mountWith(company())
+
+    const issued = volumeButton(w, 'issued_invoices')
+    expect(issued).toBeDefined()
+    await issued!.trigger('click')
+    expect(m.push).toHaveBeenCalledWith('/invoices')
+
+    await volumeButton(w, 'journal_entries')!.trigger('click')
+    expect(m.push).toHaveBeenLastCalledWith('/accounting/journal')
+  })
+
+  it('v daňové evidenci deník nenabízí', async () => {
+    const w = await mountWith(company({ accounting_mode: 'tax_evidence' }))
+
+    expect(volumeButton(w, 'journal_entries')).toBeUndefined()
+    expect(volumeButton(w, 'cash_documents')).toBeDefined()
   })
 })

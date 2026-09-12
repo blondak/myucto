@@ -20,6 +20,16 @@ export interface PortfolioUnbookedPart {
   link: string
 }
 
+/** Objem dat firmy (PortfolioVolumeCounter) — počty dokladů a zápisů. */
+export interface PortfolioVolume {
+  issued_invoices: number
+  purchase_invoices: number
+  bank_statements: number
+  bank_transactions: number
+  cash_documents: number
+  journal_entries: number
+}
+
 export interface PortfolioCompany {
   supplier_id: number
   company_name: string
@@ -33,6 +43,7 @@ export interface PortfolioCompany {
   purchase_drafts: number
   period_status: PortfolioPeriodStatus | null
   last_bank_import_at: string | null
+  volume: PortfolioVolume
 }
 
 export interface PortfolioOverview {

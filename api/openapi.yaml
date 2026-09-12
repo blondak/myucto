@@ -7375,9 +7375,15 @@ paths:
         Fáze F (audit 2026-07 P2/M). NENÍ scoped na X-Supplier-Id — agreguje přes
         firmy z `user_suppliers` přihlášeného uživatele (admin/uživatel bez membership
         řádků vidí vše). Per firma: nejbližší daňový termín, počty nezaúčtovaných
-        dokladů / nespárovaných bankovních plateb / konceptů PF, stav účetního období
-        a datum posledního importu bankovního výpisu. Role client bez přístupu.
-      responses: { '200': { description: 'companies[] + total + generated_at' } }
+        dokladů / nespárovaných bankovních plateb / konceptů PF, stav účetního období,
+        datum posledního importu bankovního výpisu a objem dat (`volume`). Role client
+        bez přístupu.
+      responses:
+        '200':
+          description: companies[] + total + generated_at
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortfolioOverview' }
 
   # ─────────────────────────────── Dokumenty ───────────────────────────────
   /api/v1/documents:
@@ -21006,6 +21012,64 @@ components:
               key: { type: string }
               link: { type: string }
               count: { type: integer }
+    PortfolioOverview:
+      type: object
+      required: [companies, total, generated_at]
+      properties:
+        companies: { type: array, items: { $ref: '#/components/schemas/PortfolioCompany' } }
+        total: { type: integer }
+        generated_at: { type: string, format: date-time }
+    PortfolioCompany:
+      type: object
+      required: [supplier_id, company_name, ic, is_vat_payer, accounting_mode, next_deadline, unbooked_documents,
+                 unbooked_breakdown, unmatched_bank_transactions, purchase_drafts, period_status, last_bank_import_at, volume]
+      properties:
+        supplier_id: { type: integer }
+        company_name: { type: string }
+        ic: { type: [string, 'null'] }
+        is_vat_payer: { type: boolean }
+        accounting_mode: { type: string, enum: [tax_evidence, double_entry] }
+        next_deadline:
+          type: [object, 'null']
+          properties:
+            label: { type: string }
+            date: { type: string, format: date }
+            days: { type: integer }
+            shv_pending: { type: boolean }
+        unbooked_documents: { type: integer }
+        unbooked_breakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string, enum: [invoices, purchase_invoices, bank] }
+              count: { type: integer }
+              link: { type: string }
+        unmatched_bank_transactions: { type: integer }
+        purchase_drafts: { type: integer }
+        period_status:
+          type: [object, 'null']
+          properties:
+            fiscal_year: { type: integer }
+            status: { type: string, enum: [open, closing, closed] }
+        last_bank_import_at: { type: [string, 'null'] }
+        volume: { $ref: '#/components/schemas/PortfolioVolume' }
+    PortfolioVolume:
+      type: object
+      description: |
+        Objem dat firmy. Vydané faktury = faktury, dobropisy a daňové doklady k přijaté
+        platbě bez konceptů a stornovaných (bez proforem, shodně s počtem faktur v CRM).
+        Přijaté faktury = stavy received/booked/paid bez zálohových. Bankovní pohyby se
+        počítají přes vlastní výpis transakce. Pokladní doklady bez konceptů, deník
+        všechny zápisy včetně storen.
+      required: [issued_invoices, purchase_invoices, bank_statements, bank_transactions, cash_documents, journal_entries]
+      properties:
+        issued_invoices: { type: integer }
+        purchase_invoices: { type: integer }
+        bank_statements: { type: integer }
+        bank_transactions: { type: integer }
+        cash_documents: { type: integer }
+        journal_entries: { type: integer }
     PayrollPersonEmploymentRef:
       type: object
       required: [id, code, relation_type, status, is_primary]

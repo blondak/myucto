@@ -37,9 +37,10 @@ final class PortfolioAggregationService
     public function overview(int $userId, bool $isSuperadmin, \DateTimeImmutable $now): array
     {
         $supplierIds = $this->allowedSupplierIds($userId, $isSuperadmin);
+        $volumes = (new PortfolioVolumeCounter($this->db))->countsFor($supplierIds);
         $companies = [];
         foreach ($supplierIds as $sid) {
-            $row = $this->buildRow($sid, $now);
+            $row = $this->buildRow($sid, $now, $volumes[$sid] ?? array_fill_keys(PortfolioVolumeCounter::KEYS, 0));
             if ($row !== null) {
                 $companies[] = $row;
             }
@@ -87,8 +88,11 @@ final class PortfolioAggregationService
         return array_map('intval', $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN));
     }
 
-    /** @return array<string,mixed>|null */
-    private function buildRow(int $supplierId, \DateTimeImmutable $now): ?array
+    /**
+     * @param array<string,int> $volume
+     * @return array<string,mixed>|null
+     */
+    private function buildRow(int $supplierId, \DateTimeImmutable $now, array $volume): ?array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, company_name, display_name, ic, accounting_mode, is_vat_payer FROM supplier WHERE id = ?'
@@ -121,6 +125,7 @@ final class PortfolioAggregationService
             'purchase_drafts'             => $this->purchaseDraftsCount($supplierId),
             'period_status'      => $this->periodStatus($supplierId),
             'last_bank_import_at' => $this->lastBankImportAt($supplierId),
+            'volume'             => $volume,
         ];
     }
 

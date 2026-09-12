@@ -71,11 +71,13 @@ final class CrmAggregationService
     /** Datum nákladu (pozdější z DUZP/vystavení) — jako Náklady.
      *  PERSISTENT gen-col effective_cost_date = GREATEST(COALESCE(tax_date,issue_date),issue_date) (mig. 1010). */
     private const COST_DATE = "pi.effective_cost_date";
-    private const REV_STATUS  = "('issued', 'sent', 'reminded', 'paid')";
+    // Veřejné kvůli přehledu firem (PortfolioVolumeCounter), který počítá vydané
+    // a přijaté faktury se stejným rozsahem jako CRM.
+    public const REV_STATUS  = "('issued', 'sent', 'reminded', 'paid')";
     // tax_document = daňový doklad k přijaté platbě (#89): patří do tržeb; finál
     // k záloze pak nese jen zbytek (záporné odpočtové řádky) → žádné dvojí započtení.
-    private const REV_TYPES   = "('invoice', 'credit_note', 'tax_document')";
-    private const COST_STATUS = "('received', 'booked', 'paid')";
+    public const REV_TYPES   = "('invoice', 'credit_note', 'tax_document')";
+    public const COST_STATUS = "('received', 'booked', 'paid')";
 
     /**
      * Datum o `$months` měsíců zpět, BEZ přetečení konce měsíce.

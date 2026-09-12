@@ -8688,7 +8688,7 @@
   },
   "portfolio": {
     "title": "Companies overview",
-    "subtitle": "Deadlines and open items across all your companies, sorted by urgency.",
+    "subtitle": "Deadlines and open items across all your companies, sorted by name. The coloured stripe on each card shows urgency.",
     "empty": "No companies to show.",
     "col_company": "Company",
     "col_deadline": "Next deadline",
@@ -8704,7 +8704,20 @@
     "period_status_closing": "closing",
     "period_status_closed": "closed",
     "open_company": "Open company",
-    "generated_at": "Generated at"
+    "generated_at": "Generated at",
+    "volume_title": "Data volume",
+    "volume_issued_invoices": "Issued invoices",
+    "volume_purchase_invoices": "Purchase invoices",
+    "volume_bank_statements": "Bank statements",
+    "volume_bank_transactions": "Bank transactions",
+    "volume_cash_documents": "Cash documents",
+    "volume_journal_entries": "Journal entries",
+    "volume_hint_issued_invoices": "Invoices, credit notes and tax documents for received payments, excluding drafts, cancelled documents and proformas. Counted the same way as the invoice count in CRM.",
+    "volume_hint_purchase_invoices": "Purchase invoices, receipts, credit notes and tax documents, excluding drafts, cancelled documents and advance invoices.",
+    "volume_hint_bank_statements": "Imported bank statements of the company.",
+    "volume_hint_bank_transactions": "Transactions from all bank statements of the company.",
+    "volume_hint_cash_documents": "Posted and reversed cash documents, excluding drafts.",
+    "volume_hint_journal_entries": "All journal entries, including reversals."
   },
   "linked_documents": {
     "title": "Attachments",

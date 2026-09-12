@@ -8688,7 +8688,7 @@
   },
   "portfolio": {
     "title": "Přehled firem",
-    "subtitle": "Termíny a resty napříč všemi vašimi firmami, seřazeno dle urgence.",
+    "subtitle": "Termíny a resty napříč všemi vašimi firmami, seřazeno podle názvu. Barevný pruh u karty ukazuje naléhavost.",
     "empty": "Žádné firmy k zobrazení.",
     "col_company": "Firma",
     "col_deadline": "Nejbližší termín",
@@ -8704,7 +8704,20 @@
     "period_status_closing": "uzavírá se",
     "period_status_closed": "uzavřené",
     "open_company": "Otevřít firmu",
-    "generated_at": "Vygenerováno"
+    "generated_at": "Vygenerováno",
+    "volume_title": "Objem dat",
+    "volume_issued_invoices": "Vydané faktury",
+    "volume_purchase_invoices": "Přijaté faktury",
+    "volume_bank_statements": "Bankovní výpisy",
+    "volume_bank_transactions": "Bankovní pohyby",
+    "volume_cash_documents": "Pokladní doklady",
+    "volume_journal_entries": "Zápisy v deníku",
+    "volume_hint_issued_invoices": "Faktury, dobropisy a daňové doklady k přijaté platbě bez konceptů, stornovaných dokladů a proforem. Počítá se stejně jako počet faktur v CRM.",
+    "volume_hint_purchase_invoices": "Přijaté faktury, účtenky, dobropisy a daňové doklady bez konceptů, stornovaných dokladů a zálohových faktur.",
+    "volume_hint_bank_statements": "Importované bankovní výpisy firmy.",
+    "volume_hint_bank_transactions": "Pohyby ze všech bankovních výpisů firmy.",
+    "volume_hint_cash_documents": "Zaúčtované a stornované pokladní doklady bez konceptů.",
+    "volume_hint_journal_entries": "Všechny zápisy v účetním deníku včetně storen."
   },
   "linked_documents": {
     "title": "Přílohy",
