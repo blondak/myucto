@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Bank\StatementBalanceService;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use PDO;
 
 /**
@@ -335,9 +336,9 @@ final class CashBankImporter
                         InvoiceImporter::date($r, ['DatPlat', 'DatUcPr']) ?? $lastDate,
                         number_format($amount, 2, '.', ''),
                         $currency,
-                        mb_substr(trim((string) ($r['VarSym'] ?? '')), 0, 20) ?: null,
+                        self::symbolAndDescription($r)[0],
                         mb_substr(trim((string) ($r['AdNazev'] ?? '')), 0, 190) ?: null,
-                        mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
+                        self::symbolAndDescription($r)[1],
                         mb_substr($docNo, 0, 40),
                         hash('sha256', 'money-s3|' . $ctx->supplierId . '|' . $txKey),
                     ]);
@@ -635,6 +636,29 @@ final class CashBankImporter
                 $primary !== null && str_starts_with($primary, '221.') ? substr($primary, 4) : null,
             );
         }
+    }
+
+    /**
+     * Variabilní symbol a popis bankovního pohybu z Money. Platný VS má nejvýš 10 číslic
+     * (vodicí nuly se nepočítají, stejně jako v GPC). Money do pole ukládá i reference
+     * plateb kartou (13 až 15 číslic) nebo text; ty VS nejsou, a proto zůstanou v popisu
+     * pohybu. Jinak by výpis nešel vyexportovat do GPC a párování by dostalo nesmyslný symbol.
+     *
+     * @param array<string,mixed> $r
+     * @return array{0:?string,1:?string} [variabilní symbol, popis]
+     */
+    private static function symbolAndDescription(array $r): array
+    {
+        $raw = trim((string) ($r['VarSym'] ?? ''));
+        $description = trim((string) ($r['Popis'] ?? ''));
+        $valid = $raw === '' || (ctype_digit($raw) && strlen(ltrim($raw, '0')) <= VariableSymbolNormalizer::MAX_LENGTH);
+        if (!$valid) {
+            $description = trim($description . ' (ref. ' . $raw . ')');
+        }
+        return [
+            $valid && $raw !== '' ? $raw : null,
+            $description !== '' ? mb_substr($description, 0, 255) : null,
+        ];
     }
 
     /** Měna pokladny/účtu z Money (prázdná = domácí). */

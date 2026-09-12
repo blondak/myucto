@@ -78,7 +78,7 @@ final class SyntheticAgenda
     ];
     private const BANK_FIELDS = [
         ['Doklad', 'C', 10], ['Ucet', 'C', 6], ['Vydej', 'B', 1], ['DatUcPr', 'D', 2], ['DatPlat', 'D', 2], ['Celkem', 'E', 10],
-        ['VarSym', 'C', 10], ['AdNazev', 'C', 60], ['Popis', 'C', 50], ['Vypis', 'L', 4],
+        ['VarSym', 'C', 20], ['AdNazev', 'C', 60], ['Popis', 'C', 50], ['Vypis', 'L', 4],
         ['Mena', 'C', 3], ['Kurs', 'E', 10], ['ValutyKUhr', 'E', 10],
     ];
     private const RULE_FIELDS = [['Zkrat', 'C', 6], ['Popis', 'C', 40], ['UcMD', 'C', 6], ['UcD', 'C', 6]];
@@ -175,6 +175,12 @@ final class SyntheticAgenda
                 // Pole státu použité na jiný údaj (u fyzické osoby třeba rodné číslo) zemí není.
                 ['Cislo' => 7, 'Nazev' => 'Řemeslník Epsilon', 'ICO' => '', 'DIC' => '',
                     'Ulice' => 'Dílenská 3', 'Misto' => 'Kolín', 'PSC' => '280 02', 'Stat' => 'r.č. 000000/0000'],
+                // Tentýž subjekt dvakrát: IČO jednou s vodicími nulami, jednou bez nich; e-mail jen ve druhém.
+                ['Cislo' => 8, 'Nazev' => 'Obec Vzorová', 'ICO' => '00012346', 'Ulice' => 'Náměstí 1', 'Misto' => 'Vzorová', 'PSC' => '123 45'],
+                ['Cislo' => 9, 'Nazev' => 'Obec Vzorová', 'ICO' => '12346', 'EMail' => 'obec@example.invalid'],
+                // Člen skupiny DPH: Money místo DIČ uvádí značku skupiny.
+                ['Cislo' => 10, 'Nazev' => 'Pojišťovna Theta a.s.', 'ICO' => '00087650', 'DIC' => 'SKUPINOVE_DPH',
+                    'Ulice' => 'Pojistná 5', 'Misto' => 'Praha', 'PSC' => '110 00'],
             ]),
             'AdUcBan.DAT' => Ms3FixtureWriter::table([['CisPartn', 'L', 4], ['Ucet', 'C', 20], ['KodBanky', 'C', 4]], [
                 ['CisPartn' => 2, 'Ucet' => '1000000005', 'KodBanky' => '0100'],
@@ -236,7 +242,8 @@ final class SyntheticAgenda
             'ROK.001/BankKnih.DAT' => Ms3FixtureWriter::table(self::BANK_FIELDS, [
                 ['Doklad' => 'BV24001', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2024-02-20', 'DatPlat' => '2024-02-20', 'Celkem' => 12100.0, 'VarSym' => '2024017', 'AdNazev' => 'Dodavatel Alfa s.r.o.', 'Popis' => 'Úhrada FP24001', 'Vypis' => 1],
                 ['Doklad' => 'BP24002', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2024-03-20', 'DatPlat' => '2024-03-20', 'Celkem' => 24200.0, 'VarSym' => '2024001', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada FV24001', 'Vypis' => 2],
-                ['Doklad' => 'BP24003', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2024-06-30', 'DatPlat' => '2024-06-30', 'Celkem' => 50.0, 'Popis' => 'Vratka poplatku', 'Vypis' => 3],
+                // Reference platby kartou v poli VS (15 číslic) — variabilní symbol to není.
+                ['Doklad' => 'BP24003', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2024-06-30', 'DatPlat' => '2024-06-30', 'Celkem' => 50.0, 'VarSym' => '955000000000017', 'Popis' => 'Vratka poplatku', 'Vypis' => 3],
             ]),
 
             'ROK.002/UcOsnova.DAT' => Ms3FixtureWriter::table(self::CHART_FIELDS, $chart),

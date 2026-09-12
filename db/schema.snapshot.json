@@ -811,7 +811,8 @@
         "1824_statement_rows_related_party_split.sql",
         "1825_statement_account_overrides.sql",
         "1826_statement_map_corrections_to_leaves.sql",
-        "1827_net_turnover_business_model_rows.sql"
+        "1827_net_turnover_business_model_rows.sql",
+        "1828_countries_iso3166_full.sql"
     ],
     "tables": {
         "accounting_archives": {

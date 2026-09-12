@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Geo\CountryNameMatcher;
 use PDO;
 
 /**
@@ -55,22 +56,24 @@ final class CodebookImporter
                     $p->count(self::STEP_PARTNERS, 'existing');
                     continue;
                 }
+                $data = [
+                    'name' => $name,
+                    'ico' => $ico,
+                    'dic' => trim((string) ($r['DIC'] ?? '')),
+                    'street' => trim((string) ($r['Ulice'] ?? '')),
+                    'city' => trim((string) ($r['Misto'] ?? '')),
+                    'zip' => trim((string) ($r['PSC'] ?? '')),
+                    'email' => trim((string) ($r['EMail'] ?? '')),
+                    'phone' => trim((string) ($r['TelCislo'] ?? '')),
+                    'country' => trim((string) (($r['Stat'] ?? '') ?: ($r['FaktStat'] ?? '') ?: ($r['ObchStat'] ?? ''))),
+                    'note' => 'Převzato z Money S3 (adresa č. ' . $no . ')',
+                ];
                 if ($ico !== '' && isset($ctx->clientsByIco[$ico])) {
                     $clientId = $ctx->clientsByIco[$ico];
+                    $this->fillMissing($ctx->supplierId, $clientId, $data);
                     $p->count(self::STEP_PARTNERS, 'matched');
                 } else {
-                    $clientId = $this->insertClient($ctx, [
-                        'name' => $name,
-                        'ico' => $ico,
-                        'dic' => trim((string) ($r['DIC'] ?? '')),
-                        'street' => trim((string) ($r['Ulice'] ?? '')),
-                        'city' => trim((string) ($r['Misto'] ?? '')),
-                        'zip' => trim((string) ($r['PSC'] ?? '')),
-                        'email' => trim((string) ($r['EMail'] ?? '')),
-                        'phone' => trim((string) ($r['TelCislo'] ?? '')),
-                        'country' => trim((string) (($r['Stat'] ?? '') ?: ($r['FaktStat'] ?? '') ?: ($r['ObchStat'] ?? ''))),
-                        'note' => 'Převzato z Money S3 (adresa č. ' . $no . ')',
-                    ], $defaults);
+                    $clientId = $this->insertClient($ctx, $data, $defaults);
                     $p->count(self::STEP_PARTNERS, 'created');
                 }
                 $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_CLIENT, $key, $clientId, $ctx->runId);
@@ -214,7 +217,13 @@ final class CodebookImporter
     {
         $ico = self::ico($data['ico']);
         $related = $ico !== '' && in_array($ico, array_map(self::ico(...), $ctx->options->relatedPartyIcos), true);
-        $dic = strtoupper(str_replace(' ', '', $data['dic']));
+        // Značka člena skupiny DPH („SKUPINOVE_DPH") DIČ není: partner je plátcem, ale DIČ
+        // skupiny Money nezná — karta ho nedostane a poznámka řekne, že ho je potřeba doplnit.
+        $groupVat = str_starts_with(\MyInvoice\Support\CompanyIdNormalizer::dic($data['dic']) ?? '', 'SKUPINOV');
+        $dic = self::vatId($data['dic']);
+        if ($groupVat) {
+            $data['note'] .= '; člen skupiny DPH, DIČ skupiny v Money chybí';
+        }
         // Země: předpona DIČ z EU, jinak stát z adresy v Money. Money pustí do pole DIČ i
         // rejstříkové nebo daňové číslo mimo EU (FN…, PIB…) — pak zemi nese jen adresa.
         $countryName = trim((string) ($data['country'] ?? ''));
@@ -224,7 +233,7 @@ final class CodebookImporter
             $countryName = '';
         }
         $countryId = $this->countryFromVatId($dic) ?? $this->countryFromName($countryName);
-        if ($countryId === null && $countryName !== '' && !self::isDomesticName($countryName)) {
+        if ($countryId === null && $countryName !== '' && !$this->isDomesticName($countryName)) {
             $ctx->protocol->warn(CodebookImporter::STEP_PARTNERS, 'country_unknown',
                 "Stát „{$countryName}“ partnera {$data['name']} v číselníku zemí není, partner má zemi firmy. Zkontrolujte ho.");
         }
@@ -249,7 +258,7 @@ final class CodebookImporter
             $data['email'] !== '' ? mb_substr($data['email'], 0, 190) : null,
             $data['phone'] !== '' ? mb_substr($data['phone'], 0, 40) : null,
             $defaults['currency_id'],
-            $dic !== '' ? 1 : 0,
+            $dic !== '' || $groupVat ? 1 : 0,
             $related ? 1 : 0,
             $related ? 'capital' : null,
             $data['note'],
@@ -257,8 +266,7 @@ final class CodebookImporter
         return (int) $pdo->lastInsertId();
     }
 
-    /** @var array<string,?int> ISO kód země => countries.id */
-    private array $countryIds = [];
+    private ?CountryNameMatcher $countryMatcher = null;
 
     /** Země partnera podle předpony DIČ (EL = Řecko); tuzemské, chybějící nebo neznámé → null. */
     private function countryFromVatId(string $dic): ?int
@@ -266,42 +274,24 @@ final class CodebookImporter
         if (preg_match('/^([A-Z]{2})[0-9A-Z]/', $dic, $m) !== 1 || $m[1] === 'CZ') {
             return null;
         }
-        $iso = $m[1] === 'EL' ? 'GR' : $m[1];
-        if (!array_key_exists($iso, $this->countryIds)) {
-            $stmt = $this->db->pdo()->prepare('SELECT id FROM countries WHERE iso2 = ? LIMIT 1');
-            $stmt->execute([$iso]);
-            $id = $stmt->fetchColumn();
-            $this->countryIds[$iso] = $id === false ? null : (int) $id;
-        }
-        return $this->countryIds[$iso];
+        return $this->countryMatcher()->idOf($m[1] === 'EL' ? 'GR' : $m[1]);
     }
 
-    /** @var array<string,?int> název státu z Money (malými písmeny) => countries.id */
-    private array $countryNames = [];
-
-    /** Země podle státu z adresy Money (český či anglický název, ISO kód); tuzemsko a neznámý stát → null. */
+    /** Země podle státu z adresy Money ({@see CountryNameMatcher}); tuzemsko a neznámý stát → null. */
     private function countryFromName(string $name): ?int
     {
-        $key = mb_strtolower(trim($name));
-        if ($key === '' || self::isDomesticName($key)) {
-            return null;
-        }
-        if (!array_key_exists($key, $this->countryNames)) {
-            $stmt = $this->db->pdo()->prepare(
-                "SELECT id FROM countries
-                  WHERE iso2 <> 'CZ' AND (LOWER(name_cs) = ? OR LOWER(name_en) = ? OR iso2 = UPPER(?) OR iso3 = UPPER(?))
-                  ORDER BY id LIMIT 1"
-            );
-            $stmt->execute([$key, $key, $key, $key]);
-            $id = $stmt->fetchColumn();
-            $this->countryNames[$key] = $id === false ? null : (int) $id;
-        }
-        return $this->countryNames[$key];
+        $iso = $this->countryMatcher()->match($name);
+        return $iso === null || $iso === 'CZ' ? null : $this->countryMatcher()->idOf($iso);
     }
 
-    private static function isDomesticName(string $name): bool
+    private function isDomesticName(string $name): bool
     {
-        return in_array(mb_strtolower(trim($name)), ['cz', 'cze', 'čr', 'česko', 'česká republika', 'czech republic', 'czechia'], true);
+        return $this->countryMatcher()->match($name) === 'CZ';
+    }
+
+    private function countryMatcher(): CountryNameMatcher
+    {
+        return $this->countryMatcher ??= CountryNameMatcher::fromDatabase($this->db);
     }
 
     /** @return array{currency_id:int,country_id:int} */
@@ -321,8 +311,52 @@ final class CodebookImporter
         return ['currency_id' => $currencyId, 'country_id' => $countryId ?: (int) ($row['country_id'] ?? 0)];
     }
 
+    /** IČO v kanonickém tvaru (8 číslic): Money vede tentýž subjekt jednou s vodicí nulou a jednou bez ní. */
     public static function ico(string $ico): string
     {
-        return (string) preg_replace('/\D/', '', $ico);
+        return \MyInvoice\Support\CompanyIdNormalizer::ic($ico) ?? '';
+    }
+
+    /**
+     * DIČ z adresáře Money, jen když má tvar DIČ (kód státu a aspoň jedna číslice).
+     * Money do pole ukládá i značku člena skupiny DPH („SKUPINOVE_DPH") nebo jiný text.
+     */
+    private static function vatId(string $dic): string
+    {
+        $clean = \MyInvoice\Support\CompanyIdNormalizer::dic($dic) ?? '';
+        return preg_match('/^[A-Z]{2}(?=[0-9A-Z]*\d)[0-9A-Z]{2,13}$/', $clean) === 1 ? $clean : '';
+    }
+
+    /**
+     * Druhý záznam adresáře Money se stejným IČO: karta už existuje, doplní se jen
+     * údaje, které na ní chybějí (DIČ, adresa, e-mail, telefon). Nic se nepřepisuje.
+     *
+     * @param array{dic:string,street:string,city:string,zip:string,email:string,phone:string} $data
+     */
+    private function fillMissing(int $supplierId, int $clientId, array $data): void
+    {
+        $dic = self::vatId($data['dic']);
+        $zip = str_replace(' ', '', $data['zip']);
+        $this->db->pdo()->prepare(
+            "UPDATE clients SET
+                dic = COALESCE(NULLIF(dic, ''), ?),
+                is_vat_payer = IF(? IS NOT NULL, 1, is_vat_payer),
+                street = IF(street IS NULL OR street IN ('', '-'), COALESCE(?, street), street),
+                city = IF(city IS NULL OR city IN ('', '-'), COALESCE(?, city), city),
+                zip = IF(zip IS NULL OR zip IN ('', '-'), COALESCE(?, zip), zip),
+                main_email = COALESCE(NULLIF(main_email, ''), ?),
+                phone = COALESCE(NULLIF(phone, ''), ?)
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([
+            $dic !== '' ? mb_substr($dic, 0, 20) : null,
+            $dic !== '' ? $dic : null,
+            $data['street'] !== '' ? mb_substr($data['street'], 0, 190) : null,
+            $data['city'] !== '' ? mb_substr($data['city'], 0, 120) : null,
+            $zip !== '' ? mb_substr($zip, 0, 10) : null,
+            $data['email'] !== '' ? mb_substr($data['email'], 0, 190) : null,
+            $data['phone'] !== '' ? mb_substr($data['phone'], 0, 40) : null,
+            $clientId,
+            $supplierId,
+        ]);
     }
 }

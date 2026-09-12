@@ -132,7 +132,12 @@ final class MoneyS3ImportTest extends TestCase
         // Tři vydané faktury a ostatní pohledávka PH25001, která je v přiznání DPH.
         self::assertSame(4, $this->rowCount('invoices', $supplierId));
         self::assertSame(4, $this->rowCount('cash_documents', $supplierId));
-        self::assertSame(5, $this->rowCount('clients', $supplierId));
+        self::assertSame(7, $this->rowCount('clients', $supplierId));
+        // Dva záznamy adresáře se stejným IČO (s vodicími nulami i bez) = jedna karta, doplněná z obou.
+        self::assertSame(1, $this->rowCount('clients', $supplierId,
+            "ic = '00012346' AND main_email = 'obec@example.invalid' AND street = 'Náměstí 1'"));
+        // Značka člena skupiny DPH není DIČ: karta DIČ nemá, ale je plátcem.
+        self::assertSame(1, $this->rowCount('clients', $supplierId, "ic = '00087650' AND dic IS NULL AND is_vat_payer = 1"));
         // Zahraniční partner má zemi podle DIČ — jinak by dodání do EU chybělo v souhrnném hlášení.
         self::assertSame(1, $this->rowCount('clients', $supplierId,
             "dic = 'DE123456789' AND country_id = (SELECT id FROM countries WHERE iso2 = 'DE')"));
@@ -555,6 +560,16 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame('confirmed', $snapshot['status'], json_encode($snapshot, JSON_UNESCAPED_UNICODE) ?: '');
         self::assertEqualsWithDelta(62100.0, (float) $snapshot['closing'], 0.001);
         self::assertStringStartsWith('074', $this->container(\MyInvoice\Service\Bank\GpcExporter::class)->export($snapshot));
+        // Reference platby kartou z pole VS v Money není variabilní symbol: zůstane v popisu
+        // a výpis s ní jde do GPC (pevné pole VS má 10 číslic).
+        $tx = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM bank_transactions WHERE statement_id = ? AND bank_ref = 'BP24003'
+                AND variable_symbol IS NULL AND description LIKE '%ref. 955000000000017%'"
+        );
+        $tx->execute([(int) $rows[2]['id']]);
+        self::assertSame(1, (int) $tx->fetchColumn());
+        $juneSnapshot = $this->container(\MyInvoice\Service\Bank\StatementBalanceService::class)->snapshot($supplierId, (int) $rows[2]['id']);
+        self::assertStringStartsWith('074', $this->container(\MyInvoice\Service\Bank\GpcExporter::class)->export($juneSnapshot));
         self::assertSame(1, $this->rowCount('currencies', $supplierId, "code = 'CZK' AND account_number = '3000000004'"),
             'Účet firmy se bere z posledního roku agendy (při shodě první účet).');
         // Účet je v evidenci účtů firmy s analytikou podle Money (PrimUcet 221001 → 221.001),
