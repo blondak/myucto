@@ -218,6 +218,11 @@ final class CodebookImporter
         // Země: předpona DIČ z EU, jinak stát z adresy v Money. Money pustí do pole DIČ i
         // rejstříkové nebo daňové číslo mimo EU (FN…, PIB…) — pak zemi nese jen adresa.
         $countryName = trim((string) ($data['country'] ?? ''));
+        // Pole státu s číslicemi nese jiný údaj (u fyzické osoby třeba rodné číslo): zemí
+        // není a do protokolu se jeho obsah nevypisuje.
+        if (preg_match('/\d/', $countryName) === 1) {
+            $countryName = '';
+        }
         $countryId = $this->countryFromVatId($dic) ?? $this->countryFromName($countryName);
         if ($countryId === null && $countryName !== '' && !self::isDomesticName($countryName)) {
             $ctx->protocol->warn(CodebookImporter::STEP_PARTNERS, 'country_unknown',

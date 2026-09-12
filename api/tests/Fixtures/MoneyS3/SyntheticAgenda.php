@@ -170,6 +170,9 @@ final class SyntheticAgenda
                 // Money pustí do pole DIČ i rejstříkové číslo; zemi pak nese jen adresa.
                 ['Cislo' => 6, 'Nazev' => 'Lieferant Delta GmbH', 'ICO' => '', 'DIC' => 'FN123456a',
                     'Ulice' => 'Beispielgasse 2', 'Misto' => 'Wien', 'PSC' => '1010', 'Stat' => 'Rakousko'],
+                // Pole státu použité na jiný údaj (u fyzické osoby třeba rodné číslo) zemí není.
+                ['Cislo' => 7, 'Nazev' => 'Řemeslník Epsilon', 'ICO' => '', 'DIC' => '',
+                    'Ulice' => 'Dílenská 3', 'Misto' => 'Kolín', 'PSC' => '280 02', 'Stat' => 'r.č. 000000/0000'],
             ]),
             'AdUcBan.DAT' => Ms3FixtureWriter::table([['CisPartn', 'L', 4], ['Ucet', 'C', 20], ['KodBanky', 'C', 4]], [
                 ['CisPartn' => 2, 'Ucet' => '1000000005', 'KodBanky' => '0100'],
