@@ -507,7 +507,7 @@ final class CashBookAction
                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
                   FROM journal_entry_lines l
                   JOIN journal_entries e    ON e.id = l.entry_id
-                  JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+                  " . JournalTaxOrigin::join() . "
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                  WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                    AND (l.account_id = ? OR ca.parent_id = ?)

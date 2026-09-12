@@ -566,7 +566,9 @@ final class ClosingRepository
                     SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS czk_balance
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
-               JOIN chart_of_accounts a ON a.id = l.account_id
+               -- a.supplier_id plyne už z FK řádku na osnovu (supplier_id, account_id);
+               -- výslovně uvedená dovolí začít od pár účtů 211/221 místo všech řádků deníku.
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date <= ?
                 AND l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
