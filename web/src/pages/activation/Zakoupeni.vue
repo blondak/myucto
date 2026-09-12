@@ -174,9 +174,12 @@ const subscription = computed(() => status.value?.subscription ?? null)
 const canStartPurchase = computed(() => subscription.value === null || subscription.value.state === 'expired')
 /** Konec zaplaceného období — do něj licence poběží i po zrušení obnovy. */
 const paidUntil = computed(() => subscription.value?.valid_until ?? status.value?.valid_until ?? null)
-const periodLabel = computed(() =>
-  subscription.value?.period === 'year' ? t('license.renewal_period_year') : t('license.renewal_period_month'),
-)
+const hasPaidUntil = computed(() => subscription.value?.valid_until != null)
+const periodLabel = computed(() => {
+  if (subscription.value?.period === 'year') return t('license.renewal_period_year')
+  if (subscription.value?.period === 'month') return t('license.renewal_period_month')
+  return t('license.renewal_period_unknown')
+})
 
 /** Navýšení má smysl jen u aktivního placeného předplatného (aktivní klíč). */
 const canUpgrade = computed(() => {
@@ -1093,9 +1096,11 @@ onMounted(async () => {
             <dd class="mt-0.5 text-neutral-900 font-medium">{{ fmtDate(status.trial_ends_at) }}</dd>
           </div>
           <div v-else>
-            <dt class="text-xs uppercase tracking-wider text-neutral-500">{{ t('license.valid_until') }}</dt>
-            <dd class="mt-0.5 text-neutral-900 font-medium">
-              {{ status.perpetual ? t('license.perpetual_validity') : fmtDate(status.valid_until) }}
+            <dt class="text-xs uppercase tracking-wider text-neutral-500">
+              {{ t(hasPaidUntil || status.perpetual ? 'license.valid_until' : 'license.token_valid_until') }}
+            </dt>
+            <dd class="mt-0.5 text-neutral-900 font-medium" data-license-valid-until>
+              {{ status.perpetual ? t('license.perpetual_validity') : fmtDate(paidUntil) }}
             </dd>
           </div>
           <div v-if="status.overage_deadline">

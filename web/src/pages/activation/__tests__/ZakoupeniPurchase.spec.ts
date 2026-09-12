@@ -27,7 +27,7 @@ vi.mock('@/api/instanceStatus', () => ({
 vi.mock('@/api/instanceHealth', () => ({ resolveBillingNarrative: () => null }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' },
-    t: (key: string) => key,
+    t: (key: string, params?: Record<string, unknown>) => params?.period ? `${key} ${params.period}` : key,
     te: () => false,
     tm: () => [],
     rt: (value: string) => value,
@@ -128,6 +128,67 @@ describe('automatický purchase handoff', () => {
     expect(wrapper.text()).toContain('license.purchase_existing_subscription_hint')
   })
 
+  it('u ročního předplatného ukáže konec zaplaceného období místo expirace tokenu', async () => {
+    const tokenValidUntil = 1_800_000_000
+    const paidUntil = 1_900_000_000
+    api.status.mockResolvedValue(status({
+      state: 'active',
+      tier: 'single',
+      users_licensed: 1,
+      valid_until: tokenValidUntil,
+      license_key_masked: 'MYU-…-AAAA',
+      subscription: {
+        state: 'active', period: 'year', auto_renew: true,
+        next_charge_at: paidUntil, cancelled_at: null, valid_until: paidUntil,
+      },
+    }))
+
+    const wrapper = await mountPage()
+
+    expect(wrapper.find('[data-license-valid-until]').text()).toBe(new Date(paidUntil * 1000).toLocaleDateString())
+    expect(wrapper.find('[data-license-valid-until]').text()).not.toBe(new Date(tokenValidUntil * 1000).toLocaleDateString())
+    expect(wrapper.text()).toContain('license.valid_until')
+    expect(wrapper.text()).not.toContain('license.token_valid_until')
+    expect(wrapper.text()).toContain('license.renewal_period_year')
+    expect(wrapper.text()).not.toContain('license.renewal_period_month')
+  })
+
+  it('u měsíčního předplatného zachová měsíční periodicitu', async () => {
+    api.status.mockResolvedValue(status({
+      state: 'active',
+      tier: 'single',
+      users_licensed: 1,
+      license_key_masked: 'MYU-…-AAAA',
+      subscription: {
+        state: 'active', period: 'month', auto_renew: true,
+        next_charge_at: 1_900_000_000, cancelled_at: null, valid_until: 1_900_000_000,
+      },
+    }))
+
+    const wrapper = await mountPage()
+
+    expect(wrapper.text()).toContain('license.renewal_period_month')
+    expect(wrapper.text()).not.toContain('license.renewal_period_unknown')
+  })
+
+  it('chybějící periodicitu neoznačí jako měsíční', async () => {
+    api.status.mockResolvedValue(status({
+      state: 'active',
+      tier: 'single',
+      users_licensed: 1,
+      license_key_masked: 'MYU-…-AAAA',
+      subscription: {
+        state: 'active', auto_renew: true,
+        next_charge_at: 1_900_000_000, cancelled_at: null, valid_until: 1_900_000_000,
+      },
+    }))
+
+    const wrapper = await mountPage()
+
+    expect(wrapper.text()).toContain('license.renewal_period_unknown')
+    expect(wrapper.text()).not.toContain('license.renewal_period_month')
+  })
+
   it('u ruční licence bez předplatného nabídne nový nákup místo nefunkčních doplatků', async () => {
     api.status.mockResolvedValue(status({
       state: 'active',
@@ -140,6 +201,7 @@ describe('automatický purchase handoff', () => {
     const wrapper = await mountPage()
 
     expect(wrapper.find('[data-license-purchase-start]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('license.token_valid_until')
     expect(wrapper.find('#tier-change').exists()).toBe(false)
     expect(wrapper.find('#upgrade').exists()).toBe(false)
 
