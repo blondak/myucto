@@ -200,6 +200,22 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
     wrapper.unmount()
   })
 
+  it('výpis převzatý z jiného programu (import, bez souboru) nabídne GPC složené ze zůstatků', async () => {
+    m.list.mockResolvedValue({ ...emptyPage(), total: 1, items: [{
+      id: 43, source: 'import', file_name: 'money-s3-BU_2026_03.import',
+      account_number: '1000000005', bank_code: '0100', currency: 'CZK',
+      statement_date: '2026-03-31', curr_balance: 1250, prev_balance: 1000,
+      transaction_count: 1, matched_count: 0, unposted_count: 0, has_file: false, has_pdf: false,
+      balance_calculation: { status: 'confirmed', closing: 1250, confirmed_closing: 1250, bank_statement_id: undefined },
+    }] })
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    const actions = wrapper.findAll('a').filter(a => a.text() === 'GPC')
+    expect(actions).toHaveLength(2)
+    for (const action of actions) expect(action.attributes('href')).toBe('/export-gpc/43')
+    wrapper.unmount()
+  })
+
   it('jinak nový výpis s přeskočenými duplicitami uvnitř → toast.warning s přesnými čísly, ne tichý souhrn', async () => {
     const result: ImportResult = {
       statement_id: 42,

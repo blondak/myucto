@@ -15,7 +15,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatAccountNumber } from '@/utils/bankAccount'
-import { statementClosingBalance, statementGpcUrl, statementGpcTitle } from '@/utils/bankStatement'
+import { statementClosingBalance, statementGpcUrl, statementGpcTitle, statementHasGpc } from '@/utils/bankStatement'
 import RuleHintBanner from '@/components/bank/RuleHintBanner.vue'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
@@ -340,7 +340,7 @@ const statementActions = computed<ActionItem[]>(() => {
       label: 'GPC',
       icon: 'download',
       tier: 'secondary',
-      show: s.has_file || s.source === 'bank_api',
+      show: statementHasGpc(s),
       disabled: !statementGpcUrl(s),
       disabledReason: t(`bank.balance_${s.balance_calculation?.status ?? 'unavailable'}`),
       title: t(statementGpcTitle(s)),

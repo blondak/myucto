@@ -187,7 +187,18 @@ final class StatementBalanceService
             $tx->execute([$after, $to]);
             $preloadedTransactions = $tx->fetchAll(PDO::FETCH_ASSOC);
         }
-        $opening = $anchor ?? ($selected['source'] === 'bank_api' && !$hasKnownBalance ? 0 : null);
+        // Bez stavu z dřívějška: historie účtu začíná prvním výpisem se stavem. Leží-li v tomto
+        // měsíci, počáteční stav nese on sám (typicky první výpis převzatý z jiného programu).
+        $firstOpening = null;
+        if ($anchor === null) {
+            foreach ($statements as $row) {
+                if (!BankStatementSource::isBalanceAnchor((string) $row['source']) || $row['prev_balance'] === null) continue;
+                $date = substr((string) $row['statement_date'], 0, 10);
+                if ($date >= $from && $date <= $to) $firstOpening = self::cents($row['prev_balance']);
+                break;
+            }
+        }
+        $opening = $anchor ?? $firstOpening ?? ($selected['source'] === 'bank_api' && !$hasKnownBalance ? 0 : null);
         $credit = 0;
         $debit = 0;
         $transactions = [];

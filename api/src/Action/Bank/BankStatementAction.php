@@ -815,7 +815,8 @@ final class BankStatementAction
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         $balanceSummaries = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summaries(
             $sid,
-            array_map('intval', array_column(array_filter($rows, static fn (array $row): bool => $row['source'] === 'bank_api'), 'id')),
+            // Stav se počítá výpisům, jejichž GPC se skládá ze zůstatků (API, převod z jiného programu).
+            array_map('intval', array_column(array_filter($rows, static fn (array $row): bool => in_array($row['source'], ['bank_api', 'import'], true)), 'id')),
         );
         foreach ($rows as &$r) {
             $r['id'] = (int) $r['id'];

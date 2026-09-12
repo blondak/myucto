@@ -17,7 +17,7 @@ import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
 import { formatAccountNumber } from '@/utils/bankAccount'
-import { statementClosingBalance, statementGpcUrl, statementGpcTitle } from '@/utils/bankStatement'
+import { statementClosingBalance, statementGpcUrl, statementGpcTitle, statementHasGpc } from '@/utils/bankStatement'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import BankReconciliationConfirmation from '@/components/bank/BankReconciliationConfirmation.vue'
@@ -778,7 +778,7 @@ async function onFileSelected(e: Event) {
             </td>
             <td class="px-3 py-2 text-right whitespace-nowrap">
               <div class="inline-flex flex-wrap items-center gap-1.5">
-                <a v-if="s.has_file || s.source === 'bank_api'" :href="statementGpcUrl(s)" @click.stop
+                <a v-if="statementHasGpc(s)" :href="statementGpcUrl(s)" @click.stop
                    :aria-disabled="!statementGpcUrl(s) || undefined" :tabindex="statementGpcUrl(s) ? undefined : -1"
                    :class="{ 'opacity-50 cursor-not-allowed': !statementGpcUrl(s) }"
                    :title="t(statementGpcTitle(s))"
@@ -847,7 +847,7 @@ async function onFileSelected(e: Event) {
             {{ t('bank.unposted_count', { count: s.unposted_count }) }}
           </div>
           <div class="flex flex-wrap items-center gap-1.5 mt-2">
-            <a v-if="s.has_file || s.source === 'bank_api'" :href="statementGpcUrl(s)" @click.stop
+            <a v-if="statementHasGpc(s)" :href="statementGpcUrl(s)" @click.stop
                    :aria-disabled="!statementGpcUrl(s) || undefined" :tabindex="statementGpcUrl(s) ? undefined : -1"
                    :class="{ 'opacity-50 cursor-not-allowed': !statementGpcUrl(s) }"
                :title="t(statementGpcTitle(s))"

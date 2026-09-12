@@ -346,6 +346,27 @@ final class StatementAccountResolutionTest extends TestCase
         self::assertArrayNotHasKey('transactions', $items[$apiId]['balance_calculation']);
     }
 
+    /**
+     * Výpis převzatý z jiného programu (`import`) soubor nemá — GPC se skládá ze zůstatků.
+     * Seznam výpisů mu proto stav počítá stejně jako výpisu z API, jinak by GPC nešlo nabídnout.
+     */
+    public function testListCalculatesBalanceForImportedStatement(): void
+    {
+        $account = '1000000005';
+        $this->registerCurrency('CZK', $account, '2250');
+        $id = $this->insertStatement('import', $account, '2250', '2099-07-31', 125.0, 'money-s3-import');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET prev_balance = 100 WHERE id = ?')->execute([$id]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-15', 25, 'CZK')")->execute([$id]);
+        $request = $this->mockRequest($this->supplierId, 'admin', [], [], ['filter' => ['year' => 2099, 'account' => $account]]);
+        $list = json_decode((string) $this->action->list($request, new Response())->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $items = array_column($list['items'], null, 'id');
+        self::assertArrayHasKey($id, $items);
+        self::assertNotNull($items[$id]['balance_calculation'], 'Výpis z převodu musí mít stav, jinak mu seznam nenabídne GPC.');
+        self::assertContains($items[$id]['balance_calculation']['status'], ['calculated', 'confirmed']);
+        self::assertSame(125.0, (float) $items[$id]['balance_calculation']['closing']);
+    }
+
     public function testApiWithoutInitialBalanceUsesMovementsInListAndAccountBalances(): void
     {
         $account = '1000000005';
