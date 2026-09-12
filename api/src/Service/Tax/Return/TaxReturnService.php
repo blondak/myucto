@@ -771,6 +771,18 @@ final class TaxReturnService
      */
     public function previewXml(int $supplierId, int $year, string $type, string $variant = 'radne', int $variantSeq = 1): array
     {
+        return $this->previewXmlWithComputation($supplierId, $year, $type, $variant, $variantSeq)['built'];
+    }
+
+    /**
+     * Pracovní XML DPFO spolu s výpočtem, ze kterého vzniklo. Veřejný {@see previewXml()}
+     * vrací jen `built`, pracovní PDF sestava ({@see reportSource()}) čte obojí, aby neměla
+     * vlastní druhý výpočet.
+     *
+     * @return array{built: array<string,mixed>, computation: array{result: array<string,mixed>, podklady: array<string,mixed>, warnings: list<string>}}
+     */
+    private function previewXmlWithComputation(int $supplierId, int $year, string $type, string $variant, int $variantSeq): array
+    {
         $this->assertType($type);
         $this->assertSupplierType($supplierId, $type);
         if ($type !== 'fo') {
@@ -793,7 +805,7 @@ final class TaxReturnService
         );
         $xsd = $this->xmlValidator->validate($built['xml'], 'dpfdp7');
         $xsdErrors = $xsd['status'] === 'failed' ? $xsd['errors'] : [];
-        return [
+        return ['computation' => $computation, 'built' => [
             'xml' => $built['xml'],
             'form_code' => 'dpfdp7-preview',
             'filename' => sprintf('dpfdp7-%04d-pracovni.xml', $year),
@@ -810,10 +822,22 @@ final class TaxReturnService
             'xsd_status' => $xsd['status'],
             'variant' => $variant,
             'variant_seq' => $seq,
-        ];
+        ]];
     }
 
     public function buildXml(int $supplierId, int $year, string $type, string $variant = 'radne', int $variantSeq = 1): array
+    {
+        return $this->buildXmlWithComputation($supplierId, $year, $type, $variant, $variantSeq)['built'];
+    }
+
+    /**
+     * Jediná cesta k XML přiznání, která vrací i výpočet, ze kterého XML vzniklo (u
+     * finálního přiznání výpočet uložený ve snapshotu). {@see buildXml()} bere jen `built`;
+     * pracovní PDF sestava ({@see reportSource()}) bere obojí.
+     *
+     * @return array{built: array<string,mixed>, computation: array{result: array<string,mixed>, podklady: array<string,mixed>, warnings: list<string>}}
+     */
+    private function buildXmlWithComputation(int $supplierId, int $year, string $type, string $variant, int $variantSeq): array
     {
         $this->assertType($type);
         $this->assertSupplierType($supplierId, $type);
@@ -822,10 +846,11 @@ final class TaxReturnService
         $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
         if ($type === 'po' && $row !== null && $row['status'] === 'final'
             && ($row['final_snapshot_id'] === null || $this->returns->snapshot($supplierId, (int) $row['final_snapshot_id']) === null)) {
-            return $this->buildDppoXml(
-                $supplierId, $year, (array) $row['inputs'],
-                $this->legacyDppoComputation($supplierId, $year, $row, $variant), $variant, $seq,
-            );
+            $computation = $this->legacyDppoComputation($supplierId, $year, $row, $variant);
+            return [
+                'built' => $this->buildDppoXml($supplierId, $year, (array) $row['inputs'], $computation, $variant, $seq),
+                'computation' => $computation,
+            ];
         }
         if ($type === 'fo' || ($row !== null && $row['status'] === 'final')) {
             if ($row === null || $row['status'] !== 'final' || $row['final_snapshot_id'] === null) {
@@ -841,19 +866,88 @@ final class TaxReturnService
             $summary['warnings'] = (array) ($snapshot['warnings'] ?? []);
             $suffix = $variant === 'radne' ? '' : '-' . $variant . ($variant === 'dodatecne' && $seq > 1 ? '-' . $seq : '');
             return [
-                'xml' => (string) $stored['xml_content'],
-                'form_code' => $type === 'po' ? 'dppdp9' : 'dpfdp7',
-                'filename' => sprintf('%s-%04d%s.xml', $type === 'po' ? 'dppdp9' : 'dpfdp7', $year, $suffix),
-                'summary' => $summary,
-                'warnings' => $summary['warnings'],
-                'variant' => $variant,
-                'variant_seq' => $seq,
+                'built' => [
+                    'xml' => (string) $stored['xml_content'],
+                    'form_code' => $type === 'po' ? 'dppdp9' : 'dpfdp7',
+                    'filename' => sprintf('%s-%04d%s.xml', $type === 'po' ? 'dppdp9' : 'dpfdp7', $year, $suffix),
+                    'summary' => $summary,
+                    'warnings' => $summary['warnings'],
+                    'variant' => $variant,
+                    'variant_seq' => $seq,
+                ],
+                'computation' => [
+                    'result' => (array) ($snapshot['computed'] ?? []),
+                    'podklady' => (array) ($snapshot['podklady'] ?? []),
+                    'warnings' => (array) ($snapshot['warnings'] ?? []),
+                ],
             ];
         }
         $inputs = $row !== null ? (array) $row['inputs'] : [];
 
         $computation = $this->compute($supplierId, $year, $type, $inputs, $variant);
-        return $this->buildDppoXml($supplierId, $year, $inputs, $computation, $variant, $seq);
+        return [
+            'built' => $this->buildDppoXml($supplierId, $year, $inputs, $computation, $variant, $seq),
+            'computation' => $computation,
+        ];
+    }
+
+    /**
+     * Strukturovaný mezivýsledek přiznání pro pracovní PDF sestavu (není podáním).
+     *
+     * Sestava nesmí mít vlastní výpočet: XML i výpočet se berou ze STEJNÉ cesty jako
+     * export ({@see buildXmlWithComputation()}, u rozpracovaného DPFO pracovní XML
+     * {@see previewXmlWithComputation()}). Finální přiznání tak dá sestavu z uloženého
+     * snapshotu, rozpracované z téhož výpočtu, ze kterého by vzniklo stažené XML.
+     * Čistě čtecí: nezakládá draft, nepáruje zálohy a nic nearchivuje.
+     *
+     * @return array{type:string, year:int, variant:string, variant_seq:int, status:string,
+     *   finalized_at:?string, form_code:string, xml:string, warnings:list<string>,
+     *   computation: array{result: array<string,mixed>, podklady: array<string,mixed>, warnings: list<string>},
+     *   inputs: array<string,mixed>, tax_losses: array<string,mixed>, supplier: array<string,string>,
+     *   snapshot: ?array<string,mixed>}
+     */
+    public function reportSource(int $supplierId, int $year, string $type, string $variant = 'radne', int $variantSeq = 1): array
+    {
+        $this->assertType($type);
+        $this->assertSupplierType($supplierId, $type);
+        $this->assertVariant($variant);
+        $seq = $this->resolveSeq($supplierId, $year, $type, $variant, $variantSeq);
+        $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
+        $isFinal = $row !== null && $row['status'] === 'final';
+
+        $source = $type === 'fo' && !$isFinal
+            ? $this->previewXmlWithComputation($supplierId, $year, $type, $variant, $seq)
+            : $this->buildXmlWithComputation($supplierId, $year, $type, $variant, $seq);
+        $built = $source['built'];
+
+        $inputs = $row !== null ? (array) $row['inputs'] : [];
+        if ($type === 'fo') {
+            $inputs = Section10Codebook::mergeLegacyAggregate($inputs);
+        }
+        $supplier = $this->loadSupplier($supplierId);
+
+        return [
+            'type' => $type,
+            'year' => $year,
+            'variant' => $variant,
+            'variant_seq' => $seq,
+            'status' => $isFinal ? 'final' : 'draft',
+            'finalized_at' => $isFinal ? ($row['finalized_at'] ?? null) : null,
+            'form_code' => $type === 'po' ? 'dppdp9' : 'dpfdp7',
+            'xml' => (string) $built['xml'],
+            'warnings' => array_values(array_unique(array_map('strval', (array) ($built['warnings'] ?? [])))),
+            'computation' => $source['computation'],
+            'inputs' => $inputs,
+            'tax_losses' => $this->losses->card($supplierId, $year, $type),
+            'supplier' => [
+                'name' => (string) ($supplier['company_name'] ?? ''),
+                'ic' => (string) ($supplier['ic'] ?? ''),
+                'dic' => (string) ($supplier['dic'] ?? ''),
+            ],
+            'snapshot' => $isFinal && $row['final_snapshot_id'] !== null
+                ? $this->snapshotMetadata($supplierId, (int) $row['final_snapshot_id'])
+                : null,
+        ];
     }
 
     private function legacyDppoComputation(int $supplierId, int $year, array $row, string $variant): array

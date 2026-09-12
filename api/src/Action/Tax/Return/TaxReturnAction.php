@@ -13,6 +13,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Tax\Return\DppoReconciliationService;
 use MyInvoice\Service\Tax\Return\TaxReturnException;
+use MyInvoice\Service\Tax\Return\TaxReturnReportService;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -41,6 +42,7 @@ final class TaxReturnAction
         private readonly DppoReconciliationService $reconciliation,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly TaxReturnReportService $reports,
     ) {}
 
     public function get(Request $request, Response $response, array $args): Response
@@ -179,6 +181,35 @@ final class TaxReturnAction
             ->withHeader('Content-Disposition', 'attachment; filename="' . $built['filename'] . '"')
             ->withHeader('X-DPFO-Preview', '1')
             ->withHeader('X-Business-Errors', (string) count($built['business_errors']))
+            ->withHeader('Cache-Control', 'no-store');
+    }
+
+    /**
+     * Pracovní PDF sestava přiznání (DPPO i DPFO) pro kontrolu s účetní a archiv. Není
+     * podáním: nic nearchivuje, jen čte stejné XML a výpočet jako export.
+     */
+    public function pdf(Request $request, Response $response, array $args): Response
+    {
+        if (($err = $this->requireAccess($request, $response, AccessLevel::READ, 'reports.export')) !== null) {
+            return $err;
+        }
+        [$type, $year, $bad] = $this->params($args);
+        if ($bad !== null) {
+            return $bad($response);
+        }
+        try {
+            $built = $this->reports->pdf(
+                SupplierGuard::currentId($request), $year, $type, $this->variant($request), $this->seq($request)
+            );
+        } catch (TaxReturnException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\Throwable $e) {
+            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+        }
+        $response->getBody()->write($built['pdf']);
+        return $response
+            ->withHeader('Content-Type', 'application/pdf')
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $built['filename'] . '"')
             ->withHeader('Cache-Control', 'no-store');
     }
 

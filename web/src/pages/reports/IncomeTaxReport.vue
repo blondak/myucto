@@ -14,6 +14,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { taxApi, type TaxProfile, type TaxActivity, type TaxChild, type SpouseClaim, type OsvcMonth } from '@/api/tax'
 import { taxEvidenceApi, type TaxEvidenceClosing, type TaxEvidenceAdjustment } from '@/api/taxEvidence'
 import { downloadApiFile } from '@/utils/downloadFile'
+import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
@@ -358,6 +359,14 @@ async function downloadXml() {
   }
 }
 
+async function downloadReportPdf() {
+  try {
+    await downloadApiFile(taxReturnApi.reportPdfUrl(type.value, year.value, variant.value, seqParam()), `${type.value}-${year.value}-sestava.pdf`)
+  } catch (e) {
+    error.value = apiErrorMessage(e)
+  }
+}
+
 function addActivity() {
   profile.activities!.push({ name: '', nace_code: '', expense_mode: 'pausal', expense_rate: 60,
     income: 0, expenses: 0, active_months: 12 } as TaxActivity)
@@ -657,6 +666,7 @@ const actions = computed<ActionItem[]>(() => {
       show: auth.canWrite('reports.reopen'), disabled: saving.value, run: reopen })
   }
   a.push({ key: 'xml', label: t(isFinal.value ? 'taxReturn.download_xml' : 'taxReturn.preview_xml'), icon: 'download', tier: 'secondary', variant: 'neutral', show: auth.canRead('reports.export'), run: downloadXml })
+  a.push({ key: 'report_pdf', label: t('taxReturn.report_pdf'), icon: 'doc', tier: 'secondary', variant: 'neutral', show: auth.canRead('reports.export'), run: downloadReportPdf })
   return a
 })
 
@@ -1288,6 +1298,17 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
           <button type="button" @click="downloadXml" class="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-primary-600 text-white text-sm">
             {{ t('taxReturn.download_xml') }}
           </button>
+        </div>
+
+        <div v-if="auth.canRead('reports.export')" class="bg-surface border border-neutral-200 rounded-lg p-5" data-testid="export-pdf-box">
+          <h3 class="text-sm font-semibold mb-1">{{ t('taxReturn.export_pdf_title') }}</h3>
+          <p class="text-xs text-neutral-500 mb-3">{{ t('taxReturn.export_pdf_hint') }}</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" @click="downloadReportPdf" :class="[btnOutline('neutral'), 'whitespace-nowrap']" data-testid="export-pdf-download">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+              {{ t('taxReturn.export_pdf_download') }}
+            </button>
+          </div>
         </div>
 
         <!-- Featura A — rekonciliace proti PODANÉMU přiznání (jen DPPO) -->

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>{{ r.form_code }} {{ r.year }}</title>
+<style>
+    /* Barvy a písma podle design tokenů aplikace (web/src/styles/main.css). mPDF: jednoduché
+       selektory, odsazení v <td>, ne v <div>. */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .kicker { font-size: 7pt; color: #6753AE; font-weight: bold; letter-spacing: 0.5pt; }
+    .title { font-size: 13.5pt; font-weight: bold; color: #211A4B; margin-top: 1mm; }
+    .subtitle { font-size: 8.5pt; color: #5A5470; margin-top: 1mm; }
+    .firm { font-size: 10pt; font-weight: bold; color: #15131D; }
+    .firm-meta { font-size: 8pt; color: #403B52; }
+    table.top { width: 100%; border-collapse: collapse; }
+    table.top td { vertical-align: top; }
+    table.banner { width: 100%; border-collapse: collapse; margin-top: 4mm; }
+    table.banner td { background-color: #FDF6E9; border-left: 1.2mm solid #C68A30; padding: 2mm 3mm; font-size: 8pt; color: #403B52; }
+    .banner-strong { font-weight: bold; color: #8A5E1C; }
+    table.meta { width: 100%; border-collapse: collapse; margin-top: 3mm; }
+    table.meta td { font-size: 7.5pt; padding: 1mm 2mm 1mm 0; vertical-align: top; }
+    .meta-label { color: #7A748C; }
+    .meta-value { color: #15131D; }
+    .h2 { font-size: 10.5pt; font-weight: bold; color: #3B2D83; margin-top: 6mm; margin-bottom: 1.5mm; padding-bottom: 1mm; border-bottom: 0.4mm solid #C9C0E9; }
+    .h3 { font-size: 9pt; font-weight: bold; color: #211A4B; margin-top: 4mm; margin-bottom: 1mm; }
+    .unit { font-size: 7pt; color: #7A748C; font-weight: normal; }
+    .note { font-size: 7.5pt; color: #5A5470; margin-top: 1mm; }
+    table.summary { width: 100%; border-collapse: collapse; }
+    table.summary td.sum-left { width: 62%; vertical-align: top; padding-right: 4mm; }
+    table.summary td.sum-right { width: 38%; vertical-align: top; }
+    table.sumrows { width: 100%; border-collapse: collapse; }
+    table.sumrows td { padding: 1mm 1.5mm; border-bottom: 0.2mm solid #E7E3EE; font-size: 8pt; }
+    table.sumrows td.ref { color: #7A748C; font-size: 7pt; width: 18mm; }
+    table.sumrows tr.strong td { font-weight: bold; }
+    table.sumrows tr.total td { font-weight: bold; border-top: 0.3mm solid #3B2D83; border-bottom: 0.3mm solid #3B2D83; background-color: #F4F2FB; }
+    table.tile { width: 100%; border-collapse: collapse; }
+    table.tile td { padding: 3mm 4mm; }
+    td.tile-due { background-color: #F4F2FB; border: 0.3mm solid #C9C0E9; }
+    td.tile-refund { background-color: #ECF6F0; border: 0.3mm solid #4CAF7A; }
+    td.tile-zero { background-color: #FBFAFD; border: 0.3mm solid #E7E3EE; }
+    .tile-label { font-size: 8pt; color: #5A5470; }
+    .tile-value { font-family: geistmono, monospace; font-size: 17pt; font-weight: bold; color: #211A4B; margin-top: 1mm; }
+    .tile-value-refund { font-family: geistmono, monospace; font-size: 17pt; font-weight: bold; color: #2E7B53; margin-top: 1mm; }
+    table.adv { width: 100%; border-collapse: collapse; margin-top: 3mm; }
+    table.adv td { padding: 1mm 0; font-size: 7.5pt; border-bottom: 0.2mm solid #E7E3EE; vertical-align: top; }
+    .adv-title { font-size: 8pt; font-weight: bold; color: #3B2D83; }
+    table.grid { width: 100%; border-collapse: collapse; }
+    table.grid thead th { font-size: 7pt; font-weight: normal; color: #7A748C; text-align: left; padding: 1mm 1.5mm; border-bottom: 0.3mm solid #C9C0E9; vertical-align: bottom; }
+    table.grid thead th.r { text-align: right; }
+    table.grid thead th.th-title { font-size: 10.5pt; font-weight: bold; color: #3B2D83; text-align: left; padding: 6mm 0 1mm 0; border-bottom: 0.4mm solid #C9C0E9; }
+    table.grid tbody td { padding: 0.9mm 1.5mm; font-size: 8pt; border-bottom: 0.2mm solid #E7E3EE; vertical-align: top; }
+    table.grid tbody tr.strong td { font-weight: bold; }
+    table.grid tbody tr.zero td { color: #968FAD; }
+    table.grid tbody tr.hit td { background-color: #FBFAFD; }
+    td.code { width: 12mm; color: #5A5470; white-space: nowrap; }
+    td.num { text-align: right; white-space: nowrap; font-family: geistmono, monospace; font-size: 7.8pt; }
+    td.numcol { width: 24mm; }
+    .neg { color: #B84545; }
+    .src { font-size: 6.5pt; color: #968FAD; font-weight: normal; }
+    .key { color: #6753AE; font-size: 6.5pt; }
+    table.warn { width: 100%; border-collapse: collapse; margin-top: 1mm; }
+    table.warn td { background-color: #FBEDED; border-left: 1mm solid #D45B5B; padding: 1.2mm 2.5mm; font-size: 7.5pt; color: #403B52; }
+    table.plain { width: 100%; border-collapse: collapse; margin-top: 1mm; }
+    table.plain td { background-color: #FBFAFD; border-left: 1mm solid #C9C0E9; padding: 1.2mm 2.5mm; font-size: 7.5pt; color: #403B52; }
+</style>
+</head>
+<body>
+{% set h = r.header %}
+
+<table class="top">
+    <tr>
+        <td style="width: 64%;">
+            <div class="kicker">MYÚČTO · PRACOVNÍ SESTAVA</div>
+            <div class="title">{{ r.title }}</div>
+            <div class="subtitle">za zdaňovací období {{ h.period_from }} až {{ h.period_to }} · {{ h.variant_label }}</div>
+        </td>
+        <td style="width: 36%; text-align: right;">
+            <div class="firm">{{ h.name }}</div>
+            <div class="firm-meta">
+                {% if h.ic %}IČO {{ h.ic }}{% endif %}{% if h.ic and h.dic %} · {% endif %}{% if h.dic %}DIČ {{ h.dic }}{% endif %}<br>
+                {{ h.address }}
+            </div>
+        </td>
+    </tr>
+</table>
+
+<table class="banner">
+    <tr>
+        <td>
+            <span class="banner-strong">Pracovní sestava, není podáním pro finanční úřad.</span>
+            Slouží ke kontrole s účetní a do archivu. Finančnímu úřadu se podává XML {{ r.form_code }}
+            přes portál Moje daně; všechny částky přiznání v této sestavě jsou přečtené z tohoto XML.
+        </td>
+    </tr>
+</table>
+
+<table class="meta">
+    <tr>
+        <td style="width: 25%;"><span class="meta-label">Druh přiznání</span><br><span class="meta-value">{{ h.variant_label }}</span></td>
+        <td style="width: 25%;"><span class="meta-label">Stav v aplikaci</span><br><span class="meta-value">{{ h.status_label }}{% if h.finalized_at %}, {{ h.finalized_at }}{% endif %}{% if h.revision_no %} (revize {{ h.revision_no }}){% endif %}</span></td>
+        <td style="width: 25%;"><span class="meta-label">Sestava vytvořena</span><br><span class="meta-value">{{ h.generated_at }}</span></td>
+        <td style="width: 25%;"><span class="meta-label">Otisk XML (SHA-256)</span><br><span class="meta-value">{{ h.xml_sha256|slice(0, 16) }}…</span></td>
+    </tr>
+    {% if h.scope %}
+    <tr>
+        <td colspan="4"><span class="meta-label">Rozsah výkazů v příloze</span><br><span class="meta-value">{{ h.scope }}</span></td>
+    </tr>
+    {% endif %}
+</table>
+
+<div class="h2">Souhrn</div>
+<table class="summary">
+    <tr>
+        <td class="sum-left">
+            <table class="sumrows">
+                {% for row in r.summary.rows %}
+                <tr class="{{ row.style }}">
+                    <td>{{ row.label }}</td>
+                    <td class="ref">{{ row.ref }}</td>
+                    <td class="num{% if row.neg %} neg{% endif %}">{{ row.text }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </td>
+        <td class="sum-right">
+            {% set res = r.summary.result %}
+            <table class="tile">
+                <tr>
+                    <td class="tile-{{ res.tone }}">
+                        <div class="tile-label">{{ res.label }}</div>
+                        <div class="{{ res.tone == 'refund' ? 'tile-value-refund' : 'tile-value' }}">{{ res.text }} Kč</div>
+                    </td>
+                </tr>
+            </table>
+            {% if r.summary.advances %}
+            {% set adv = r.summary.advances %}
+            <table class="adv">
+                <tr><td colspan="2" class="adv-title">Zálohy na další období (§ 38a)</td></tr>
+                <tr><td>Poslední známá daň</td><td class="num">{{ adv.last_known_tax_text }} Kč</td></tr>
+                <tr><td>Režim záloh</td><td style="text-align: right;">{{ adv.regime_label }}</td></tr>
+                {% if adv.count > 0 %}
+                <tr><td>Výše jedné zálohy</td><td class="num">{{ adv.amount_text }} Kč</td></tr>
+                <tr><td>Počet záloh</td><td style="text-align: right;">{{ adv.count }}</td></tr>
+                {% endif %}
+                {% if adv.filing_deadline_text %}
+                <tr><td>Lhůta pro podání</td><td style="text-align: right;">{{ adv.filing_deadline_text }}</td></tr>
+                {% endif %}
+            </table>
+            {% if adv.note %}<div class="note">{{ adv.note }}</div>{% endif %}
+            {% endif %}
+        </td>
+    </tr>
+</table>
+
+{% if r.amendment %}
+<div class="h3">Dodatečné přiznání: rozdíl proti poslední známé dani</div>
+<table class="sumrows">
+    {% for row in r.amendment %}
+    <tr class="{{ row.style }}">
+        <td>{{ row.label }}</td>
+        <td class="ref">{{ row.ref }}</td>
+        <td class="num{% if row.neg %} neg{% endif %}">{{ row.text }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+{% if r.warnings|length %}
+<div class="h2">Upozornění k podání ({{ r.warnings|length }})</div>
+{% for w in r.warnings %}
+<table class="warn"><tr><td>{{ w }}</td></tr></table>
+{% endfor %}
+{% endif %}
+
+<table class="grid">
+    <thead>
+        <tr><th colspan="3" class="th-title">{{ r.lines.title }} <span class="unit">v Kč</span></th></tr>
+        <tr>
+            <th>Řádek</th>
+            <th>Položka</th>
+            <th class="r">Hodnota</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in r.lines.rows %}
+        <tr class="{{ row.nonzero ? 'hit' : 'zero' }}{% if row.key %} strong{% endif %}">
+            <td class="code">{{ row.code }}</td>
+            <td>{{ row.label }}{% if row.note %}<br><span class="src">{{ row.note }}</span>{% endif %}</td>
+            <td class="num numcol{% if row.neg %} neg{% endif %}">{{ row.text }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<div class="note">Tučně jsou klíčové řádky, které se zobrazují vždy; šedě řádky s nulou. Ostatní nulové řádky XML neobsahuje, a proto tu nejsou.</div>
+
+{% for s in r.statements %}
+<table class="grid">
+    <thead>
+        <tr><th colspan="{{ s.columns|length + 3 }}" class="th-title">Příloha: {{ s.title }} <span class="unit">{{ s.unit }}</span></th></tr>
+        <tr>
+            <th>Ozn.</th>
+            <th>Položka</th>
+            {% for col in s.columns %}<th class="r">{{ col }}</th>{% endfor %}
+            <th class="r">Ř.</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in s.rows %}
+        <tr class="{{ row.strong ? 'strong' : '' }}">
+            <td class="code">{{ row.code }}</td>
+            <td style="padding-left: {{ 1.5 + row.level * 3 }}mm;">{{ row.label }}</td>
+            {% for v in row.texts %}<td class="num{% if v.neg %} neg{% endif %}" style="width: 20mm;">{{ v.text }}</td>{% endfor %}
+            <td class="num" style="width: 8mm; color: #968FAD;">{{ row.number }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endfor %}
+{% if r.statements|length %}
+<div class="note">Příloha obsahuje jen řádky, které jdou do XML (nenulové v běžném nebo minulém období). Hodnoty jsou v celých tisících Kč po zaokrouhlení, se kterým je podává XML.</div>
+{% endif %}
+
+{% for t in r.tables %}
+<table class="grid">
+    <thead>
+        <tr><th colspan="{{ t.columns|length }}" class="th-title">{{ t.title }}</th></tr>
+        <tr>
+            {% for col in t.columns %}<th class="{{ col.align == 'right' ? 'r' : '' }}">{{ col.label }}</th>{% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in t.rows %}
+        <tr class="{{ row.strong ? 'strong' : '' }}">
+            {% for cell in row.cells %}
+            <td class="{{ cell.align == 'right' ? 'num' : '' }}{% if cell.neg %} neg{% endif %}">{{ cell.text }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
+{% endfor %}
+
+{% if r.notes|length %}
+<div class="h2">Poznámky</div>
+{% for n in r.notes %}
+<table class="plain"><tr><td>{{ n }}</td></tr></table>
+{% endfor %}
+{% endif %}
+
+</body>
+</html>

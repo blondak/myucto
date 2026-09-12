@@ -3426,6 +3426,8 @@ final class Routes
             $g->get('/{type}/{year:[0-9]+}/prefinalize-check', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'prefinalizeCheck']);
             $g->get('/{type}/{year:[0-9]+}/xml/preview', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'previewXml']);
             $g->get('/{type}/{year:[0-9]+}/xml',       [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'xml']);
+            // Pracovní PDF sestava přiznání (DPPO i DPFO), není podáním; data z téhož XML.
+            $g->get('/{type}/{year:[0-9]+}/pdf',       [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'pdf']);
             // Featura A — rekonciliace proti PODANÉMU přiznání (upload EPO XML DPPDP9 od účetní).
             $g->post('/{type}/{year:[0-9]+}/reconcile', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'reconcile']);
             $g->get('/{type}/{year:[0-9]+}/insurance/pdf', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'insurancePdf']);

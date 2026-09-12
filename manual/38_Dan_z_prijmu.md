@@ -145,6 +145,18 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   předvyplněného formuláře EPO a po odeslání k němu přetáhnout XML a potvrzení.
   Dokumenty DPFO a DPPO se ukládají pod samostatně konfigurovatelný kořen
   **Daň z příjmů** a dále podle roku a typu formuláře.
+- **PDF sestava** — přehledná pracovní sestava přiznání (DPPO i DPFO) pro kontrolu
+  s účetní a do archivu. Není podáním pro finanční úřad a netváří se jako tiskopis; každá
+  strana to uvádí. Obsahuje identifikaci poplatníka, zdaňovací období, druh a stav
+  přiznání, souhrn (základ daně, sazba, daň, slevy, zálohy, doplatek nebo přeplatek,
+  zálohy podle § 38a), řádky přiznání a upozornění k podání. U DPPO přidává rozvahu
+  a výkaz zisku a ztráty v celých tisících Kč v rozsahu přílohy přiznání, u DPFO
+  Přílohu č. 1 (příjmy a výdaje, činnosti, úpravy podle § 23, majetek a dluhy), Přílohu
+  č. 2, děti a manžela nebo manželku. Na konci jsou daňové ztráty podle § 34 a vstupy
+  zadané v přiznání. Všechny částky přiznání se čtou z téhož XML, které se stahuje pro
+  EPO (u rozpracovaného DPFO z pracovního XML), takže se od něj nemohou lišit; otisk
+  XML je v hlavičce sestavy. Stažení sestavy nic nearchivuje a nevyžaduje finalizaci.
+  Přehledy pojistného OSVČ se tisknou zvlášť, viz níže.
 - **DPFO — Pojistné:** karta **sociálního** a **zdravotního** pojištění OSVČ — vyměřovací
   základ, pojistné, doplatek po zálohách, **nová měsíční záloha**, případně **nemocenské**
   (dobrovolné). Tlačítka: **PDF přehledů** (souhrnná pomůcka), **XML ČSSZ** (validovaná datová

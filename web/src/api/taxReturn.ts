@@ -323,6 +323,15 @@ export const taxReturnApi = {
     return `/api/tax-return/fo/${year}/xml/preview?${params.toString()}`
   },
 
+  // Pracovní PDF sestava přiznání (DPPO i DPFO) — kontrola s účetní a archiv, není podáním.
+  reportPdfUrl: (type: TaxpayerType, year: number, variant?: TaxReturnVariant, seq?: number): string => {
+    const params = new URLSearchParams()
+    supplierParam(params)
+    if (variant && variant !== 'radne') params.set('variant', variant)
+    if (variant === 'dodatecne' && seq && seq > 0) params.set('seq', String(seq))
+    return `/api/tax-return/${type}/${year}/pdf?${params.toString()}`
+  },
+
   insurancePdfUrl: (year: number): string => {
     const params = new URLSearchParams()
     supplierParam(params)
