@@ -22,7 +22,10 @@ const m = vi.hoisted(() => ({
   toastWarning: vi.fn(),
   toastError: vi.fn(),
   push: vi.fn(),
+  download: vi.fn(),
 }))
+
+vi.mock('@/utils/downloadFile', () => ({ downloadApiFile: m.download }))
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: m.push, replace: vi.fn() }),
@@ -53,7 +56,7 @@ vi.mock('@/api/bank', () => ({
     delete: vi.fn(),
     downloadUrl: (id: number) => `/download/${id}`,
     gpcExportUrl: (id: number) => `/export-gpc/${id}`,
-    pdfUrl: () => '',
+    pdfUrl: (id: number) => `/pdf/${id}`,
   },
 }))
 
@@ -186,16 +189,48 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
     }] })
     const wrapper = mount(StatementList, { global: { stubs } })
     await flushPromises()
-    const actions = wrapper.findAll('a').filter(a => a.text() === 'GPC')
+    const actions = wrapper.findAll('button').filter(a => a.text() === 'GPC')
     expect(actions).toHaveLength(2)
     for (const action of actions) {
-      expect(action.attributes('href')).toBe(href)
+      // Holý href by stažení poslal bez X-Supplier-Id a server by vzal výchozí firmu.
+      expect(action.attributes('href')).toBeUndefined()
       if (!href) expect(action.attributes('aria-disabled')).toBe('true')
     }
     const { formatMoney } = await import('@/composables/useFormat')
     if (closing !== null) expect(wrapper.text().split(formatMoney(closing, 'CZK')).length - 1).toBe(2)
     else expect(wrapper.find('tbody tr td:nth-child(5)').text()).toBe('-')
-    await actions[0]!.trigger('click')
+    for (const action of actions) await action.trigger('click')
+    await flushPromises()
+    expect(m.push).not.toHaveBeenCalled()
+    if (href) {
+      expect(m.download).toHaveBeenCalledTimes(2)
+      expect(m.download).toHaveBeenNthCalledWith(1, href, 'vypis.gpc')
+      expect(m.download).toHaveBeenNthCalledWith(2, href, 'vypis.gpc')
+    } else {
+      expect(m.download).not.toHaveBeenCalled()
+    }
+    wrapper.unmount()
+  })
+
+  it('stažení GPC a PDF jde přes downloadApiFile (hlavička firmy), chybu ukáže toastem', async () => {
+    m.list.mockResolvedValue({ ...emptyPage(), total: 1, items: [{
+      id: 44, source: 'gpc', file_name: 'EUR-2026-09.gpc',
+      account_number: '1000000005', bank_code: '0100', currency: 'EUR',
+      statement_date: '2026-09-30', curr_balance: 10, prev_balance: 5,
+      transaction_count: 1, matched_count: 0, unposted_count: 0, has_file: true, has_pdf: true,
+    }] })
+    m.download.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('Výpis nenalezen.'))
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.findAll('a').filter(a => ['GPC', 'PDF'].includes(a.text()))).toHaveLength(0)
+
+    await wrapper.findAll('[data-testid="statement-gpc"]')[0]!.trigger('click')
+    await wrapper.findAll('[data-testid="statement-pdf"]')[0]!.trigger('click')
+    await flushPromises()
+
+    expect(m.download).toHaveBeenNthCalledWith(1, '/download/44', 'vypis.gpc')
+    expect(m.download).toHaveBeenNthCalledWith(2, '/pdf/44', 'vypis.pdf')
+    expect(m.toastError).toHaveBeenCalledWith('Výpis nenalezen.')
     expect(m.push).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -210,9 +245,11 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
     }] })
     const wrapper = mount(StatementList, { global: { stubs } })
     await flushPromises()
-    const actions = wrapper.findAll('a').filter(a => a.text() === 'GPC')
+    const actions = wrapper.findAll('button').filter(a => a.text() === 'GPC')
     expect(actions).toHaveLength(2)
-    for (const action of actions) expect(action.attributes('href')).toBe('/export-gpc/43')
+    await actions[0]!.trigger('click')
+    await flushPromises()
+    expect(m.download).toHaveBeenCalledWith('/export-gpc/43', 'vypis.gpc')
     wrapper.unmount()
   })
 

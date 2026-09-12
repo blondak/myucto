@@ -12580,6 +12580,7 @@
         "balance_inventory": "Balance sheet account inventory",
         "dph_book": "VAT book (per month)",
         "income_tax": "Income tax return (XML)",
+        "income_tax_report": "Income tax return report (PDF, working copy, not a filing)",
         "income_tax_advances": "Income tax advance payments notice under §38a (PDF, PO only)",
         "asset_inventory": "Asset inventory (fixed + low-value assets)",
         "saldo_over_1y": "Receivables/payables aged over 1 year",

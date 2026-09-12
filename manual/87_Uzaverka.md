@@ -568,10 +568,16 @@ hodnoty:
 
 Uzávěrkový balíček je výběrový ZIP sestav za jedno období. Náhled nejprve ukáže,
 které části mají data; účetní může vybrat rozvahu, výsledovku, hlavní knihu, obratovou
-předvahu, deník, knihu DPH, přiznání k dani z příjmů, přehled záloh na daň z příjmů
-právnických osob, inventuru dlouhodobého majetku, saldo starší než jeden rok a soupis
-dohadných položek a časového rozlišení. Výstup je standardně v PDF a volitelně
-obsahuje i XLSX.
+předvahu, deník, knihu DPH, přiznání k dani z příjmů (XML), PDF sestavu přiznání,
+přehled záloh na daň z příjmů právnických osob, inventuru dlouhodobého majetku, saldo
+starší než jeden rok a soupis dohadných položek a časového rozlišení. Výstup je
+standardně v PDF a volitelně obsahuje i XLSX.
+
+**PDF sestava přiznání** je pracovní přehled přiznání k DPPO (u fyzické osoby k DPFO)
+za rok období pro kontrolu s účetní a do archivu. Není podáním; částky čte ze
+stejného XML, jaké se stahuje pro EPO. Když v balíčku není zvolené samotné přiznání
+(XML), přibalí se XML vedle sestavy. Pokud přiznání za rok sestavit nejde, balíček
+sestavu vynechá, uvede důvod mezi upozorněními v README a ostatní sestavy vytvoří.
 
 Vytvoření probíhá na pozadí. Stránka zobrazuje frontu, aktuální krok, počet
 hotových a neúspěšných částí a po dokončení nabídne ZIP ke stažení. Aktivní může

@@ -25,7 +25,7 @@ const ALL_PARTS: ClosingPackagePart[] = [
   'balance_sheet', 'income_statement', 'statement_notes',
   'cash_flow', 'equity_changes',
   'general_ledger', 'trial_balance', 'journal', 'balance_inventory',
-  'dph_book', 'income_tax', 'income_tax_advances',
+  'dph_book', 'income_tax', 'income_tax_report', 'income_tax_advances',
   'asset_inventory', 'saldo_over_1y', 'accruals',
 ]
 const selected = ref<Set<ClosingPackagePart>>(new Set(ALL_PARTS))

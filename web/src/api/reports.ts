@@ -354,7 +354,7 @@ function monthlyExportPeriodParams(period: ExportPeriodArg): Record<string, stri
 
 export type ClosingPackagePart =
   | 'balance_sheet' | 'income_statement' | 'general_ledger'
-  | 'trial_balance' | 'journal' | 'balance_inventory' | 'dph_book' | 'income_tax' | 'income_tax_advances'
+  | 'trial_balance' | 'journal' | 'balance_inventory' | 'dph_book' | 'income_tax' | 'income_tax_report' | 'income_tax_advances'
   | 'asset_inventory' | 'saldo_over_1y' | 'accruals' | 'statement_notes'
   | 'cash_flow' | 'equity_changes'
 

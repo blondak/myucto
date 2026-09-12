@@ -36,6 +36,7 @@ use MyInvoice\Service\Pdf\SmallAssetInventoryPdfRenderer;
 use MyInvoice\Service\Pdf\TrialBalancePdfRenderer;
 use MyInvoice\Service\Report\DphBookBuilder;
 use MyInvoice\Service\Report\IncomeTaxAdvanceNoticeReportService;
+use MyInvoice\Service\Tax\Return\TaxReturnReportService;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
 use ZipArchive;
 
@@ -54,6 +55,7 @@ use ZipArchive;
  *   Obratova-predvaha/obratova-predvaha-<rok>.pdf(.xlsx)
  *   Kniha-DPH/kniha-dph-<rok>-<měsíc>.pdf  (jeden soubor per kalendářní měsíc období)
  *   Dan-z-prijmu/dpfdp7-<rok>.xml | dppdp9-<rok>.xml
+ *   Dan-z-prijmu/dpfdp7-<rok>-sestava.pdf | dppdp9-<rok>-sestava.pdf (pracovní PDF sestava přiznání)
  *   Dan-a-zalohy/predpis-zaloh-38a-<rok>.pdf (jen PO)
  *   Inventarizace-majetku/dlouhodoby-majetek-<rok>.pdf(.xlsx) + drobny-majetek-<rok>.pdf(.xlsx)
  *   Inventarizace-majetku/karty/karta-<N>.pdf (inventární karta na majetek, §29–30 ZoÚ)
@@ -70,7 +72,7 @@ final class ClosingPackageService
     /** Všechny podporované sestavy (a zároveň default, když uživatel nic nezvolí). */
     public const ALL_PARTS = [
         'balance_sheet', 'income_statement', 'general_ledger',
-        'trial_balance', 'journal', 'balance_inventory', 'dph_book', 'income_tax', 'income_tax_advances',
+        'trial_balance', 'journal', 'balance_inventory', 'dph_book', 'income_tax', 'income_tax_report', 'income_tax_advances',
         'asset_inventory', 'saldo_over_1y', 'accruals', 'statement_notes',
         'cash_flow', 'equity_changes',
     ];
@@ -117,6 +119,7 @@ final class ClosingPackageService
         private readonly DphBookBuilder $dphBookBuilder,
         private readonly DphBookPdfRenderer $dphBookRenderer,
         private readonly TaxReturnService $taxReturns,
+        private readonly TaxReturnReportService $taxReturnReports,
         private readonly IncomeTaxAdvanceNoticeReportService $advanceNoticeReport,
         private readonly IncomeTaxAdvanceNoticePdfRenderer $advanceNoticePdf,
         private readonly ReportXlsxExporter $xlsx,
@@ -214,6 +217,7 @@ final class ClosingPackageService
             'balance_inventory' => 1,
             'dph_book'          => count($months),
             'income_tax'        => $this->taxpayerType($supplierId) !== null ? 1 : 0,
+            'income_tax_report' => $this->taxpayerType($supplierId) !== null ? 1 : 0,
             'income_tax_advances' => $this->taxpayerType($supplierId) === 'po' ? 1 : 0,
             'asset_inventory'   => 1,
             'saldo_over_1y'     => 1,
@@ -465,6 +469,36 @@ final class ClosingPackageService
                     $warnings[] = 'Daň z příjmů: firma nemá vyplněný typ poplatníka (fo/po) — přeskočeno.';
                 }
                 $bump('Daň z příjmů');
+            }
+
+            // 7a) Pracovní PDF sestava přiznání (DPPO/DPFO). Čte částky ze stejného XML jako
+            //     export pro EPO; když balík XML nenese z části income_tax, přibalí se vedle.
+            //     Přiznání, které za rok sestavit nejde, se vynechá s upozorněním, balík doběhne.
+            if (in_array('income_tax_report', $parts, true)) {
+                $this->ensureNotCancelled($jobId, $zip, $absPath);
+                $type = $this->taxpayerType($supplierId);
+                if ($type !== null) {
+                    try {
+                        $report = $this->taxReturnReports->pdf($supplierId, $fiscalYear, $type);
+                        $reportFiles = [['Dan-z-prijmu/' . $report['filename'], $report['pdf']]];
+                        $xmlWarnings = [];
+                        if (!in_array('income_tax', $parts, true)) {
+                            $built = $this->taxReturns->buildXml($supplierId, $fiscalYear, $type);
+                            $reportFiles[] = ['Dan-z-prijmu/' . $built['filename'], $built['xml']];
+                            $xmlWarnings = $built['warnings'];
+                        }
+                        foreach ($reportFiles as [$path, $bytes]) {
+                            $put($path, $bytes);
+                        }
+                        $added += count($reportFiles); $summary['income_tax_report'] = count($reportFiles);
+                        foreach ($xmlWarnings as $w) {
+                            $warnings[] = 'Daň z příjmů: ' . $w;
+                        }
+                    } catch (\Throwable $e) { $warnings[] = 'Sestava přiznání k dani z příjmů: ' . $e->getMessage(); }
+                } else {
+                    $warnings[] = 'Sestava přiznání k dani z příjmů: firma nemá vyplněný typ poplatníka (fo/po), přeskočeno.';
+                }
+                $bump('Sestava přiznání k dani z příjmů');
             }
 
             // 7b) Placení záloh na daň dle §38a (jen PO — DPFO §38a se v systému negeneruje)
@@ -943,6 +977,7 @@ final class ClosingPackageService
             'balance_inventory' => 'Inventarizace rozvahových účtů (PDF, §29–30 ZoÚ)',
             'dph_book' => 'Kniha DPH (PDF, počet měsíců)',
             'income_tax' => 'Přiznání k dani z příjmů (XML)',
+            'income_tax_report' => 'Sestava přiznání k dani z příjmů (PDF, pracovní, není podáním; bez části XML i XML)',
             'income_tax_advances' => 'Placení záloh dle §38a (PDF)',
             'asset_inventory' => 'Inventarizace majetku (PDF, dlouhodobý + drobný majetek + inventární karty)',
             'saldo_over_1y' => 'Saldokonta pohledávek a závazků starší 1 roku (PDF)',

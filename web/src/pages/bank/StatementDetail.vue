@@ -16,6 +16,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import { statementClosingBalance, statementGpcUrl, statementGpcTitle, statementHasGpc } from '@/utils/bankStatement'
+import { downloadApiFile } from '@/utils/downloadFile'
 import RuleHintBanner from '@/components/bank/RuleHintBanner.vue'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
@@ -33,6 +34,17 @@ const router = useRouter()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const paneDom = usePaneDom()
+
+// Stažení jde přes axios, aby nesl hlavičku X-Supplier-Id. Holý odkaz ji nepošle
+// a server by u výpisu jiné než výchozí firmy vrátil not_found.
+async function downloadStatementFile(url: string | undefined, fallbackName: string) {
+  if (!url) return
+  try {
+    await downloadApiFile(url, fallbackName)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  }
+}
 const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 // Počet transakcí s návrhem zaúčtování (pro chip v headeru) — počítá backend přes
@@ -344,7 +356,7 @@ const statementActions = computed<ActionItem[]>(() => {
       disabled: !statementGpcUrl(s),
       disabledReason: t(`bank.balance_${s.balance_calculation?.status ?? 'unavailable'}`),
       title: t(statementGpcTitle(s)),
-      href: statementGpcUrl(s),
+      run: () => { void downloadStatementFile(statementGpcUrl(s), 'vypis.gpc') },
     },
     {
       key: 'pdf',
@@ -353,14 +365,14 @@ const statementActions = computed<ActionItem[]>(() => {
       tier: 'secondary',
       show: s.has_pdf,
       title: s.pdf_name ?? t('bank.download_pdf'),
-      href: bankApi.pdfUrl(s.id),
+      run: () => { void downloadStatementFile(bankApi.pdfUrl(s.id), s.pdf_name ?? 'vypis.pdf') },
     },
     ...(s.evidence_pdfs ?? []).map(pdf => ({
       key: `evidence_pdf_${pdf.id}`,
       label: t('bank.evidence_pdf', { name: pdf.pdf_name ?? String(pdf.id) }),
       icon: 'download' as const,
       tier: 'overflow' as const,
-      href: bankApi.pdfUrl(pdf.id),
+      run: () => { void downloadStatementFile(bankApi.pdfUrl(pdf.id), pdf.pdf_name ?? 'vypis.pdf') },
     })),
     {
       key: 'pdf_upload',

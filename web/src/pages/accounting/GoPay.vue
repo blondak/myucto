@@ -14,11 +14,22 @@ import { useToast } from '@/composables/useToast'
 import { formatDate, formatDateTime, formatMoney } from '@/composables/useFormat'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { downloadApiFile } from '@/utils/downloadFile'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
+
+// Stažení jde přes axios, aby nesl hlavičku X-Supplier-Id. Holý <a href> ji nepošle
+// a server by u zúčtování jiné než výchozí firmy vrátil not_found.
+async function downloadFile(url: string, fallbackName: string) {
+  try {
+    await downloadApiFile(url, fallbackName)
+  } catch (error) {
+    toast.error(errorMessage(error))
+  }
+}
 
 const loading = ref(true)
 const saving = ref(false)
@@ -376,14 +387,14 @@ onMounted(load)
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.eye" /></svg>
                       {{ selected?.id === clearing.id ? t('gopay.close') : t('common.detail') }}
                     </button>
-                    <a :href="gopayApi.downloadUrl(clearing.id)" :class="btnOutlineSm('neutral')">
+                    <button type="button" :class="btnOutlineSm('neutral')" @click="downloadFile(gopayApi.downloadUrl(clearing.id), 'gopay.xml')">
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.download" /></svg>
                       XML
-                    </a>
-                    <a v-if="clearing.has_pdf" :href="gopayApi.pdfDownloadUrl(clearing.id)" :class="btnOutlineSm('neutral')">
+                    </button>
+                    <button v-if="clearing.has_pdf" type="button" :class="btnOutlineSm('neutral')" @click="downloadFile(gopayApi.pdfDownloadUrl(clearing.id), 'gopay.pdf')">
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.download" /></svg>
                       PDF
-                    </a>
+                    </button>
                     <button v-if="canConfigure" type="button" :class="btnOutlineSm('warning')" :disabled="processingId === clearing.id" @click="process(clearing)">
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.cycle" /></svg>
                       {{ t('gopay.process.button') }}
@@ -426,10 +437,10 @@ onMounted(load)
             <input ref="detailPdfInput" class="form-input mt-1 block w-full" type="file" accept=".pdf,application/pdf" :disabled="pdfUploadingId === selected.id" @change="chooseDetailPdf">
           </label>
           <div class="flex flex-wrap gap-2">
-            <a v-if="selected.has_pdf" :href="gopayApi.pdfDownloadUrl(selected.id)" :class="btnOutline('neutral')">
+            <button v-if="selected.has_pdf" type="button" :class="btnOutline('neutral')" @click="downloadFile(gopayApi.pdfDownloadUrl(selected.id), selected.pdf_name || 'gopay.pdf')">
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.download" /></svg>
               {{ t('gopay.pdf.download') }}
-            </a>
+            </button>
             <button v-if="canManagePdf" type="button" :class="btnFilled('primary')" :disabled="!detailPdfFile || pdfUploadingId === selected.id" @click="uploadPdf">
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.upload" /></svg>
               {{ pdfUploadingId === selected.id ? t('gopay.pdf.uploading') : t('gopay.pdf.upload') }}

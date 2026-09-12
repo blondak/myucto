@@ -12580,6 +12580,7 @@
         "balance_inventory": "Inventarizace rozvahových účtů",
         "dph_book": "Kniha DPH (per měsíc)",
         "income_tax": "Přiznání k dani z příjmů (XML)",
+        "income_tax_report": "Sestava přiznání k dani z příjmů (PDF, pracovní, není podáním)",
         "income_tax_advances": "Placení záloh dle §38a (PDF, jen PO)",
         "asset_inventory": "Inventarizace majetku (dlouhodobý + drobný)",
         "saldo_over_1y": "Saldokonta nad 1 rok (staré pohledávky a závazky)",

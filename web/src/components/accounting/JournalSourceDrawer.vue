@@ -119,10 +119,22 @@ const actions = computed<ActionItem[]>(() => {
       icon: a.key === 'open_pdf' || a.key === 'open_original' ? 'download' : 'doc',
       tier: i === 0 ? 'primary' : 'secondary',
       variant: i === 0 ? 'primary' : 'neutral',
-      ...(a.href ? { href: a.href } : {}),
+      ...(a.href ? { href: withSupplierScope(a.href) } : {}),
       ...(a.route ? { to: { name: a.route.name, params: a.route.params, query: a.route.query } } : {}),
     }))
 })
+
+/**
+ * PDF dokladu se otevírá v nové záložce, kde axios hlavičku X-Supplier-Id nepošle.
+ * Aktivní firma proto jede v query paramu (middleware ho čte jako fallback), jinak by
+ * server u dokladu jiné firmy vzal výchozí firmu uživatele a vrátil not_found.
+ */
+function withSupplierScope(href: string): string {
+  if (!href.startsWith('/api/')) return href
+  const sid = localStorage.getItem('myinvoice.current_supplier_id')
+  if (!sid || !/^\d+$/.test(sid)) return href
+  return `${href}${href.includes('?') ? '&' : '?'}supplier_id=${sid}`
+}
 
 function label(key: string): string {
   const v = t(key)

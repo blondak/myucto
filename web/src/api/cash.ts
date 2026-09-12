@@ -1,5 +1,11 @@
 import { api } from './client'
 
+/** `supplier_id` aktivní firmy pro odkazy otevírané mimo axios (prefix `?` nebo `&`). */
+function supplierQuery(prefix: '?' | '&'): string {
+  const sid = localStorage.getItem('myinvoice.current_supplier_id')
+  return sid && /^\d+$/.test(sid) ? `${prefix}supplier_id=${sid}` : ''
+}
+
 export type CashDocType = 'in' | 'out'                                   // in = PPD, out = VPD
 export type CashPurpose = 'sale' | 'purchase' | 'invoice_payment'
                         | 'purchase_payment' | 'transfer' | 'other'      // šestihodnotový (O3/C3)
@@ -186,7 +192,9 @@ export const cashApi = {
   deleteDocument: (id: number, force = false) =>
     api.delete<CashDocumentDeleteResult>(`/accounting/cash-documents/${id}`,
       { params: force ? { force: 1 } : {} }).then(r => r.data),
-  documentPdfUrl: (id: number) => `/api/accounting/cash-documents/${id}/pdf`,
+  // Otevírá se v nové záložce (window.open / <a href>), kde axios hlavičku X-Supplier-Id
+  // nepošle — aktivní firma proto jede v query paramu, jinak by server sáhl po výchozí firmě.
+  documentPdfUrl: (id: number) => `/api/accounting/cash-documents/${id}/pdf${supplierQuery('?')}`,
 
   /**
    * L-8: vrací i příznak, že nabídka je oříznutá. Tiše oseknutý seznam tvrdí
@@ -207,6 +215,6 @@ export const cashApi = {
     if (f.q) qs.set('q', f.q)
     if (f.doc_type) qs.set('doc_type', f.doc_type)
     if (f.purpose) qs.set('purpose', f.purpose)
-    return `/api/accounting/cash-registers/${registerId}/book/pdf?${qs.toString()}`
+    return `/api/accounting/cash-registers/${registerId}/book/pdf?${qs.toString()}${supplierQuery('&')}`
   },
 }
