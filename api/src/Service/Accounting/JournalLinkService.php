@@ -31,6 +31,9 @@ use PDO;
  *                             source_id NULL. Nese ji obousměrně: ze zápisu na
  *                             doklad ('linked_document') a z dokladu na zápis
  *                             ('linked_entry', kind 'journal_entry').
+ *                             Vazba zápisu na jeho VLASTNÍ zdrojový doklad (tak
+ *                             ji zakládá převod z Money S3) je jen původ zápisu,
+ *                             ne hrana — graf ji přeskakuje v obou směrech.
  *
  * ── Bezpečnost ────────────────────────────────────────────────────────────────
  * Klíčem je VŽDY ověřený řádek journal_entries daného tenanta (stejně jako
@@ -85,9 +88,46 @@ final class JournalLinkService
         $truncated = count($refs) > self::MAX_ITEMS;
 
         return [
-            'items'     => $this->hydrate($supplierId, array_slice($refs, 0, self::MAX_ITEMS)),
+            'items'     => $this->withoutRepeatedEntries(
+                $this->hydrate($supplierId, array_slice($refs, 0, self::MAX_ITEMS)),
+                (int) ($entry['id'] ?? 0)
+            ),
             'truncated' => $truncated,
         ];
+    }
+
+    /**
+     * Každý zápis smí panel ukázat nejvýš jednou a nikdy ne ten prohlížený. Když
+     * je zápis úhrady zároveň ručně navázaný na hrazený doklad, přišel by jednou
+     * jako zaúčtování úhrady a podruhé jako „Navázaný zápis" se stejnými řádky —
+     * účetní to čte jako dvojí zaúčtování. Doklad nese víc informací (proklik na
+     * doklad, alokovanou částku), proto vyhrává nad holým zápisem.
+     *
+     * @param  list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
+     */
+    private function withoutRepeatedEntries(array $items, int $ownEntryId): array
+    {
+        $shownByDocument = [];
+        foreach ($items as $it) {
+            if ($it['source_type'] !== 'journal_entry' && $it['entry_id'] !== null) {
+                $shownByDocument[$it['entry_id']] = true;
+            }
+        }
+
+        return array_values(array_filter($items, static function (array $it) use ($ownEntryId, $shownByDocument): bool {
+            if ($it['entry_id'] !== null && $it['entry_id'] === $ownEntryId) return false;
+            return $it['source_type'] !== 'journal_entry' || !isset($shownByDocument[$it['entry_id']]);
+        }));
+    }
+
+    /**
+     * Vazba zápisu na doklad, jehož zaúčtováním zápis sám je. Nese jen původ
+     * (převod z Money S3 ji zakládá u každého zápisu) — protějšek to není.
+     */
+    private static function isOwnDocument(string $docType, int $docId, mixed $sourceType, mixed $sourceId): bool
+    {
+        return $sourceId !== null && (string) $sourceType === $docType && (int) $sourceId === $docId;
     }
 
     /**
@@ -123,10 +163,13 @@ final class JournalLinkService
         $linked = [];
         if ($pageIds !== []) {
             foreach ($this->rows(
-                'SELECT DISTINCT entry_id FROM journal_entry_document_links
-                  WHERE supplier_id = ? AND entry_id IN (' . $this->placeholders($pageIds) . ')',
+                'SELECT l.entry_id, l.doc_type, l.doc_id, e.source_type, e.source_id
+                   FROM journal_entry_document_links l
+                   JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+                  WHERE l.supplier_id = ? AND l.entry_id IN (' . $this->placeholders($pageIds) . ')',
                 array_merge([$supplierId], $pageIds)
             ) as $r) {
+                if (self::isOwnDocument((string) $r['doc_type'], (int) $r['doc_id'], $r['source_type'], $r['source_id'])) continue;
                 $linked[(int) $r['entry_id']] = true;
             }
         }
@@ -232,15 +275,19 @@ final class JournalLinkService
         //    zápis. Bez tohohle by odznak u faktury chyběl, ačkoli panel doúčtování
         //    ukáže — a seznam by lhal (odznak a panel musí říkat totéž).
         foreach ($this->pairsQuery(
-            'SELECT doc_type, doc_id FROM journal_entry_document_links WHERE supplier_id = ?',
+            'SELECT l.doc_type, l.doc_id, e.source_type, e.source_id
+               FROM journal_entry_document_links l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ?',
             [$supplierId],
             [
-                ["CASE WHEN doc_type = 'invoice' THEN doc_id END", $invoices],
-                ["CASE WHEN doc_type = 'purchase_invoice' THEN doc_id END", $purchases],
-                ["CASE WHEN doc_type = 'bank' THEN doc_id END", $banks],
-                ["CASE WHEN doc_type = 'cash' THEN doc_id END", $cash],
+                ["CASE WHEN l.doc_type = 'invoice' THEN l.doc_id END", $invoices],
+                ["CASE WHEN l.doc_type = 'purchase_invoice' THEN l.doc_id END", $purchases],
+                ["CASE WHEN l.doc_type = 'bank' THEN l.doc_id END", $banks],
+                ["CASE WHEN l.doc_type = 'cash' THEN l.doc_id END", $cash],
             ]
         ) as $r) {
+            if (self::isOwnDocument((string) $r['doc_type'], (int) $r['doc_id'], $r['source_type'], $r['source_id'])) continue;
             $mark((int) $r['doc_id'], (string) $r['doc_type']);
         }
 
@@ -268,17 +315,18 @@ final class JournalLinkService
      */
     private function neighbourRefs(int $supplierId, array $entry): array
     {
-        $refs    = [];
-        $entryId = (int) ($entry['id'] ?? 0);
+        $refs     = [];
+        $entryId  = (int) ($entry['id'] ?? 0);
+        $type     = (string) ($entry['source_type'] ?? '');
+        $sourceId = $this->sourceId($entry);
 
         if ($entryId > 0) {
             foreach ($this->linkedDocumentRefs($supplierId, $entryId) as $r) {
+                if (self::isOwnDocument($r['kind'], $r['id'], $type, $sourceId)) continue;
                 $this->addRef($refs, $r['kind'], $r['id'], $r['relation'], $r['allocated']);
             }
         }
 
-        $type     = (string) ($entry['source_type'] ?? '');
-        $sourceId = $this->sourceId($entry);
         if ($sourceId === null || !in_array($type, self::LINKABLE, true)) {
             return array_values($refs);
         }
@@ -334,10 +382,14 @@ final class JournalLinkService
     {
         $refs = [];
         foreach ($this->rows(
-            'SELECT entry_id FROM journal_entry_document_links
-              WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? ORDER BY entry_id',
+            'SELECT l.entry_id, e.source_type, e.source_id
+               FROM journal_entry_document_links l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND l.doc_type = ? AND l.doc_id = ? ORDER BY l.entry_id',
             [$supplierId, $docType, $docId]
         ) as $r) {
+            // Zaúčtování téhož dokladu (i starší, stornované) není „navázaný" zápis.
+            if (self::isOwnDocument($docType, $docId, $r['source_type'], $r['source_id'])) continue;
             $this->addRef($refs, 'journal_entry', (int) $r['entry_id'], 'linked_entry', null);
         }
         return array_values($refs);
