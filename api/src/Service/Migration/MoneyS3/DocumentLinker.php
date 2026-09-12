@@ -274,10 +274,16 @@ final class DocumentLinker
         return is_string($date) ? substr($date, 0, 10) : null;
     }
 
-    /** @return array<int,true> */
+    /**
+     * Doklady, u kterých převod zápis v deníku Money nečeká: koncept k ruční kontrole
+     * a zálohová faktura, kterou Money neúčtuje (DPH nese daňový doklad k platbě).
+     *
+     * @return array<int,true>
+     */
     private function draftIds(string $table, int $supplierId): array
     {
-        $stmt = $this->db->pdo()->prepare("SELECT id FROM {$table} WHERE supplier_id = ? AND status = 'draft'");
+        $advance = $table === 'invoices' ? "invoice_type = 'proforma'" : "document_kind = 'advance'";
+        $stmt = $this->db->pdo()->prepare("SELECT id FROM {$table} WHERE supplier_id = ? AND (status = 'draft' OR {$advance})");
         $stmt->execute([$supplierId]);
         return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
     }

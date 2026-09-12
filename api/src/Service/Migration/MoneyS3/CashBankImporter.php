@@ -53,7 +53,7 @@ final class CashBankImporter
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "CZK", ?, ?, "posted", ?)'
         );
         $insertVat = $pdo->prepare(
-            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount) VALUES (?, ?, ?, ?)'
+            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction) VALUES (?, ?, ?, ?, ?)'
         );
         // Každá pokladna má vlastní číselnou řadu — stejné číslo v další pokladně téhož
         // roku dostane klíč s kódem pokladny (první si ponechá „rok|číslo").
@@ -98,12 +98,19 @@ final class CashBankImporter
             $isOut = (((int) ($r['Vydej'] ?? 0)) === 1) !== ($amount < 0);
             $vatLines = self::vatLines($r, $amount < 0);
             $cleneni = trim((string) ($r['Cleneni'] ?? ''));
-            if ($vatLines !== [] && !InvoiceImporter::isDomesticVatCode($cleneni, !$isOut)) {
+            // Pokladní doklad je tuzemské plnění (řádky 1/2, 40/41) — stejné členění jako
+            // u faktur ({@see Ms3VatCode}), krácený odpočet § 76 včetně.
+            $vatClass = Ms3VatCode::resolve($cleneni, !$isOut);
+            if ($vatLines !== [] && $isOut && $vatClass !== null && !$vatClass['in_return']) {
+                // Výdej mimo přiznání: daň je součástí nákladu, odpočet se neuplatnil.
+                $vatLines = [];
+            } elseif ($vatLines !== [] && ($vatClass === null || !$vatClass['in_return'] || $vatClass['code'] !== null)) {
                 // Mimo tuzemské plnění (PDP, EU, bez nároku) převod DPH neodhaduje — doklad
                 // zůstane bez DPH a účetní ho doplní; v deníku z Money DPH je.
                 $p->warn(self::STEP_CASH, 'cash_vat_review', "Pokladní doklad {$docNo} ({$year}): členění DPH „{$cleneni}“ převod nepřebírá, DPH doplňte ručně.", ['document_no' => $docNo, 'year' => $year]);
                 $vatLines = [];
             }
+            $vatDeduction = $vatClass['deduction'] ?? 'full';
             $rule = mb_substr(trim((string) ($r['PrKont'] ?? '')), 0, 64);
             $ruleKey = null;
             if ($rule !== '') {
@@ -130,7 +137,7 @@ final class CashBankImporter
             ]);
             $id = (int) $pdo->lastInsertId();
             foreach ($vatLines as $line) {
-                $insertVat->execute([$id, $line['rate'], $line['base'], $line['vat']]);
+                $insertVat->execute([$id, $line['rate'], $line['base'], $line['vat'], $vatDeduction]);
             }
             if ($vatLines !== []) {
                 $p->count(self::STEP_CASH, 'with_vat');

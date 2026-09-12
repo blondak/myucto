@@ -126,7 +126,8 @@ final class MoneyS3ImportTest extends TestCase
         // 7 dokladů; smazaný doklad FP24099 se nepřenese.
         self::assertSame(8, $this->rowCount('journal_entries', $supplierId, "YEAR(entry_date) = 2024 AND source_type <> 'closing'"));
         self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "document_no = 'FP24099'"));
-        self::assertSame(10, $this->rowCount('purchase_invoices', $supplierId));
+        // Zálohová ZF24001 se převede (nezaúčtovaná), koncept RC-2024-001 z uzavřeného roku ne.
+        self::assertSame(11, $this->rowCount('purchase_invoices', $supplierId));
         self::assertSame(3, $this->rowCount('invoices', $supplierId));
         self::assertSame(4, $this->rowCount('cash_documents', $supplierId));
         self::assertSame(2, $this->rowCount('clients', $supplierId));
@@ -149,39 +150,68 @@ final class MoneyS3ImportTest extends TestCase
     }
 
     /**
-     * DPH evidence (VatLedgerService, z níž se staví přiznání i KH) smí z převodu dostat
-     * jen doklady, jejichž druh a členění DPH jsou jisté. Zálohová faktura vedle konečné
-     * by DPH započetla dvakrát, dobropis jako faktura s opačným znaménkem, doklad
-     * přenesené daňové povinnosti jako tuzemský a cizí měna s kurzem 1.
+     * DPH evidence (VatLedgerService, z níž se staví přiznání i KH) dostane z převodu doklady
+     * podle druhu a členění DPH z Money: daňový doklad k záloze, dobropis (záporné částky),
+     * doklad v cizí měně (Money drží částky v Kč) a krácený odpočet § 76. Zálohová faktura
+     * do evidence nejde — DPH vedle konečné faktury by se započetlo dvakrát — a doklad
+     * s členěním, které převod nezná (přenesená povinnost na vstupu), zůstane konceptem.
      */
-    public function testUncertainTaxDocumentsStayOutOfVatLedgerAsDrafts(): void
+    public function testMoneyVatClassificationDrivesVatLedger(): void
     {
         $supplierId = $this->supplier();
         $protocol = $this->import($supplierId);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
 
-        $rows = $this->container(VatLedgerService::class)->rows($supplierId, '2025-01-01', '2025-12-31');
+        $ledger = $this->container(VatLedgerService::class);
+        $rows = $ledger->rows($supplierId, '2025-01-01', '2025-12-31');
         $vat = ['purchase' => 0.0, 'sale' => 0.0];
         foreach ($rows as $r) {
             $vat[$r['source']] = ($vat[$r['source']] ?? 0.0) + (float) $r['vat_czk'];
         }
-        // FP25001 1 050 + konečná FP25002 210 + FP24001 z roku 2025 63; vydaná jen FV25001.
-        // + DPH 21 z pokladního nákupu PV25002 (tuzemské členění 19Ř40,41).
-        self::assertEqualsWithDelta(1344.0, $vat['purchase'], 0.001, json_encode($rows, JSON_UNESCAPED_UNICODE) ?: '');
+        // FP25001 1 050 + FP25002 210 + FP24001 z roku 2025 63 + pokladna PV25002 21
+        // + daňový doklad k záloze DZ25001 210 + doklad v EUR FP25004 525 − dobropis DP25001 105.
+        self::assertEqualsWithDelta(1974.0, $vat['purchase'], 0.001, json_encode($rows, JSON_UNESCAPED_UNICODE) ?: '');
+        // Vydaná jen FV25001, zálohová ZV25001 do evidence nejde.
         self::assertEqualsWithDelta(210.0, $vat['sale'], 0.001);
 
-        $drafts = $this->db->pdo()->prepare(
-            "SELECT vendor_invoice_number FROM purchase_invoices WHERE supplier_id = ? AND status = 'draft' ORDER BY vendor_invoice_number"
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT vendor_invoice_number, document_kind, status, booked_at FROM purchase_invoices WHERE supplier_id = ? AND YEAR(issue_date) = 2025'
         );
-        $drafts->execute([$supplierId]);
-        self::assertSame(['DB-2025-001', 'DZ-2025-001', 'EU-2025-001', 'RC-2025-001', 'ZF-2025-001'], $drafts->fetchAll(PDO::FETCH_COLUMN));
-        self::assertSame(1, $this->rowCount('invoices', $supplierId, "status = 'draft' AND varsymbol = 'ZV25001'"));
-        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "status = 'draft' AND booked_at IS NOT NULL"),
-            'Koncept k ruční kontrole nesmí být zamčený jako zaúčtovaný.');
+        $stmt->execute([$supplierId]);
+        $byNumber = array_column($stmt->fetchAll(PDO::FETCH_ASSOC), null, 'vendor_invoice_number');
+        self::assertSame(['credit_note', 'booked'], [$byNumber['DB-2025-001']['document_kind'], $byNumber['DB-2025-001']['status']]);
+        self::assertSame(['tax_document', 'booked'], [$byNumber['DZ-2025-001']['document_kind'], $byNumber['DZ-2025-001']['status']]);
+        self::assertSame(['advance', 'received'], [$byNumber['ZF-2025-001']['document_kind'], $byNumber['ZF-2025-001']['status']]);
+        self::assertNull($byNumber['ZF-2025-001']['booked_at'], 'Zálohovou fakturu Money neúčtuje.');
+        self::assertSame(['invoice', 'draft'], [$byNumber['RC-2025-001']['document_kind'], $byNumber['RC-2025-001']['status']]);
+        self::assertNull($byNumber['RC-2025-001']['booked_at'], 'Koncept k ruční kontrole nesmí být zamčený jako zaúčtovaný.');
+        self::assertSame('booked', $byNumber['EU-2025-001']['status']);
+        self::assertSame(1, $this->rowCount('invoices', $supplierId, "invoice_type = 'proforma' AND status = 'sent' AND booked_at IS NULL AND varsymbol = 'ZV25001'"));
+        self::assertSame(0, $this->rowCount('invoices', $supplierId, "status = 'draft'"));
+
+        // Krácený odpočet § 76 z členění pokladního dokladu (19Ř40,41 K).
+        $cash = $this->db->pdo()->prepare(
+            "SELECT l.vat_deduction FROM cash_document_vat_lines l JOIN cash_documents d ON d.id = l.cash_document_id
+              WHERE d.supplier_id = ? AND d.doc_number = 'PV25002'"
+        );
+        $cash->execute([$supplierId]);
+        self::assertSame('reduced', $cash->fetchColumn());
+
+        // Odpočet, který Money přesunulo do února (UcPrvDPH), se uplatní v únoru.
+        $claim = $this->db->pdo()->prepare(
+            "SELECT received_at, received_at_source FROM purchase_invoices WHERE supplier_id = ? AND vendor_invoice_number = 'DF-2025-003'"
+        );
+        $claim->execute([$supplierId]);
+        $shifted = $claim->fetch(PDO::FETCH_ASSOC);
+        self::assertSame(['2025-02-03', 'manual'], [substr((string) $shifted['received_at'], 0, 10), $shifted['received_at_source']]);
+        $purchases = static fn (array $rows): array => array_values(array_filter($rows, static fn (array $r): bool => $r['source'] === 'purchase'));
+        self::assertSame([], $purchases($ledger->rows($supplierId, '2025-01-01', '2025-01-31')), 'Odpočet FP25001 v lednu není.');
+        self::assertCount(1, $purchases($ledger->rows($supplierId, '2025-02-01', '2025-02-28')));
 
         $steps = array_column($protocol->toArray()['steps'], null, 'key');
-        self::assertSame(5, $steps['purchase_invoices']['counts']['review'] ?? 0);
-        self::assertSame(1, $steps['issued_invoices']['counts']['review'] ?? 0);
+        self::assertSame(1, $steps['purchase_invoices']['counts']['review'] ?? 0);
+        self::assertSame(0, $steps['issued_invoices']['counts']['review'] ?? 0);
+        self::assertSame(1, $steps['purchase_invoices']['counts']['claim_shifted'] ?? 0);
         self::assertContains('needs_review', array_column($steps['purchase_invoices']['messages'], 'code'));
     }
 
@@ -478,18 +508,22 @@ final class MoneyS3ImportTest extends TestCase
     }
 
     /**
-     * Záloha/proforma, kterou Money v historickém roce nezaúčtovalo, se nepřevádí — v uzavřeném
-     * roce by jen visela jako koncept. V posledním roce (ZF25001) zůstává ke kontrole.
+     * Doklad k ruční kontrole, který Money v historickém roce vůbec nezaúčtovalo, se nepřevádí —
+     * v uzavřeném roce by jen visel jako koncept. V posledním roce (RC-2025-001) zůstává ke
+     * kontrole. Zálohová faktura (ZF24001) koncept není: převede se jako nezaúčtovaná záloha.
      */
     public function testUnpostedReviewDocumentFromHistoricalYearIsSkipped(): void
     {
         $supplierId = $this->supplier();
         $protocol = $this->import($supplierId);
 
-        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'ZF-2024-001'"));
-        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'ZF-2025-001' AND status = 'draft'"));
+        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'RC-2024-001'"));
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'RC-2025-001' AND status = 'draft'"));
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'ZF-2024-001' AND document_kind = 'advance' AND booked_at IS NULL"));
         $steps = array_column($protocol->toArray()['steps'], null, 'key');
         self::assertSame(1, $steps['purchase_invoices']['counts']['unposted_review_skipped'] ?? 0);
+        self::assertNotContains('ZF24001', array_column($protocol->get('orphans'), 'document_no'),
+            'Zálohovou fakturu Money neúčtuje, zápis v deníku u ní převod nečeká.');
     }
 
     public function testRepeatedImportCreatesNothingNew(): void

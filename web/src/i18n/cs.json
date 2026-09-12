@@ -23479,6 +23479,7 @@
       "bank": "Banka",
       "link": "Vazby dokladů na deník",
       "payments": "Úhrady faktur",
+      "vat_coefficients": "Koeficient krácení DPH",
       "closing": "Uzávěrka historických let",
       "reconciliation": "Rekonciliace",
       "cancelled": "Zrušeno uživatelem",
@@ -23509,7 +23510,14 @@
       "review_unlinked": "konceptů bez zápisu v deníku",
       "suffixed": "čísel s příponou roku",
       "changed": "změněno v Money, ponecháno",
-      "ambiguous": "úhrad nejednoznačných"
+      "ambiguous": "úhrad nejednoznačných",
+      "unposted_review_skipped": "nezaúčtovaných konceptů z uzavřených let vynecháno",
+      "claim_shifted": "odpočtů přesunutých do pozdějšího období",
+      "zero_amount": "nulových dokladů vynecháno",
+      "with_vat": "dokladů s DPH",
+      "balances": "stavů výpisů z deníku",
+      "moved_entries": "zápisů na hranici období",
+      "settled": "vypořádaných let"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",
@@ -23521,7 +23529,8 @@
       "documents_purchase_invoices": "Přijaté faktury × 321",
       "documents_issued_invoices": "Vydané faktury × 311",
       "documents_cash": "Pokladna × 211",
-      "documents_bank": "Banka × 221"
+      "documents_bank": "Banka × 221",
+      "balance_sheet_balanced": "Rozvaha vyrovnaná, všechny účty ve výkazu"
     },
     "closing_status": {
       "open": "Zůstává otevřený",

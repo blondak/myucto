@@ -206,6 +206,9 @@ final class SyntheticAgenda
                     'Doklad' => 'FP24002', 'PrijatDokl' => 'DF-2024-099', 'VarSymbol' => '2024099',
                     'Zaklad_2' => 400.0, 'DPH_2' => 84.0, 'CelkemSDPH' => 484.0, 'Popis' => 'Nezaúčtovaná faktura',
                 ] + $purchaseDates('2024-11-15'),
+                // Doklad k ruční kontrole (přenesená povinnost), který Money v uzavřeném roce nezaúčtovalo.
+                ['KodDPH' => self::KOD_DPH_REVERSE_CHARGE, 'Doklad' => 'FP24003', 'PrijatDokl' => 'RC-2024-001', 'VarSymbol' => '2024301',
+                    'Zaklad_2' => 800.0, 'DPH_2' => 0.0, 'CelkemSDPH' => 800.0, 'Popis' => 'Nezaúčtované stavební práce'] + $purchaseDates('2024-12-02') + $vendor,
             ]),
             'ROK.001/VFaktury.DAT' => Ms3FixtureWriter::table(self::ISSUED_FIELDS, [
                 $customer + [
@@ -276,8 +279,8 @@ final class SyntheticAgenda
                 // Zálohová faktura (jiný druh než běžná `N`) — daňový doklad je až konečná FP25002.
                 ['Druh' => 'Z', 'Doklad' => 'ZF25001', 'PrijatDokl' => 'ZF-2025-001', 'VarSymbol' => '2025101',
                     'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Záloha na služby'] + $purchaseDates('2025-03-01') + $vendor,
-                // Daňový doklad k poskytnuté záloze: Money ho účtuje jen 343/314, na 321 nejde.
-            ['Druh' => 'L', 'Doklad' => 'DZ25001', 'PrijatDokl' => 'DZ-2025-001', 'VarSymbol' => '2025102',
+                // Daňový doklad k poskytnuté záloze (druh D): Money ho účtuje jen 343/314, na 321 nejde.
+            ['Druh' => 'D', 'Doklad' => 'DZ25001', 'PrijatDokl' => 'DZ-2025-001', 'VarSymbol' => '2025102',
                 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Daňový doklad k záloze'] + $purchaseDates('2025-03-02') + $vendor,
             // Smazaná faktura (`FlagDel`): řada její číslo přidělila znovu živé FP25001.
             ['FlagDel' => 1, 'Doklad' => 'FP25001', 'PrijatDokl' => 'SMAZ-2025-001', 'VarSymbol' => '2025901',
@@ -303,12 +306,17 @@ final class SyntheticAgenda
             'ROK.002/PoklKnih.DAT' => Ms3FixtureWriter::table(self::CASH_FIELDS, [
                 ['Doklad' => 'PV25001', 'Pokl' => 'PO', 'Vydej' => 1, 'PrKont' => 'PV001', 'DatVyst' => '2025-02-01', 'DatUcPr' => '2025-02-01', 'Popis' => 'Kancelářské potřeby', 'Celkem' => 800.0],
                 ['Doklad' => 'PP25001', 'Pokl' => 'PO', 'Vydej' => 0, 'DatVyst' => '2025-03-01', 'DatUcPr' => '2025-03-01', 'Popis' => 'Vratka tržby', 'Celkem' => -200.0],
-                // Nákup s DPH za hotové (tankování) — DPH z pokladny patří do přiznání.
+                // Nákup s DPH za hotové (tankování) — DPH z pokladny patří do přiznání,
+                // s kráceným odpočtem podle § 76 (členění s příponou K).
                 ['Doklad' => 'PV25002', 'Pokl' => 'PO', 'Vydej' => 1, 'DatVyst' => '2025-06-02', 'DatUplDPH' => '2025-06-02', 'DatUcPr' => '2025-06-02',
                     'AdNazev' => 'Čerpací stanice Gama s.r.o.', 'Popis' => 'Tankování', 'Celkem' => 121.0,
-                    'Cleneni' => self::KOD_DPH_PURCHASE, 'ZSazba' => 21.0, 'ZaklZS' => 100.0, 'DPHZS' => 21.0],
+                    'Cleneni' => self::KOD_DPH_PURCHASE . ' K', 'ZSazba' => 21.0, 'ZaklZS' => 100.0, 'DPHZS' => 21.0],
                 // Nulový doklad nemá v pokladně účinek ani zápis v deníku.
                 ['Doklad' => 'PP25002', 'Pokl' => 'PO', 'Vydej' => 0, 'DatVyst' => '2025-03-02', 'DatUcPr' => '2025-03-02', 'Popis' => 'Stornovaná tržba', 'Celkem' => 0.0],
+            ]),
+            // Odpočet FP25001 Money přesunulo do února (doklad došel po podání přiznání za leden).
+            'ROK.002/UcPrvDPH.DAT' => Ms3FixtureWriter::table([['Doklad', 'C', 10], ['DatumD', 'D', 2], ['DatPln', 'D', 2], ['Cleneni', 'C', 12]], [
+                ['Doklad' => 'FP25001', 'DatumD' => '2025-01-15', 'DatPln' => '2025-02-03', 'Cleneni' => self::KOD_DPH_PURCHASE],
             ]),
             'ROK.002/BankKnih.DAT' => Ms3FixtureWriter::table(self::BANK_FIELDS, [
                 ['Doklad' => 'BV25001', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-12-31', 'DatPlat' => '2025-12-31', 'Celkem' => 100.0, 'Popis' => 'Poplatek za vedení účtu'],

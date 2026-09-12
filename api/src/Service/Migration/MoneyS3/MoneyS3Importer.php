@@ -43,6 +43,7 @@ final class MoneyS3Importer
         private readonly InvoiceImporter $invoices,
         private readonly CashBankImporter $cashBank,
         private readonly DocumentLinker $linker,
+        private readonly VatCoefficientSeeder $coefficients,
         private readonly HistoricalYearCloser $closer,
         private readonly MoneyS3Reconciler $reconciler,
     ) {}
@@ -62,6 +63,7 @@ final class MoneyS3Importer
             CashBankImporter::STEP_BANK,
             DocumentLinker::STEP_LINK,
             DocumentLinker::STEP_PAYMENTS,
+            VatCoefficientSeeder::STEP,
             HistoricalYearCloser::STEP,
             MoneyS3Reconciler::STEP,
         ];
@@ -280,6 +282,7 @@ final class MoneyS3Importer
             CashBankImporter::STEP_BANK => fn () => $this->cashBank->importBank($ctx),
             DocumentLinker::STEP_LINK => fn () => $this->linker->link($ctx),
             DocumentLinker::STEP_PAYMENTS => fn () => $this->linker->matchPayments($ctx),
+            VatCoefficientSeeder::STEP => fn () => $this->coefficients->run($ctx),
             HistoricalYearCloser::STEP => fn () => $this->closer->run($ctx),
             MoneyS3Reconciler::STEP => fn () => $this->reconciler->run($ctx),
         ];

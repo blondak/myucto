@@ -23479,6 +23479,7 @@
       "bank": "Bank",
       "link": "Documents linked to the journal",
       "payments": "Invoice payments",
+      "vat_coefficients": "VAT deduction coefficient",
       "closing": "Closing of historical years",
       "reconciliation": "Reconciliation",
       "cancelled": "Cancelled by user",
@@ -23509,7 +23510,14 @@
       "review_unlinked": "drafts without journal entry",
       "suffixed": "numbers with year suffix",
       "changed": "changed in Money, kept",
-      "ambiguous": "ambiguous payments"
+      "ambiguous": "ambiguous payments",
+      "unposted_review_skipped": "unposted drafts from closed years skipped",
+      "claim_shifted": "deductions moved to a later period",
+      "zero_amount": "zero documents skipped",
+      "with_vat": "documents with VAT",
+      "balances": "statement balances from the journal",
+      "moved_entries": "entries at the period boundary",
+      "settled": "years settled"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",
@@ -23521,7 +23529,8 @@
       "documents_purchase_invoices": "Received invoices × 321",
       "documents_issued_invoices": "Issued invoices × 311",
       "documents_cash": "Cash × 211",
-      "documents_bank": "Bank × 221"
+      "documents_bank": "Bank × 221",
+      "balance_sheet_balanced": "Balance sheet balanced, every account in the statements"
     },
     "closing_status": {
       "open": "Stays open",

@@ -37,11 +37,8 @@ final class InvoiceImporter
     /** Sazby dokladu Money: `Zaklad_n` + `SazbaDPHn` + `DPH_n`. */
     private const RATE_SLOTS = 6;
 
-    /** Řádky přiznání, na které Money zařazuje tuzemské přijaté plnění s nárokem na odpočet. */
-    private const DOMESTIC_PURCHASE_ROWS = [40, 41];
-
-    /** Řádky přiznání tuzemského uskutečněného plnění. */
-    private const DOMESTIC_SALE_ROWS = [1, 2];
+    /** Druhy zálohové faktury v Money (`L`, starší `Z`, u vydaných `F`) — nejsou daňovým dokladem. */
+    private const ADVANCE_KINDS = ['L', 'Z', 'F'];
 
     /** @var array<string,int> */
     private array $rateCache = [];
@@ -65,15 +62,18 @@ final class InvoiceImporter
                  document_kind, issue_date, tax_date, due_date, received_at, received_at_source, currency_id,
                  vendor_snapshot, total_without_vat, total_vat, total_with_vat, rounding,
                  payment_variable_symbol, payment_method, status, paid_at, booked_at, booked_by,
-                 note_above_items, note_below_items, external_barcode, vat_deduction, prices_include_vat, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "import", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
+                 note_above_items, note_below_items, external_barcode, vat_deduction, vat_classification_code,
+                 prices_include_vat, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
         );
         $insertItem = $pdo->prepare(
             'INSERT INTO purchase_invoice_items
                 (purchase_invoice_id, description, quantity, unit_price_without_vat,
-                 vat_rate_id, vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
-             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)'
+                 vat_rate_id, vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index,
+                 vat_classification_code)
+             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
+        $claimShifts = $this->claimShifts($ctx);
         $duplicate = $pdo->prepare(
             'SELECT 1 FROM purchase_invoices
               WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ? LIMIT 1'
@@ -123,6 +123,11 @@ final class InvoiceImporter
                 continue;
             }
             $paidAt = self::date($r, ['Uhrazeno']);
+            // Zálohovou fakturu Money neúčtuje — v MyÚčtu je přijatá, ne zaúčtovaná.
+            $unbooked = $review || $class['kind'] === 'advance';
+            // Odpočet, který Money přesunulo do pozdějšího období (§ 73), se uplatní ke dni
+            // z Money — stejně jako ručně zadané datum přijetí dokladu.
+            $claimDate = $claimShifts[$key] ?? null;
             $vendorNumber = mb_substr(trim((string) ($r['PrijatDokl'] ?? '')) ?: (trim((string) ($r['VarSymbol'] ?? '')) ?: $docNo), 0, 50);
             $duplicate->execute([$ctx->supplierId, $vendorId, $vendorNumber, $issue]);
             if ($duplicate->fetchColumn() !== false) {
@@ -135,11 +140,12 @@ final class InvoiceImporter
                     $snapshot['dic'] !== '' ? 1 : 0,
                     $number['number'],
                     $vendorNumber,
-                    'invoice',
+                    $class['kind'],
                     $issue,
                     self::date($r, ['PlnenoDPH']) ?? $issue,
                     self::date($r, ['Splatno']) ?? $issue,
-                    self::date($r, ['Doruceno', 'DatUcPr']) ?? $issue,
+                    $claimDate ?? (self::date($r, ['Doruceno', 'DatUcPr']) ?? $issue),
+                    $claimDate !== null ? 'manual' : 'import',
                     $currencyId,
                     json_encode([
                         'company_name' => $snapshot['name'], 'street' => $snapshot['street'], 'city' => $snapshot['city'],
@@ -151,15 +157,16 @@ final class InvoiceImporter
                     $amounts['rounding'],
                     mb_substr(trim((string) ($r['VarSymbol'] ?? '')), 0, 20) ?: null,
                     self::paymentMethod((string) ($r['Uhrada'] ?? '')),
-                    $review ? 'draft' : ($paidAt !== null ? 'paid' : 'booked'),
+                    $review ? 'draft' : ($paidAt !== null ? 'paid' : ($unbooked ? 'received' : 'booked')),
                     $paidAt,
-                    $review ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
-                    $review || $ctx->userId <= 0 ? null : $ctx->userId,
+                    $unbooked ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
+                    $unbooked || $ctx->userId <= 0 ? null : $ctx->userId,
                     mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
                     self::note($docNo, $class['reasons']),
                     // Čárový kód z Money je jistý klíč pro párování naskenovaných příloh.
                     mb_substr(trim((string) ($r['BarCode'] ?? '')), 0, 64) ?: null,
                     $class['vat_deduction'],
+                    $class['code'],
                     $ctx->userId,
                 ]);
             } catch (\PDOException $e) {
@@ -176,7 +183,11 @@ final class InvoiceImporter
                     trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
                     $item['base'], $item['rate_id'], $item['rate'],
                     $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
+                    $class['code'],
                 ]);
+            }
+            if ($claimDate !== null) {
+                $p->count(self::STEP_PURCHASE, 'claim_shifted');
             }
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
             $ctx->purchaseInvoices[$key] = $id;
@@ -197,16 +208,16 @@ final class InvoiceImporter
                 (supplier_id, invoice_type, client_id, varsymbol, issue_date, tax_date, due_date,
                  currency_id, note_above_items, note_below_items, client_snapshot,
                  total_without_vat, total_vat, total_with_vat, rounding, paid_total,
-                 paid_at, status, booked_at, booked_by, prices_include_vat, created_by)
-             VALUES (?, "invoice", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
+                 paid_at, status, booked_at, booked_by, vat_classification_code, prices_include_vat, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
         );
-        // Převedená faktura je tuzemské plnění: Money S3 v záloze místo plnění pro OSS
-        // nedrží, a kdyby šlo o OSS, podané přiznání za ten rok už je v Money.
+        // Převedená faktura není OSS: Money S3 v záloze místo plnění pro OSS nedrží,
+        // a kdyby šlo o OSS, podané přiznání za ten rok už je v Money.
         $insertItem = $pdo->prepare(
             'INSERT INTO invoice_items
                 (invoice_id, description, quantity, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
-                 total_without_vat, total_vat, total_with_vat, order_index, oss_applicable)
-             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 0)'
+                 total_without_vat, total_vat, total_with_vat, order_index, oss_applicable, vat_classification_code)
+             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
         );
 
         $clients = [];
@@ -249,10 +260,17 @@ final class InvoiceImporter
             $amounts = $this->amounts($ctx, self::STEP_ISSUED, $docNo, $r, self::date($r, ['PlnenoDPH']) ?? $issue);
             $class = self::classify($r, true, $amounts['vat']);
             $review = $class['reasons'] !== [];
+            if ($review && self::historicalUnposted($ctx, $year, 'FV', $docNo)) {
+                $p->count(self::STEP_ISSUED, 'unposted_review_skipped');
+                continue;
+            }
+            // Zálohovou fakturu Money neúčtuje — v MyÚčtu je vystavená, ne zaúčtovaná.
+            $unbooked = $review || $class['kind'] === 'proforma';
             $paidAt = self::date($r, ['Uhrazeno']);
             try {
                 $insert->execute([
                     $ctx->supplierId,
+                    $class['kind'],
                     $clientId,
                     $number['number'],
                     $issue,
@@ -272,8 +290,9 @@ final class InvoiceImporter
                     $paidAt !== null ? $amounts['total'] : 0,
                     $paidAt,
                     $review ? 'draft' : ($paidAt !== null ? 'paid' : 'sent'),
-                    $review ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
-                    $review || $ctx->userId <= 0 ? null : $ctx->userId,
+                    $unbooked ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
+                    $unbooked || $ctx->userId <= 0 ? null : $ctx->userId,
+                    $class['code'],
                     $ctx->userId > 0 ? $ctx->userId : null,
                 ]);
             } catch (\PDOException $e) {
@@ -291,6 +310,7 @@ final class InvoiceImporter
                     trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
                     $item['base'], $item['rate_id'], $item['rate'],
                     $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
+                    $class['code'],
                 ]);
             }
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
@@ -320,29 +340,41 @@ final class InvoiceImporter
     }
 
     /**
-     * Daňová povaha dokladu z Money. Vrací důvody, proč doklad NEJDE převzít jako
-     * běžný tuzemský daňový doklad (prázdné = jde), a nárok na odpočet u přijatého
-     * dokladu mimo přiznání.
+     * Daňová povaha dokladu z Money. Vrací důvody, proč doklad NEJDE převzít bez ruční
+     * kontroly (prázdné = jde), druh dokladu v MyÚčtu, nárok na odpočet a kód zařazení
+     * do přiznání.
      *
-     * Jisté je jen to, co v záloze ověřitelně nese význam: druh `N` je běžná faktura,
-     * členění DPH (`KodDPH`, např. `19Ř40,41`) jmenuje řádky přiznání, na které Money
-     * doklad zařadilo, a řádek `00` znamená „do přiznání nezahrnovat". Ostatní druhy
-     * (zálohová, proforma, daňový doklad k platbě) ani zahraniční a zvláštní řádky se
-     * na MyÚčto nepřevádějí naslepo.
+     * Druh Money: `N` běžná faktura, `D` daňový doklad k přijaté platbě (Money ho účtuje
+     * jen 343/314), `L`/`Z`/`F` zálohová faktura — Money ji neúčtuje a do přiznání nejde,
+     * DPH nese až daňový doklad k platbě nebo konečná faktura. Dobropis (`Dobropis`) má
+     * v Money záporné částky. Členění DPH (`KodDPH`) převádí {@see Ms3VatCode}; členění,
+     * které převod nezná, a stornované či neúčtované doklady jdou k ruční kontrole.
+     * Doklad v cizí měně má v Money základ i daň v Kč, převezme se tak.
      *
      * @param array<string,mixed> $r
-     * @return array{reasons:list<string>,vat_deduction:string}
+     * @return array{reasons:list<string>,vat_deduction:string,code:?string,kind:string}
      */
     public static function classify(array $r, bool $issued, float $vat): array
     {
         $reasons = [];
         $deduction = 'full';
-        $kind = strtoupper(trim((string) ($r['Druh'] ?? '')));
-        if ($kind !== '' && $kind !== 'N') {
-            $reasons[] = "druh dokladu „{$kind}“ (zálohová faktura, proforma nebo daňový doklad k platbě)";
+        $vatCode = null;
+        $kind = 'invoice';
+        $druh = strtoupper(trim((string) ($r['Druh'] ?? '')));
+        $advance = in_array($druh, self::ADVANCE_KINDS, true);
+        if ($druh === 'D') {
+            $kind = 'tax_document';
+        } elseif ($advance) {
+            $kind = $issued ? 'proforma' : 'advance';
+        } elseif ($druh !== '' && $druh !== 'N') {
+            $reasons[] = "neznámý druh dokladu „{$druh}“";
         }
         if ((int) ($r['Dobropis'] ?? 0) === 1) {
-            $reasons[] = 'dobropis';
+            if ($kind === 'invoice') {
+                $kind = 'credit_note';
+            } else {
+                $reasons[] = 'dobropis zálohy nebo daňového dokladu k platbě';
+            }
         }
         if ((int) ($r['Storno'] ?? 0) === 1) {
             $reasons[] = 'stornovaný doklad';
@@ -350,24 +382,21 @@ final class InvoiceImporter
         if ((int) ($r['Neuctovat'] ?? 0) === 1) {
             $reasons[] = 'v Money označený „neúčtovat“';
         }
-        $currency = strtoupper(trim((string) ($r['Mena'] ?? '')));
-        if (!in_array($currency, ['', 'CZK', 'KČ'], true)) {
-            $rate = (float) ($r['Kurs'] ?? 0);
-            $reasons[] = "cizí měna {$currency}" . ($rate > 0 ? ' (kurz ' . rtrim(rtrim(number_format($rate, 4, ',', ''), '0'), ',') . ')' : '')
-                . ', částky převzaty v Kč';
+        if ($advance) {
+            return ['reasons' => $reasons, 'vat_deduction' => $deduction, 'code' => null, 'kind' => $kind];
         }
 
         $code = trim((string) ($r['KodDPH'] ?? ''));
-        $rows = self::vatReturnRows($code);
-        $domestic = $issued ? self::DOMESTIC_SALE_ROWS : self::DOMESTIC_PURCHASE_ROWS;
+        $resolved = $code === '' ? null : Ms3VatCode::resolve($code, $issued);
+        $hasVat = abs($vat) >= 0.005;
         if ($code === '') {
-            if (abs($vat) >= 0.005) {
+            if ($hasVat) {
                 $reasons[] = 'doklad s daní bez členění DPH';
             }
-        } elseif ($rows === null) {
-            $reasons[] = "neznámé členění DPH „{$code}“";
-        } elseif ($rows === [0]) {
-            if (abs($vat) >= 0.005) {
+        } elseif ($resolved === null) {
+            $reasons[] = "členění DPH „{$code}“ (přenesená daňová povinnost na vstupu, pořízení z EU, dovoz, poměrný nárok nebo zvláštní režim)";
+        } elseif (!$resolved['in_return']) {
+            if ($hasVat) {
                 if ($issued) {
                     $reasons[] = "členění DPH „{$code}“ mimo přiznání u dokladu s daní";
                 } else {
@@ -375,24 +404,13 @@ final class InvoiceImporter
                     $deduction = 'none';
                 }
             }
-        } elseif (array_diff($rows, $domestic) !== []) {
-            $reasons[] = "členění DPH „{$code}“ (zahraniční plnění, přenesená daňová povinnost nebo zvláštní režim)";
+        } elseif ($resolved['code'] !== null && $hasVat) {
+            $reasons[] = "členění DPH „{$code}“ (plnění bez daně) u dokladu s daní";
+        } else {
+            $deduction = $resolved['deduction'];
+            $vatCode = $resolved['code'];
         }
-        return ['reasons' => $reasons, 'vat_deduction' => $deduction];
-    }
-
-    /**
-     * Řádky přiznání z členění DPH Money (`19Ř40,41` → [40, 41], `19Ř00P` → [0]).
-     *
-     * @return list<int>|null null = kód neodpovídá tvaru „RRŘřádky"
-     */
-    public static function vatReturnRows(string $code): ?array
-    {
-        if (preg_match('/^\d{2}Ř\s*([0-9][0-9 ,]*?)\s*[A-Z]?$/u', $code, $m) !== 1) {
-            return null;
-        }
-        $rows = array_map('intval', preg_split('/[\s,]+/', trim($m[1]), -1, PREG_SPLIT_NO_EMPTY) ?: []);
-        return $rows === [] ? null : array_values(array_unique($rows));
+        return ['reasons' => $reasons, 'vat_deduction' => $deduction, 'code' => $vatCode, 'kind' => $kind];
     }
 
     /**
@@ -419,14 +437,27 @@ final class InvoiceImporter
     }
 
     /**
-     * Členění DPH z Money je jen tuzemské plnění v základní/snížené sazbě (ř. 1–2 na výstupu,
-     * ř. 40–41 na vstupu) — jediné, které převod bere do DPH automaticky. Stejné pravidlo
-     * pro faktury ({@see classify()}) i pokladnu ({@see CashBankImporter}).
+     * Doklady, jejichž odpočet Money přesunulo do pozdějšího období (§ 73 — doklad došel
+     * až po podání přiznání za měsíc plnění). Money je vede v tabulce `UcPrvDPH` roku,
+     * do kterého odpočet přešel, s datem uplatnění (`DatPln`); doklad sám patří do roku
+     * data plnění (`DatumD`), bez něj do roku předchozího.
+     *
+     * @return array<string,string> "rok|číslo dokladu" => datum uplatnění odpočtu
      */
-    public static function isDomesticVatCode(string $code, bool $issued): bool
+    private function claimShifts(ImportContext $ctx): array
     {
-        $rows = self::vatReturnRows(trim($code));
-        return $rows !== null && array_diff($rows, $issued ? self::DOMESTIC_SALE_ROWS : self::DOMESTIC_PURCHASE_ROWS) === [];
+        $out = [];
+        foreach ($ctx->backup->rowsAcrossYears('UcPrvDPH') as $r) {
+            $docNo = trim((string) ($r['Doklad'] ?? ''));
+            $claim = self::date($r, ['DatPln']);
+            $year = $ctx->yearOf($r);
+            if ($docNo === '' || $claim === null || $year === null) {
+                continue;
+            }
+            $docDate = self::date($r, ['DatumD']);
+            $out[($docDate !== null ? (int) substr($docDate, 0, 4) : $year - 1) . '|' . $docNo] = $claim;
+        }
+        return $out;
     }
 
     /** Způsob úhrady z Money (volný text `Uhrada`, viz {@see \MyInvoice\Service\Export\MoneyS3XmlExporter}). */
