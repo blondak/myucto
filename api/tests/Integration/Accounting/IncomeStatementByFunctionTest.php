@@ -154,7 +154,10 @@ final class IncomeStatementByFunctionTest extends TestCase
         self::assertTrue($byFunction['checks']['profit_matches'], 'VH musí sedět na výsledkové účty.');
     }
 
-    /** Čistý obrat sečte výnosové řádky účelového členění, ne druhového. */
+    /**
+     * Čistý obrat v účelovém členění = řádek I. (tržby z prodeje výrobků, zboží a služeb,
+     * § 1a odst. 2 ZoÚ od 1. 1. 2024). Ostatní provozní výnos (II.) se do něj nepočítá.
+     */
     public function testNetTurnoverSumsRevenueRows(): void
     {
         $this->revenue('602', 500_000.00);
@@ -164,7 +167,7 @@ final class IncomeStatementByFunctionTest extends TestCase
 
         $out = $this->statements->incomeStatementByFunction($this->supplierId, $this->periodId, self::ENDS_ON, 'full');
 
-        self::assertEqualsWithDelta(520_000.00, $out['checks']['net_turnover'], 0.01);
+        self::assertEqualsWithDelta(500_000.00, $out['checks']['net_turnover'], 0.01);
     }
 
     /**

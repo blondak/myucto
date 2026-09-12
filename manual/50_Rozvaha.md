@@ -110,6 +110,61 @@ Rozsah řádků:
 PDF a XLSX používají stejný rozvahový den, rozsah, verzi mapy, srovnávací
 období a kontroly jako obrazovka. Přepínač tisíců export neovlivňuje.
 
+## 50.7 Mapování účtů pro konkrétní firmu
+
+**Cesta: `Účetnictví → Mapování účtů do výkazů`**
+
+Globální mapa zařazuje účet podle čísla syntetiky. Předpis ale nechává firmě
+volby, které z čísla účtu vyčíst nejde. Pro ně slouží výjimky mapování, které
+platí jen pro vybranou firmu:
+
+- **splatnost** — půjčka od společníka na analytice 365.100 splatná za víc
+  než rok patří do dlouhodobých závazků (C.I.), ne do krátkodobých (C.II.),
+- **spřízněné osoby** — pohledávky, závazky, výnosy a náklady vůči ovládané
+  nebo ovládající osobě patří do vlastních řádků a podřádků výkazů,
+- **zařazení analytiky** — konkrétní analytika může patřit do jiného řádku
+  než její syntetika.
+
+Stránka má záložky **Rozvaha** a **Výsledovka**. Tabulka ukazuje účty firmy,
+jejich zůstatek ke konci vybraného období a řádek, kam je výkaz dnes zařadí,
+spolu se zdrojem zařazení (globální mapa, mapa funkcí u účelové výsledovky,
+výjimka firmy). Ve sloupci **Řádek výkazu** se vybírá cílový řádek ze stromu
+řádků výkazu, volba **(podle globální mapy)** výjimku ruší. U saldového účtu
+lze výjimku omezit na debetní nebo kreditní zůstatek; opačná strana se pak
+řídí mapou bez výjimky. U řádku aktiv lze účet zařadit jako korekci. Poznámka
+slouží k zapsání důvodu, například splatnosti.
+
+Výjimka se zadává prefixem účtu stejně jako globální mapa. Při více shodách
+vyhrává nejdelší prefix a při stejné délce vyhrává výjimka firmy. Výjimka na
+analytiku (365.100) proto přesune jen tu analytiku, ostatní analytiky
+syntetiky zůstanou podle globální mapy.
+
+Změny se nejdřív jen připravují a ukládají se najednou tlačítkem **Uložit**
+v liště dole; **Zahodit změny** vrátí uložený stav. **Náhled dopadu** ukáže
+řádky výkazu, jejichž hodnota se po uložení změní, a upozorní, kdyby rozvaha
+přestala být vyrovnaná. Náhled nic neukládá.
+
+Výjimky používá rozvaha, obě výsledovky, jejich PDF a XLSX exporty, měsíční
+report, uzávěrkový balík, kategorie účetní jednotky i příloha účetní závěrky
+v přiznání k dani z příjmů právnických osob.
+
+### Návrh z podaného přiznání
+
+Když je za rok v evidenci podané přiznání k dani z příjmů právnických osob,
+tlačítko **Navrhnout z podaného přiznání** porovná přílohu účetní závěrky
+(aktiva, pasiva a výsledovku v celých tisících Kč), jak ji vyrobí aplikace,
+s přílohou podaného přiznání. Kde se dva řádky liší opačně o částku, která
+odpovídá zůstatku jednoho účtu nebo analytiky (s tolerancí 1 tis. Kč na
+zaokrouhlení), navrhne tento účet přeřadit do řádku, kde ho má podané
+přiznání. Přiznání, které v evidenci není, lze nahrát jako XML přes
+**Navrhnout z XML přiznání** v nabídce dalších akcí.
+
+Každý návrh uvádí účet, výchozí a cílový řádek a odůvodnění. Návrh, který by
+stejně dobře vysvětlil víc účtů, je označený jako nejistý a není předvybraný.
+Vybrané návrhy se tlačítkem **Převzít vybrané** přenesou do připravovaných
+změn; uloží se až tlačítkem **Uložit**. Pod návrhy je rozbalovací seznam všech
+rozdílných řádků přílohy.
+
 > ⚠️ **Zelená rovnost stran není kontrola věcného zařazení.** Rozvaha je
 > odvozena z účtového rozvrhu a mapy výkazu; podezřelý řádek rozbalte a jeho
 > účty ověřte v opisu.

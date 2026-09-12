@@ -807,7 +807,11 @@
         "1819_stock_item_intrastat.sql",
         "1820_vat_rates_historical_2004_2012.sql",
         "1821_statement_map_legacy_accounts.sql",
-        "1823_fueling_odometer_estimate.sql"
+        "1823_fueling_odometer_estimate.sql",
+        "1824_statement_rows_related_party_split.sql",
+        "1825_statement_account_overrides.sql",
+        "1826_statement_map_corrections_to_leaves.sql",
+        "1827_net_turnover_business_model_rows.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -1306,6 +1310,7 @@
                 "fx_reversal_at_open": "tinyint(1) NOT NULL DEFAULT 1",
                 "locked_until": "date NULL DEFAULT NULL",
                 "manual_doc_series": "tinyint(1) NOT NULL DEFAULT 0",
+                "net_turnover_extra_rows": "text NULL DEFAULT NULL",
                 "single_analytic_redirect": "tinyint(1) NOT NULL DEFAULT 1",
                 "small_asset_accrual_mode": "enum('none','pro_rata','flat_pct') NOT NULL DEFAULT 'none'",
                 "small_asset_accrual_pct": "decimal(5,2) NULL DEFAULT NULL",
@@ -16850,6 +16855,35 @@
             },
             "foreign_keys": {
                 "fk_sam_version": "(version_id) -> statement_versions (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "statement_account_overrides": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_prefix": "varchar(10) NOT NULL",
+                "balance_condition": "enum('any','debit','credit') NOT NULL DEFAULT 'any'",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "int(10) unsigned NULL DEFAULT NULL",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "note": "varchar(255) NULL DEFAULT NULL",
+                "row_code": "varchar(20) NOT NULL",
+                "sign": "tinyint(4) NOT NULL DEFAULT 1",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "target": "enum('gross','correction') NOT NULL DEFAULT 'gross'",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "version_id": "smallint(5) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_stmt_ovr_version": "BTREE (version_id)",
+                "uq_stmt_ovr_supplier_version_prefix": "UNIQUE BTREE (supplier_id, version_id, account_prefix, balance_condition)"
+            },
+            "foreign_keys": {
+                "fk_stmt_ovr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_stmt_ovr_version": "(version_id) -> statement_versions (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },

@@ -36,6 +36,7 @@ final class EntityCategoryService
         private readonly StatementMapper $mapper,
         private readonly EntityCategoryHistoryRepository $history,
         private readonly TaxConstantsRepository $taxConstants,
+        private readonly StatementMapResolver $maps,
     ) {}
 
     /**
@@ -216,14 +217,24 @@ final class EntityCategoryService
             throw new ReportException('statement_version_missing', 'Pro rozvahový den ' . $asOf . ' neexistuje verze mapování rozvahy.');
         }
         $rows = $this->definitions->rows((int) $version['id']);
-        $map  = $this->definitions->accountMap((int) $version['id']);
+        // Stejná sloučená mapa jako rozvaha (globální + výjimky firmy) — aktiva netto pro
+        // kategorii ÚJ se nesmí počítat z jiného zařazení než rozvaha sama.
+        $map  = $this->maps->accountMap($version, $supplierId);
 
         // D2 (H9): saldové účty (balance_condition != 'any') se nettují per analytika,
         // ne přes syntetiku — aktiva netto pak nezahrnou kompenzovaný kontokorent. N1 guard
         // (fail-loud na nepárový prefix) je sdílený se StatementMapper (§2.8, žádná duplicita).
         $splitCodes = $this->mapper->noCompensationPrefixes($map);
 
-        $balances = $this->ledger->syntheticBalances($supplierId, $asOf, (string) $period['starts_on'], $splitCodes);
+        // Analytické prefixy mapy (311D, výjimka na 365.100…) musí dostat zůstatek své
+        // analytiky zvlášť, stejně jako v rozvaze (FinancialStatementService::buildStatement).
+        $balances = $this->ledger->syntheticBalances(
+            $supplierId,
+            $asOf,
+            (string) $period['starts_on'],
+            $splitCodes,
+            $this->mapper->analyticPrefixes($map),
+        );
         $mapped   = $this->mapper->map($rows, $map, $balances);
 
         return [

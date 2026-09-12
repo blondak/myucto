@@ -69,8 +69,13 @@ VH před zdaněním = Provozní VH + Finanční VH
 VH po zdanění    = VH před zdaněním − J. Daň z příjmů
 VH za období     = VH po zdanění − K. Převod podílu na VH společníkům
 
-Čistý obrat = I. + II. + III. + IV. + V. + VI.
+Čistý obrat (období od 1. 1. 2024)       = I. + řádky zvolené firmou
+Čistý obrat (období započatá před 2024) = I. + II. + III. + IV. + V. + VI.
 ```
+
+Volba dalších výnosů obchodního modelu je stejná jako u
+[druhové výsledovky](51_Vysledovka_druhova.md), pro účelové členění se nastavuje
+zvlášť.
 
 Výsledek za období se kontroluje proti nezávislému součtu všech výnosových a
 nákladových účtů. Testovaná vazba vyžaduje, aby účelová a

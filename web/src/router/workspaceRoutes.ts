@@ -163,6 +163,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'accounting/balance-sheet',    name: 'accounting-balance-sheet',    component: () => import('@/pages/accounting/BalanceSheet.vue'),    meta: { requiresDoubleEntry: true } },
       { path: 'accounting/income-statement', name: 'accounting-income-statement', component: () => import('@/pages/accounting/IncomeStatement.vue'), meta: { requiresDoubleEntry: true } },
       { path: 'accounting/income-statement-by-function', name: 'accounting-income-statement-by-function', component: () => import('@/pages/accounting/IncomeStatementByFunction.vue'), meta: { requiresDoubleEntry: true } },
+      // Výjimky mapování účtů do výkazů pro konkrétní firmu (splatnost, spřízněné osoby, analytiky).
+      { path: 'accounting/statement-mapping', name: 'accounting-statement-mapping', component: () => import('@/pages/accounting/StatementMapping.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/saldo',            name: 'accounting-saldo',            component: () => import('@/pages/accounting/Saldokonto.vue'),      meta: { requiresDoubleEntry: true } },
       // Featura E (REAL_data_followup_UX.md) — kontrola úplnosti dokladů proti bance (§24/1) + doklady po splatnosti.
       { path: 'accounting/document-completeness', name: 'accounting-document-completeness', component: () => import('@/pages/accounting/DocumentCompleteness.vue'), meta: { requiresDoubleEntry: true } },

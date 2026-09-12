@@ -478,7 +478,9 @@ final class FinancialStatementTest extends TestCase
         self::assertNotNull($cii2, 'C.II.2. (Krátkodobé pohledávky) je v malé rozvaze — §3a/2 výjimka.');
         self::assertSame(3, (int) $cii1['level'], 'C.II.1. je level 3 (nad hranicí ≤ 2).');
         self::assertSame(3, (int) $cii2['level'], 'C.II.2. je level 3 (nad hranicí ≤ 2).');
-        self::assertSame(self::cents(1210.00), self::cents($cii2['net']), 'C.II.2. nese krátkodobou pohledávku 311.');
+        // 311 = 1210 snížená o opravnou položku 391 = 100, která od migrace 1826 patří
+        // k pohledávkám z obchodních vztahů (C.II.2.1.), ne až k celému C.II.
+        self::assertSame(self::cents(1110.00), self::cents($cii2['net']), 'C.II.2. nese krátkodobou pohledávku 311 po opravné položce 391.');
 
         // hlubší detail (level 4) v malé rozvaze zůstává vyřazen
         self::assertNull($this->rowByCode($small['assets'], 'C.II.2.1.'), 'Level 4 (C.II.2.1.) v malé rozvaze není.');

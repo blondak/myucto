@@ -41,6 +41,23 @@ final class StatementDefinitionRepository
         return $row;
     }
 
+    /** @return array<string,mixed>|null */
+    public function findVersionById(int $versionId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, statement_type, version_code, valid_from, valid_to
+               FROM statement_versions
+              WHERE id = ?'
+        );
+        $stmt->execute([$versionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row['id'] = (int) $row['id'];
+        return $row;
+    }
+
     /**
      * Řádky výkazu dané verze v pořadí výkazu (position).
      *

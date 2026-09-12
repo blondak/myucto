@@ -12,6 +12,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\StatementDefinitionRepository;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
+use MyInvoice\Service\Accounting\Reports\StatementMapResolver;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -46,6 +47,7 @@ final class FinancialStatementAction
         private readonly LoggerInterface $log,
         private readonly Connection $db,
         private readonly StatementDefinitionRepository $definitions,
+        private readonly StatementMapResolver $maps,
     ) {}
 
     public function balanceSheet(Request $request, Response $response): Response
@@ -143,7 +145,9 @@ final class FinancialStatementAction
             (string) $period['ends_on'],
         );
         if ($version !== null) {
-            foreach ($this->definitions->accountMap((int) $version['id']) as $m) {
+            // Táž sloučená mapa jako výkaz (globální + funkce + výjimky firmy) — účet, který
+            // firma zařadila výjimkou, přiřazení funkci nepotřebuje.
+            foreach ($this->maps->accountMap($version, $supplierId) as $m) {
                 $prefixes[] = (string) $m['account_prefix'];
             }
         }

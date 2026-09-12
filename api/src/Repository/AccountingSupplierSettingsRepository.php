@@ -22,14 +22,15 @@ final class AccountingSupplierSettingsRepository
      * @return array{avg_employees: ?int, statement_scope_override: ?string,
      *               statutory_audit: bool, manual_doc_series: bool, fx_reversal_at_open: bool,
      *               fx_rate_mode: string, small_asset_accrual_mode: string,
-     *               small_asset_accrual_pct: ?float}
+     *               small_asset_accrual_pct: ?float,
+     *               net_turnover_extra_rows: array{income_statement: list<string>, income_statement_purpose: list<string>}}
      */
     public function get(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT avg_employees, statement_scope_override, statutory_audit,
                     manual_doc_series, fx_reversal_at_open, fx_rate_mode,
-                    small_asset_accrual_mode, small_asset_accrual_pct
+                    small_asset_accrual_mode, small_asset_accrual_pct, net_turnover_extra_rows
                FROM accounting_supplier_settings
               WHERE supplier_id = ?'
         );
@@ -45,6 +46,7 @@ final class AccountingSupplierSettingsRepository
                 'fx_rate_mode'             => 'daily',
                 'small_asset_accrual_mode' => 'none',
                 'small_asset_accrual_pct'  => null,
+                'net_turnover_extra_rows'  => self::decodeTurnoverRows(null),
             ];
         }
         return [
@@ -56,7 +58,62 @@ final class AccountingSupplierSettingsRepository
             'fx_rate_mode'             => (string) ($row['fx_rate_mode'] ?? 'daily'),
             'small_asset_accrual_mode' => (string) ($row['small_asset_accrual_mode'] ?? 'none'),
             'small_asset_accrual_pct'  => $row['small_asset_accrual_pct'] === null ? null : (float) $row['small_asset_accrual_pct'],
+            'net_turnover_extra_rows'  => self::decodeTurnoverRows($row['net_turnover_extra_rows'] ?? null),
         ];
+    }
+
+    /**
+     * Řádky VZZ, které firma podle § 35 vyhl. 500/2002 Sb. počítá k výnosům obchodního
+     * modelu, tedy do čistého obratu nad výchozí I. + II. (účelové členění I.). Čte
+     * {@see \MyInvoice\Service\Accounting\Reports\FinancialStatementService}.
+     *
+     * @return array{income_statement: list<string>, income_statement_purpose: list<string>}
+     */
+    public function getNetTurnoverExtraRows(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT net_turnover_extra_rows FROM accounting_supplier_settings WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $v = $stmt->fetchColumn();
+        return self::decodeTurnoverRows($v === false ? null : $v);
+    }
+
+    /**
+     * Partial upsert jen tohoto sloupce; oba seznamy prázdné = NULL (výchozí I. + II.).
+     * Kódy řádků musí volající předem ověřit proti povoleným volbám.
+     *
+     * @param array{income_statement?: list<string>, income_statement_purpose?: list<string>} $rows
+     */
+    public function setNetTurnoverExtraRows(int $supplierId, array $rows): void
+    {
+        $clean = self::decodeTurnoverRows(json_encode($rows));
+        $stored = ($clean['income_statement'] === [] && $clean['income_statement_purpose'] === [])
+            ? null
+            : json_encode($clean, JSON_UNESCAPED_UNICODE);
+        $this->db->pdo()->prepare(
+            'INSERT INTO accounting_supplier_settings (supplier_id, net_turnover_extra_rows)
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE net_turnover_extra_rows = VALUES(net_turnover_extra_rows)'
+        )->execute([$supplierId, $stored]);
+    }
+
+    /** @return array{income_statement: list<string>, income_statement_purpose: list<string>} */
+    private static function decodeTurnoverRows(mixed $json): array
+    {
+        $out = ['income_statement' => [], 'income_statement_purpose' => []];
+        $data = is_string($json) && $json !== '' ? json_decode($json, true) : null;
+        if (!is_array($data)) {
+            return $out;
+        }
+        foreach (array_keys($out) as $type) {
+            foreach ((array) ($data[$type] ?? []) as $code) {
+                if (is_string($code) && $code !== '' && !in_array($code, $out[$type], true)) {
+                    $out[$type][] = $code;
+                }
+            }
+        }
+        return $out;
     }
 
     /**

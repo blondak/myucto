@@ -133,6 +133,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-erasure': ['payroll.erasure'],
   'accounting-general-ledger': ['accounting'], 'accounting-trial-balance': ['accounting'], 'accounting-account-statement': ['accounting'],
   'accounting-balance-sheet': ['accounting'], 'accounting-income-statement': ['accounting'], 'accounting-income-statement-by-function': ['accounting'], 'accounting-saldo': ['accounting'],
+  'accounting-statement-mapping': ['accounting'],
   'accounting-document-completeness': ['accounting'],
   'accounting-balance-inventory': ['accounting'],
   'accounting-section18-statements': ['accounting'],

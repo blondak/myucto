@@ -566,6 +566,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/balance-sheet',    label: t('nav.accounting_balance_sheet'),    icon: ICONS.reports },
         { to: '/accounting/income-statement', label: t('nav.accounting_income_statement'), icon: ICONS.tax_income },
         { to: '/accounting/income-statement-by-function', label: t('nav.accounting_income_statement_by_function'), icon: ICONS.tax_income },
+        { to: '/accounting/statement-mapping', label: t('nav.accounting_statement_mapping'), icon: ICONS.codebooks, permission: 'accounting' },
         { to: '/accounting/saldo',            label: t('nav.accounting_saldo'),            icon: ICONS.coin },
         { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
         { to: '/accounting/monthly-check',    label: t('nav.accounting_monthly_check'),    icon: ICONS.approvals },

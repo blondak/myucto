@@ -40,26 +40,7 @@ final class StatementMapper
             $balance = round($b['md'] - $b['d'], 2);
             $balCents = (int) round($balance * 100);
 
-            $maxLen = 0;
-            foreach ($map as $m) {
-                $prefix = (string) $m['account_prefix'];
-                if ($prefix !== '' && str_starts_with($code, $prefix) && strlen($prefix) > $maxLen) {
-                    $maxLen = strlen($prefix);
-                }
-            }
-            if ($maxLen === 0) {
-                continue;
-            }
-
-            foreach ($map as $m) {
-                $prefix = (string) $m['account_prefix'];
-                if (strlen($prefix) !== $maxLen || !str_starts_with($code, $prefix)) {
-                    continue;
-                }
-                $condition = (string) $m['balance_condition'];
-                if (($condition === 'debit' && $balCents <= 0) || ($condition === 'credit' && $balCents >= 0)) {
-                    continue;
-                }
+            foreach ($this->entriesFor($map, $code, $balCents) as $m) {
                 $rowCode = (string) $m['row_code'];
                 $section = $sectionByRow[$rowCode] ?? null;
                 if ($section === null) {
@@ -90,6 +71,30 @@ final class StatementMapper
             }
         }
         return $result;
+    }
+
+    /**
+     * Záznamy mapy, které pro účet `$code` se zůstatkem `$balCents` platí: nejdelší shodný
+     * prefix, z nich jen ty, jejichž balance_condition odpovídá straně zůstatku. Stejné
+     * pravidlo používá {@see map()}; seznam účtů v editoru výjimek ho volá, aby ukazoval
+     * přesně ten řádek, kam účet výkaz opravdu zařadí. `$balCents = null` stranu zůstatku
+     * nekontroluje (účet bez zůstatku).
+     *
+     * @param list<array<string,mixed>> $map
+     * @return list<array<string,mixed>>
+     */
+    public function entriesFor(array $map, string $code, ?int $balCents): array
+    {
+        $out = [];
+        foreach (StatementMapResolver::longestMatching($map, $code) as $m) {
+            $condition = (string) $m['balance_condition'];
+            if ($balCents !== null
+                && (($condition === 'debit' && $balCents <= 0) || ($condition === 'credit' && $balCents >= 0))) {
+                continue;
+            }
+            $out[] = $m;
+        }
+        return $out;
     }
 
     /**

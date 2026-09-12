@@ -65,18 +65,18 @@ final class DppoXmlBuilder
     private const ALWAYS = [10, 200, 250, 270, 290, 310, 340, 360];
 
     /**
-     * Příloha účetní závěrky — mapa `row_code` (FinancialStatementService::balanceSheet,
-     * section AKTIVA) → `c_radku` EPO tiskopisu, úroveň 1 (souhrnné řádky). Číselně
-     * ověřeno proti dvěma reálně podaným přiznáním (private/APPENDIX-XML-MAPPING-SPEC.md
-     * §1.1) i proti oficiálnímu číselníku MF ČR (daňový portál, idpr_pub/hlib/uv_info,
-     * tabulka 23810 „Rozvaha", platnost=2026 — stejný zdroj, na který odkazuje
-     * dokumentace atributu c_radku v dppdp9_epo2.xsd).
+     * Příloha účetní závěrky — kořen rozvahy-aktiv (FinancialStatementService::balanceSheet,
+     * section AKTIVA) → `c_radku` EPO tiskopisu. Číselně ověřeno proti dvěma reálně podaným
+     * přiznáním (private/APPENDIX-XML-MAPPING-SPEC.md §1.1) i proti oficiálnímu číselníku
+     * MF ČR (daňový portál, idpr_pub/hlib/uv_info, tabulka 23810 „Rozvaha", platnost=2026 —
+     * stejný zdroj, na který odkazuje dokumentace atributu c_radku v dppdp9_epo2.xsd).
+     *
+     * Souhrnné řádky A./B./C./D. jsou v AKTIVA_DETAIL_C_RADKU jako podřádky kořene, takže se
+     * na AKTIVA CELKEM absorbují stejně jako každá nižší úroveň. Řádek A. (Pohledávky za
+     * upsaný základní kapitál, ř. 2, účet 353) v příloze dřív chyběl úplně.
      */
     private const AKTIVA_C_RADKU = [
         ['AKTIVA', 1],
-        ['B.', 3],
-        ['C.', 37],
-        ['D.', 74],
     ];
 
     /**
@@ -92,6 +92,7 @@ final class DppoXmlBuilder
      * je číselník vypisuje.
      */
     private const AKTIVA_DETAIL_C_RADKU = [
+        'AKTIVA' => [['A.', 2], ['B.', 3], ['C.', 37], ['D.', 74]],
         'B.' => [['B.I.', 4], ['B.II.', 14], ['B.III.', 27]],
         'C.' => [['C.I.', 38], ['C.II.', 46], ['C.III.', 68], ['C.IV.', 71]],
         'D.' => [['D.1.', 75], ['D.2.', 76], ['D.3.', 77]],
@@ -104,6 +105,18 @@ final class DppoXmlBuilder
         // mezeře u pasiv), posílá se tedy jen C.II.1.+C.II.2., což na součet stačí (chybí
         // třetí složka přispívá nulou, ne chybou).
         'C.II.' => [['C.II.1.', 47], ['C.II.2.', 57]],
+        // Úroveň 4 a 5 pohledávek (plný rozsah; malá ÚJ je ve výkazu nemá, takže se ani
+        // nevypíší). Čísla z tabulky 23810, platnost=2026; číselník mezi C.II.2.4.6. (67)
+        // a C.III. (68) nic nevynechává, C.II.3. (78–81) aplikace nevede.
+        'C.II.1.' => [
+            ['C.II.1.1.', 48], ['C.II.1.2.', 49], ['C.II.1.3.', 50], ['C.II.1.4.', 51], ['C.II.1.5.', 52],
+        ],
+        'C.II.1.5.' => [['C.II.1.5.1.', 53], ['C.II.1.5.2.', 54], ['C.II.1.5.3.', 55], ['C.II.1.5.4.', 56]],
+        'C.II.2.' => [['C.II.2.1.', 58], ['C.II.2.2.', 59], ['C.II.2.3.', 60], ['C.II.2.4.', 61]],
+        'C.II.2.4.' => [
+            ['C.II.2.4.1.', 62], ['C.II.2.4.2.', 63], ['C.II.2.4.3.', 64],
+            ['C.II.2.4.4.', 65], ['C.II.2.4.5.', 66], ['C.II.2.4.6.', 67],
+        ],
         // Dodatek 2026-08-31 (pokračování, úroveň 3 zbytku rozvahy-aktiv) — jakmile
         // předchozí doplnění poslalo B./C. skupiny jako hodnoty, zkušební EPO u `large`
         // začalo navíc vytýkat i JEJICH vlastní součty: „Hodnota řádku B.I./B.II./B.III./
@@ -193,11 +206,11 @@ final class DppoXmlBuilder
      * Nové checky to nezavádí: rodiče C.I./C.II./B. se posílaly už předtím, EPO jejich
      * součet kontrolovalo — jen mu chyběly složky.
      *
-     * Naopak `C.II.1.` rozvahy-AKTIV (dlouhodobé pohledávky) své podřádky doplněné migrací
-     * 1664 (C.II.1.2./1.3./1.5.1.–5.4.) do AKTIVA_DETAIL_C_RADKU ZÁMĚRNĚ nedostalo:
-     * ten řádek se sice posílá, ale jeho podřádky se dnes neposílají vůbec, takže by je
-     * doplnění zavedlo jako NOVOU křížovou kontrolu EPO — a to je změna, kterou musí
-     * potvrdit zkušební podání, ne úsudek.
+     * Podřádky `C.II.1.` a `C.II.2.` rozvahy-AKTIV (C.II.1.1.–1.5.4., C.II.2.1.–2.4.6.) se
+     * dřív záměrně neposílaly, aby nevznikla nová křížová kontrola EPO bez zkušebního
+     * podání. Výkaz je ale počítá a přiznání podaná jinými programy je nesou (např.
+     * C.II.2.4.3. Stát - daňové pohledávky), takže bez nich se příloha rozcházela s výkazem;
+     * součty drží stejná absorpce jako všude jinde. Úplnost hlídá DppoAppendixRowCoverageTest.
      */
     private const PASIVA_DETAIL_C_RADKU = [
         'P.A.I.'    => [['P.A.I.1.', 4], ['P.A.I.2.', 5], ['P.A.I.3.', 6]],
@@ -224,13 +237,10 @@ final class DppoXmlBuilder
     /**
      * Příloha — mapa `row_code` (FinancialStatementService::incomeStatement) → `c_radku`
      * EPO tiskopisu VZZ (druhové členění, plný rozsah), tabulka 25810, platnost=2026
-     * (stejný číselník jako AKTIVA_C_RADKU výše). `VI.` se v tiskopisu tiskne dvakrát
-     * (ř.39 „VI." celkem, ř.41 „VI.2. Ostatní") — náš statement_rows seed nerozlišuje
-     * VI.1./VI.2. (spec §3 pozn., §7.d): VI.1. (úroky od ovládané/ovládající osoby) je
-     * v ověřených datech vždy 0 a nemáme jej v chart_of_accounts odděleně, proto oba
-     * řádky čerpají ze stejné hodnoty `VI.`. Obdobně `I.n` (interní row_code, viz
+     * (stejný číselník jako AKTIVA_C_RADKU výše). Obsahuje KAŽDÝ řádek číselníku, 56 řádků
+     * v jeho pořadí. `I.n` (interní row_code, viz
      * {@see \MyInvoice\Service\Accounting\Reports\FinancialStatementService::DISPLAY_CODE_ALIAS})
-     * je v tiskopisu znovu jen „I." (ř.42) — druhý výskyt písmene I. ve VZZ.
+     * je v tiskopisu znovu jen „I." (ř.42), druhý výskyt písmene I. ve VZZ.
      *
      * Zkušební EPO 31. 8. 2026 vytklo chybějící řádky II./B./C./III./IV./G./V./H./I.n/J.
      * jako křížové kontroly „Provozní/Finanční výsledek hospodaření neodpovídá výpočtu"
@@ -238,31 +248,32 @@ final class DppoXmlBuilder
      * neměla co sečíst. Doplněno; zaokrouhlovací absorpce součtu do PVH/FVH viz
      * buildVetaUB/absorbRoundingDiff.
      *
-     * Zbývající neověřené řádky (v obou referenčních letech vždy nulové, bez kotvy —
-     * E.1.2., E.2., E.3., III.1.-III.3., F.1., F.2., F.4., M.) záměrně chybí (spec §7.a);
-     * nejde o formulové součty, které EPO cituje, jen o dílčí rozpady již pokrytých
-     * mezisoučtů.
+     * Dílčí rozpady A.1., E.1.2., E.2., E.3., III.1.–III.3., F.1., F.2., F.4. a převod
+     * podílu M. tu dřív záměrně chyběly s odůvodněním, že jsou v referenčních letech nulové.
+     * Firma s prodaným zbožím (504), prodejem majetku (641/541) nebo jinými provozními výnosy
+     * (648) je ale nulové nemá a její příloha se rozcházela s výkazem v aplikaci; bez M. navíc
+     * ř. 55 převod podílu vůbec neodečítal. Rozpad IV./V./VI./J. na ovládanou nebo ovládající
+     * osobu (.1) a ostatní (.2) doplnila do `statement_rows` migrace 1824; do té doby se VI.
+     * psalo do ř. 39 i 41 a J. jen do ř. 43.
      *
-     * `L.2.` (odložená daň) mezi nimi BÝVALO — a to jen proto, že o odložené dani systém
-     * neúčtoval, takže řádek vycházel vždy nulový. Po doplnění kroku uzávěrky (ČÚS 003,
-     * 592/481) už nulový být nemusí, takže kotvu má: bez ní by se zaúčtovaná odložená daň
-     * do přílohy přiznání vůbec nepřenesla.
+     * Úplnost proti `statement_rows` i proti opisu číselníku hlídá DppoAppendixRowCoverageTest.
      */
     private const VZZ_C_RADKU = [
-        ['I.', 1], ['II.', 2], ['A.', 3], ['A.2.', 5], ['A.3.', 6],
+        ['I.', 1], ['II.', 2], ['A.', 3], ['A.1.', 4], ['A.2.', 5], ['A.3.', 6],
         ['B.', 7], ['C.', 8],
         ['D.', 9], ['D.1.', 10], ['D.2.', 11], ['D.2.1.', 12], ['D.2.2.', 13],
-        ['E.', 14], ['E.1.', 15], ['E.1.1.', 16],
-        ['III.', 20],
-        ['F.', 24], ['F.3.', 27], ['F.5.', 29],
+        ['E.', 14], ['E.1.', 15], ['E.1.1.', 16], ['E.1.2.', 17], ['E.2.', 18], ['E.3.', 19],
+        ['III.', 20], ['III.1.', 21], ['III.2.', 22], ['III.3.', 23],
+        ['F.', 24], ['F.1.', 25], ['F.2.', 26], ['F.3.', 27], ['F.4.', 28], ['F.5.', 29],
         ['PVH', 30],
-        ['IV.', 31], ['G.', 34], ['V.', 35], ['H.', 38],
-        ['VI.', 39], ['VI.', 41],
-        ['I.n', 42], ['J.', 43],
+        ['IV.', 31], ['IV.1.', 32], ['IV.2.', 33], ['G.', 34],
+        ['V.', 35], ['V.1.', 36], ['V.2.', 37], ['H.', 38],
+        ['VI.', 39], ['VI.1.', 40], ['VI.2.', 41],
+        ['I.n', 42], ['J.', 43], ['J.1.', 44], ['J.2.', 45],
         ['VII.', 46], ['K.', 47],
         ['FVH', 48], ['VHPZ', 49],
         ['L.', 50], ['L.1.', 51], ['L.2.', 52],
-        ['VHPO', 53], ['VH', 55], ['OBRAT', 56],
+        ['VHPO', 53], ['M.', 54], ['VH', 55], ['OBRAT', 56],
     ];
 
     /**
@@ -278,15 +289,89 @@ final class DppoXmlBuilder
     ];
 
     /**
+     * Souhrnné řádky rozvahy-pasiv, které staví přímo buildVetaUD (tabulka 24810,
+     * platnost=2026). Řádek 24 „B.+C. Cizí zdroje" v `statement_rows` není, dopočítává se.
+     */
+    private const PASIVA_TOP_C_RADKU = ['PASIVA' => 1, 'P.A.' => 2, 'P.B.' => 25, 'P.C.' => 30, 'P.D.' => 64];
+
+    /**
+     * Čísla řádků přílohy účetní závěrky podle sekce: row_code => seznam c_radku, pod
+     * kterými se řádek do přílohy píše. Veřejné kvůli kontrole úplnosti: každý řádek
+     * `statement_rows` musí mít v příloze právě jedno číslo z číselníku MF ČR, jinak se
+     * jeho zůstatek do přiznání nedostane, přestože ho aplikace ve výkazu ukazuje.
+     *
+     * @return array{assets: array<string,list<int>>, liabilities: array<string,list<int>>, income_statement: array<string,list<int>>}
+     */
+    public static function appendixRowNumbers(): array
+    {
+        $assets = [];
+        foreach (self::AKTIVA_C_RADKU as [$rowCode, $cRadku]) {
+            $assets[$rowCode][] = $cRadku;
+        }
+        foreach (self::AKTIVA_DETAIL_C_RADKU as $children) {
+            foreach ($children as [$rowCode, $cRadku]) {
+                $assets[$rowCode][] = $cRadku;
+            }
+        }
+
+        $liabilities = [];
+        foreach (self::PASIVA_TOP_C_RADKU as $rowCode => $cRadku) {
+            $liabilities[$rowCode][] = $cRadku;
+        }
+        $pasivaGroups = [self::PASIVA_A_C_RADKU, self::PASIVA_B_C_RADKU, self::PASIVA_C_C_RADKU, self::PASIVA_D_C_RADKU];
+        foreach ([...$pasivaGroups, ...array_values(self::PASIVA_DETAIL_C_RADKU)] as $children) {
+            foreach ($children as [$rowCode, $cRadku]) {
+                $liabilities[$rowCode][] = $cRadku;
+            }
+        }
+
+        $income = [];
+        foreach (self::VZZ_C_RADKU as [$rowCode, $cRadku]) {
+            $income[$rowCode][] = $cRadku;
+        }
+
+        return ['assets' => $assets, 'liabilities' => $liabilities, 'income_statement' => $income];
+    }
+
+    /**
+     * Strom, podle kterého se absorbuje zaokrouhlovací rozdíl mezi rodičem a jeho
+     * podřádky (rodič => podřádky). Musí odpovídat `parent_row_code` ve `statement_rows`,
+     * jinak by součet podřádků v příloze neseděl na rodiče a EPO by to vytklo.
+     *
+     * @return array{assets: array<string,list<string>>, liabilities: array<string,list<string>>, income_statement: array<string,list<string>>}
+     */
+    public static function appendixRowTree(): array
+    {
+        $codes = static fn (array $children): array => array_map(static fn (array $c): string => $c[0], $children);
+
+        $assets = [];
+        foreach (self::AKTIVA_DETAIL_C_RADKU as $parent => $children) {
+            $assets[$parent] = $codes($children);
+        }
+
+        $liabilities = [
+            'PASIVA' => ['P.A.', 'P.B.', 'P.C.', 'P.D.'],
+            'P.A.' => $codes(self::PASIVA_A_C_RADKU),
+            'P.B.' => $codes(self::PASIVA_B_C_RADKU),
+            'P.C.' => $codes(self::PASIVA_C_C_RADKU),
+            'P.D.' => $codes(self::PASIVA_D_C_RADKU),
+        ];
+        foreach (self::PASIVA_DETAIL_C_RADKU as $parent => $children) {
+            $liabilities[$parent] = $codes($children);
+        }
+
+        return ['assets' => $assets, 'liabilities' => $liabilities];
+    }
+
+    /**
      * Řádky VZZ (druhové členění), které tvoří „roční úhrn čistého obratu" podle § 1d
      * odst. 2 zákona o účetnictví — VetaS/kc_dpp_i1 (chyba EPO 1703). 'I.' = Tržby
      * z prodeje výrobků a služeb (účty 601+602), 'II.' = Tržby za prodej zboží (účet 604).
      * Shodné s {@see \MyInvoice\Service\Accounting\Reports\EntityCategoryService::TURNOVER_CODES}
      * (601/602/604), který stejnou dvojici řádků používá pro kategorizaci ÚJ podle §1b —
-     * jde o tentýž zákonný pojem. Záměrně NEbereme `checks.net_turnover`/řádek 'OBRAT'
-     * z {@see \MyInvoice\Service\Accounting\Reports\FinancialStatementService} — ten je
-     * širší (calc_key sčítá I.–VII., tj. i finanční a ostatní provozní výnosy), a čistému
-     * obratu dle §1d neodpovídá.
+     * jde o tentýž zákonný pojem. Řádek 'OBRAT' z {@see \MyInvoice\Service\Accounting\Reports\FinancialStatementService}
+     * je od období započatých 1. 1. 2024 tatáž veličina (I. + II.); pro dřívější období
+     * ale sčítá I.–VII. podle původního znění, proto se sem nebere.
      */
     private const NET_TURNOVER_ROW_CODES = ['I.', 'II.'];
 
@@ -746,6 +831,70 @@ final class DppoXmlBuilder
     }
 
     /**
+     * Korekce vedená jen na rodiči (opravné položky 091, 092, 096 a účty mimo šablonu, které
+     * nejde přiřadit jedné položce) se rozpočítá na jeho podřádky poměrem brutta. Bez toho by
+     * netto podřádků nesedělo na netto rodiče a absorpce zaokrouhlení by celou korekci dala
+     * do jediného podřádku (záporné netto staveb apod.). Oprávky se mapují přímo na své
+     * položky (migrace 1826), sem padá jen zbytek. Počítá se v Kč před převodem na tisíce
+     * a shora dolů, takže rozpočtená část doteče až k listům. Sloupec minulého období se
+     * rozpočítá stejně, když výkaz nese `prev_gross`/`prev_correction`.
+     *
+     * @param array<string,array<string,mixed>> $byCode
+     * @return array<string,array<string,mixed>>
+     */
+    private function allocateParentCorrections(array $byCode): array
+    {
+        foreach (self::AKTIVA_DETAIL_C_RADKU as $parentCode => $children) {
+            if (!isset($byCode[$parentCode])) {
+                continue;
+            }
+            $childCodes = [];
+            foreach ($children as [$code, ]) {
+                if (isset($byCode[$code])) {
+                    $childCodes[] = $code;
+                }
+            }
+            if ($childCodes === []) {
+                continue;
+            }
+            foreach ([['gross', 'correction', 'net'], ['prev_gross', 'prev_correction', 'prev_net']] as [$g, $c, $n]) {
+                if (!isset($byCode[$parentCode][$c])) {
+                    continue;
+                }
+                $residual = (float) $byCode[$parentCode][$c];
+                $base = 0.0;
+                $last = null;
+                foreach ($childCodes as $code) {
+                    if (!isset($byCode[$code][$c], $byCode[$code][$g])) {
+                        continue 2;
+                    }
+                    $residual -= (float) $byCode[$code][$c];
+                    if ((float) $byCode[$code][$g] > 0.0) {
+                        $base += (float) $byCode[$code][$g];
+                        $last = $code;
+                    }
+                }
+                $residual = round($residual, 2);
+                if (abs($residual) < 0.005 || $last === null) {
+                    continue;
+                }
+                $left = $residual;
+                foreach ($childCodes as $code) {
+                    $childGross = (float) $byCode[$code][$g];
+                    if ($childGross <= 0.0) {
+                        continue;
+                    }
+                    $share = $code === $last ? $left : round($residual * $childGross / $base, 2);
+                    $left = round($left - $share, 2);
+                    $byCode[$code][$c] = round((float) $byCode[$code][$c] + $share, 2);
+                    $byCode[$code][$n] = round((float) $byCode[$code][$g] - (float) $byCode[$code][$c], 2);
+                }
+            }
+        }
+        return $byCode;
+    }
+
+    /**
      * VetaUA — rozvaha AKTIVA (spec §1). Řádek se vypíše, jen když netto ≠ 0 NEBO
      * netto minulého období ≠ 0; hodnoty v celých tisících Kč.
      *
@@ -758,25 +907,28 @@ final class DppoXmlBuilder
         foreach ((array) ($balanceSheet['assets'] ?? []) as $row) {
             $byCode[(string) $row['row_code']] = $row;
         }
+        $byCode = $this->allocateParentCorrections($byCode);
 
         $elements = [];
         foreach (self::AKTIVA_C_RADKU as [$rowCode, $cRadku]) {
             $row = $byCode[$rowCode] ?? null;
-            if ($row === null) {
-                continue;
+            $netto = $nettoMin = null;
+            if ($row !== null) {
+                $netto = $this->toThousands((float) $row['net']);
+                $nettoMin = $this->toThousands((float) $row['prev_net']);
+                if ($netto !== 0 || $nettoMin !== 0) {
+                    $elements[] = $this->vetaUaElement(
+                        $dom,
+                        $cRadku,
+                        $this->toThousands((float) $row['gross']),
+                        $this->toThousands((float) $row['correction']),
+                        $netto,
+                        $nettoMin,
+                    );
+                }
             }
-            $netto = $this->toThousands((float) $row['net']);
-            $nettoMin = $this->toThousands((float) $row['prev_net']);
-            if ($netto !== 0 || $nettoMin !== 0) {
-                $elements[] = $this->vetaUaElement(
-                    $dom,
-                    $cRadku,
-                    $this->toThousands((float) $row['gross']),
-                    $this->toThousands((float) $row['correction']),
-                    $netto,
-                    $nettoMin,
-                );
-            }
+            // Bez kořene (volající předal jen část rozvahy) se A./B./C./D. vypíší bez
+            // absorpce, jako se psaly dřív, když byly samy souhrnnými řádky.
             foreach ($this->buildAktivaDetailElements($dom, $byCode, $rowCode, $netto, $nettoMin) as $detailEl) {
                 $elements[] = $detailEl;
             }
@@ -785,17 +937,18 @@ final class DppoXmlBuilder
     }
 
     /**
-     * Úroveň 2 rozvahy-aktiv (AKTIVA_DETAIL_C_RADKU) pod jedním souhrnným řádkem —
+     * Podřádky rozvahy-aktiv (AKTIVA_DETAIL_C_RADKU) pod jedním rodičem —
      * zaokrouhlovací past (viz absorbRoundingDiff) se řeší stejně jako u VetaUD: rodič
      * (`$parentNetto`/`$parentNettoMin`, už zaokrouhlený, případně sám absorbovaný o
      * úroveň výš) se NEMĚNÍ, rozdíl jde do dítěte s největší abs. hodnotou. Brutto se
      * upraví o STEJNÝ rozdíl jako netto (korekce beze změny), aby uvnitř upraveného
-     * řádku dál platilo netto = brutto − korekce.
+     * řádku dál platilo netto = brutto − korekce. Rodič `null` (ve výkazu chybí) =
+     * podřádky bez absorpce.
      *
      * @param array<string,array<string,mixed>> $byCode
      * @return list<\DOMElement>
      */
-    private function buildAktivaDetailElements(\DOMDocument $dom, array $byCode, string $parentRowCode, int $parentNetto, int $parentNettoMin): array
+    private function buildAktivaDetailElements(\DOMDocument $dom, array $byCode, string $parentRowCode, ?int $parentNetto, ?int $parentNettoMin): array
     {
         $children = self::AKTIVA_DETAIL_C_RADKU[$parentRowCode] ?? [];
         if ($children === []) {
@@ -826,8 +979,12 @@ final class DppoXmlBuilder
         }
 
         $originalNetto = $netto;
-        $netto = $this->absorbRoundingDiff($parentNetto, $netto);
-        $nettoMin = $this->absorbRoundingDiff($parentNettoMin, $nettoMin);
+        if ($parentNetto !== null) {
+            $netto = $this->absorbRoundingDiff($parentNetto, $netto);
+        }
+        if ($parentNettoMin !== null) {
+            $nettoMin = $this->absorbRoundingDiff($parentNettoMin, $nettoMin);
+        }
         foreach ($netto as $rowCode => $n) {
             $gross[$rowCode] += $n - $originalNetto[$rowCode];
         }
@@ -905,14 +1062,10 @@ final class DppoXmlBuilder
             $byCode[(string) $row['row_code']] = $row;
         }
 
-        // Tisíce PŘED absorpcí; 'VI.' se v poli vyskytuje 2× (viz VZZ_C_RADKU) — hodnota
-        // se počítá jen jednou, oba c_radku ji pak níže sdílí.
+        // Tisíce PŘED absorpcí.
         $sled = [];
         $min = [];
         foreach (self::VZZ_C_RADKU as [$rowCode, ]) {
-            if (array_key_exists($rowCode, $sled)) {
-                continue;
-            }
             $row = $byCode[$rowCode] ?? null;
             if ($row === null) {
                 continue;
@@ -939,6 +1092,37 @@ final class DppoXmlBuilder
             }
         }
 
+        // Podřádky výsledovky (A.1.–A.3., D.2.1./D.2.2. …) se zaokrouhlují každý zvlášť a do
+        // rodiče se nedorovnávají: § 4 odst. 3 vyhl. 500/2002 Sb. připouští oba způsoby
+        // a přílohy podané účetními je nesou nezávisle zaokrouhlené. Absorbuje se jen tam,
+        // kde EPO součet kontroluje (PVH/FVH výše, řetězec VHPZ/VHPO/VH níže).
+        //
+        // Výjimkou je rozpad finančních položek na ovládanou osobu a ostatní (IV./V./VI./J.,
+        // migrace 1824): .1 a .2 tvoří rodiče beze zbytku a rodič se dorovnává do FVH.
+        // Podřádky proto jdou s rodičem, jinak by VI. = 51 stálo vedle VI.2. = 50 (dřív se
+        // hodnota rodiče psala rovnou do „ostatních" ř. 41). Rozdíl jde do největšího podřádku.
+        $splitRows = [
+            'IV.' => ['IV.1.', 'IV.2.'],
+            'V.' => ['V.1.', 'V.2.'],
+            'VI.' => ['VI.1.', 'VI.2.'],
+            'J.' => ['J.1.', 'J.2.'],
+        ];
+        foreach ($splitRows as $parentCode => $childCodes) {
+            $wanted = array_flip($childCodes);
+            if (isset($sled[$parentCode])) {
+                $parts = array_intersect_key($sled, $wanted);
+                if ($parts !== []) {
+                    $sled = array_replace($sled, $this->absorbRoundingDiff($sled[$parentCode], $parts));
+                }
+            }
+            if (isset($min[$parentCode])) {
+                $partsMin = array_intersect_key($min, $wanted);
+                if ($partsMin !== []) {
+                    $min = array_replace($min, $this->absorbRoundingDiff($min[$parentCode], $partsMin));
+                }
+            }
+        }
+
         // VHPZ = PVH + FVH musí sedět přesně (chyba EPO „Výsledek hospodaření před
         // zdaněním neodpovídá výpočtu") — místo nezávislého zaokrouhlení skutečné hodnoty
         // VHPZ se proto DOPOČÍTÁ z už zaokrouhlených (a případně absorbovaných) PVH/FVH.
@@ -951,8 +1135,9 @@ final class DppoXmlBuilder
         // VHPO = VHPZ − L. a VH = VHPO − M. musí sedět přesně stejně (chyby EPO „Výsledek
         // hospodaření po zdanění/za účetní období neodpovídá výpočtu"), obě zjištěné
         // křížovým ověřením proti zkušebnímu EPO 31. 8. 2026 poté, co předchozí oprava
-        // nechala vždy jen NÁSLEDUJÍCÍ řádek řetězce nezávisle zaokrouhlený. M. se
-        // nemapuje (viz VZZ_C_RADKU) — chybí-li, přispívá nulou, ne chybou.
+        // nechala vždy jen NÁSLEDUJÍCÍ řádek řetězce nezávisle zaokrouhlený. M. (převod
+        // podílu společníkům, ř. 54) dřív ve VZZ_C_RADKU chyběl, takže se sem nedostal a
+        // ř. 55 převod podílu vůbec neodečítal; chybí-li ve výkazu, přispívá nulou.
         if (isset($sled['VHPZ'], $sled['L.'])) {
             $sled['VHPO'] = $sled['VHPZ'] - $sled['L.'];
         }
@@ -1053,24 +1238,25 @@ final class DppoXmlBuilder
             $bMin = $bMinParts['B.'];
         }
 
+        $top = self::PASIVA_TOP_C_RADKU;
         $rows = [];
         if (isset($byCode['PASIVA'])) {
-            $rows[] = [1, $this->toThousands((float) $byCode['PASIVA']['amount']), $this->toThousands((float) $byCode['PASIVA']['prev_amount'])];
+            $rows[] = [$top['PASIVA'], $this->toThousands((float) $byCode['PASIVA']['amount']), $this->toThousands((float) $byCode['PASIVA']['prev_amount'])];
         }
         if (isset($byCode['P.A.'])) {
-            $rows[] = [2, $partsT[2][0], $partsT[2][1]];
+            $rows[] = [$top['P.A.'], $partsT[2][0], $partsT[2][1]];
         }
         if (isset($byCode['P.B.']) || isset($byCode['P.C.'])) {
             $rows[] = [24, $partsT[24][0], $partsT[24][1]];
         }
         if ($bSled !== null) {
-            $rows[] = [25, $bSled, $bMin];
+            $rows[] = [$top['P.B.'], $bSled, $bMin];
         }
         if (isset($byCode['P.C.'])) {
-            $rows[] = [30, $this->toThousands((float) $byCode['P.C.']['amount']), $this->toThousands((float) $byCode['P.C.']['prev_amount'])];
+            $rows[] = [$top['P.C.'], $this->toThousands((float) $byCode['P.C.']['amount']), $this->toThousands((float) $byCode['P.C.']['prev_amount'])];
         }
         if (isset($byCode['P.D.'])) {
-            $rows[] = [64, $partsT[64][0], $partsT[64][1]];
+            $rows[] = [$top['P.D.'], $partsT[64][0], $partsT[64][1]];
         }
 
         $elements = [];

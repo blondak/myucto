@@ -9,6 +9,7 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
+use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -43,7 +44,36 @@ final class ReportingSettingsAction
     {
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
-        return Json::ok($response, $this->settings->get($supplierId));
+        return Json::ok($response, $this->payload($supplierId));
+    }
+
+    /**
+     * Nastavení + volby řádků pro výnosy obchodního modelu (§ 35 vyhl. 500/2002 Sb.)
+     * s popisky z definice výkazu, ať je UI nemusí držet ve vlastní kopii.
+     *
+     * @return array<string,mixed>
+     */
+    private function payload(int $supplierId): array
+    {
+        $options = [];
+        foreach (FinancialStatementService::NET_TURNOVER_EXTRA_ROW_OPTIONS as $type => $codes) {
+            $placeholders = implode(',', array_fill(0, count($codes), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT sr.row_code, sr.label
+                   FROM statement_rows sr
+                   JOIN statement_versions sv ON sv.id = sr.version_id
+                  WHERE sv.statement_type = ? AND sv.valid_to IS NULL AND sr.row_code IN ({$placeholders})"
+            );
+            $stmt->execute([$type, ...$codes]);
+            $labels = [];
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+                $labels[(string) $r['row_code']] = (string) $r['label'];
+            }
+            foreach ($codes as $code) {
+                $options[$type][] = ['code' => $code, 'label' => $labels[$code] ?? $code];
+            }
+        }
+        return $this->settings->get($supplierId) + ['net_turnover_extra_row_options' => $options];
     }
 
     public function update(Request $request, Response $response): Response
@@ -110,6 +140,29 @@ final class ReportingSettingsAction
             $this->settings->setSmallAssetAccrual($supplierId, $mode, $pct);
         }
 
-        return Json::ok($response, $this->settings->get($supplierId));
+        // § 35 vyhl. 500/2002 Sb.: řádky VZZ, které firma počítá k výnosům obchodního
+        // modelu (čistý obrat nad I. + II.). Partial update — jen je-li klíč v body.
+        if (array_key_exists('net_turnover_extra_rows', $body)) {
+            $raw = $body['net_turnover_extra_rows'];
+            if (!is_array($raw)) {
+                return Json::error($response, 'validation_failed', 'net_turnover_extra_rows musí být objekt se seznamy řádků.', 422);
+            }
+            $clean = [];
+            foreach (FinancialStatementService::NET_TURNOVER_EXTRA_ROW_OPTIONS as $type => $allowed) {
+                $list = $raw[$type] ?? [];
+                if (!is_array($list)) {
+                    return Json::error($response, 'validation_failed', "net_turnover_extra_rows.{$type} musí být seznam řádků.", 422);
+                }
+                foreach ($list as $code) {
+                    if (!is_string($code) || !in_array($code, $allowed, true)) {
+                        return Json::error($response, 'validation_failed', "Řádek {$type} „" . (is_scalar($code) ? (string) $code : '?') . '" do čistého obratu přičíst nelze.', 422);
+                    }
+                }
+                $clean[$type] = array_values(array_unique($list));
+            }
+            $this->settings->setNetTurnoverExtraRows($supplierId, $clean);
+        }
+
+        return Json::ok($response, $this->payload($supplierId));
     }
 }

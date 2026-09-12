@@ -364,7 +364,7 @@ final class DppoXmlBuilderXsdTest extends TestCase
             'E.' => [127000.0, 0.0], 'E.1.' => [127000.0, 0.0], 'E.1.1.' => [127000.0, 0.0],
             'F.' => [48000.0, 3000.0], 'F.3.' => [1000.0, 0.0], 'F.5.' => [47000.0, 3000.0],
             'PVH' => [3229000.0, 5768000.0],
-            'VI.' => [91000.0, 50000.0],
+            'VI.' => [91000.0, 50000.0], 'VI.2.' => [91000.0, 50000.0],
             'VII.' => [0.0, 5000.0], 'K.' => [24000.0, 4000.0],
             'FVH' => [67000.0, 51000.0], 'VHPZ' => [3296000.0, 5819000.0],
             'L.' => [692000.0, 1218000.0], 'L.1.' => [692000.0, 1218000.0],
@@ -405,7 +405,7 @@ final class DppoXmlBuilderXsdTest extends TestCase
         self::assertStringContainsString('<VetaUA c_radku="37" kc_brutto="6395" kc_korekce="0" kc_netto="6395" kc_netto_min="5758"/>', $xml);
         self::assertStringContainsString('<VetaUA c_radku="74" kc_brutto="45" kc_korekce="0" kc_netto="45" kc_netto_min="131"/>', $xml);
 
-        // VetaUB — VZZ, vč. VI./VI.2. duplicity (c_radku 39 a 41 ze stejné hodnoty).
+        // VetaUB — VZZ, VI. (ř. 39) a jeho podřádek VI.2. „ostatní" (ř. 41).
         self::assertStringContainsString('<VetaUB c_radku="1" kc_min="7383" kc_sled="6674"/>', $xml);
         self::assertStringContainsString('<VetaUB c_radku="39" kc_min="50" kc_sled="91"/>', $xml);
         self::assertStringContainsString('<VetaUB c_radku="41" kc_min="50" kc_sled="91"/>', $xml);

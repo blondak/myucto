@@ -1,0 +1,191 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import type { StatementOverrideOverview, StatementOverrideSuggestions } from '@/api/accounting'
+
+const m = vi.hoisted(() => ({
+  listPeriods: vi.fn(),
+  getStatementOverrides: vi.fn(),
+  saveStatementOverrides: vi.fn(),
+  previewStatementOverrides: vi.fn(),
+  suggestStatementOverrides: vi.fn(),
+  suggestStatementOverridesFromXml: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}))
+
+vi.mock('@/api/accounting', () => ({
+  accountingApi: {
+    listPeriods: m.listPeriods,
+    getStatementOverrides: m.getStatementOverrides,
+    saveStatementOverrides: m.saveStatementOverrides,
+    previewStatementOverrides: m.previewStatementOverrides,
+    suggestStatementOverrides: m.suggestStatementOverrides,
+    suggestStatementOverridesFromXml: m.suggestStatementOverridesFromXml,
+  },
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ error: m.toastError, success: m.toastSuccess }),
+}))
+
+vi.mock('@/composables/useFormat', () => ({
+  formatMoney: (v: number) => String(v),
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ canWrite: () => true }),
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key) }),
+}))
+
+vi.mock('vue-router', () => ({
+  RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+}))
+
+import StatementMapping from '@/pages/accounting/StatementMapping.vue'
+
+function overview(overrides: Partial<StatementOverrideOverview> = {}): StatementOverrideOverview {
+  return {
+    statement_type: 'balance_sheet',
+    version: { id: 1, statement_type: 'balance_sheet', version_code: 'vyhl500-2002/2024' },
+    period: { id: 6, fiscal_year: 2099, starts_on: '2099-01-01', ends_on: '2099-12-31' },
+    as_of: '2099-12-31',
+    rows: [
+      { row_code: 'P.C.I.9.1.', display_code: 'C.I.9.1.', parent_row_code: 'P.C.I.9.', section: 'liabilities', label: 'Závazky ke společníkům', level: 4, row_type: 'detail', value: 0 },
+      { row_code: 'P.C.II.8.1.', display_code: 'C.II.8.1.', parent_row_code: 'P.C.II.8.', section: 'liabilities', label: 'Závazky ke společníkům', level: 4, row_type: 'detail', value: 530000 },
+    ],
+    overrides: [],
+    accounts: [
+      { account_code: '365.100', name: 'Půjčka od společníka', account_type: 'liability', is_synthetic: false, parent_code: '365', balance: -500000,
+        mappings: [{ row_code: 'P.C.II.8.1.', target: 'gross', balance_condition: 'any', source: 'global' }] },
+      { account_code: '365.200', name: 'Ostatní závazky', account_type: 'liability', is_synthetic: false, parent_code: '365', balance: -30000,
+        mappings: [{ row_code: 'P.C.II.8.1.', target: 'gross', balance_condition: 'any', source: 'global' }] },
+    ],
+    filed_return: null,
+    ...overrides,
+  }
+}
+
+describe('StatementMapping.vue', () => {
+  beforeEach(() => {
+    for (const fn of Object.values(m)) fn.mockReset()
+    m.listPeriods.mockResolvedValue([
+      { id: 6, supplier_id: 1, fiscal_year: 2099, starts_on: '2099-01-01', ends_on: '2099-12-31', status: 'open', closed_at: null, created_at: '' },
+    ])
+    m.saveStatementOverrides.mockResolvedValue({ overrides: [] })
+  })
+
+  it('(a) ukáže účty s řádkem, kam dnes jdou, a zdroj zařazení', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview())
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    expect(m.getStatementOverrides).toHaveBeenCalledWith(6, 'balance_sheet')
+    const row = wrapper.find('[data-test="account-365.100"]')
+    expect(row.text()).toContain('C.II.8.1. Závazky ke společníkům')
+    expect(row.text()).toContain('accounting.statements.mapping.source_global')
+    expect(wrapper.find('[data-test="save-bar"]').exists()).toBe(false)
+  })
+
+  it('(b) změna řádku zapne jedno společné Uložit a uloží celou sadu', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview())
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    await wrapper.find('[data-test="account-365.100"] [data-test="row-select"]').setValue('P.C.I.9.1.')
+    expect(wrapper.find('[data-test="save-bar"]').exists()).toBe(true)
+
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [
+      { account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null },
+    ])
+    expect(m.toastSuccess).toHaveBeenCalled()
+  })
+
+  it('(c) zrušení uložené výjimky se uloží jako prázdná sada', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview({
+      overrides: [{ id: 3, version_id: 1, account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: 'splatnost 3 roky' }],
+    }))
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    await wrapper.find('[data-test="account-365.100"] [data-test="remove"]').trigger('click')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [])
+  })
+
+  it('(d) náhled dopadu posílá neuloženou sadu a ukáže změněné řádky', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview())
+    m.previewStatementOverrides.mockResolvedValue({
+      statement_type: 'balance_sheet', version_id: 1, balanced_before: true, balanced_after: true,
+      rows: [
+        { row_code: 'P.C.I.9.1.', display_code: 'C.I.9.1.', label: 'Závazky ke společníkům', level: 4, section: 'liabilities', before: 0, after: 500000, delta: 500000 },
+        { row_code: 'P.C.II.8.1.', display_code: 'C.II.8.1.', label: 'Závazky ke společníkům', level: 4, section: 'liabilities', before: 530000, after: 30000, delta: -500000 },
+      ],
+    })
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    await wrapper.find('[data-test="account-365.100"] [data-test="row-select"]').setValue('P.C.I.9.1.')
+    const previewBtn = wrapper.findAll('button').find(b => b.text().includes('accounting.statements.mapping.action_preview'))
+    expect(previewBtn).toBeTruthy()
+    await previewBtn!.trigger('click')
+    await flushPromises()
+
+    expect(m.previewStatementOverrides).toHaveBeenCalledWith(6, 'balance_sheet', [
+      { account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null },
+    ])
+    expect(wrapper.findAll('[data-test="preview-row"]')).toHaveLength(2)
+    expect(m.saveStatementOverrides).not.toHaveBeenCalled()
+  })
+
+  it('(e) návrh z podaného přiznání se po převzetí dostane do úprav a uloží', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview({
+      filed_return: { submission_id: 9, year: 2099, status: 'submitted', submitted_at: '2100-03-31 10:00:00', form_variant: 'B' },
+    }))
+    const result: StatementOverrideSuggestions = {
+      period_id: 6, year: 2099, source: { type: 'filed_return', submission_id: 9 },
+      differences: [{ sentence: 'VetaUD', c_radku: 43, row_code: 'P.C.I.9.1.', app: 0, filed: 500, diff: -500 }],
+      suggestions: [{
+        statement_type: 'balance_sheet', version_id: 1, account_code: '365.100', account_name: 'Půjčka od společníka',
+        amount: 500000, amount_thousands: 500, current_row_code: 'P.C.II.8.1.', from_row_code: 'P.C.II.8.1.', from_label: 'Závazky ke společníkům',
+        to_row_code: 'P.C.I.9.1.', to_label: 'Závazky ke společníkům', to_is_subtotal: false, balance_condition: 'any', target: 'gross',
+        sign: 1, reason: 'Účet 365.100 …', ambiguous: false, confidence: 'exact', accounts: ['365.100'],
+        overrides: [{ account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', note: null }],
+      }],
+    }
+    m.suggestStatementOverrides.mockResolvedValue(result)
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    const suggestBtn = wrapper.findAll('button').find(b => b.text().includes('accounting.statements.mapping.action_suggest'))
+    await suggestBtn!.trigger('click')
+    await flushPromises()
+    expect(m.suggestStatementOverrides).toHaveBeenCalledWith(6)
+    expect(wrapper.findAll('[data-test="suggestion"]')).toHaveLength(1)
+
+    await wrapper.find('[data-test="apply-suggestions"]').trigger('click')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [expect.objectContaining({
+      account_prefix: '365.100', row_code: 'P.C.I.9.1.', balance_condition: 'any',
+    })])
+  })
+
+  it('(f) bez podaného přiznání je návrh zašedlý s vysvětlením', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview())
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    const suggestBtn = wrapper.findAll('button').find(b => b.text().includes('accounting.statements.mapping.action_suggest'))
+    expect(suggestBtn!.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('accounting.statements.mapping.suggest_disabled')
+  })
+})

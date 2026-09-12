@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest, type TaxRepresentationHistoryEntry, type TaxRepresentationSavePayload } from '@/api/settings'
 import { adminApi, type SampleDataStatus } from '@/api/admin'
+import { closingSettingsApi, type AccountingClosingSettings } from '@/api/closing'
+import { isCoveredByParent, toggleTurnoverRow } from '@/utils/netTurnoverRows'
 import { clientsApi } from '@/api/clients'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
@@ -341,6 +343,44 @@ async function load() {
 
 onMounted(load)
 
+// ── Účetní závěrka: výnosy obchodního modelu v čistém obratu (§ 35 vyhl. 500/2002) ──
+// Nastavení žije v reporting-settings (accounting_supplier_settings). API je jen pro
+// podvojné účetnictví; když ho firma nevede, GET selže a sekce zůstane skrytá.
+const TURNOVER_TYPES = ['income_statement', 'income_statement_purpose'] as const
+type TurnoverType = typeof TURNOVER_TYPES[number]
+const reporting = ref<AccountingClosingSettings | null>(null)
+
+async function loadReporting() {
+  try { reporting.value = await closingSettingsApi.get() }
+  catch { reporting.value = null }
+}
+onMounted(loadReporting)
+
+function turnoverSelected(type: TurnoverType): string[] {
+  return reporting.value?.net_turnover_extra_rows?.[type] ?? []
+}
+
+function turnoverCovered(type: TurnoverType, code: string): boolean {
+  return isCoveredByParent(code, turnoverSelected(type))
+}
+
+function turnoverChecked(type: TurnoverType, code: string): boolean {
+  return turnoverSelected(type).includes(code) || turnoverCovered(type, code)
+}
+
+function onTurnoverToggle(type: TurnoverType, code: string, on: boolean) {
+  if (!reporting.value) return
+  const current = reporting.value.net_turnover_extra_rows ?? { income_statement: [], income_statement_purpose: [] }
+  reporting.value.net_turnover_extra_rows = { ...current, [type]: toggleTurnoverRow(current[type], code, on) }
+}
+
+// Ukládá se se zbytkem záložky (jedno společné Uložit). Posílá se celý objekt z GET:
+// reporting-settings při zápisu přepisuje i počet zaměstnanců a rozsah výkazů.
+async function saveReporting() {
+  if (!reporting.value?.net_turnover_extra_rows) return
+  reporting.value = await closingSettingsApi.update({ ...reporting.value })
+}
+
 // ── Ukázková (sample) data — sekce se zobrazí jen když nějaká evidovaná existují (issue #162) ──
 const sampleStatus = ref<SampleDataStatus | null>(null)
 const showSampleConfirm = ref(false)
@@ -509,6 +549,7 @@ async function saveSupplier() {
       tax_foreign_income_credit: (supplier.value as any).tax_foreign_income_credit ?? false,
     })
     syncSupplierStore(supplier.value)
+    await saveReporting()
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
     if (handOffToActivation) {
       // Uloženo je vše kromě režimu; ten přepne až průvodce po doúčtování.
@@ -1907,6 +1948,27 @@ async function confirmTaxRepDelete() {
           </div>
         </div>
 
+      </section>
+
+      <!-- Účetní závěrka: výnosy obchodního modelu v čistém obratu (§ 35 vyhl. 500/2002) -->
+      <section v-if="tab === 'accounting' && reporting?.net_turnover_extra_row_options" id="net-turnover"
+        class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-2">{{ t('settings.net_turnover.section') }}</h2>
+        <p class="text-sm text-neutral-700 font-medium">{{ t('settings.net_turnover.title') }}</p>
+        <p class="text-xs text-neutral-500 mt-1 mb-3">{{ t('settings.net_turnover.hint') }}</p>
+        <div v-for="type in TURNOVER_TYPES" :key="type" class="mb-3">
+          <span class="block text-xs font-medium text-neutral-600 mb-1">{{ t(`settings.net_turnover.${type}`) }}</span>
+          <div class="flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
+            <label v-for="opt in reporting.net_turnover_extra_row_options[type]" :key="opt.code"
+              class="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" class="mt-0.5"
+                :checked="turnoverChecked(type, opt.code)"
+                :disabled="turnoverCovered(type, opt.code)"
+                @change="onTurnoverToggle(type, opt.code, ($event.target as HTMLInputElement).checked)" />
+              <span><span class="font-mono">{{ opt.code }}</span> {{ opt.label }}</span>
+            </label>
+          </div>
+        </div>
       </section>
 
       <!-- Pohoda XML export config (volitelné) — samostatný box -->

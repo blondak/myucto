@@ -547,6 +547,9 @@
       "activation",
       "reports"
     ],
+    "accounting-statement-mapping": [
+      "settings"
+    ],
     "accounting-document-completeness": [
       "documentCompleteness"
     ],

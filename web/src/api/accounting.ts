@@ -1206,6 +1206,134 @@ export interface StatementFunctionMap {
   unassigned: UnassignedExpenseAccount[]
 }
 
+// ── Výjimky mapování účtů do výkazů pro konkrétní firmu ────────────────────
+export type StatementOverrideType = 'balance_sheet' | 'income_statement' | 'income_statement_purpose'
+export type StatementBalanceCondition = 'any' | 'debit' | 'credit'
+export type StatementSection = 'assets' | 'liabilities' | 'profit_loss'
+
+export interface StatementOverride {
+  id?: number
+  version_id?: number
+  account_prefix: string
+  row_code: string
+  target: 'gross' | 'correction'
+  balance_condition: StatementBalanceCondition
+  sign?: number
+  note: string | null
+  updated_at?: string | null
+}
+
+export interface StatementOverrideRow {
+  row_code: string
+  display_code: string
+  parent_row_code: string | null
+  section: StatementSection
+  label: string
+  level: number
+  row_type: StatementRowType
+  value: number | null
+}
+
+/** Kam výkaz účet dnes zařadí — a podle čeho (globální mapa, mapa funkcí, výjimka firmy). */
+export interface StatementOverrideAccountMapping {
+  row_code: string
+  target: 'gross' | 'correction'
+  balance_condition: StatementBalanceCondition
+  source: 'global' | 'function' | 'override'
+}
+
+export interface StatementOverrideAccount {
+  account_code: string
+  name: string
+  account_type: string
+  is_synthetic: boolean
+  parent_code: string | null
+  balance: number
+  mappings: StatementOverrideAccountMapping[]
+}
+
+/** Doložené podání DPPO za rok období (bez XML). */
+export interface StatementFiledReturn {
+  submission_id: number
+  year: number
+  status: string
+  submitted_at: string | null
+  form_variant: string
+}
+
+export interface StatementOverrideOverview {
+  statement_type: StatementOverrideType
+  version: { id: number; statement_type: StatementOverrideType; version_code: string }
+  period: { id: number; fiscal_year: number; starts_on: string; ends_on: string }
+  as_of: string
+  rows: StatementOverrideRow[]
+  overrides: StatementOverride[]
+  accounts: StatementOverrideAccount[]
+  filed_return: StatementFiledReturn | null
+}
+
+export interface StatementOverridePreviewRow {
+  row_code: string
+  display_code: string
+  label: string
+  level: number
+  section: StatementSection
+  before: number
+  after: number
+  delta: number
+}
+
+export interface StatementOverridePreview {
+  statement_type: StatementOverrideType
+  version_id: number
+  rows: StatementOverridePreviewRow[]
+  balanced_before: boolean | null
+  balanced_after: boolean | null
+}
+
+export interface StatementOverrideSuggestion {
+  statement_type: StatementOverrideType
+  version_id: number
+  account_code: string
+  account_name: string
+  amount: number
+  amount_thousands: number
+  current_row_code: string
+  from_row_code: string
+  from_label: string
+  to_row_code: string
+  to_label: string
+  to_is_subtotal: boolean
+  balance_condition: StatementBalanceCondition
+  target: 'gross' | 'correction'
+  sign: number
+  reason: string
+  ambiguous: boolean
+  /** Účty, které návrh přesouvá (u skupiny víc analytik). */
+  accounts: string[]
+  /** Výjimky, které návrh založí — jeden prefix, nebo účet po účtu. */
+  overrides: StatementOverride[]
+  /** exact = sedí obě strany, partial = jedna strana, fit = jen se vejde (nejisté). */
+  confidence: 'exact' | 'partial' | 'fit'
+}
+
+export interface StatementOverrideDifference {
+  sentence: 'VetaUA' | 'VetaUB' | 'VetaUD'
+  c_radku: number
+  row_code: string | null
+  app: number
+  filed: number
+  diff: number
+}
+
+export interface StatementOverrideSuggestions {
+  period_id: number
+  year: number
+  suggestions: StatementOverrideSuggestion[]
+  differences: StatementOverrideDifference[]
+  source: { type: 'filed_return' | 'upload'; submission_id?: number; status?: string; submitted_at?: string | null }
+}
+
 export interface IncomeStatementReport {
   statement_type: 'income_statement' | 'income_statement_purpose'
   version_code: string
@@ -1835,6 +1963,38 @@ export const accountingApi = {
       account_prefix: accountPrefix,
       function_code: functionCode,
     }).then(r => r.data),
+  /** Výjimky mapování účtů do výkazů — účty, řádky výkazu, výjimky firmy a podané DPPO roku. */
+  getStatementOverrides: (periodId: number, statementType: StatementOverrideType) =>
+    api.get<StatementOverrideOverview>('/accounting/reports/statement-overrides', {
+      params: { period_id: periodId, statement_type: statementType },
+    }).then(r => r.data),
+  /** Uloží CELOU sadu výjimek verze výkazu (jedno společné Uložit editoru). */
+  saveStatementOverrides: (versionId: number, overrides: StatementOverride[]) =>
+    api.put<{ overrides: StatementOverride[] }>('/accounting/reports/statement-overrides', {
+      version_id: versionId,
+      overrides,
+    }).then(r => r.data),
+  /** Náhled dopadu neuložené sady — nic neukládá. */
+  previewStatementOverrides: (periodId: number, statementType: StatementOverrideType, overrides: StatementOverride[]) =>
+    api.post<StatementOverridePreview>('/accounting/reports/statement-overrides/preview', {
+      period_id: periodId,
+      statement_type: statementType,
+      overrides,
+    }).then(r => r.data),
+  /** Návrh výjimek z podaného DPPO v evidenci — nic nezapisuje. */
+  suggestStatementOverrides: (periodId: number) =>
+    api.get<StatementOverrideSuggestions>('/accounting/reports/statement-overrides/suggestions', {
+      params: { period_id: periodId },
+    }).then(r => r.data),
+  /** Návrh výjimek z nahraného XML podaného přiznání DPPDP9. */
+  suggestStatementOverridesFromXml: (periodId: number, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    return api.post<StatementOverrideSuggestions>('/accounting/reports/statement-overrides/suggestions', fd, {
+      params: { period_id: periodId },
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
   getSaldo: (params: SaldoParams) =>
     api.get<SaldoReport>('/accounting/reports/saldo', { params }).then(r => r.data),
   getEntityCategory: (periodId: number) =>

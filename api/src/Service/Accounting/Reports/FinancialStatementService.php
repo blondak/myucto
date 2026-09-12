@@ -38,6 +38,21 @@ final class FinancialStatementService
         'I.f' => 'I.',
     ];
 
+    /**
+     * Výnosové řádky, které si firma může podle § 35 vyhl. 500/2002 Sb. (úsudek účetní
+     * jednotky o jejím obchodním modelu) přičíst k čistému obratu nad výchozí I. + II.,
+     * v účelovém členění nad I. Rodič (IV.) zahrnuje své podřádky (IV.1., IV.2.), zvolené
+     * podřádky zvoleného rodiče se proto nepřičítají podruhé.
+     */
+    public const NET_TURNOVER_EXTRA_ROW_OPTIONS = [
+        'income_statement' => [
+            'III.', 'III.1.', 'III.2.', 'III.3.',
+            'IV.', 'IV.1.', 'IV.2.', 'V.', 'V.1.', 'V.2.',
+            'VI.', 'VI.1.', 'VI.2.', 'VII.',
+        ],
+        self::TYPE_PURPOSE => ['II.', 'III.', 'IV.', 'V.', 'VI.'],
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly LedgerReportRepository $ledger,
@@ -45,7 +60,38 @@ final class FinancialStatementService
         private readonly AccountingPeriodRepository $periods,
         private readonly EntityCategoryService $categories,
         private readonly StatementMapper $mapper,
+        private readonly StatementMapResolver $maps,
+        private readonly \MyInvoice\Repository\AccountingSupplierSettingsRepository $settings,
     ) {}
+
+    /**
+     * Zvolené řádky výnosů obchodního modelu pro daný výkaz: jen povolené volby a bez
+     * podřádků, jejichž rodič je zvolený taky (IV. už obsahuje IV.2.).
+     *
+     * @return list<string>
+     */
+    private function netTurnoverExtraRows(string $type, int $supplierId): array
+    {
+        $allowed = self::NET_TURNOVER_EXTRA_ROW_OPTIONS[$type] ?? [];
+        if ($allowed === []) {
+            return [];
+        }
+        $selected = array_values(array_intersect(
+            $this->settings->getNetTurnoverExtraRows($supplierId)[$type] ?? [],
+            $allowed,
+        ));
+        return array_values(array_filter(
+            $selected,
+            static function (string $code) use ($selected): bool {
+                foreach ($selected as $parent) {
+                    if ($parent !== $code && str_starts_with($code, $parent)) {
+                        return false;
+                    }
+                }
+                return true;
+            },
+        ));
+    }
 
     /**
      * @param 'full'|'small'|'micro'|'auto' $scope
@@ -86,6 +132,8 @@ final class FinancialStatementService
                     'correction'   => $v['correction'],
                     'net'          => round($v['gross'] - $v['correction'], 2),
                     'prev_net'     => round($pv['gross'] - $pv['correction'], 2),
+                    'prev_gross'      => $pv['gross'],
+                    'prev_correction' => $pv['correction'],
                     'accounts'     => $ctx['mapped'][$code]['accounts'] ?? [],
                 ];
             } else {
@@ -242,13 +290,9 @@ final class FinancialStatementService
             throw new ReportException('statement_version_missing', 'Pro rozvahový den ' . $asOf . ' neexistuje verze mapování výkazu.');
         }
         $rows = $this->definitions->rows((int) $version['id']);
-        $baseMap = $this->definitions->accountMap((int) $version['id']);
-        if ($type === self::TYPE_PURPOSE) {
-            // Řádky A./B./C. globální mapu nemají — funkce, které náklad slouží, není
-            // vlastnost účtu. Doplní se z per-firma mapy a dál se s ní zachází stejně,
-            // takže platí i pravidlo nejdelšího prefixu (analytiky 518.100 / 518.200).
-            $baseMap = array_merge($baseMap, $this->definitions->functionMap($supplierId));
-        }
+        // Sloučená mapa firmy: globální + (účelová VZZ) mapa funkcí + výjimky firmy.
+        // Skládá ji jen StatementMapResolver, aby výjimka platila ve všech výkazech stejně.
+        $baseMap = $this->maps->accountMap($version, $supplierId);
         $map = $baseMap;
         if ($type === 'balance_sheet' && $asOf < (string) $period['ends_on']) {
             foreach ($map as &$mapping) {
@@ -274,10 +318,12 @@ final class FinancialStatementService
             $balances,
             $type === 'balance_sheet' ? ['asset', 'liability', 'equity'] : ['revenue', 'expense'],
         );
-        $values   = $this->computeValues($rows, $mapped, $balances, $type);
+        $startsOn = (string) $period['starts_on'];
+        $turnoverExtra = $this->netTurnoverExtraRows($type, $supplierId);
+        $values   = $this->computeValues($rows, $mapped, $balances, $type, $startsOn, $turnoverExtra);
 
         // R13: minulé období stejným během k ends_on předchozího období, stejná verze.
-        $prevPeriod = $this->ledger->previousPeriod($supplierId, (string) $period['starts_on']);
+        $prevPeriod = $this->ledger->previousPeriod($supplierId, $startsOn);
         $valuesPrev = [];
         if ($prevPeriod !== null) {
             $balancesPrev = $this->ledger->syntheticBalances(
@@ -288,7 +334,34 @@ final class FinancialStatementService
                 $this->mapper->analyticPrefixes($baseMap),
             );
             $mappedPrev = $this->mapper->map($rows, $baseMap, $balancesPrev);
-            $valuesPrev = $this->computeValues($rows, $mappedPrev, $balancesPrev, $type);
+            $valuesPrev = $this->computeValues($rows, $mappedPrev, $balancesPrev, $type, (string) $prevPeriod['starts_on'], $turnoverExtra);
+            // Čistý obrat v pojetí od 1. 1. 2024 se za minulé období spočtené po staru
+            // neuvádí (stanovisko MF a Komory auditorů ČR z 24. 7. 2024): dvě různé veličiny
+            // vedle sebe by nebyly srovnatelné.
+            if (self::netTurnoverIsBusinessModel($startsOn)
+                && !self::netTurnoverIsBusinessModel((string) $prevPeriod['starts_on'])) {
+                foreach ($rows as $r) {
+                    if ((string) $r['calc_key'] === 'net_turnover') {
+                        $valuesPrev[(string) $r['row_code']] = ['gross' => 0.0, 'correction' => 0.0];
+                    }
+                }
+            }
+        } elseif ($type === 'balance_sheet') {
+            // První účetní období (§ 4 odst. 7 vyhl. 500/2002 Sb., § 17 odst. 1 písm. a) ZoÚ):
+            // sloupec minulého období nese zahajovací rozvahu, tj. stav po zápisech ke dni
+            // zahájení období (typicky splacení základního kapitálu 353/411). Firma převedená
+            // odjinud bez předchozího období tu má počáteční stavy, tedy konečné zůstatky
+            // předchozího roku, což je pro sloupec minulého období totéž. VZZ minulé období
+            // v prvním roce nemá, zůstává nulové.
+            $balancesOpening = $this->ledger->syntheticBalances(
+                $supplierId,
+                $startsOn,
+                $startsOn,
+                $splitCodes,
+                $this->mapper->analyticPrefixes($baseMap),
+            );
+            $mappedOpening = $this->mapper->map($rows, $baseMap, $balancesOpening);
+            $valuesPrev = $this->computeValues($rows, $mappedOpening, $balancesOpening, $type, $startsOn, $turnoverExtra);
         }
 
         $resolvedScope = $scope === 'auto' ? $this->categories->statementScope($supplierId, $periodId) : $scope;
@@ -326,7 +399,7 @@ final class FinancialStatementService
      * @param list<array<string,mixed>> $balances
      * @return array<string, array{gross: float, correction: float}>
      */
-    private function computeValues(array $rows, array $mapped, array $balances, string $type): array
+    private function computeValues(array $rows, array $mapped, array $balances, string $type, string $periodStartsOn, array $turnoverExtra = []): array
     {
         $byCode = [];
         $children = [];
@@ -346,7 +419,7 @@ final class FinancialStatementService
             $v = $resolve($code);
             return round($v['gross'] - $v['correction'], 2);
         };
-        $resolve = function (string $code) use (&$resolve, &$memo, $byCode, $children, $mapped, $balances, $type, $net): array {
+        $resolve = function (string $code) use (&$resolve, &$memo, $byCode, $children, $mapped, $balances, $type, $net, $periodStartsOn, $turnoverExtra): array {
             if (isset($memo[$code])) {
                 return $memo[$code];
             }
@@ -363,7 +436,7 @@ final class FinancialStatementService
                     $correction += $cv['correction'];
                 }
             } elseif ((string) $row['row_type'] === 'computed') {
-                $gross += $this->calcValue((string) $row['calc_key'], $type, $net, $balances);
+                $gross += $this->calcValue((string) $row['calc_key'], $type, $net, $balances, $periodStartsOn, $turnoverExtra);
             }
             return $memo[$code] = ['gross' => round($gross, 2), 'correction' => round($correction, 2)];
         };
@@ -375,33 +448,59 @@ final class FinancialStatementService
     }
 
     /**
+     * Čistý obrat jako výnosy obchodního modelu (§ 1a odst. 2 zákona o účetnictví ve znění
+     * účinném od 1. 1. 2024, § 35 vyhl. 500/2002 Sb.): tržby z prodeje výrobků, zboží
+     * a služeb. Pro účetní období započatá před tímto dnem platí podle přechodného
+     * ustanovení dosavadní součet výnosů.
+     */
+    private const NET_TURNOVER_BUSINESS_MODEL_FROM = '2024-01-01';
+
+    private static function netTurnoverIsBusinessModel(string $periodStartsOn): bool
+    {
+        return $periodStartsOn >= self::NET_TURNOVER_BUSINESS_MODEL_FROM;
+    }
+
+    /**
      * Vzorce computed řádků (§1.2.4). V rozvaze je jediný calc_key profit_current
      * (P.A.V.) — VH za fiskální rok přímo z výsledkových účtů (každý účet 5xx/6xx
      * je v mapě VZZ právě jednou, hodnoty jsou ekvivalentní vzorci VZZ).
      *
+     * Čistý obrat závisí na začátku období (viz NET_TURNOVER_BUSINESS_MODEL_FROM): od 2024
+     * druhové I. + II., účelové I., plus řádky, které firma počítá k výnosům obchodního
+     * modelu ($turnoverExtra, viz netTurnoverExtraRows); dřív součet všech výnosových řádků.
+     *
      * @param callable(string): float $net netto hodnota řádku dle row_code
      * @param list<array<string,mixed>> $balances
+     * @param list<string> $turnoverExtra
      */
-    private function calcValue(string $key, string $type, callable $net, array $balances): float
+    private function calcValue(string $key, string $type, callable $net, array $balances, string $periodStartsOn, array $turnoverExtra = []): float
     {
         if ($type === 'balance_sheet') {
             return $key === 'profit_current' ? $this->profitFromBalances($balances) : 0.0;
+        }
+        $businessModel = self::netTurnoverIsBusinessModel($periodStartsOn);
+        $extra = 0.0;
+        if ($businessModel && $key === 'net_turnover') {
+            foreach ($turnoverExtra as $code) {
+                $extra += $net($code);
+            }
         }
         // Účelové členění má vlastní kódy řádků (A. je náklad prodeje, ne výkonová
         // spotřeba), takže vzorce druhového by tu sečetly něco úplně jiného.
         if ($type === self::TYPE_PURPOSE) {
             return round(match ($key) {
                 'gross_profit'      => $net('I.') - $net('A.'),
-                'operating_profit'  => $this->calcValue('gross_profit', $type, $net, $balances)
+                'operating_profit'  => $this->calcValue('gross_profit', $type, $net, $balances, $periodStartsOn)
                                      - $net('B.') - $net('C.') + $net('II.') - $net('D.'),
                 'financial_profit'  => $net('III.') - $net('E.') + $net('IV.') - $net('F.')
                                      + $net('V.') - $net('G.') - $net('H.') + $net('VI.') - $net('I.f'),
-                'profit_before_tax' => $this->calcValue('operating_profit', $type, $net, $balances)
-                                     + $this->calcValue('financial_profit', $type, $net, $balances),
-                'profit_after_tax'  => $this->calcValue('profit_before_tax', $type, $net, $balances) - $net('J.'),
-                'profit_current'    => $this->calcValue('profit_after_tax', $type, $net, $balances) - $net('K.'),
-                'net_turnover'      => $net('I.') + $net('II.') + $net('III.') + $net('IV.')
-                                     + $net('V.') + $net('VI.'),
+                'profit_before_tax' => $this->calcValue('operating_profit', $type, $net, $balances, $periodStartsOn)
+                                     + $this->calcValue('financial_profit', $type, $net, $balances, $periodStartsOn),
+                'profit_after_tax'  => $this->calcValue('profit_before_tax', $type, $net, $balances, $periodStartsOn) - $net('J.'),
+                'profit_current'    => $this->calcValue('profit_after_tax', $type, $net, $balances, $periodStartsOn) - $net('K.'),
+                'net_turnover'      => $businessModel
+                                     ? $net('I.') + $extra
+                                     : $net('I.') + $net('II.') + $net('III.') + $net('IV.') + $net('V.') + $net('VI.'),
                 default             => 0.0,
             }, 2);
         }
@@ -411,12 +510,13 @@ final class FinancialStatementService
                                  - $net('D.') - $net('E.') + $net('III.') - $net('F.'),
             'financial_profit'  => $net('IV.') - $net('G.') + $net('V.') - $net('H.') + $net('VI.')
                                  - $net('I.n') - $net('J.') + $net('VII.') - $net('K.'),
-            'profit_before_tax' => $this->calcValue('operating_profit', $type, $net, $balances)
-                                 + $this->calcValue('financial_profit', $type, $net, $balances),
-            'profit_after_tax'  => $this->calcValue('profit_before_tax', $type, $net, $balances) - $net('L.'),
-            'profit_current'    => $this->calcValue('profit_after_tax', $type, $net, $balances) - $net('M.'),
-            'net_turnover'      => $net('I.') + $net('II.') + $net('III.') + $net('IV.') + $net('V.')
-                                 + $net('VI.') + $net('VII.'),
+            'profit_before_tax' => $this->calcValue('operating_profit', $type, $net, $balances, $periodStartsOn)
+                                 + $this->calcValue('financial_profit', $type, $net, $balances, $periodStartsOn),
+            'profit_after_tax'  => $this->calcValue('profit_before_tax', $type, $net, $balances, $periodStartsOn) - $net('L.'),
+            'profit_current'    => $this->calcValue('profit_after_tax', $type, $net, $balances, $periodStartsOn) - $net('M.'),
+            'net_turnover'      => $businessModel
+                                 ? $net('I.') + $net('II.') + $extra
+                                 : $net('I.') + $net('II.') + $net('III.') + $net('IV.') + $net('V.') + $net('VI.') + $net('VII.'),
             default             => 0.0,
         }, 2);
     }

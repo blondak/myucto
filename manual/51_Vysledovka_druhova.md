@@ -70,8 +70,17 @@ VH před zdaněním = Provozní VH + Finanční VH
 VH po zdanění    = VH před zdaněním − L.
 VH za období     = VH po zdanění − M.
 
-Čistý obrat = I. + II. + III. + IV. + V. + VI. + VII.
+Čistý obrat (období od 1. 1. 2024)       = I. + II. + řádky zvolené firmou
+Čistý obrat (období započatá před 2024) = I. + II. + III. + IV. + V. + VI. + VII.
 ```
+
+Čistý obrat jsou od roku 2024 výnosy z prodeje výrobků, zboží a služeb (§ 1a
+odst. 2 zákona o účetnictví, § 35 vyhlášky č. 500/2002 Sb.). Které další výnosy
+patří k obchodnímu modelu firmy, je její úsudek: pronajímatel k nim může
+počítat tržby z prodeje majetku (III.1.), holding výnosy z podílů (IV.). Řádky se
+volí v **Nastavení uzávěrky** na stránce účetních období a rozhodnutí se uvádí
+v příloze v účetní závěrce. Ve výkazu za první rok nového pojetí se čistý obrat
+minulého období spočtený po staru neuvádí, sloupec zůstane nulový.
 
 Interně mají obě položky označené `I.` jedinečné kódy, na výstupu se však
 zobrazují podle vyhlášky. Výsledek za období se zároveň nezávisle spočítá ze

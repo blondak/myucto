@@ -46,6 +46,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/accounting\/general-ledger(?:\/|$)/, '48_Hlavni_kniha'],
   [/^\/accounting\/trial-balance(?:\/|$)/, '49_Obratova_predvaha'],
   [/^\/accounting\/balance-sheet(?:\/|$)/, '50_Rozvaha'],
+  [/^\/accounting\/statement-mapping(?:\/|$)/, '50_Rozvaha'],
   [/^\/accounting\/income-statement-by-function(?:\/|$)/, '52_Vysledovka_ucelova'],
   [/^\/accounting\/income-statement(?:\/|$)/, '51_Vysledovka_druhova'],
   [/^\/accounting\/saldo(?:\/|$)/, '53_Saldokonto'],

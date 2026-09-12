@@ -606,6 +606,19 @@ export interface AccountingClosingSettings extends ReportingSettings {
   // §DM / Task 14 — účetní politika časového rozlišení drobného majetku na 381 (§7 ZoÚ).
   small_asset_accrual_mode?: SmallAssetAccrualMode
   small_asset_accrual_pct?: number | null
+  // § 35 vyhl. 500/2002 — řádky VZZ, které firma počítá do čistého obratu nad I. + II.
+  net_turnover_extra_rows?: NetTurnoverExtraRows
+  net_turnover_extra_row_options?: Record<keyof NetTurnoverExtraRows, NetTurnoverRowOption[]>
+}
+
+export interface NetTurnoverExtraRows {
+  income_statement: string[]
+  income_statement_purpose: string[]
+}
+
+export interface NetTurnoverRowOption {
+  code: string
+  label: string
 }
 
 // ── API klienti ────────────────────────────────────────────────────────────

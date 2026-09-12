@@ -2116,6 +2116,16 @@ final class Routes
             $g->get('/reports/income-statement-by-function/export', [FinancialStatementAction::class, 'exportIncomeStatementByFunction']);
             $g->get('/reports/statement-function-map',              [FinancialStatementAction::class, 'functionMap']);
             $g->put('/reports/statement-function-map',              [FinancialStatementAction::class, 'setFunctionMapping']);
+            // Výjimky mapování účtů do výkazů pro konkrétní firmu (splatnost, spřízněné osoby,
+            // zařazení analytiky). Konkrétní cesty preview/suggestions před {id}.
+            $g->get   ('/reports/statement-overrides',             [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'list']);
+            $g->put   ('/reports/statement-overrides',             [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'save']);
+            $g->post  ('/reports/statement-overrides',             [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'create']);
+            $g->post  ('/reports/statement-overrides/preview',     [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'preview']);
+            $g->get   ('/reports/statement-overrides/suggestions', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'suggestions']);
+            $g->post  ('/reports/statement-overrides/suggestions', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'suggestFromUpload']);
+            $g->put   ('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'update']);
+            $g->delete('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'delete']);
             $g->get('/reports/saldo',                             [SaldoAction::class, 'get']);
             $g->get('/reports/saldo/export',                      [SaldoAction::class, 'export']);
             // Kontrola úplnosti dokladů proti bance (REAL_data_followup_UX.md E) — read-only

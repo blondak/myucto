@@ -246,6 +246,7 @@ final class DppoXmlBuilderAppendixDetailTest extends TestCase
             'income_statement' => ['rows' => [
                 ['row_code' => 'IV.', 'amount' => 100500.0, 'prev_amount' => 0.0],
                 ['row_code' => 'VI.', 'amount' => 100500.0, 'prev_amount' => 0.0],
+                ['row_code' => 'VI.2.', 'amount' => 100500.0, 'prev_amount' => 0.0],
                 ['row_code' => 'FVH', 'amount' => 201000.0, 'prev_amount' => 0.0],
             ]],
         ];
@@ -253,7 +254,7 @@ final class DppoXmlBuilderAppendixDetailTest extends TestCase
 
         self::assertStringContainsString('<VetaUB c_radku="48" kc_min="0" kc_sled="201"/>', $xml); // FVH beze změny
         self::assertStringContainsString('<VetaUB c_radku="31" kc_min="0" kc_sled="100"/>', $xml); // IV. absorbovalo −1
-        // VI. se tiskne 2× (39 celkem, 41 „VI.2. Ostatní") se stejnou (beze změny) hodnotou 101.
+        // VI. (ř. 39) beze změny, podřádek VI.2. „ostatní" (ř. 41) nese vlastní hodnotu z výkazu.
         self::assertStringContainsString('<VetaUB c_radku="39" kc_min="0" kc_sled="101"/>', $xml);
         self::assertStringContainsString('<VetaUB c_radku="41" kc_min="0" kc_sled="101"/>', $xml);
     }
