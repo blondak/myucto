@@ -131,6 +131,19 @@ final class FuelingOdometerEstimateTest extends TestCase
         self::assertSame(10460, $this->odometer($missing)['odometer']);
     }
 
+    public function testManualEditKeepsNote(): void
+    {
+        $id = $this->fueling($this->carA, '2099-03-01', 12000, 25.0);
+        $repo = $this->container->get(FuelingRepository::class);
+
+        $repo->update($id, $this->supplierA, [
+            'fueled_date' => '2099-03-01', 'amount_with_vat' => 900, 'car_id' => $this->carA,
+            'quantity' => 25, 'odometer' => 12000, 'note' => 'Tankováno do kanystru',
+        ]);
+
+        self::assertSame('Tankováno do kanystru', $repo->find($id, $this->supplierA)['note']);
+    }
+
     private function fueling(int $carId, string $date, ?int $odometer, ?float $quantity): int
     {
         $this->pdo->prepare(
