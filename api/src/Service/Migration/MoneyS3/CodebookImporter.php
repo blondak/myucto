@@ -68,6 +68,7 @@ final class CodebookImporter
                         'zip' => trim((string) ($r['PSC'] ?? '')),
                         'email' => trim((string) ($r['EMail'] ?? '')),
                         'phone' => trim((string) ($r['TelCislo'] ?? '')),
+                        'country' => trim((string) (($r['Stat'] ?? '') ?: ($r['FaktStat'] ?? '') ?: ($r['ObchStat'] ?? ''))),
                         'note' => 'Převzato z Money S3 (adresa č. ' . $no . ')',
                     ], $defaults);
                     $p->count(self::STEP_PARTNERS, 'created');
@@ -109,7 +110,7 @@ final class CodebookImporter
      * Partner dokladu podle IČO, jinak podle názvu, jinak se založí z údajů na dokladu
      * (Money drží na dokladu kopii adresy, partner v adresáři chybět může).
      *
-     * @param array{name:string,ico:string,dic:string,street:string,city:string,zip:string} $snapshot
+     * @param array{name:string,ico:string,dic:string,street:string,city:string,zip:string,country?:string} $snapshot
      */
     public function resolvePartner(ImportContext $ctx, array $snapshot): int
     {
@@ -206,7 +207,7 @@ final class CodebookImporter
     }
 
     /**
-     * @param array{name:string,ico:string,dic:string,street:string,city:string,zip:string,email:string,phone:string,note:string} $data
+     * @param array{name:string,ico:string,dic:string,street:string,city:string,zip:string,email:string,phone:string,note:string,country?:string} $data
      * @param array{currency_id:int,country_id:int} $defaults
      */
     private function insertClient(ImportContext $ctx, array $data, array $defaults): int
@@ -214,6 +215,14 @@ final class CodebookImporter
         $ico = self::ico($data['ico']);
         $related = $ico !== '' && in_array($ico, array_map(self::ico(...), $ctx->options->relatedPartyIcos), true);
         $dic = strtoupper(str_replace(' ', '', $data['dic']));
+        // Země: předpona DIČ z EU, jinak stát z adresy v Money. Money pustí do pole DIČ i
+        // rejstříkové nebo daňové číslo mimo EU (FN…, PIB…) — pak zemi nese jen adresa.
+        $countryName = trim((string) ($data['country'] ?? ''));
+        $countryId = $this->countryFromVatId($dic) ?? $this->countryFromName($countryName);
+        if ($countryId === null && $countryName !== '' && !self::isDomesticName($countryName)) {
+            $ctx->protocol->warn(CodebookImporter::STEP_PARTNERS, 'country_unknown',
+                "Stát „{$countryName}“ partnera {$data['name']} v číselníku zemí není, partner má zemi firmy. Zkontrolujte ho.");
+        }
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO clients
@@ -229,9 +238,9 @@ final class CodebookImporter
             mb_substr($data['street'] !== '' ? $data['street'] : '-', 0, 190),
             mb_substr($data['city'] !== '' ? $data['city'] : '-', 0, 120),
             mb_substr($data['zip'] !== '' ? str_replace(' ', '', $data['zip']) : '-', 0, 10),
-            // Zahraniční partner: země podle předpony DIČ — jinak by dodání do EU chybělo
-            // v souhrnném hlášení a samovyměření by se bralo jako tuzemské.
-            $this->countryFromVatId($dic) ?? $defaults['country_id'],
+            // Zahraniční partner se zemí firmy by vypadl ze souhrnného hlášení a samovyměření
+            // by se bralo jako tuzemské.
+            $countryId ?? $defaults['country_id'],
             $data['email'] !== '' ? mb_substr($data['email'], 0, 190) : null,
             $data['phone'] !== '' ? mb_substr($data['phone'], 0, 40) : null,
             $defaults['currency_id'],
@@ -260,6 +269,34 @@ final class CodebookImporter
             $this->countryIds[$iso] = $id === false ? null : (int) $id;
         }
         return $this->countryIds[$iso];
+    }
+
+    /** @var array<string,?int> název státu z Money (malými písmeny) => countries.id */
+    private array $countryNames = [];
+
+    /** Země podle státu z adresy Money (český či anglický název, ISO kód); tuzemsko a neznámý stát → null. */
+    private function countryFromName(string $name): ?int
+    {
+        $key = mb_strtolower(trim($name));
+        if ($key === '' || self::isDomesticName($key)) {
+            return null;
+        }
+        if (!array_key_exists($key, $this->countryNames)) {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT id FROM countries
+                  WHERE iso2 <> 'CZ' AND (LOWER(name_cs) = ? OR LOWER(name_en) = ? OR iso2 = UPPER(?) OR iso3 = UPPER(?))
+                  ORDER BY id LIMIT 1"
+            );
+            $stmt->execute([$key, $key, $key, $key]);
+            $id = $stmt->fetchColumn();
+            $this->countryNames[$key] = $id === false ? null : (int) $id;
+        }
+        return $this->countryNames[$key];
+    }
+
+    private static function isDomesticName(string $name): bool
+    {
+        return in_array(mb_strtolower(trim($name)), ['cz', 'cze', 'čr', 'česko', 'česká republika', 'czech republic', 'czechia'], true);
     }
 
     /** @return array{currency_id:int,country_id:int} */

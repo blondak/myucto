@@ -157,6 +157,7 @@ final class SyntheticAgenda
             'AdresarF.DAT' => Ms3FixtureWriter::table([
                 ['Cislo', 'L', 4], ['Nazev', 'C', 60], ['ICO', 'C', 12], ['DIC', 'C', 14], ['Ulice', 'C', 40],
                 ['Misto', 'C', 40], ['PSC', 'C', 10], ['EMail', 'C', 60], ['TelCislo', 'C', 20], ['Del', 'B', 1],
+                ['Stat', 'C', 40],
             ], [
                 ['Cislo' => 1, 'Nazev' => self::NAME, 'ICO' => self::ICO, 'DIC' => 'CZ' . self::ICO, 'Ulice' => 'Účetní 12', 'Misto' => 'Brno', 'PSC' => '602 00'],
                 ['Cislo' => 2, 'Nazev' => 'Dodavatel Alfa s.r.o.', 'ICO' => self::VENDOR_ICO, 'DIC' => 'CZ' . self::VENDOR_ICO,
@@ -165,7 +166,10 @@ final class SyntheticAgenda
                     'Ulice' => 'Ukázková 7', 'Misto' => 'Ostrava', 'PSC' => '702 00'],
                 ['Cislo' => 4, 'Nazev' => 'Smazaný partner', 'ICO' => '', 'Del' => 1],
                 ['Cislo' => 5, 'Nazev' => 'Lieferant Gamma GmbH', 'ICO' => '', 'DIC' => 'DE123456789',
-                    'Ulice' => 'Musterstraße 1', 'Misto' => 'Berlin', 'PSC' => '10115'],
+                    'Ulice' => 'Musterstraße 1', 'Misto' => 'Berlin', 'PSC' => '10115', 'Stat' => 'Německo'],
+                // Money pustí do pole DIČ i rejstříkové číslo; zemi pak nese jen adresa.
+                ['Cislo' => 6, 'Nazev' => 'Lieferant Delta GmbH', 'ICO' => '', 'DIC' => 'FN123456a',
+                    'Ulice' => 'Beispielgasse 2', 'Misto' => 'Wien', 'PSC' => '1010', 'Stat' => 'Rakousko'],
             ]),
             'AdUcBan.DAT' => Ms3FixtureWriter::table([['CisPartn', 'L', 4], ['Ucet', 'C', 20], ['KodBanky', 'C', 4]], [
                 ['CisPartn' => 2, 'Ucet' => '1000000005', 'KodBanky' => '0100'],

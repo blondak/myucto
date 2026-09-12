@@ -132,10 +132,13 @@ final class MoneyS3ImportTest extends TestCase
         // Tři vydané faktury a ostatní pohledávka PH25001, která je v přiznání DPH.
         self::assertSame(4, $this->rowCount('invoices', $supplierId));
         self::assertSame(4, $this->rowCount('cash_documents', $supplierId));
-        self::assertSame(3, $this->rowCount('clients', $supplierId));
+        self::assertSame(4, $this->rowCount('clients', $supplierId));
         // Zahraniční partner má zemi podle DIČ — jinak by dodání do EU chybělo v souhrnném hlášení.
         self::assertSame(1, $this->rowCount('clients', $supplierId,
             "dic = 'DE123456789' AND country_id = (SELECT id FROM countries WHERE iso2 = 'DE')"));
+        // Identifikátor, který není DIČ z EU (rejstříkové číslo), zemi neurčí — tu dá adresář Money.
+        self::assertSame(1, $this->rowCount('clients', $supplierId,
+            "dic = 'FN123456A' AND country_id = (SELECT id FROM countries WHERE iso2 = 'AT')"));
         self::assertSame(2, $this->rowCount('payment_matches', $supplierId));
         // Čárový kód z Money (BarCode) je klíč pro připojení naskenovaných příloh.
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "external_barcode = '90000101'"));

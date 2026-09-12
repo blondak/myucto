@@ -115,6 +115,7 @@ final class InvoiceImporter
                 'street' => trim((string) ($r['D_Ulice'] ?? '')),
                 'city' => trim((string) ($r['D_Mesto'] ?? '')),
                 'zip' => trim((string) ($r['D_Psc'] ?? '')),
+                'country' => trim((string) ($r['D_Stat'] ?? '')),
             ];
             $vendorId = $this->codebooks->resolvePartner($ctx, $snapshot);
             $amounts = $this->amounts($ctx, self::STEP_PURCHASE, $docNo, $r, self::date($r, ['PlnenoDPH']) ?? $issue);
@@ -282,6 +283,7 @@ final class InvoiceImporter
                 'street' => trim((string) ($r['O_Ulice'] ?? $r['AdUlice'] ?? '')),
                 'city' => trim((string) ($r['O_Mesto'] ?? $r['AdMesto'] ?? '')),
                 'zip' => trim((string) ($r['O_Psc'] ?? $r['AdPSC'] ?? '')),
+                'country' => trim((string) ($r['O_Stat'] ?? $r['AdStat'] ?? '')),
             ];
             $clientId = $this->codebooks->resolvePartner($ctx, $snapshot);
             $amounts = $this->amounts($ctx, self::STEP_ISSUED, $docNo, $r, self::date($r, ['PlnenoDPH']) ?? $issue);
@@ -413,6 +415,7 @@ final class InvoiceImporter
                 'street' => trim((string) ($r['AdUlice'] ?? '')),
                 'city' => trim((string) ($r['AdMesto'] ?? '')),
                 'zip' => trim((string) ($r['AdPSC'] ?? '')),
+                'country' => trim((string) ($r['AdStat'] ?? '')),
             ];
             $clientId = $this->codebooks->resolvePartner($ctx, $snapshot);
             $paidAt = self::date($r, ['UhDatum']);
