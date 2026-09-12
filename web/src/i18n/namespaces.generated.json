@@ -105,6 +105,7 @@
     "sent_emails",
     "settings",
     "setup",
+    "shoptet",
     "smtp_logs",
     "stats",
     "stock",
@@ -197,6 +198,7 @@
       "sent_emails",
       "settings",
       "setup",
+      "shoptet",
       "smtp_logs",
       "stats",
       "stock",
@@ -714,6 +716,10 @@
     "eshop-integrations": [
       "eshop",
       "imports"
+    ],
+    "eshop-shoptet": [
+      "imports",
+      "shoptet"
     ],
     "eshop": [
       "eshop",

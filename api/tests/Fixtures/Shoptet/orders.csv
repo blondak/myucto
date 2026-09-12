@@ -1,0 +1,5 @@
+code;date;statusName;currencyCode;currencyExchangeRate;email;billFullName;billCompany;billStreet;billHouseNumber;billCity;billZip;billCountryCode;billCompanyId;billVatId;deliveryCountryCode;totalPriceWithVat;orderItemType;orderItemCode;orderItemEan;orderItemName;orderItemAmount;orderItemUnit;orderItemUnitPriceWithVat;orderItemVatRate;orderItemTotalPriceWithVat;neznamySloupec
+2026000201;2026-09-02 09:00:00;Vyřizuje se;CZK;1;karel.testovaci@example.test;Karel Testovací;;Zkušební;7;Třeboň;37901;CZ;;;CZ;1 331,00;product;SHOP-TRIKO-M;;Tričko;3;ks;363,00;21;1 089,00;x
+2026000201;2026-09-02 09:00:00;Vyřizuje se;CZK;1;karel.testovaci@example.test;Karel Testovací;;Zkušební;7;Třeboň;37901;CZ;;;CZ;1 331,00;shipping;;;Doručení na adresu;1;;242,00;21;242,00;x
+2026000202;2026-09-02 10:00:00;Nová;CZK;1;"firma@example.test";Eva Nákupní;"Testovací; odběratel s.r.o.";Průmyslová;12;Brno;60200;CZ;25596641;CZ25596641;CZ;224,00;product;;8590000000017;Hrnek;1;ks;224,00;12 %;224,00;x
+;2026-09-02 11:00:00;Nová;CZK;1;chyba@example.test;Bez kódu;;;;;;CZ;;;CZ;10,00;product;X;;Řádek bez kódu;1;ks;10,00;21;10,00;x

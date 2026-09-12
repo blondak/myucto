@@ -232,6 +232,10 @@ final class InvoiceImportService
      *        se nezapočítává do nákladů, závazků ani do výkazů, takže dávková migrace
      *        z jiného systému má smysl jen jako `received` — jinak by účetní musela
      *        stovky dokladů otevřít jeden po druhém. Vydané strany se netýká.
+     * @param (\Closure(array<string,mixed>):array<string,mixed>)|null $transform Úprava
+     *        rozparsovaného dokladu před zpracováním pro kanál, který nese údaj jinak než
+     *        obecný import (Shoptet: číslo objednávky není číslo zakázky). Import dál
+     *        běží celou stejnou cestou, takže sazby, OSS i kontrola duplicit platí beze změny.
      * @return array{summary:array<string,int>, results:list<array<string,mixed>>, cancelled:bool, not_processed:int}
      */
     public function importBundle(
@@ -242,6 +246,7 @@ final class InvoiceImportService
         ?\Closure $onProgress = null,
         ?\Closure $shouldCancel = null,
         string $purchaseStatus = 'draft',
+        ?\Closure $transform = null,
     ): array
     {
         if (!in_array($kind, ['auto', 'issued', 'purchase'], true)) {
@@ -431,10 +436,17 @@ final class InvoiceImportService
                     continue;
                 }
 
-                // Auto-detekce per soubor: dle IČO buyer vs supplier
-                $route = $this->detectRoute($inv, $tenantIc, $kind);
-
                 try {
+                    // Úprava kanálu běží UVNITŘ try: kanál smí doklad odmítnout výjimkou
+                    // (Shoptet: druhá faktura k objednávce, která už fakturu má) a odmítnutí
+                    // je pak chyba jednoho řádku dávky, ne pád celého běhu.
+                    if ($transform !== null) {
+                        $inv = $transform($inv);
+                    }
+
+                    // Auto-detekce per soubor: dle IČO buyer vs supplier
+                    $route = $this->detectRoute($inv, $tenantIc, $kind);
+
                     if ($route === 'issued') {
                         $r = $this->processOne($inv, $supplierId, $userId, $emailMap);
                     } elseif ($route === 'purchase') {
@@ -518,7 +530,10 @@ final class InvoiceImportService
         // Selhání syncu nesmí shodit import — jen se přeskočí (generátor je i tak
         // duplicate-aware při dalším vystavení).
         foreach ($counterScopes as [$type, $cli, $cat, $date]) {
-            if (!in_array($type, ['invoice', 'proforma', 'credit_note'], true)) {
+            // Daňový doklad k přijaté platbě se čísluje v řadě faktur (alias ve
+            // VarsymbolGenerator). Bez něj dávka samých DDPP nechala řadu faktur pozadu
+            // a další vystavená faktura dostala číslo, které už v importu bylo.
+            if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'tax_document'], true)) {
                 continue;
             }
             try {
@@ -1277,8 +1292,14 @@ final class InvoiceImportService
         // než 'issued'. Staré splatné → 'paid' (předpoklad zaplaceno).
         // sent_at = issue_date — nemáme přesnější údaj z původního systému,
         // den vystavení je nejlepší aproximace okamžiku odeslání.
+        //
+        // Daňový doklad k přijaté platbě dokumentuje úplatu, která už přišla. Je proto
+        // zaplacený bez ohledu na splatnost a paid_at = den přijetí úplaty (DUZP), stejně
+        // jako když ho aplikace vystaví k platbě zálohy. Podle splatnosti by čerstvý DDPP
+        // skončil jako `sent` a visel v pohledávkách a po splatnosti.
         $threshold = (new \DateTimeImmutable('today'))->modify('-30 days');
-        $isPaid = new \DateTimeImmutable($dueDate) < $threshold;
+        $isPaid = ImportedIssuedDocumentPolicy::isPaidByNature($invoiceType)
+            || new \DateTimeImmutable($dueDate) < $threshold;
         $status = $isPaid ? 'paid' : 'sent';
         $paidAt = $isPaid ? ($taxDate ?? $issueDate) : null;
         $sentAt = $issueDate . ' 12:00:00';
@@ -1343,9 +1364,12 @@ final class InvoiceImportService
             $inv['exchange_rate'] !== null ? $issueDate : null,
             $reverseCharge ? 1 : 0,
             'cs',
-            $status,
-            $sentAt,
-            $paidAt,
+            // Hlavička vzniká jako KONCEPT a stav dostane až po přepočtu a posouzení
+            // dokladu níž. Import neběží v transakci: doklad, u kterého běh spadne mezi
+            // zápisem a posouzením, tak zůstane konceptem, ne vystavenou tržbou.
+            'draft',
+            null,
+            null,
             $revenueCategoryId,
             $userId,
         ]);
@@ -1357,6 +1381,22 @@ final class InvoiceImportService
         // Recompute totals (z položek)
         $this->calculator->recompute($invoiceId);
 
+        // Odpočet záloh a součet řádků proti dokladu — pravidlo sdílené s AI importem
+        // a importem dokladů Shoptetu ({@see ImportedIssuedDocumentPolicy}).
+        $totalStmt = $pdo->prepare('SELECT total_with_vat FROM invoices WHERE id = ?');
+        $totalStmt->execute([$invoiceId]);
+        $assessment = ImportedIssuedDocumentPolicy::assess($inv, (float) $totalStmt->fetchColumn());
+        $notes = array_merge($notes, $assessment['notes']);
+        if ($assessment['review'] !== []) {
+            $warnings = array_merge($warnings, $assessment['review']);
+            $status = 'draft';
+            $sentAt = null;
+            $paidAt = null;
+        }
+        if (ImportedIssuedDocumentPolicy::isPaidByNature($invoiceType)) {
+            ImportedIssuedDocumentPolicy::settleTaxDocument($pdo, $invoiceId);
+        }
+
         // Snapshoty z aktuálního supplier/client/bank; plátcovství DPH firmy k datu
         // importovaného dokladu (zpětně datovaná faktura dostane stav k svému datu).
         $snapshots = $this->snapshots->build(
@@ -1367,11 +1407,16 @@ final class InvoiceImportService
             $taxDate ?? $issueDate,
         );
         $pdo->prepare(
-            'UPDATE invoices SET client_snapshot = ?, supplier_snapshot = ?, bank_snapshot = ? WHERE id = ?'
+            'UPDATE invoices SET client_snapshot = ?, supplier_snapshot = ?, bank_snapshot = ?,
+                    status = ?, sent_at = ?, paid_at = ?
+              WHERE id = ?'
         )->execute([
             json_encode($snapshots['client'],   JSON_UNESCAPED_UNICODE),
             json_encode($snapshots['supplier'], JSON_UNESCAPED_UNICODE),
             $snapshots['bank'] !== null ? json_encode($snapshots['bank'], JSON_UNESCAPED_UNICODE) : null,
+            $status,
+            $sentAt,
+            $paidAt,
             $invoiceId,
         ]);
 

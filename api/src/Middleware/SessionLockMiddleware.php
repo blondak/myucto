@@ -64,6 +64,7 @@ final class SessionLockMiddleware implements MiddlewareInterface
             '#^/api/public/work-report/[a-f0-9]{32,128}$#D',
             '#^/api/public/payroll-document/[a-f0-9]{64}$#D',
             '#^/api/public/payroll-document/[a-f0-9]{64}/download$#D',
+            '#^/api/public/shoptet/feed/[a-f0-9]{64}$#D',
         ],
         'POST' => [
             '#^/api/public/approval/[a-f0-9]{32,128}/decide$#D',

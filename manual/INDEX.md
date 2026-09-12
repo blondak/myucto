@@ -69,6 +69,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 
 33. [Sklad](33_Sklad.md)
 34. [E-shop](34_Eshop.md)
+34a. [Shoptet](34a_Shoptet.md)
 
 ### Daně
 

@@ -192,6 +192,61 @@ tags:
       pojišťovnu a zálohy na daň (§38a) vč. rozhodnutí FÚ (§174).
 
 paths:
+  /api/public/shoptet/feed/{token}:
+    get:
+      tags: [Eshop]
+      summary: XML feed zásob a cen pro automatický import produktů Shoptetu
+      description: |
+        Veřejný feed bez přihlášení, autorizovaný jen tokenem v cestě. Token (32 náhodných
+        bajtů, 64 hex znaků) se vygeneruje v E-shop → Shoptet → Export pro Shoptet
+        a v databázi je uložen jen jako SHA-256. Vypnutý, neznámý i cizí token vrací 404.
+
+        Formát podle specifikace Shoptet XML (Relax NG `products-supplier-v10.rng`,
+        developers.shoptet.com/shoptet-tools/shoptet-xml-specification/): kořen `SHOP`,
+        `SHOPITEM` s `CODE`, `EAN`, `PRICE_VAT` a `STOCK/AMOUNT`, produkt s variantami jako
+        `VARIANTS/VARIANT` s povinnými `PARAMETERS`. Feed obsahuje jen produkty zvolené
+        firmou; množství je fyzický stav minus rezervace objednávek z jiných kanálů.
+
+        Obsah je stabilní (bez časového razítka), `ETag` se mění jen se změnou dat
+        a `If-None-Match` vrací 304. Limit 30 požadavků za minutu z jedné IP adresy.
+      operationId: getShoptetFeed
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{64}$'
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Feed ve formátu Shoptet XML
+          headers:
+            ETag:
+              schema:
+                type: string
+            Last-Modified:
+              schema:
+                type: string
+          content:
+            application/xml:
+              schema:
+                $ref: '#/components/schemas/ShoptetFeed'
+        '304':
+          description: Obsah feedu se od posledního stažení nezměnil
+        '404':
+          description: Neznámý, vypnutý nebo cizí token
+          content:
+            text/plain:
+              schema:
+                type: string
+        '429':
+          description: Překročený limit požadavků z jedné IP adresy
   /api/v1/branding-profiles:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -19929,6 +19984,79 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    ShoptetFeed:
+      type: object
+      description: Kořen `SHOP` feedu pro automatický import produktů Shoptetu.
+      xml:
+        name: SHOP
+      properties:
+        SHOPITEM:
+          type: array
+          xml:
+            name: SHOPITEM
+          items:
+            $ref: '#/components/schemas/ShoptetFeedItem'
+    ShoptetFeedItem:
+      type: object
+      description: |
+        Produkt bez variant nese přímo `CODE`/`EAN`/`PRICE_VAT`/`STOCK`; produkt s variantami
+        nese `NAME` a `VARIANTS`. Název jednoduchého produktu se záměrně neposílá.
+      properties:
+        NAME:
+          type: string
+          maxLength: 250
+        CODE:
+          type: string
+          maxLength: 64
+        EAN:
+          type: string
+        PRICE_VAT:
+          type: number
+          description: Cena s DPH v CZK (jen když firma posílá ceny).
+        STOCK:
+          $ref: '#/components/schemas/ShoptetFeedStock'
+        VARIANTS:
+          type: array
+          xml:
+            name: VARIANTS
+            wrapped: true
+          items:
+            $ref: '#/components/schemas/ShoptetFeedVariant'
+    ShoptetFeedVariant:
+      type: object
+      xml:
+        name: VARIANT
+      required: [CODE, PARAMETERS]
+      properties:
+        CODE:
+          type: string
+          maxLength: 64
+        EAN:
+          type: string
+        PRICE_VAT:
+          type: number
+        STOCK:
+          $ref: '#/components/schemas/ShoptetFeedStock'
+        PARAMETERS:
+          type: array
+          xml:
+            name: PARAMETERS
+            wrapped: true
+          items:
+            type: object
+            xml:
+              name: PARAMETER
+            properties:
+              NAME:
+                type: string
+              VALUE:
+                type: string
+    ShoptetFeedStock:
+      type: object
+      properties:
+        AMOUNT:
+          type: number
+          description: Prodejná zásoba, nejméně 0, tři desetinná místa.
     IntrastatRequest:
       type: object
       required: [period, direction]
@@ -20611,6 +20739,64 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/CatalogChange' }
+    IntegrationWebhookEvent:
+      type: object
+      description: |
+        Tělo příchozího webhooku Integračního centra. Endpoint
+        `POST /api/public/integrations/webhooks/{connection_uuid}` leží mimo `/api/v1`
+        a neověřuje se API tokenem, ale podpisem: hlavička `X-Integration-Timestamp`
+        nese unixový čas v sekundách (odchylka nejvýše 300 s) a hlavička
+        `X-Integration-Signature` hodnotu `sha256=<hex HMAC-SHA256 z "{timestamp}.{tělo}">`
+        klíčem secret daného připojení. Podepisuje se přesně odeslané tělo. Připojení
+        musí být ve stavu `active`, tělo má nejvýše 1 MiB a další vlastnosti se uloží
+        spolu s událostí. Odpovědi: 202 `IntegrationWebhookAccepted` (i pro opakované
+        doručení se stejným `event_id` a tělem, pak `duplicate: true`), 400
+        `webhook_invalid`, 401 `webhook_unauthorized` (neznámé nebo neaktivní připojení,
+        chybějící secret, časové razítko nebo podpis), 409 `webhook_idempotency_conflict`
+        (stejné `event_id` s jiným tělem), 413 `payload_too_large`. Pořadí změn jedné
+        entity určuje `aggregate_version`; událost se starší nebo stejnou verzí, než jaká
+        už byla zpracována, se při zpracování přeskočí.
+      required: [event_id, entity_type, entity_id, event_type, aggregate_version]
+      additionalProperties: true
+      properties:
+        event_id:
+          type: string
+          minLength: 1
+          maxLength: 190
+          description: Jednoznačné ID události v externím systému, klíč idempotence.
+        entity_type:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{0,59}$'
+          example: product
+        entity_id:
+          type: string
+          minLength: 1
+          maxLength: 190
+          description: ID entity v externím systému. Číslo se přijme a převede na text.
+        event_type:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{0,99}$'
+          example: product.updated
+        aggregate_version:
+          type: integer
+          minimum: 1
+          description: Verze entity, s každou změnou roste.
+      example:
+        event_id: evt-1001
+        entity_type: product
+        entity_id: SKU-1001
+        event_type: product.updated
+        aggregate_version: 7
+        data: { name: Syntetické zboží, price: '199.00', currency: CZK }
+    IntegrationWebhookAccepted:
+      type: object
+      required: [accepted, duplicate, id]
+      properties:
+        accepted: { type: boolean, const: true }
+        duplicate:
+          type: boolean
+          description: true, pokud stejná událost už dorazila dřív a znovu se neukládala.
+        id: { type: integer, minimum: 1, description: ID záznamu ve frontě příchozích událostí. }
     CatalogJob:
       type: object
       properties:

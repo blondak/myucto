@@ -23,7 +23,7 @@ final class IntegrationCoreTest extends StockTestCase
         $sid = $this->createSupplier();
         $connections = $this->container->get(IntegrationConnectionService::class);
         $created = $connections->create($sid, [
-            'connector_key' => 'synthetic.empty',
+            'connector_key' => 'custom.webhook',
             'name' => 'Empty mapping',
             'status' => 'draft',
         ], $this->userId);
@@ -54,14 +54,14 @@ final class IntegrationCoreTest extends StockTestCase
         $sid = $this->createSupplier();
         $connection = $this->connection($sid);
         $connections = $this->container->get(IntegrationConnectionService::class);
-        $presented = $connections->setCredentials($sid, $connection['id'], ['token' => 'synthetic-token']);
+        $presented = $connections->setCredentials($sid, $connection['id'], ['endpoint_token' => 'synthetic-token']);
 
         self::assertTrue($presented['credentials_configured']);
         self::assertArrayNotHasKey('credentials_enc', $presented);
         $ciphertext = $this->db->pdo()->query('SELECT credentials_enc FROM integration_connections WHERE id = ' . $connection['id'])->fetchColumn();
         self::assertIsString($ciphertext);
         self::assertStringNotContainsString('synthetic-token', $ciphertext);
-        self::assertSame(['token' => 'synthetic-token'], $connections->credentials($sid, $connection['id']));
+        self::assertSame(['endpoint_token' => 'synthetic-token'], $connections->credentials($sid, $connection['id']));
 
         $rotated = $connections->rotateWebhookSecret($sid, $connection['id']);
         $body = json_encode([
@@ -325,8 +325,8 @@ PHP;
     private function connection(int $supplierId, string $name = 'Synthetic'): array
     {
         return $this->container->get(IntegrationConnectionService::class)->create($supplierId, [
-            'connector_key' => 'synthetic.adapter', 'name' => $name, 'status' => 'active',
-            'mappings' => ['warehouse' => 'MAIN', 'currency' => 'CZK', 'language' => 'cs'],
+            'connector_key' => 'custom.webhook', 'name' => $name, 'status' => 'active',
+            'mappings' => ['currencies' => ['CZK' => 'CZK']],
             'field_ownership' => ['product.name' => 'local'],
         ], $this->userId);
     }

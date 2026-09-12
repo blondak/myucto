@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Syntetický daňový doklad ve tvaru ISDOC 6.0.2 exportu dokladů Shoptetu.
+     Dodavatel = testovací firma (IČO 12345679), odběratel = spotřebitel bez IČO. -->
+<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.2">
+  <DocumentType>1</DocumentType>
+  <ID>2026100001</ID>
+  <UUID>6f1e3c2a-0000-4000-8000-000000000101</UUID>
+  <IssueDate>2026-09-02</IssueDate>
+  <TaxPointDate>2026-09-02</TaxPointDate>
+  <VATApplicable>true</VATApplicable>
+  <ElectronicPossibilityAgreementReference></ElectronicPossibilityAgreementReference>
+  <LocalCurrencyCode>CZK</LocalCurrencyCode>
+  <CurrRate>1</CurrRate>
+  <RefCurrRate>1</RefCurrRate>
+  <AccountingSupplierParty>
+    <Party>
+      <PartyIdentification><ID>12345679</ID></PartyIdentification>
+      <PartyName><Name>Testovací e-shop s.r.o.</Name></PartyName>
+      <PostalAddress>
+        <StreetName>Skladová</StreetName><BuildingNumber>3</BuildingNumber>
+        <CityName>Praha</CityName><PostalZone>11000</PostalZone>
+        <Country><IdentificationCode>CZ</IdentificationCode><Name>Česká republika</Name></Country>
+      </PostalAddress>
+      <PartyTaxScheme><CompanyID>CZ12345679</CompanyID><TaxScheme>VAT</TaxScheme></PartyTaxScheme>
+    </Party>
+  </AccountingSupplierParty>
+  <AccountingCustomerParty>
+    <Party>
+      <PartyIdentification><ID></ID></PartyIdentification>
+      <PartyName><Name>Jana Testovací</Name></PartyName>
+      <PostalAddress>
+        <StreetName>Testovací</StreetName><BuildingNumber>1</BuildingNumber>
+        <CityName>Praha</CityName><PostalZone>11000</PostalZone>
+        <Country><IdentificationCode>CZ</IdentificationCode><Name>Česká republika</Name></Country>
+      </PostalAddress>
+      <Contact><ElectronicMail>jana.testovaci@example.test</ElectronicMail></Contact>
+    </Party>
+  </AccountingCustomerParty>
+  <OrderReferences>
+    <OrderReference id="o1"><SalesOrderID>2026000101</SalesOrderID></OrderReference>
+  </OrderReferences>
+  <InvoiceLines>
+    <InvoiceLine>
+      <ID>1</ID>
+      <InvoicedQuantity unitCode="ks">2</InvoicedQuantity>
+      <LineExtensionAmount>600.00</LineExtensionAmount>
+      <LineExtensionAmountTaxInclusive>726.00</LineExtensionAmountTaxInclusive>
+      <LineExtensionTaxAmount>126.00</LineExtensionTaxAmount>
+      <UnitPrice>300.00</UnitPrice>
+      <UnitPriceTaxInclusive>363.00</UnitPriceTaxInclusive>
+      <ClassifiedTaxCategory><Percent>21</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+      <Item><Description>Tričko – M</Description></Item>
+    </InvoiceLine>
+    <InvoiceLine>
+      <ID>2</ID>
+      <InvoicedQuantity unitCode="ks">1</InvoicedQuantity>
+      <LineExtensionAmount>200.00</LineExtensionAmount>
+      <UnitPrice>200.00</UnitPrice>
+      <ClassifiedTaxCategory><Percent>12</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+      <Item><Description>Hrnek</Description></Item>
+    </InvoiceLine>
+    <InvoiceLine>
+      <ID>3</ID>
+      <InvoicedQuantity unitCode="ks">1</InvoicedQuantity>
+      <LineExtensionAmount>65.29</LineExtensionAmount>
+      <UnitPrice>65.29</UnitPrice>
+      <ClassifiedTaxCategory><Percent>21</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+      <Item><Description>Doprava: Výdejní místo</Description></Item>
+    </InvoiceLine>
+    <InvoiceLine>
+      <ID>4</ID>
+      <InvoicedQuantity unitCode="ks">1</InvoicedQuantity>
+      <LineExtensionAmount>24.79</LineExtensionAmount>
+      <UnitPrice>24.79</UnitPrice>
+      <ClassifiedTaxCategory><Percent>21</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+      <Item><Description>Platba: Dobírka</Description></Item>
+    </InvoiceLine>
+    <InvoiceLine>
+      <ID>5</ID>
+      <InvoicedQuantity unitCode="ks">1</InvoicedQuantity>
+      <LineExtensionAmount>-41.32</LineExtensionAmount>
+      <UnitPrice>-41.32</UnitPrice>
+      <ClassifiedTaxCategory><Percent>21</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+      <Item><Description>Slevový kupón</Description></Item>
+    </InvoiceLine>
+  </InvoiceLines>
+  <TaxTotal>
+    <TaxSubTotal>
+      <TaxableAmount>648.76</TaxableAmount>
+      <TaxAmount>136.24</TaxAmount>
+      <TaxInclusiveAmount>785.00</TaxInclusiveAmount>
+      <AlreadyClaimedTaxableAmount>0</AlreadyClaimedTaxableAmount>
+      <AlreadyClaimedTaxAmount>0</AlreadyClaimedTaxAmount>
+      <AlreadyClaimedTaxInclusiveAmount>0</AlreadyClaimedTaxInclusiveAmount>
+      <DifferenceTaxableAmount>648.76</DifferenceTaxableAmount>
+      <DifferenceTaxAmount>136.24</DifferenceTaxAmount>
+      <DifferenceTaxInclusiveAmount>785.00</DifferenceTaxInclusiveAmount>
+      <TaxCategory><Percent>21</Percent></TaxCategory>
+    </TaxSubTotal>
+    <TaxSubTotal>
+      <TaxableAmount>200.00</TaxableAmount>
+      <TaxAmount>24.00</TaxAmount>
+      <TaxInclusiveAmount>224.00</TaxInclusiveAmount>
+      <AlreadyClaimedTaxableAmount>0</AlreadyClaimedTaxableAmount>
+      <AlreadyClaimedTaxAmount>0</AlreadyClaimedTaxAmount>
+      <AlreadyClaimedTaxInclusiveAmount>0</AlreadyClaimedTaxInclusiveAmount>
+      <DifferenceTaxableAmount>200.00</DifferenceTaxableAmount>
+      <DifferenceTaxAmount>24.00</DifferenceTaxAmount>
+      <DifferenceTaxInclusiveAmount>224.00</DifferenceTaxInclusiveAmount>
+      <TaxCategory><Percent>12</Percent></TaxCategory>
+    </TaxSubTotal>
+    <TaxAmount>160.24</TaxAmount>
+  </TaxTotal>
+  <LegalMonetaryTotal>
+    <TaxExclusiveAmount>848.76</TaxExclusiveAmount>
+    <TaxInclusiveAmount>1009.00</TaxInclusiveAmount>
+    <AlreadyClaimedTaxExclusiveAmount>0</AlreadyClaimedTaxExclusiveAmount>
+    <AlreadyClaimedTaxInclusiveAmount>0</AlreadyClaimedTaxInclusiveAmount>
+    <DifferenceTaxExclusiveAmount>848.76</DifferenceTaxExclusiveAmount>
+    <DifferenceTaxInclusiveAmount>1009.00</DifferenceTaxInclusiveAmount>
+    <PayableRoundingAmount>0</PayableRoundingAmount>
+    <PaidDepositsAmount>0</PaidDepositsAmount>
+    <PayableAmount>1009.00</PayableAmount>
+  </LegalMonetaryTotal>
+  <PaymentMeans>
+    <Payment>
+      <PaidAmount>1009.00</PaidAmount>
+      <PaymentMeansCode>42</PaymentMeansCode>
+      <Details>
+        <PaymentDueDate>2026-09-16</PaymentDueDate>
+        <ID>1000000005</ID>
+        <BankCode>0100</BankCode>
+        <VariableSymbol>2026100001</VariableSymbol>
+      </Details>
+    </Payment>
+  </PaymentMeans>
+</Invoice>

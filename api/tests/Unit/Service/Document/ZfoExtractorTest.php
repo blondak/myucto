@@ -44,6 +44,22 @@ final class ZfoExtractorTest extends TestCase
         return self::tlv(0x30, $oidSigned . $explicit);             // ContentInfo
     }
 
+    /**
+     * FAIL-BEFORE: kontrola DOCTYPE nad surovými bajty neviděla deklaraci v UTF-16
+     * (nulové bajty mezi znaky), libxml ji přesto načetl a obálka se zpracovala.
+     */
+    public function testUtf16EnvelopeWithDoctypeIsRejected(): void
+    {
+        $xml = (string) preg_replace('/^<\?xml[^>]*\?>/', '', self::sampleXml(base64_encode('%PDF-1.4 test')));
+        $doc = '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE q:MessageDownloadResponse [<!ENTITY x "y">]>' . $xml;
+        $utf16 = "\xFF\xFE" . mb_convert_encoding($doc, 'UTF-16LE', 'UTF-8');
+        self::assertDoesNotMatchRegularExpression('/<!DOCTYPE/i', $utf16);
+
+        $this->expectException(DocumentException::class);
+        $this->expectExceptionMessageMatches('/DTD/');
+        (new ZfoExtractor())->extract(self::buildZfo($utf16));
+    }
+
     private static function sampleXml(string $b64): string
     {
         return '<?xml version="1.0" encoding="UTF-8"?>'

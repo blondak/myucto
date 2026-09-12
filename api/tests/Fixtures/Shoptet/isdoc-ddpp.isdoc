@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Syntetický daňový doklad k přijaté platbě (ISDOC DocumentType 5 = daňový zálohový list). -->
+<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.2">
+  <DocumentType>5</DocumentType>
+  <ID>2026500001</ID>
+  <UUID>6f1e3c2a-0000-4000-8000-000000000501</UUID>
+  <IssueDate>2026-09-03</IssueDate>
+  <TaxPointDate>2026-09-03</TaxPointDate>
+  <VATApplicable>true</VATApplicable>
+  <LocalCurrencyCode>CZK</LocalCurrencyCode>
+  <CurrRate>1</CurrRate>
+  <RefCurrRate>1</RefCurrRate>
+  <AccountingSupplierParty>
+    <Party>
+      <PartyIdentification><ID>12345679</ID></PartyIdentification>
+      <PartyName><Name>Testovací e-shop s.r.o.</Name></PartyName>
+      <PostalAddress><StreetName>Skladová</StreetName><BuildingNumber>3</BuildingNumber><CityName>Praha</CityName><PostalZone>11000</PostalZone><Country><IdentificationCode>CZ</IdentificationCode></Country></PostalAddress>
+    </Party>
+  </AccountingSupplierParty>
+  <AccountingCustomerParty>
+    <Party>
+      <PartyIdentification><ID>25596641</ID></PartyIdentification>
+      <PartyName><Name>Testovací odběratel s.r.o.</Name></PartyName>
+      <PostalAddress><StreetName>Průmyslová</StreetName><BuildingNumber>12</BuildingNumber><CityName>Brno</CityName><PostalZone>60200</PostalZone><Country><IdentificationCode>CZ</IdentificationCode></Country></PostalAddress>
+      <PartyTaxScheme><CompanyID>CZ25596641</CompanyID><TaxScheme>VAT</TaxScheme></PartyTaxScheme>
+    </Party>
+  </AccountingCustomerParty>
+  <OrderReferences>
+    <OrderReference id="o1"><SalesOrderID>2026000102</SalesOrderID></OrderReference>
+  </OrderReferences>
+  <InvoiceLines>
+    <InvoiceLine>
+      <ID>1</ID>
+      <InvoicedQuantity unitCode="ks">1</InvoicedQuantity>
+      <LineExtensionAmount>400.00</LineExtensionAmount>
+      <UnitPrice>400.00</UnitPrice>
+      <ClassifiedTaxCategory><Percent>21</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+      <Item><Description>Přijatá platba k objednávce 2026000102</Description></Item>
+    </InvoiceLine>
+  </InvoiceLines>
+  <TaxTotal>
+    <TaxSubTotal>
+      <TaxableAmount>400.00</TaxableAmount>
+      <TaxAmount>84.00</TaxAmount>
+      <TaxInclusiveAmount>484.00</TaxInclusiveAmount>
+      <TaxCategory><Percent>21</Percent></TaxCategory>
+    </TaxSubTotal>
+    <TaxAmount>84.00</TaxAmount>
+  </TaxTotal>
+  <LegalMonetaryTotal>
+    <TaxExclusiveAmount>400.00</TaxExclusiveAmount>
+    <TaxInclusiveAmount>484.00</TaxInclusiveAmount>
+    <PayableRoundingAmount>0</PayableRoundingAmount>
+    <PayableAmount>0</PayableAmount>
+  </LegalMonetaryTotal>
+</Invoice>

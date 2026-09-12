@@ -80,6 +80,14 @@ Aby ses nemusel po importu zabývat starými fakturami:
 - **Datum splatnosti v posledních 30 dnech (nebo v budoucnu)** → faktura se
   uloží jako **Vystavená**. Můžeš platbu spárovat standardním flow přes
   bankovní výpis nebo ručně označit jako zaplacenou.
+- **Daňový doklad k přijaté platbě** je vždy **Zaplacený** (ke dni přijetí
+  platby) a nic se na něm nedoplácí. Dokumentuje platbu, která už přišla.
+- **Faktura, která odečítá zálohy**, nebo jejíž součet položek se od celkové
+  částky či částky k úhradě ze souboru liší o víc než 1 Kč, se uloží jako
+  **Koncept** s varováním v reportu. Odpočet zálohy je v souboru mimo položky,
+  takže by vystavená faktura zaevidovala tržbu i DPH v plné výši a platba
+  zdaněná dokladem k záloze by se zdanila podruhé. Koncept nejde do DPH ani do
+  pohledávek: navaž ho na daňový doklad k záloze, zkontroluj a vystav.
 
 ## 21.4 Co se přeskočí
 

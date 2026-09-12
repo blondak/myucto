@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Syntetický opravný daňový doklad (DocumentType 2) z exportu dokladů Shoptetu. -->
+<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.2">
+  <DocumentType>2</DocumentType>
+  <ID>2026900001</ID>
+  <UUID>6f1e3c2a-0000-4000-8000-000000000201</UUID>
+  <IssueDate>2026-09-05</IssueDate>
+  <TaxPointDate>2026-09-05</TaxPointDate>
+  <VATApplicable>true</VATApplicable>
+  <LocalCurrencyCode>CZK</LocalCurrencyCode>
+  <CurrRate>1</CurrRate>
+  <RefCurrRate>1</RefCurrRate>
+  <AccountingSupplierParty>
+    <Party>
+      <PartyIdentification><ID>12345679</ID></PartyIdentification>
+      <PartyName><Name>Testovací e-shop s.r.o.</Name></PartyName>
+      <PostalAddress><StreetName>Skladová</StreetName><BuildingNumber>3</BuildingNumber><CityName>Praha</CityName><PostalZone>11000</PostalZone><Country><IdentificationCode>CZ</IdentificationCode></Country></PostalAddress>
+    </Party>
+  </AccountingSupplierParty>
+  <AccountingCustomerParty>
+    <Party>
+      <PartyName><Name>Jana Testovací</Name></PartyName>
+      <PostalAddress><StreetName>Testovací</StreetName><BuildingNumber>1</BuildingNumber><CityName>Praha</CityName><PostalZone>11000</PostalZone><Country><IdentificationCode>CZ</IdentificationCode></Country></PostalAddress>
+      <Contact><ElectronicMail>jana.testovaci@example.test</ElectronicMail></Contact>
+    </Party>
+  </AccountingCustomerParty>
+  <OrderReferences>
+    <OrderReference id="o1"><SalesOrderID>2026000101</SalesOrderID></OrderReference>
+  </OrderReferences>
+  <InvoiceLines>
+    <InvoiceLine>
+      <ID>1</ID>
+      <InvoicedQuantity unitCode="ks">1</InvoicedQuantity>
+      <LineExtensionAmount>300.00</LineExtensionAmount>
+      <UnitPrice>300.00</UnitPrice>
+      <ClassifiedTaxCategory><Percent>21</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+      <Item><Description>Vrácené tričko – M</Description></Item>
+    </InvoiceLine>
+  </InvoiceLines>
+  <TaxTotal>
+    <TaxSubTotal>
+      <TaxableAmount>300.00</TaxableAmount>
+      <TaxAmount>63.00</TaxAmount>
+      <TaxInclusiveAmount>363.00</TaxInclusiveAmount>
+      <TaxCategory><Percent>21</Percent></TaxCategory>
+    </TaxSubTotal>
+    <TaxAmount>63.00</TaxAmount>
+  </TaxTotal>
+  <LegalMonetaryTotal>
+    <TaxExclusiveAmount>300.00</TaxExclusiveAmount>
+    <TaxInclusiveAmount>363.00</TaxInclusiveAmount>
+    <PayableRoundingAmount>0</PayableRoundingAmount>
+    <PayableAmount>363.00</PayableAmount>
+  </LegalMonetaryTotal>
+</Invoice>

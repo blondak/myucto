@@ -110,6 +110,19 @@ final class CronPreflight
     }
 
     /**
+     * Stahuje některá firma objednávky ze Shoptetu automaticky? Protějšek
+     * {@see \MyInvoice\Service\Shoptet\ShoptetSettingsService::dueForFetch()}.
+     */
+    public static function hasShoptetAutoFetch(PDO $pdo): bool
+    {
+        return self::probe($pdo, '
+            SELECT 1 FROM shoptet_settings
+             WHERE auto_fetch = 1 AND order_url_enc IS NOT NULL
+             LIMIT 1
+        ');
+    }
+
+    /**
      * Čeká nějaké mzdové podání na protokol ČSSZ nebo na uzavření transakce?
      *
      * Výběr sdílí s frontou, aby jiné agendy a vyčerpaná uzavření

@@ -269,6 +269,10 @@ final class PohodaXmlParser
         if (!$loaded || $dom->documentElement === null) {
             throw new \RuntimeException('Nelze parsovat Pohoda XML.');
         }
+        // DOCTYPE v UTF-16 kontrola nad surovými bajty nevidí — viz IsdocParser::parse().
+        if ($dom->doctype !== null) {
+            throw new \RuntimeException('Pohoda XML obsahuje DOCTYPE, což není povoleno.');
+        }
 
         $root = $dom->documentElement;
         // dataPack = import balík (faktura <inv:invoice>); responsePack = export

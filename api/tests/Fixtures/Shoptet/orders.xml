@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Syntetický export objednávek ve tvaru systémové šablony „Shoptet - XML".
+     Žádná reálná data: e-maily example.test, IČO s platným kontrolním součtem. -->
+<ORDERS>
+  <ORDER>
+    <ORDER_ID>90001</ORDER_ID>
+    <CODE>2026000101</CODE>
+    <DATE>2026-09-01 10:15:00</DATE>
+    <STATUS>Vyřizuje se</STATUS>
+    <CURRENCY>
+      <CODE>CZK</CODE>
+      <EXCHANGE_RATE>1</EXCHANGE_RATE>
+    </CURRENCY>
+    <CUSTOMER>
+      <EMAIL>jana.testovaci@example.test</EMAIL>
+      <PHONE>+420 600 000 001</PHONE>
+      <BILLING_ADDRESS>
+        <NAME>Jana Testovací</NAME>
+        <COMPANY></COMPANY>
+        <STREET>Testovací</STREET>
+        <HOUSENUMBER>1</HOUSENUMBER>
+        <CITY>Praha</CITY>
+        <ZIP>11000</ZIP>
+        <COUNTRY>Česká republika</COUNTRY>
+        <COUNTRY_CODE>CZ</COUNTRY_CODE>
+        <COMPANY_ID></COMPANY_ID>
+        <VAT_ID></VAT_ID>
+      </BILLING_ADDRESS>
+      <SHIPPING_ADDRESS>
+        <NAME>Jana Testovací</NAME>
+        <STREET>Testovací</STREET>
+        <HOUSENUMBER>1</HOUSENUMBER>
+        <CITY>Praha</CITY>
+        <ZIP>11000</ZIP>
+        <COUNTRY_CODE>CZ</COUNTRY_CODE>
+      </SHIPPING_ADDRESS>
+      <IP_ADDRESS>192.0.2.10</IP_ADDRESS>
+    </CUSTOMER>
+    <REMARK/>
+    <UNKNOWN_ELEMENT_FROM_TEMPLATE>ignoruje se</UNKNOWN_ELEMENT_FROM_TEMPLATE>
+    <TOTAL_PRICE>
+      <WITH_VAT>1009.00</WITH_VAT>
+      <WITHOUT_VAT>848.76</WITHOUT_VAT>
+      <VAT>160.24</VAT>
+      <ROUNDING>0.00</ROUNDING>
+      <PRICE_TO_PAY>1009.00</PRICE_TO_PAY>
+      <PAID>0</PAID>
+    </TOTAL_PRICE>
+    <ORDER_ITEMS>
+      <ITEM>
+        <TYPE>product</TYPE>
+        <NAME>Tričko</NAME>
+        <AMOUNT>2</AMOUNT>
+        <CODE>SHOP-TRIKO-M</CODE>
+        <EAN></EAN>
+        <VARIANT_NAME>M</VARIANT_NAME>
+        <UNIT>ks</UNIT>
+        <DISCOUNT>0</DISCOUNT>
+        <UNIT_PRICE>
+          <WITH_VAT>363.00</WITH_VAT>
+          <WITHOUT_VAT>300.00</WITHOUT_VAT>
+          <VAT>63.00</VAT>
+          <VAT_RATE>21</VAT_RATE>
+        </UNIT_PRICE>
+        <TOTAL_PRICE>
+          <WITH_VAT>726.00</WITH_VAT>
+          <WITHOUT_VAT>600.00</WITHOUT_VAT>
+          <VAT>126.00</VAT>
+          <VAT_RATE>21</VAT_RATE>
+        </TOTAL_PRICE>
+      </ITEM>
+      <ITEM>
+        <TYPE>product</TYPE>
+        <NAME>Hrnek</NAME>
+        <AMOUNT>1</AMOUNT>
+        <CODE>SHOPTET-NEZNAMY-KOD</CODE>
+        <EAN>8590000000017</EAN>
+        <UNIT>ks</UNIT>
+        <UNIT_PRICE>
+          <WITH_VAT>224.00</WITH_VAT>
+          <WITHOUT_VAT>200.00</WITHOUT_VAT>
+          <VAT_RATE>12</VAT_RATE>
+        </UNIT_PRICE>
+        <TOTAL_PRICE>
+          <WITH_VAT>224.00</WITH_VAT>
+          <WITHOUT_VAT>200.00</WITHOUT_VAT>
+          <VAT_RATE>12</VAT_RATE>
+        </TOTAL_PRICE>
+      </ITEM>
+      <ITEM>
+        <TYPE>shipping</TYPE>
+        <NAME>Výdejní místo</NAME>
+        <AMOUNT>1</AMOUNT>
+        <UNIT_PRICE>
+          <WITH_VAT>79.00</WITH_VAT>
+          <WITHOUT_VAT>65.29</WITHOUT_VAT>
+          <VAT_RATE>21</VAT_RATE>
+        </UNIT_PRICE>
+        <TOTAL_PRICE>
+          <WITH_VAT>79.00</WITH_VAT>
+          <VAT_RATE>21</VAT_RATE>
+        </TOTAL_PRICE>
+      </ITEM>
+      <ITEM>
+        <TYPE>billing</TYPE>
+        <NAME>Dobírka</NAME>
+        <AMOUNT>1</AMOUNT>
+        <UNIT_PRICE>
+          <WITH_VAT>30.00</WITH_VAT>
+          <WITHOUT_VAT>24.79</WITHOUT_VAT>
+          <VAT_RATE>21</VAT_RATE>
+        </UNIT_PRICE>
+        <TOTAL_PRICE>
+          <WITH_VAT>30.00</WITH_VAT>
+          <VAT_RATE>21</VAT_RATE>
+        </TOTAL_PRICE>
+      </ITEM>
+      <ITEM>
+        <TYPE>discount-coupon</TYPE>
+        <NAME>Slevový kupón</NAME>
+        <AMOUNT>1</AMOUNT>
+        <UNIT_PRICE>
+          <WITH_VAT>-50.00</WITH_VAT>
+          <WITHOUT_VAT>-41.32</WITHOUT_VAT>
+          <VAT_RATE>21</VAT_RATE>
+        </UNIT_PRICE>
+        <TOTAL_PRICE>
+          <WITH_VAT>-50.00</WITH_VAT>
+          <VAT_RATE>21</VAT_RATE>
+        </TOTAL_PRICE>
+      </ITEM>
+    </ORDER_ITEMS>
+  </ORDER>
+  <ORDER>
+    <CODE>2026000102</CODE>
+    <DATE>2026-09-01 11:00:00</DATE>
+    <STATUS>Nová</STATUS>
+    <CURRENCY><CODE>CZK</CODE><EXCHANGE_RATE>1</EXCHANGE_RATE></CURRENCY>
+    <CUSTOMER>
+      <EMAIL>nakup@example.test</EMAIL>
+      <BILLING_ADDRESS>
+        <NAME>Petr Nákupčí</NAME>
+        <COMPANY>Testovací odběratel s.r.o.</COMPANY>
+        <STREET>Průmyslová</STREET>
+        <HOUSENUMBER>12</HOUSENUMBER>
+        <CITY>Brno</CITY>
+        <ZIP>60200</ZIP>
+        <COUNTRY_CODE>CZ</COUNTRY_CODE>
+        <COMPANY_ID>25596641</COMPANY_ID>
+        <VAT_ID>CZ25596641</VAT_ID>
+      </BILLING_ADDRESS>
+    </CUSTOMER>
+    <TOTAL_PRICE>
+      <WITH_VAT>484.00</WITH_VAT>
+      <PRICE_TO_PAY>484.00</PRICE_TO_PAY>
+    </TOTAL_PRICE>
+    <ORDER_ITEMS>
+      <ITEM>
+        <TYPE>product</TYPE>
+        <NAME>Výrobek mimo katalog</NAME>
+        <AMOUNT>3</AMOUNT>
+        <CODE>MIMO-KATALOG-01</CODE>
+        <UNIT_PRICE><WITH_VAT>121.00</WITH_VAT><VAT_RATE>21</VAT_RATE></UNIT_PRICE>
+        <TOTAL_PRICE><WITH_VAT>363.00</WITH_VAT></TOTAL_PRICE>
+      </ITEM>
+      <ITEM>
+        <TYPE>shipping</TYPE>
+        <NAME>Kurýr</NAME>
+        <AMOUNT>1</AMOUNT>
+        <UNIT_PRICE><WITH_VAT>121.00</WITH_VAT><VAT_RATE>21</VAT_RATE></UNIT_PRICE>
+        <TOTAL_PRICE><WITH_VAT>121.00</WITH_VAT></TOTAL_PRICE>
+      </ITEM>
+    </ORDER_ITEMS>
+  </ORDER>
+  <ORDER>
+    <CODE>2026000103</CODE>
+    <DATE>2026-09-01 12:30:00</DATE>
+    <STATUS>Nová</STATUS>
+    <CURRENCY><CODE>EUR</CODE><EXCHANGE_RATE>25,10</EXCHANGE_RATE></CURRENCY>
+    <CUSTOMER>
+      <EMAIL>zakaznik.sk@example.test</EMAIL>
+      <BILLING_ADDRESS>
+        <NAME>Zákazník Slovensko</NAME>
+        <STREET>Skúšobná</STREET>
+        <HOUSENUMBER>5</HOUSENUMBER>
+        <CITY>Bratislava</CITY>
+        <ZIP>81101</ZIP>
+        <COUNTRY_CODE>SK</COUNTRY_CODE>
+      </BILLING_ADDRESS>
+      <SHIPPING_ADDRESS>
+        <NAME>Zákazník Slovensko</NAME>
+        <CITY>Bratislava</CITY>
+        <COUNTRY_CODE>SK</COUNTRY_CODE>
+      </SHIPPING_ADDRESS>
+    </CUSTOMER>
+    <TOTAL_PRICE>
+      <WITH_VAT>19.68</WITH_VAT>
+      <PRICE_TO_PAY>19.68</PRICE_TO_PAY>
+    </TOTAL_PRICE>
+    <ORDER_ITEMS>
+      <ITEM>
+        <TYPE>product</TYPE>
+        <NAME>Tričko</NAME>
+        <AMOUNT>1</AMOUNT>
+        <CODE>SHOP-TRIKO-M</CODE>
+        <UNIT_PRICE><WITH_VAT>14.76</WITH_VAT><WITHOUT_VAT>12.00</WITHOUT_VAT><VAT_RATE>23</VAT_RATE></UNIT_PRICE>
+        <TOTAL_PRICE><WITH_VAT>14.76</WITH_VAT></TOTAL_PRICE>
+      </ITEM>
+      <ITEM>
+        <TYPE>shipping</TYPE>
+        <NAME>Doprava SK</NAME>
+        <AMOUNT>1</AMOUNT>
+        <UNIT_PRICE><WITH_VAT>4.92</WITH_VAT><VAT_RATE>23</VAT_RATE></UNIT_PRICE>
+        <TOTAL_PRICE><WITH_VAT>4.92</WITH_VAT></TOTAL_PRICE>
+      </ITEM>
+    </ORDER_ITEMS>
+  </ORDER>
+  <ORDER>
+    <DATE>2026-09-01 13:00:00</DATE>
+    <ORDER_ITEMS>
+      <ITEM><TYPE>product</TYPE><NAME>Bez kódu objednávky</NAME><AMOUNT>1</AMOUNT>
+        <UNIT_PRICE><WITH_VAT>10.00</WITH_VAT><VAT_RATE>21</VAT_RATE></UNIT_PRICE></ITEM>
+    </ORDER_ITEMS>
+  </ORDER>
+</ORDERS>

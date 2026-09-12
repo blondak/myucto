@@ -350,6 +350,14 @@ final class RateLimitMiddleware implements MiddlewareInterface
                     (int) ($rl['payroll_document_public_per_min_per_ip'] ?? 30), 60];
         }
 
+        // Veřejný feed pro automatický import Shoptetu (bez auth, jen token). Shoptet
+        // si ho stahuje nejvýš několikrát za hodinu, 30/min/IP nechá rezervu na ruční
+        // kontrolu a zastaví hádání tokenu i opakované sestavování feedu.
+        if (str_starts_with($path, '/api/public/shoptet/feed/')) {
+            return ['rl:pubshoptet:ip:' . $this->ipBucket($ip),
+                    (int) ($rl['shoptet_feed_per_min_per_ip'] ?? 30), 60];
+        }
+
         // ARES / VIES / CRPDPH lookups (per user) — chrání 24h cache před zaplněním
         if (in_array($path, ['/api/clients/lookup-ares', '/api/clients/lookup-vies', '/api/clients/lookup-bank'], true) && $userId > 0) {
             return ['rl:ares:user:' . $userId, (int) ($rl['ares_per_min_per_user'] ?? 30), 60];

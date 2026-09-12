@@ -279,6 +279,7 @@ const ICONS = {
   company:          'M3.75 21h16.5M4.5 3h15v18h-15V3zm3.75 4.5h.008v.008H8.25V7.5zm0 3h.008v.008H8.25V10.5zm0 3h.008v.008H8.25V13.5zm3.75-6h.008v.008H12V7.5zm0 3h.008v.008H12V10.5zm0 3h.008v.008H12V13.5zm3.75-6h.008v.008H15.75V7.5zm0 3h.008v.008H15.75V10.5zm0 3h.008v.008H15.75V13.5zM9 21v-3.75h6V21',
   tools:            'M11.42 15.17l-5.66 5.66a2.25 2.25 0 0 1-3.18-3.18l5.66-5.66m3.18 3.18 2.12-2.12m-2.12 2.12-3.18-3.18m5.3 1.06 1.06-1.06m0 0 4.24 4.24m-4.24-4.24a6 6 0 0 0 1.62-6.23l-2.83 2.83-3.18-3.18 2.83-2.83a6 6 0 0 0-6.23 1.62',
   folderOpen:       'M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z M3 9h18',
+  swap:             'M7 8h13m0 0l-4-4m4 4l-4 4M17 16H4m0 0l4 4m-4-4l4-4',
   requestDoc:       'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M12 11v4m-2-2h4',
   // Výmaz osobních údajů — koš. Odlišný od tax_archive (uschovávání), protože
   // sousední položka menu dělá pravý opak.
@@ -505,6 +506,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/stock/intrastat',  label: t('nav.stock_intrastat'),  icon: ICONS.exports },
         { to: '/eshop/jobs',        label: t('nav.eshop_jobs'),       icon: ICONS.reports },
         { to: '/eshop/integrations', label: t('nav.eshop_integrations'), icon: ICONS.tools, permission: 'eshop.integrations' as PermissionKey },
+        { to: '/eshop/shoptet', label: t('nav.eshop_shoptet'), icon: ICONS.swap, permission: 'eshop' as PermissionKey },
       ],
     } as NavSection] : []),
     {

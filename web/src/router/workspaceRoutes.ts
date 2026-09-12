@@ -254,6 +254,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'eshop/product-masters/new', name: 'eshop-product-master-new', component: () => import('@/pages/eshop/ProductMasterEditor.vue'), meta: { requiresStock: true, requiresSupplier: true, additionalPermissions: ['stock.items.write'] } },
       { path: 'eshop/product-masters/:id(\\d+)', name: 'eshop-product-master-detail', component: () => import('@/pages/eshop/ProductMasterEditor.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'eshop/integrations',      name: 'eshop-integrations',    component: () => import('@/pages/eshop/IntegrationCenter.vue'), meta: { requiresStock: true, requiresSupplier: true } },
+      // Shoptet bez API — import objednávek a dokladů, feed zásob a cen (?tab=…).
+      { path: 'eshop/shoptet',           name: 'eshop-shoptet',         component: () => import('@/pages/eshop/ShoptetPage.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       // E-shop — číselníky (Výrobci/Kategorie/Atributy/Tagy/Poplatky/Sklady) + import
       // jako záložky jedné stránky (?tab=…). Poslední položka sekce „Zboží".
       { path: 'eshop',               name: 'eshop',               component: () => import('@/pages/eshop/EshopPage.vue'),     meta: { requiresStock: true, requiresSupplier: true } },

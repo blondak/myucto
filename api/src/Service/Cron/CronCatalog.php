@@ -397,6 +397,18 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Stažení exportu objednávek ze Shoptetu; interval si určuje každá firma
+                // v nastavení, úloha jen běží dost často, aby ho mohla dodržet.
+                'script' => 'cron-shoptet-orders',
+                'requires_usage' => CronJobGate::USAGE_SHOPTET_ORDERS,
+                'recommended' => 'every_15_min',
+                'linux_cron' => '*/15 * * * *',
+                'windows_schtasks' => '/sc minute /mo 15',
+                'max_age_hours' => 26,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-ai-worker',
                 'recommended' => 'every_10_min',
                 'linux_cron' => '*/10 * * * *',

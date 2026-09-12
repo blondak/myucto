@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Syntetická konečná faktura, která odečítá zdaněnou zálohu (daňový doklad k přijaté
+     platbě 2026500001). Řádky nesou plnou tržbu, odpočet je jen v TaxedDeposits
+     a PaidDepositsAmount, takže částka k úhradě je 0. -->
+<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.2">
+  <DocumentType>1</DocumentType>
+  <ID>2026100002</ID>
+  <UUID>6f1e3c2a-0000-4000-8000-000000000102</UUID>
+  <IssueDate>2026-09-05</IssueDate>
+  <TaxPointDate>2026-09-05</TaxPointDate>
+  <VATApplicable>true</VATApplicable>
+  <LocalCurrencyCode>CZK</LocalCurrencyCode>
+  <CurrRate>1</CurrRate>
+  <RefCurrRate>1</RefCurrRate>
+  <AccountingSupplierParty>
+    <Party>
+      <PartyIdentification><ID>12345679</ID></PartyIdentification>
+      <PartyName><Name>Testovací e-shop s.r.o.</Name></PartyName>
+      <PostalAddress><StreetName>Skladová</StreetName><BuildingNumber>3</BuildingNumber><CityName>Praha</CityName><PostalZone>11000</PostalZone><Country><IdentificationCode>CZ</IdentificationCode></Country></PostalAddress>
+    </Party>
+  </AccountingSupplierParty>
+  <AccountingCustomerParty>
+    <Party>
+      <PartyIdentification><ID>25596641</ID></PartyIdentification>
+      <PartyName><Name>Testovací odběratel s.r.o.</Name></PartyName>
+      <PostalAddress><StreetName>Průmyslová</StreetName><BuildingNumber>12</BuildingNumber><CityName>Brno</CityName><PostalZone>60200</PostalZone><Country><IdentificationCode>CZ</IdentificationCode></Country></PostalAddress>
+      <PartyTaxScheme><CompanyID>CZ25596641</CompanyID><TaxScheme>VAT</TaxScheme></PartyTaxScheme>
+    </Party>
+  </AccountingCustomerParty>
+  <OrderReferences>
+    <OrderReference id="o1"><SalesOrderID>2026000102</SalesOrderID></OrderReference>
+  </OrderReferences>
+  <InvoiceLines>
+    <InvoiceLine>
+      <ID>1</ID>
+      <InvoicedQuantity unitCode="ks">1</InvoicedQuantity>
+      <LineExtensionAmount>400.00</LineExtensionAmount>
+      <UnitPrice>400.00</UnitPrice>
+      <ClassifiedTaxCategory><Percent>21</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+      <Item><Description>Výrobek mimo katalog</Description></Item>
+    </InvoiceLine>
+  </InvoiceLines>
+  <TaxedDeposits>
+    <TaxedDeposit>
+      <ID>2026500001</ID>
+      <VariableSymbol>2026500001</VariableSymbol>
+      <TaxableDepositAmount>400.00</TaxableDepositAmount>
+      <TaxInclusiveDepositAmount>484.00</TaxInclusiveDepositAmount>
+      <ClassifiedTaxCategory><Percent>21</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+    </TaxedDeposit>
+  </TaxedDeposits>
+  <TaxTotal>
+    <TaxSubTotal>
+      <TaxableAmount>400.00</TaxableAmount>
+      <TaxAmount>84.00</TaxAmount>
+      <TaxInclusiveAmount>484.00</TaxInclusiveAmount>
+      <AlreadyClaimedTaxableAmount>400.00</AlreadyClaimedTaxableAmount>
+      <AlreadyClaimedTaxAmount>84.00</AlreadyClaimedTaxAmount>
+      <AlreadyClaimedTaxInclusiveAmount>484.00</AlreadyClaimedTaxInclusiveAmount>
+      <DifferenceTaxableAmount>0</DifferenceTaxableAmount>
+      <DifferenceTaxAmount>0</DifferenceTaxAmount>
+      <DifferenceTaxInclusiveAmount>0</DifferenceTaxInclusiveAmount>
+      <TaxCategory><Percent>21</Percent></TaxCategory>
+    </TaxSubTotal>
+    <TaxAmount>84.00</TaxAmount>
+  </TaxTotal>
+  <LegalMonetaryTotal>
+    <TaxExclusiveAmount>400.00</TaxExclusiveAmount>
+    <TaxInclusiveAmount>484.00</TaxInclusiveAmount>
+    <AlreadyClaimedTaxExclusiveAmount>400.00</AlreadyClaimedTaxExclusiveAmount>
+    <AlreadyClaimedTaxInclusiveAmount>484.00</AlreadyClaimedTaxInclusiveAmount>
+    <DifferenceTaxExclusiveAmount>0</DifferenceTaxExclusiveAmount>
+    <DifferenceTaxInclusiveAmount>0</DifferenceTaxInclusiveAmount>
+    <PayableRoundingAmount>0</PayableRoundingAmount>
+    <PaidDepositsAmount>484.00</PaidDepositsAmount>
+    <PayableAmount>0</PayableAmount>
+  </LegalMonetaryTotal>
+</Invoice>

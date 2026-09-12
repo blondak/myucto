@@ -632,6 +632,11 @@ final class RoutePermissionMap
         ['*', '#^/api/stock(/|$)#', 'stock', AccessLevel::WRITE],
         ['GET', '#^/api/eshop/integrations(/|$)#', 'eshop.integrations', AccessLevel::READ],
         ['*', '#^/api/eshop/integrations(/|$)#', 'eshop.integrations', AccessLevel::WRITE],
+        // Shoptet: zápis objednávek je právo k prodejním objednávkám, import dokladů
+        // zakládá vydané faktury. Akce navíc ověřuje i `eshop.write`.
+        ['GET', '#^/api/eshop/shoptet(/|$)#', 'eshop', AccessLevel::READ],
+        ['POST', '#^/api/eshop/shoptet/orders(/|$)#', 'stock.orders.write', AccessLevel::WRITE],
+        ['POST', '#^/api/eshop/shoptet/documents/import$#', 'invoices.create', AccessLevel::WRITE],
         ['GET', '#^/api/eshop(/|$)#', 'eshop', AccessLevel::READ],
         ['POST', '#^/api/catalog/(products|prices)/batch$#', 'eshop', AccessLevel::READ],
         ['GET', '#^/api/catalog/facets$#', 'eshop', AccessLevel::READ],

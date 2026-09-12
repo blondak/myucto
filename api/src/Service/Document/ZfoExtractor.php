@@ -202,6 +202,10 @@ final class ZfoExtractor
         if (!$ok) {
             throw new DocumentException('zfo_parse_failed', 'Obsah datové zprávy se nepodařilo přečíst.', 422);
         }
+        // DOCTYPE v UTF-16 kontrola nad surovými bajty nevidí, libxml ho načte.
+        if ($dom->doctype !== null) {
+            throw new DocumentException('zfo_parse_failed', 'ZFO obsahuje nepovolenou DTD deklaraci.', 422);
+        }
 
         $xp = new \DOMXPath($dom);
         $get = function (string $local) use ($xp): ?string {

@@ -9,6 +9,7 @@ use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Integration\IntegrationEventPublisher;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Oss\OssItemPlanner;
+use MyInvoice\Service\Shoptet\ShoptetInvoicingGuard;
 use PDO;
 
 final class SalesOrderInvoiceService
@@ -20,6 +21,7 @@ final class SalesOrderInvoiceService
         private readonly SalesOrderService $orders,
         private readonly OssItemPlanner $ossPlanner,
         private readonly IntegrationEventPublisher $events,
+        private readonly ShoptetInvoicingGuard $shoptetGuard,
     ) {}
 
     /** Vytvoří pouze draft. Běžné vystavení ani stock_auto_issue tato cesta nespouští. */
@@ -55,6 +57,7 @@ final class SalesOrderInvoiceService
             if (!in_array($header['commercial_status'], ['confirmed', 'completed'], true)) {
                 throw new SalesOrderException('state_conflict', 'Fakturu lze vytvořit jen z potvrzené objednávky.', 409);
             }
+            $this->shoptetGuard->assertCanInvoice($supplierId, $orderId);
             $order = $this->orders->detail($supplierId, $orderId) ?? throw new SalesOrderException('not_found', 'Objednávka nenalezena.', 404);
             $today = date('Y-m-d');
             $clientContext = $this->ossPlanner->clientContext((int) $order['client_id'], $order['customer_snapshot']);

@@ -86,6 +86,7 @@ Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 | `cron-automation-digest` | každou hodinu v ranním okně 06:00–08:00 |
 | `cron-ai-worker` | každých 10 min; zpracuje frontu po zapnutí AI asistence |
 | `cron-ai-rule-miner` | 1× denně 04:00; vytváří návrhová pravidla z korekcí |
+| `cron-shoptet-orders` | každých 15 min; jen firmy se zapnutým automatickým stahováním objednávek ze Shoptetu, interval určuje firma ([§ 34a.5](34a_Shoptet.md)) |
 | `cron-payroll-post` | 1× měsíčně 1. dne 04:00; zaúčtuje mzdy za předchozí měsíc |
 | `cron-payroll-registration-changes` | 1× denně 05:00; jen firmy se zapnutými mzdami. Hledá změny hlásitelné do registru pojištěnců (ČSSZ) a zakládá návrh povinnosti s termínem — nic neodesílá. Denní běh stačí: lhůta je osm dnů ([§ 68.3](68_Podani_a_hlaseni.md)). Bez ní se změna zjistí jen tehdy, když někdo otevře kartu zaměstnance, a lhůta uteče |
 | `cron-vat-clearing` | 1× měsíčně 1. dne 04:30; interní doklad zúčtování DPH za skončené období ([§ 81.3.3](81_Ucetni_osnova.md#8133-mesicni-zuctovani-dph)) |

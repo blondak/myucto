@@ -317,10 +317,14 @@ final class IsdocToPurchaseInvoiceMapper
      */
     private function mapDocumentKind(string $invoiceType): string
     {
+        // `tax_document` = ISDOC DocumentType 5 (daňový zálohový list). Na přijaté straně
+        // zůstává zálohou jako před opravou mapování v IsdocParser — změna by posunula
+        // odpočet DPH u přijatých DZL a ta otázka patří samostatnému rozhodnutí.
         return match ($invoiceType) {
-            'credit_note' => 'credit_note',
-            'proforma'    => 'advance',
-            default       => 'invoice',
+            'credit_note'  => 'credit_note',
+            'proforma',
+            'tax_document' => 'advance',
+            default        => 'invoice',
         };
     }
 

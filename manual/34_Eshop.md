@@ -886,23 +886,282 @@ odmítne; nejprve stornuj kompletaci nebo proveď korekci po ní.
 
 **Cesta: `Zboží → Integrace`**
 
-Integrační centrum spravuje obecná připojení e-shopů a dalších externích
-systémů. U každého připojení nastavíš typ konektoru, provozní stav, mapování
-skladu, měny a jazyka, vlastnictví jednotlivých polí, limit požadavků a dobu
-uchování provozních záznamů. Přístupové údaje se ukládají šifrovaně a po
-uložení se ve formuláři znovu nezobrazí.
+Integrační centrum propojuje MyÚčto s e-shopem nebo jiným externím systémem.
+Pro každé propojení založíš **připojení**: vybereš konektor, přiřadíš místním
+číselníkům hodnoty externího systému, rozhodneš, kdo je u kterých dat zdrojem
+pravdy, uložíš přístupové údaje a připojení aktivuješ. Stránka zároveň obsahuje
+všechny podklady pro vývojáře, který napojení programuje, a přehled provozu.
 
-Sekce **Webhook** vytvoří nový podpisový klíč a ukáže ho právě jednou. Externí
-systém jím podepisuje tělo zprávy spolu s časovým razítkem. Otočením klíče se
-předchozí klíč okamžitě zneplatní.
+Každá firma má předem připravené **Ukázkové napojení (vzor Shoptet)** ve stavu
+Koncept, předvyplněné z jejích číselníků; vznikne při prvním otevření stránky
+uživatelem s právem integrace upravovat, a když ho smažeš, znovu se už
+nezaloží (ručně ho vrátíš tlačítkem **Vytvořit ukázkové napojení**). Formulář
+nového připojení je předvyplněný stejnými výchozími hodnotami. Zástupné
+hodnoty v lomených závorkách, např. `<stockId skladu v Shoptetu>`, nahraď
+skutečnými a jako první krok vytvoř secret webhooku. Připojení smažeš
+tlačítkem **Smazat připojení** v záhlaví editoru, zmizí i jeho fronty událostí.
 
-Přehled provozu ukazuje stáří poslední synchronizace, počty čekajících,
-zpracovaných a chybových zpráv a bezpečné diagnostické kódy. Nezobrazuje obsah
-zpráv ani přístupové údaje. Událost ve stavu trvalé chyby lze po odstranění
-příčiny vrátit do fronty tlačítkem **Opakovat**.
+Stránka je dostupná jen firmě se zapnutým skladem a uživateli s oprávněním
+**Spravovat integrace e-shopu** (ve výchozím nastavení administrátor). Uživatel
+jen s právem čtení nastavení vidí, ale nemůže ho měnit.
 
-Tlačítko **Spustit kontrolu** porovná mapované identity s místními daty. Kontrola
-běží na pozadí po dávkách a její průběh zůstává v historii úloh. Stejná kontrola
-se pro aktivní připojení spouští také pravidelně. Pokud se změnový kurzor
-externího systému dostane mimo uchovávanou historii, systém výslovně vyžádá
-nový úplný snapshot katalogu.
+### 34.16.1 Postup nastavení
+
+Editor připojení je rozdělený do šesti kroků. Nahoře vidíš jejich stav
+(hotovo, doplnit, nepovinné, po uložení) a klepnutím na krok na něj stránka
+sjede. Všechno kromě webhooku uložíš jedním tlačítkem **Uložit** v liště dole.
+**Zahodit změny** vrátí formulář do uloženého stavu.
+
+| Krok | Co v něm nastavíš |
+|---|---|
+| **1. Konektor** | S jakým systémem se propojuješ a název připojení |
+| **2. Mapování** | Které sklady, měny, jazyky a sazby DPH odpovídají hodnotám v externím systému |
+| **3. Vlastnictví polí** | U každého pole, jestli pravdu drží MyÚčto, externí systém, nebo rozhoduješ ručně |
+| **4. Přístupy** | Přístupové údaje k externímu systému, pokud je konektor potřebuje |
+| **5. Webhook** | Adresa pro příchozí události, secret a podklady pro vývojáře (až po prvním uložení) |
+| **6. Aktivace** | Stav připojení a provozní limity |
+
+### 34.16.2 Konektory
+
+Konektor určuje, s jakým systémem se připojení baví a co od tebe potřebuje.
+Konektor uloženého připojení už nejde změnit, pro jiný systém založ nové
+připojení.
+
+| Konektor | Stav | K čemu je |
+|---|---|---|
+| **Vlastní napojení přes webhook a API** | K dispozici | Pro vlastní e-shop nebo prostředníka. Externí systém posílá podepsané události na webhook a změny katalogu si stahuje přes API |
+| **Shoptet** | Připravujeme | Přímé napojení Shoptetu. Bude mít vlastní příjem webhooků Shoptetu a stahování změn objednávek, na obecnou adresu webhooku se nenapojuje. Zatím ho nelze vybrat |
+
+> [!NOTE]
+> Připojení, které vzniklo dřív, než aplikace začala konektory rozlišovat,
+> může mít konektor, který seznam nezná. Takové připojení dál funguje a jde
+> upravovat. Stránka na to upozorní a mapování, vlastnictví polí i přístupové
+> údaje u něj zadáváš jako JSON bez kontroly podle definice.
+
+### 34.16.3 Mapování číselníků
+
+Mapování říká, pod jakou hodnotou zná externí systém tvoje sklady, měny,
+jazyky a sazby DPH. Každý typ má vlastní tabulku: vlevo vybereš místní
+hodnotu z číselníku firmy, vpravo napíšeš kód nebo ID v externím systému.
+Řádek přidáš tlačítkem **Přidat řádek**, odebereš ikonou koše. Hodnotu, kterou
+nenamapuješ, konektor nepřenáší.
+
+| Typ | Místní hodnota | Příklad hodnoty v e-shopu |
+|---|---|---|
+| **Sklady** | Kód skladu (`E-shop → Sklady`) | ID skladu v e-shopu, např. `1` |
+| **Měny** | Měna firmy nebo měna, ve které má zboží prodejní cenu | `CZK`, `EUR` |
+| **Jazyky** | Jazyk z číselníku `E-shop → Jazyky` | `cs`, `sk` |
+| **Sazby DPH** | Sazba DPH podle číselníku | `21` nebo ID sazby |
+
+Výběr nabízí jen aktivní hodnoty. Když sklad deaktivuješ nebo jazyk
+archivuješ, jeho uložené mapování zůstává. Uložení odmítne hodnotu, která ve
+firmě neexistuje, prázdnou hodnotu v externím systému i stejnou místní
+hodnotu namapovanou dvakrát. Chyba vždy řekne, u kterého typu a hodnoty je.
+
+**Pokročilý režim** (přepínač u kroku 2) ukáže mapování i vlastnictví polí
+jako JSON. Hodí se vývojáři, který nastavení kopíruje mezi prostředími. Při
+vypnutí režimu se JSON zkontroluje a převede zpět do tabulek; neplatný JSON
+tabulky nepřepíše. Uložený tvar mapování:
+
+```json
+{
+  "warehouses": { "HLAVNI": "1" },
+  "currencies": { "CZK": "CZK", "EUR": "EUR" },
+  "languages": { "cs": "cs" }
+}
+```
+
+### 34.16.4 Vlastnictví polí
+
+U každého pole rozhoduješ, kdo je zdrojem pravdy, když se hodnoty v MyÚčtu
+a v externím systému liší. Konektor se tím řídí při přenosu změn.
+
+| Vlastník | Co znamená |
+|---|---|
+| **Místní** | Pravdou je MyÚčto. Hodnota se posílá do externího systému a jeho změna se nepřevezme |
+| **Externí** | Pravdou je externí systém. Jeho změna přepíše hodnotu v MyÚčtu a MyÚčto ji ven neposílá |
+| **Ruční** | Nic se nepřepisuje automaticky. Rozdíl se jen nahlásí a rozhodneš o něm ty |
+
+Pole jsou seskupená podle oblasti. Výchozí volba je označená štítkem
+**výchozí**; pole, které v nastavení chybí, má výchozího vlastníka.
+
+| Pole | Výchozí vlastník | Proč |
+|---|---|---|
+| Kód zboží, název, popis, SEO texty, EAN, výrobce, obrázky, hmotnost | Místní | Katalog vedeš v MyÚčtu |
+| Prodejní cena, sazba DPH | Místní | Cena a DPH vstupují do účetnictví |
+| Prodejnost karty | Místní | Aktivace a vyřazení karty |
+| Skladové množství | Místní | Sklad vede MyÚčto |
+| Stav objednávky, kontaktní údaje zákazníka | Externí | Objednávku zakládá a mění zákazník v e-shopu |
+| Stav úhrady objednávky | Místní | Úhradu páruje MyÚčto z banky a pokladny |
+| Stav expedice | Místní | Rezervace a vyskladnění probíhají ve skladu MyÚčta |
+
+**Příklady:**
+
+- Popisy zboží píše marketing přímo v e-shopu: nastav **Popis zboží** na
+  **Externí**. Změna popisu v e-shopu se pak převezme do MyÚčta.
+- Ceny spravuješ v MyÚčtu, ale v e-shopu občas někdo cenu ručně upraví a ty o
+  tom chceš vědět: nastav **Prodejní cena** na **Ruční**. Rozdíl se nahlásí a
+  nic se nepřepíše.
+
+U vlastního napojení můžeš přidat i **vlastní pole**, které definice konektoru
+nezná (např. `custom.loyalty_points`). Klíč začíná malým písmenem a obsahuje
+jen `a–z`, `0–9`, tečku a podtržítko.
+
+### 34.16.5 Přístupové údaje
+
+Přístupové údaje jsou pole, která konektor potřebuje k přístupu do externího
+systému. Ukládají se šifrovaně a po uložení se už nikdy nezobrazí, ani
+administrátorovi. U každého pole vidíš jen stav **Uloženo** nebo
+**Nevyplněno**.
+
+- Uložené pole přepíšeš vyplněním nové hodnoty. Prázdné pole ponechá uloženou
+  hodnotu.
+- Nepovinné uložené pole odstraníš zaškrtnutím **Odebrat uloženou hodnotu**.
+- Pole typu adresa musí začínat `https://`.
+
+Vlastní napojení nabízí nepovinnou **Adresu pro odchozí události** a **Token
+pro odchozí události**. Odchozí doručování zatím nic nespouští, údaje si můžeš
+připravit dopředu. Secret webhooku s nimi nesouvisí, ten vzniká v kroku 5.
+
+### 34.16.6 Webhook a podklady pro vývojáře
+
+Krok 5 se zobrazí po prvním uložení připojení. Obsahuje adresu webhooku
+s tlačítkem **Kopírovat**, kontrolu připravenosti a podrobný popis kontraktu
+s ukázkami v curl, PHP a Node.js.
+
+Tlačítko **Vytvořit secret** vytvoří podpisový klíč webhooku a ukáže ho právě
+jednou. Ulož ho hned do externího systému. **Vytvořit nový secret** předchozí
+klíč okamžitě zneplatní, proto se aplikace nejdřív zeptá.
+
+Webhook přijímá události, jen když je připojení **aktivní** a má vytvořený
+secret. Požadavek je `POST` na adresu webhooku s těmito hlavičkami:
+
+| Hlavička | Obsah |
+|---|---|
+| `Content-Type` | `application/json`, tělo nejvýše 1 MiB |
+| `X-Integration-Timestamp` | Unixový čas odeslání v sekundách; odchylka od času serveru nejvýše 5 minut |
+| `X-Integration-Signature` | `sha256=` a hexadecimální HMAC-SHA256 z řetězce `časové_razítko.tělo` klíčem secret |
+
+Podepisuje se přesně odeslané tělo, bajt po bajtu. Když tělo po výpočtu
+podpisu přeformátuješ, podpis přestane sedět. Ukázka výpočtu v PHP:
+
+```php
+$body = json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+$timestamp = (string) time();
+$signature = 'sha256=' . hash_hmac('sha256', $timestamp . '.' . $body, getenv('WEBHOOK_SECRET'));
+```
+
+Tělo události je JSON objekt s povinnými poli `event_id` (jednoznačné ID
+události, nejvýše 190 znaků), `entity_type` (např. `order`), `entity_id`
+(ID entity v externím systému), `event_type` (např. `order.created`)
+a `aggregate_version` (celé číslo od 1, s každou změnou entity roste). Další
+pole se uloží spolu s událostí. Ukázka je objednávka ve stylu Shoptetu
+převedená do tohoto kontraktu (syntetická data). Skutečný Shoptet náš webhook
+sám nevolá (podepisuje HMAC-SHA1 v hlavičce `Shoptet-Webhook-Signature`),
+takže jde o vzor pro prostředníka nebo vlastní skript:
+
+```json
+{
+  "event_id": "shoptet-order-2026000123-1",
+  "entity_type": "order",
+  "entity_id": "2026000123",
+  "event_type": "order.created",
+  "aggregate_version": 1,
+  "payload": {
+    "code": "2026000123",
+    "status": { "id": -1 },
+    "currency": { "code": "CZK" },
+    "price": { "withVat": "1210.00", "withoutVat": "1000.00", "vat": "210.00" },
+    "paid": false,
+    "items": [{ "itemType": "product", "code": "SKU-1001", "amount": "2", "vatRate": "21" }]
+  }
+}
+```
+
+| Odpověď | Význam |
+|---|---|
+| **202** | Událost je přijatá do fronty. Při opakovaném doručení stejné události (stejné `event_id` i tělo) vrátí `duplicate: true` a znovu ji neuloží |
+| **400** | Tělo není platný JSON objekt nebo chybí či je neplatné povinné pole |
+| **401** | Připojení neexistuje nebo není aktivní, chybí secret, časové razítko je mimo 5 minut nebo nesedí podpis |
+| **409** | Pod stejným `event_id` už přišla událost s jiným obsahem; změnu pošli s novým `event_id` |
+| **413** | Tělo je větší než 1 MiB |
+
+Opakované doručení je proto bezpečné: když si odesílatel není jistý, že
+událost dorazila, pošle ji znovu beze změny. O pořadí změn jedné entity
+rozhoduje `aggregate_version`, ne čas doručení; pozdě doručená starší verze
+se při zpracování přeskočí.
+
+> [!NOTE]
+> Přijaté události čekají ve frontě příchozích událostí. Zapisovat je do
+> katalogu a objednávek bude konkrétní konektor; do té doby je v diagnostice
+> uvidíš jako čekající.
+
+**Ověřit podpis a tělo události:** ve spodní části kroku 5 vloží vývojář
+secret, časové razítko a tělo a stránka spočítá očekávanou hodnotu hlavičky
+`X-Integration-Signature`, zkontroluje tělo proti kontraktu, porovná podpis
+z jeho systému a připraví hotový příkaz curl. Výpočet probíhá jen
+v prohlížeči, secret se nikam neodesílá ani neukládá.
+
+### 34.16.7 Stahování změn katalogu
+
+Změny katalogu si externí systém stahuje sám přes veřejné API
+`GET /api/v1/catalog/changes`. Potřebuje API token s právem číst e-shop
+(vytvoříš ho v profilu v sekci **API tokeny**); pokud token není vázaný na
+jednu firmu, posílá hlavičku `X-Supplier-Id`.
+
+```bash
+curl -sS 'https://ucto.example.test/api/v1/catalog/changes?after_cursor=0&limit=250' \
+  -H "Authorization: Bearer $API_TOKEN"
+```
+
+Každá změna karty, ceny, obrázku, překladu, zásoby nebo rezervace dostane
+rostoucí kurzor. `after_cursor` je poslední zpracovaný kurzor (na začátku 0),
+`limit` 1 až 1000. Po každé stránce si systém uloží `next_cursor`; dokud je
+`has_more` true, načte hned další stránku. Položka říká, která karta se
+změnila (`entity_id`) a v jaké oblasti (`source_area`); aktuální data karty
+se pak načtou přes `POST /api/v1/catalog/products/batch`. Hodnota `tombstone`
+znamená smazanou nebo vyřazenou kartu.
+
+Odpověď **410** znamená, že kurzor je starší než uchovávaná historie změn.
+Externí systém stáhne celý katalog znovu a pokračuje od `minimum_cursor`.
+
+### 34.16.8 Aktivace a provozní limity
+
+| Stav | Co znamená |
+|---|---|
+| **Koncept** | Nastavuješ. Webhook nic nepřijímá a pro připojení nevznikají odchozí události |
+| **Aktivní** | Webhook přijímá události a pro připojení vznikají odchozí události o objednávkách |
+| **Pozastavené** | Dočasně vypnuto. Webhook události odmítá, dosavadní fronty zůstávají |
+| **Chyba** | Nastaví ho porovnání úplnosti, když najde problém. Po odstranění příčiny spusť porovnání znovu nebo zvol jiný stav |
+
+**Limit odchozích požadavků za minutu** (1 až 6000) určuje, kolik odchozích
+událostí smí konektor za minutu doručit a chrání API externího systému před
+přetížením. **Uchování provozních záznamů** (1 až 365 dní) určuje, po jaké době
+se z příchozích a odchozích událostí odstraní obsah a změnový feed zapomene
+starší změny.
+
+### 34.16.9 Diagnostika, opakování a porovnání úplnosti
+
+Přehled provozu pod editorem ukazuje počty příchozích a odchozích událostí,
+které čekají, doručené události, trvalé chyby a jejich diagnostické kódy.
+Obsah zpráv ani přístupové údaje nezobrazuje. Odchozí událost ve stavu trvalé
+chyby lze po odstranění příčiny vrátit do fronty tlačítkem **Opakovat**.
+
+Tlačítko **Porovnat úplnost** projde propojené identity připojení (které
+externí ID patří ke které místní kartě) a ověří, že místní karty pořád
+existují. Chybějící hlásí jako neúplné mapování a připojení přepne do stavu
+Chyba. Porovnání běží na pozadí po dávkách, průběh vidíš v přehledu a pro
+aktivní připojení se spouští i pravidelně. Obsah externího systému nestahuje
+ani nemění.
+
+### 34.16.10 Řešení potíží
+
+| Příznak | Příčina a řešení |
+|---|---|
+| Webhook vrací **401** | Připojení není aktivní, secret nebyl vytvořen nebo byl vyměněn, hodiny odesílatele se liší o víc než 5 minut, nebo se podepisuje jiné tělo, než se posílá. Ověř podpis nástrojem v kroku 5 |
+| Webhook vrací **409** | Stejné `event_id` bylo použito pro jinou změnu. Každá změna potřebuje nové `event_id` |
+| Webhook vrací **400** | Chybí povinné pole nebo má špatný tvar (např. `entity_type` s velkými písmeny, `aggregate_version` 0) |
+| Uložení hlásí, že hodnota ve firmě neexistuje | Sklad, jazyk nebo měna byly smazány. Oprav nebo odeber řádek mapování |
+| Změnový feed vrací **410** | Externí systém se dlouho nepřipojil. Musí stáhnout celý katalog znovu |
+| V diagnostice přibývají čekající příchozí události | Události se přijímají, ale konkrétní konektor je zatím nezpracovává |
+| Připojení je ve stavu Chyba | Porovnání úplnosti našlo propojení na neexistující kartu. Oprav propojení a spusť porovnání znovu |

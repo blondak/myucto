@@ -581,10 +581,17 @@ final class SalesOrderService
         if (count($rawLines) > 1000) throw new SalesOrderException('lines_limit', 'Objednávka má příliš mnoho řádků.');
         $lines = [];
         $totalNet = $totalVat = $totalGross = 0.0;
+        $hasNegativeLine = false;
         foreach ($rawLines as $index => $raw) {
             if (!is_array($raw)) throw new SalesOrderException('line_invalid', 'Neplatný řádek objednávky.');
             $qty = self::quantity((string) ($raw['quantity'] ?? '0'));
-            $unitPrice = self::money((string) ($raw['unit_price'] ?? '0'), 6);
+            // Záporná cena jen u neskladového řádku: sleva nebo kupón z e-shopu nese
+            // vlastní sazbu DPH a musí zůstat samostatným řádkem, aby součet i rozpad
+            // DPH seděl na objednávku. Skladová položka se zápornou cenou je chyba.
+            $unitPrice = (int) ($raw['stock_item_id'] ?? 0) === 0
+                ? self::signedMoney((string) ($raw['unit_price'] ?? '0'), 6)
+                : self::money((string) ($raw['unit_price'] ?? '0'), 6);
+            if ((float) $unitPrice < 0.0) $hasNegativeLine = true;
             $discount = self::percent((string) ($raw['discount_percent'] ?? '0'));
             $warehouseId = isset($raw['warehouse_id']) ? (int) $raw['warehouse_id'] : 0;
             if ($warehouseId > 0) {
@@ -627,6 +634,15 @@ final class SalesOrderService
             ];
             if ($lines[array_key_last($lines)]['description'] === '') throw new SalesOrderException('description_required', 'Popis řádku je povinný.');
         }
+        // Slevové řádky smí objednávku snížit, ne srazit na nulu nebo pod ni: taková
+        // objednávka není prodej a faktura z ní by byla nekladný doklad, který vystavení
+        // odmítne. Objednávka za nulu BEZ záporných řádků (vzorek zdarma) projde jako dřív.
+        if ($hasNegativeLine && round($totalGross, 2) <= 0.0) {
+            throw new SalesOrderException(
+                'total_not_positive',
+                'Celková částka objednávky po slevách musí být kladná. Slevy a kupóny ji srazily na nulu nebo pod ni.',
+            );
+        }
         $expires = trim((string) ($data['reservation_expires_at'] ?? ''));
         if ($expires !== '' && strtotime($expires) === false) throw new SalesOrderException('expiry_invalid', 'Neplatná expirace rezervace.');
         return [
@@ -643,6 +659,14 @@ final class SalesOrderService
             'reservation_expires_at' => $expires !== '' ? date('Y-m-d H:i:s', strtotime($expires)) : null,
             'lines' => $lines,
         ];
+    }
+
+    private static function signedMoney(string $value, int $scale): string
+    {
+        if (!is_numeric($value) || bccomp(ltrim($value, '-'), '999999999999.99999999', $scale) > 0) {
+            throw new SalesOrderException('money_invalid', 'Neplatná peněžní částka.');
+        }
+        return number_format((float) $value, $scale, '.', '');
     }
 
     private function insertLines(int $supplierId, int $orderId, array $lines): void

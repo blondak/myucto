@@ -69,6 +69,8 @@ final class CronJobGate
     public const USAGE_EPO_PENDING = 'epo_pending';
     /** Mzdové podání čekající na protokol ČSSZ nebo na uzavření transakce. */
     public const USAGE_JMHZ_TRANSPORT = 'jmhz_transport';
+    /** Aspoň jedna firma se zapnutým automatickým stahováním objednávek ze Shoptetu. */
+    public const USAGE_SHOPTET_ORDERS = 'shoptet_orders';
 
     /**
      * Sondy k `requires_usage` z {@see CronCatalog}. Každá je v {@see CronPreflight},
@@ -86,6 +88,7 @@ final class CronJobGate
         self::USAGE_CATALOG            => [CronPreflight::class, 'hasCatalogWorkerUse'],
         self::USAGE_EPO_PENDING        => [CronPreflight::class, 'hasPendingEpoAttempts'],
         self::USAGE_JMHZ_TRANSPORT     => [CronPreflight::class, 'hasOpenJmhzTransport'],
+        self::USAGE_SHOPTET_ORDERS     => [CronPreflight::class, 'hasShoptetAutoFetch'],
     ];
 
     /** Cfg klíč se seznamem jmen úloh z {@see CronCatalog}, které mají na téhle instalaci zůstat vypnuté. */

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Syntetický doklad v cizí měně pro spotřebitele v jiném členském státě (OSS). -->
+<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.2">
+  <DocumentType>1</DocumentType>
+  <ID>2026100002</ID>
+  <UUID>6f1e3c2a-0000-4000-8000-000000000102</UUID>
+  <IssueDate>2026-09-02</IssueDate>
+  <TaxPointDate>2026-09-02</TaxPointDate>
+  <VATApplicable>true</VATApplicable>
+  <LocalCurrencyCode>CZK</LocalCurrencyCode>
+  <ForeignCurrencyCode>EUR</ForeignCurrencyCode>
+  <CurrRate>25.10</CurrRate>
+  <RefCurrRate>1</RefCurrRate>
+  <AccountingSupplierParty>
+    <Party>
+      <PartyIdentification><ID>12345679</ID></PartyIdentification>
+      <PartyName><Name>Testovací e-shop s.r.o.</Name></PartyName>
+      <PostalAddress><StreetName>Skladová</StreetName><BuildingNumber>3</BuildingNumber><CityName>Praha</CityName><PostalZone>11000</PostalZone><Country><IdentificationCode>CZ</IdentificationCode></Country></PostalAddress>
+    </Party>
+  </AccountingSupplierParty>
+  <AccountingCustomerParty>
+    <Party>
+      <PartyName><Name>Zákazník Slovensko</Name></PartyName>
+      <PostalAddress><StreetName>Skúšobná</StreetName><BuildingNumber>5</BuildingNumber><CityName>Bratislava</CityName><PostalZone>81101</PostalZone><Country><IdentificationCode>SK</IdentificationCode></Country></PostalAddress>
+    </Party>
+  </AccountingCustomerParty>
+  <OrderReferences>
+    <OrderReference id="o1"><SalesOrderID>2026000103</SalesOrderID></OrderReference>
+  </OrderReferences>
+  <InvoiceLines>
+    <InvoiceLine>
+      <ID>1</ID>
+      <InvoicedQuantity unitCode="ks">1</InvoicedQuantity>
+      <LineExtensionAmount>301.20</LineExtensionAmount>
+      <LineExtensionAmountCurr>12.00</LineExtensionAmountCurr>
+      <UnitPrice>301.20</UnitPrice>
+      <ClassifiedTaxCategory><Percent>23</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+      <Item><Description>Tričko</Description></Item>
+    </InvoiceLine>
+  </InvoiceLines>
+  <TaxTotal>
+    <TaxSubTotal>
+      <TaxableAmount>301.20</TaxableAmount>
+      <TaxableAmountCurr>12.00</TaxableAmountCurr>
+      <TaxAmount>69.28</TaxAmount>
+      <TaxAmountCurr>2.76</TaxAmountCurr>
+      <TaxCategory><Percent>23</Percent></TaxCategory>
+    </TaxSubTotal>
+    <TaxAmount>69.28</TaxAmount>
+  </TaxTotal>
+  <LegalMonetaryTotal>
+    <TaxExclusiveAmount>301.20</TaxExclusiveAmount>
+    <TaxInclusiveAmount>370.48</TaxInclusiveAmount>
+    <PayableRoundingAmount>0</PayableRoundingAmount>
+    <PayableAmount>370.48</PayableAmount>
+    <PayableAmountCurr>14.76</PayableAmountCurr>
+  </LegalMonetaryTotal>
+</Invoice>

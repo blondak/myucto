@@ -70,6 +70,12 @@ final class IsdocParser
         if (!$loaded || $dom->documentElement === null) {
             throw new \RuntimeException('Nelze parsovat ISDOC XML.');
         }
+        // Kontrola nad surovými bajty výše nevidí DOCTYPE v UTF-16 (mezi znaky jsou nulové
+        // bajty), libxml ho ale přečte. Rozhoduje proto i to, co libxml skutečně načetl,
+        // dřív než se z dokladu cokoli čte.
+        if ($dom->doctype !== null) {
+            throw new \RuntimeException('ISDOC XML obsahuje DOCTYPE, což není povoleno.');
+        }
 
         $root = $dom->documentElement;
         if ($root->localName !== 'Invoice') {
@@ -115,11 +121,18 @@ final class IsdocParser
         // DocumentType dle ISDOC 6.0.2 číselníku DocumentTypeType:
         //   1 = faktura, 2 = dobropis, 3 = vrubopis, 4 = zálohová faktura (nedaňová),
         //   5 = daňový zálohový list, 6 = dobropis DZL, 7 = zjednodušený daň. doklad.
-        // Dobropis i jeho zálohová varianta → credit_note; obě zálohové varianty → proforma.
+        // Dobropis i jeho zálohová varianta → credit_note; nedaňová záloha → proforma.
+        //
+        // Daňový zálohový list (5) je DAŇOVÝ doklad k přijaté platbě, tedy náš
+        // `tax_document` — přesně pod tímhle kódem ho zapisuje IsdocExporter. Dřív padal
+        // do `proforma`, takže vlastní vyexportovaný DDPP (a DDPP ze Shoptetu) se vracel
+        // jako nedaňová záloha a jeho DPH z evidence zmizela. Přijatá strana si původní
+        // chování drží v IsdocToPurchaseInvoiceMapper::mapDocumentKind().
         $docType = (int) ($this->text($xpath, 'i:DocumentType', $root) ?: '1');
         $invoiceType = match ($docType) {
             2, 6    => 'credit_note',
-            4, 5    => 'proforma',
+            4       => 'proforma',
+            5       => 'tax_document',
             default => 'invoice',
         };
 
@@ -201,6 +214,7 @@ final class IsdocParser
 
         return [
             'invoice_type'   => $invoiceType,
+            'document_type_code' => $docType,
             'varsymbol'      => $varsymbol,
             'issue_date'     => $issueDate,
             'tax_date'       => $taxDate,
@@ -221,6 +235,17 @@ final class IsdocParser
             // dopočítá rounding offset proti součtu položek (viz IsdocToPurchaseInvoiceMapper).
             // U cizoměnového dokladu preferuje *Curr (v měně faktury, jako řádkové totály).
             'payable_amount' => $this->parsePayableAmount($xpath, $root, $hasForeignCurrency),
+            // Částky dokladu v MĚNĚ DOKLADU pro kontrolu převzetí vydaného dokladu
+            // ({@see ImportedIssuedDocumentPolicy}). Striktně: u cizoměnového dokladu jen
+            // *Curr, bez náhrady částkou v Kč — ta by se s řádky v měně dokladu nikdy nepotkala.
+            'monetary'       => [
+                'total'           => $this->monetaryAmount($xpath, $root, 'TaxInclusiveAmount', $hasForeignCurrency),
+                'payable'         => $this->monetaryAmount($xpath, $root, 'PayableAmount', $hasForeignCurrency),
+                'paid_deposits'   => $this->monetaryAmount($xpath, $root, 'PaidDepositsAmount', $hasForeignCurrency),
+                'already_claimed' => $this->monetaryAmount($xpath, $root, 'AlreadyClaimedTaxInclusiveAmount', $hasForeignCurrency),
+            ],
+            // Zdaněné zálohy, které doklad odečítá (ISDOC `TaxedDeposits/TaxedDeposit`).
+            'taxed_deposits' => $this->parseTaxedDeposits($xpath, $root),
             // Rekapitulace DPH po sazbách z <TaxTotal>/<TaxSubTotal> — pro seed
             // override (PurchaseVatRecapSeeder), aby naše evidence seděla na doklad.
             'vat_recap'      => $recap,
@@ -544,6 +569,37 @@ final class IsdocParser
         $loc  = $this->text($xpath, 'i:LegalMonetaryTotal/i:PayableAmount', $root);
         $val  = ($foreignCurrency && $curr !== '') ? $curr : $loc;
         return $val !== '' ? (float) $val : null;
+    }
+
+    /**
+     * Částka z `<LegalMonetaryTotal>` v měně dokladu. U cizoměnového dokladu jen `*Curr`
+     * varianta, jinak `null` (částka v Kč by se s řádky v měně dokladu nepotkala).
+     */
+    private function monetaryAmount(\DOMXPath $xpath, \DOMElement $root, string $name, bool $foreignCurrency): ?float
+    {
+        $val = $this->text($xpath, 'i:LegalMonetaryTotal/i:' . $name . ($foreignCurrency ? 'Curr' : ''), $root);
+
+        return is_numeric($val) ? (float) $val : null;
+    }
+
+    /**
+     * Zdaněné zálohy odečítané dokladem (`<TaxedDeposits>/<TaxedDeposit>`).
+     *
+     * @return list<array{id:?string, varsymbol:?string}>
+     */
+    private function parseTaxedDeposits(\DOMXPath $xpath, \DOMElement $root): array
+    {
+        $out = [];
+        foreach ($xpath->query('i:TaxedDeposits/i:TaxedDeposit', $root) ?: [] as $el) {
+            if (!$el instanceof \DOMElement) {
+                continue;
+            }
+            $id = $this->text($xpath, 'i:ID', $el);
+            $vs = $this->text($xpath, 'i:VariableSymbol', $el);
+            $out[] = ['id' => $id !== '' ? $id : null, 'varsymbol' => $vs !== '' ? $vs : null];
+        }
+
+        return $out;
     }
 
     private function text(\DOMXPath $xpath, string $expr, \DOMNode $context): string

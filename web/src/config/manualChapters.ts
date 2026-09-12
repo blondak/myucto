@@ -27,6 +27,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/documents(?:\/|$)|^\/document-requests(?:\/|$)/, '31_Dokumenty'],
   [/^\/logbook(?:\/|$)/, '32_Kniha_jizd'],
   [/^\/stock(?:\/|$)/, '33_Sklad'],
+  [/^\/eshop\/shoptet(?:\/|$)/, '34a_Shoptet'],
   [/^\/eshop(?:\/|$)/, '34_Eshop'],
   [/^\/reports\/dph-book(?:\/|$)/, '37_Kniha_DPH'],
   [/^\/reports\/shv(?:\/|$)/, '39_Souhrnne_hlaseni'],

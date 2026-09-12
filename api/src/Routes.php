@@ -784,6 +784,8 @@ final class Routes
         $app->post   ('/api/public/work-report/{token:[a-f0-9]{32,128}}/request-code', PublicWorkReportRequestCodeAction::class);
         $app->post   ('/api/public/work-report/{token:[a-f0-9]{32,128}}/verify',       PublicWorkReportVerifyAction::class);
         $app->get    ('/api/public/domain-verification/{token:[a-f0-9]{64}}', \MyInvoice\Action\Public\DomainVerificationAction::class);
+        // Feed zásob a cen pro automatický import produktů Shoptetu (bez auth, jen token).
+        $app->get    ('/api/public/shoptet/feed/{token:[a-f0-9]{64}}', \MyInvoice\Action\Eshop\PublicShoptetFeedAction::class);
 
         // Zabezpečený odkaz na osobní mzdový dokument (bez auth; lokátor + jednorázový
         // kód na známou adresu zaměstnance). Zaměstnanec není uživatel aplikace.
@@ -3255,13 +3257,33 @@ final class Routes
         $app->post('/api/public/integrations/webhooks/{uuid:[0-9a-f-]{36}}', [\MyInvoice\Action\Eshop\IntegrationWebhookAction::class, 'receive']);
         $app->group('/api/eshop', function ($g) {
             $g->get('/integrations', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'list']);
+            $g->get('/integrations/connectors', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'connectors']);
+            $g->post('/integrations/sample', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'sample']);
             $g->post('/integrations', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'create']);
             $g->put('/integrations/{id:[0-9]+}', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'update']);
+            $g->delete('/integrations/{id:[0-9]+}', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'delete']);
             $g->put('/integrations/{id:[0-9]+}/credentials', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'credentials']);
             $g->post('/integrations/{id:[0-9]+}/webhook-secret', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'rotateWebhookSecret']);
             $g->get('/integrations/{id:[0-9]+}/diagnostics', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'diagnostics']);
             $g->post('/integrations/{id:[0-9]+}/reconcile', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'reconcile']);
             $g->post('/integrations/{id:[0-9]+}/outbox/{eventId:[0-9]+}/retry', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'retryOutbox']);
+            // Shoptet bez API — import objednávek a dokladů ze souborů / odkazu, feed zásob.
+            $g->get('/shoptet/settings', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'settings']);
+            $g->put('/shoptet/settings', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'saveSettings']);
+            $g->put('/shoptet/order-url', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'setOrderUrl']);
+            $g->delete('/shoptet/order-url', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'clearOrderUrl']);
+            $g->post('/shoptet/orders/preview', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'previewOrders']);
+            $g->post('/shoptet/orders/batches/{id:[0-9]+}/apply', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'applyOrders']);
+            $g->post('/shoptet/orders/batches/{id:[0-9]+}/discard', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'discardOrders']);
+            $g->post('/shoptet/orders/batches/{id:[0-9]+}/erase', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'eraseOrders']);
+            $g->get('/shoptet/orders/review', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'reviewQueue']);
+            $g->post('/shoptet/orders/{id:[0-9]+}/reviewed', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'markReviewed']);
+            $g->get('/shoptet/batches', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'batches']);
+            $g->get('/shoptet/batches/{id:[0-9]+}', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'batch']);
+            $g->post('/shoptet/documents/import', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'importDocuments']);
+            $g->post('/shoptet/feed/token', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'rotateFeed']);
+            $g->delete('/shoptet/feed/token', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'disableFeed']);
+            $g->get('/shoptet/feed/download', [\MyInvoice\Action\Eshop\ShoptetAction::class, 'downloadFeed']);
             $g->post('/imports/sources', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'upload']);
             $g->get('/imports/sources/{id:[0-9]+}/sample', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'sample']);
             $g->get('/imports/profiles', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'profiles']);

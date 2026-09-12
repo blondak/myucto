@@ -27,6 +27,14 @@ final class IntegrationWebhookAction
                 $request->getHeaderLine('X-Integration-Signature'), $body);
         } catch (\JsonException|\InvalidArgumentException) {
             return Json::error($response, 'webhook_invalid', 'Webhook payload není platný.', 400);
+        } catch (\RuntimeException $e) {
+            // Konflikt idempotence vzniká až po ověření podpisu, takže jeho odlišení
+            // od 401 nic neprozradí a odesílateli řekne, že poslal jiné tělo pod stejným event_id.
+            if ($e->getMessage() === 'webhook_idempotency_conflict') {
+                return Json::error($response, 'webhook_idempotency_conflict',
+                    'Událost se stejným event_id už byla přijata s jiným obsahem.', 409);
+            }
+            return Json::error($response, 'webhook_unauthorized', 'Webhook nelze ověřit.', 401);
         } catch (\Throwable) {
             return Json::error($response, 'webhook_unauthorized', 'Webhook nelze ověřit.', 401);
         }

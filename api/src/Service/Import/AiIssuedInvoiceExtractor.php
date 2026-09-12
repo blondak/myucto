@@ -223,12 +223,20 @@ final class AiIssuedInvoiceExtractor
         ];
 
         $invoiceId = $this->createDraft($draft, $userId, $supplierId);
+
+        // Odpočet záloh a nesedící součet: tady doklad vzniká jako koncept tak jako tak,
+        // uživatel ale musí vědět, že ho před vystavením musí navázat na daňový doklad
+        // k záloze. Pravidlo je společné s importem ({@see ImportedIssuedDocumentPolicy}).
+        $total = $this->db->pdo()->prepare('SELECT total_with_vat FROM invoices WHERE id = ?');
+        $total->execute([$invoiceId]);
+        $assessment = ImportedIssuedDocumentPolicy::assess($inv, (float) $total->fetchColumn());
+
         return [
             'ok' => true,
             'invoice_id' => $invoiceId,
             'client_id' => $resolved['id'],
             'source' => $source,
-            'warnings' => $this->ossWarnings,
+            'warnings' => array_merge($this->ossWarnings, $assessment['review'], $assessment['notes']),
         ];
     }
 
@@ -287,6 +295,9 @@ final class AiIssuedInvoiceExtractor
         $id = $this->repo->createDraft($draft, $userId);
         $this->repo->replaceItems($id, (array) $draft['items']);
         $this->calc->recompute($id);
+        if (ImportedIssuedDocumentPolicy::isPaidByNature((string) ($draft['invoice_type'] ?? ''))) {
+            ImportedIssuedDocumentPolicy::settleTaxDocument($this->db->pdo(), $id);
+        }
         return $id;
     }
 
@@ -343,12 +354,26 @@ final class AiIssuedInvoiceExtractor
         return null;
     }
 
-    /** Vydaná faktura zná jen invoice/proforma/credit_note; ostatní kindy zmapuj. */
+    /**
+     * Druh dokladu z ISDOC (`invoice_type`) nebo z AI (`document_kind`) na druh vydaného dokladu.
+     *
+     * Daňový doklad k přijaté platbě (ISDOC DocumentType 5, AI `tax_document`) zůstává
+     * `tax_document`. Dřív propadl do `invoice`, takže z DDPP vznikla řádná faktura
+     * a po vystavení se tržba i DPH zaevidovaly podruhé vedle konečné faktury.
+     *
+     * Vzniká KONCEPT se správným druhem a `amount_to_pay` = 0 (úplata už přišla, viz
+     * {@see ImportedIssuedDocumentPolicy::settleTaxDocument()}). Import souborů ho zakládá
+     * rovnou jako zaplacený; tady ne, protože doklad z AI vždycky čeká na kontrolu
+     * uživatele. Vazbu na zálohovou fakturu (`parent_invoice_id`) doklad nemá, takže ho
+     * vystavení nepárově neoznačí jako zaplacený (InvoiceAmountPolicy to u DDPP bez
+     * zálohy záměrně nedělá) — do pohledávek ale nespadne, protože nemá co doplatit.
+     */
     private function normalizeInvoiceType(string $kind): string
     {
         return match ($kind) {
             'credit_note', 'creditnote' => 'credit_note',
             'proforma', 'advance'       => 'proforma',
+            'tax_document'              => 'tax_document',
             default                     => 'invoice',
         };
     }

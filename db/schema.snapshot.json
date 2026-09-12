@@ -812,7 +812,9 @@
         "1825_statement_account_overrides.sql",
         "1826_statement_map_corrections_to_leaves.sql",
         "1827_net_turnover_business_model_rows.sql",
-        "1828_countries_iso3166_full.sql"
+        "1828_countries_iso3166_full.sql",
+        "1829_shoptet_file_integration.sql",
+        "1830_integration_sample_seeded.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -16599,6 +16601,133 @@
             },
             "checks": []
         },
+        "shoptet_import_batches": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "applied_at": "datetime NULL DEFAULT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "erased_at": "datetime NULL DEFAULT NULL",
+                "fetched_at": "datetime NULL DEFAULT NULL",
+                "file_name": "varchar(255) NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "invoice_batch_id": "varchar(32) NULL DEFAULT NULL",
+                "kind": "enum('orders','documents') NOT NULL",
+                "payload": "longblob NULL DEFAULT NULL",
+                "payload_sha256": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "report_json": "longtext NOT NULL DEFAULT '[]'",
+                "source": "enum('upload','url') NOT NULL",
+                "status": "enum('preview','applied','discarded','erased') NOT NULL DEFAULT 'preview'",
+                "summary_json": "longtext NOT NULL DEFAULT '{}'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "update_time_from": "datetime NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_shoptet_batches_user": "BTREE (created_by)",
+                "ix_shoptet_batches_list": "BTREE (supplier_id, kind, created_at)",
+                "ix_shoptet_batches_status": "BTREE (status, created_at)"
+            },
+            "foreign_keys": {
+                "fk_shoptet_batches_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_shoptet_batches_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "report_json": "json_valid(`report_json`)",
+                "summary_json": "json_valid(`summary_json`)"
+            }
+        },
+        "shoptet_orders": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "content_hash": "char(64) NOT NULL COLLATE ascii_bin",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "created_batch_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "last_batch_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "order_id": "bigint(20) unsigned NOT NULL",
+                "pending_change": "tinyint(1) NOT NULL DEFAULT 0",
+                "review_reasons": "longtext NOT NULL DEFAULT '[]'",
+                "review_required": "tinyint(1) NOT NULL DEFAULT 0",
+                "reviewed_at": "datetime NULL DEFAULT NULL",
+                "reviewed_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "shoptet_code": "varchar(100) NOT NULL",
+                "shoptet_status": "varchar(120) NULL DEFAULT NULL",
+                "shoptet_total_with_vat": "decimal(15,2) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "datetime NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "vat_snapshot": "longtext NOT NULL DEFAULT '{}'"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (order_id)",
+                "fk_shoptet_orders_created_batch": "BTREE (created_batch_id)",
+                "fk_shoptet_orders_last_batch": "BTREE (last_batch_id)",
+                "fk_shoptet_orders_reviewer": "BTREE (reviewed_by)",
+                "ix_shoptet_orders_batch": "BTREE (supplier_id, created_batch_id)",
+                "ix_shoptet_orders_review": "BTREE (supplier_id, review_required)",
+                "uq_shoptet_orders_code": "UNIQUE BTREE (supplier_id, shoptet_code)"
+            },
+            "foreign_keys": {
+                "fk_shoptet_orders_created_batch": "(created_batch_id) -> shoptet_import_batches (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_shoptet_orders_last_batch": "(last_batch_id) -> shoptet_import_batches (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_shoptet_orders_order": "(order_id) -> sales_orders (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_shoptet_orders_reviewer": "(reviewed_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_shoptet_orders_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "review_reasons": "json_valid(`review_reasons`)",
+                "vat_snapshot": "json_valid(`vat_snapshot`)"
+            }
+        },
+        "shoptet_settings": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "auto_fetch": "tinyint(1) NOT NULL DEFAULT 0",
+                "confirm_orders": "tinyint(1) NOT NULL DEFAULT 0",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "default_warehouse_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "documents_issuer": "enum('myucto','shoptet') NOT NULL DEFAULT 'myucto'",
+                "feed_changed_at": "datetime NULL DEFAULT NULL",
+                "feed_etag": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "feed_include_price": "tinyint(1) NOT NULL DEFAULT 1",
+                "feed_last_served_at": "datetime NULL DEFAULT NULL",
+                "feed_scope": "enum('eshop','active') NOT NULL DEFAULT 'eshop'",
+                "feed_token_created_at": "datetime NULL DEFAULT NULL",
+                "feed_token_hash": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "feed_warehouse_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "fetch_cursor": "datetime NULL DEFAULT NULL",
+                "fetch_interval_minutes": "smallint(5) unsigned NOT NULL DEFAULT 60",
+                "last_fetch_at": "datetime NULL DEFAULT NULL",
+                "last_fetch_message": "varchar(255) NULL DEFAULT NULL",
+                "last_fetch_status": "enum('ok','error') NULL DEFAULT NULL",
+                "last_full_fetch_at": "datetime NULL DEFAULT NULL",
+                "order_url_enc": "text NULL DEFAULT NULL",
+                "order_url_hint": "varchar(160) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "datetime NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id)",
+                "fk_shoptet_settings_default_wh": "BTREE (default_warehouse_id)",
+                "fk_shoptet_settings_feed_wh": "BTREE (feed_warehouse_id)",
+                "fk_shoptet_settings_user": "BTREE (updated_by)",
+                "ix_shoptet_auto_fetch": "BTREE (auto_fetch, last_fetch_at)",
+                "uq_shoptet_feed_token": "UNIQUE BTREE (feed_token_hash)"
+            },
+            "foreign_keys": {
+                "fk_shoptet_settings_default_wh": "(default_warehouse_id) -> warehouses (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_shoptet_settings_feed_wh": "(feed_warehouse_id) -> warehouses (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_shoptet_settings_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_shoptet_settings_user": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": []
+        },
         "signature_document_overrides": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -18691,6 +18820,7 @@
                 "idoklad_client_secret_enc": "varbinary(512) NULL DEFAULT NULL",
                 "idoklad_last_imported_at": "timestamp NULL DEFAULT NULL",
                 "idoklad_token_expires_at": "timestamp NULL DEFAULT NULL",
+                "integration_sample_seeded_at": "datetime NULL DEFAULT NULL",
                 "invoice_number_format": "varchar(60) NULL DEFAULT NULL",
                 "invoice_number_period": "enum('year','month','none') NOT NULL DEFAULT 'month'",
                 "invoice_qr_include_due_date": "tinyint(1) NOT NULL DEFAULT 0",
