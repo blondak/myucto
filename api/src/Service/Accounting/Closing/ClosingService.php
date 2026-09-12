@@ -1927,7 +1927,7 @@ final class ClosingService
         $stmt = $this->db->pdo()->prepare(
             "SELECT ca.account_code
                FROM journal_entry_lines l
-               JOIN journal_entries e     ON e.id = l.entry_id
+               JOIN journal_entries e     ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                     AND e.source_type = 'purchase_invoice' AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
                JOIN purchase_invoices pi  ON pi.id = e.source_id AND pi.supplier_id = l.supplier_id
                JOIN chart_of_accounts ca  ON ca.id = l.account_id

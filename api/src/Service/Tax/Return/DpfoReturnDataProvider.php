@@ -217,7 +217,7 @@ final class DpfoReturnDataProvider
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0) AS bal
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
-               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+               " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?

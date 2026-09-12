@@ -80,7 +80,7 @@ final class LedgerReportRepository
                               AND l.side = 'credit' THEN l.amount ELSE 0 END) AS to_d
                 FROM journal_entry_lines l
                 JOIN journal_entries e   ON e.id = l.entry_id
-                " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
+                " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
                 JOIN chart_of_accounts a ON a.id = l.account_id
                 WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date <= ?{$filterSql}{$closingSql}
                 GROUP BY acc_id
@@ -149,7 +149,7 @@ final class LedgerReportRepository
                     SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
-               " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
+               " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
                 {$openingSql}{$filterSql}{$closingSql}
@@ -200,7 +200,7 @@ final class LedgerReportRepository
                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
                   FROM journal_entry_lines l
                   JOIN journal_entries e    ON e.id = l.entry_id
-                  " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
+                  " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
              LEFT JOIN bank_transactions bt ON e.source_type = 'bank' AND bt.id = e.source_id
              LEFT JOIN cash_documents cd    ON e.source_type = 'cash' AND cd.id = e.source_id
@@ -286,7 +286,7 @@ final class LedgerReportRepository
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
-               " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
+               " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
                JOIN chart_of_accounts ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
@@ -314,7 +314,7 @@ final class LedgerReportRepository
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COUNT(*)
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
-               " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
+               " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
                JOIN chart_of_accounts ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
@@ -337,7 +337,7 @@ final class LedgerReportRepository
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
-               " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
+               " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
                JOIN chart_of_accounts ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
@@ -373,7 +373,7 @@ final class LedgerReportRepository
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id
-              " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
+              " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
                 AND NOT (e.entry_date = ? AND e.source_type = 'opening'){$closingSql}"
         );
@@ -432,6 +432,16 @@ final class LedgerReportRepository
         }
         $params[] = $anchor;
         $params[] = $anchor;
+        // Spodní mez data je čistě výkonová: rozvahové účty (asset/liability/equity) už
+        // omezuje kotva, výsledkové plFrom a offbalance/closing se vylučují úplně, takže
+        // zápis starší než obě meze do součtu nevstoupí nikdy. Bez ní MariaDB prošla
+        // všechny řádky deníku firmy za celou historii; s indexem (supplier_id, entry_date)
+        // čte jen dotčené období. Bez kotvy nebo bez plFrom mez neexistuje.
+        $lowerBoundSql = '';
+        if ($anchor !== null && $plFrom !== null) {
+            $lowerBoundSql = ' AND e.entry_date >= ?';
+            $params[] = min($anchor, $plFrom);
+        }
         // Agregace per LIST účet (a.id) + jeho syntetika — roll-up i případný D2 split
         // (kladné/záporné saldo per analytika) se dopočítá v PHP.
         $stmt = $this->db->pdo()->prepare(
@@ -446,14 +456,14 @@ final class LedgerReportRepository
                     SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
-               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+               " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND a.account_type NOT IN ('offbalance','closing')
                 AND " . JournalTaxOrigin::includedSql() . "
                 AND e.entry_date <= ?{$plCond}
-                AND (a.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?)
+                AND (a.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?){$lowerBoundSql}
               GROUP BY COALESCE(p.id, a.id), COALESCE(p.account_code, a.account_code),
                        COALESCE(p.name, a.name), a.account_type, a.id
               ORDER BY code"
@@ -595,7 +605,7 @@ final class LedgerReportRepository
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
-               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+               " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL

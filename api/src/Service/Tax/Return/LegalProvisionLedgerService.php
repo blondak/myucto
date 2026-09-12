@@ -167,7 +167,7 @@ final class LegalProvisionLedgerService
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
-               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+               " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
@@ -201,7 +201,7 @@ final class LegalProvisionLedgerService
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
-               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+               " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
@@ -223,7 +223,7 @@ final class LegalProvisionLedgerService
                 SELECT e.id AS root_entry_id, e.id, e.reversed_by, l.amount, 1 AS direction
                   FROM journal_entry_lines l
                   JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
-                  JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+                  " . JournalTaxOrigin::join() . "
                   JOIN chart_of_accounts a ON a.id = l.account_id
                   LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
                  WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL

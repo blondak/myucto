@@ -327,7 +327,7 @@ final class PreFinalizeCheckService
                     ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2) AS turnover
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
-               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+               " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
@@ -464,7 +464,7 @@ final class PreFinalizeCheckService
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
-               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+               " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?

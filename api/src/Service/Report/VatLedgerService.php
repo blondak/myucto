@@ -708,6 +708,9 @@ final class VatLedgerService
                            i.is_fixed_asset, NULL AS vat_deduction,
                            NULL AS vat_deduction_percent
                       FROM purchase_invoice_items i
+                      -- Omezení na firmu uvnitř odvozené tabulky: MariaDB ji materializuje
+                      -- celou, bez něj tedy položky VŠECH firem instalace na každé volání.
+                      JOIN purchase_invoices own ON own.id = i.purchase_invoice_id AND own.supplier_id = ?
                      WHERE NOT EXISTS (
                                SELECT 1 FROM purchase_invoice_vat_allocations a
                                 WHERE a.purchase_invoice_id = i.purchase_invoice_id
@@ -718,6 +721,7 @@ final class VatLedgerService
                            0 AS is_fixed_asset, a.vat_deduction,
                            a.vat_deduction_percent
                       FROM purchase_invoice_vat_allocations a
+                      JOIN purchase_invoices own ON own.id = a.purchase_invoice_id AND own.supplier_id = ?
                    ) pii ON pii.purchase_invoice_id = pi.id
          LEFT JOIN currencies cur ON cur.id = pi.currency_id
              WHERE pi.supplier_id = ?
@@ -755,7 +759,7 @@ final class VatLedgerService
                AND {$periodExpr} BETWEEN ? AND ?
           ORDER BY {$periodExpr}, pi.id, pii.id
         ");
-        $stmt->execute([$standardRate, $supplierId, $start, $end]);
+        $stmt->execute([$standardRate, $supplierId, $supplierId, $supplierId, $start, $end]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
