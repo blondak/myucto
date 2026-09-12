@@ -23514,6 +23514,7 @@
       "unposted_review_skipped": "unposted drafts from closed years skipped",
       "claim_shifted": "deductions moved to a later period",
       "self_assessed": "invoices with VAT self-assessed on internal documents",
+      "other_receivables": "other receivables included in the VAT return",
       "zero_amount": "zero documents skipped",
       "with_vat": "documents with VAT",
       "balances": "statement balances from the journal",

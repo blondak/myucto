@@ -345,8 +345,119 @@ final class InvoiceImporter
             $p->count(self::STEP_ISSUED, 'created');
             $this->reportNumberAndReview($ctx, self::STEP_ISSUED, $docNo, $year, $number, $class['reasons']);
         }
+        $this->importOtherReceivables($ctx, $insert, $insertItem, $currencyId, $clients);
         $ctx->statsClients = array_values(array_unique(array_merge($ctx->statsClients, array_values($clients))));
         $p->finish(self::STEP_ISSUED);
+    }
+
+    /**
+     * Ostatní pohledávky Money (`KnihPohl`, v deníku zdroj KP) v přiznání — věcná břemena,
+     * pachty, osvobozená plnění ř. 50 — jsou plněním jako vydaná faktura. Bez nich by
+     * v přiznání chyběla daň na výstupu i hodnota osvobozených plnění pro koeficient § 76.
+     * Převedou se jako vydané doklady (záporná = opravný doklad) a zápis KP se naváže
+     * ({@see DocumentLinker}). Pohledávky mimo přiznání (19Ř00U) zůstanou jen v deníku.
+     *
+     * @param array<int,int> $clients
+     */
+    private function importOtherReceivables(ImportContext $ctx, \PDOStatement $insert, \PDOStatement $insertItem, int $currencyId, array &$clients): void
+    {
+        $p = $ctx->protocol;
+        $pdo = $this->db->pdo();
+        $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE);
+        foreach ($ctx->backup->rowsAcrossYears('KnihPohl') as $r) {
+            $year = $ctx->yearOf($r);
+            $docNo = trim((string) ($r['Doklad'] ?? ''));
+            $resolved = Ms3VatCode::resolve((string) ($r['Cleneni'] ?? ''), true);
+            if ($year === null || $docNo === '' || (int) ($r['Storno'] ?? 0) === 1 || $resolved === null || !$resolved['in_return']) {
+                continue;
+            }
+            $key = 'KP|' . $year . '|' . $docNo;
+            if (isset($existing[$key])) {
+                $ctx->otherReceivables[$year . '|' . $docNo] = $existing[$key];
+                $p->count(self::STEP_ISSUED, 'existing');
+                continue;
+            }
+            $issue = self::date($r, ['DatVyst', 'DatUcPr']);
+            if ($ctx->isLocked($year) || $issue === null) {
+                continue;
+            }
+            $number = $this->freeNumber('invoices', $ctx->supplierId, $docNo, $year);
+            if ($number === null) {
+                $p->error(self::STEP_ISSUED, 'number_taken', "Číslo pohledávky {$docNo} ({$year}) už ve firmě má jiný doklad, pohledávka nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
+                continue;
+            }
+            $taxDate = self::date($r, ['DatPln', 'DatUcPr']) ?? $issue;
+            // Částky pohledávky nesou znaménko z Money (opravná pohledávka je záporná).
+            $items = [];
+            foreach (CashBankImporter::vatLines($r, false) as $line) {
+                $items[] = ['base' => $line['base'], 'vat' => $line['vat'], 'rate' => $line['rate']];
+            }
+            $zero = round((float) ($r['Zakl0'] ?? 0), 2);
+            if ($zero !== 0.0) {
+                $items[] = ['base' => $zero, 'vat' => 0.0, 'rate' => 0.0];
+            }
+            $total = round((float) ($r['Celkem'] ?? 0), 2);
+            if ($items === [] && $total !== 0.0) {
+                $items[] = ['base' => $total, 'vat' => 0.0, 'rate' => 0.0];
+            }
+            if ($items === []) {
+                continue;
+            }
+            $base = round(array_sum(array_column($items, 'base')), 2);
+            $vat = round(array_sum(array_column($items, 'vat')), 2);
+            $total = $total !== 0.0 ? $total : round($base + $vat, 2);
+            $snapshot = [
+                'name' => trim((string) ($r['AdNazev'] ?? '')),
+                'ico' => CodebookImporter::ico((string) ($r['AdICO'] ?? '')),
+                'dic' => strtoupper(str_replace(' ', '', trim((string) ($r['AdDIC'] ?? '')))),
+                'street' => trim((string) ($r['AdUlice'] ?? '')),
+                'city' => trim((string) ($r['AdMesto'] ?? '')),
+                'zip' => trim((string) ($r['AdPSC'] ?? '')),
+            ];
+            $clientId = $this->codebooks->resolvePartner($ctx, $snapshot);
+            $paidAt = self::date($r, ['UhDatum']);
+            $insert->execute([
+                $ctx->supplierId,
+                $total < 0 ? 'credit_note' : 'invoice',
+                $clientId,
+                $number['number'],
+                $issue,
+                $taxDate,
+                self::date($r, ['DatSpl']) ?? $issue,
+                $currencyId,
+                mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
+                'Převzato z Money S3, ostatní pohledávka ' . $docNo,
+                json_encode([
+                    'company_name' => $snapshot['name'], 'street' => $snapshot['street'], 'city' => $snapshot['city'],
+                    'zip' => $snapshot['zip'], 'ic' => $snapshot['ico'], 'dic' => $snapshot['dic'],
+                ], JSON_UNESCAPED_UNICODE),
+                $base,
+                $vat,
+                $total,
+                round($total - $base - $vat, 2),
+                $paidAt !== null ? $total : 0,
+                $paidAt,
+                $paidAt !== null ? 'paid' : 'sent',
+                (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
+                $ctx->userId > 0 ? $ctx->userId : null,
+                $resolved['code'],
+                $ctx->userId > 0 ? $ctx->userId : null,
+            ]);
+            $id = (int) $pdo->lastInsertId();
+            foreach ($items as $i => $item) {
+                $insertItem->execute([
+                    $id,
+                    trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
+                    $item['base'], $this->rateId($item['rate'], $taxDate), $item['rate'],
+                    $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
+                    $resolved['code'],
+                ]);
+            }
+            $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
+            $ctx->otherReceivables[$year . '|' . $docNo] = $id;
+            $clients[$clientId] = $clientId;
+            $p->count(self::STEP_ISSUED, 'other_receivables');
+        }
     }
 
     /**

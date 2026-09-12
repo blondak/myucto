@@ -129,7 +129,8 @@ final class MoneyS3ImportTest extends TestCase
         // Zálohová ZF24001 se převede (nezaúčtovaná), koncept RC-2024-001 z uzavřeného roku ne;
         // přibyla licence z EU FP25005 se samovyměřením.
         self::assertSame(12, $this->rowCount('purchase_invoices', $supplierId));
-        self::assertSame(3, $this->rowCount('invoices', $supplierId));
+        // Tři vydané faktury a ostatní pohledávka PH25001, která je v přiznání DPH.
+        self::assertSame(4, $this->rowCount('invoices', $supplierId));
         self::assertSame(4, $this->rowCount('cash_documents', $supplierId));
         self::assertSame(3, $this->rowCount('clients', $supplierId));
         // Zahraniční partner má zemi podle DIČ — jinak by dodání do EU chybělo v souhrnném hlášení.
@@ -186,8 +187,18 @@ final class MoneyS3ImportTest extends TestCase
         // FP25001 1 050 + FP25002 210 + FP24001 z roku 2025 63 + pokladna PV25002 21
         // + daňový doklad k záloze DZ25001 210 + doklad v EUR FP25004 525 − dobropis DP25001 105.
         self::assertEqualsWithDelta(1974.0, $vat['purchase'], 0.001, json_encode($rows, JSON_UNESCAPED_UNICODE) ?: '');
-        // Vydaná jen FV25001, zálohová ZV25001 do evidence nejde.
-        self::assertEqualsWithDelta(210.0, $vat['sale'], 0.001);
+        // Vydaná FV25001 210 + ostatní pohledávka PH25001 s DPH 210 (věcné břemeno, kniha KP);
+        // zálohová ZV25001 do evidence nejde.
+        self::assertEqualsWithDelta(420.0, $vat['sale'], 0.001);
+        $receivable = $this->db->pdo()->prepare(
+            "SELECT i.id, i.status, (SELECT e.source_type FROM journal_entries e WHERE e.supplier_id = i.supplier_id AND e.source_id = i.id
+                      AND e.source_type = 'invoice' LIMIT 1) AS entry_source
+               FROM invoices i WHERE i.supplier_id = ? AND i.varsymbol = 'PH25001'"
+        );
+        $receivable->execute([$supplierId]);
+        $receivable = $receivable->fetch(PDO::FETCH_ASSOC);
+        self::assertNotFalse($receivable, 'Ostatní pohledávka s DPH se převede jako vydaný doklad.');
+        self::assertSame('invoice', $receivable['entry_source'], 'Zápis KP z Money je zápisem dokladu — kontrola 343 ho páruje s evidencí DPH.');
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT vendor_invoice_number, document_kind, status, booked_at FROM purchase_invoices WHERE supplier_id = ? AND YEAR(issue_date) = 2025'

@@ -34,6 +34,9 @@ final class ImportContext
     /** @var array<int,float> id pohybu v cizí měně => částka v Kč z Money (párování úhrad s fakturami v Kč) */
     public array $bankTransactionCzk = [];
 
+    /** @var array<string,int> "rok|číslo dokladu" ostatní pohledávky (kniha KP) => invoices.id */
+    public array $otherReceivables = [];
+
     /** @var array<int,int> číslo adresy v Money (`AdresarF.Cislo`) => clients.id */
     public array $clientsByMoneyNo = [];
 

@@ -417,7 +417,7 @@ final class CashBankImporter
      * @param array<string,mixed> $r
      * @return list<array{rate:float,base:float,vat:float}>
      */
-    private static function vatLines(array $r, bool $negative): array
+    public static function vatLines(array $r, bool $negative): array
     {
         $slots = [['ZaklSS', 'DPHSS', 'SSazba'], ['ZaklZS', 'DPHZS', 'ZSazba']];
         for ($i = 3; $i <= 6; $i++) {

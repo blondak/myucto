@@ -41,12 +41,16 @@ final class DocumentLinker
             'invoice' => $this->draftIds('invoices', $ctx->supplierId),
         ];
         $orphans = [];
+        // Ostatní pohledávky vede Money v deníku pod zdrojem KP (převod ho čte jako ruční
+        // zápis); navázaný zápis se přeznačí na zápis vydaného dokladu — jen tak ho kontrola
+        // 343 i Doúčtování dokladů poznají jako zaúčtovaný doklad.
         foreach ([
-            ['purchase_invoice', 'purchase_invoice', $ctx->purchaseInvoices],
-            ['invoice', 'invoice', $ctx->issuedInvoices],
-            ['cash', 'cash', $ctx->cashDocuments],
-            ['bank', 'bank', $ctx->bankTransactions],
-        ] as [$sourceType, $docType, $docs]) {
+            ['purchase_invoice', 'purchase_invoice', $ctx->purchaseInvoices, null],
+            ['invoice', 'invoice', $ctx->issuedInvoices, null],
+            ['cash', 'cash', $ctx->cashDocuments, null],
+            ['bank', 'bank', $ctx->bankTransactions, null],
+            ['manual', 'invoice', $ctx->otherReceivables, 'invoice'],
+        ] as [$sourceType, $docType, $docs, $retype]) {
             foreach ($docs as $key => $docId) {
                 [$year, $docNo] = explode('|', (string) $key, 3);
                 $entries = $index[(int) $year][$sourceType][$docNo] ?? [];
@@ -68,7 +72,7 @@ final class DocumentLinker
                     $p->count(self::STEP_LINK, 'orphans');
                     continue;
                 }
-                $new = $this->attach($ctx, $sourceType, $docType, $docId, $entries);
+                $new = $this->attach($ctx, $sourceType, $docType, $docId, $entries, $retype);
                 $p->count(self::STEP_LINK, $new ? 'linked' : 'existing');
             }
         }
@@ -236,22 +240,23 @@ final class DocumentLinker
 
     /**
      * @param list<int> $entryIds
+     * @param string|null $retype zdroj, na který se zápis při navázání přeznačí (zápis KP → vydaný doklad)
      * @return bool true = nová vazba
      */
-    private function attach(ImportContext $ctx, string $sourceType, string $docType, int $docId, array $entryIds): bool
+    private function attach(ImportContext $ctx, string $sourceType, string $docType, int $docId, array $entryIds, ?string $retype = null): bool
     {
         $pdo = $this->db->pdo();
         $owner = $pdo->prepare(
             'SELECT id FROM journal_entries
               WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL LIMIT 1'
         );
-        $owner->execute([$ctx->supplierId, $sourceType, $docId]);
+        $owner->execute([$ctx->supplierId, $retype ?? $sourceType, $docId]);
         $isNew = false;
         if ($owner->fetchColumn() === false) {
             $pdo->prepare(
-                'UPDATE journal_entries SET source_id = ?
+                'UPDATE journal_entries SET source_type = ?, source_id = ?
                   WHERE id = ? AND supplier_id = ? AND source_type = ? AND source_id IS NULL'
-            )->execute([$docId, $entryIds[0], $ctx->supplierId, $sourceType]);
+            )->execute([$retype ?? $sourceType, $docId, $entryIds[0], $ctx->supplierId, $sourceType]);
             $isNew = true;
         }
         $link = $pdo->prepare(

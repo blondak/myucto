@@ -117,6 +117,7 @@ final class SyntheticAgenda
             ['Ucet' => '221002', 'Nazev' => 'Druhý běžný účet'],
             ['Ucet' => '311000', 'Nazev' => 'Odběratelé'],
             ['Ucet' => '314000', 'Nazev' => 'Poskytnuté zálohy'],
+            ['Ucet' => '315000', 'Nazev' => 'Ostatní pohledávky'],
             ['Ucet' => '321000', 'Nazev' => 'Dodavatelé'],
             ['Ucet' => '325000', 'Nazev' => 'Ostatní závazky'],
             ['Ucet' => '343100', 'Nazev' => 'DPH na vstupu'],
@@ -270,6 +271,9 @@ final class SyntheticAgenda
                 ['Cislo' => 21, 'Zdroj' => 'PK', 'Doklad' => 'PP25001', 'Datum' => '2025-03-01', 'Popis' => 'Vratka tržby', 'UcMD' => '211000', 'UcD' => '602000', 'Castka' => -200.0],
                 ['Cislo' => 24, 'Zdroj' => 'PK', 'Doklad' => 'PV25002', 'Datum' => '2025-06-02', 'DatPlnDPH' => '2025-06-02', 'Popis' => 'Tankování', 'UcMD' => '501100', 'UcD' => '211000', 'Castka' => 100.0],
                 ['Cislo' => 25, 'Zdroj' => 'PK', 'Doklad' => 'PV25002', 'Datum' => '2025-06-02', 'DatPlnDPH' => '2025-06-02', 'Popis' => 'DPH tankování', 'UcMD' => '343100', 'UcD' => '211000', 'Castka' => 21.0],
+                // Ostatní pohledávka s DPH (věcné břemeno) — kniha pohledávek Money, zdroj KP.
+                ['Cislo' => 28, 'Zdroj' => 'KP', 'Doklad' => 'PH25001', 'Datum' => '2025-08-05', 'DatPlnDPH' => '2025-08-05', 'Popis' => 'Věcné břemeno', 'UcMD' => '315000', 'UcD' => '602000', 'Castka' => 1000.0],
+                ['Cislo' => 29, 'Zdroj' => 'KP', 'Doklad' => 'PH25001', 'Datum' => '2025-08-05', 'DatPlnDPH' => '2025-08-05', 'Popis' => 'DPH 21% - věcné břemeno', 'UcMD' => '315000', 'UcD' => '343200', 'Castka' => 210.0],
                 ['Cislo' => 26, 'Zdroj' => 'FP', 'Doklad' => 'FP25005', 'Datum' => '2025-07-10', 'DatPlnDPH' => '2025-07-10', 'Popis' => 'Licence ze zahraničí', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 1000.0],
                 // Samovyměření: odpočet i povinnost na 343 stejnou částkou.
                 ['Cislo' => 27, 'Zdroj' => 'ID', 'Doklad' => 'ICH25001', 'Datum' => '2025-07-10', 'DatPlnDPH' => '2025-07-10', 'Popis' => 'RCH k FP25005', 'UcMD' => '343100', 'UcD' => '343200', 'Castka' => 210.0],
@@ -342,6 +346,18 @@ final class SyntheticAgenda
             ], [
                 ['CISLO' => 1, 'Cena' => 1000.0, 'SazbaDPH' => 21.0, 'PocetMJ' => 1.0, 'Cleneni' => '19Ř05,06'],
                 ['CISLO' => 1, 'Cena' => 1000.0, 'SazbaDPH' => 21.0, 'PocetMJ' => 1.0, 'Cleneni' => '19Ř43,44 K'],
+            ]),
+            // Kniha ostatních pohledávek: věcné břemeno s DPH (tuzemské plnění ř. 1).
+            'ROK.002/KnihPohl.DAT' => Ms3FixtureWriter::table([
+                ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['DatUcPr', 'D', 2], ['DatVyst', 'D', 2], ['DatPln', 'D', 2], ['DatSpl', 'D', 2],
+                ['Popis', 'C', 50], ['VarSym', 'C', 10], ['AdNazev', 'C', 60], ['AdICO', 'C', 12], ['AdDIC', 'C', 14],
+                ['AdUlice', 'C', 40], ['AdMesto', 'C', 40], ['AdPSC', 'C', 10], ['Cleneni', 'C', 12],
+                ['ZSazba', 'E', 10], ['ZaklZS', 'E', 10], ['DPHZS', 'E', 10], ['Zakl0', 'E', 10], ['Celkem', 'E', 10],
+            ], [
+                ['Cislo' => 1, 'Doklad' => 'PH25001', 'DatUcPr' => '2025-08-05', 'DatVyst' => '2025-08-05', 'DatPln' => '2025-08-05', 'DatSpl' => '2025-08-19',
+                    'Popis' => 'Věcné břemeno', 'VarSym' => '2025801', 'AdNazev' => 'Odběratel Beta a.s.', 'AdICO' => self::CUSTOMER_ICO,
+                    'AdDIC' => 'CZ' . self::CUSTOMER_ICO, 'AdUlice' => 'Ukázková 7', 'AdMesto' => 'Ostrava', 'AdPSC' => '702 00',
+                    'Cleneni' => self::KOD_DPH_SALE, 'ZSazba' => 21.0, 'ZaklZS' => 1000.0, 'DPHZS' => 210.0, 'Celkem' => 1210.0],
             ]),
             'ROK.002/BankKnih.DAT' => Ms3FixtureWriter::table(self::BANK_FIELDS, [
                 ['Doklad' => 'BV25001', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-12-31', 'DatPlat' => '2025-12-31', 'Celkem' => 100.0, 'Popis' => 'Poplatek za vedení účtu'],
