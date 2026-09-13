@@ -23,11 +23,14 @@ namespace MyInvoice\Service\Payroll\Import\Attendance;
  * mají přednost, stejný údaj se nikdy nesčítá.
  *
  * Firma dostane profil jako vlastní záznam (upravit, smazat, zkopírovat);
- * kód drží jen výchozí podobu.
+ * kód drží jen výchozí podobu. Při každé změně pravidel nebo složek zvyšte
+ * {@see self::VERSION} — nedotčený vzor firmy se pak převede sám, upravený
+ * dostane jen nabídku (PayrollImportProfileRepository::upgradeSample()).
  */
 final class AttendanceSampleProfile
 {
     public const NAME = 'Vzor GIRITON';
+    public const VERSION = 2;
 
     private const CALCULATION = 'výpočet*';
     private const EXPORT = 'data*';
@@ -101,7 +104,8 @@ final class AttendanceSampleProfile
         $add(self::MAIN, 'týdenní fond', 'weekly_hours');
         $add(self::MAIN, 'název pozice', 'position');
         // Sjednaná měsíční mzda patří do podmínek vztahu, ne mezi měsíční vstupy:
-        // předvyplní se jen při zakládání osoby.
+        // předvyplní se při zakládání osoby a u existujícího vztahu ji import
+        // zapíše do podmínek jen na výslovné potvrzení.
         $add(self::MAIN, 'mv', 'monthly_wage');
         $add(self::MAIN, 'mzdový výměr*', 'monthly_wage');
         $add(self::MAIN, 'měsíční mzda*', 'monthly_wage');

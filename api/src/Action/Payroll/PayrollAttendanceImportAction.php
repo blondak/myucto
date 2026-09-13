@@ -77,6 +77,7 @@ final class PayrollAttendanceImportAction
                 ($body['create_components'] ?? false) === true,
                 $this->profileId($body),
                 ($body['adopt_personal_numbers'] ?? false) === true,
+                ($body['adopt_monthly_wage'] ?? false) === true,
             );
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -95,6 +96,7 @@ final class PayrollAttendanceImportAction
                 'inputs_created' => $inputs['created'] ?? 0,
                 'components_created' => $result['components_created'] ?? [],
                 'links_saved' => $result['links_saved'] ?? 0,
+                'monthly_wages_adopted' => $result['monthly_wages_adopted'] ?? 0,
                 'replayed' => $result['replayed'] ?? false,
             ],
             $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),

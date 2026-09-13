@@ -499,12 +499,12 @@ final class PayrollEmploymentRepository
                 $employeeId,
                 $movedFrom,
             );
-            $this->assertTermsCorrectable($supplierId, $employmentId, $storedFrom, $storedTo);
+            $this->assertTermsOpenFrom($supplierId, $employmentId, $storedFrom, $storedTo);
             $predecessor = null;
             if ($movedFrom !== $storedFrom) {
                 // Nový rozsah musí být volný stejně jako ten starý; jinak by
                 // se oprava data protáhla do už vyplaceného měsíce.
-                $this->assertTermsCorrectable($supplierId, $employmentId, $movedFrom, $storedTo);
+                $this->assertTermsOpenFrom($supplierId, $employmentId, $movedFrom, $storedTo);
                 $predecessor = $this->previousTermsForUpdate(
                     $supplierId,
                     $employmentId,
@@ -671,6 +671,9 @@ final class PayrollEmploymentRepository
                     'Nová smluvní verze musí začínat později než dosud poslední verze.'
                 );
             }
+            // Nová verze platí od svého data napořád — nesmí začít v měsíci,
+            // za který je mzda zaúčtovaná nebo vyplacená, ani před ním.
+            $this->assertTermsOpenFrom($supplierId, $employmentId, (string) $data['effective_from'], null);
             $data['monthly_gross_minor'] = $replaceMonthlyGross
                 ? $monthlyGrossMinor
                 : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor']);
@@ -1596,8 +1599,12 @@ final class PayrollEmploymentRepository
      * jediný záznam. Od chvíle, kdy je běh zaúčtovaný nebo vyplacený, je
      * proto správná cesta NOVÁ VERZE od konkrétního data — a uživatel se to
      * musí dozvědět větou, ne obecným „nepovedlo se".
+     *
+     * Totéž hlídá i nová verze ({@see addTerms()}, rozsah bez konce): změna
+     * se nesmí protáhnout do zúčtovaného měsíce ani jednou z cest. Veřejné,
+     * aby se na totéž pravidlo mohl předem zeptat import (náhled změn mzdy).
      */
-    private function assertTermsCorrectable(
+    public function assertTermsOpenFrom(
         int $supplierId,
         int $employmentId,
         string $effectiveFrom,

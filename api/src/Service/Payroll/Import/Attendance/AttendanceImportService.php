@@ -8,13 +8,17 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
+use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollImportLinkRepository;
 use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollInputImportRepository;
+use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Payroll\Component\PayrollInputImportService;
+use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
+use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -41,6 +45,27 @@ final class AttendanceImportService
     public const EXPORT_FORMAT = 'myucto-attendance-profile';
     public const EXPORT_VERSION = 1;
 
+    /**
+     * Běh v těchto stavech už je uzavřený výstup (nebo k tomu míří). Kontrola
+     * zúčtování v podmínkách ({@see PayrollEmploymentRepository::assertTermsOpenFrom()})
+     * pouští i schválený běh, protože kartu vztahu opravuje člověk, který běh
+     * vidí. Hromadný import je přísnější: schválený měsíc nepřepočítá nikdo,
+     * kdo o změně ví, proto do něj nezapíše vůbec.
+     */
+    private const WAGE_BLOCKING_RUN_STATUSES = [
+        'approved', 'posted', 'payment_ready', 'paid', 'closed', 'correction_pending',
+    ];
+
+    /**
+     * Druhy složek, kterými se vyplácí základ mzdy podle docházky. Rychlý
+     * vstup bere hodinovou mzdu jako spravovaný základ (měsíční mzdu pak
+     * nepoužije), úkolovou jako „ostatní" — ta by se k základu z měsíční
+     * mzdy přičetla podruhé. Ani u jedné se sjednaná měsíční mzda z podkladů
+     * do podmínek nezapisuje: platila by jako základ v každém měsíci, kdy
+     * složka z docházky nepřijde.
+     */
+    private const WAGE_BASE_KINDS = ['hourly_wage', 'task_wage'];
+
     public function __construct(
         private readonly AttendanceWorkbookReader $reader,
         private readonly AttendanceColumnMapper $mapper,
@@ -57,6 +82,7 @@ final class AttendanceImportService
         private readonly PayrollEmploymentRepository $employments,
         private readonly LicenseCapacityGate $license,
         private readonly Connection $db,
+        private readonly PayrollEmploymentValidator $employmentValidator,
     ) {
     }
 
@@ -73,6 +99,7 @@ final class AttendanceImportService
         mixed $components = null,
     ): array {
         $periodStart = $this->period($period);
+        $modifiedSamples = $this->ensureSampleProfile($supplierId);
         $read = $this->readFiles($files);
         [$validated, $profileComponents, $profileMeta] = $this->resolveMapping(
             $supplierId,
@@ -82,7 +109,8 @@ final class AttendanceImportService
             $components,
         );
 
-        return self::public($this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta));
+        return self::public($this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta))
+            + ['upgrade_available' => self::sampleUpgrade($modifiedSamples)];
     }
 
     /**
@@ -102,6 +130,7 @@ final class AttendanceImportService
         bool $createComponents = false,
         ?int $profileId = null,
         bool $adoptPersonalNumbers = false,
+        bool $adoptMonthlyWage = false,
     ): array {
         $periodStart = $this->period($period);
         $read = $this->readFiles($files);
@@ -182,11 +211,28 @@ final class AttendanceImportService
             'create_inputs' => $createInputs,
             'create_components' => $createComponents,
             'adopt_personal_numbers' => $adoptPersonalNumbers,
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), true);
+        // Klíč jen při zapnutí, ať otisky dávek bez převzetí mzdy zůstanou stejné.
+        ] + ($adoptMonthlyWage ? ['adopt_monthly_wage' => true] : []), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), true);
+
+        /*
+         * Mzda se zapisuje až po dávce, vztah po vztahu, a to i při opakování
+         * téže dávky: zápis se pokaždé plánuje znovu nad aktuálními podmínkami,
+         * takže převzatá mzda se podruhé nezapíše a odmítnutá (třeba kvůli
+         * schválenému běhu) projde, jakmile překážka zmizí.
+         */
+        $adoptWages = fn (): array => $adoptMonthlyWage
+            ? $this->adoptMonthlyWages(
+                $supplierId,
+                $periodStart,
+                $assigned,
+                self::componentKinds($computed['component_checks'], $computed['component_definitions']),
+                $userId,
+            )
+            : ['adopted' => 0, 'conflicts' => [], 'runs_needing_refresh' => []];
 
         $existing = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint);
         if ($existing !== null) {
-            return self::replay($existing, $skipped);
+            return self::replay($existing, $skipped, $adoptWages());
         }
 
         $result = $this->transactional(function () use (
@@ -289,8 +335,9 @@ final class AttendanceImportService
             $winner = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint)
                 ?? throw new \RuntimeException('Souběžně založenou dávku importu nelze načíst.');
 
-            return self::replay($winner, $skipped);
+            return self::replay($winner, $skipped, $adoptWages());
         }
+        $wages = $adoptWages();
 
         return [
             'replayed' => false,
@@ -301,6 +348,9 @@ final class AttendanceImportService
             'components_created' => $result['components_created'],
             'personal_numbers_adopted' => $result['adoption']['adopted'],
             'personal_number_conflicts' => $result['adoption']['conflicts'],
+            'monthly_wages_adopted' => $wages['adopted'],
+            'wage_conflicts' => $wages['conflicts'],
+            'runs_needing_refresh' => $wages['runs_needing_refresh'],
             'skipped_persons' => $skipped,
         ];
     }
@@ -450,9 +500,12 @@ final class AttendanceImportService
     /** @return list<array<string,mixed>> */
     public function profiles(int $supplierId): array
     {
-        $this->ensureSampleProfile($supplierId);
+        $outdated = array_column($this->ensureSampleProfile($supplierId), 'id');
 
-        return $this->profiles->list($supplierId, AttendanceMeaning::SOURCE_SYSTEM);
+        return array_map(
+            static fn (array $profile): array => $profile + ['upgrade_available' => in_array($profile['id'], $outdated, true)],
+            $this->profiles->list($supplierId, AttendanceMeaning::SOURCE_SYSTEM),
+        );
     }
 
     /** @return array<string,mixed> */
@@ -578,7 +631,13 @@ final class AttendanceImportService
         ) ?? throw new \RuntimeException('Profil mapování se nepodařilo uložit.');
     }
 
-    private function ensureSampleProfile(int $supplierId): void
+    /**
+     * Založí vzor firmě, která ho ještě nedostala, a nedotčený starší vzor
+     * převede na aktuální verzi.
+     *
+     * @return list<array{id:int,name:string,sample_version:?int}> upravené vzory starší verze
+     */
+    private function ensureSampleProfile(int $supplierId): array
     {
         $this->profiles->seedSampleOnce(
             $supplierId,
@@ -586,7 +645,40 @@ final class AttendanceImportService
             AttendanceSampleProfile::NAME,
             AttendanceSampleProfile::rules(),
             AttendanceSampleProfile::components(),
+            AttendanceSampleProfile::VERSION,
         );
+
+        return $this->profiles->upgradeSample(
+            $supplierId,
+            AttendanceMeaning::SOURCE_SYSTEM,
+            AttendanceSampleProfile::VERSION,
+            AttendanceSampleProfile::rules(),
+            AttendanceSampleProfile::components(),
+        );
+    }
+
+    /**
+     * Nabídka nové verze vzoru pro upravený profil. Nese i pravidla a složky
+     * vzoru: uloží-li je účetní do profilu (běžné uložení profilu), vzor se
+     * při dalším načtení označí jako aktuální.
+     *
+     * @param list<array{id:int,name:string,sample_version:?int}> $modified
+     * @return array<string,mixed>|null
+     */
+    private static function sampleUpgrade(array $modified): ?array
+    {
+        if ($modified === []) {
+            return null;
+        }
+
+        return [
+            'profile_id' => $modified[0]['id'],
+            'name' => $modified[0]['name'],
+            'version' => $modified[0]['sample_version'],
+            'latest_version' => AttendanceSampleProfile::VERSION,
+            'rules' => AttendanceSampleProfile::rules(),
+            'components' => AttendanceSampleProfile::components(),
+        ];
     }
 
     /**
@@ -855,6 +947,20 @@ final class AttendanceImportService
             }
         }
 
+        $matchedPairs = [];
+        foreach ($persons as $person) {
+            if (in_array($person['match']['status'], ['linked', 'matched'], true) && is_int($person['match']['employment_id'])) {
+                $matchedPairs[] = ['person' => $person, 'employment_id' => $person['match']['employment_id']];
+            }
+        }
+        [$wageChanges, $wageWarnings] = $this->wageChanges(
+            $supplierId,
+            $periodStart,
+            $matchedPairs,
+            self::componentKinds($checks, array_values($definitions)),
+        );
+        array_push($warnings, ...$wageWarnings);
+
         return [
             'period' => substr($periodStart, 0, 7),
             'content_hash' => hash('sha256', implode("\n", self::sortedHashes($files))),
@@ -882,6 +988,7 @@ final class AttendanceImportService
             'employment_options' => $matched['options'],
             'persons' => $persons,
             'component_checks' => $checks,
+            'wage_changes' => $wageChanges,
             'unrecognized_columns' => $unrecognized,
             'summary' => $summary,
             'warnings' => array_values(array_unique($warnings)),
@@ -1125,6 +1232,271 @@ final class AttendanceImportService
         return ['adopted' => $adopted, 'conflicts' => $conflicts];
     }
 
+    /**
+     * Druh mzdové složky podle kódu: existující složka firmy má přednost před
+     * definicí z profilu.
+     *
+     * @param list<array<string,mixed>> $checks
+     * @param list<array<string,mixed>> $definitions
+     * @return array<string,string>
+     */
+    private static function componentKinds(array $checks, array $definitions): array
+    {
+        $kinds = [];
+        foreach ($definitions as $definition) {
+            $kinds[(string) $definition['code']] = (string) $definition['kind'];
+        }
+        foreach ($checks as $check) {
+            if (is_string($check['kind'] ?? null)) {
+                $kinds[(string) $check['component_code']] = $check['kind'];
+            }
+        }
+
+        return $kinds;
+    }
+
+    /**
+     * Rozdíly mezi měsíční mzdou z podkladů a sjednanými podmínkami vztahů.
+     *
+     * @param list<array{person:array<string,mixed>,employment_id:int}> $pairs
+     * @param array<string,string> $kinds
+     * @return array{0:list<array<string,mixed>>,1:list<string>}
+     */
+    private function wageChanges(int $supplierId, string $periodStart, array $pairs, array $kinds): array
+    {
+        $warnings = [];
+        $wanted = [];
+        foreach ($pairs as $pair) {
+            $raw = $pair['person']['monthly_wage'] ?? null;
+            if (!is_string($raw) || trim($raw) === '') {
+                continue;
+            }
+            $imported = self::monthlyWageMinor($raw);
+            if ($imported === null) {
+                $warnings[] = "Měsíční mzdu „{$raw}“ osoby {$pair['person']['display_name']} nejde přečíst jako částku; "
+                    . 'do podmínek vztahu se nezapíše.';
+                continue;
+            }
+            if ($imported > 0) {
+                $wanted[] = $pair + ['imported_minor' => $imported];
+            }
+        }
+        if ($wanted === []) {
+            return [[], $warnings];
+        }
+        $periodEnd = (new \DateTimeImmutable($periodStart))->format('Y-m-t');
+        $terms = $this->imports->termsAt(
+            $supplierId,
+            array_map(static fn (array $pair): int => $pair['employment_id'], $wanted),
+            $periodStart,
+            $periodEnd,
+        );
+        $changes = [];
+        foreach ($wanted as $pair) {
+            $change = $this->planWage(
+                $supplierId,
+                $periodStart,
+                $pair['person'],
+                $pair['employment_id'],
+                $pair['imported_minor'],
+                $terms[$pair['employment_id']] ?? null,
+                $kinds,
+            );
+            if ($change !== null) {
+                $changes[] = $change;
+            }
+        }
+
+        return [$changes, $warnings];
+    }
+
+    /**
+     * Jak se měsíční mzda do podmínek zapíše, případně proč ne.
+     *
+     * `correct` = podmínky mzdu nemají, doplňuje se chybějící údaj opravou
+     * platné verze (bez nové verze a bez sady povinností ke změně).
+     * `add` = podmínky mají jinou mzdu, vzniká nová verze od 1. dne období.
+     * Doplnění, které by přepsalo zúčtovaný měsíc, se zapíše jako nová verze
+     * od začátku období — přesně to radí i hláška kontroly zúčtování.
+     *
+     * @param array<string,mixed> $person
+     * @param array{terms_id:int,effective_from:string,effective_to:?string,monthly_gross_minor:?int,is_latest:bool,employment_status:string}|null $terms
+     * @param array<string,string> $kinds
+     * @return array<string,mixed>|null null = mzda se shoduje, není co měnit
+     */
+    private function planWage(
+        int $supplierId,
+        string $periodStart,
+        array $person,
+        int $employmentId,
+        int $imported,
+        ?array $terms,
+        array $kinds,
+    ): ?array {
+        $current = $terms['monthly_gross_minor'] ?? null;
+        if ($current === $imported) {
+            return null;
+        }
+        $mode = $current === null ? 'correct' : 'add';
+        $entry = static fn (string $mode, ?string $reason, array $refresh = []): array => [
+            'key' => (string) $person['key'],
+            'display_name' => (string) $person['display_name'],
+            'employment_id' => $employmentId,
+            'current_minor' => $current,
+            'imported_minor' => $imported,
+            'mode' => $mode,
+            'reason' => $reason,
+            'runs_needing_refresh' => $refresh,
+        ];
+
+        foreach (array_keys($person['_components'] ?? []) as $code) {
+            if (in_array($kinds[(string) $code] ?? null, self::WAGE_BASE_KINDS, true)) {
+                return $entry($mode, "Osoba dostává v podkladech mzdu podle docházky (složka {$code}). "
+                    . 'Měsíční mzda se do podmínek nezapíše, aby se základ nevyplatil dvakrát; '
+                    . 'platí-li opravdu, zapište ji na kartě vztahu.');
+            }
+        }
+        if ($terms === null) {
+            return $entry($mode, 'Pracovní vztah nemá v období žádnou verzi sjednaných podmínek. Doplňte je na kartě vztahu.');
+        }
+        if (in_array($terms['employment_status'], ['ended', 'archived', 'no_show'], true)) {
+            return $entry($mode, 'U ukončeného, archivovaného nebo nenastoupeného vztahu import podmínky nemění.');
+        }
+        if (!$terms['is_latest']) {
+            return $entry($mode, 'Po začátku období už platí novější verze podmínek. Mzdu upravte na kartě vztahu.');
+        }
+
+        $from = $terms['effective_from'];
+        $to = $terms['effective_to'];
+        if ($mode === 'correct') {
+            try {
+                $this->employments->assertTermsOpenFrom($supplierId, $employmentId, $from, $to);
+            } catch (PayrollTermsSettledException $e) {
+                if ($from >= $periodStart) {
+                    return $entry($mode, $e->getMessage());
+                }
+                $mode = 'add';
+            }
+        }
+        if ($mode === 'add') {
+            if ($from >= $periodStart) {
+                return $entry($mode, "Platná verze podmínek začíná až {$from}, novou verzi od začátku období proto "
+                    . 'založit nejde. Mzdu upravte na kartě vztahu.');
+            }
+            $from = $periodStart;
+            $to = null;
+            try {
+                $this->employments->assertTermsOpenFrom($supplierId, $employmentId, $from, $to);
+            } catch (PayrollTermsSettledException $e) {
+                return $entry($mode, $e->getMessage());
+            }
+        }
+
+        $refresh = [];
+        foreach ($this->imports->runsCoveringEmployment($supplierId, $employmentId, $from, $to) as $run) {
+            if (in_array($run['status'], self::WAGE_BLOCKING_RUN_STATUSES, true)) {
+                return $entry($mode, "Mzdový běh za {$run['period']} je schválený, zaúčtovaný nebo vyplacený. "
+                    . 'Import do jeho podmínek nezapisuje; vraťte běh k úpravám, nebo mzdu zapište na kartě vztahu '
+                    . 'jako novou verzi od dalšího měsíce.');
+            }
+            $refresh[] = $run;
+        }
+
+        return $entry($mode, null, $refresh);
+    }
+
+    /**
+     * Zapíše převzaté měsíční mzdy do podmínek, vztah po vztahu. Chyba
+     * jednoho vztahu nezastaví ostatní a vrátí se jako konflikt (stejně jako
+     * převzetí osobních čísel).
+     *
+     * @param list<array{person:array<string,mixed>,employment:array<string,mixed>}> $assigned
+     * @param array<string,string> $kinds
+     * @return array{adopted:int,conflicts:list<array{key:string,display_name:string,reason:string}>,runs_needing_refresh:list<array{run_id:int,period:string,status:string}>}
+     */
+    private function adoptMonthlyWages(
+        int $supplierId,
+        string $periodStart,
+        array $assigned,
+        array $kinds,
+        ?int $userId,
+    ): array {
+        [$changes] = $this->wageChanges(
+            $supplierId,
+            $periodStart,
+            array_map(
+                static fn (array $item): array => ['person' => $item['person'], 'employment_id' => (int) $item['employment']['employment_id']],
+                $assigned,
+            ),
+            $kinds,
+        );
+        $adopted = 0;
+        $conflicts = [];
+        $refresh = [];
+        foreach ($changes as $change) {
+            $reason = $change['reason'];
+            if ($reason === null) {
+                try {
+                    $this->writeWage($supplierId, $periodStart, $change, $userId);
+                    ++$adopted;
+                    foreach ($change['runs_needing_refresh'] as $run) {
+                        $refresh[$run['run_id']] = $run;
+                    }
+                    continue;
+                } catch (PayrollEmploymentConflictException) {
+                    $reason = 'Pracovní vztah mezitím změnil někdo jiný. Načtěte náhled znovu.';
+                } catch (PayrollEmploymentNotFoundException|\DomainException|\InvalidArgumentException $e) {
+                    $reason = $e->getMessage();
+                }
+            }
+            $conflicts[] = [
+                'key' => (string) $change['key'],
+                'display_name' => (string) $change['display_name'],
+                'reason' => (string) $reason,
+            ];
+        }
+
+        return ['adopted' => $adopted, 'conflicts' => $conflicts, 'runs_needing_refresh' => array_values($refresh)];
+    }
+
+    /** @param array<string,mixed> $change */
+    private function writeWage(int $supplierId, string $periodStart, array $change, ?int $userId): void
+    {
+        $employmentId = (int) $change['employment_id'];
+        $current = $this->employments->currentTerms($supplierId, $employmentId)
+            ?? throw new \DomainException('Pracovní vztah nemá verzi sjednaných podmínek.');
+        $version = $this->imports->employmentRowVersion($supplierId, $employmentId)
+            ?? throw new PayrollEmploymentNotFoundException('Pracovní vztah nebyl nalezen.');
+        $body = RegistrationImportWriter::termsBody(
+            $current,
+            'Měsíční mzda z importu docházky za ' . substr($periodStart, 0, 7) . '.',
+        );
+        $body['effective_from'] = $change['mode'] === 'add' ? $periodStart : (string) $current['effective_from'];
+        $terms = $this->employmentValidator->terms(
+            $body,
+            $this->employments->currentCzIscoCode($supplierId, $employmentId),
+            $this->employments->currentOtherWithholdingEligibility($supplierId, $employmentId),
+            $this->employments->currentRelationType($supplierId, $employmentId),
+        );
+        $monthlyGross = (int) $change['imported_minor'];
+        if ($change['mode'] === 'add') {
+            $this->employments->addTerms($supplierId, $employmentId, $terms, $version, $userId, null, null, true, $monthlyGross);
+        } else {
+            $this->employments->correctTerms($supplierId, $employmentId, $terms, $version, $userId, null, null, true, $monthlyGross);
+        }
+    }
+
+    /** Měsíční mzda z podkladů v haléřích; null, když text částkou není. */
+    private static function monthlyWageMinor(string $value): ?int
+    {
+        $number = AttendanceDecimal::parseNumber($value);
+        if ($number === null || str_starts_with($number, '-')) {
+            return null;
+        }
+
+        return AttendanceDecimal::scaled($number, 2);
+    }
+
     /** @return string|null důvod, proč se kód nezměnil */
     private function renameEmployment(
         int $supplierId,
@@ -1279,9 +1651,10 @@ final class AttendanceImportService
     /**
      * @param array<string,mixed> $batch
      * @param list<array<string,mixed>> $skipped
+     * @param array{adopted:int,conflicts:list<array<string,mixed>>,runs_needing_refresh:list<array<string,mixed>>} $wages
      * @return array<string,mixed>
      */
-    private static function replay(array $batch, array $skipped): array
+    private static function replay(array $batch, array $skipped, array $wages): array
     {
         return [
             'replayed' => true,
@@ -1291,6 +1664,9 @@ final class AttendanceImportService
             'components_created' => [],
             'personal_numbers_adopted' => 0,
             'personal_number_conflicts' => [],
+            'monthly_wages_adopted' => $wages['adopted'],
+            'wage_conflicts' => $wages['conflicts'],
+            'runs_needing_refresh' => $wages['runs_needing_refresh'],
             'skipped_persons' => $skipped,
         ];
     }

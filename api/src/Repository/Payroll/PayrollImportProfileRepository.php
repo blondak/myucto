@@ -14,12 +14,12 @@ use PDOException;
  *
  * @phpstan-type ImportProfile array{
  *   id:int,name:string,rules:list<array<string,mixed>>,components:list<array<string,mixed>>,
- *   is_sample:bool,updated_at:string
+ *   is_sample:bool,sample_version:?int,updated_at:string
  * }
  */
 final class PayrollImportProfileRepository
 {
-    private const COLUMNS = 'id, name, rules_json, components_json, is_sample, updated_at';
+    private const COLUMNS = 'id, name, rules_json, components_json, is_sample, sample_version, updated_at';
 
     public function __construct(private readonly Connection $db)
     {
@@ -70,16 +70,28 @@ final class PayrollImportProfileRepository
         ?int $userId,
         array $components = [],
         bool $isSample = false,
+        ?int $sampleVersion = null,
     ): ?array {
-        $rulesJson = json_encode($rules, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $componentsJson = json_encode($components, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $rulesJson = self::json($rules);
+        $componentsJson = self::json($components);
         try {
             if ($id === null) {
                 $this->db->pdo()->prepare(
                     'INSERT INTO payroll_import_profiles
-                        (supplier_id, source_system, name, rules_json, components_json, is_sample, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)'
-                )->execute([$supplierId, $sourceSystem, $name, $rulesJson, $componentsJson, $isSample ? 1 : 0, $userId]);
+                        (supplier_id, source_system, name, rules_json, components_json, is_sample,
+                         sample_version, sample_rules_sha256, updated_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                )->execute([
+                    $supplierId,
+                    $sourceSystem,
+                    $name,
+                    $rulesJson,
+                    $componentsJson,
+                    $isSample ? 1 : 0,
+                    $isSample ? $sampleVersion : null,
+                    $isSample ? self::contentHash($rulesJson, $componentsJson) : null,
+                    $userId,
+                ]);
                 $id = (int) $this->db->pdo()->lastInsertId();
             } else {
                 if ($this->find($supplierId, $sourceSystem, $id) === null) {
@@ -138,6 +150,7 @@ final class PayrollImportProfileRepository
         string $name,
         array $rules,
         array $components,
+        ?int $sampleVersion = null,
     ): bool {
         $pdo = $this->db->pdo();
         if ($pdo->inTransaction()) {
@@ -165,7 +178,7 @@ final class PayrollImportProfileRepository
             $exists->execute([$supplierId, $sourceSystem, $name]);
             $created = $exists->fetchColumn() === false;
             if ($created) {
-                $this->save($supplierId, $sourceSystem, null, $name, $rules, null, $components, true);
+                $this->save($supplierId, $sourceSystem, null, $name, $rules, null, $components, true, $sampleVersion);
             }
             $pdo->prepare('UPDATE supplier SET payroll_attendance_sample_seeded_at = NOW() WHERE id = ?')
                 ->execute([$supplierId]);
@@ -178,6 +191,95 @@ final class PayrollImportProfileRepository
             }
             throw $e;
         }
+    }
+
+    /**
+     * Převede ukázkové profily firmy na aktuální verzi vzoru.
+     *
+     * Nedotčený vzor (uložený obsah má týž otisk, jaký aplikace zapsala) se
+     * nahradí; obsah, který už aktuálnímu vzoru odpovídá, jen dostane novou
+     * verzi. Upravený vzor se NEPŘEPISUJE — účetní si ho přizpůsobila a nová
+     * pravidla by jí změnu potichu vzala. Takový profil se vrátí, aby náhled
+     * mohl nabídnout převzetí. Smazaný vzor tu není, takže se ani nevrátí.
+     *
+     * Zápis je podmíněný otiskem i verzí řádku, takže souběžná úprava profilu
+     * se nepřepíše; zámek firmy není potřeba, a proto to jde i uvnitř cizí
+     * transakce.
+     *
+     * @param list<array<string,mixed>> $rules
+     * @param list<array<string,mixed>> $components
+     * @return list<array{id:int,name:string,sample_version:?int}> upravené vzory starší verze
+     */
+    public function upgradeSample(
+        int $supplierId,
+        string $sourceSystem,
+        int $version,
+        array $rules,
+        array $components,
+    ): array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, name, rules_json, components_json, sample_version, sample_rules_sha256, row_version
+               FROM payroll_import_profiles
+              WHERE supplier_id = ? AND source_system = ? AND is_sample = 1
+                AND (sample_version IS NULL OR sample_version < ?)
+              ORDER BY id'
+        );
+        $stmt->execute([$supplierId, $sourceSystem, $version]);
+        $rulesJson = self::json($rules);
+        $componentsJson = self::json($components);
+        $latestHash = self::contentHash($rulesJson, $componentsJson);
+        $modified = [];
+        foreach (PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'payroll_import_samples') as $row) {
+            $id = PayrollTimeValue::int($row['id'] ?? null, 'id');
+            $storedHash = self::contentHash((string) $row['rules_json'], (string) ($row['components_json'] ?? ''));
+            $sampleVersion = $row['sample_version'] === null
+                ? null
+                : PayrollTimeValue::int($row['sample_version'], 'sample_version');
+            if ($storedHash === $latestHash) {
+                $this->db->pdo()->prepare(
+                    'UPDATE payroll_import_profiles
+                        SET sample_version = ?, sample_rules_sha256 = ?
+                      WHERE supplier_id = ? AND id = ? AND row_version = ?'
+                )->execute([$version, $latestHash, $supplierId, $id, $row['row_version']]);
+                continue;
+            }
+            if ($row['sample_rules_sha256'] !== null && hash_equals((string) $row['sample_rules_sha256'], $storedHash)) {
+                $update = $this->db->pdo()->prepare(
+                    'UPDATE payroll_import_profiles
+                        SET rules_json = ?, components_json = ?, sample_version = ?, sample_rules_sha256 = ?,
+                            row_version = row_version + 1
+                      WHERE supplier_id = ? AND id = ? AND row_version = ? AND sample_rules_sha256 = ?'
+                );
+                $update->execute([
+                    $rulesJson,
+                    $componentsJson,
+                    $version,
+                    $latestHash,
+                    $supplierId,
+                    $id,
+                    $row['row_version'],
+                    $storedHash,
+                ]);
+                if ($update->rowCount() === 1) {
+                    continue;
+                }
+            }
+            $modified[] = ['id' => $id, 'name' => (string) $row['name'], 'sample_version' => $sampleVersion];
+        }
+
+        return $modified;
+    }
+
+    /** Otisk obsahu profilu; stejný výraz počítá doplnění v migraci 1836. */
+    public static function contentHash(string $rulesJson, string $componentsJson): string
+    {
+        return hash('sha256', $rulesJson . "\n" . $componentsJson);
+    }
+
+    /** @param list<array<string,mixed>> $value */
+    private static function json(array $value): string
+    {
+        return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     /**
@@ -195,6 +297,9 @@ final class PayrollImportProfileRepository
             'rules' => is_array($rules) ? array_values(array_filter($rules, 'is_array')) : [],
             'components' => is_array($components) ? array_values(array_filter($components, 'is_array')) : [],
             'is_sample' => (int) ($row['is_sample'] ?? 0) === 1,
+            'sample_version' => ($row['sample_version'] ?? null) === null
+                ? null
+                : PayrollTimeValue::int($row['sample_version'], 'sample_version'),
             'updated_at' => (string) $row['updated_at'],
         ];
     }

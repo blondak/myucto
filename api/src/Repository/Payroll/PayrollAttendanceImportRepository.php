@@ -158,6 +158,114 @@ final class PayrollAttendanceImportRepository
         ];
     }
 
+    /**
+     * Verze sjednaných podmínek, která platí k začátku období (u nástupu
+     * uprostřed měsíce první verze v období), pro každý z vztahů.
+     *
+     * `monthly_gross_minor` je hodnota, se kterou počítá mzdový běh: verze
+     * podmínek, jinak projekce na vztahu. `is_latest` říká, jestli po ní už
+     * nenásleduje další verze — opravit jde jen poslední a nová verze musí
+     * začínat až po ní.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array{terms_id:int,effective_from:string,effective_to:?string,monthly_gross_minor:?int,is_latest:bool,employment_status:string}>
+     */
+    public function termsAt(int $supplierId, array $employmentIds, string $periodStart, string $periodEnd): array
+    {
+        $employmentIds = array_values(array_unique(array_filter($employmentIds, static fn (int $id): bool => $id > 0)));
+        if ($employmentIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "WITH ranked AS (
+                SELECT terms.id, terms.employment_id, terms.effective_from, terms.effective_to,
+                       terms.monthly_gross_minor,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY terms.employment_id
+                           ORDER BY terms.effective_from DESC, terms.id DESC
+                       ) AS recency
+                  FROM payroll_employment_terms terms
+                 WHERE terms.supplier_id = ? AND terms.employment_id IN ({$placeholders})
+             )
+             SELECT ranked.id, ranked.employment_id, ranked.effective_from, ranked.effective_to,
+                    COALESCE(ranked.monthly_gross_minor, employment.monthly_gross_minor) AS monthly_gross_minor,
+                    ranked.recency, employment.status
+               FROM ranked
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = ? AND employment.id = ranked.employment_id
+              WHERE ranked.effective_from <= ?
+                AND (ranked.effective_to IS NULL OR ranked.effective_to >= ?)
+              ORDER BY ranked.employment_id,
+                       CASE WHEN ranked.effective_from <= ? THEN 0 ELSE 1 END,
+                       CASE WHEN ranked.effective_from <= ? THEN ranked.effective_from END DESC,
+                       ranked.effective_from, ranked.id"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds, $supplierId, $periodEnd, $periodStart, $periodStart, $periodStart]);
+        $result = [];
+        foreach (PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'attendance_terms') as $row) {
+            $employmentId = PayrollTimeValue::int($row['employment_id'] ?? null, 'employment_id');
+            if (isset($result[$employmentId])) {
+                continue;
+            }
+            $result[$employmentId] = [
+                'terms_id' => PayrollTimeValue::int($row['id'] ?? null, 'id'),
+                'effective_from' => (string) $row['effective_from'],
+                'effective_to' => $row['effective_to'] === null ? null : (string) $row['effective_to'],
+                'monthly_gross_minor' => $row['monthly_gross_minor'] === null
+                    ? null
+                    : PayrollTimeValue::int($row['monthly_gross_minor'], 'monthly_gross_minor'),
+                'is_latest' => PayrollTimeValue::int($row['recency'] ?? null, 'recency') === 1,
+                'employment_status' => (string) ($row['status'] ?? ''),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Mzdové běhy, jejichž některá revize počítá s vztahem v měsících od
+     * `$from` (do `$to`, je-li zadané). Stornované běhy se nevracejí.
+     *
+     * @return list<array{run_id:int,period:string,status:string}>
+     */
+    public function runsCoveringEmployment(int $supplierId, int $employmentId, string $from, ?string $to): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT run.id, run.period_start, run.status
+               FROM payroll_run_employments run_employment
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run_employment.supplier_id
+                AND revision.id = run_employment.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE run_employment.supplier_id = ?
+                AND run_employment.employment_id = ?
+                AND run.status <> "cancelled"
+                AND run.period_start >= ?
+                AND (? IS NULL OR run.period_start <= ?)
+              ORDER BY run.period_start, run.id'
+        );
+        $monthStart = substr($from, 0, 8) . '01';
+        $stmt->execute([$supplierId, $employmentId, $monthStart, $to, $to]);
+
+        return array_map(static fn (array $row): array => [
+            'run_id' => PayrollTimeValue::int($row['id'] ?? null, 'id'),
+            'period' => substr((string) $row['period_start'], 0, 7),
+            'status' => (string) $row['status'],
+        ], PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'attendance_runs'));
+    }
+
+    public function employmentRowVersion(int $supplierId, int $employmentId): ?int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT row_version FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false ? null : PayrollTimeValue::int($value, 'row_version');
+    }
+
     /** @return array<string,mixed>|null */
     public function findBatchByHash(int $supplierId, string $periodStart, string $contentSha256): ?array
     {
