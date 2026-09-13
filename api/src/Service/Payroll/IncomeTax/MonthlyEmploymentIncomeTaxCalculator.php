@@ -427,6 +427,23 @@ final class MonthlyEmploymentIncomeTaxCalculator
         };
     }
 
+    /**
+     * Skupina zvláštní sazby, do které by vztah spadl BEZ podepsaného
+     * prohlášení poplatníka — tatáž pravidla jako výpočet, jen bez částky.
+     *
+     * `null` = srážka nepřipadá v úvahu (záloha), nebo zařazení není
+     * jednoznačné a výpočet by ho poslal do ručního posouzení. Skupina ještě
+     * neznamená srážku: ta nastane, jen když úhrn ve skupině nedosáhne
+     * rozhodné částky ({@see self::regime()}), a to se z evidence předem
+     * poznat nedá. Slouží náhledu hromadného doplnění evidence, aby účetní
+     * věděla, u koho má „nepodepsal" daňový dopad navíc.
+     */
+    public function withholdingGroupWithoutSignedDeclaration(
+        EmploymentRelationshipTaxInput $relationship,
+    ): ?string {
+        return $this->candidateGroup($relationship, false)['group'];
+    }
+
     private function regime(
         bool $signed,
         ?string $group,

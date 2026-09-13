@@ -189,6 +189,10 @@ final class RoutePermissionMap
         // a vyživované osoby, ne `payroll.employment.write`.
         ['GET', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll', AccessLevel::READ],
         ['PUT', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll.person.write', AccessLevel::WRITE],
+        // Hromadné doplnění výchozí evidence — tentýž zápis jako PUT výše, jen
+        // pro víc osob. Náhled je POST (tělo se seznamem osob) a vypisuje osobní
+        // údaje celé firmy, proto stejné právo jako zápis.
+        ['POST', '#^/api/payroll/statutory-evidence/bulk-defaults/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/foreign-permits$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/foreign-permits$#', 'payroll.person.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],

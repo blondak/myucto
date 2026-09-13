@@ -262,6 +262,18 @@ final class PayrollPersonStatutoryEvidenceRepository
         private readonly PayrollRunWorkflow $workflow = new PayrollRunWorkflow(),
     ) {}
 
+    /**
+     * Tabulka editovatelné sekce — pro dotazy nad celou množinou osob
+     * (hromadné doplnění evidence), aby jméno tabulky nežilo na dvou místech.
+     */
+    public static function sectionTable(string $section): string
+    {
+        $spec = self::EDITABLE[$section]
+            ?? throw new InvalidArgumentException("Neznámá sekce zákonné evidence {$section}.");
+
+        return self::COLLECTIONS[$spec['section']][$spec['collection']]['table'];
+    }
+
     /** @return array<string,mixed>|null */
     public function snapshot(
         int $supplierId,
@@ -589,6 +601,14 @@ final class PayrollPersonStatutoryEvidenceRepository
 
             $substantive = false;
             foreach ($spec['fields'] as $field) {
+                // Otisk dokladu klient nikdy neposílá (inputValues() ho nuluje)
+                // a odvozuje se až z DMS v resolveHealthEvidenceDocuments().
+                // Věcnou změnu pozná porovnání ID dokladu; kdyby se porovnával
+                // i otisk, každé uložení nezměněného řádku s dokladem by se
+                // tvářilo jako změna a ve zmrazeném období řádek rozdělilo.
+                if ($field === 'health_evidence_document_sha256') {
+                    continue;
+                }
                 if ($this->nullableText($existing[$field] ?? null) !== $values[$field]) {
                     $substantive = true;
                     break;

@@ -311,6 +311,58 @@ final class PayrollPersonStatutoryEvidenceRepositoryTest extends TestCase
         self::assertSame([], $view['frozen_runs']);
     }
 
+    /**
+     * Uložení NEZMĚNĚNÉ karty nesmí rozdělit zdravotní krytí s dokladem, které
+     * začalo ve schváleném období.
+     *
+     * Otisk dokladu klient nikdy neposílá (zapisovací cesta ho nuluje a odvodí
+     * z DMS), jenže věcné porovnání ho počítalo — nezměněný řádek se tak tvářil
+     * jako změna a save() ho ve zmrazeném období uzavřel a založil novou verzi.
+     */
+    public function testUnchangedDocumentLinkedCoverageIsNotSplitInFrozenPeriod(): void
+    {
+        $pdo = $this->db->pdo();
+        $userId = (int) ($pdo->query('SELECT MIN(id) FROM users')->fetchColumn() ?: 0);
+        if ($userId === 0) {
+            $this->markTestSkipped('Chybí uživatel pro syntetický dokument.');
+        }
+        $sha256 = hash('sha256', 'repository-unchanged-health-document');
+        $pdo->prepare(
+            'INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type,
+                 size_bytes, doc_type, source, uploaded_by, scope)
+             VALUES (?, "Syntetický zdravotní důkaz", "health-evidence.pdf", ?, ?,
+                     "application/pdf", 1, "pdf", "manual", ?, "company")'
+        )->execute([$this->supplierId, $sha256 . '.pdf', $sha256, $userId]);
+        $documentId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_person_health_coverage_history
+                (supplier_id, employee_id, jurisdiction, insurer_status, insurer_code,
+                 insurer_evidence_reference, health_evidence_document_id,
+                 health_evidence_document_sha256, effective_from)
+             VALUES (?, ?, "czech_regime_verified", "verified", "111",
+                     "document:health-insurer", ?, ?, "2026-01-01")'
+        )->execute([$this->supplierId, $this->employeeId, $documentId, $sha256]);
+        $this->approveRun($pdo, '2026-06-01', 'approved');
+        $before = $this->repository->editorView($this->supplierId, $this->employeeId, '2026-07-31');
+        self::assertNotNull($before);
+
+        $after = $this->repository->save(
+            $this->supplierId,
+            $this->employeeId,
+            ['sections' => $before['sections']],
+            '2026-07-31',
+            $userId,
+            null,
+            null,
+        );
+
+        self::assertSame($before['sections']['health_coverages'], $after['sections']['health_coverages']);
+        self::assertCount(1, $after['sections']['health_coverages']);
+        self::assertSame(1, $after['sections']['health_coverages'][0]['row_version']);
+        self::assertNull($after['sections']['health_coverages'][0]['effective_to']);
+    }
+
     private function approveRun(PDO $pdo, string $periodStart, string $status): int
     {
         $pdo->prepare(

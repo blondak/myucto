@@ -561,6 +561,38 @@ final class PayrollRunSnapshotBuilder
         }
         unset($person);
 
+        // Nepodepsané prohlášení poplatníka je rozhodnutý stav, ne mezera —
+        // assembler ho proto neblokuje. Má ale daňový dopad (bez slevy na
+        // poplatníka a zvýhodnění, u DPP a zaměstnání malého rozsahu pod
+        // rozhodnou částkou srážka) a hromadné doplnění ho umí zapsat na jedno
+        // kliknutí. Jedno souhrnné varování za firmu, ne řádek na osobu:
+        // u 200 lidí by jednotlivá varování přehlušila skutečné problémy.
+        // Validace do `$data` nevstupují, takže `input_hash` se nemění.
+        $unsignedDeclarations = 0;
+        foreach (array_keys($people) as $personId) {
+            $declaration = $statutoryEvidence[$personId]['income_tax']['declaration'] ?? null;
+            if (is_array($declaration) && ($declaration['status'] ?? null) === 'not-signed') {
+                $unsignedDeclarations++;
+            }
+        }
+        if ($unsignedDeclarations > 0) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'tax_declaration_not_signed_summary',
+                'run',
+                null,
+                sprintf(
+                    'Počet osob s nepodepsaným prohlášením poplatníka k dani: %d. Záloha'
+                    . ' se jim počítá bez slevy na poplatníka a bez daňového zvýhodnění;'
+                    . ' u dohody o provedení práce a zaměstnání malého rozsahu s příjmem'
+                    . ' pod rozhodnou částkou se daň sráží zvláštní sazbou (§ 6 odst. 4 ZDP).'
+                    . ' Ověřte, že to odpovídá skutečnosti.',
+                    $unsignedDeclarations,
+                ),
+                '/payroll/people',
+            );
+        }
+
         $data = [
             'schema_version' => 'payroll-run-input.v2',
             'supplier_id' => $supplierId,

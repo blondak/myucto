@@ -141,6 +141,7 @@ use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
 use MyInvoice\Action\Payroll\PayrollOpeningBalanceAction;
 use MyInvoice\Action\Payroll\PayrollPersonSensitiveRevealAction;
 use MyInvoice\Action\Payroll\PayrollPersonStatutoryEvidenceAction;
+use MyInvoice\Action\Payroll\PayrollStatutoryEvidenceBulkDefaultsAction;
 use MyInvoice\Action\Payroll\PayrollPostingReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
@@ -1342,6 +1343,14 @@ final class Routes
             $g->put(
                 '/people/{id:[0-9]+}/statutory-evidence',
                 [PayrollPersonStatutoryEvidenceAction::class, 'save'],
+            );
+            $g->post(
+                '/statutory-evidence/bulk-defaults/preview',
+                [PayrollStatutoryEvidenceBulkDefaultsAction::class, 'preview'],
+            );
+            $g->post(
+                '/statutory-evidence/bulk-defaults/apply',
+                [PayrollStatutoryEvidenceBulkDefaultsAction::class, 'apply'],
             );
             $g->get(
                 '/people/{id:[0-9]+}/foreign-permits',

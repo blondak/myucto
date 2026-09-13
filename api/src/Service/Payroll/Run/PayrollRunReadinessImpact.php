@@ -71,6 +71,9 @@ final class PayrollRunReadinessImpact
         'missing_effective_employment_term' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_intent_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_transitional_window' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // Stav prohlášení vstupuje do zmrazeného snímku — podpis po zamknutí
+        // znamená opravnou revizi. Je to ale rozhodnutý stav, ne chyba.
+        'tax_declaration_not_signed_summary' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
 
         // ── Skupina 1: doplní se kdykoli, na výpočet to nemá vliv ────────────
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
