@@ -779,3 +779,12 @@ export function autoPersonCreateDefaults(period: string): PersonCreateDefaults {
 export function isValidPeriod(period: string): boolean {
   return firstDayOfPeriod(period) !== ''
 }
+
+export function chunk<T>(items: readonly T[], size: number): T[][] {
+  if (size < 1) throw new RangeError('Velikost dávky musí být aspoň 1.')
+  const parts: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    parts.push(items.slice(index, index + size))
+  }
+  return parts
+}

@@ -22,6 +22,7 @@ import {
   autoPersonCreateDefaults,
   buildAttendanceLinks,
   buildPersonsPayload,
+  chunk,
   componentsToCreate,
   filesFingerprint,
   guessRelationType,
@@ -142,6 +143,19 @@ async function previewSource() {
   }
 }
 
+// Po dávkách: server bere nejvýš 200 osob na požadavek a firma jich může mít víc.
+const PERSONS_PER_REQUEST = 100
+
+async function createPersonsInChunks(payload: AttendancePersonCreate[]): Promise<AttendancePersonsResult> {
+  const source = await previewSource()
+  const results: AttendancePersonsResult['results'] = []
+  for (const part of chunk(payload, PERSONS_PER_REQUEST)) {
+    const response = await payrollImportsApi.createAttendancePersons(period.value, part, source)
+    results.push(...response.results)
+  }
+  return { results }
+}
+
 async function requestPreview(): Promise<boolean> {
   error.value = ''
   const current = fingerprint.value
@@ -204,7 +218,7 @@ async function createPersons(payload: AttendancePersonCreate[]) {
   busy.value = 'persons'
   error.value = ''
   try {
-    const response = await payrollImportsApi.createAttendancePersons(period.value, payload, await previewSource())
+    const response = await createPersonsInChunks(payload)
     createResults.value = response
     const created = response.results.filter(item => item.status === 'created').length
     const failed = response.results.length - created
@@ -234,7 +248,7 @@ async function apply() {
         person => guessRelationType(person.relation_label),
       )
       try {
-        autoCreateResult.value = await payrollImportsApi.createAttendancePersons(period.value, payload, await previewSource())
+        autoCreateResult.value = await createPersonsInChunks(payload)
       } catch (err) {
         error.value = apiErrorMessage(err, t('payroll_imports.attendance.persons_failed'))
       }

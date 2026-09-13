@@ -13,6 +13,7 @@ import {
   buildAttendanceLinks,
   buildPersonsPayload,
   buildRegistrationPairs,
+  chunk,
   creatablePersonKeys,
   hasReadyItem,
   isRegistrationApplicable,
@@ -533,6 +534,20 @@ describe('osoby a vazby', () => {
     expect(autoPersonCreateDefaults('2026-06')).toEqual({
       relation_type: 'employment', weekly_hours: '40', planned_start_on: '2026-06-01', activate: true,
     })
+  })
+})
+
+describe('dávky zakládání osob', () => {
+  it('rozdělí 227 osob na dávky po 100 bez ztráty pořadí', () => {
+    const items = Array.from({ length: 227 }, (_, index) => index)
+    const parts = chunk(items, 100)
+    expect(parts.map(part => part.length)).toEqual([100, 100, 27])
+    expect(parts.flat()).toEqual(items)
+  })
+
+  it('prázdný seznam nedá žádnou dávku a nulová velikost je chyba', () => {
+    expect(chunk([], 100)).toEqual([])
+    expect(() => chunk([1], 0)).toThrow(RangeError)
   })
 })
 
