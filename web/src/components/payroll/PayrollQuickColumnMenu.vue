@@ -37,7 +37,7 @@ onClickOutside(root, () => emit('close'), { ignore: ['[data-quick-columns-anchor
     data-testid="quick-columns-menu"
     role="dialog"
     :aria-label="t('payroll.quick_inputs.columns_menu.title')"
-    class="absolute left-0 top-full z-40 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-neutral-200 bg-surface shadow-lg"
+    class="absolute left-0 top-full z-40 mt-1 w-[28rem] max-w-[calc(100vw-2rem)] rounded-lg border border-neutral-200 bg-surface shadow-lg"
     @keydown.esc.stop="emit('close')"
   >
     <div class="border-b border-neutral-100 px-3 py-2">
@@ -63,8 +63,10 @@ onClickOutside(root, () => emit('close'), { ignore: ['[data-quick-columns-anchor
         </button>
       </div>
     </div>
-    <div class="max-h-80 overflow-y-auto py-1">
-      <fieldset v-for="group in groups" :key="group.key" class="px-1 py-1">
+    <!-- fieldset má v prohlížeči min-width: min-content; bez min-w-0 by dlouhý
+         název složky roztáhl seznam a vznikl vodorovný posuvník. -->
+    <div class="max-h-96 overflow-y-auto overflow-x-hidden py-1">
+      <fieldset v-for="group in groups" :key="group.key" class="min-w-0 px-1 py-1">
         <legend class="px-2 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
           {{ group.label }}
         </legend>
