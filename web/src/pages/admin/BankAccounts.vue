@@ -36,6 +36,15 @@ const props = withDefaults(defineProps<{ embedded?: boolean; canManageAccounts?:
 const { t } = useI18n()
 const toast = useToast()
 const { blockDemoMutation } = useDemoMode()
+
+/** Důvod, proč automat pohyb z avíza nespároval (#46); neznámý kód se nezobrazí. */
+function noticeReasonLabel(m: { parsed_payload: Record<string, any> | null }): string {
+  const reason = m.parsed_payload?.match_result?.reason
+  if (typeof reason !== 'string' || reason === '') return ''
+  const key = `bank.match_reason.${reason}`
+  const label = t(key)
+  return label === key ? '' : label
+}
 const route = useRoute()
 const router = useRouter()
 
@@ -1487,6 +1496,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                   <div v-if="m.error_message"
                     :class="m.matched && m.status === 'postprocess_failed' ? 'text-xs text-warning-600' : 'text-xs text-danger-500'">
                     {{ m.error_message }}
+                  </div>
+                  <div v-if="!m.matched && noticeReasonLabel(m)" class="text-xs text-neutral-500" :title="t('bank.match_reason_title')">
+                    {{ noticeReasonLabel(m) }}
                   </div>
                 </td>
                 <td class="px-3 py-2">{{ m.provider_code || '—' }}</td>

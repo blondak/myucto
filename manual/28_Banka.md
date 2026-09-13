@@ -289,6 +289,11 @@ eviduje jako částečná úhrada přepočtená kurzem faktury. V podvojném
 Pro transakce, které se nespárovaly automaticky (typicky chybí VS, nebo
 částka nesedí kvůli devizovému kurzu či bankovnímu poplatku):
 
+- Pod stavem **Nespárováno** je vidět důvod, proč transakci automat nevzal,
+  například *Žádná vydaná faktura s tímto VS* (platba přišla dřív, než faktura
+  vznikla), *Chybí variabilní symbol* nebo *Částka nesedí s fakturou*. Důvod se
+  obnoví při každém automatickém párování. U e-mailových avíz ho najdeš i
+  v přehledu zpracovaných e-mailů ([§ 29.6](29_Bankovni_ucty.md)).
 - MyÚčto nejprve nabídne **skórovaný návrh** přímo pod transakcí. U každého
   kandidáta ukáže slovní jistotu a důvody, například shodný VS, zbývající
   částku, číslo faktury ve zprávě, známý účet protistrany nebo blízké datum

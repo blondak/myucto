@@ -814,7 +814,8 @@
         "1827_net_turnover_business_model_rows.sql",
         "1828_countries_iso3166_full.sql",
         "1829_shoptet_file_integration.sql",
-        "1830_integration_sample_seeded.sql"
+        "1830_integration_sample_seeded.sql",
+        "1831_bank_transaction_match_reason.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -2680,6 +2681,7 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "ignore_note": "varchar(1000) NULL DEFAULT NULL",
                 "import_fingerprint": "char(64) NULL DEFAULT NULL",
+                "match_reason": "varchar(40) NULL DEFAULT NULL",
                 "match_status": "enum('unmatched','auto_exact','auto_partial','manual','ignored') NOT NULL DEFAULT 'unmatched'",
                 "match_tolerance": "decimal(14,2) NULL DEFAULT NULL",
                 "matched_at": "timestamp NULL DEFAULT NULL",

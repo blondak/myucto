@@ -104,6 +104,14 @@ function statusLabel(s: string): string {
   return label === key ? s : label
 }
 
+/** Lidský popisek, proč automat pohyb nespároval (#46); neznámý kód se nezobrazí. */
+function reasonLabel(reason: string | null | undefined): string {
+  if (!reason) return ''
+  const key = `bank.match_reason.${reason}`
+  const label = t(key)
+  return label === key ? '' : label
+}
+
 /**
  * Odkaz na druhou nohu vlastního převodu.
  *
@@ -271,6 +279,10 @@ function candidateReject() {
         <span class="text-xs px-2 py-0.5 rounded font-medium" :class="statusBadge(payrollMatched ? 'auto_exact' : tx.match_status)">
           {{ payrollMatched ? t('bank.match_status.payroll') : statusLabel(tx.match_status) }}
         </span>
+        <div v-if="!payrollMatched && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
+          class="mt-1 text-[11px] leading-tight text-neutral-500" :title="t('bank.match_reason_title')">
+          {{ reasonLabel(tx.match_reason) }}
+        </div>
         <button v-if="!payrollMatched && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
           class="mt-1 mx-auto inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600"
           :aria-expanded="expandedSuggestions.has(tx.id)" :title="t('bank.match_v2.title')"
@@ -326,6 +338,10 @@ function candidateReject() {
       <div class="flex flex-col items-end gap-1">
         <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="statusBadge(payrollMatched ? 'auto_exact' : tx.match_status)">
           {{ payrollMatched ? t('bank.match_status.payroll') : statusLabel(tx.match_status) }}
+        </span>
+        <span v-if="!payrollMatched && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
+          class="text-[11px] leading-tight text-right text-neutral-500" :title="t('bank.match_reason_title')">
+          {{ reasonLabel(tx.match_reason) }}
         </span>
         <button v-if="!payrollMatched && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
           class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600"

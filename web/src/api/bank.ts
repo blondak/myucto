@@ -86,6 +86,8 @@ export interface BankTransaction {
   matched_invoices?: MatchedInvoice[]
   ignore_note?: string | null
   match_status: MatchStatus
+  /** Kód důvodu posledního neúspěšného automatického párování (#46), např. `no_invoice_with_vs`. */
+  match_reason?: string | null
   matched_at: string | null
   /** Datum pohybu nemá otevřené účetní období nebo spadá do účetního zámku. */
   period_closed?: boolean

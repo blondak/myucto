@@ -25435,6 +25435,7 @@ components:
           type: string
           enum: [unmatched, auto_exact, auto_partial, manual, ignored]
           description: "Stav fakturačního párování. auto_* = automatika, manual = ruční přiřazení. Mzdovou vazbu označuje posting.payroll_matched, nemění tento stav."
+        match_reason: { type: [string, "null"], maxLength: 40, example: no_invoice_with_vs, description: "Kód důvodu posledního neúspěšného automatického párování (např. no_vs, no_invoice_with_vs, amount_mismatch, no_amount_date_match). Po spárování null; význam má jen u match_status = unmatched." }
         matched_invoice_id: { type: [integer, "null"], format: int64, description: "Spárovaná VYDANÁ faktura" }
         matched_purchase_invoice_id: { type: [integer, "null"], format: int64, description: "Spárovaná PŘIJATÁ faktura (z payment_matches)" }
         matched_varsymbol: { type: [string, "null"] }

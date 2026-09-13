@@ -223,7 +223,32 @@ final class StatementMatcherCardPaymentTest extends TestCase
         self::assertSame(0, $this->matchCount($tx));
     }
 
+    /** #46 — důvod nespárování se uloží k pohybu a spárováním zmizí. */
+    public function testUnmatchedReasonIsStoredAndClearedOnMatch(): void
+    {
+        $tx = $this->seedTransaction($this->seedStatement(), -275.00, self::DAY, '9876');
+
+        $res = $this->matcher->match($tx);
+
+        self::assertSame('unmatched', $res['status'] ?? null);
+        self::assertIsString($res['reason'] ?? null);
+        self::assertSame($res['reason'], $this->matchReason($tx));
+
+        $doc = $this->seedPurchase(275.00, '2093-06-14', '9876');
+        $again = $this->matcher->matchBatch([$tx])[$tx];
+
+        self::assertSame('auto_exact', $again['status'] ?? null);
+        self::assertSame($doc, $again['purchase_invoice_id'] ?? null);
+        self::assertNull($this->matchReason($tx));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    private function matchReason(int $txId): ?string
+    {
+        $v = $this->db->pdo()->query("SELECT match_reason FROM bank_transactions WHERE id = {$txId}")->fetchColumn();
+        return $v === null || $v === false ? null : (string) $v;
+    }
 
     private function markManual(int $txId): void
     {

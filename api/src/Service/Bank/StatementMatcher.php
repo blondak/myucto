@@ -217,7 +217,7 @@ final class StatementMatcher
 
     public function match(int $transactionId): array
     {
-        return $this->afterMatch($transactionId, $this->doMatch($transactionId, false));
+        return $this->rememberReason($transactionId, $this->afterMatch($transactionId, $this->doMatch($transactionId, false)));
     }
 
     /**
@@ -257,7 +257,31 @@ final class StatementMatcher
                 $results[$transactionId] = $fallback;
             }
         }
+        foreach ($results as $transactionId => $result) {
+            $this->rememberReason($transactionId, $result);
+        }
         return $results;
+    }
+
+    /**
+     * Důvod posledního neúspěšného automatického párování (#46) — UI ho ukáže
+     * u nespárovaného pohybu. Spárováním se důvod maže; už zapsaný stav
+     * (already_recorded) ani chybějící pohyb se nepřepisují.
+     *
+     * @param array<string,mixed> $result
+     * @return array<string,mixed>
+     */
+    private function rememberReason(int $transactionId, array $result): array
+    {
+        if (!empty($result['already_recorded']) || ($result['reason'] ?? null) === 'transaction_not_found') {
+            return $result;
+        }
+        $reason = ($result['status'] ?? 'unmatched') === 'unmatched' && is_string($result['reason'] ?? null)
+            ? mb_substr($result['reason'], 0, 40)
+            : null;
+        $this->db->pdo()->prepare('UPDATE bank_transactions SET match_reason = ? WHERE id = ?')
+            ->execute([$reason, $transactionId]);
+        return $result;
     }
 
     /** @return array<string,mixed> */
