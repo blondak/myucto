@@ -170,7 +170,8 @@ final class JmhzReportImportServiceTest extends TestCase
             self::assertContains($operation, $january['operations']);
         }
         self::assertSame(['saved' => 1, 'skipped' => []], $applied['opening_balances']);
-        self::assertSame(['created' => 1, 'skipped' => []], $applied['averages']);
+        self::assertSame(['created' => 1, 'approved' => 0, 'skipped' => []], $applied['averages']);
+        self::assertSame(['completed' => 0, 'failed' => []], $applied['change_checklist']);
 
         $reference = 'jmhz-import:' . hash('sha256', base64_decode($files[0]['content_base64'], true))
             . ':' . JmhzReportFixtures::guid(1, 101);
@@ -256,6 +257,45 @@ final class JmhzReportImportServiceTest extends TestCase
         self::assertSame(1, $this->tableRows('payroll_dependants'));
         self::assertSame(1, $this->tableRows('payroll_person_tax_child_claims'));
         self::assertSame(1, $this->tableRows('payroll_person_tax_declarations'));
+    }
+
+    /**
+     * Volba automatického schválení: povinnosti ke změně, které založila
+     * nová verze podmínek z importu, se odškrtnou a průměr se rovnou schválí.
+     * Povinnosti při nástupu (z dřívější registrace) zůstanou účetní.
+     */
+    public function testAutoApprovalCompletesImportedChangeDutiesAndApprovesAverages(): void
+    {
+        [, $employmentId] = $this->registerEmployee(withIdentifiers: true);
+        $files = [];
+        foreach ([1, 2, 3] as $month) {
+            $files[] = $this->file("jmhz-{$month}.xml", JmhzReportFixtures::report([JmhzReportFixtures::person([
+                'oic' => $this->oic,
+                'id_ppv' => $this->idPpv,
+                'work_place' => $month === 1 ? 'Brno' : 'Olomouc',
+                'municipality' => $month === 1 ? '582786' : '500496',
+            ])], 2026, $month));
+        }
+        $keys = array_column($this->imports->preview($this->supplierId, 'test', $files)['records'], 'key');
+        $onboardingBefore = $this->checklistStatuses($employmentId)['onboarding'] ?? [];
+
+        $applied = $this->apply($files, $keys, averages: true, autoChanges: true, autoAverages: true);
+
+        self::assertContains('applied', array_column($applied['results'], 'status'), $this->dump($applied['results']));
+        $terms = $this->container->get(JmhzReportLookup::class)->termVersions($this->supplierId, $employmentId);
+        self::assertCount(2, $terms, 'Únorová změna pracoviště musí založit novou verzi podmínek.');
+        $statuses = $this->checklistStatuses($employmentId);
+        self::assertArrayNotHasKey('pending', $statuses['change'] ?? [], $this->dump($statuses));
+        self::assertGreaterThan(0, $statuses['change']['completed'] ?? 0, $this->dump($statuses));
+        self::assertSame(
+            ['completed' => $statuses['change']['completed'], 'failed' => []],
+            $applied['change_checklist'],
+        );
+        self::assertSame($onboardingBefore, $statuses['onboarding'] ?? [], 'Nástupní povinnosti import nemění.');
+
+        self::assertSame(1, $applied['averages']['approved'], $this->dump($applied['averages']));
+        $averages = $this->container->get(PayrollAverageEarningRepository::class)->list($this->supplierId, $employmentId);
+        self::assertSame('approved', (string) $averages[0]['status']);
     }
 
     public function testUnpairedFormIsAssignedManually(): void
@@ -549,8 +589,15 @@ final class JmhzReportImportServiceTest extends TestCase
      * @param list<array{key:string,employment_id:int}>|null $pairs
      * @return array<string,mixed>
      */
-    private function apply(array $files, array $keys, ?array $pairs = null, bool $openings = false, bool $averages = false): array
-    {
+    private function apply(
+        array $files,
+        array $keys,
+        ?array $pairs = null,
+        bool $openings = false,
+        bool $averages = false,
+        bool $autoChanges = false,
+        bool $autoAverages = false,
+    ): array {
         return $this->imports->apply(
             $this->supplierId,
             'test',
@@ -564,7 +611,27 @@ final class JmhzReportImportServiceTest extends TestCase
             $pairs,
             $openings,
             $averages,
+            $autoChanges,
+            $autoAverages,
         );
+    }
+
+    /** @return array<string,array<string,int>> fáze => stav => počet */
+    private function checklistStatuses(int $employmentId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT phase, status, COUNT(*) AS items
+               FROM payroll_employment_checklist_items
+              WHERE supplier_id = ? AND employment_id = ?
+              GROUP BY phase, status'
+        );
+        $statement->execute([$this->supplierId, $employmentId]);
+        $statuses = [];
+        foreach ($statement->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $statuses[(string) $row['phase']][(string) $row['status']] = (int) $row['items'];
+        }
+
+        return $statuses;
     }
 
     /**

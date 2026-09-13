@@ -22,7 +22,7 @@ function tabFromQuery(): Tab {
   const requested = payrollQueryValue(route.query, 'tab')
   // Starší odkazy nesly množné číslo.
   if (requested === 'registrations') return 'registration'
-  return requested !== null && (TABS as readonly string[]).includes(requested) ? requested as Tab : 'attendance'
+  return requested !== null && (TABS as readonly string[]).includes(requested) ? requested as Tab : 'registration'
 }
 
 const activeTab = ref<Tab>(tabFromQuery())

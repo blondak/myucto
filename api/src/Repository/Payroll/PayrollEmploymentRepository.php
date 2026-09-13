@@ -1096,6 +1096,38 @@ final class PayrollEmploymentRepository
         });
     }
 
+    /**
+     * Nevyřízené položky checklistu dané fáze založené od `$since` (čas
+     * databáze, {@see databaseNow()}). Import podle nich pozná povinnosti,
+     * které založil sám, a starší rozpracované nechá být.
+     *
+     * @return list<array{item_key:string,row_version:int}>
+     */
+    public function pendingChecklistItemsSince(int $supplierId, int $employmentId, string $phase, string $since): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT item_key, row_version
+               FROM payroll_employment_checklist_items
+              WHERE supplier_id = ? AND employment_id = ? AND phase = ?
+                AND status = 'pending' AND created_at >= ?
+              ORDER BY item_key"
+        );
+        $stmt->execute([$supplierId, $employmentId, $phase, $since]);
+
+        return array_map(
+            static fn (array $row): array => [
+                'item_key' => (string) $row['item_key'],
+                'row_version' => (int) $row['row_version'],
+            ],
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        );
+    }
+
+    public function databaseNow(): string
+    {
+        return (string) $this->db->pdo()->query('SELECT NOW()')->fetchColumn();
+    }
+
     /** @return array<string,mixed> */
     /**
      * Prohlášení k dani osoby platné k danému dni.

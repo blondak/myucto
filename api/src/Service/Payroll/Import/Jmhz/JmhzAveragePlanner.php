@@ -38,7 +38,8 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
  *    nepravidelné odměny (10331 — mohou být za delší období a potřebují
  *    poměrné rozpočítání podle § 358 ZP) nebo odměnu za pracovní pohotovost
  *    (10343 — stojí mimo 10328 a její zařazení import neposoudí). Návrh je
- *    vždy ke schválení, ne hotový průměr.
+ *    ke schválení, ne hotový průměr; schválit ho rovnou lze jen výslovnou
+ *    volbou importu.
  */
 final class JmhzAveragePlanner
 {
@@ -63,12 +64,17 @@ final class JmhzAveragePlanner
     }
 
     /**
+     * `$approve` návrh rovnou schválí stejnou cestou jako tlačítko
+     * v Nepřítomnostech — volí ho účetní, která nechce u stovek lidí
+     * potvrzovat hodnoty převzaté z přijatých hlášení po jednom.
+     *
      * @param list<array<string,mixed>> $plans
-     * @return array{created:int,skipped:list<array<string,mixed>>}
+     * @return array{created:int,approved:int,skipped:list<array<string,mixed>>}
      */
-    public function apply(int $supplierId, array $plans, ?int $userId): array
+    public function apply(int $supplierId, array $plans, ?int $userId, bool $approve = false): array
     {
         $created = 0;
+        $approved = 0;
         $skipped = [];
         foreach ($this->candidates($supplierId, $plans) as $candidate) {
             $public = $candidate['public'];
@@ -77,7 +83,7 @@ final class JmhzAveragePlanner
                 continue;
             }
             try {
-                $this->averages->create(
+                $snapshot = $this->averages->create(
                     $supplierId,
                     $candidate['data']['employment_id'],
                     $candidate['data']['applicable_year'],
@@ -94,12 +100,16 @@ final class JmhzAveragePlanner
                     $userId,
                 );
                 $created++;
+                if ($approve) {
+                    $this->averages->approve($supplierId, (int) $snapshot['id'], (int) $snapshot['row_version'], $userId);
+                    $approved++;
+                }
             } catch (\InvalidArgumentException|\DomainException $e) {
                 $skipped[] = $this->skip($public, $e->getMessage());
             }
         }
 
-        return ['created' => $created, 'skipped' => $skipped];
+        return ['created' => $created, 'approved' => $approved, 'skipped' => $skipped];
     }
 
     /**

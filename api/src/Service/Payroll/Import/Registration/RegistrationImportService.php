@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Import\Registration;
 
+use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Payroll\Import\ImportFiles;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzAveragePlanner;
@@ -34,6 +35,7 @@ final class RegistrationImportService
 {
     private const ENVIRONMENTS = ['production', 'test'];
     private const KEY_PATTERN = '/^[0-9a-f]{16}:[0-9]{1,5}$/D';
+    private const AUTO_CHANGE_NOTE = 'Odškrtnuto importem: změnu už vykázalo importované podání.';
 
     public function __construct(
         private readonly RegistrationXmlReader $reader,
@@ -45,6 +47,7 @@ final class RegistrationImportService
         private readonly JmhzOpeningBalancePlanner $openingPlanner,
         private readonly JmhzAveragePlanner $averagePlanner,
         private readonly JmhzReportLookup $jmhzLookup,
+        private readonly PayrollEmploymentRepository $employments,
     ) {}
 
     /** @return array<string,mixed> */
@@ -93,7 +96,8 @@ final class RegistrationImportService
      *   results:list<array<string,mixed>>,
      *   summary:array{applied:int,failed:int,skipped:int},
      *   opening_balances:array{saved:int,skipped:list<array<string,mixed>>},
-     *   averages:array{created:int,skipped:list<array<string,mixed>>}
+     *   averages:array{created:int,approved:int,skipped:list<array<string,mixed>>},
+     *   change_checklist:array{completed:int,failed:list<array{employment_id:int,item_key:string,message:string}>}
      * }
      */
     public function apply(
@@ -109,6 +113,8 @@ final class RegistrationImportService
         mixed $pairs = null,
         bool $applyOpeningBalances = false,
         bool $applyAverages = false,
+        bool $autoApproveChanges = false,
+        bool $autoApproveAverages = false,
     ): array {
         $this->environment($environment);
         if (!$evidenceConfirmed) {
@@ -160,6 +166,7 @@ final class RegistrationImportService
             $b['record']->position,
         ]);
 
+        $changesSince = $autoApproveChanges ? $this->employments->databaseNow() : null;
         $results = [];
         foreach (array_keys($selected) as $key) {
             if (!isset($byKey[$key]) && $read['batch']->item($key) === null) {
@@ -234,6 +241,11 @@ final class RegistrationImportService
             }
         }
 
+        $checklist = ['completed' => 0, 'failed' => []];
+        if ($changesSince !== null) {
+            $checklist = $this->completeImportedChanges($supplierId, $results, $changesSince, $userId, $ip, $userAgent);
+        }
+
         $list = [];
         foreach (array_keys($selected) as $key) {
             if (isset($results[$key])) {
@@ -246,14 +258,14 @@ final class RegistrationImportService
         }
 
         $openings = ['saved' => 0, 'skipped' => []];
-        $averages = ['created' => 0, 'skipped' => []];
+        $averages = ['created' => 0, 'approved' => 0, 'skipped' => []];
         if (($applyOpeningBalances || $applyAverages) && $batch->items() !== []) {
             $fresh = array_values($this->planJmhz($supplierId, $environment, $batch, $pairMap));
             if ($applyOpeningBalances) {
                 $openings = $this->openingPlanner->apply($supplierId, $fresh, $batch, $userId);
             }
             if ($applyAverages) {
-                $averages = $this->averagePlanner->apply($supplierId, $fresh, $userId);
+                $averages = $this->averagePlanner->apply($supplierId, $fresh, $userId, $autoApproveAverages);
             }
         }
 
@@ -262,7 +274,62 @@ final class RegistrationImportService
             'summary' => $summary,
             'opening_balances' => $openings,
             'averages' => $averages,
+            'change_checklist' => $checklist,
         ];
+    }
+
+    /**
+     * Povinnosti ke změně (dodatek, oznámení pojišťovně a ČSSZ), které založila
+     * nová verze podmínek z importu, odškrtne jako splněné: změnu už vykázalo
+     * importované podání. Jde přes tutéž cestu jako ruční odškrtnutí, takže
+     * na kartě vztahu zůstane událost. Starší rozpracované položky a fáze
+     * nástupu a skončení nechává účetní.
+     *
+     * @param array<string,array<string,mixed>> $results
+     * @return array{completed:int,failed:list<array{employment_id:int,item_key:string,message:string}>}
+     */
+    private function completeImportedChanges(
+        int $supplierId,
+        array $results,
+        string $since,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        $employmentIds = [];
+        foreach ($results as $row) {
+            if (($row['status'] ?? null) === 'applied' && isset($row['employment_id'])) {
+                $employmentIds[(int) $row['employment_id']] = true;
+            }
+        }
+        $completed = 0;
+        $failed = [];
+        foreach (array_keys($employmentIds) as $employmentId) {
+            foreach ($this->employments->pendingChecklistItemsSince($supplierId, $employmentId, 'change', $since) as $item) {
+                try {
+                    $this->employments->updateChecklist(
+                        $supplierId,
+                        $employmentId,
+                        $item['item_key'],
+                        $item['row_version'],
+                        'completed',
+                        self::AUTO_CHANGE_NOTE,
+                        $userId,
+                        $ip,
+                        $userAgent,
+                    );
+                    $completed++;
+                } catch (\Exception $e) {
+                    $failed[] = [
+                        'employment_id' => $employmentId,
+                        'item_key' => $item['item_key'],
+                        'message' => $e->getMessage(),
+                    ];
+                }
+            }
+        }
+
+        return ['completed' => $completed, 'failed' => $failed];
     }
 
     /**

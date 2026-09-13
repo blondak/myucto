@@ -643,6 +643,27 @@ export function pruneManualLinks(
   return next
 }
 
+/**
+ * Osobu lze rovnou založit, když ji import nenašel nebo je nejasná a nemá
+ * (ani ručně zvolený) přiřazený pracovní vztah. Sdílí ji krok Osoby (checkbox
+ * u řádku) i krok Souhrn (nabídka založit chybějící osoby) — počítat to jinde
+ * jinak by rozjelo, kolik osob jde založit z obou míst.
+ */
+export function personCanBeCreated(person: AttendancePerson, manual: ManualLinks): boolean {
+  return (person.match.status === 'not_found' || person.match.status === 'ambiguous')
+    && effectiveEmploymentId(person, manual) === null
+}
+
+/** Klíče osob bez vztahu, které lze rovnou založit — pro předvýběr v kroku Osoby. */
+export function creatablePersonKeys(persons: AttendancePerson[], manual: ManualLinks): string[] {
+  return persons.filter(person => personCanBeCreated(person, manual)).map(person => person.key)
+}
+
+/** Kolik osob se při použití přeskočí, protože nemají přiřazený pracovní vztah. */
+export function personsWithoutEmploymentCount(persons: AttendancePerson[], manual: ManualLinks): number {
+  return persons.filter(person => effectiveEmploymentId(person, manual) === null).length
+}
+
 export function guessRelationType(label: string | null): RegistrationRelationType {
   const normalized = normalizeHeader(label ?? '')
   if (normalized === '') return 'employment'
@@ -676,10 +697,16 @@ export interface PersonCreateDefaults {
   activate: boolean
 }
 
+/**
+ * `relationTypeFor` volitelně určí druh vztahu za osobu (odhad z podkladů);
+ * bez něj se použije jednotný `defaults.relation_type` jako dosud (ruční
+ * založení v kroku Osoby, kde druh vybírá uživatel jednou pro celou dávku).
+ */
 export function buildPersonsPayload(
   persons: AttendancePerson[],
   drafts: Record<string, PersonDraft>,
   defaults: PersonCreateDefaults,
+  relationTypeFor?: (person: AttendancePerson) => RegistrationRelationType,
 ): AttendancePersonCreate[] {
   return persons.map(person => {
     const draft = drafts[person.key] ?? splitDisplayName(person.display_name)
@@ -693,7 +720,7 @@ export function buildPersonsPayload(
       first_name: firstName,
       last_name: lastName,
       birth_number: null,
-      relation_type: defaults.relation_type,
+      relation_type: relationTypeFor ? relationTypeFor(person) : defaults.relation_type,
       weekly_hours: weekly === '' ? null : weekly.replace(',', '.'),
       monthly_gross: Number.isFinite(wage) && wage > 0 ? Math.round(wage) : null,
       planned_start_on: defaults.planned_start_on,
@@ -738,6 +765,15 @@ export function formatHours(value: string | null | undefined, locale?: string): 
 
 export function firstDayOfPeriod(period: string): string {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(period) ? `${period}-01` : ''
+}
+
+/**
+ * Výchozí hodnoty pro automatické založení chybějících osob ze souhrnu
+ * importu docházky — bez proklikávání kroku Osoby. Druh vztahu je jen
+ * záložní hodnota; skutečný se odhadne per osoba přes `guessRelationType`.
+ */
+export function autoPersonCreateDefaults(period: string): PersonCreateDefaults {
+  return { relation_type: 'employment', weekly_hours: '40', planned_start_on: firstDayOfPeriod(period), activate: true }
 }
 
 export function isValidPeriod(period: string): boolean {

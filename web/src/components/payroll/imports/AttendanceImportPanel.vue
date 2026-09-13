@@ -19,15 +19,20 @@ import AttendanceBatchHistory from './AttendanceBatchHistory.vue'
 import AttendanceRecognitionStrip from './AttendanceRecognitionStrip.vue'
 import { useAttendanceWorkspace } from './attendanceWorkspace'
 import {
+  autoPersonCreateDefaults,
   buildAttendanceLinks,
+  buildPersonsPayload,
   componentsToCreate,
   filesFingerprint,
+  guessRelationType,
   isValidPeriod,
+  personCanBeCreated,
+  personsWithoutEmploymentCount,
   pruneManualLinks,
   type ManualLinks,
 } from './importHelpers'
 
-defineProps<{
+const props = defineProps<{
   canWrite: boolean
   canCreatePersons: boolean
 }>()
@@ -51,6 +56,9 @@ const saveLinks = ref(true)
 const createInputs = ref(true)
 const createComponents = ref(true)
 const adoptPersonalNumbers = ref(true)
+const autoCreateMissingPersons = ref(true)
+const autoCreateResult = ref<AttendancePersonsResult | null>(null)
+const applyPhase = ref<'creating' | 'importing' | null>(null)
 const result = ref<AttendanceApplyResult | null>(null)
 const busy = ref<'preview' | 'apply' | 'persons' | null>(null)
 const error = ref('')
@@ -70,13 +78,27 @@ const loadBlockedReason = computed(() => {
 const applyBlockedReason = computed(() => {
   if (!preview.value) return t('payroll_imports.attendance.reason.no_preview')
   if (profileStale.value) return t('payroll_imports.attendance.reason.profile_changed')
-  if (links.value.length === 0) return t('payroll_imports.attendance.reason.nothing_to_apply')
+  if (links.value.length === 0 && !(autoCreateMissingPersons.value && showAutoCreateOption.value)) {
+    return t('payroll_imports.attendance.reason.nothing_to_apply')
+  }
   return ''
+})
+const creatableMissingPersons = computed(() =>
+  preview.value ? preview.value.persons.filter(person => personCanBeCreated(person, manualLinks.value)) : [])
+const missingEmploymentCount = computed(() =>
+  preview.value ? personsWithoutEmploymentCount(preview.value.persons, manualLinks.value) : 0)
+const showAutoCreateOption = computed(() => props.canCreatePersons && creatableMissingPersons.value.length > 0)
+const applyButtonLabel = computed(() => {
+  if (applyPhase.value === 'creating') return t('payroll_imports.attendance.summary.phase_creating')
+  if (applyPhase.value === 'importing') return t('payroll_imports.attendance.summary.phase_importing')
+  if (busy.value === 'apply') return t('payroll_imports.common.working')
+  return t('payroll_imports.attendance.summary.apply', { count: links.value.length })
 })
 
 // Jiné období, soubory nebo profil = jiný náhled; vazby osob se týkaly toho starého.
 watch(fingerprint, value => {
   result.value = null
+  autoCreateResult.value = null
   if (preview.value && value !== previewFingerprint.value) {
     preview.value = null
     manualLinks.value = {}
@@ -111,16 +133,22 @@ function kindLabel(kind: string | null): string {
   return te(key) ? t(key) : kind
 }
 
+async function previewSource() {
+  return {
+    files: await workspace.payloadFiles(),
+    rules: null,
+    profile_id: profileId.value,
+    components: null,
+  }
+}
+
 async function requestPreview(): Promise<boolean> {
   error.value = ''
   const current = fingerprint.value
   try {
     const response = await payrollImportsApi.previewAttendance({
       period: period.value,
-      files: await workspace.payloadFiles(),
-      rules: null,
-      profile_id: profileId.value,
-      components: null,
+      ...await previewSource(),
     })
     preview.value = response
     previewFingerprint.value = current
@@ -176,7 +204,7 @@ async function createPersons(payload: AttendancePersonCreate[]) {
   busy.value = 'persons'
   error.value = ''
   try {
-    const response = await payrollImportsApi.createAttendancePersons(period.value, payload)
+    const response = await payrollImportsApi.createAttendancePersons(period.value, payload, await previewSource())
     createResults.value = response
     const created = response.results.filter(item => item.status === 'created').length
     const failed = response.results.length - created
@@ -195,7 +223,29 @@ async function apply() {
   if (!preview.value || applyBlockedReason.value !== '' || busy.value !== null) return
   busy.value = 'apply'
   error.value = ''
+  autoCreateResult.value = null
   try {
+    if (autoCreateMissingPersons.value && showAutoCreateOption.value) {
+      applyPhase.value = 'creating'
+      const payload = buildPersonsPayload(
+        creatableMissingPersons.value,
+        {},
+        autoPersonCreateDefaults(period.value),
+        person => guessRelationType(person.relation_label),
+      )
+      try {
+        autoCreateResult.value = await payrollImportsApi.createAttendancePersons(period.value, payload, await previewSource())
+      } catch (err) {
+        error.value = apiErrorMessage(err, t('payroll_imports.attendance.persons_failed'))
+      }
+      applyPhase.value = 'importing'
+      // requestPreview() by chybu ze založení přepsalo — obnova náhledu ji nesmí smazat.
+      const creationError = error.value
+      // Nově založené osoby mají uloženou vazbu — nový náhled je ukáže jako propojené.
+      await requestPreview()
+      if (creationError) error.value = creationError
+    }
+    if (!preview.value) return
     const response = await payrollImportsApi.applyAttendance({
       period: period.value,
       files: await workspace.payloadFiles(),
@@ -216,6 +266,7 @@ async function apply() {
     error.value = apiErrorMessage(err, t('payroll_imports.attendance.apply_failed'))
   } finally {
     busy.value = null
+    applyPhase.value = null
   }
 }
 </script>
@@ -355,7 +406,15 @@ async function apply() {
               </li>
             </ul>
           </div>
+          <p v-if="missingEmploymentCount > 0" class="mb-3 text-xs text-neutral-600">
+            {{ t('payroll_imports.attendance.summary.missing_employment_note', { count: missingEmploymentCount }) }}
+            <button type="button" class="ml-1 font-medium text-payroll-600 hover:underline" @click="goTo(2)">{{ t('payroll_imports.attendance.summary.edit_in_persons_step') }}</button>
+          </p>
           <div class="space-y-3">
+            <label v-if="showAutoCreateOption" class="flex items-start gap-2 text-sm text-neutral-800">
+              <input v-model="autoCreateMissingPersons" type="checkbox" data-testid="attendance-auto-create-persons" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
+              <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.auto_create_persons', { count: creatableMissingPersons.length }) }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.auto_create_persons_hint') }}</span></span>
+            </label>
             <label v-if="willCreate.length" class="flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="createComponents" type="checkbox" data-testid="attendance-create-components-toggle" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.create_components') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.create_components_hint') }}</span></span>
@@ -383,10 +442,17 @@ async function apply() {
                 :disabled="!canWrite || busy !== null || applyBlockedReason !== ''"
                 :title="disabledTitle(applyBlockedReason !== '', applyBlockedReason)" @click="apply">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
-                {{ busy === 'apply' ? t('payroll_imports.common.working') : t('payroll_imports.attendance.summary.apply', { count: links.length }) }}
+                {{ applyButtonLabel }}
               </button>
               <p v-if="applyBlockedReason && canWrite" :class="BTN_DISABLED_NOTE">{{ applyBlockedReason }}</p>
             </div>
+          </div>
+
+          <div v-if="autoCreateResult?.results.some(item => item.status === 'failed')" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3" data-testid="attendance-auto-create-errors">
+            <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.summary.auto_create_failed_title', { count: autoCreateResult.results.filter(item => item.status === 'failed').length }) }}</p>
+            <ul class="mt-1 space-y-0.5 text-xs text-warning-700">
+              <li v-for="item in autoCreateResult.results.filter(entry => entry.status === 'failed')" :key="item.person_key">{{ item.message }}</li>
+            </ul>
           </div>
         </section>
 

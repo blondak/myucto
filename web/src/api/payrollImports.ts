@@ -193,6 +193,8 @@ export interface RegistrationApplyPayload extends RegistrationPreviewPayload {
   pairs: RegistrationPair[]
   apply_opening_balances: boolean
   apply_averages: boolean
+  auto_approve_changes: boolean
+  auto_approve_averages: boolean
 }
 
 export type RegistrationResultStatus = 'applied' | 'failed' | 'skipped'
@@ -228,7 +230,12 @@ export interface RegistrationApplyResult {
   }
   averages: {
     created: number
+    approved: number
     skipped: { employment_id: number; label: string; year: number; quarter: number; reason: string }[]
+  }
+  change_checklist: {
+    completed: number
+    failed: { employment_id: number; item_key: string; message: string }[]
   }
 }
 
@@ -533,8 +540,13 @@ export const payrollImportsApi = {
   applyAttendance: (payload: AttendanceApplyPayload) =>
     api.post<AttendanceApplyResult>('/payroll/imports/attendance/apply', payload)
       .then(response => response.data),
-  createAttendancePersons: (period: string, persons: AttendancePersonCreate[]) =>
-    api.post<AttendancePersonsResult>('/payroll/imports/attendance/persons', { period, persons })
+  // S podklady (jako u náhledu) doplní server rodná čísla, která klient zná jen maskovaná.
+  createAttendancePersons: (
+    period: string,
+    persons: AttendancePersonCreate[],
+    source?: Omit<AttendancePreviewPayload, 'period'>,
+  ) =>
+    api.post<AttendancePersonsResult>('/payroll/imports/attendance/persons', { period, persons, ...source })
       .then(response => response.data),
   attendanceBatches: (period?: string | null) =>
     api.get<{ batches: AttendanceBatch[] }>('/payroll/imports/attendance/batches', {

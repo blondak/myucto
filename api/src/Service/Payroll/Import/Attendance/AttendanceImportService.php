@@ -305,7 +305,49 @@ final class AttendanceImportService
         ];
     }
 
-    /** @return array{results:list<array<string,mixed>>} */
+    /**
+     * Rodná čísla z podkladů podle klíče osoby. Klient zná jen maskovanou
+     * podobu, takže je při zakládání osob doplní server ze stejných souborů
+     * a stejného mapování, ze kterých vznikl náhled.
+     *
+     * @param list<array{name:string,content:string,sha256:string,extension:string}> $files
+     * @return array<string,string>
+     */
+    private function birthNumbersFromFiles(
+        int $supplierId,
+        string $periodStart,
+        array $files,
+        mixed $rules,
+        ?int $profileId,
+        mixed $components,
+    ): array {
+        $read = $this->readFiles($files);
+        [$validated, $profileComponents, $profileMeta] = $this->resolveMapping(
+            $supplierId,
+            $read['sheets'],
+            $rules,
+            $profileId,
+            $components,
+        );
+        $computed = $this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta);
+        $numbers = [];
+        foreach ($computed['persons'] as $person) {
+            $birthNumber = $person['_birth_number'] ?? null;
+            if (is_string($birthNumber) && trim($birthNumber) !== '') {
+                $numbers[(string) $person['key']] = trim($birthNumber);
+            }
+        }
+
+        return $numbers;
+    }
+
+    /**
+     * Se soubory (a mapováním jako u náhledu) doplní osobám bez rodného
+     * čísla to z podkladů.
+     *
+     * @param list<array{name:string,content:string,sha256:string,extension:string}>|null $files
+     * @return array{results:list<array<string,mixed>>}
+     */
     public function persons(
         int $supplierId,
         string $period,
@@ -313,8 +355,12 @@ final class AttendanceImportService
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
+        ?array $files = null,
+        mixed $rules = null,
+        ?int $profileId = null,
+        mixed $components = null,
     ): array {
-        $this->period($period);
+        $periodStart = $this->period($period);
         if (!is_array($persons) || !array_is_list($persons) || $persons === []) {
             throw new \InvalidArgumentException('Vyberte aspoň jednu osobu k založení.');
         }
@@ -323,6 +369,9 @@ final class AttendanceImportService
                 'Najednou lze založit nejvýše ' . self::MAX_PERSONS_PER_REQUEST . ' osob. Rozdělte je na víc kroků.',
             );
         }
+        $birthNumbers = $files === null
+            ? []
+            : $this->birthNumbersFromFiles($supplierId, $periodStart, $files, $rules, $profileId, $components);
         $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
         $results = [];
         foreach ($persons as $item) {
@@ -330,6 +379,9 @@ final class AttendanceImportService
             try {
                 if (!is_array($item)) {
                     throw new \InvalidArgumentException('Údaje osoby nemají platný tvar.');
+                }
+                if (in_array($item['birth_number'] ?? null, [null, ''], true) && isset($birthNumbers[$key])) {
+                    $item['birth_number'] = $birthNumbers[$key];
                 }
                 $created = $this->license->mutatePayrollEmployees(
                     fn (): array => $this->createPerson($supplierId, $item, $today, $userId, $ip, $userAgent),

@@ -278,6 +278,18 @@ Z historie hlášení aplikace navrhne:
 Návrh, kterému chybí údaje nebo už je v evidenci, je označený a nepoužije se.
 Obojí zapnete zaškrtnutím před tlačítkem **Použít**.
 
+Aby firma se stovkami zaměstnanců nemusela nic potvrzovat po jednom, import
+nabízí dvě volby automatického schválení. Obě jsou předem zapnuté a jde je
+vypnout:
+
+- **Rovnou odškrtnout povinnosti ke změnám.** Nová verze podmínek jinak na
+  kartě vztahu založí úkoly (dodatek smlouvy, oznámení změny pojišťovně
+  a ČSSZ). Změnu už vykázalo importované podání, proto je import odškrtne
+  s poznámkou. Povinnosti při nástupu a skončení i starší rozpracované úkoly
+  zůstávají.
+- **Průměry rovnou schválit.** Bez této volby čekají založené průměry na
+  schválení v Nepřítomnostech.
+
 ### 76.9.2 Docházka
 
 Záložka převezme měsíční podklady z docházkového systému (například GIRITON)

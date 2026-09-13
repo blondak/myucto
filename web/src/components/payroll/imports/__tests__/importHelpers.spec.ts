@@ -9,13 +9,17 @@ import type {
   RegistrationRecord,
 } from '@/api/payrollImports'
 import {
+  autoPersonCreateDefaults,
   buildAttendanceLinks,
   buildPersonsPayload,
   buildRegistrationPairs,
+  creatablePersonKeys,
   hasReadyItem,
   isRegistrationApplicable,
   minutesToHours,
   openingBalanceTotals,
+  personCanBeCreated,
+  personsWithoutEmploymentCount,
   pruneRegistrationPairs,
   registrationApplyBlock,
   registrationNeedsPairSelect,
@@ -501,6 +505,34 @@ describe('osoby a vazby', () => {
         relation_type: 'dpp', weekly_hours: '40', monthly_gross: null, planned_start_on: '2026-06-01', personal_number: null, activate: true,
       },
     ])
+  })
+
+  it('sestaví payload s druhem vztahu odhadnutým per osoba', () => {
+    const dpp = person('karel', { display_name: 'Vzorový Karel', relation_label: 'DPP' })
+    const payload = buildPersonsPayload(
+      [missing, dpp],
+      {},
+      { relation_type: 'employment', weekly_hours: '40', planned_start_on: '2026-06-01', activate: true },
+      candidate => guessRelationType(candidate.relation_label),
+    )
+    expect(payload.map(item => item.relation_type)).toEqual(['employment', 'dpp'])
+  })
+
+  it('osobu lze rovnou založit, jen když ji import nenašel/je nejasná a nemá vztah', () => {
+    const ambiguous = person('petra', { match: { ...missing.match, status: 'ambiguous' } })
+    expect(personCanBeCreated(missing, {})).toBe(true)
+    expect(personCanBeCreated(ambiguous, {})).toBe(true)
+    expect(personCanBeCreated(matched, {})).toBe(false)
+    expect(personCanBeCreated(missing, { petr: 2 })).toBe(false)
+    expect(creatablePersonKeys([matched, missing, ambiguous], {})).toEqual(['petr', 'petra'])
+  })
+
+  it('spočítá osoby bez vztahu a sestaví výchozí hodnoty automatického založení', () => {
+    expect(personsWithoutEmploymentCount([matched, missing], {})).toBe(1)
+    expect(personsWithoutEmploymentCount([matched, missing], { jana: null })).toBe(2)
+    expect(autoPersonCreateDefaults('2026-06')).toEqual({
+      relation_type: 'employment', weekly_hours: '40', planned_start_on: '2026-06-01', activate: true,
+    })
   })
 })
 

@@ -119,6 +119,10 @@ final class PayrollAttendanceImportAction
                 $this->userId($request),
                 $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
                 $request->getHeaderLine('User-Agent'),
+                isset($body['files']) ? ImportFiles::fromRequest($body['files'], ['xlsx', 'csv']) : null,
+                $body['rules'] ?? null,
+                $this->profileId($body),
+                $body['components'] ?? null,
             );
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);

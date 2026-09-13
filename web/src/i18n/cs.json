@@ -24646,6 +24646,8 @@
         },
         "apply_openings": "Uložit počáteční stavy ročních součtů",
         "apply_averages": "Založit průměrné výdělky (ke schválení)",
+        "auto_approve_averages": "Průměry rovnou schválit",
+        "auto_approve_averages_hint": "Bez této volby čekají založené průměry na schválení v Nepřítomnostech.",
         "nothing_ready": "Není co převzít."
       },
       "operations": {
@@ -24661,6 +24663,8 @@
       "no_changes": "Žádné změny údajů",
       "confirm": "Údaje jsem porovnal(a) s podáním přijatým ČSSZ",
       "confirm_hint": "Identifikátory ČSSZ se uloží jako ověřené ručním importem a nahradí dříve ručně opsané hodnoty.",
+      "auto_approve_changes": "Rovnou odškrtnout povinnosti ke změnám",
+      "auto_approve_changes_hint": "Změny smluvních podmínek by jinak založily na kartě vztahu úkoly (dodatek smlouvy, oznámení změny pojišťovně a ČSSZ). Protože změnu už vykázalo importované podání, import je rovnou odškrtne. Povinnosti při nástupu a skončení i starší rozpracované úkoly zůstávají.",
       "apply": "Použít vybrané ({count})",
       "apply_history_only": "Převzít historii",
       "history_applied": "Historie převzata: uloženo počátečních stavů {saved}, založeno průměrů {created}.",
@@ -24696,9 +24700,14 @@
       "result_history": {
         "title": "Převzetí historie",
         "openings_saved": "Uloženo počátečních stavů: {count}",
-        "averages_created": "Založeno průměrů ke schválení: {count}",
+        "averages_created": "Založeno průměrů: {created}, z toho schváleno {approved}",
         "opening_skipped": "Počáteční stav přeskočen",
         "average_skipped": "Průměr přeskočen"
+      },
+      "result_checklist": {
+        "title": "Povinnosti ke změnám",
+        "completed": "Odškrtnuté povinnosti ke změnám: {count}",
+        "failed": "Nepodařilo se odškrtnout"
       }
     },
     "meaning_groups": {
@@ -24861,18 +24870,20 @@
         "columns": {
           "person": "Osoba v podkladech",
           "status": "Stav",
-          "employment": "Pracovní vztah",
-          "create": "Založit"
+          "employment": "Přiřadit k existujícímu vztahu",
+          "create": "Založit nového"
         },
         "manual": "zvoleno ručně",
         "employment_for": "Pracovní vztah pro {name}",
         "no_employment": "Bez vztahu (přeskočit)",
+        "no_employment_create": "Nepřiřazovat",
         "candidates": "Možné shody",
-        "all_employments": "Všechny vztahy v období",
+        "all_employments": "Existující vztahy ve firmě",
+        "create_guidance": "Osoby, které v evidenci ještě nejsou, založte zaškrtnutím ve sloupci Založit nového (nebo tlačítkem Vybrat všechny k založení). Výběr vztahu slouží jen k přiřazení k zaměstnanci, kterého už evidujete.",
         "empty": "Žádná osoba neodpovídá filtru.",
         "select_all_creatable": "Vybrat k založení všechny nenalezené ({count})",
         "create_for": "Založit osobu {name}",
-        "create_label": "Založit tuto osobu",
+        "create_label": "Založit jako nového zaměstnance",
         "create_title": "Založit osoby ({count})",
         "create_hint": "Osoby se založí s pracovním vztahem od prvního dne období a propojí se s podklady. Zkontrolujte rozdělení na jméno a příjmení.",
         "relation_type": "Druh vztahu",
@@ -24926,6 +24937,13 @@
         "adopt_personal_numbers_hint": "Vztahy s automatickým číslem (1, ZAM-7…) dostanou osobní číslo z podkladů; ručně zadané číslo se nepřepisuje.",
         "create_inputs": "Vytvořit mzdové vstupy (návrhy ke schválení)",
         "create_inputs_hint": "Peněžní složky se předají do importu mzdových vstupů. Opakovaný import téhož měsíce nevytvoří druhou odměnu, jen duplicitu.",
+        "missing_employment_note": "{count} osob nemá pracovní vztah a při použití se přeskočí.",
+        "edit_in_persons_step": "Upravit v kroku Osoby",
+        "auto_create_persons": "Chybějící osoby založit automaticky ({count})",
+        "auto_create_persons_hint": "Založí se jméno, osobní číslo, rodné číslo a měsíční mzda z podkladů, druh vztahu odhadnutý z podkladů (jinak pracovní poměr), úvazek z podkladů nebo 40 h, nástup první den importovaného období, vztah rovnou aktivní. Údaje lze doplnit později na kartě zaměstnance.",
+        "auto_create_failed_title": "Nepodařilo se založit ({count})",
+        "phase_creating": "Zakládám osoby…",
+        "phase_importing": "Importuji…",
         "apply": "Použít ({count} osob)",
         "applied": "Docházka uložena jako dávka č. {id}, vytvořeno vstupů: {count}.",
         "replayed_toast": "Tytéž soubory už byly za toto období použity (dávka č. {id}). Nic nového nevzniklo."

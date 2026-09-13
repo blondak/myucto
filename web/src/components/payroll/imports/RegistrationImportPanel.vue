@@ -61,6 +61,8 @@ const applyOpenings = ref(false)
 const applyAverages = ref(false)
 const openingsTouched = ref(false)
 const averagesTouched = ref(false)
+const autoApproveChanges = ref(true)
+const autoApproveAverages = ref(true)
 const result = ref<RegistrationApplyResult | null>(null)
 const busy = ref<'preview' | 'apply' | null>(null)
 const error = ref('')
@@ -80,6 +82,7 @@ const averagesReady = computed(() => hasReadyItem(averages.value))
 const showTakeover = computed(() => openingBalances.value.length > 0 || averages.value.length > 0)
 const historySelected = computed(() =>
   (applyOpenings.value && openingsReady.value) || (applyAverages.value && averagesReady.value))
+const showAutoApproveChanges = computed(() => selected.value.length > 0)
 
 const summaryItems = computed(() => {
   const items = ['total', 'create', 'update', 'terminate', 'none', 'blocked'] as const
@@ -107,6 +110,11 @@ const resultHasHistory = computed(() => {
   return value.opening_balances.saved > 0 || value.opening_balances.skipped.length > 0
     || value.averages.created > 0 || value.averages.skipped.length > 0
 })
+const resultHasChecklist = computed(() => {
+  const value = result.value
+  if (!value) return false
+  return value.change_checklist.completed > 0 || value.change_checklist.failed.length > 0
+})
 
 // Jiné soubory nebo prostředí = jiný náhled; výběr z toho starého by klamal.
 watch(fingerprint, value => {
@@ -117,6 +125,8 @@ watch(fingerprint, value => {
     evidenceConfirmed.value = false
     openingsTouched.value = false
     averagesTouched.value = false
+    autoApproveChanges.value = true
+    autoApproveAverages.value = true
   }
   result.value = null
 })
@@ -166,6 +176,8 @@ async function runApply() {
       pairs: buildRegistrationPairs(pairs.value),
       apply_opening_balances: applyOpenings.value && openingsReady.value,
       apply_averages: applyAverages.value && averagesReady.value,
+      auto_approve_changes: keys.length > 0 && autoApproveChanges.value,
+      auto_approve_averages: applyAverages.value && averagesReady.value && autoApproveAverages.value,
     })
     result.value = response
     const summary = response.summary
@@ -298,6 +310,12 @@ function dateText(value: string | null): string {
 function operationLabel(operation: string): string {
   const key = `payroll_imports.registration.result_operations.${operation}`
   return te(key) ? t(key) : operation
+}
+
+/** Klíč povinnosti checklistu je stejný napříč mzdovým jádrem — sdílený překlad, ne duplikát. */
+function checklistItemLabel(itemKey: string): string {
+  const key = `payroll.people.checklist.${itemKey}`
+  return te(key) ? t(key) : itemKey
 }
 
 function historyRows(history: RegistrationHistory): { key: string; label: string; value: string }[] {
@@ -690,6 +708,14 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
               <span v-if="!averagesReady" class="mt-0.5 block text-xs text-neutral-500">{{ t('payroll_imports.registration.takeover.nothing_ready') }}</span>
             </span>
           </label>
+          <label class="ml-6 flex items-start gap-2 text-sm text-neutral-800">
+            <input v-model="autoApproveAverages" type="checkbox" data-testid="registration-auto-approve-averages" class="mt-0.5 rounded border-neutral-300 text-payroll-600"
+              :disabled="!canWrite || busy !== null || !applyAverages">
+            <span>
+              <span class="font-medium">{{ t('payroll_imports.registration.takeover.auto_approve_averages') }}</span>
+              <span class="mt-0.5 block text-xs text-neutral-500">{{ t('payroll_imports.registration.takeover.auto_approve_averages_hint') }}</span>
+            </span>
+          </label>
         </div>
       </section>
 
@@ -699,6 +725,13 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
           <span>
             <span class="font-medium">{{ t('payroll_imports.registration.confirm') }}</span>
             <span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.registration.confirm_hint') }}</span>
+          </span>
+        </label>
+        <label v-if="showAutoApproveChanges" class="mt-3 flex items-start gap-2 text-sm text-neutral-800">
+          <input v-model="autoApproveChanges" type="checkbox" data-testid="registration-auto-approve-changes" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
+          <span>
+            <span class="font-medium">{{ t('payroll_imports.registration.auto_approve_changes') }}</span>
+            <span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.registration.auto_approve_changes_hint') }}</span>
           </span>
         </label>
         <div class="mt-4 flex flex-col items-start gap-1.5">
@@ -745,7 +778,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
         <h4 class="text-sm font-medium text-neutral-800">{{ t('payroll_imports.registration.result_history.title') }}</h4>
         <div class="flex flex-wrap gap-2 text-xs">
           <span class="rounded-full bg-success-50 px-2 py-1 font-medium text-success-700">{{ t('payroll_imports.registration.result_history.openings_saved', { count: result.opening_balances.saved }) }}</span>
-          <span class="rounded-full bg-success-50 px-2 py-1 font-medium text-success-700">{{ t('payroll_imports.registration.result_history.averages_created', { count: result.averages.created }) }}</span>
+          <span class="rounded-full bg-success-50 px-2 py-1 font-medium text-success-700">{{ t('payroll_imports.registration.result_history.averages_created', { created: result.averages.created, approved: result.averages.approved }) }}</span>
         </div>
         <ul v-if="result.opening_balances.skipped.length || result.averages.skipped.length" class="divide-y divide-neutral-100 rounded-lg border border-neutral-200 text-sm">
           <li v-for="item in result.opening_balances.skipped" :key="`o-${item.employee_id}-${item.year}`" class="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
@@ -761,6 +794,22 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
               <p class="text-xs text-neutral-600">{{ item.reason }}</p>
             </div>
             <span class="whitespace-nowrap rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">{{ t('payroll_imports.registration.result_history.average_skipped') }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <div v-if="resultHasChecklist" class="mt-4 space-y-3" data-testid="registration-result-checklist">
+        <h4 class="text-sm font-medium text-neutral-800">{{ t('payroll_imports.registration.result_checklist.title') }}</h4>
+        <div class="flex flex-wrap gap-2 text-xs">
+          <span class="rounded-full bg-success-50 px-2 py-1 font-medium text-success-700">{{ t('payroll_imports.registration.result_checklist.completed', { count: result.change_checklist.completed }) }}</span>
+        </div>
+        <ul v-if="result.change_checklist.failed.length" class="divide-y divide-neutral-100 rounded-lg border border-neutral-200 text-sm">
+          <li v-for="(item, index) in result.change_checklist.failed" :key="`c-${item.employment_id}-${item.item_key}-${index}`" class="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
+            <div class="min-w-0">
+              <p class="font-medium text-neutral-900">{{ checklistItemLabel(item.item_key) }}</p>
+              <p class="text-xs text-neutral-600">{{ item.message }}</p>
+            </div>
+            <span class="whitespace-nowrap rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">{{ t('payroll_imports.registration.result_checklist.failed') }}</span>
           </li>
         </ul>
       </div>

@@ -24646,6 +24646,8 @@
         },
         "apply_openings": "Save opening balances of annual totals",
         "apply_averages": "Create average earnings (for approval)",
+        "auto_approve_averages": "Approve averages right away",
+        "auto_approve_averages_hint": "Without this, created averages wait for approval in Absences.",
         "nothing_ready": "Nothing to take over."
       },
       "operations": {
@@ -24661,6 +24663,8 @@
       "no_changes": "No data changes",
       "confirm": "I have compared the data with the submission accepted by ČSSZ",
       "confirm_hint": "ČSSZ identifiers are stored as verified by manual import and replace values typed in manually before.",
+      "auto_approve_changes": "Auto-complete change obligations",
+      "auto_approve_changes_hint": "Changed contract terms would otherwise create tasks on the employment card (contract amendment, notifying the insurer and ČSSZ). Since the imported submission already reported the change, the import checks them off right away. Onboarding and termination obligations and older in-progress tasks are kept.",
       "apply": "Apply selected ({count})",
       "apply_history_only": "Take over history",
       "history_applied": "History taken over: {saved} opening balances saved, {created} averages created.",
@@ -24696,9 +24700,14 @@
       "result_history": {
         "title": "History takeover",
         "openings_saved": "Opening balances saved: {count}",
-        "averages_created": "Averages created for approval: {count}",
+        "averages_created": "Averages created: {created}, of which approved {approved}",
         "opening_skipped": "Opening balance skipped",
         "average_skipped": "Average skipped"
+      },
+      "result_checklist": {
+        "title": "Change obligations",
+        "completed": "Change obligations checked off: {count}",
+        "failed": "Could not check off"
       }
     },
     "meaning_groups": {
@@ -24861,18 +24870,20 @@
         "columns": {
           "person": "Person in the data",
           "status": "Status",
-          "employment": "Employment",
-          "create": "Create"
+          "employment": "Assign to an existing employment",
+          "create": "Create new"
         },
         "manual": "chosen manually",
         "employment_for": "Employment for {name}",
         "no_employment": "No employment (skip)",
+        "no_employment_create": "Do not assign",
         "candidates": "Possible matches",
-        "all_employments": "All employments in the period",
+        "all_employments": "Existing employments in the company",
+        "create_guidance": "Create people who are not in the records yet by checking the Create new column (or the Select all to create button). Choosing an employment only assigns the person to an employee you already have on record.",
         "empty": "No person matches the filter.",
         "select_all_creatable": "Select all unmatched for creation ({count})",
         "create_for": "Create person {name}",
-        "create_label": "Create this person",
+        "create_label": "Create as a new employee",
         "create_title": "Create people ({count})",
         "create_hint": "The people are created with an employment starting on the first day of the period and linked to the data. Check the split into first and last name.",
         "relation_type": "Employment type",
@@ -24926,6 +24937,13 @@
         "adopt_personal_numbers_hint": "Employments with an automatic number (1, ZAM-7…) get the personal number from the source files; a manually entered number is never overwritten.",
         "create_inputs": "Create payroll inputs (drafts awaiting approval)",
         "create_inputs_hint": "Money components are passed to the payroll input import. Importing the same month again does not create a second bonus, only a duplicate.",
+        "missing_employment_note": "{count} people have no employment and will be skipped when applying.",
+        "edit_in_persons_step": "Edit in the People step",
+        "auto_create_persons": "Create missing people automatically ({count})",
+        "auto_create_persons_hint": "Creates the name, personal number, birth number and monthly wage from the source data, the employment type estimated from the data (employment otherwise), weekly hours from the data or 40 h, start on the first day of the imported period, employment active right away. Details can be filled in later on the employee's card.",
+        "auto_create_failed_title": "Could not be created ({count})",
+        "phase_creating": "Creating people…",
+        "phase_importing": "Importing…",
         "apply": "Apply ({count} people)",
         "applied": "Attendance stored as batch no. {id}, inputs created: {count}.",
         "replayed_toast": "The same files were already applied for this period (batch no. {id}). Nothing new was created."

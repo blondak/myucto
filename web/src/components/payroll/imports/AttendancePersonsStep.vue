@@ -17,6 +17,7 @@ import {
   effectiveEmploymentId,
   firstDayOfPeriod,
   guessRelationType,
+  personCanBeCreated,
   splitDisplayName,
   type ManualLinks,
   type PersonDraft,
@@ -98,8 +99,7 @@ function needsAttention(person: AttendancePerson): boolean {
 }
 
 function canBeCreated(person: AttendancePerson): boolean {
-  return (person.match.status === 'not_found' || person.match.status === 'ambiguous')
-    && effectiveEmploymentId(person, props.manualLinks) === null
+  return personCanBeCreated(person, props.manualLinks)
 }
 
 function statusClass(status: AttendanceMatchStatus): string {
@@ -118,6 +118,13 @@ function selectValue(person: AttendancePerson): string {
 
 function onSelect(person: AttendancePerson, value: string) {
   emit('set-link', person.key, value === '' ? null : Number(value))
+}
+
+/** Prázdná volba selectu se liší podle toho, jestli osobu lze rovnou založit. */
+function noEmploymentLabel(person: AttendancePerson): string {
+  return canBeCreated(person)
+    ? t('payroll_imports.attendance.persons.no_employment_create')
+    : t('payroll_imports.attendance.persons.no_employment')
 }
 
 function candidateOptions(person: AttendancePerson): AttendanceEmploymentOption[] {
@@ -192,6 +199,8 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
         </button>
       </div>
 
+      <p v-if="creatable.length" class="border-b border-neutral-100 bg-neutral-50 px-4 py-2 text-xs text-neutral-600">{{ t('payroll_imports.attendance.persons.create_guidance') }}</p>
+
       <p v-if="visiblePersons.length === 0" class="px-4 py-6 text-sm text-neutral-500">{{ t('payroll_imports.attendance.persons.empty') }}</p>
 
       <div v-else class="hidden max-h-[65vh] overflow-auto md:block">
@@ -225,10 +234,10 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
                 <p v-if="isManual(person)" class="mt-1 text-[11px] font-medium text-payroll-600">{{ t('payroll_imports.attendance.persons.manual') }}</p>
               </td>
               <td class="px-3 py-2">
-                <select :class="SELECT_CLASS" :value="selectValue(person)" :disabled="disabled"
+                <select :class="SELECT_CLASS" :value="selectValue(person)" :disabled="disabled || createKeys.includes(person.key)"
                   :aria-label="t('payroll_imports.attendance.persons.employment_for', { name: person.display_name })"
                   @change="onSelect(person, ($event.target as HTMLSelectElement).value)">
-                  <option value="">{{ t('payroll_imports.attendance.persons.no_employment') }}</option>
+                  <option value="">{{ noEmploymentLabel(person) }}</option>
                   <optgroup v-if="candidateOptions(person).length" :label="t('payroll_imports.attendance.persons.candidates')">
                     <option v-for="option in candidateOptions(person)" :key="`c-${option.employment_id}`" :value="String(option.employment_id)">{{ option.label }}</option>
                   </optgroup>
@@ -259,10 +268,10 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
             </div>
             <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="statusClass(person.match.status)">{{ t(`payroll_imports.attendance.persons.status.${person.match.status}`) }}</span>
           </div>
-          <select :class="`${SELECT_CLASS} mt-2`" :value="selectValue(person)" :disabled="disabled"
+          <select :class="`${SELECT_CLASS} mt-2`" :value="selectValue(person)" :disabled="disabled || createKeys.includes(person.key)"
             :aria-label="t('payroll_imports.attendance.persons.employment_for', { name: person.display_name })"
             @change="onSelect(person, ($event.target as HTMLSelectElement).value)">
-            <option value="">{{ t('payroll_imports.attendance.persons.no_employment') }}</option>
+            <option value="">{{ noEmploymentLabel(person) }}</option>
             <option v-for="option in options" :key="option.employment_id" :value="String(option.employment_id)">{{ option.label }}</option>
           </select>
           <ul v-if="person.warnings.length" class="mt-2 space-y-0.5 text-xs text-warning-700">

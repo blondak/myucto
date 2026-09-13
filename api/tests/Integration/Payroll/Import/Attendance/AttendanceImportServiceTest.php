@@ -330,6 +330,40 @@ final class AttendanceImportServiceTest extends TestCase
         self::assertSame($employmentId, $persons['eva pokusna']['match']['employment_id']);
     }
 
+    /**
+     * Klient zná rodné číslo jen maskované; se soubory ho při zakládání
+     * doplní server z podkladů podle klíče osoby.
+     */
+    public function testPersonsWithFilesTakeBirthNumberFromSourceData(): void
+    {
+        $result = $this->service->persons($this->supplierId, self::PERIOD, [
+            [
+                'person_key' => 'petr zkusebni',
+                'full_name' => 'Petr Zkušební',
+                'first_name' => 'Petr',
+                'last_name' => 'Zkušební',
+                'birth_number' => null,
+                'relation_type' => 'employment',
+                'weekly_hours' => '40',
+                'planned_start_on' => '2026-06-01',
+                'activate' => false,
+            ],
+        ], $this->userId, null, null, AttendanceFixture::scenario());
+
+        self::assertSame('created', $result['results'][0]['status'], (string) $result['results'][0]['message']);
+        $sensitive = $this->container->get(PayrollSensitiveData::class);
+        self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT value_masked FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ? AND identifier_type = "birth_number"',
+        );
+        $stmt->execute([$this->supplierId, (int) $result['results'][0]['employee_id']]);
+        self::assertSame(
+            [$sensitive->mask(AttendanceFixture::petrBirthNumber(), PayrollSensitiveField::PERSONAL_IDENTIFIER)],
+            $stmt->fetchAll(PDO::FETCH_COLUMN),
+        );
+    }
+
     public function testProfilesCrudAndPreviewWithProfile(): void
     {
         $rules = [['sheet' => 'výpočet', 'header' => 'Dovolená', 'meaning' => 'vacation_hours', 'unit' => 'hours', 'component_code' => null]];

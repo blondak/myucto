@@ -78,6 +78,8 @@ final class PayrollRegistrationImportAction
                 $body['pairs'] ?? null,
                 ($body['apply_opening_balances'] ?? false) === true,
                 ($body['apply_averages'] ?? false) === true,
+                ($body['auto_approve_changes'] ?? false) === true,
+                ($body['auto_approve_averages'] ?? false) === true,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
