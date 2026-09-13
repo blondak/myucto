@@ -2097,11 +2097,71 @@ export interface PayrollQuickInputSaveResult {
   failures: PayrollQuickInputFailure[]
 }
 
+export interface PayrollInputBatchFailure {
+  id: number
+  code: string
+  message: string
+}
+
+/**
+ * Průběh hromadné akce podle filtru. Na velkém měsíci server vrátí
+ * `complete = false` a kurzor `next_after_id`, od kterého se pokračuje.
+ */
+interface PayrollInputBatchProgress {
+  skipped: PayrollInputBatchFailure[]
+  failed: PayrollInputBatchFailure[]
+  remaining: number
+  complete: boolean
+  next_after_id: number
+}
+
 /** Výsledek hromadného schválení mzdových vstupů. */
-export interface PayrollInputApproveBatchResult {
+export interface PayrollInputApproveBatchResult extends PayrollInputBatchProgress {
   approved: number[]
-  skipped: Array<{ id: number, code: string, message: string }>
-  failed: Array<{ id: number, code: string, message: string }>
+}
+
+export interface PayrollInputCancelBatchResult extends PayrollInputBatchProgress {
+  cancelled: number[]
+}
+
+export interface PayrollInputBatchPayload {
+  ids?: number[]
+  period?: string
+  employment_id?: number
+  /** Tytéž klíče jako parametry výpisu (`q`, `status`, `component_id`, …). */
+  filter?: Record<string, string | number>
+  after_id?: number
+}
+
+/** Souhrn za CELÝ filtr, ne za zobrazenou stránku. */
+export interface PayrollInputsSummary {
+  total: number
+  draft_total: number
+  amount_total_minor: number
+  draft_amount_total_minor: number
+}
+
+export interface PayrollInputGroup {
+  key: number
+  label: string
+  secondary: string | null
+  count: number
+  draft_count: number
+  amount_minor: number
+}
+
+export interface PayrollInputFacets {
+  components: Array<{ id: number, code: string, name: string, count: number }>
+  imports: Array<{ id: number, source_name: string, created_at: string, count: number }>
+}
+
+export interface PayrollInputsPage {
+  items: PayrollInput[]
+  total: number
+  summary: PayrollInputsSummary | null
+  groups: PayrollInputGroup[] | null
+  group_total: number | null
+  facets: PayrollInputFacets | null
 }
 
 export interface PayrollQuickInputSavePayload {
@@ -7746,15 +7806,41 @@ export const payrollApi = {
       '/payroll/recurring-components/materialize',
       { period },
     ).then(response => response.data.materialization),
-  /** `employmentId` zúží seznam na jeden vztah už na serveru, ne až za stránkováním. */
-  inputs: (period: string, page?: PayrollPageParams, employmentId?: number) =>
-    api.get<{ inputs: PayrollInput[]; total: number }>('/payroll/inputs', {
+  /**
+   * `employmentId` zúží seznam na jeden vztah už na serveru, ne až za stránkováním.
+   * `filters` jsou parametry z `payrollInputFilterParams()`; `groupBy` vrátí
+   * místo řádků souhrnné skupiny stránkované po skupinách.
+   */
+  inputs: (
+    period: string,
+    page?: PayrollPageParams,
+    employmentId?: number,
+    filters: Record<string, string | number> = {},
+    groupBy: 'employee' | 'component' | null = null,
+  ) =>
+    api.get<{
+      inputs: PayrollInput[]
+      total: number
+      summary?: PayrollInputsSummary
+      groups?: PayrollInputGroup[] | null
+      group_total?: number | null
+      facets?: PayrollInputFacets
+    }>('/payroll/inputs', {
       params: {
         period,
         ...pageParams(page),
         ...(employmentId ? { employment_id: employmentId } : {}),
+        ...filters,
+        ...(groupBy ? { group_by: groupBy } : {}),
       },
-    }).then(response => ({ items: response.data.inputs, total: response.data.total })),
+    }).then((response): PayrollInputsPage => ({
+      items: response.data.inputs,
+      total: response.data.total,
+      summary: response.data.summary ?? null,
+      groups: response.data.groups ?? null,
+      group_total: response.data.group_total ?? null,
+      facets: response.data.facets ?? null,
+    })),
   quickInputs: (period: string, page?: PayrollPageParams, employmentId?: number) =>
     api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', {
       params: {
@@ -7816,15 +7902,16 @@ export const payrollApi = {
   /**
    * Hromadné schválení mzdových vstupů.
    *
-   * Bez `ids` si dávku poskládá server ze všech konceptů období — právě z těch,
-   * kvůli kterým mzdový běh drží blokátor `draft_inputs_present`.
+   * Bez `ids` si dávku poskládá server ze všech konceptů období odpovídajících
+   * `filter` — právě z těch, kvůli kterým mzdový běh drží blokátor
+   * `draft_inputs_present`. Strop 500 platí jen pro výčet `ids`.
    */
-  approveInputsBatch: (payload: {
-    ids?: number[]
-    period?: string
-    employment_id?: number
-  }) =>
+  approveInputsBatch: (payload: PayrollInputBatchPayload) =>
     api.post<PayrollInputApproveBatchResult>('/payroll/inputs/approve-batch', payload)
+      .then(response => response.data),
+  /** Hromadné zrušení konceptů — výčtem `ids` nebo podle `filter`. */
+  cancelInputsBatch: (payload: PayrollInputBatchPayload) =>
+    api.post<PayrollInputCancelBatchResult>('/payroll/inputs/cancel-batch', payload)
       .then(response => response.data),
   cancelInput: (id: number, rowVersion: number) =>
     api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/cancel`, {

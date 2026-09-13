@@ -90,10 +90,12 @@ schvalovat; bez toho práva vznikají koncepty a schválí je někdo jiný.
 Jednotlivé mzdové vstupy zadané v **Mzdy → Mzdové složky a vstupy** vznikají
 vždy jako koncept, protože je nutné je umět ještě upravit i zrušit.
 
-Koncepty, které v běhu zbyly, schválíte hromadně tlačítkem **Schválit vše (N)**
-— buď v mzdových vstupech, nebo přímo u blokace v kartě běhu. Schvaluje se
-najednou až 500 vstupů; už schválený se jen přeskočí, takže je bezpečné
-tlačítko použít znovu. Dvoustupňový režim tedy zůstává možný, jen není povinný.
+Koncepty, které v běhu zbyly, schválíte hromadně — přímo u blokace v kartě
+běhu, nebo v mzdových vstupech tlačítkem **Schválit N odpovídajících filtru**.
+Odkaz u blokace otevře seznam konceptů daného měsíce. Schvalují se všechny
+koncepty bez ohledu na jejich počet; už schválený se jen přeskočí, takže je
+bezpečné tlačítko použít znovu. Dvoustupňový režim tedy zůstává možný, jen není
+povinný.
 
 Skutečně prázdný technický běh lze tlačítkem **Smazat prázdný běh** odstranit
 i po jeho zrušení. Tlačítko se zobrazí pouze tehdy, když běh nemá žádnou revizi,

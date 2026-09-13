@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollInputApprovalException;
 use MyInvoice\Repository\Payroll\PayrollInputCancellationException;
 use MyInvoice\Repository\Payroll\PayrollInputConflictException;
+use MyInvoice\Repository\Payroll\PayrollInputFilter;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
@@ -45,28 +46,46 @@ final class PayrollInputsAction
             (int) ($query['limit'] ?? PayrollInputRepository::LIST_DEFAULT_LIMIT),
         ));
         $offset = max(0, (int) ($query['offset'] ?? 0));
-        $employmentId = self::narrowingId($query, 'employment_id');
+        $supplierId = $this->currentSupplierId($request);
+        $groupBy = $query['group_by'] ?? null;
         try {
-            $period = $this->period($query['period'] ?? null);
-            $page = $this->inputs->list(
-                $this->currentSupplierId($request),
-                $period,
-                $limit,
-                $offset,
-                $employmentId,
+            $filter = PayrollInputFilter::fromArray(
+                $this->period($query['period'] ?? null),
+                [...$query, 'employment_id' => self::narrowingId($query, 'employment_id')],
             );
+            if ($groupBy !== null && $groupBy !== ''
+                && !in_array($groupBy, PayrollInputFilter::GROUP_BY, true)
+            ) {
+                throw new \InvalidArgumentException('group_by smí být employee nebo component.');
+            }
+            $grouped = is_string($groupBy) && $groupBy !== '';
+            $summary = $this->inputs->summary($supplierId, $filter);
+            $page = $grouped
+                ? ['items' => [], 'total' => $summary['total']]
+                : $this->inputs->listFiltered($supplierId, $filter, $limit, $offset);
+            $groups = $grouped
+                ? $this->inputs->groups($supplierId, $filter, $groupBy, $limit, $offset)
+                : null;
+            $facets = $this->inputs->facets($supplierId, $filter->periodStart, $filter->employmentId);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
 
         // `employment_id` se vrací zpátky, aby prohlížeč poznal zúžený prázdný
-        // seznam od nezúženého — bez toho vypadá obojí stejně.
+        // seznam od nezúženého — bez toho vypadá obojí stejně. Souhrn je za CELÝ
+        // filtr: podle stránky by „Schválit" ukazovalo jen těch pětadvacet.
         return Json::ok($response, [
             'inputs' => $page['items'],
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
-            'employment_id' => $employmentId,
+            'employment_id' => $filter->employmentId,
+            'summary' => $summary,
+            'group_by' => $grouped ? $groupBy : null,
+            'groups' => $groups['items'] ?? null,
+            'group_total' => $groups['total'] ?? null,
+            'facets' => $facets,
+            'filter' => $filter->toArray(),
         ]);
     }
 
@@ -125,9 +144,12 @@ final class PayrollInputsAction
      * obrazovce, kam uživatel přišel jen proto, že mzdový běh drží blokátor
      * `draft_inputs_present`.
      *
-     * Přijímá buď výčet `ids`, nebo `period` (volitelně zúžené na jeden vztah),
-     * kdy si dávku poskládá server ze všech konceptů měsíce. Idempotentní: už
-     * schválený vstup se hlásí jako přeskočený, ne jako chyba.
+     * Přijímá buď výčet `ids` (nejvýše {@see PayrollInputRepository::APPROVE_BATCH_MAX}),
+     * nebo `period` s volitelným filtrem (`filter` — tytéž parametry jako výpis),
+     * kdy server projde VŠECHNY koncepty odpovídající filtru po dávkách. Na
+     * velkém měsíci může odpovědět `complete = false`; prohlížeč pak pošle
+     * `after_id = next_after_id` a pokračuje. Idempotentní: už schválený vstup
+     * se hlásí jako přeskočený, ne jako chyba.
      */
     public function approveBatch(Request $request, Response $response): Response
     {
@@ -141,28 +163,40 @@ final class PayrollInputsAction
         }
         $body = $this->input($request);
         $supplierId = $this->currentSupplierId($request);
+        $userId = $this->userId($request);
+        $filter = null;
         try {
             $ids = $this->batchIds($body);
             if ($ids === null) {
-                $ids = $this->inputs->draftInputIds(
+                $filter = $this->batchFilter($body);
+                $result = $this->inputs->approveByFilter(
                     $supplierId,
-                    $this->period($body['period'] ?? null),
-                    self::narrowingId($body, 'employment_id'),
+                    $filter,
+                    $userId,
+                    $this->afterId($body),
                 );
+            } else {
+                $result = [
+                    ...$this->inputs->approveBatch($supplierId, $ids, $userId),
+                    'remaining' => 0,
+                    'complete' => true,
+                    'next_after_id' => 0,
+                ];
             }
-            $result = $this->inputs->approveBatch($supplierId, $ids, $this->userId($request));
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
         $this->logger->log(
             'payroll.inputs.approved_batch',
-            $this->userId($request),
+            $userId,
             'payroll_input',
             null,
             [
                 'approved_count' => count($result['approved']),
                 'skipped_count' => count($result['skipped']),
                 'failed_count' => count($result['failed']),
+                'remaining' => $result['remaining'],
+                'filter' => $filter?->toArray(),
             ],
             $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
             $request->getHeaderLine('User-Agent'),
@@ -170,6 +204,91 @@ final class PayrollInputsAction
         );
 
         return Json::ok($response, $result);
+    }
+
+    /**
+     * Hromadné zrušení konceptů — výčtem `ids` nebo podle filtru, stejně jako
+     * {@see approveBatch()}.
+     *
+     * Každý vstup prochází stejnými zábranami jako jednotlivé zrušení: vstup
+     * navázaný na vyúčtování cesty nebo zmrazený v revizi běhu se nezruší a
+     * vrátí se ve `failed` s důvodem. Do auditu jde výčet zrušených id — zrušení
+     * nejde vrátit, takže stopa musí říct přesně co.
+     */
+    public function cancelBatch(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $supplierId = $this->currentSupplierId($request);
+        $filter = null;
+        try {
+            $ids = $this->batchIds($body);
+            if ($ids === null) {
+                $filter = $this->batchFilter($body);
+                $result = $this->inputs->cancelByFilter($supplierId, $filter, $this->afterId($body));
+            } else {
+                $result = [
+                    ...$this->inputs->cancelBatch($supplierId, $ids),
+                    'remaining' => 0,
+                    'complete' => true,
+                    'next_after_id' => 0,
+                ];
+            }
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        $this->logger->log(
+            'payroll.inputs.cancelled_batch',
+            $this->userId($request),
+            'payroll_input',
+            null,
+            [
+                'cancelled_ids' => $result['cancelled'],
+                'skipped_count' => count($result['skipped']),
+                'failed_count' => count($result['failed']),
+                'remaining' => $result['remaining'],
+                'filter' => $filter?->toArray(),
+            ],
+            $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Filtr hromadné akce: `period` + volitelné `filter` (tytéž klíče jako
+     * výpis). Starší tvar `{period, employment_id}` platí dál.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function batchFilter(array $body): PayrollInputFilter
+    {
+        $filter = $body['filter'] ?? [];
+        if (!is_array($filter) || ($filter !== [] && array_is_list($filter))) {
+            throw new \InvalidArgumentException('filter musí být objekt.');
+        }
+        /** @var array<string,mixed> $filter */
+        if (!array_key_exists('employment_id', $filter) && array_key_exists('employment_id', $body)) {
+            $filter['employment_id'] = $body['employment_id'];
+        }
+
+        return PayrollInputFilter::fromArray($this->period($body['period'] ?? null), $filter);
+    }
+
+    /** @param array<string,mixed> $body */
+    private function afterId(array $body): int
+    {
+        $value = $body['after_id'] ?? 0;
+        $id = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+        if ($id === false) {
+            throw new \InvalidArgumentException('after_id musí být nezáporné celé číslo.');
+        }
+
+        return (int) $id;
     }
 
     /**

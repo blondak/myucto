@@ -680,6 +680,11 @@ export const TOOLS = [
     inputSchema: schema({
       period: str('Měsíc YYYY-MM.', { pattern: '^\\d{4}-\\d{2}$' }),
       employment_id: int('Volitelně jen jeden pracovní vztah.'),
+      q: str('Hledání ve jméně zaměstnance nebo v osobním čísle.'),
+      status: str('Stavy oddělené čárkou: draft, approved, locked.'),
+      source_kind: str('Zdroje oddělené čárkou (manual, recurring, time, absence, import, correction, travel).'),
+      component_code: str('Kódy mzdových složek oddělené čárkou.'),
+      import_id: int('Jen vstupy z jedné importní dávky.'),
       limit: int('Počet záznamů, nejvýše 200.', { minimum: 1, maximum: 200 }),
       offset: int('Kolik záznamů přeskočit.', { minimum: 0 }),
     }, ['period']),
@@ -687,6 +692,11 @@ export const TOOLS = [
     run: (c, a, tool) => c.get('/payroll/inputs', {
       period: a.period,
       employment_id: a.employment_id,
+      q: a.q,
+      status: a.status,
+      source_kind: a.source_kind,
+      component_code: a.component_code,
+      import_id: a.import_id,
       limit: a.limit,
       offset: a.offset,
     }, tool),

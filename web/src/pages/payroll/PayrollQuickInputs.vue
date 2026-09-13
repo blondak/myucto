@@ -702,21 +702,6 @@ function modeButtonClass(active: boolean): string[] {
   ]
 }
 
-/**
- * Přepínač příplatků stojí v jedné liště s `ColumnPicker` a `DensityToggle`,
- * takže musí vypadat jako oni — stejná výška, rám i rádius. Dvojitý rám navíc
- * ho z lišty vytrhával a působil jako jiný druh ovládacího prvku.
- */
-function tableToolClass(active: boolean): string[] {
-  return [
-    'inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md',
-    'border px-2.5 text-sm transition-colors',
-    active
-      ? 'border-payroll-200 bg-payroll-50 text-payroll-700'
-      : 'border-neutral-300 bg-surface text-neutral-700 hover:bg-neutral-50',
-  ]
-}
-
 function validAmount(value: string): number {
   const parsed = parsedAmount(value)
   return parsed !== null && parsed >= 0 && parsed <= MAX_AMOUNT_MINOR ? parsed : 0
@@ -1062,15 +1047,15 @@ onMounted(() => {
           <button
             type="button"
             data-testid="quick-surcharges-toggle"
-            class="cursor-pointer"
-            :class="tableToolClass(surchargesVisible)"
+            class="whitespace-nowrap"
+            :class="surchargesVisible ? btnOutline('primary') : btnFilled('primary')"
             :aria-pressed="surchargesVisible"
             aria-controls="quick-surcharge-columns"
             :title="t('payroll.quick_inputs.surcharges.toggle')"
             @click="toggleSurcharges"
           >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.coin" /></svg>
-            {{ t('payroll.quick_inputs.surcharges.toggle_short') }}
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="surchargesVisible ? ICONS.x : ICONS.coin" /></svg>
+            {{ t(surchargesVisible ? 'payroll.quick_inputs.surcharges.toggle_hide' : 'payroll.quick_inputs.surcharges.toggle_show') }}
           </button>
           <div class="hidden flex-wrap items-center gap-2 lg:flex">
             <ColumnPicker :ctrl="tbl" />

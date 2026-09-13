@@ -522,7 +522,7 @@ async function apply() {
             </ul>
           </div>
           <div class="mt-4 flex flex-wrap gap-2">
-            <RouterLink :to="{ name: 'payroll-components', query: { tab: 'inputs', period: result.batch.period } }" :class="btnOutline('primary')">
+            <RouterLink :to="{ name: 'payroll-components', query: { tab: 'inputs', period: result.batch.period, ...(result.inputs.import_id ? { import: String(result.inputs.import_id) } : {}) } }" :class="btnOutline('primary')">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
               {{ t('payroll_imports.attendance.result.open_inputs') }}
             </RouterLink>

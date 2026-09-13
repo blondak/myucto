@@ -669,7 +669,12 @@ describe('PayrollRuns', () => {
     await wrapper.get('[data-testid="payroll-validation-100-approve-inputs"]').trigger('click')
     await flushPromises()
 
-    expect(m.approveInputsBatch).toHaveBeenCalledWith({ period: '2026-08' })
+    // Bez stropu 500: server projde koncepty měsíce po dávkách podle filtru.
+    expect(m.approveInputsBatch).toHaveBeenCalledWith({
+      period: '2026-08',
+      filter: { status: 'draft' },
+      after_id: 0,
+    })
     expect(m.success).toHaveBeenCalledWith('payroll.runs.validation.draft_inputs_approved')
   })
 

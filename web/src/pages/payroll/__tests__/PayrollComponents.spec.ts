@@ -365,8 +365,10 @@ describe('PayrollComponents', () => {
     expect(m.recurringComponents).toHaveBeenLastCalledWith(12, { limit: 25, offset: 0 })
     expect(m.inputs).toHaveBeenLastCalledWith(
       expect.any(String),
-      { limit: 25, offset: 0 },
+      { limit: 100, offset: 0 },
       12,
+      {},
+      null,
     )
     wrapper.unmount()
   })
@@ -391,8 +393,10 @@ describe('PayrollComponents', () => {
     expect(m.recurringComponents).toHaveBeenLastCalledWith(12, { limit: 25, offset: 25 })
     expect(m.inputs).toHaveBeenLastCalledWith(
       expect.any(String),
-      { limit: 25, offset: 25 },
+      { limit: 100, offset: 100 },
       12,
+      {},
+      null,
     )
     wrapper.unmount()
   })
@@ -421,12 +425,119 @@ describe('PayrollComponents', () => {
     await flushPromises()
 
     const button = wrapper.get('[data-testid="payroll-inputs-approve-all"]')
-    expect(button.text()).toContain('payroll.components.inputs.approve_all')
+    expect(button.text()).toContain('payroll.components.inputs.approve_matching')
     await button.trigger('click')
     await flushPromises()
 
-    expect(m.approveInputsBatch).toHaveBeenCalledWith({ period: expect.any(String) })
+    expect(m.approveInputsBatch).toHaveBeenCalledWith({
+      period: expect.any(String),
+      filter: {},
+      after_id: 0,
+    })
     expect(m.toastSuccess).toHaveBeenCalledWith('payroll.components.inputs.approve_all_done')
+    wrapper.unmount()
+  })
+
+  /**
+   * „Schválit" počítalo koncepty ze zobrazené stránky: na straně bez konceptu
+   * tlačítko zmizelo, i když měsíc držel stovky konceptů. Rozhoduje souhrn
+   * serveru za celý filtr.
+   */
+  it('offers the bulk approval from the whole-filter summary, not from the page', async () => {
+    const approvedRow = {
+      ...(await m.inputs()).items[0],
+      status: 'approved',
+    }
+    m.inputs.mockReset()
+    m.inputs.mockResolvedValue({
+      total: 480,
+      items: [approvedRow],
+      summary: { total: 480, draft_total: 312, amount_total_minor: 1_000_000, draft_amount_total_minor: 600_000 },
+      groups: null,
+      group_total: null,
+      facets: { components: [], imports: [] },
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const summary = wrapper.get('[data-testid="payroll-inputs-summary"]')
+    expect(summary.text()).toContain('payroll.components.inputs.summary')
+    expect(wrapper.find('[data-testid="payroll-inputs-approve-all"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  /** Filtr z adresy jde na server a hromadná akce dostane TENTÝŽ výřez. */
+  it('reads the filter from the URL and approves exactly the filtered drafts', async () => {
+    m.routeQuery = { tab: 'inputs', period: '2026-06', status: 'draft', q: 'Novák', import: '7' }
+    m.approveInputsBatch.mockResolvedValue({
+      approved: [9],
+      skipped: [],
+      failed: [],
+      remaining: 0,
+      complete: true,
+      next_after_id: 9,
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(m.inputs).toHaveBeenLastCalledWith(
+      '2026-06',
+      { limit: 100, offset: 0 },
+      undefined,
+      { q: 'Novák', status: 'draft', import_id: 7 },
+      null,
+    )
+    await wrapper.get('[data-testid="payroll-inputs-approve-all"]').trigger('click')
+    await flushPromises()
+    expect(m.approveInputsBatch).toHaveBeenCalledWith({
+      period: '2026-06',
+      filter: { q: 'Novák', status: 'draft', import_id: 7 },
+      after_id: 0,
+    })
+    wrapper.unmount()
+  })
+
+  /** Neschválené vstupy zůstanou na obrazovce seskupené po důvodu, ne jen první v toastu. */
+  it('keeps grouped failure reasons of a bulk approval on screen', async () => {
+    m.approveInputsBatch.mockResolvedValue({
+      approved: [],
+      skipped: [],
+      failed: [
+        { id: 9, code: 'benefit_limit_exceeded', message: 'Limit benefitu.' },
+        { id: 10, code: 'benefit_limit_exceeded', message: 'Limit benefitu.' },
+      ],
+      remaining: 2,
+      complete: true,
+      next_after_id: 10,
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-inputs-approve-all"]').trigger('click')
+    await flushPromises()
+
+    const failures = wrapper.get('[data-testid="payroll-inputs-batch-failures"]')
+    expect(failures.findAll('li')).toHaveLength(1)
+    expect(failures.text()).toContain('payroll.components.inputs.batch_failed_row')
+    wrapper.unmount()
+  })
+
+  /** Koncept z importu jde opravit; schválený importovaný ne. */
+  it('offers editing for imported drafts but not for approved imported inputs', async () => {
+    const base = (await m.inputs()).items[0]
+    m.inputs.mockReset()
+    m.inputs.mockResolvedValue({
+      total: 2,
+      items: [
+        { ...base, id: 21, source_kind: 'import', import_id: 3, status: 'draft' },
+        { ...base, id: 22, source_kind: 'import', import_id: 3, status: 'approved' },
+      ],
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const rows = wrapper.get('[data-layout="desktop"]').findAll('tbody tr')
+    expect(rows[0].find('[data-testid="payroll-input-edit"]').exists()).toBe(true)
+    expect(rows[1].find('[data-testid="payroll-input-edit"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

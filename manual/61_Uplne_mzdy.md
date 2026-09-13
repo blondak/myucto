@@ -216,8 +216,8 @@ stejným sledem devíti kroků a odkazuje rovnou na příslušné obrazovky.
    rovnou jako **schválené**; bez toho práva vznikají koncepty.
 6. **Mzdy → Mzdové složky a vstupy** použijte pro opakující se složky, benefity
    a jednotlivé výjimky. Vstupy zadané tady vznikají **vždy jako koncept** —
-   schválit je jde hromadně tlačítkem **Schválit vše**, a to i později přímo
-   u blokace v kartě běhu.
+   schválit je jde hromadně tlačítkem **Schválit N odpovídajících filtru**,
+   a to i později přímo u blokace v kartě běhu tlačítkem **Schválit vše**.
 
 #### B. Mzdový běh — **Mzdy → Mzdové běhy**
 

@@ -19548,9 +19548,21 @@ paths:
     get:
       tags: [Payroll]
       summary: Měsíční mzdové vstupy
+      description: >-
+        Zrušené vstupy se nevypisují. `summary` a `facets` se počítají za celý
+        filtr (resp. celý měsíc), ne za stránku. S `group_by` vrací místo
+        jednotlivých vstupů souhrnné řádky (`groups`), stránkované po skupinách.
       parameters:
         - { name: period, in: query, required: true, description: Měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
         - { name: employment_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: employee_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: q, in: query, description: Hledání ve jméně zaměstnance a v osobním čísle (kódu vztahu), schema: { type: string, maxLength: 100 } }
+        - { name: component_id, in: query, description: 'ID mzdových složek oddělená čárkou', schema: { type: string, example: '12,15' } }
+        - { name: component_code, in: query, description: 'Kódy mzdových složek oddělené čárkou', schema: { type: string } }
+        - { name: source_kind, in: query, description: 'Zdroje oddělené čárkou (manual, recurring, time, absence, import, correction, travel)', schema: { type: string } }
+        - { name: status, in: query, description: 'Stavy oddělené čárkou (draft, approved, locked)', schema: { type: string } }
+        - { name: import_id, in: query, description: Importní dávka vstupů (payroll_input_imports), schema: { type: integer, format: int64 } }
+        - { name: group_by, in: query, schema: { type: string, enum: [employee, component] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
@@ -22162,6 +22174,50 @@ components:
         limit: { type: integer, minimum: 1 }
         offset: { type: integer, minimum: 0 }
         employment_id: { type: [integer, "null"], format: int64 }
+        summary:
+          type: object
+          required: [total, draft_total, amount_total_minor, draft_amount_total_minor]
+          properties:
+            total: { type: integer, minimum: 0 }
+            draft_total: { type: integer, minimum: 0 }
+            amount_total_minor: { type: integer }
+            draft_amount_total_minor: { type: integer }
+        group_by: { type: [string, "null"], enum: [employee, component, null] }
+        groups:
+          type: [array, "null"]
+          items:
+            type: object
+            required: [key, label, count, draft_count, amount_minor]
+            properties:
+              key: { type: integer, format: int64, description: ID zaměstnance nebo mzdové složky }
+              label: { type: string }
+              secondary: { type: [string, "null"] }
+              count: { type: integer, minimum: 0 }
+              draft_count: { type: integer, minimum: 0 }
+              amount_minor: { type: integer }
+        group_total: { type: [integer, "null"], minimum: 0 }
+        facets:
+          type: object
+          properties:
+            components:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: integer, format: int64 }
+                  code: { type: string }
+                  name: { type: string }
+                  count: { type: integer, minimum: 0 }
+            imports:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: integer, format: int64 }
+                  source_name: { type: string }
+                  created_at: { type: string }
+                  count: { type: integer, minimum: 0 }
+        filter: { type: object, additionalProperties: true }
 
     PayrollRun:
       type: object

@@ -30,6 +30,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
+import { runPayrollInputBatch } from '@/pages/payroll/payrollInputFilters'
 import PayrollMonthlyChecklistPanel from '@/pages/payroll/PayrollMonthlyChecklistPanel.vue'
 import type { PayrollRegzelEnvironment } from '@/api/payroll'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -885,8 +886,16 @@ async function approveDraftInputs(run: PayrollRun) {
   if (!canOverride.value) return
   saving.value = true
   try {
-    const result = await payrollApi.approveInputsBatch({
-      period: run.period_start.slice(0, 7),
+    // Filtrem, ne výčtem: server projde VŠECHNY koncepty měsíce po dávkách.
+    // Dřív schválil nejvýš 500 a zbytek zůstal viset bez hlášky.
+    const period = run.period_start.slice(0, 7)
+    const result = await runPayrollInputBatch(async (afterId) => {
+      const pass = await payrollApi.approveInputsBatch({
+        period,
+        filter: { status: 'draft' },
+        after_id: afterId,
+      })
+      return { ...pass, done: pass.approved }
     })
     if (result.failed.length > 0) {
       // Toast nesl důvod PRVNÍHO neúspěchu a za pár vteřin zmizel; zbylých
@@ -897,13 +906,13 @@ async function approveDraftInputs(run: PayrollRun) {
         [run.id]: groupedFailures(result.failed),
       }
       toast.error(t('payroll.runs.validation.draft_inputs_approve_partial', {
-        approved: result.approved.length,
+        approved: result.done,
         failed: result.failed.length,
       }))
     } else {
       dismissDraftInputFailures(run.id)
       toast.success(t('payroll.runs.validation.draft_inputs_approved', {
-        count: result.approved.length,
+        count: result.done,
       }))
     }
     await load()

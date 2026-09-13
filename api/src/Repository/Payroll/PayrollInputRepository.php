@@ -26,6 +26,14 @@ final class PayrollInputRepository
      */
     public const APPROVE_BATCH_MAX = 500;
     private const APPROVE_BATCH_SAVEPOINT = 'payroll_input_approve_batch';
+    private const CANCEL_BATCH_SAVEPOINT = 'payroll_input_cancel_batch';
+    /**
+     * Časový rozpočet jednoho požadavku hromadné akce podle filtru (s).
+     *
+     * Hluboko pod nejnižším stropem stacku (Apache 60 s) — dávka se dokončí
+     * a vrátí kurzor, místo aby ji server utnul uprostřed.
+     */
+    public const FILTER_BATCH_TIME_BUDGET = 20.0;
 
     public function __construct(
         private readonly Connection $db,
@@ -56,29 +64,32 @@ final class PayrollInputRepository
         int $offset = 0,
         ?int $employmentId = null,
     ): array {
+        return $this->listFiltered(
+            $supplierId,
+            new PayrollInputFilter($periodStart, $employmentId),
+            $limit,
+            $offset,
+        );
+    }
+
+    /**
+     * Výpis podle celého filtru — stránka i `total` z TÉHOŽ WHERE.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
+     */
+    public function listFiltered(
+        int $supplierId,
+        PayrollInputFilter $filter,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
         // Strop se klampuje i tady, ne jen na HTTP hranici: repozitář volá
         // i jiný kód než akce a „nekonečný" seznam nesmí jít objednat nikudy.
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
-        if ($employmentId !== null && $employmentId <= 0) {
-            throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
-        }
+        $where = $filter->where($supplierId);
 
-        $narrowing = $employmentId === null ? '' : ' AND input.employment_id = ?';
-        $filterParams = [$supplierId, $periodStart];
-        if ($employmentId !== null) {
-            $filterParams[] = $employmentId;
-        }
-
-        $countStmt = $this->db->pdo()->prepare(
-            'SELECT COUNT(*)
-               FROM payroll_inputs input
-              WHERE input.supplier_id = ?
-                AND input.period_start = ?
-                AND input.status <> "cancelled"' . $narrowing
-        );
-        $countStmt->execute($filterParams);
-        $total = (int) $countStmt->fetchColumn();
+        $total = $this->summary($supplierId, $filter)['total'];
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT input.*, employee.full_name AS employee_name,
@@ -88,30 +99,12 @@ final class PayrollInputRepository
                     component.name AS component_name,
                     component.component_kind,
                     component.value_kind
-               FROM payroll_inputs input
-               JOIN payroll_employees employee
-                 ON employee.supplier_id = input.supplier_id
-                AND employee.id = input.employee_id
-               JOIN payroll_employments employment
-                 ON employment.supplier_id = input.supplier_id
-                AND employment.id = input.employment_id
-               JOIN payroll_component_definitions component
-                 ON component.supplier_id = input.supplier_id
-                AND component.id = input.component_id
-              WHERE input.supplier_id = ?
-                AND input.period_start = ?
-                AND input.status <> "cancelled"' . $narrowing
+             ' . self::FILTER_FROM . '
+              WHERE ' . $where['sql']
             . ' ORDER BY employee.full_name, employment.code, component.code, input.id
               LIMIT ? OFFSET ?'
         );
-        $position = 1;
-        foreach ($filterParams as $param) {
-            $stmt->bindValue(
-                $position++,
-                $param,
-                is_int($param) ? PDO::PARAM_INT : PDO::PARAM_STR,
-            );
-        }
+        $position = self::bindAll($stmt, $where['params']);
         $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
         $stmt->bindValue($position, $offset, PDO::PARAM_INT);
         $stmt->execute();
@@ -126,6 +119,218 @@ final class PayrollInputRepository
             ),
             'total' => $total,
         ];
+    }
+
+    /**
+     * Souhrn za CELÝ filtr, ne za zobrazenou stránku.
+     *
+     * Počet konceptů ze stránky dřív rozhodoval, jestli se „Schválit vše" vůbec
+     * ukáže: na straně bez konceptu tlačítko zmizelo, i když jich měsíc držel
+     * stovky a mzdový běh na nich stál.
+     *
+     * @return array{total:int,draft_total:int,amount_total_minor:int,
+     *   draft_amount_total_minor:int}
+     */
+    public function summary(int $supplierId, PayrollInputFilter $filter): array
+    {
+        $where = $filter->where($supplierId);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) AS total,
+                    COALESCE(SUM(input.status = "draft"), 0) AS draft_total,
+                    COALESCE(SUM(input.amount_minor), 0) AS amount_total_minor,
+                    COALESCE(SUM(CASE WHEN input.status = "draft"
+                                      THEN input.amount_minor END), 0)
+                        AS draft_amount_total_minor
+             ' . self::FILTER_FROM . '
+              WHERE ' . $where['sql']
+        );
+        self::bindAll($stmt, $where['params']);
+        $stmt->execute();
+        $row = PayrollTimeValue::row(
+            $stmt->fetch(PDO::FETCH_ASSOC) ?: [],
+            'payroll_inputs_summary',
+        );
+
+        return [
+            'total' => (int) ($row['total'] ?? 0),
+            'draft_total' => (int) ($row['draft_total'] ?? 0),
+            'amount_total_minor' => (int) ($row['amount_total_minor'] ?? 0),
+            'draft_amount_total_minor' => (int) ($row['draft_amount_total_minor'] ?? 0),
+        ];
+    }
+
+    /**
+     * Souhrnné řádky podle zaměstnance nebo složky — stránkují se samy,
+     * `total` je počet skupin.
+     *
+     * U pěti set lidí je to jediný způsob, jak projít měsíc bez listování dvaceti
+     * stranami po pětadvaceti řádcích: jeden řádek na člověka, rozbalí se jen ten,
+     * u kterého je něco k řešení.
+     *
+     * @return array{items:list<array{key:int,label:string,secondary:?string,
+     *   count:int,draft_count:int,amount_minor:int}>,total:int}
+     */
+    public function groups(
+        int $supplierId,
+        PayrollInputFilter $filter,
+        string $groupBy,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        if (!in_array($groupBy, PayrollInputFilter::GROUP_BY, true)) {
+            throw new \InvalidArgumentException('group_by smí být employee nebo component.');
+        }
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+        $where = $filter->where($supplierId);
+        [$key, $label, $secondary, $order] = $groupBy === 'employee'
+            ? [
+                'input.employee_id',
+                'MIN(employee.full_name)',
+                'GROUP_CONCAT(DISTINCT employment.code ORDER BY employment.code SEPARATOR ", ")',
+                'label, group_key',
+            ]
+            : [
+                'input.component_id',
+                'MIN(component.name)',
+                'MIN(component.code)',
+                'secondary, group_key',
+            ];
+
+        $count = $this->db->pdo()->prepare(
+            'SELECT COUNT(DISTINCT ' . $key . ')
+             ' . self::FILTER_FROM . '
+              WHERE ' . $where['sql']
+        );
+        self::bindAll($count, $where['params']);
+        $count->execute();
+        $total = (int) $count->fetchColumn();
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . $key . ' AS group_key,
+                    ' . $label . ' AS label,
+                    ' . $secondary . ' AS secondary,
+                    COUNT(*) AS item_count,
+                    COALESCE(SUM(input.status = "draft"), 0) AS draft_count,
+                    COALESCE(SUM(input.amount_minor), 0) AS amount_minor
+             ' . self::FILTER_FROM . '
+              WHERE ' . $where['sql'] . '
+              GROUP BY ' . $key . '
+              ORDER BY ' . $order . '
+              LIMIT ? OFFSET ?'
+        );
+        $position = self::bindAll($stmt, $where['params']);
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $items = [];
+        foreach (PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'payroll_input_groups') as $row) {
+            $items[] = [
+                'key' => (int) $row['group_key'],
+                'label' => (string) $row['label'],
+                'secondary' => $row['secondary'] === null ? null : (string) $row['secondary'],
+                'count' => (int) $row['item_count'],
+                'draft_count' => (int) $row['draft_count'],
+                'amount_minor' => (int) $row['amount_minor'],
+            ];
+        }
+
+        return ['items' => $items, 'total' => $total];
+    }
+
+    /**
+     * Nabídka pro filtr: složky a importní dávky, které se v měsíci vyskytují.
+     *
+     * Počítá se nad celým měsícem (případně zúženým na vztah), ne nad aktuálním
+     * filtrem — jinak by po výběru jedné složky zmizely ostatní a nešlo by
+     * přidat druhou.
+     *
+     * @return array{components:list<array{id:int,code:string,name:string,count:int}>,
+     *   imports:list<array{id:int,source_name:string,created_at:string,count:int}>}
+     */
+    public function facets(int $supplierId, string $periodStart, ?int $employmentId = null): array
+    {
+        $narrowing = $employmentId === null ? '' : ' AND input.employment_id = ?';
+        $params = [$supplierId, $periodStart];
+        if ($employmentId !== null) {
+            $params[] = $employmentId;
+        }
+        $components = $this->db->pdo()->prepare(
+            'SELECT component.id, component.code, component.name, COUNT(*) AS item_count
+               FROM payroll_inputs input
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = input.supplier_id
+                AND component.id = input.component_id
+              WHERE input.supplier_id = ? AND input.period_start = ?
+                AND input.status <> "cancelled"' . $narrowing . '
+              GROUP BY component.id, component.code, component.name
+              ORDER BY component.code'
+        );
+        $components->execute($params);
+        $imports = $this->db->pdo()->prepare(
+            'SELECT batch.id, batch.source_name, batch.created_at, COUNT(*) AS item_count
+               FROM payroll_inputs input
+               JOIN payroll_input_imports batch
+                 ON batch.supplier_id = input.supplier_id
+                AND batch.id = input.import_id
+              WHERE input.supplier_id = ? AND input.period_start = ?
+                AND input.status <> "cancelled"' . $narrowing . '
+              GROUP BY batch.id, batch.source_name, batch.created_at
+              ORDER BY batch.created_at DESC, batch.id DESC'
+        );
+        $imports->execute($params);
+
+        return [
+            'components' => array_map(
+                static fn (array $row): array => [
+                    'id' => (int) $row['id'],
+                    'code' => (string) $row['code'],
+                    'name' => (string) $row['name'],
+                    'count' => (int) $row['item_count'],
+                ],
+                PayrollTimeValue::rows($components->fetchAll(PDO::FETCH_ASSOC), 'facet_components'),
+            ),
+            'imports' => array_map(
+                static fn (array $row): array => [
+                    'id' => (int) $row['id'],
+                    'source_name' => (string) $row['source_name'],
+                    'created_at' => (string) $row['created_at'],
+                    'count' => (int) $row['item_count'],
+                ],
+                PayrollTimeValue::rows($imports->fetchAll(PDO::FETCH_ASSOC), 'facet_imports'),
+            ),
+        ];
+    }
+
+    /** Spojení, nad kterými stojí WHERE z {@see PayrollInputFilter::where()}. */
+    private const FILTER_FROM = 'FROM payroll_inputs input
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = input.supplier_id
+                AND employee.id = input.employee_id
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = input.supplier_id
+                AND employment.id = input.employment_id
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = input.supplier_id
+                AND component.id = input.component_id';
+
+    /**
+     * @param list<int|string> $params
+     * @return int další volná pozice
+     */
+    private static function bindAll(\PDOStatement $stmt, array $params): int
+    {
+        $position = 1;
+        foreach ($params as $param) {
+            $stmt->bindValue(
+                $position++,
+                $param,
+                is_int($param) ? PDO::PARAM_INT : PDO::PARAM_STR,
+            );
+        }
+
+        return $position;
     }
 
     /** @return array<string,mixed>|null */
@@ -1143,6 +1348,285 @@ final class PayrollInputRepository
         $stmt->execute($params);
 
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Koncepty odpovídající filtru za kurzorem `$afterId`, vzestupně podle id.
+     *
+     * Kurzor místo OFFSETu: neschválený koncept (limit benefitu, docházka)
+     * zůstává konceptem, takže by ho OFFSET potkal v každém kole znovu a
+     * dávka by se točila na místě.
+     *
+     * @return list<int>
+     */
+    public function draftInputIdsByFilter(
+        int $supplierId,
+        PayrollInputFilter $filter,
+        int $afterId = 0,
+        int $limit = self::APPROVE_BATCH_MAX,
+    ): array {
+        $drafts = $filter->draftsOnly();
+        if ($drafts === null) {
+            return [];
+        }
+        $limit = max(1, min(self::APPROVE_BATCH_MAX, $limit));
+        $where = $drafts->where($supplierId);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT input.id
+             ' . self::FILTER_FROM . '
+              WHERE ' . $where['sql'] . ' AND input.id > ?
+              ORDER BY input.id
+              LIMIT ' . $limit
+        );
+        $position = self::bindAll($stmt, $where['params']);
+        $stmt->bindValue($position, max(0, $afterId), PDO::PARAM_INT);
+        $stmt->execute();
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Hromadné schválení VŠECH konceptů odpovídajících filtru.
+     *
+     * Dřív šlo schválit najednou nejvýš {@see APPROVE_BATCH_MAX} konceptů
+     * a zbytek zůstal viset bez hlášky — u firmy s 500 lidmi a třemi složkami
+     * z docházky je to třetina měsíce. Teď se měsíc projde po dávkách: každá
+     * dávka má vlastní transakci ({@see approveBatch()}), takže zámky nad
+     * `payroll_inputs` nedrží celý měsíc naráz, a schválení každého vstupu jde
+     * TOUŽ cestou jako jednotlivé — s limity benefitů, košem osvobození
+     * i kontrolou docházky u stravného.
+     *
+     * Jeden požadavek má časový rozpočet; když nestačí, vrátí `complete = false`
+     * a kurzor `next_after_id`, od kterého prohlížeč pokračuje. Webový server by
+     * jinak požadavek utnul uprostřed a výsledek by se ztratil.
+     *
+     * @return array{
+     *   approved:list<int>,
+     *   skipped:list<array{id:int,code:string,message:string}>,
+     *   failed:list<array{id:int,code:string,message:string}>,
+     *   remaining:int,
+     *   complete:bool,
+     *   next_after_id:int
+     * }
+     */
+    public function approveByFilter(
+        int $supplierId,
+        PayrollInputFilter $filter,
+        ?int $userId,
+        int $afterId = 0,
+        float $timeBudgetSeconds = self::FILTER_BATCH_TIME_BUDGET,
+    ): array {
+        $result = $this->walkDraftsByFilter(
+            $supplierId,
+            $filter,
+            $afterId,
+            $timeBudgetSeconds,
+            fn (array $ids): array => $this->approveBatch($supplierId, $ids, $userId),
+            'approved',
+        );
+
+        return [
+            'approved' => $result['done'],
+            'skipped' => $result['skipped'],
+            'failed' => $result['failed'],
+            'remaining' => $result['remaining'],
+            'complete' => $result['complete'],
+            'next_after_id' => $result['next_after_id'],
+        ];
+    }
+
+    /**
+     * Hromadné zrušení konceptů podle výčtu — protějšek {@see approveBatch()}.
+     *
+     * Každý vstup jde TOUŽ cestou jako jednotlivé zrušení ({@see cancel()}):
+     * vstup navázaný na vyúčtování cesty nebo zmrazený v revizi běhu se nezruší
+     * a skončí ve `failed` s důvodem, zbytek dávky to nezastaví.
+     *
+     * @param list<int> $ids
+     * @return array{
+     *   cancelled:list<int>,
+     *   skipped:list<array{id:int,code:string,message:string}>,
+     *   failed:list<array{id:int,code:string,message:string}>
+     * }
+     */
+    public function cancelBatch(int $supplierId, array $ids): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if (count($ids) > self::APPROVE_BATCH_MAX) {
+            throw new \InvalidArgumentException(sprintf(
+                'Najednou lze zrušit nejvýše %d mzdových vstupů.',
+                self::APPROVE_BATCH_MAX,
+            ));
+        }
+        $cancelled = [];
+        $skipped = [];
+        $failed = [];
+        if ($ids === []) {
+            return ['cancelled' => $cancelled, 'skipped' => $skipped, 'failed' => $failed];
+        }
+
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $state = $pdo->prepare(
+                'SELECT status, row_version
+                   FROM payroll_inputs
+                  WHERE supplier_id = ? AND id = ?
+                  FOR UPDATE'
+            );
+            foreach ($ids as $id) {
+                $state->execute([$supplierId, $id]);
+                $row = $state->fetch(PDO::FETCH_ASSOC);
+                $state->closeCursor();
+                if ($id <= 0 || $row === false) {
+                    $failed[] = [
+                        'id' => $id,
+                        'code' => 'not_found',
+                        'message' => 'Mzdový vstup nebyl nalezen.',
+                    ];
+                    continue;
+                }
+                $status = (string) $row['status'];
+                if ($status === 'cancelled') {
+                    $skipped[] = [
+                        'id' => $id,
+                        'code' => 'already_cancelled',
+                        'message' => 'Mzdový vstup už je zrušený.',
+                    ];
+                    continue;
+                }
+                if ($status !== 'draft') {
+                    $skipped[] = [
+                        'id' => $id,
+                        'code' => 'input_state_conflict',
+                        'message' => 'Zrušit lze jen rozpracovaný mzdový vstup.',
+                    ];
+                    continue;
+                }
+                $pdo->exec('SAVEPOINT ' . self::CANCEL_BATCH_SAVEPOINT);
+                try {
+                    $this->cancel($supplierId, $id, (int) $row['row_version']);
+                    $pdo->exec('RELEASE SAVEPOINT ' . self::CANCEL_BATCH_SAVEPOINT);
+                    $cancelled[] = $id;
+                } catch (PayrollInputCancellationException $e) {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::CANCEL_BATCH_SAVEPOINT);
+                    $failed[] = ['id' => $id, 'code' => $e->errorCode, 'message' => $e->getMessage()];
+                } catch (PayrollInputConflictException $e) {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::CANCEL_BATCH_SAVEPOINT);
+                    $failed[] = ['id' => $id, 'code' => 'row_version_conflict', 'message' => $e->getMessage()];
+                }
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return ['cancelled' => $cancelled, 'skipped' => $skipped, 'failed' => $failed];
+    }
+
+    /**
+     * Hromadné zrušení VŠECH konceptů odpovídajících filtru — po dávkách a se
+     * stejným časovým rozpočtem jako {@see approveByFilter()}.
+     *
+     * @return array{
+     *   cancelled:list<int>,
+     *   skipped:list<array{id:int,code:string,message:string}>,
+     *   failed:list<array{id:int,code:string,message:string}>,
+     *   remaining:int,
+     *   complete:bool,
+     *   next_after_id:int
+     * }
+     */
+    public function cancelByFilter(
+        int $supplierId,
+        PayrollInputFilter $filter,
+        int $afterId = 0,
+        float $timeBudgetSeconds = self::FILTER_BATCH_TIME_BUDGET,
+    ): array {
+        $result = $this->walkDraftsByFilter(
+            $supplierId,
+            $filter,
+            $afterId,
+            $timeBudgetSeconds,
+            fn (array $ids): array => $this->cancelBatch($supplierId, $ids),
+            'cancelled',
+        );
+
+        return [
+            'cancelled' => $result['done'],
+            'skipped' => $result['skipped'],
+            'failed' => $result['failed'],
+            'remaining' => $result['remaining'],
+            'complete' => $result['complete'],
+            'next_after_id' => $result['next_after_id'],
+        ];
+    }
+
+    /**
+     * Společná smyčka hromadných akcí nad filtrem: dávky po
+     * {@see APPROVE_BATCH_MAX} za kurzorem id, dokud je co dělat a čas.
+     *
+     * @param callable(list<int>):array<string,mixed> $batch
+     * @return array{
+     *   done:list<int>,
+     *   skipped:list<array{id:int,code:string,message:string}>,
+     *   failed:list<array{id:int,code:string,message:string}>,
+     *   remaining:int,
+     *   complete:bool,
+     *   next_after_id:int
+     * }
+     */
+    private function walkDraftsByFilter(
+        int $supplierId,
+        PayrollInputFilter $filter,
+        int $afterId,
+        float $timeBudgetSeconds,
+        callable $batch,
+        string $doneKey,
+    ): array {
+        $started = microtime(true);
+        $cursor = max(0, $afterId);
+        $done = [];
+        $skipped = [];
+        $failed = [];
+        $complete = false;
+        while (true) {
+            $ids = $this->draftInputIdsByFilter($supplierId, $filter, $cursor);
+            if ($ids === []) {
+                $complete = true;
+                break;
+            }
+            $result = $batch($ids);
+            array_push($done, ...$result[$doneKey]);
+            array_push($skipped, ...$result['skipped']);
+            array_push($failed, ...$result['failed']);
+            $cursor = max($ids);
+            if (count($ids) < self::APPROVE_BATCH_MAX) {
+                $complete = true;
+                break;
+            }
+            if (microtime(true) - $started >= $timeBudgetSeconds) {
+                break;
+            }
+        }
+        $drafts = $filter->draftsOnly();
+
+        return [
+            'done' => $done,
+            'skipped' => $skipped,
+            'failed' => $failed,
+            'remaining' => $drafts === null ? 0 : $this->summary($supplierId, $drafts)['total'],
+            'complete' => $complete,
+            'next_after_id' => $cursor,
+        ];
     }
 
     /**

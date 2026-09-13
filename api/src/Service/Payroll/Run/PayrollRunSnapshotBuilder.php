@@ -330,7 +330,9 @@ final class PayrollRunSnapshotBuilder
                         '%s: pracovní vztah obsahuje neschválené mzdové vstupy.',
                         (string) $row['full_name'],
                     ),
-                    '/payroll/components',
+                    // Rovnou na koncepty měsíce: nefiltrovaný seznam měl stovky
+                    // řádků a koncepty v něm musel uživatel hledat po stránkách.
+                    '/payroll/components?tab=inputs&status=draft&period=' . substr($periodStart, 0, 7),
                 );
             }
             $inputs = $this->inputs($inputRows[$employmentId] ?? []);

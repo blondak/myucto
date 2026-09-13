@@ -18,6 +18,9 @@ import {
   type PayrollComponentTaxTreatment,
   type PayrollComponentValueKind,
   type PayrollInput,
+  type PayrollInputFacets,
+  type PayrollInputGroup,
+  type PayrollInputsSummary,
   type PayrollInputImportPayload,
   type PayrollInputImportPreview,
   type PayrollInputImportResult,
@@ -43,13 +46,29 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 import PayrollRiskySavingsPanel from '@/components/payroll/PayrollRiskySavingsPanel.vue'
+import PayrollInputRowActions from '@/components/payroll/PayrollInputRowActions.vue'
+import MultiSelectFilter from '@/components/ui/MultiSelectFilter.vue'
+import {
+  emptyPayrollInputFilters,
+  groupPayrollInputFailures,
+  payrollInputFilterParams,
+  payrollInputFiltersActive,
+  payrollInputFiltersFromQuery,
+  payrollInputFiltersToQuery,
+  runPayrollInputBatch,
+  PAYROLL_INPUT_FILTER_STATUSES,
+  PAYROLL_INPUT_SOURCE_KINDS,
+  type PayrollInputBatchPass,
+  type PayrollInputBatchTotal,
+  type PayrollInputFilterState,
+} from '@/pages/payroll/payrollInputFilters'
 import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import {
   canApplyPayrollImport,
-  payrollWorkingPeriod,
+  payrollQueryPeriod,
   monthStart,
   parsePayrollAmountToMinor,
   payrollEmploymentOptionsFromContext,
@@ -104,7 +123,9 @@ const activeTab = ref<Tab>(
     ? requestedTab as Tab
     : 'inputs',
 )
-const period = ref(payrollWorkingPeriod())
+// Období z adresy: odkaz z blokátoru běhu i z importu docházky míří na
+// konkrétní měsíc a stránka ho nesmí tiše přepnout na zpracovávaný.
+const period = ref(payrollQueryPeriod(route.query))
 const loading = ref(false)
 /*
  * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
@@ -140,7 +161,45 @@ const INPUT_COLUMNS: ColumnDef[] = [
   { key: 'actions', labelKey: 'payroll.components.fields.actions', required: true },
 ]
 const inputsTbl = useTablePrefs('payroll-inputs', INPUT_COLUMNS)
-const inputsPageSize = 25
+// Stovka na stránku: po importu docházky má měsíc stovky vstupů a listovat
+// jimi po pětadvaceti je přesně to proklikávání, které filtr odstraňuje.
+const inputsPageSize = 100
+/** Kolik vstupů ukáže rozbalená skupina; zbytek otevře „Otevřít v seznamu". */
+const GROUP_ITEMS_LIMIT = 200
+const inputFilters = ref<PayrollInputFilterState>(payrollInputFiltersFromQuery(route.query))
+const inputFilterParams = computed(() => payrollInputFilterParams(inputFilters.value))
+const inputFiltersOn = computed(() => payrollInputFiltersActive(inputFilters.value))
+const inputSummary = ref<PayrollInputsSummary | null>(null)
+const inputFacets = ref<PayrollInputFacets>({ components: [], imports: [] })
+const inputGroups = ref<PayrollInputGroup[]>([])
+const inputGroupTotal = ref(0)
+/** Rozbalené skupiny: `null` = načítá se. */
+const expandedGroups = ref<Record<number, PayrollInput[] | null>>({})
+const selectedInputIds = ref<number[]>([])
+const inputBatchFailures = ref<Array<{ message: string, count: number }>>([])
+/** Kolik už hromadná akce zpracovala; `null` = neběží. */
+const batchProgress = ref<number | null>(null)
+const componentFilterOptions = computed(() => {
+  const options = inputFacets.value.components.map(item => ({
+    value: String(item.id),
+    label: item.name,
+    secondary: item.code,
+  }))
+  // Složka z adresy, která v měsíci zrovna nemá vstup, musí jít odškrtnout.
+  for (const id of inputFilters.value.componentIds) {
+    if (!options.some(option => option.value === String(id))) {
+      options.push({ value: String(id), label: `#${id}`, secondary: '' })
+    }
+  }
+  return options
+})
+const statusFilterOptions = computed(() => PAYROLL_INPUT_FILTER_STATUSES.map(status => ({
+  value: status,
+  label: t(`payroll.components.input_status.${status}`),
+})))
+const inputListEmpty = computed(() => inputFilters.value.groupBy === null
+  ? inputs.value.length === 0
+  : inputGroups.value.length === 0)
 const inputsTotal = ref(0)
 const inputsOffset = ref(0)
 const inputsPage = computed(() =>
@@ -172,7 +231,7 @@ const focusName = computed(() => {
 const focusMissing = computed(() =>
   focusEmploymentId.value !== null && !loading.value && !loadFailed.value
   && (
-    (activeTab.value === 'inputs' && inputsTotal.value === 0)
+    (activeTab.value === 'inputs' && inputsTotal.value === 0 && !inputFiltersOn.value)
     || (activeTab.value === 'recurring' && recurringTotal.value === 0)
   ))
 const chartAccounts = ref<PayrollAccountOption[]>([])
@@ -250,6 +309,20 @@ const oneOffComponentOptions = computed(() => activeOneOffComponents.value.map(i
   label: item.name,
   secondary: item.code,
 })))
+/** Importovaný koncept se opravuje jen v částce a množství; identita zůstává ze zdroje. */
+const editingImported = computed(() =>
+  editingInput.value !== null && editingInput.value.source_kind !== 'manual')
+// Import nese i pravidelné složky (docházka), které nabídka jednorázových nemá.
+const inputComponentOptions = computed(() => {
+  const current = editingInput.value
+  if (current === null || oneOffComponentOptions.value.some(option => option.value === current.component_id)) {
+    return oneOffComponentOptions.value
+  }
+  return [
+    ...oneOffComponentOptions.value,
+    { value: current.component_id, label: current.component_name, secondary: current.component_code },
+  ]
+})
 const debitAccountOptions = computed(() => accountOptions('expense'))
 const creditAccountOptions = computed(() => accountOptions('liability'))
 const importPayload = computed<PayrollInputImportPayload>(() => ({
@@ -282,7 +355,9 @@ const manualInputPayload = computed<PayrollInputPayload | null>(() => {
     source_period: inputForm.value.source_period || null,
     amount_minor: amountMinor,
     quantity_milliunits: quantityMilliunits,
-    source_kind: 'manual',
+    // Oprava importovaného konceptu nese jeho původ; server ho zachová
+    // i s `external_id`, formulář ho jen nesmí přepsat na ruční vstup.
+    source_kind: editingInput.value?.source_kind ?? 'manual',
     external_id: inputForm.value.external_id.trim() || null,
   }
 })
@@ -671,6 +746,13 @@ async function reloadPeriod() {
   inputPreview.value = null
   // Jiné období = jiný seznam, takže stránkování musí zpátky na začátek.
   inputsOffset.value = 0
+  // Importní dávka patří k měsíci; v jiném by filtr tiše vrátil prázdno.
+  inputFilters.value = { ...inputFilters.value, importId: null }
+  selectedInputIds.value = []
+  expandedGroups.value = {}
+  void router.replace({
+    query: { ...payrollInputFiltersToQuery(route.query, inputFilters.value), period: period.value },
+  })
   try {
     await loadInputsPage()
   } catch (error: any) {
@@ -923,33 +1005,153 @@ async function loadRecurringPage() {
   recurringTotal.value = page.total
 }
 
-async function loadInputsPage() {
+async function fetchInputsPage() {
   const focused = focusEmploymentId.value ?? undefined
-  let page = await payrollApi.inputs(
+  const filters = inputFilterParams.value
+  const groupBy = inputFilters.value.groupBy
+  const request = () => payrollApi.inputs(
     period.value,
     { limit: inputsPageSize, offset: inputsOffset.value },
     focused,
+    filters,
+    groupBy,
   )
+  let page = await request()
+  const count = groupBy === null ? page.total : (page.group_total ?? 0)
+  const shown = groupBy === null ? page.items.length : (page.groups?.length ?? 0)
   // Zrušení posledního vstupu na poslední straně by jinak nechalo uživatele
   // stát na straně, která už neexistuje — prázdná tabulka a pager bez cesty zpět.
-  if (page.items.length === 0 && page.total > 0 && inputsOffset.value >= page.total) {
+  if (shown === 0 && count > 0 && inputsOffset.value >= count) {
     inputsOffset.value = Math.max(
       0,
-      (Math.ceil(page.total / inputsPageSize) - 1) * inputsPageSize,
+      (Math.ceil(count / inputsPageSize) - 1) * inputsPageSize,
     )
-    page = await payrollApi.inputs(
-      period.value,
-      { limit: inputsPageSize, offset: inputsOffset.value },
-      focused,
-    )
+    page = await request()
   }
   inputs.value = page.items
   inputsTotal.value = page.total
+  inputGroups.value = page.groups ?? []
+  inputGroupTotal.value = page.group_total ?? 0
+  inputSummary.value = page.summary ?? null
+  if (page.facets) inputFacets.value = page.facets
+  if (groupBy === null) {
+    const visible = new Set(page.items.map(item => item.id))
+    selectedInputIds.value = selectedInputIds.value.filter(id => visible.has(id))
+  }
+}
+
+/** Stránka i rozbalené skupiny — po každé akci, ať neukazují starý stav. */
+async function loadInputsPage() {
+  const expanded = Object.keys(expandedGroups.value).map(Number)
+  await fetchInputsPage()
+  expandedGroups.value = {}
+  for (const key of expanded) {
+    const group = inputGroups.value.find(item => item.key === key)
+    if (group !== undefined) await toggleGroup(group)
+  }
 }
 
 function goToInputsPage(nextPage: number) {
   inputsOffset.value = Math.max(0, (nextPage - 1) * inputsPageSize)
+  expandedGroups.value = {}
   void loadInputsPage()
+}
+
+let inputSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Nový výřez: stránkování na začátek, výběr pryč, filtr do adresy. */
+function applyInputFilters() {
+  if (inputSearchTimer !== null) {
+    clearTimeout(inputSearchTimer)
+    inputSearchTimer = null
+  }
+  inputsOffset.value = 0
+  selectedInputIds.value = []
+  expandedGroups.value = {}
+  inputBatchFailures.value = []
+  void router.replace({ query: payrollInputFiltersToQuery(route.query, inputFilters.value) })
+  loadInputsPage().catch((error: any) => {
+    toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
+  })
+}
+
+function setInputFilters(patch: Partial<PayrollInputFilterState>) {
+  inputFilters.value = { ...inputFilters.value, ...patch }
+  applyInputFilters()
+}
+
+function onInputSearch(value: string) {
+  inputFilters.value = { ...inputFilters.value, q: value }
+  if (inputSearchTimer !== null) clearTimeout(inputSearchTimer)
+  inputSearchTimer = setTimeout(applyInputFilters, 350)
+}
+
+function setComponentFilter(values: string[]) {
+  setInputFilters({
+    componentIds: values.map(Number).filter(id => Number.isInteger(id) && id > 0),
+  })
+}
+
+function setStatusFilter(values: string[]) {
+  setInputFilters({ statuses: PAYROLL_INPUT_FILTER_STATUSES.filter(status => values.includes(status)) })
+}
+
+function setSourceFilter(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  setInputFilters({ sourceKind: PAYROLL_INPUT_SOURCE_KINDS.find(kind => kind === value) ?? null })
+}
+
+function setImportFilter(event: Event) {
+  const id = Number((event.target as HTMLSelectElement).value)
+  setInputFilters({ importId: Number.isInteger(id) && id > 0 ? id : null })
+}
+
+function setGroupBy(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  setInputFilters({ groupBy: value === 'employee' || value === 'component' ? value : null })
+}
+
+function clearInputFilters() {
+  inputFilters.value = { ...emptyPayrollInputFilters(), groupBy: inputFilters.value.groupBy }
+  applyInputFilters()
+}
+
+async function toggleGroup(group: PayrollInputGroup) {
+  const key = group.key
+  if (key in expandedGroups.value) {
+    const next = { ...expandedGroups.value }
+    delete next[key]
+    expandedGroups.value = next
+    return
+  }
+  expandedGroups.value = { ...expandedGroups.value, [key]: null }
+  try {
+    const narrowing: Record<string, string | number> = inputFilters.value.groupBy === 'employee'
+      ? { employee_id: key }
+      : { component_id: String(key) }
+    const page = await payrollApi.inputs(
+      period.value,
+      { limit: GROUP_ITEMS_LIMIT, offset: 0 },
+      focusEmploymentId.value ?? undefined,
+      { ...inputFilterParams.value, ...narrowing },
+    )
+    if (key in expandedGroups.value) {
+      expandedGroups.value = { ...expandedGroups.value, [key]: page.items }
+    }
+  } catch (error: any) {
+    const next = { ...expandedGroups.value }
+    delete next[key]
+    expandedGroups.value = next
+    toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
+  }
+}
+
+/** Skupina jako filtr: celý výčet člověka nebo složky v běžném seznamu. */
+function openGroupAsFilter(group: PayrollInputGroup) {
+  inputFilters.value = inputFilters.value.groupBy === 'employee'
+    ? { ...inputFilters.value, groupBy: null, employeeId: group.key }
+    : { ...inputFilters.value, groupBy: null, componentIds: [group.key] }
+  applyInputFilters()
 }
 
 function goToRecurringPage(nextPage: number) {
@@ -1098,45 +1300,145 @@ async function approveInput(input: PayrollInput) {
 }
 
 /*
- * Kolik konceptů drží mzdový běh. Počítá se ze zobrazené stránky, ale
- * schvaluje se celé období — proto se v tlačítku ukazuje počet ze serveru
- * až po akci, ne dopředná domněnka o zbytku seznamu.
+ * Kolik konceptů drží filtr — počítá server za CELÝ filtr. Dřív se to bralo
+ * ze zobrazené stránky a na straně bez konceptu tlačítko zmizelo, i když měsíc
+ * držel stovky konceptů a mzdový běh na nich stál.
  */
-const draftInputCount = computed(() =>
-  inputs.value.filter(input => input.status === 'draft').length)
+const matchingDraftCount = computed(() => inputSummary.value?.draft_total
+  ?? inputs.value.filter(input => input.status === 'draft').length)
+const summaryTotal = computed(() => inputSummary.value?.total ?? inputsTotal.value)
+const summaryAmount = computed(() => inputSummary.value?.amount_total_minor
+  ?? inputs.value.reduce((sum, input) => sum + input.amount_minor, 0))
 
-/**
- * Schválit všechny koncepty období najednou.
- *
- * Po jednom to je při 500 zaměstnancích zhruba tisíc kliknutí na obrazovce,
- * kam uživatel přišel jen kvůli blokátoru `draft_inputs_present`. Server si
- * dávku poskládá sám ze všech konceptů měsíce — ne jen z právě zobrazené
- * stránky, protože blokuje běh celý měsíc, ne jedna stránka.
- */
-async function approveAllInputs() {
-  inputError.value = ''
-  saving.value = true
-  try {
-    const result = await payrollApi.approveInputsBatch({ period: period.value })
-    await loadInputsPage()
-    if (result.failed.length > 0) {
-      // Konkrétní důvod, ne „nepodařilo se": u benefitů to bývá překročený
-      // roční limit nebo neuzavřená docházka a uživatel s tím musí něco udělat.
-      inputError.value = t('payroll.components.inputs.approve_all_partial', {
-        approved: result.approved.length,
+/** Výřez hromadné akce: tentýž, jaký je vidět, včetně zúžení z karty zaměstnance. */
+const batchFilter = computed<Record<string, string | number>>(() => ({
+  ...inputFilterParams.value,
+  ...(focusEmploymentId.value !== null ? { employment_id: focusEmploymentId.value } : {}),
+}))
+
+const pageDraftIds = computed(() =>
+  inputs.value.filter(input => input.status === 'draft').map(input => input.id))
+const allPageDraftsSelected = computed(() => pageDraftIds.value.length > 0
+  && pageDraftIds.value.every(id => selectedInputIds.value.includes(id)))
+
+function isInputSelected(id: number): boolean {
+  return selectedInputIds.value.includes(id)
+}
+
+function toggleInputSelection(id: number) {
+  selectedInputIds.value = isInputSelected(id)
+    ? selectedInputIds.value.filter(item => item !== id)
+    : [...selectedInputIds.value, id]
+}
+
+function togglePageSelection() {
+  selectedInputIds.value = allPageDraftsSelected.value
+    ? selectedInputIds.value.filter(id => !pageDraftIds.value.includes(id))
+    : Array.from(new Set([...selectedInputIds.value, ...pageDraftIds.value]))
+}
+
+function inputStatusClass(status: PayrollInput['status']): string {
+  if (status === 'approved' || status === 'locked') return 'bg-success-50 text-success-600'
+  return status === 'cancelled' ? 'bg-neutral-100 text-neutral-500' : 'bg-payroll-50 text-payroll-700'
+}
+
+function reportInputBatch(result: PayrollInputBatchTotal, kind: 'approve' | 'cancel') {
+  inputBatchFailures.value = groupPayrollInputFailures(result.failed)
+  if (result.failed.length > 0) {
+    // Konkrétní důvod, ne „nepodařilo se": u benefitů to bývá překročený
+    // roční limit nebo neuzavřená docházka a uživatel s tím musí něco udělat.
+    // Všechny důvody zůstávají seskupené pod lištou, ne jen první v hlášce.
+    inputError.value = kind === 'approve'
+      ? t('payroll.components.inputs.approve_all_partial', {
+        approved: result.done,
         failed: result.failed.length,
         reason: result.failed[0].message,
       })
-      return
-    }
-    toast.success(t('payroll.components.inputs.approve_all_done', {
-      count: result.approved.length,
-    }))
+      : t('payroll.components.inputs.cancel_all_partial', {
+        cancelled: result.done,
+        failed: result.failed.length,
+        reason: result.failed[0].message,
+      })
+    return
+  }
+  if (!result.complete) {
+    inputError.value = t('payroll.components.inputs.batch_incomplete', { remaining: result.remaining })
+    return
+  }
+  toast.success(kind === 'approve'
+    ? t('payroll.components.inputs.approve_all_done', { count: result.done })
+    : t('payroll.components.inputs.cancel_all_done', { count: result.done }))
+}
+
+/**
+ * Hromadné schválení nebo zrušení — výběrem (`ids`), nebo celým filtrem.
+ *
+ * Filtrem jde server po dávkách bez stropu 500 a na velkém měsíci vrací
+ * kurzor, od kterého se pokračuje. Výběr se posílá po pěti stech, protože
+ * víc server v jednom výčtu nevezme.
+ */
+async function runInputBatch(kind: 'approve' | 'cancel', ids: number[] | null) {
+  inputError.value = ''
+  inputBatchFailures.value = []
+  saving.value = true
+  batchProgress.value = 0
+  const chunks: number[][] = []
+  for (let index = 0; ids !== null && index < ids.length; index += 500) {
+    chunks.push(ids.slice(index, index + 500))
+  }
+  let chunk = 0
+  const send = async (afterId: number): Promise<PayrollInputBatchPass> => {
+    const payload = ids === null
+      ? { period: period.value, filter: batchFilter.value, after_id: afterId }
+      : { ids: chunks[chunk] ?? [] }
+    const pass = kind === 'approve'
+      ? await payrollApi.approveInputsBatch(payload).then(result => ({ ...result, done: result.approved }))
+      : await payrollApi.cancelInputsBatch(payload).then(result => ({ ...result, done: result.cancelled }))
+    if (ids === null) return pass
+    chunk++
+    return { ...pass, complete: chunk >= chunks.length, next_after_id: chunk }
+  }
+  try {
+    const result = await runPayrollInputBatch(send, (done) => { batchProgress.value = done })
+    selectedInputIds.value = []
+    await loadInputsPage()
+    reportInputBatch(result, kind)
   } catch (error: any) {
-    inputError.value = apiErrorMessage(error, t('payroll.components.inputs.approve_failed'))
+    inputError.value = apiErrorMessage(error, t(kind === 'approve'
+      ? 'payroll.components.inputs.approve_failed'
+      : 'payroll.components.inputs.cancel_failed'))
   } finally {
     saving.value = false
+    batchProgress.value = null
   }
+}
+
+/**
+ * Schválit všechny koncepty odpovídající filtru.
+ *
+ * Po jednom to je při 500 zaměstnancích zhruba tisíc kliknutí na obrazovce,
+ * kam uživatel přišel jen kvůli blokátoru `draft_inputs_present`.
+ */
+async function approveMatchingInputs() {
+  await runInputBatch('approve', null)
+}
+
+async function cancelMatchingInputs() {
+  if (!window.confirm(t('payroll.components.inputs.cancel_matching_confirm', {
+    count: matchingDraftCount.value,
+  }))) return
+  await runInputBatch('cancel', null)
+}
+
+async function approveSelectedInputs() {
+  await runInputBatch('approve', [...selectedInputIds.value])
+}
+
+async function cancelSelectedInputs() {
+  if (!window.confirm(t('payroll.components.inputs.cancel_selected_confirm', {
+    count: selectedInputIds.value.length,
+  }))) return
+  await runInputBatch('cancel', [...selectedInputIds.value])
 }
 
 /**
@@ -1168,11 +1470,6 @@ async function cancelInput(input: PayrollInput) {
   } finally {
     saving.value = false
   }
-}
-
-/** Čerpá schválený vstup roční koš osvobození § 6 odst. 9 ZDP? Jen ten jde stornovat. */
-function canReverseBenefit(input: PayrollInput): boolean {
-  return input.status === 'approved' && !!input.benefit_basket
 }
 
 async function reverseBenefitInput(input: PayrollInput) {
@@ -1521,14 +1818,15 @@ onMounted(load)
 
         <section v-if="inputEditorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold text-neutral-900">{{ t(editingInput ? 'payroll.components.inputs.edit' : 'payroll.components.inputs.new') }}</h3><p class="mt-1 text-xs text-neutral-600">{{ t('payroll.components.inputs.preview_hint') }}</p></div><button :class="btnOutline('neutral')" @click="inputEditorOpen = false"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button></div>
+          <p v-if="editingImported" class="mt-3 text-xs text-neutral-600" data-testid="payroll-input-origin-hint">{{ t('payroll.components.inputs.edit_origin_hint') }}</p>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <div class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employee') }}</span><PayrollPersonSearchSelect :model-value="inputForm.employee_id" data-test="payroll-input-person" :candidates="personOptions" :label="t('payroll.components.fields.employee')" :clearable="false" @update:model-value="selectInputEmployee" /></div>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="inputForm.employment_id" data-test="payroll-input-employment" :options="inputEmploymentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="selectInputEmployment($event)" /></label>
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><SearchableSelect :model-value="inputForm.component_id" :options="oneOffComponentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="inputForm.component_id = $event" /></label>
+            <div class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employee') }}</span><PayrollPersonSearchSelect :model-value="inputForm.employee_id" data-test="payroll-input-person" :candidates="personOptions" :label="t('payroll.components.fields.employee')" :clearable="false" :disabled="editingImported" @update:model-value="selectInputEmployee" /></div>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="inputForm.employment_id" data-test="payroll-input-employment" :options="inputEmploymentOptions" :clearable="false" :disabled="editingImported" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="selectInputEmployment($event)" /></label>
+            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><SearchableSelect :model-value="inputForm.component_id" :options="inputComponentOptions" :clearable="false" :disabled="editingImported" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="inputForm.component_id = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.amount') }}</span><input v-model="inputForm.amount" data-testid="payroll-input-amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.quantity') }}</span><input v-model="inputForm.quantity" data-testid="payroll-input-quantity" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.source_period') }}</span><input v-model="inputForm.source_period" type="month" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.external_id') }}</span><input v-model="inputForm.external_id" maxlength="190" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm"></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.external_id') }}</span><input v-model="inputForm.external_id" maxlength="190" :disabled="editingImported" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm disabled:bg-neutral-100"></label>
           </div>
           <div
             v-if="inputPreview"
@@ -1597,37 +1895,164 @@ onMounted(load)
           <div class="mt-5 flex flex-wrap justify-end gap-2"><button :class="btnOutline('neutral')" :disabled="saving || !manualInputPayload" @click="previewManualInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('payroll.components.inputs.preview') }}</button><button :class="btnFilled('primary')" :disabled="saving || !canSaveInput" @click="saveInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
         </section>
 
-        <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
-          <div v-if="inputs.length === 0" class="p-8 text-center"><h3 class="font-semibold text-neutral-900">{{ t('payroll.components.inputs.empty') }}</h3><p class="mt-1 text-sm text-neutral-500">{{ t('payroll.components.inputs.empty_hint') }}</p></div>
-          <template v-else>
-            <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
-              <!--
-                Hromadné schválení stojí nad seznamem, ne u jednotlivých řádků:
-                týká se celého období, ne zobrazené stránky.
-              -->
-              <button
-                v-if="canApprove && draftInputCount > 0"
-                type="button"
-                data-testid="payroll-inputs-approve-all"
-                :class="btnOutline('success')"
-                :disabled="saving"
-                @click="approveAllInputs"
-              >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
-                {{ t('payroll.components.inputs.approve_all', { count: draftInputCount }) }}
-              </button>
-              <span class="hidden items-center gap-2 md:inline-flex"><ColumnPicker :ctrl="inputsTbl" /><DensityToggle :ctrl="inputsTbl" /></span>
+        <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm" data-testid="payroll-inputs-list">
+          <!--
+            Filtr žije v adrese (sdílený odkaz, obnovení stránky) a stejný výřez
+            dostává hromadné schválení i zrušení — nemůžou se rozejít.
+          -->
+          <div class="flex flex-wrap items-end gap-2 border-b border-neutral-200 px-4 py-3" data-testid="payroll-inputs-filters">
+            <label class="block w-full sm:w-56">
+              <span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.inputs.filters.search') }}</span>
+              <input :value="inputFilters.q" type="search" maxlength="100" data-testid="payroll-inputs-filter-q" :placeholder="t('payroll.components.inputs.filters.search_placeholder')" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" @input="onInputSearch(($event.target as HTMLInputElement).value)">
+            </label>
+            <div class="block w-full sm:w-60">
+              <span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employee') }}</span>
+              <PayrollPersonSearchSelect :model-value="inputFilters.employeeId" data-test="payroll-inputs-filter-employee" :candidates="personOptions" :label="t('payroll.components.fields.employee')" :placeholder="t('payroll.components.inputs.filters.all_people')" @update:model-value="setInputFilters({ employeeId: $event })" />
             </div>
-            <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="inputsTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.amount') }}</th><th v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t('payroll.components.fields.source') }}</th><th v-if="inputsTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3">{{ t('payroll.components.fields.external_id') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="input in inputs" :key="input.id"><td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ input.employee_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></td><td class="px-4 py-3"><p>{{ input.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ input.component_code }}</p></td><td class="px-4 py-3 font-medium">{{ formatMoney(input.amount_minor) }}</td><td v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t(`payroll.components.source.${input.source_kind}`) }}</td><td v-if="inputsTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="input.status === 'approved' || input.status === 'locked' ? 'bg-success-50 text-success-600' : input.status === 'cancelled' ? 'bg-neutral-100 text-neutral-500' : 'bg-payroll-50 text-payroll-700'">{{ t(`payroll.components.input_status.${input.status}`) }}</span></td><td v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3 break-all font-mono text-xs text-neutral-500">{{ input.external_id ?? '—' }}</td><td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" :class="btnOutlineSm('neutral')" @click="editInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite && input.status === 'draft'" data-testid="payroll-input-cancel" :class="btnOutlineSm('danger')" :disabled="saving" @click="cancelInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.inputs.cancel') }}</button><button v-if="canApprove && input.status === 'draft'" :class="btnOutlineSm('success')" :disabled="saving" @click="approveInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.components.inputs.approve') }}</button><button v-if="canApprove && canReverseBenefit(input)" data-testid="payroll-input-reverse-benefit" :class="btnOutlineSm('warning')" :disabled="saving" @click="reverseBenefitInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.components.inputs.reverse_benefit') }}</button></div></td></tr></tbody></table></div>
-            <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="input in inputs" :key="input.id" class="rounded-lg border border-neutral-200 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div><h3 class="font-semibold text-neutral-900">{{ input.employee_name }}</h3><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }} · {{ input.component_code }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="input.status === 'approved' || input.status === 'locked' ? 'bg-success-50 text-success-600' : input.status === 'cancelled' ? 'bg-neutral-100 text-neutral-500' : 'bg-payroll-50 text-payroll-700'">{{ t(`payroll.components.input_status.${input.status}`) }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ input.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd class="font-semibold">{{ formatMoney(input.amount_minor) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.source') }}</dt><dd>{{ t(`payroll.components.source.${input.source_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.external_id') }}</dt><dd class="break-all font-mono text-xs">{{ input.external_id ?? '—' }}</dd></div></dl><div class="mt-4 flex flex-wrap gap-2"><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" :class="btnOutlineSm('neutral')" @click="editInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite && input.status === 'draft'" data-testid="payroll-input-cancel" :class="btnOutlineSm('danger')" :disabled="saving" @click="cancelInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.inputs.cancel') }}</button><button v-if="canApprove && input.status === 'draft'" :class="btnOutlineSm('success')" :disabled="saving" @click="approveInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.components.inputs.approve') }}</button><button v-if="canApprove && canReverseBenefit(input)" data-testid="payroll-input-reverse-benefit" :class="btnOutlineSm('warning')" :disabled="saving" @click="reverseBenefitInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.components.inputs.reverse_benefit') }}</button></div></article></div>
-            <PaginationBar
-              embedded
-              :page="inputsPage"
-              :per-page="inputsPageSize"
-              :total="inputsTotal"
-              @update:page="goToInputsPage"
-            />
+            <MultiSelectFilter data-testid="payroll-inputs-filter-component" :model-value="inputFilters.componentIds.map(String)" :options="componentFilterOptions" :label="t('payroll.components.inputs.filters.component_all')" :active-label="t('payroll.components.inputs.filters.component')" @update:model-value="setComponentFilter" />
+            <MultiSelectFilter data-testid="payroll-inputs-filter-status" :model-value="inputFilters.statuses" :options="statusFilterOptions" :label="t('payroll.components.inputs.filters.status_all')" :active-label="t('payroll.components.inputs.filters.status')" @update:model-value="setStatusFilter" />
+            <select :value="inputFilters.sourceKind ?? ''" data-testid="payroll-inputs-filter-source" :aria-label="t('payroll.components.inputs.filters.source')" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm" @change="setSourceFilter">
+              <option value="">{{ t('payroll.components.inputs.filters.source_all') }}</option>
+              <option v-for="kind in PAYROLL_INPUT_SOURCE_KINDS" :key="kind" :value="kind">{{ t(`payroll.components.source.${kind}`) }}</option>
+            </select>
+            <select v-if="inputFacets.imports.length > 0 || inputFilters.importId !== null" :value="inputFilters.importId ?? ''" data-testid="payroll-inputs-filter-import" :aria-label="t('payroll.components.inputs.filters.import')" class="h-9 max-w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm" @change="setImportFilter">
+              <option value="">{{ t('payroll.components.inputs.filters.import_all') }}</option>
+              <option v-if="inputFilters.importId !== null && !inputFacets.imports.some(batch => batch.id === inputFilters.importId)" :value="inputFilters.importId">#{{ inputFilters.importId }}</option>
+              <option v-for="batch in inputFacets.imports" :key="batch.id" :value="batch.id">{{ t('payroll.components.inputs.filters.import_option', { name: batch.source_name, date: batch.created_at.slice(0, 16), count: batch.count }) }}</option>
+            </select>
+            <select :value="inputFilters.groupBy ?? ''" data-testid="payroll-inputs-group-by" :aria-label="t('payroll.components.inputs.filters.group_by')" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm" @change="setGroupBy">
+              <option value="">{{ t('payroll.components.inputs.filters.group_none') }}</option>
+              <option value="employee">{{ t('payroll.components.inputs.filters.group_employee') }}</option>
+              <option value="component">{{ t('payroll.components.inputs.filters.group_component') }}</option>
+            </select>
+            <button v-if="inputFiltersOn" type="button" data-testid="payroll-inputs-filter-clear" :class="[btnOutline('neutral'), 'whitespace-nowrap']" @click="clearInputFilters">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('payroll.components.inputs.filters.clear') }}
+            </button>
+            <span v-if="inputFilters.groupBy === null" class="ml-auto hidden items-center gap-2 md:inline-flex"><ColumnPicker :ctrl="inputsTbl" /><DensityToggle :ctrl="inputsTbl" /></span>
+          </div>
+
+          <!--
+            Souhrn a hromadné akce jsou za CELÝ filtr, ne za stránku — tlačítko
+            zůstává, dokud filtr drží aspoň jeden koncept.
+          -->
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-2" data-testid="payroll-inputs-summary">
+            <p class="text-sm text-neutral-700">{{ t('payroll.components.inputs.summary', { total: summaryTotal, amount: formatMoney(summaryAmount), drafts: matchingDraftCount }) }}</p>
+            <div class="flex flex-wrap items-center gap-2">
+              <span v-if="batchProgress !== null" role="status" class="text-xs text-neutral-500">{{ t('payroll.components.inputs.batch_progress', { done: batchProgress }) }}</span>
+              <button v-if="canWrite && matchingDraftCount > 0" type="button" data-testid="payroll-inputs-cancel-matching" :class="[btnOutline('danger'), 'whitespace-nowrap']" :disabled="saving" @click="cancelMatchingInputs">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>
+                {{ t('payroll.components.inputs.cancel_matching', { count: matchingDraftCount }) }}
+              </button>
+              <button v-if="canApprove && matchingDraftCount > 0" type="button" data-testid="payroll-inputs-approve-all" :class="[btnFilled('success'), 'whitespace-nowrap']" :disabled="saving" @click="approveMatchingInputs">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
+                {{ t('payroll.components.inputs.approve_matching', { count: matchingDraftCount }) }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="selectedInputIds.length > 0" class="flex flex-wrap items-center gap-2 border-b border-payroll-200 bg-payroll-50 px-4 py-2" data-testid="payroll-inputs-selection">
+            <span class="text-sm font-medium text-payroll-700">{{ t('payroll.components.inputs.selection_count', { count: selectedInputIds.length }) }}</span>
+            <button v-if="canApprove" type="button" data-testid="payroll-inputs-approve-selected" :class="[btnOutline('success'), 'whitespace-nowrap']" :disabled="saving" @click="approveSelectedInputs">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.components.inputs.approve_selected') }}
+            </button>
+            <button v-if="canWrite" type="button" data-testid="payroll-inputs-cancel-selected" :class="[btnOutline('danger'), 'whitespace-nowrap']" :disabled="saving" @click="cancelSelectedInputs">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>
+              {{ t('payroll.components.inputs.cancel_selected') }}
+            </button>
+            <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" @click="selectedInputIds = []">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('payroll.components.inputs.clear_selection') }}
+            </button>
+          </div>
+
+          <!-- Co hromadná akce nezpracovala, zůstává tady — seskupené po důvodu. -->
+          <div v-if="inputBatchFailures.length > 0" class="border-b border-danger-200 bg-danger-50 px-4 py-3 text-xs text-danger-700" data-testid="payroll-inputs-batch-failures">
+            <p class="font-medium">{{ t('payroll.components.inputs.batch_failed_title') }}</p>
+            <ul class="mt-1 space-y-0.5">
+              <li v-for="failure in inputBatchFailures" :key="failure.message">{{ failure.count > 1 ? t('payroll.components.inputs.batch_failed_row', { count: failure.count, reason: failure.message }) : failure.message }}</li>
+            </ul>
+            <button type="button" :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex whitespace-nowrap']" @click="inputBatchFailures = []">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('payroll.components.inputs.batch_failed_dismiss') }}
+            </button>
+          </div>
+
+          <div v-if="inputListEmpty" class="p-8 text-center">
+            <template v-if="inputFiltersOn">
+              <h3 class="font-semibold text-neutral-900">{{ t('payroll.components.inputs.empty_filtered') }}</h3>
+              <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.components.inputs.empty_filtered_hint') }}</p>
+              <button type="button" :class="[btnOutline('neutral'), 'mt-3 whitespace-nowrap']" @click="clearInputFilters">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+                {{ t('payroll.components.inputs.filters.clear') }}
+              </button>
+            </template>
+            <template v-else>
+              <h3 class="font-semibold text-neutral-900">{{ t('payroll.components.inputs.empty') }}</h3>
+              <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.components.inputs.empty_hint') }}</p>
+            </template>
+          </div>
+          <template v-else-if="inputFilters.groupBy === null">
+            <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="inputsTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="w-10 px-4 py-3"><input v-if="pageDraftIds.length > 0" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-testid="payroll-inputs-select-page" :checked="allPageDraftsSelected" :aria-label="t('payroll.components.inputs.select_page')" @change="togglePageSelection"></th><th class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.amount') }}</th><th v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t('payroll.components.fields.source') }}</th><th v-if="inputsTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3">{{ t('payroll.components.fields.external_id') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="input in inputs" :key="input.id" :class="isInputSelected(input.id) ? 'bg-payroll-50/60' : ''"><td class="px-4 py-3"><input v-if="input.status === 'draft'" type="checkbox" class="rounded border-neutral-300 text-payroll-600" :data-testid="`payroll-input-select-${input.id}`" :checked="isInputSelected(input.id)" :aria-label="t('payroll.components.inputs.select_row')" @change="toggleInputSelection(input.id)"></td><td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ input.employee_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></td><td class="px-4 py-3"><p>{{ input.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ input.component_code }}</p></td><td class="px-4 py-3 font-medium">{{ formatMoney(input.amount_minor) }}</td><td v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t(`payroll.components.source.${input.source_kind}`) }}</td><td v-if="inputsTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="inputStatusClass(input.status)">{{ t(`payroll.components.input_status.${input.status}`) }}</span></td><td v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3 break-all font-mono text-xs text-neutral-500">{{ input.external_id ?? '—' }}</td><td class="px-4 py-3"><PayrollInputRowActions class="justify-end" :input="input" :can-write="canWrite" :can-approve="canApprove" :saving="saving" @edit="editInput" @cancel="cancelInput" @approve="approveInput" @reverse-benefit="reverseBenefitInput" /></td></tr></tbody></table></div>
+            <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="input in inputs" :key="input.id" class="rounded-lg border border-neutral-200 p-4" :class="isInputSelected(input.id) ? 'border-payroll-300 bg-payroll-50/60' : ''"><div class="flex flex-wrap items-start justify-between gap-2"><label class="flex items-start gap-2"><input v-if="input.status === 'draft'" type="checkbox" class="mt-1 rounded border-neutral-300 text-payroll-600" :checked="isInputSelected(input.id)" :aria-label="t('payroll.components.inputs.select_row')" @change="toggleInputSelection(input.id)"><span><span class="block font-semibold text-neutral-900">{{ input.employee_name }}</span><span class="block text-xs text-neutral-500">{{ relationLabel(input.relation_type) }} · {{ input.component_code }}</span><span class="block font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</span></span></label><span class="rounded-full px-2 py-1 text-xs font-medium" :class="inputStatusClass(input.status)">{{ t(`payroll.components.input_status.${input.status}`) }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ input.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd class="font-semibold">{{ formatMoney(input.amount_minor) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.source') }}</dt><dd>{{ t(`payroll.components.source.${input.source_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.external_id') }}</dt><dd class="break-all font-mono text-xs">{{ input.external_id ?? '—' }}</dd></div></dl><PayrollInputRowActions class="mt-4" :input="input" :can-write="canWrite" :can-approve="canApprove" :saving="saving" @edit="editInput" @cancel="cancelInput" @approve="approveInput" @reverse-benefit="reverseBenefitInput" /></article></div>
           </template>
+          <!--
+            Seskupení: jeden řádek na člověka nebo složku se součty. U pěti set
+            lidí se tak měsíc projde bez listování; rozbalí se jen to, co je
+            potřeba řešit.
+          -->
+          <ul v-else data-layout="groups" class="divide-y divide-neutral-100">
+            <li v-for="group in inputGroups" :key="group.key" :data-testid="`payroll-inputs-group-${group.key}`">
+              <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <button type="button" class="flex min-w-0 cursor-pointer items-start gap-2 text-left" :aria-expanded="group.key in expandedGroups" @click="toggleGroup(group)">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-neutral-400 transition-transform" :class="group.key in expandedGroups ? '' : '-rotate-90'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevron" /></svg>
+                  <span class="min-w-0">
+                    <span class="block font-medium text-neutral-900">{{ group.label }}</span>
+                    <span v-if="group.secondary" class="block font-mono text-[11px] text-neutral-400">{{ group.secondary }}</span>
+                  </span>
+                </button>
+                <div class="flex flex-wrap items-center gap-3 text-sm">
+                  <span class="text-neutral-600">{{ t('payroll.components.inputs.group_count', { count: group.count }) }}</span>
+                  <span v-if="group.draft_count > 0" class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700">{{ t('payroll.components.inputs.group_drafts', { count: group.draft_count }) }}</span>
+                  <span v-else class="rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-600">{{ t('payroll.components.inputs.group_all_approved') }}</span>
+                  <span class="font-semibold text-neutral-900">{{ formatMoney(group.amount_minor) }}</span>
+                  <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" @click="openGroupAsFilter(group)">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.funnel" /></svg>
+                    {{ t('payroll.components.inputs.group_open') }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="group.key in expandedGroups" class="border-t border-neutral-100 bg-neutral-50 px-4 py-2">
+                <p v-if="expandedGroups[group.key] === null" class="py-2 text-sm text-neutral-500">{{ t('payroll.components.inputs.group_loading') }}</p>
+                <template v-else>
+                  <div v-for="input in expandedGroups[group.key] ?? []" :key="input.id" class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 py-2 last:border-b-0">
+                    <label class="flex min-w-0 items-center gap-2 text-sm">
+                      <input v-if="input.status === 'draft'" type="checkbox" class="rounded border-neutral-300 text-payroll-600" :checked="isInputSelected(input.id)" :aria-label="t('payroll.components.inputs.select_row')" @change="toggleInputSelection(input.id)">
+                      <span class="min-w-0">
+                        <span class="block text-neutral-900">{{ inputFilters.groupBy === 'employee' ? input.component_name : input.employee_name }}</span>
+                        <span class="block font-mono text-[11px] text-neutral-400">{{ inputFilters.groupBy === 'employee' ? input.component_code : input.employment_code }} · {{ t(`payroll.components.source.${input.source_kind}`) }}</span>
+                      </span>
+                    </label>
+                    <div class="flex flex-wrap items-center gap-3">
+                      <span class="text-sm font-medium">{{ formatMoney(input.amount_minor) }}</span>
+                      <span class="rounded-full px-2 py-1 text-xs font-medium" :class="inputStatusClass(input.status)">{{ t(`payroll.components.input_status.${input.status}`) }}</span>
+                      <PayrollInputRowActions :input="input" :can-write="canWrite" :can-approve="canApprove" :saving="saving" @edit="editInput" @cancel="cancelInput" @approve="approveInput" @reverse-benefit="reverseBenefitInput" />
+                    </div>
+                  </div>
+                  <p v-if="(expandedGroups[group.key]?.length ?? 0) < group.count" class="py-2 text-xs text-neutral-500">{{ t('payroll.components.inputs.group_truncated', { shown: expandedGroups[group.key]?.length ?? 0, total: group.count }) }}</p>
+                </template>
+              </div>
+            </li>
+          </ul>
+          <PaginationBar
+            v-if="!inputListEmpty"
+            embedded
+            :page="inputsPage"
+            :per-page="inputsPageSize"
+            :total="inputFilters.groupBy === null ? inputsTotal : inputGroupTotal"
+            @update:page="goToInputsPage"
+          />
         </section>
       </section>
 

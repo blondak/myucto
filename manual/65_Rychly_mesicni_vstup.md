@@ -121,8 +121,8 @@ Opakované uložení stejného měsíce nevytvoří duplicity.
 vstupy schvalovat, uloží se rozepsané řádky rovnou jako schválené a mzdový běh
 je bez dalšího zásahu přebere. Uživatel bez tohoto práva ukládá koncepty, které
 někdo se schvalovacím oprávněním potvrdí později — buď po jednom, nebo hromadně
-tlačítkem **Schválit vše (N)**. Ani u pěti set zaměstnanců tedy nemusíte
-schvalovat řádek po řádku.
+v mzdových vstupech tlačítkem **Schválit N odpovídajících filtru**. Ani u pěti
+set zaměstnanců tedy nemusíte schvalovat řádek po řádku.
 
 Ukládá se **celá rozepsaná sada, ne jen zobrazená stránka.** Rozepsané změny
 přežijí přechod na další stránku a při uložení se pošlou i řádky z ostatních

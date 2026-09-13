@@ -76,12 +76,33 @@ neupravíš, sleduje změny názvu. Po uložení už kód ani začátek platnost
 nelze; další účinnost se zakládá jako nová verze.
 
 Jednorázový měsíční vstup vzniká jako **koncept** — teprve tak jde ještě
-upravit i zrušit. Schválení je to, co vstup zmrazí. Schvalovat po jednom ale
-nemusíte: tlačítko **Schválit vše (N)** schválí najednou až pět set konceptů
-zvoleného měsíce a už schválený vstup jen přeskočí. Totéž tlačítko nabízí
-mzdový běh přímo u blokace, když do něj nějaký koncept zbyl. Hromadné zadání
-přes [rychlý měsíční vstup](65_Rychly_mesicni_vstup.md) uloží řádky rovnou
-jako schválené, má-li k tomu uživatel oprávnění.
+upravit i zrušit. Schválení je to, co vstup zmrazí. Upravit jde i koncept
+z importu, například z docházky: zaměstnanec, vztah, složka i externí
+identifikátor zůstávají podle zdroje, měnit lze částku a množství. Vstupy
+z pravidelného předpisu, docházky, absence nebo pracovní cesty se opravují
+u svého zdroje.
+
+Po importu docházky má měsíc často stovky vstupů. Lišta nad seznamem je
+filtruje podle jména nebo osobního čísla, zaměstnance, složky, stavu, zdroje
+a importní dávky. Filtr se drží v adrese stránky, takže přežije obnovení a jde
+poslat odkazem. Volba **Zobrazení** seskupí vstupy podle zaměstnance nebo podle
+složky i se součty; skupina se rozbalí kliknutím a **Otevřít v seznamu** z ní
+udělá filtr.
+
+Souhrnný pruh ukazuje počet vstupů, součet částek a počet konceptů za **celý
+filtr**, ne za zobrazenou stránku. Tlačítko **Schválit N odpovídajících
+filtru** schválí všechny koncepty ve filtru bez ohledu na jejich počet a už
+schválený vstup jen přeskočí. Každý vstup přitom prochází stejnými kontrolami
+jako při schválení po jednom (roční limit benefitu, podklad docházky
+u stravného, složka k ručnímu posouzení). Co schválit nešlo, zůstane pod
+pruhem seskupené podle důvodu. Stejně funguje **Zrušit N konceptů**, které se
+vždy zeptá na potvrzení. Zaškrtnutím řádků schválíte nebo zrušíte jen vybrané
+vstupy.
+
+Blokace neschválených vstupů v mzdovém běhu odkazuje rovnou na koncepty
+daného měsíce a u ní je i tlačítko pro jejich hromadné schválení. Hromadné
+zadání přes [rychlý měsíční vstup](65_Rychly_mesicni_vstup.md) uloží řádky
+rovnou jako schválené, má-li k tomu uživatel oprávnění.
 
 Každá složka samostatně určuje dopad do daně, sociálního a zdravotního
 pojištění, průměrného výdělku, exekučního základu, JMHZ, statistiky a
