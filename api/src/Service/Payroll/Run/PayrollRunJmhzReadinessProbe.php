@@ -122,11 +122,13 @@ final class PayrollRunJmhzReadinessProbe
                     'message' => '',
                     'remediation_path' => self::remediationPath($code),
                     'count' => 0,
+                    'entity_total' => 0,
                     'entities' => [],
                     'labels' => [],
                 ];
             }
             ++$groups[$code]['count'];
+            ++$groups[$code]['entity_total'];
             if (count($groups[$code]['entities']) < self::MAX_ENTITIES) {
                 $groups[$code]['entities'][] = [
                     'entity_type' => $issue['entity_type'],
@@ -225,8 +227,11 @@ final class PayrollRunJmhzReadinessProbe
             'component_jmhz_mapping_missing' => sprintf(
                 'Zařazení do měsíčního hlášení nemá: %s. Složka se v tomhle '
                 . 'období použila, takže se bez zařazení hlášení nesestaví. '
-                . 'Doplňte ho v Mzdy → Mzdové složky. Mzdový běh tím omezený '
-                . 'není — spočítat a vyplatit jde i teď.',
+                . 'Aplikace ho sama nevyplnila, protože z druhu složky neplyne '
+                . '(typicky složka „podle hlavičky" z importu docházky). Otevřete '
+                . 'Mzdy → Mzdové složky → Číselník, u složky zvolte „Zařazení do '
+                . 'JMHZ" a vyberte pole hlášení, kam částka patří. Mzdový běh tím '
+                . 'omezený není — spočítat a vyplatit jde i teď.',
                 $named !== '' ? $named : $count . '× mzdová složka',
             ),
             'component_jmhz_manual_review' => sprintf(
@@ -282,9 +287,35 @@ final class PayrollRunJmhzReadinessProbe
         return match ($code) {
             'component_jmhz_mapping_missing',
             'component_jmhz_manual_review',
-            'component_jmhz_treatment_invalid' => '/payroll/components',
+            'component_jmhz_treatment_invalid' => self::componentPath($code, $entityId),
             default => '/payroll/submissions/jmhz',
         };
+    }
+
+    /**
+     * Odkaz, který vede ROVNOU na opravu.
+     *
+     * Dřív mířil nález na holé `/payroll/components` — stránka se otevřela na
+     * záložce mzdových vstupů a účetní musela hledat číselník i složku sama.
+     * Jednotlivá složka teď vede na svoje zařazení (`component` + `panel=jmhz`),
+     * souhrnný nález na číselník vyfiltrovaný na složky s tímtéž problémem,
+     * odkud se dají zařadit hromadně.
+     */
+    private static function componentPath(string $code, ?int $componentId): string
+    {
+        $query = ['tab' => 'catalog'];
+        if ($componentId !== null) {
+            $query['component'] = $componentId;
+            $query['panel'] = 'jmhz';
+        } else {
+            $query['jmhz'] = match ($code) {
+                'component_jmhz_manual_review' => 'manual_review',
+                'component_jmhz_treatment_invalid' => 'invalid',
+                default => 'missing',
+            };
+        }
+
+        return '/payroll/components?' . http_build_query($query);
     }
 
     /**

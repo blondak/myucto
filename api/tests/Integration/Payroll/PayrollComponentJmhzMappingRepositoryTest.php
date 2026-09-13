@@ -75,7 +75,9 @@ final class PayrollComponentJmhzMappingRepositoryTest extends TestCase
             ->execute([$this->supplierId, $this->otherSupplierId]);
         $rows = $components->list($this->supplierId, '2026-06-01');
         $byCode = array_column($rows, null, 'code');
-        $this->componentId = PayrollTimeValue::int($byCode['ODMENA']['id'] ?? null, 'component_id');
+        // Provize výchozí zařazení nemá (úsudek účetní), takže životní cyklus
+        // mapování začíná od prázdna. Odměna už zařazení dostane při založení.
+        $this->componentId = PayrollTimeValue::int($byCode['PROVIZE']['id'] ?? null, 'component_id');
     }
 
     protected function tearDown(): void

@@ -197,6 +197,9 @@ final class PayrollRunReadinessService
             'message' => $message,
             'remediation_path' => $remediationPath,
             'count' => $count,
+            // Kolik záznamů se nálezu týká CELKEM. `entities` je oříznutý na
+            // MAX_ENTITIES, takže jeho délka o počtu nic neříká.
+            'entity_total' => $count,
             'entities' => $entities,
         ];
     }
@@ -221,7 +224,7 @@ final class PayrollRunReadinessService
     private function personDataGapFinding(int $supplierId): ?array
     {
         try {
-            $people = $this->people->listActiveWithBlockingDataGaps(
+            $gaps = $this->people->activeWithBlockingDataGaps(
                 $supplierId,
                 self::MAX_ENTITIES,
             );
@@ -230,6 +233,7 @@ final class PayrollRunReadinessService
             // se sem chodí.
             return null;
         }
+        $people = $gaps['people'];
         if ($people === []) {
             return null;
         }
@@ -238,18 +242,22 @@ final class PayrollRunReadinessService
             static fn (array $person): string => $person['full_name'],
             $people,
         );
+        // Jmen je nejvýš MAX_ENTITIES, počet je ale celkový — „25×" u firmy,
+        // kde údaje chybí dvěma stům lidí, by účetní poslalo špatným směrem.
+        $hidden = $gaps['total'] - count($people);
 
         return self::finding(
             'person_data_gap',
             sprintf(
-                'Chybí zákonné údaje u těchto zaměstnanců: %s. Bez nich se '
+                'Chybí zákonné údaje u těchto zaměstnanců: %s%s. Bez nich se '
                 . 'nedá podat hlášení ani spočítat odvody. Otevřete Mzdy → '
                 . 'Zaměstnanci, zapněte filtr „Mám doplnit údaje" a doplňte je; '
                 . 'karta osoby nahoře vypíše, co konkrétně chybí.',
                 implode(', ', $names),
+                $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
             ),
             '/payroll/people?filter=blocking_data',
-            count($people),
+            max($gaps['total'], count($people)),
             array_map(
                 static fn (array $person): array => [
                     'entity_type' => 'employee',
@@ -335,9 +343,11 @@ final class PayrollRunReadinessService
                     'message' => $validation->message,
                     'remediation_path' => $validation->remediationPath,
                     'count' => 0,
+                    'entity_total' => 0,
                     'entities' => [],
                 ];
             }
+            ++$groups[$code]['entity_total'];
             if ($groups[$code]['remediation_path'] !== $validation->remediationPath) {
                 $groups[$code]['remediation_path'] = null;
             }

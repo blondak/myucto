@@ -233,6 +233,17 @@ final class PayrollComponentJmhzMappingsAction
             'jmhz_treatment' => $treatment,
             'status' => $status,
             'mapping' => $mapping,
+            // Výchozí zařazení podle kódu a druhu složky (týž zdroj, podle
+            // kterého ho aplikace sama předvyplňuje). `null` = zařazení je
+            // úsudek účetní — typicky složka „podle hlavičky" z importu docházky.
+            'suggested_target_attribute_id' => $treatment === 'included'
+                ? PayrollComponentJmhzMappingDefaults::targetFor(
+                    PayrollTimeValue::string($component['code'] ?? null, 'code'),
+                    PayrollTimeValue::string($component['component_kind'] ?? null, 'component_kind'),
+                    PayrollTimeValue::string($component['frequency_kind'] ?? null, 'frequency_kind'),
+                    PayrollTimeValue::string($component['tax_treatment'] ?? null, 'tax_treatment'),
+                )
+                : null,
         ];
     }
 

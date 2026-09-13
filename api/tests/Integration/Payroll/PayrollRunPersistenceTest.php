@@ -2587,8 +2587,13 @@ final class PayrollRunPersistenceTest extends TestCase
                 'message',
                 'remediation_path',
                 'count',
+                // Kolik záznamů se nálezu týká celkem; `entities` je oříznutý
+                // na několik desítek jmen, takže jeho délka počet neříká.
+                'entity_total',
                 'entities',
             ], array_keys($finding));
+            self::assertIsInt($finding['entity_total']);
+            self::assertGreaterThanOrEqual(count($finding['entities']), $finding['entity_total']);
             self::assertContains($finding['severity'], ['blocker', 'warning', 'info']);
             self::assertContains(
                 $finding['impact'],

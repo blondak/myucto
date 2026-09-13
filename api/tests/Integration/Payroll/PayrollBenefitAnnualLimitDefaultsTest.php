@@ -14,6 +14,7 @@ use MyInvoice\Repository\Payroll\PayrollComponentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
+use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -287,7 +288,10 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
             throw new \RuntimeException('DI kontejner není dostupný.');
         }
         $deletion = $container->get(PayrollComponentDeletionRepository::class);
-        if (!$deletion instanceof PayrollComponentDeletionRepository) {
+        $jmhzDefaults = $container->get(PayrollComponentJmhzMappingDefaults::class);
+        if (!$deletion instanceof PayrollComponentDeletionRepository
+            || !$jmhzDefaults instanceof PayrollComponentJmhzMappingDefaults
+        ) {
             throw new \RuntimeException('Mazací repozitář složek není dostupný.');
         }
 
@@ -295,6 +299,7 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
             $this->db,
             $deletion,
             new PayrollComponentDefaults(CzechPayrollRulesets2026::provider(), $catalog),
+            $jmhzDefaults,
         );
     }
 

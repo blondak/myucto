@@ -234,10 +234,26 @@ final class PayrollPeopleRepository
      */
     public function listActiveWithBlockingDataGaps(int $supplierId, int $limit = 25): array
     {
+        return $this->activeWithBlockingDataGaps($supplierId, $limit)['people'];
+    }
+
+    /**
+     * Totéž co {@see self::listActiveWithBlockingDataGaps()}, navíc se SKUTEČNÝM
+     * počtem dotčených osob.
+     *
+     * Seznam je oříznutý na `$limit` jmen, ale počet z něj brát nejde: kontrola
+     * před během pak u firmy s 225 lidmi bez údajů hlásila „25×". Celkový počet
+     * se proto počítá v témže dotazu oknem přes celý výsledek, ještě před LIMIT.
+     *
+     * @return array{total:int,people:list<array{id:int,full_name:string}>}
+     */
+    public function activeWithBlockingDataGaps(int $supplierId, int $limit = 25): array
+    {
         $limit = max(1, $limit);
         $stmt = $this->db->pdo()->prepare(
             'SELECT employee.id,
-                    ' . self::fullNameExpression() . ' AS full_name'
+                    ' . self::fullNameExpression() . ' AS full_name,
+                    COUNT(*) OVER () AS total_count'
             . ' ' . self::fromClause()
             . ' WHERE employee.supplier_id = ?
                 AND employee.is_active = 1
@@ -253,15 +269,17 @@ final class PayrollPeopleRepository
         $stmt->execute();
 
         $people = [];
+        $total = 0;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $person = $this->normalizeRow($row);
+            $total = $this->intValue($person, 'total_count');
             $people[] = [
                 'id' => $this->intValue($person, 'id'),
                 'full_name' => $this->stringValue($person, 'full_name'),
             ];
         }
 
-        return $people;
+        return ['total' => max($total, count($people)), 'people' => $people];
     }
 
     public function listOptionsForTenant(int $supplierId): array

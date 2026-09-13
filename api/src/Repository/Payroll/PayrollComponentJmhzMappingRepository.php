@@ -95,6 +95,33 @@ final class PayrollComponentJmhzMappingRepository
         return is_array($row) ? $this->enrich(self::cast($row), false) : null;
     }
 
+    /**
+     * Id balíku specifikace, ze kterého aplikace zařazení čte.
+     *
+     * Chybí-li, nainstaluje se — přesně to dělá i první zápis zařazení
+     * ({@see self::put()}). Bez toho by zakládání výchozího zařazení na
+     * instalaci, kde ještě nikdo nic nezařadil (nebo po přechodu na nový balík),
+     * tiše nevložilo nic a kontrola před během by dál hlásila „nemá zařazení".
+     * V ustáleném stavu stojí jeden dotaz.
+     */
+    public function currentPackageId(): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM payroll_jmhz_spec_packages
+              WHERE package_key = ? AND manifest_sha256 = ?',
+        );
+        $stmt->execute([
+            PayrollComponentJmhzTargetCatalog::PACKAGE_KEY,
+            PayrollComponentJmhzTargetCatalog::MANIFEST_SHA256,
+        ]);
+        $id = $stmt->fetchColumn();
+        if ($id !== false) {
+            return PayrollTimeValue::int($id, 'package_id');
+        }
+
+        return $this->specPackages->install($this->targets->specManifest());
+    }
+
     /** @return array<int,array<string,mixed>> */
     public function listForSupplier(int $supplierId): array
     {

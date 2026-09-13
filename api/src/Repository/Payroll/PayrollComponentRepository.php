@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
+use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use PDO;
 use PDOException;
 
@@ -15,6 +16,7 @@ final class PayrollComponentRepository
         private readonly Connection $db,
         private readonly PayrollComponentDeletionRepository $deletion,
         private readonly PayrollComponentDefaults $defaults,
+        private readonly PayrollComponentJmhzMappingDefaults $jmhzDefaults,
     ) {}
 
     /**
@@ -133,6 +135,7 @@ final class PayrollComponentRepository
                 PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
             ]);
             $id = PayrollTimeValue::int($pdo->lastInsertId(), 'last_insert_id');
+            $this->applyDefaultJmhzMappings($supplierId, [$id]);
             if ($ownsTransaction) {
                 $pdo->commit();
             }
@@ -313,27 +316,80 @@ final class PayrollComponentRepository
                         $version['valid_from'],
                     ]);
                 }
-                $insert->execute([
-                    $supplierId,
-                    $row['code'],
-                    $row['name'],
-                    $row['component_kind'],
-                    $row['value_kind'],
-                    $row['frequency_kind'],
-                    $row['tax_treatment'],
-                    $row['social_treatment'],
-                    $row['social_treatment'],
-                    $row['health_treatment'],
-                    $row['health_treatment'],
-                    $row['average_earning_treatment'],
-                    $row['enforcement_treatment'],
-                    $row['jmhz_treatment'],
-                    $row['statistics_treatment'],
-                    $row['exemption_basket'],
-                    $row['exemption_basis'],
-                    $version['valid_from'],
-                ]);
+                $this->insertDefaultRow($insert, $supplierId, $row, $version['valid_from']);
             }
+        }
+        // Zařazení do JMHZ vzniká spolu se složkou, ne až při otevření obrazovky
+        // zařazení — jinak kontrola před během hlásila „nemá zařazení" u složek,
+        // které aplikace založila sama.
+        $this->seedDefaultJmhzMappings($supplierId);
+    }
+
+    /**
+     * Výchozí zařazení číselníku jedním příkazem při KAŽDÉM volání.
+     *
+     * Záměrně bez podmínky „jen když něco přibylo": ensureDefaults() běží na
+     * každém čtení a stránky nad ním mají hlídaný počet dotazů. Podmíněná
+     * práce by první čtení prodražila o desítky dotazů proti každému dalšímu;
+     * jeden idempotentní příkaz stojí pokaždé stejně.
+     *
+     * Fail-soft: zařazení je předvyplnění, ne podmínka existence složky.
+     * Instalace bez registru specifikace JMHZ nesmí shodit čtení číselníku;
+     * nezařazená složka se pak ozve jako `component_jmhz_mapping_missing`.
+     */
+    private function seedDefaultJmhzMappings(int $supplierId): void
+    {
+        try {
+            $this->jmhzDefaults->seed($supplierId);
+        } catch (\Throwable) {
+            return;
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function insertDefaultRow(\PDOStatement $insert, int $supplierId, array $row, string $validFrom): void
+    {
+        $insert->execute([
+            $supplierId,
+            $row['code'],
+            $row['name'],
+            $row['component_kind'],
+            $row['value_kind'],
+            $row['frequency_kind'],
+            $row['tax_treatment'],
+            $row['social_treatment'],
+            $row['social_treatment'],
+            $row['health_treatment'],
+            $row['health_treatment'],
+            $row['average_earning_treatment'],
+            $row['enforcement_treatment'],
+            $row['jmhz_treatment'],
+            $row['statistics_treatment'],
+            $row['exemption_basket'],
+            $row['exemption_basis'],
+            $validFrom,
+        ]);
+    }
+
+    /**
+     * Výchozí zařazení do JMHZ ({@see PayrollComponentJmhzMappingDefaults}) pro
+     * právě založené složky.
+     *
+     * Fail-soft: zařazení je předvyplnění, ne podmínka existence složky.
+     * Instalace bez registru specifikace JMHZ nebo cíl chybějící v balíčku
+     * nesmí shodit založení složky ani čtení číselníku; nezařazená složka se
+     * pak ozve jako `component_jmhz_mapping_missing` a účetní ji zařadí.
+     *
+     * @param list<int>|null $componentIds
+     */
+    private function applyDefaultJmhzMappings(int $supplierId, ?array $componentIds): void
+    {
+        try {
+            $this->jmhzDefaults->apply($supplierId, $componentIds);
+        } catch (\Throwable) {
+            return;
         }
     }
 

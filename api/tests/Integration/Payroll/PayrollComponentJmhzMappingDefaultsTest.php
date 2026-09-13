@@ -26,10 +26,6 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
     use IsolatedSupplierTrait;
 
     /**
-     * Složky výchozího číselníku, které do JMHZ patří, ale výchozí zařazení
-     * ZÁMĚRNĚ nemají — u nich je cílový atribut úsudek účetní.
-     */
-    /**
      * Složky, které výchozí zařazení MAJÍ, ale nové firmě se neuplatní.
      *
      * Příspěvek na dlouhodobou péči patří jednoznačně na atribut 10418, takže
@@ -45,6 +41,12 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
         'PRISPEVEK_DLOUHODOBA_PECE',
     ];
 
+    /**
+     * Složky výchozího číselníku, které do JMHZ patří, ale výchozí zařazení
+     * ZÁMĚRNĚ nemají — u nich je cílový atribut úsudek účetní.
+     *
+     * @var list<string>
+     */
     private const WITHOUT_DEFAULT = [
         'PROVIZE',
         'ODSTUPNE',
@@ -112,8 +114,9 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
 
     public function testFreshSupplierGetsExpectedDefaultsAndJudgementCallsStayEmpty(): void
     {
-        $applied = $this->defaults->apply($this->supplierId);
-        self::assertNotSame([], $applied);
+        // Zařazení vzniklo už se založením číselníku; dodatečné doplnění nemá
+        // co přidat.
+        self::assertSame([], $this->defaults->apply($this->supplierId));
 
         $expected = [
             'MZDA_MESICNI' => '10329',
@@ -159,20 +162,19 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
     public function testManualChoiceIsNeverOverwrittenNorRestored(): void
     {
         $componentId = $this->componentIdByCode('MZDA_MESICNI');
-        $manual = $this->mappings->put($this->supplierId, $componentId, '10330', null, $this->userId);
+        $manual = $this->mappings->put($this->supplierId, $componentId, '10330', 1, $this->userId);
         self::assertSame('10330', $manual['target_attribute_id']);
 
         // Vědomě zrušené mapování je taky volba účetní a nesmí se obnovit.
         $removedComponentId = $this->componentIdByCode('ODMENA');
-        $this->mappings->put($this->supplierId, $removedComponentId, '10331', null, $this->userId);
         $this->mappings->remove($this->supplierId, $removedComponentId, 1, $this->userId);
 
-        $this->defaults->apply($this->supplierId);
+        self::assertSame([], $this->defaults->apply($this->supplierId));
 
         $kept = $this->mappingByCode('MZDA_MESICNI');
         self::assertIsArray($kept);
         self::assertSame('10330', $kept['target_attribute_id']);
-        self::assertSame(1, $kept['row_version']);
+        self::assertSame(2, $kept['row_version']);
 
         $disabled = $this->mappingByCode('ODMENA');
         self::assertIsArray($disabled);
@@ -181,6 +183,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
 
     public function testRepeatedApplicationIsIdempotent(): void
     {
+        $this->forgetApplicationDefaults();
         $first = $this->defaults->apply($this->supplierId);
         self::assertNotSame([], $first);
         $before = $this->snapshot();
@@ -192,6 +195,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
 
     public function testComponentOutsideJmhzIsSkippedWithoutFailingTheRest(): void
     {
+        $this->forgetApplicationDefaults();
         $componentId = $this->componentIdByCode('PRIPLATEK_VIKEND');
         $this->db->pdo()->prepare(
             "UPDATE payroll_component_definitions
@@ -209,6 +213,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
 
     public function testMappingScreenPrefillsDefaultsOnRead(): void
     {
+        $this->forgetApplicationDefaults();
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/payroll/components/jmhz-mappings')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
@@ -235,6 +240,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
             '10329',
             PayrollTimeValue::row($wage['mapping'] ?? null, 'mapping')['target_attribute_id'],
         );
+        self::assertSame('10329', $wage['suggested_target_attribute_id']);
 
         $commission = PayrollTimeValue::row(
             $byComponent[$this->componentIdByCode('PROVIZE')] ?? null,
@@ -242,6 +248,19 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
         );
         self::assertSame('missing', $commission['status']);
         self::assertNull($commission['mapping']);
+        self::assertNull($commission['suggested_target_attribute_id']);
+    }
+
+    /**
+     * Stav firmy z doby, kdy se výchozí zařazení při založení číselníku
+     * nedoplňovalo: zmizí jen to, co vyplnila aplikace (`created_by` NULL).
+     */
+    private function forgetApplicationDefaults(): void
+    {
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_component_jmhz_mappings
+              WHERE supplier_id = ? AND created_by IS NULL',
+        )->execute([$this->supplierId]);
     }
 
     private function componentIdByCode(string $code): int

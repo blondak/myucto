@@ -1,0 +1,226 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Payroll;
+
+use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfile;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Výchozí zařazení složek do JMHZ žije v PHP
+ * ({@see PayrollComponentJmhzMappingDefaults::targetFor()}) a zmrazené v SQL
+ * backfillu 1839. Tenhle test drží obě místa v shodě — pravidlo změněné jen
+ * na jedné straně by nové a staré firmy zařadilo různě.
+ */
+final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
+{
+    private const MIGRATION = '1839_payroll_component_jmhz_kind_default_mappings.sql';
+
+    /** @var list<string> component_kind z payroll_component_definitions (migrace 1501) */
+    private const KINDS = [
+        'base_wage', 'hourly_wage', 'task_wage', 'bonus', 'premium', 'commission',
+        'allowance', 'compensation', 'severance', 'competitive_clause', 'backpay',
+        'non_cash', 'benefit_meal', 'benefit_vehicle', 'benefit_pension', 'benefit_care',
+        'benefit_education', 'benefit_recreation', 'benefit_health', 'benefit_accommodation',
+        'risky_savings', 'travel_reimbursement', 'other',
+    ];
+
+    /** @return iterable<string,array{string,string,string,string,?string}> */
+    public static function targets(): iterable
+    {
+        yield 'hodinová mzda' => ['X', 'hourly_wage', 'one_off', 'included', '10329'];
+        yield 'úkolová mzda' => ['X', 'task_wage', 'one_off', 'included', '10329'];
+        yield 'měsíční mzda' => ['X', 'base_wage', 'regular', 'included', '10329'];
+        yield 'příplatek' => ['X', 'premium', 'one_off', 'included', '10332'];
+        yield 'jednorázová odměna' => ['X', 'bonus', 'one_off', 'included', '10331'];
+        yield 'pravidelná odměna' => ['X', 'bonus', 'regular', 'included', '10330'];
+        yield 'zdaněná náhrada' => ['X', 'compensation', 'one_off', 'included', '10337'];
+        yield 'osvobozená náhrada (DPN)' => ['X', 'compensation', 'one_off', 'exempt', null];
+        yield 'složka podle hlavičky' => ['DOCH_KONTEJNERY', 'other', 'one_off', 'included', null];
+        yield 'provize' => ['X', 'commission', 'one_off', 'included', null];
+        yield 'jiné plnění' => ['X', 'allowance', 'one_off', 'included', null];
+        yield 'kód má přednost před druhem' => ['PRIPLATEK_NOCNI', 'premium', 'one_off', 'included', '10334'];
+        yield 'DPN z číselníku' => ['NAHRADA_MZDY_DPN', 'compensation', 'one_off', 'exempt', '10342'];
+    }
+
+    #[DataProvider('targets')]
+    public function testTargetForDerivesFromCodeThenKind(
+        string $code,
+        string $kind,
+        string $frequency,
+        string $tax,
+        ?string $expected,
+    ): void {
+        self::assertSame($expected, PayrollComponentJmhzMappingDefaults::targetFor($code, $kind, $frequency, $tax));
+    }
+
+    /**
+     * Složky vzoru GIRITON zakládá import přes AttendanceProfileComponents::definition();
+     * s tím, co z definice vznikne, musí zařazení odpovídat jejich druhu.
+     */
+    public function testSampleProfileComponentsAreMappedByTheirKind(): void
+    {
+        $expected = [
+            'MZDA_HODINOVA_DOCH' => '10329',
+            'MZDA_HODINOVA_NOC' => '10329',
+            'PRIPLATKY_K_HODINOVE' => '10332',
+            'PRIPLATEK_ODPOLEDNI' => '10332',
+            'PRIPLATEK_BOZP' => '10332',
+            'ODMENA_MIMORADNA' => '10331',
+            'ODMENA_HOTOVOSTNI' => '10331',
+        ];
+        $actual = [];
+        foreach (AttendanceSampleProfile::components() as $component) {
+            $definition = AttendanceProfileComponents::definition($component, '2026-01-01');
+            $actual[$component['code']] = PayrollComponentJmhzMappingDefaults::targetFor(
+                (string) $definition['code'],
+                (string) $definition['component_kind'],
+                (string) $definition['frequency_kind'],
+                (string) $definition['tax_treatment'],
+            );
+        }
+        self::assertSame($expected, $actual);
+
+        // Auto složka „podle hlavičky" vzniká s druhem `other` a nezařazuje se.
+        $auto = AttendanceProfileComponents::definition(
+            ['code' => 'DOCH_KONTEJNERY', 'name' => 'Kontejnery', 'kind' => 'other'],
+            '2026-01-01',
+        );
+        self::assertNull(PayrollComponentJmhzMappingDefaults::targetFor(
+            (string) $auto['code'],
+            (string) $auto['component_kind'],
+            (string) $auto['frequency_kind'],
+            (string) $auto['tax_treatment'],
+        ));
+    }
+
+    /**
+     * Zakládání číselníku zařazuje jedním SQL příkazem. Jeho dohledávací
+     * tabulka musí pro KAŽDOU hodnotu druhu, četnosti i daňového zacházení
+     * vrátit totéž co targetFor() — jinak by stránka zařazení a založení
+     * číselníku zařadily tutéž složku různě.
+     */
+    public function testSeedTableAnswersExactlyLikeTargetFor(): void
+    {
+        $table = PayrollComponentJmhzMappingDefaults::seedTable();
+        self::assertSame(PayrollComponentJmhzMappingDefaults::all(), $table['codes']);
+        foreach (self::KINDS as $kind) {
+            foreach (['one_off', 'regular'] as $frequency) {
+                foreach (['included', 'exempt', 'withholding_candidate', 'manual_review'] as $tax) {
+                    $found = null;
+                    foreach ($table['kinds'] as $row) {
+                        if ($row['component_kind'] === $kind
+                            && $row['frequency_kind'] === $frequency
+                            && $row['tax_treatment'] === $tax
+                        ) {
+                            $found = $row['target'];
+                        }
+                    }
+                    self::assertSame(
+                        PayrollComponentJmhzMappingDefaults::targetFor('__BEZ_KODU__', $kind, $frequency, $tax),
+                        $found,
+                        "Druh {$kind}, četnost {$frequency}, daň {$tax}: tabulka zakládání se rozchází s targetFor().",
+                    );
+                }
+            }
+        }
+    }
+
+    public function testMigrationCodeListMatchesTheCatalogDefaults(): void
+    {
+        preg_match_all("/SELECT '([A-Z0-9_]+)'(?: AS code)?, '(\\d+)'/", self::sql(), $matches, PREG_SET_ORDER);
+        $codes = [];
+        foreach ($matches as $match) {
+            $codes[$match[1]] = $match[2];
+        }
+        $expected = PayrollComponentJmhzMappingDefaults::all();
+        ksort($codes);
+        ksort($expected);
+        self::assertSame($expected, $codes);
+    }
+
+    /**
+     * Pravidlo podle druhu se v SQL vyhodnotí pro každou kombinaci druhu,
+     * četnosti a daňového zacházení a porovná s PHP. Kód, který v číselníku
+     * není, nechá rozhodnout jen druh.
+     */
+    public function testMigrationKindRuleMatchesTargetForEverywhere(): void
+    {
+        $clauses = self::kindClauses();
+        self::assertNotSame([], $clauses);
+        foreach (self::KINDS as $kind) {
+            foreach (['one_off', 'regular'] as $frequency) {
+                foreach (['included', 'exempt', 'manual_review'] as $tax) {
+                    self::assertSame(
+                        PayrollComponentJmhzMappingDefaults::targetFor('__BEZ_KODU__', $kind, $frequency, $tax),
+                        self::evaluate($clauses, $kind, $frequency, $tax),
+                        "Druh {$kind}, četnost {$frequency}, daň {$tax}: SQL backfill a PHP se rozcházejí.",
+                    );
+                }
+            }
+        }
+    }
+
+    public function testMigrationIsIdempotentAndNeverTouchesExistingChoice(): void
+    {
+        $sql = self::sql();
+        self::assertStringContainsString('NOT EXISTS', $sql);
+        self::assertStringContainsString('existing.component_definition_id = target.id', $sql);
+        self::assertStringContainsString("definition.jmhz_treatment = 'included'", $sql);
+        self::assertStringNotContainsString('UPDATE ', $sql);
+        self::assertStringNotContainsString('DELETE ', $sql);
+    }
+
+    /**
+     * @param list<array{kinds:list<string>,frequency:?string,tax:?string,target:string}> $clauses
+     */
+    private static function evaluate(array $clauses, string $kind, string $frequency, string $tax): ?string
+    {
+        foreach ($clauses as $clause) {
+            if (in_array($kind, $clause['kinds'], true)
+                && ($clause['frequency'] === null || $clause['frequency'] === $frequency)
+                && ($clause['tax'] === null || $clause['tax'] === $tax)
+            ) {
+                return $clause['target'];
+            }
+        }
+
+        return null;
+    }
+
+    /** @return list<array{kinds:list<string>,frequency:?string,tax:?string,target:string}> */
+    private static function kindClauses(): array
+    {
+        preg_match_all('/WHEN\s+(.*?)\s+THEN\s+\'(\d+)\'/s', self::sql(), $matches, PREG_SET_ORDER);
+        $clauses = [];
+        foreach ($matches as $match) {
+            $condition = $match[1];
+            if (preg_match("/component_kind\\s+IN\\s+\\(([^)]*)\\)/", $condition, $in) === 1) {
+                preg_match_all("/'([a-z_]+)'/", $in[1], $kinds);
+                $kindList = $kinds[1];
+            } elseif (preg_match("/component_kind\\s*=\\s*'([a-z_]+)'/", $condition, $single) === 1) {
+                $kindList = [$single[1]];
+            } else {
+                self::fail("Neznámá podmínka backfillu: {$condition}");
+            }
+            $frequency = preg_match("/frequency_kind\\s*=\\s*'([a-z_]+)'/", $condition, $f) === 1 ? $f[1] : null;
+            $tax = preg_match("/tax_treatment\\s*=\\s*'([a-z_]+)'/", $condition, $t) === 1 ? $t[1] : null;
+            $clauses[] = ['kinds' => $kindList, 'frequency' => $frequency, 'tax' => $tax, 'target' => $match[2]];
+        }
+
+        return $clauses;
+    }
+
+    private static function sql(): string
+    {
+        $sql = file_get_contents(dirname(__DIR__, 4) . '/db/migrations/' . self::MIGRATION);
+        self::assertIsString($sql);
+
+        // Komentáře pryč — hlídá se SQL, ne to, co o sobě tvrdí.
+        return (string) preg_replace('/^\s*--.*$/m', '', $sql);
+    }
+}
