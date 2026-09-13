@@ -11,7 +11,7 @@
 #   echo "DB_PASSWORD=$(openssl rand -base64 28)" > .env
 #   echo "DB_ROOT_PASSWORD=$(openssl rand -base64 28)" >> .env
 #   docker compose up -d
-#   docker compose exec app php api/bin/migrate.php
+#   docker compose exec --user www-data app php api/bin/migrate.php
 #   # otevři http://localhost:8080 → setup wizard
 #
 # Pro update na novější verzi: změň :latest na konkrétní verzi (např. :3.6.0),

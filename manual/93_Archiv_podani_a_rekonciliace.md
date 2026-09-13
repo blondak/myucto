@@ -302,7 +302,7 @@ prodlužuje odstup:
 ```text
 Linux cron:       * * * * * /cesta/k/myucto/cmd/cron-epo-status.sh
 Windows Scheduler: C:\cesta\k\myucto\cmd\cron-epo-status.cmd
-Docker host cron: * * * * * docker compose exec -T app php api/bin/cron-epo-status.php
+Docker host cron: * * * * * docker compose exec --user www-data -T app php api/bin/cron-epo-status.php
 ```
 
 Ve Windows nastav opakování úlohy každou minutu. Výsledek každého běhu je v

@@ -218,7 +218,7 @@ docker compose up -d --force-recreate app
 ### 6.5.3 Ručně, bez wrapperu
 
 ```bash
-docker compose exec app php api/bin/MyInvoiceMigrate.php \
+docker compose exec --user www-data app php api/bin/MyInvoiceMigrate.php \
     "mysql://root:tajne@myinvoice-db:3306/myinvoice" --yes
 ```
 

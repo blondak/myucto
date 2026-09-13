@@ -151,10 +151,10 @@ echo ""
 
 EXIT_CODE=0
 if [ "$AUTO_YES" -eq 1 ]; then
-    docker compose -f "$COMPOSE_FILE" exec -T app php api/bin/MyInvoiceMigrate.php "${MIGRATE_ARGS[@]}" || EXIT_CODE=$?
+    docker compose -f "$COMPOSE_FILE" exec --user www-data -T app php api/bin/MyInvoiceMigrate.php "${MIGRATE_ARGS[@]}" || EXIT_CODE=$?
 else
     # Bez -T, aby fungoval interaktivni dotaz 'ANO'.
-    docker compose -f "$COMPOSE_FILE" exec app php api/bin/MyInvoiceMigrate.php "${MIGRATE_ARGS[@]}" || EXIT_CODE=$?
+    docker compose -f "$COMPOSE_FILE" exec --user www-data app php api/bin/MyInvoiceMigrate.php "${MIGRATE_ARGS[@]}" || EXIT_CODE=$?
 fi
 
 if [ "$EXIT_CODE" -ne 0 ]; then

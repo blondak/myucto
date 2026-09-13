@@ -139,10 +139,10 @@ Write-Host ""
 $exitCode = 0
 try {
     if ($Yes) {
-        & docker compose -f $ComposeFile exec -T app php api/bin/MyInvoiceMigrate.php @migrateArgs
+        & docker compose -f $ComposeFile exec --user www-data -T app php api/bin/MyInvoiceMigrate.php @migrateArgs
     } else {
         # Bez -T, aby fungoval interaktivni dotaz 'ANO'.
-        & docker compose -f $ComposeFile exec app php api/bin/MyInvoiceMigrate.php @migrateArgs
+        & docker compose -f $ComposeFile exec --user www-data app php api/bin/MyInvoiceMigrate.php @migrateArgs
     }
     $exitCode = $LASTEXITCODE
 } finally {

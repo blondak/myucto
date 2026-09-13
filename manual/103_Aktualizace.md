@@ -37,7 +37,7 @@ blocking síťový call při každém načtení stránky.
 | Prostředí | Příklad |
 |-----------|---------|
 | Linux/cron | `0 6 * * * cd /opt/myucto && php api/bin/cron-version-check.php` |
-| Docker (host cron) | `0 6 * * * docker compose -f /opt/myucto/docker-compose.production.yml exec -T app php api/bin/cron-version-check.php` |
+| Docker (host cron) | `0 6 * * * docker compose -f /opt/myucto/docker-compose.production.yml exec --user www-data -T app php api/bin/cron-version-check.php` |
 | Windows Scheduler | Daily, akce: `php.exe C:\inetpub\myucto\api\bin\cron-version-check.php` |
 
 Pokud cron nenastavíš, kontrola se nikdy nespustí — admin musí kliknout

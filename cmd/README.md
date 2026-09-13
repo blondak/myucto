@@ -472,7 +472,7 @@ docker compose down                                        # stop (data v named 
 docker compose down -v                                     # stop + WIPE volumes (zničí DB)
 docker compose logs -f app                                 # live logs
 docker compose exec app bash                               # shell do kontejneru
-docker compose exec app php api/bin/migrate.php --status   # cli z hostu
+docker compose exec --user www-data app php api/bin/migrate.php --status # cli z hostu
 ```
 
 ### Cron uvnitř kontejneru
@@ -487,7 +487,7 @@ entrypoint při startu (default `MYINVOICE_ENABLE_CRON=1`; logy v
 Vypnutí vestavěného cronu a spouštění z hosta (alternativa):
 
 ```cron
-0 9 * * 1-5  docker compose -f /opt/myucto/docker-compose.yml exec -T app php api/bin/cron-send-reminders.php
+0 9 * * 1-5  docker compose -f /opt/myucto/docker-compose.yml exec --user www-data -T app php api/bin/cron-send-reminders.php
 ```
 
 ## Build / deploy

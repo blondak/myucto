@@ -163,7 +163,7 @@ DB_ROOT_PASSWORD=$(openssl rand -base64 28)
 EOF
 
 docker compose up -d
-docker compose exec app php api/bin/migrate.php
+docker compose exec --user www-data app php api/bin/migrate.php
 ```
 
 > 🛈 V Dockeru se migrace spouštějí automaticky při startu kontejneru
@@ -340,13 +340,33 @@ docker compose down                                  # stop (data v named volume
 docker compose down -v                               # stop + WIPE volumes (ZNIČÍ DB!)
 docker compose logs -f app                           # live logs
 docker compose exec app bash                         # shell do kontejneru
-docker compose exec app php api/bin/migrate.php      # CLI uvnitř kontejneru
+docker compose exec --user www-data app php api/bin/migrate.php # CLI uvnitř kontejneru
 cmd/docker-build.sh --no-cache                       # rebuild image (po PHP/JS změnách, jen Varianta B)
 ```
 
 > 💡 Pokud jsi instaloval přes **Variantu A (docker-ghcr)**, všechny
 > `docker compose` příkazy potřebují flag `-f docker-compose.production.yml`,
 > např. `docker compose -f docker-compose.production.yml logs -f app`.
+
+### Oprávnění cache při ručním spuštění PHP
+
+Aplikační PHP příkazy spouštěj v kontejneru vždy s `--user www-data`, stejně
+jako web a vestavěný cron. Spuštění pod rootem může vytvořit cache a její
+soubory zámků bez práva zápisu pro web.
+
+Pokud kontrola prostředí hlásí „Bez práva zápisu: cache“ a cache vlastní root,
+oprav ve výchozím layoutu vlastníka adresáře včetně jeho obsahu:
+
+```powershell
+docker compose exec --user root app chown -R www-data:www-data /data/storage/cache
+```
+
+Příkaz nic nemaže ani nemění databázi. Potom obnov stránku kontroly prostředí.
+Při vlastním `MYINVOICE_DATA_DIR` nahraď `/data` jeho skutečnou hodnotou;
+ve starším layoutu bez této proměnné je cesta `/var/www/html/storage/cache`.
+Používáš-li `docker-compose.production.yml`, přidej za `docker compose`
+volbu `-f docker-compose.production.yml`. Oprava platí pro běžící kontejner;
+ruční PHP příkazy nadále spouštěj jako `www-data`.
 
 ## 3.7 Volitelný Redis
 
