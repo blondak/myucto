@@ -69,9 +69,9 @@ takže aktualizace je otázkou jednoho příkazu.
 > Aktualizace** stav verze + tlačítko *Aktualizovat*, které pull image
 > + restart spustí přes host-side watcher. Detaily včetně instalace
 > watcheru jako systemd unit / Scheduled Task → [§ 3.9 Update watcher](#39-update-watcher-jednoclick-upgrade-z-ui-volitelne)
-> nebo kapitola [Aktualizace](103_Aktualizace.md).
+> nebo kapitola [Aktualizace](102_Aktualizace.md).
 > Pro denní kontrolu nové verze nezapomeň naplánovat
-> `php api/bin/cron-version-check.php` (1× denně, viz [Aktualizace](103_Aktualizace.md)).
+> `php api/bin/cron-version-check.php` (1× denně, viz [Aktualizace](102_Aktualizace.md)).
 
 > **WSL2 / Linux po klonu:** pokud `./cmd/docker-ghcr.sh` hlásí
 > `Permission denied` nebo `/usr/bin/env: 'bash\r': No such file…`,
@@ -255,7 +255,7 @@ z setup wizardu tak přežije image update. Viz **[§ 3.5.3 Single-volume úlož
 Pokud používáš původní třísvazkové úložiště, `cmd/docker-update.{sh,ps1}` ho
 detekuje a před `up -d` automaticky spustí `cmd/docker-migrate-volumes.{sh,ps1}`.
 Podrobný popis aktuálního ukládání dat je v
-[§ 103.5](103_Aktualizace.md#1035-persistentni-data-v-dockeru).
+[§ 103.5](102_Aktualizace.md#1025-persistentni-data-v-dockeru).
 
 **Mount `cfg.docker.php` je volitelný** — image obsahuje stub `cfg.php`
 (`<?php return [];`) a vše lze předat přes ENV (12-factor). Pro full-ENV deploy
@@ -314,7 +314,7 @@ docker volume ls | grep myucto                           # vidíš pouze app-dat
 **Nikdy nepřepínej layout bez migrace** — aplikace by nahlížela do prázdného
 `/data` a tvářila se, že data zmizela. `cmd/docker-update.{sh,ps1}` to dělá
 automaticky před `up -d`. Aktuální rozložení dat popisuje
-[§ 103.5 Persistentní data v Dockeru](103_Aktualizace.md#1035-persistentni-data-v-dockeru).
+[§ 103.5 Persistentní data v Dockeru](102_Aktualizace.md#1025-persistentni-data-v-dockeru).
 
 Shrnutí: `cmd/docker-migrate-volumes.{sh,ps1}` snapshotne `cfg.local.php`
 z běžícího kontejneru, zkopíruje data ze starých volumes do nového `app-data`
@@ -330,7 +330,7 @@ docker run --rm \
   alpine tar czf /backup/myucto-data-$(date +%F).tar.gz -C /data .
 ```
 
-Plus dump MariaDB (viz [§ 103.7 Záloha a obnova](103_Aktualizace.md)) — to jsou dohromady **dvě entity** k zálohování (db + app-data).
+Plus dump MariaDB (viz [§ 103.7 Záloha a obnova](102_Aktualizace.md)) — to jsou dohromady **dvě entity** k zálohování (db + app-data).
 
 ## 3.6 Daily ops
 
@@ -348,7 +348,7 @@ cmd/docker-build.sh --no-cache                       # rebuild image (po PHP/JS 
 > `docker compose` příkazy potřebují flag `-f docker-compose.production.yml`,
 > např. `docker compose -f docker-compose.production.yml logs -f app`.
 
-### Oprávnění cache při ručním spuštění PHP
+### 3.6.1 Oprávnění cache při ručním spuštění PHP
 
 Aplikační PHP příkazy spouštěj v kontejneru vždy s `--user www-data`, stejně
 jako web a vestavěný cron. Spuštění pod rootem může vytvořit cache a její
@@ -576,12 +576,12 @@ Stav úlohy: `schtasks /query /tn "MyUcto Update Watcher" /v /fo list`.
 
 Watcher jen reaguje na *kliknutí*. Aby admin **viděl**, že je dostupná
 aktualizace (badge v patičce + stav na `/admin/update`), musí běžet
-denní cron `cmd/cron-version-check.(sh/cmd)` — viz [Aktualizace](103_Aktualizace.md).
+denní cron `cmd/cron-version-check.(sh/cmd)` — viz [Aktualizace](102_Aktualizace.md).
 
 #### Plné detaily
 
 Recovery při zaseknutém upgradu, test workflow z `master`, externí
-monitoring přes `/api/version` → kapitola [Aktualizace](103_Aktualizace.md).
+monitoring přes `/api/version` → kapitola [Aktualizace](102_Aktualizace.md).
 
 ## 3.10 Image: alpine/nginx (default) + Debian fallback
 

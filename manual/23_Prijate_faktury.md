@@ -86,7 +86,7 @@ V seznamu přijatých faktur je filtr **Neuhrazené k datu** — na rozdíl od c
 tomu dni nebyl uhrazen celý závazek. Doklad zaplacený až po tomto dni se proto ve
 výpisu objeví, i když má dnes stav „Uhrazená". Stejná funkce a definice úhrady je
 i u [vystavených faktur](14_Faktury.md#1411-filtry-vlevo) a sedí na
-[Saldokonto](56_Saldokonto.md).
+[Saldokonto](60_Saldokonto.md).
 
 ## 23.2 Nová přijatá faktura
 
@@ -160,7 +160,7 @@ Ikona v poli otevře kalendář.
 > dřív, než doklad fyzicky držíš). Období odpočtu je pozdější z trojice **DUZP / datum
 > vystavení / datum přijetí**. Typický případ: dodavatel pošle doklad s prosincovým
 > DUZP až v lednu — pokud datum přijetí ručně nastavíš na leden, faktura spadne do
-> lednové [Knihy DPH](40_Kniha_DPH.md) i přiznání, ne do prosincové. U faktur
+> lednové [Knihy DPH](42_Kniha_DPH.md) i přiznání, ne do prosincové. U faktur
 > **importovaných** (AI extrakce, ISDOC, iDoklad/Fakturoid, bankovní avízo, scan
 > inboxu) se datum přijetí do tohoto výpočtu nepočítá — import ho plní datem
 > zpracování, ne skutečným datem přijetí, takže by zařazení jen zkreslilo.
@@ -223,7 +223,7 @@ V boxu **Klasifikace** jsou dva nezávislé příznaky řídící, jak faktura v
   - **Plný** (výchozí) — standardní odpočet, faktura jde do Knihy DPH, DPHDP3 (ř. 40–45) i Kontrolního hlášení.
   - **Bez nároku** — faktura **vůbec nevstupuje** do DPH evidence (Kniha DPH, DPHDP3, KH); je to jen účetní náklad. Typicky reprezentace, osobní spotřeba.
   - **Krácený (poměrný §75)** — odpočet jen v poměrné výši (např. auto 70 % pro ekonomickou činnost). Po výběru zadáš **Odpočet %** a o toto procento se zkrátí základ i daň odpočtu v Knize DPH a DPHDP3 (ř. 40–45); zbytek je nedaňová část.
-  - **Krácený (koeficientem §76)** — pro **společné vstupy** používané zároveň pro plnění s nárokem na odpočet i pro plnění osvobozená bez nároku (§ 51) — typicky nájem, energie, účetní služby u firem, které mají i osvobozené příjmy (pronájem, finanční nebo zdravotní služby). Na rozdíl od §75 se procento **nezadává na dokladu** — je to jeden **koeficient za celou firmu a rok**, spočtený z poměru zdanitelných a osvobozených plnění (podrobně viz [Výkazy DPH § Krácený odpočet § 76](39_Vykazy_DPH.md#kraceny-odpocet-76-koeficient)). Než administrátor/účetní pro daný rok nastaví **zálohový koeficient**, doklad s touto volbou nejde **ani zaúčtovat, ani zahrnout do přiznání** — systém to odmítne srozumitelnou chybou.
+  - **Krácený (koeficientem §76)** — pro **společné vstupy** používané zároveň pro plnění s nárokem na odpočet i pro plnění osvobozená bez nároku (§ 51) — typicky nájem, energie, účetní služby u firem, které mají i osvobozené příjmy (pronájem, finanční nebo zdravotní služby). Na rozdíl od §75 se procento **nezadává na dokladu** — je to jeden **koeficient za celou firmu a rok**, spočtený z poměru zdanitelných a osvobozených plnění (podrobně viz [Výkazy DPH § Krácený odpočet § 76](41_Vykazy_DPH.md#kraceny-odpocet-76-koeficient)). Než administrátor/účetní pro daný rok nastaví **zálohový koeficient**, doklad s touto volbou nejde **ani zaúčtovat, ani zahrnout do přiznání** — systém to odmítne srozumitelnou chybou.
 - **Daňově uznatelný náklad** — řídí pouze daň z příjmů. V podvojném účetnictví se
   náklad vždy normálně projeví ve výsledku hospodaření; když je příznak vypnutý,
   DPFO/DPPO jej přičte zpět jako nedaňový. Při automatickém zaúčtování aplikace
@@ -237,13 +237,13 @@ Oba příznaky jsou vidět i v **detailu** přijaté faktury (box Měna/DPH).
 
 > [!NOTE]
 > **Zaúčtování i u „Bez nároku", „Krácený (§75)" a „Krácený (§76)".** Zaúčtování
-> přijaté faktury do [Účetního deníku](48_Ucetni_denik.md) umí zpracovat i doklady
+> přijaté faktury do [Účetního deníku](52_Ucetni_denik.md) umí zpracovat i doklady
 > s nárokem **Bez nároku** (celá částka včetně DPH jde na nákladový účet, žádné 343) a
 > **Krácený (§75)** (na účet 343 jde jen poměrná uplatněná část DPH, zbytek DPH jde
 > spolu se základem do nákladu). U **Krácený (§76)** se do deníku zaúčtuje **celá** DPH
 > na účet 343 — stejně jako u plného nároku — protože krácení koeficientem se
 > jednotlivého zápisu netýká, řeší se souhrnně až v přiznání DPH (ř. 52/53, viz
-> [Výkazy DPH](39_Vykazy_DPH.md#kraceny-odpocet-76-koeficient)). Kombinace
+> [Výkazy DPH](41_Vykazy_DPH.md#kraceny-odpocet-76-koeficient)). Kombinace
 > **reverse charge** se **současně** omezeným nárokem (Bez nároku/Krácený §75/Krácený
 > §76) se automaticky nezaúčtuje — takový doklad je nutné zaúčtovat ručním zápisem
 > v deníku.
@@ -351,7 +351,7 @@ Systém automaticky vypočte:
 Pole **Klasifikace DPH** v sekci *Klasifikace* můžeš nechat prázdné — kód doplní aplikace
 při uložení podle sazby, **země dodavatele**, reverse charge a plátcovství tvé firmy k datu
 dokladu. Hlavička dokladu kód jen přebírá z řádků; ručně vybraný kód nikdy nepřepíše.
-Kompletní tabulka kódů i pravidel je ve [Výkazech DPH](39_Vykazy_DPH.md#3945-auto-default-klasifikace).
+Kompletní tabulka kódů i pravidel je ve [Výkazech DPH](41_Vykazy_DPH.md#4145-auto-default-klasifikace).
 
 Tři situace, kdy zůstane **prázdná záměrně** — a aplikace ti to řekne upozorněním nad dokladem:
 
@@ -410,7 +410,7 @@ Klíčové principy:
 ### 23.2.8 Zaúčtování dobropisu
 
 Přijatý dobropis (typ dokladu **Dobropis**, viz [§ 23.2.2](#2322-povinna-pole)) se
-umí zaúčtovat do [Účetního deníku](48_Ucetni_denik.md) automaticky stejně jako běžná
+umí zaúčtovat do [Účetního deníku](52_Ucetni_denik.md) automaticky stejně jako běžná
 faktura — systém pozná opravný doklad (typ Dobropis, nebo záporná celková částka) a
 zápis automaticky **otočí strany MD/Dal** a použije absolutní částku, takže výsledný
 zápis v deníku je čitelný (kladné částky na správné straně), ne matoucí záporná čísla.
@@ -459,7 +459,7 @@ fakturu tak zaplatíš z pokladny přímo z editoru, aniž bys přecházel/a do 
 Pokladna a doklad tam vypisoval/a ručně.
 
 - Výchozí volba je **„Nepoužít pokladnu"**; nabízejí se **jen korunové**
-pokladny ([§ 31.1](31_Pokladna.md#311-ciselnik-pokladen)). Bez korunové
+pokladny ([§ 31.1](32_Pokladna.md#321-ciselnik-pokladen)). Bez korunové
   pokladny se zobrazí hláška „Nemáte založenou žádnou korunovou pokladnu —
   doklad zůstane neuhrazený."
 - Vyrovnání se spustí **při uložení faktury** a při přechodu do stavu
@@ -538,7 +538,7 @@ vybereš. Protiúčtem nesmí být týž účet, na kterém doklad visí — vzn
 Zápočet **může být částečný**: zbytek zůstane na dokladu otevřený, doklad zůstává ve stavu
 Přijatá/Zaúčtovaná a do příkazu k úhradě i k dalšímu zápočtu vstupuje už jen svým zbytkem.
 Na *Uhrazená* se překlopí teprve zápočet, který zbytek vynuluje. Zbytek se počítá ze všech
-kanálů úhrady dohromady — banka, vzájemný zápočet ([§ 63](85_Zapocty.md)) i zápočty proti
+kanálů úhrady dohromady — banka, vzájemný zápočet ([§ 63](67_Zapocty.md)) i zápočty proti
 účtu —, takže tutéž korunu nejde započíst dvakrát.
 
 Zápočet jde **stornovat** (v přehledu úhrad v detailu dokladu). Storno vytvoří protizápis
@@ -594,7 +594,7 @@ DPH (viz níže), aby nezůstal viset beze stopy.
 
 > [!NOTE]
 > **Zaúčtování zálohového cyklu.** Zaplacení zálohové přijaté faktury se do
-> [Účetního deníku](48_Ucetni_denik.md) zaúčtuje jako **poskytnutá záloha** (MD 314
+> [Účetního deníku](52_Ucetni_denik.md) zaúčtuje jako **poskytnutá záloha** (MD 314
 > Poskytnuté zálohy / D 221 banka nebo 211 pokladna) — ne jako běžný závazek 321,
 > protože záloha není daňový doklad. Když pak zaúčtuješ finální (vyúčtovací) fakturu
 > navázanou na tuto zálohu, zápis automaticky doplní i **zúčtovací řádek zálohy**
@@ -665,7 +665,7 @@ zkusí najít odpovídající zálohu a v detailu nabídne **návrh propojení**
 > **Stav „Zaúčtovaná" (§ 23.1) a zaúčtování do deníku jsou dvě různé věci.**
 > Přechod na status **Zaúčtovaná** je jen pracovní workflow značka (visuálně
 > říká „doklad je hotový, předán dál"). Skutečné **zaúčtování do podvojného
-> účetnictví** — vznik zápisu v [Účetním deníku](48_Ucetni_denik.md) — je
+> účetnictví** — vznik zápisu v [Účetním deníku](52_Ucetni_denik.md) — je
 > samostatný krok popsaný tady a řídí se vlastním příznakem `booked_at`, ne
 > statusem dokladu. Klidně tak můžeš mít fakturu ve stavu **Přijatá**, ale už
 > zaúčtovanou, nebo naopak ve stavu **Zaúčtovaná**, a v deníku zatím nic.
@@ -675,7 +675,7 @@ Tlačítko **Zaúčtovat** se zobrazí v hlavičce detailu jen firmám v režimu
 doklad nemá účetní ikonu **Zaúčtováno** ani aktivní zápis v deníku. U dokladu typu
 **Záloha** se tlačítko nezobrazuje: zálohová výzva není účetní předpis závazku;
 účtuje se až její skutečná úhrada z banky nebo pokladny na účet 314. Funguje stejně jako u [vydaných faktur](16_Faktura_PDF.md#1613-zauctovani-do-deniku)
-— potvrzovací dialog, zápis podle [předkontace](92_Ucetni_nastroje.md#923-predkontace),
+— potvrzovací dialog, zápis podle [předkontace](73_Ucetni_nastroje.md#733-predkontace),
 po úspěchu účetní ikona **Zaúčtováno** (s datem v tooltipu) + proklik **Zobrazit v deníku**. Stejná
 tabulka chybových hlášek (chybějící kurz, uzavřené období, nevyvážený zápis,
 chybějící účet v osnově…) platí i tady — viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku).
@@ -704,7 +704,7 @@ pravidlo** — podle čeho se určil druh nákladu a účet:
 
 | Co je vidět | Znamená |
 |---|---|
-| název pravidla | rozhodlo tvoje [pravidlo nákladů](83_Sablony.md) — tlačítko **Upravit pravidlo** otevře rovnou jeho formulář |
+| název pravidla | rozhodlo tvoje [pravidlo nákladů](65_Sablony.md) — tlačítko **Upravit pravidlo** otevře rovnou jeho formulář |
 | „Bez pravidla (podle katalogu frází / klíčových slov / limitu §26/2 ZDP / návrhu AI)" | žádné firemní pravidlo za tím nestojí; chceš-li, aby se příště účtovalo podle tvého, založ ho v Šablonách |
 | „Bez pravidla (řádky se liší)" | řádky dokladu se rozhodly různě, jedno pravidlo za dokladem není |
 | „Ručně (bez automatické klasifikace)" | druh a účet zvolila účetní ručně |
@@ -712,14 +712,14 @@ pravidlo** — podle čeho se určil druh nákladu a účet:
 
 Nákladové pravidlo vybírá jen **druh** nákladu; účty MD/Dal k tomu druhu určuje až
 **předkontace**. Tu sekce ukazuje hned pod pravidlem, i s tlačítkem na její opravu —
-viz [§ 48.8.3](48_Ucetni_denik.md#4883-podle-ceho-se-uctovalo).
+viz [§ 48.8.3](52_Ucetni_denik.md#5283-podle-ceho-se-uctovalo).
 
 Sekce má u každého živého zápisu i tlačítko **Přeúčtovat** (jen admin/účetní), které
 otevře řádky existujícího zápisu k opravě. Podle stavu období se zápis buď přepíše,
 nebo stornuje a zapíše znovu. Přesun nákladu mezi účty téže třídy (např. 511 → 518.100)
 se přepíše na místě i v měsíci zamčeném podaným DPH, dokud rok není v uzávěrce. Celý
 postup i chování v zamčeném období popisuje
-[§ 48.8.2](48_Ucetni_denik.md#4882-preuctovani-z-dokladu-sekce-zauctovani).
+[§ 48.8.2](52_Ucetni_denik.md#5282-preuctovani-z-dokladu-sekce-zauctovani).
 
 ## 23.4 Scan inbox — automatický import z adresáře
 

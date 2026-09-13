@@ -28,7 +28,7 @@ tržeb se spravují samostatně podle oprávnění k nastavení firmy.
 ### 96.1.1 Měny
 
 Měny a bankovní účty aktuálního dodavatele jsou soustředěné na stránce
-**Peníze → Bankovní účty** (viz [29. Bankovní účty](29_Bankovni_ucty.md)).
+**Peníze → Bankovní účty** (viz [29. Bankovní účty](30_Bankovni_ucty.md)).
 Každý řádek představuje jeden bankovní účet v dané
 měně; pokud máš víc účtů pro stejnou měnu, založ více řádků se stejným kódem
 měny.
@@ -51,7 +51,7 @@ měny.
 
 Na stejné stránce je i konfigurace **bankovních e-mailových avíz**: IMAP účty,
 mapování bankovní účet → IMAP účet → parser, parser provideri a přehled
-zpracovaných e-mailů. Detail je v [§ 28.7 Bankovní e-mailová avíza](28_Banka.md).
+zpracovaných e-mailů. Detail je v [§ 28.7 Bankovní e-mailová avíza](29_Banka.md).
 
 ### 96.1.2 Sazby DPH
 
@@ -97,7 +97,7 @@ celounijní práh 10 000 EUR sleduje orientačně a upozorní na jeho blížíc�
 překročení, ale režim sama nezapne.
 Podrobnosti — odvození řádku, plnění k ručnímu posouzení, hromadná úprava,
 účtování, podání a evidence — má vlastní kapitola
-[43. Režim OSS (One Stop Shop)](43_OSS.md).
+[43. Režim OSS (One Stop Shop)](45_OSS.md).
 
 ### 96.1.4 92.1.2b Sazby států OSS
 
@@ -327,7 +327,7 @@ vypnutý (`0`). Při této hodnotě jej může uživatel dobrovolně zapnout v p
 v rozsahu 1 až 1440 minut. Kladná hodnota správce platí pro uživatele, kteří
 zvolili **Použít nastavení správce**, a je nepřekročitelným maximem; vlastní
 interval proto může být jen stejný nebo kratší. Ruční zamknutí zůstává dostupné
-vždy. Podrobnosti jsou v [102. Bezpečnost](102_Bezpecnost.md).
+vždy. Podrobnosti jsou v [102. Bezpečnost](101_Bezpecnost.md).
 
 ## 96.4 E-mailové šablony
 
@@ -415,7 +415,7 @@ Použití:
 > podléhá stejné povinnosti uchovávat jako doklady samotné (§ 31 ZoÚ), takže by ji rotace
 > po několika měsících znehodnotila. Přehled retenčních lhůt najdete v
 > **Nástroje → Účetní nastavení → Archiv účetnictví** (viz
-> [Retence a právní zadržení](92_Ucetni_nastroje.md#927-retence-a-pravni-zadrzeni-na-backendu)).
+> [Retence a právní zadržení](73_Ucetni_nastroje.md#737-retence-a-pravni-zadrzeni-na-backendu)).
 
 ## 96.6 Elektronické podpisy
 
@@ -759,7 +759,7 @@ Pro vlastní převody nestačí zapnout pouze jeden řádek: na Automaticky mus�
 jak **Převody mezi vlastními účty**, tak **Rozpoznávání vlastních převodů**.
 Účty musí být evidované jako vlastní a mít stejnou měnu; každá noha se účtuje
 přes 261 a zůstává auditovatelná. Podrobnosti a práce s frontami jsou v
-[Automatu účtování](49_Automat.md) a kapitole [Banka](28_Banka.md).
+[Automatu účtování](53_Automat.md) a kapitole [Banka](29_Banka.md).
 
 ## 96.12 Brandingové profily
 
@@ -831,7 +831,7 @@ Vestavěné systémové kódy jsou společné a nelze je upravit ani smazat. Pro
 aktuální firmu lze vytvořit vlastní kód, upravit ho a později archivovat.
 Změnu prováděj jen tehdy, když znáš její dopad na DPHDP3, kontrolní hlášení a
 Knihu DPH. Význam jednotlivých polí je podrobně popsán v
-[39. Výkazech DPH](39_Vykazy_DPH.md#3944-jak-funguji-vat-klasifikacni-kody), kde je
+[39. Výkazech DPH](41_Vykazy_DPH.md#4144-jak-funguji-vat-klasifikacni-kody), kde je
 i kompletní tabulka vestavěných kódů.
 
 **Kód předmětu plnění** (`kod_pred_pl`, jde do vět KH A.1 a B.1) přijímá jednu až dvě
@@ -884,7 +884,7 @@ ze seznamu zapečeného v kódu a napíše to červeně přímo na stránce.
 
 **Daňové konstanty** už nejsou záložkou této stránky. Jsou samostatný bod
 menu hned pod Sazbami a číselníky; podrobnosti popisuje kapitola
-[Daňové konstanty](101_Danove_konstanty.md).
+[Daňové konstanty](100_Danove_konstanty.md).
 
 ## 96.15 E-maily → Odeslané
 
@@ -990,9 +990,9 @@ pokud nezůstane jiný aktivní alias daného účelu, nové odkazy použijí v�
 **Firma → Datová schránka** (`/admin/databox`) spravuje přístupy, příchozí
 zprávy, příjemce, výzvy a odchozí podání právě vybrané firmy. Přehled všech
 přihlašovacích metod, ručního inboxu a odeslání najdete v samostatné kapitole
-[Datová schránka](98_Datova_schranka.md).
+[Datová schránka](97_Datova_schranka.md).
 
 Globální registraci externí aplikace spravuje provozovatel v **Systém →
 Odesílací brána ISDS** (`/admin/isds-gateway`); popisuje ji kapitola
-[Odesílací brána ISDS](99_Odesilaci_brana_ISDS.md). Mzdové formuláře a jejich
-věcný stav popisuje kapitola [Podání a hlášení](71_Podani_a_hlaseni.md).
+[Odesílací brána ISDS](98_Odesilaci_brana_ISDS.md). Mzdové formuláře a jejich
+věcný stav popisuje kapitola [Podání a hlášení](85_Podani_a_hlaseni.md).

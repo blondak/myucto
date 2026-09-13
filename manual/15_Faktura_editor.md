@@ -125,7 +125,7 @@ Po zvolení „Hotově" se pod polem objeví výběr **Pokladna**:
 
 - Výchozí volba je **„Nepoužít pokladnu"** — faktura se jen vytiskne s poznámkou
   „hotově" a o úhradu se postaráš jinde. Vyrovnání se nespustí.
-- Nabízejí se **jen korunové pokladny** ([§ 31.1](31_Pokladna.md#311-ciselnik-pokladen)).
+- Nabízejí se **jen korunové pokladny** ([§ 31.1](32_Pokladna.md#321-ciselnik-pokladen)).
   Valutová pokladna v seznamu není vůbec.
 - Nemá-li firma žádnou korunovou pokladnu, pod polem se zobrazí hláška
   **„Nemáte založenou žádnou korunovou pokladnu — doklad zůstane neuhrazený."**
@@ -143,7 +143,7 @@ jen uloží a čeká) systém automaticky:
    **Uhrazeno**.
 
 Toast potvrdí **„Pokladní doklad {číslo} byl vystaven a zaúčtován."** Doklad
-najdeš normálně v [Pokladně](31_Pokladna.md) i v pokladní knize.
+najdeš normálně v [Pokladně](32_Pokladna.md) i v pokladní knize.
 
 **Je to plně vratné.** Když volbu zrušíš — přepneš způsob úhrady jinam, nebo
 vybereš „Nepoužít pokladnu" — systém při uložení **smaže pokladní doklad
@@ -173,7 +173,7 @@ nikdy nedotkne**, ani když je navázaný na tutéž fakturu.
 
 | Případ | Chování |
 |---|---|
-| **Zálohová (proforma) faktura**, storno faktura, platební kalendář | Výběr pokladny se vůbec nezobrazí. Úhrada zálohy totiž zakládá navazující finální doklad nebo daňový doklad k platbě, a ten by pozdější zrušení volby neumělo vzít zpět. Zálohu inkasuj hotově přímo v [Pokladně](31_Pokladna.md#3132-ucel-dokladu). |
+| **Zálohová (proforma) faktura**, storno faktura, platební kalendář | Výběr pokladny se vůbec nezobrazí. Úhrada zálohy totiž zakládá navazující finální doklad nebo daňový doklad k platbě, a ten by pozdější zrušení volby neumělo vzít zpět. Zálohu inkasuj hotově přímo v [Pokladně](32_Pokladna.md#3232-ucel-dokladu). |
 | **Pravidelné (opakované) fakturace** | Šablona pole „Pokladna" nemá — vygenerovaná faktura sice zdědí způsob úhrady „Hotově", ale pokladnu ne, takže **žádný doklad nevznikne a faktura zůstane neuhrazená**. Totéž platí pro finální fakturu vystavenou ze zálohy. |
 | **Cizoměnová faktura** | Vyrovnání se přeskočí („Cizoměnový doklad z pokladny hradit nelze."). |
 | **Valutová pokladna** | Nenabízí se. |
@@ -249,7 +249,7 @@ Pokud se karta uzavřít nepodaří — zavřené účetní období, nebo u dlou
 rok, který nemá potvrzený ani přerušený daňový odpis — **faktura se přesto vystaví
 a zaúčtuje** a systém hned po vystavení upozorní, která karta zůstala v užívání
 a proč (např. „rok 2025 nemá potvrzený ani přerušený daňový odpis"). Doděláš odpisy
-(viz [§ 81.6](81_Majetek.md#816-hromadne-zauctovani-odpisu-roku)) a kartu vyřadíš
+(viz [§ 61.6](28_Majetek.md#286-hromadne-zauctovani-odpisu-roku)) a kartu vyřadíš
 z její vlastní stránky.
 
 Jednu kartu lze prodat jen jednou: pokud už ji prodal jiný doklad nebo je
@@ -493,12 +493,12 @@ Zaplacení se nemění. Propojená záloha (proforma) zároveň vypadne z pohled
 
 ### 15.8.2 Zaúčtování zálohového cyklu (proforma → DDKP → vyúčtování)
 
-Z pohledu [Účetního deníku](48_Ucetni_denik.md) fungují tři doklady zálohového cyklu
+Z pohledu [Účetního deníku](52_Ucetni_denik.md) fungují tři doklady zálohového cyklu
 takto:
 
 - **Zaplacení zálohové (proforma) faktury** — zaúčtuje se jako přijetí zálohy (MD 221
   banka nebo 211 pokladna / D 324 Přijaté zálohy), ne jako běžná pohledávka 311 —
-  proforma totiž není daňový doklad. Viz [Banka](28_Banka.md) a [Pokladna](31_Pokladna.md).
+  proforma totiž není daňový doklad. Viz [Banka](29_Banka.md) a [Pokladna](32_Pokladna.md).
 - **Daňový doklad k přijaté platbě** (typ „Daňový doklad k platbě", viz
   [§ 14.1](14_Faktury.md#141-seznam-faktur)) — zaúčtuje se **jen za DPH** (MD 324 / D
   343), bez fiktivní pohledávky 311 a bez duplicitního výnosu 6xx (ten patří až finální
@@ -526,7 +526,7 @@ Pokud zjistíš, že vystavená faktura je špatně:
   vyžaduje, abys měl s klientem komunikaci o tom, co a proč.
 
 > [!NOTE]
-> **Zaúčtování dobropisu.** Dobropis se do [Účetního deníku](48_Ucetni_denik.md)
+> **Zaúčtování dobropisu.** Dobropis se do [Účetního deníku](52_Ucetni_denik.md)
 > zaúčtuje automaticky stejně jako běžná faktura — systém pozná opravný doklad (typ
 > Dobropis, nebo záporná celková částka) a zápis automaticky **otočí strany MD/Dal** a
 > použije absolutní částku, takže výsledný zápis je čitelný (kladné částky na správné

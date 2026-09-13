@@ -136,7 +136,7 @@ snapshotu uložit bez jeho výslovného obnovení.
 
 #### Režim OSS na položce šablony
 
-Má-li firma [zapnutý režim OSS](43_OSS.md#4331-zapnuti-rezimu-a-platnost-registrace),
+Má-li firma [zapnutý režim OSS](45_OSS.md#4531-zapnuti-rezimu-a-platnost-registrace),
 je u každého řádku šablony zaškrtávátko **OSS**. Po zaškrtnutí se pod řádkem otevře
 proužek se **státem spotřeby**, **typem sazby** a **typem plnění** — přesně jako na
 řádku faktury. Sazba DPH pak nabízí i sazby cizích států, aby OSS řádek mohl nést
@@ -159,7 +159,7 @@ vlastnosti konkrétního dokladu k jeho datu plnění a dopočítá je až gener
 > a povinně dostane příznak **k ručnímu posouzení** — přeřazení proti rozhodnutí
 > člověka nesmí být tiché. Bez toho by řádek nespadl do žádného přiznání: z OSS
 > podání by ho vyřadila platnost registrace, z tuzemského přiznání OSS příznak.
-> Podrobně [§ 43.3.5](43_OSS.md#4345-rozdily-mezi-kanaly).
+> Podrobně [§ 43.3.5](45_OSS.md#4545-rozdily-mezi-kanaly).
 
 **Placeholdery období** — do popisu položky (a do poznámek nad/pod
 položkami šablony) lze vložit tokeny, které se při **každém vygenerování** faktury
@@ -301,7 +301,7 @@ užitečné pro testování i pro ruční vytvoření dokladu mimo rozvrh).
   datum se proto nevybírá a varování o budoucím datu se nezobrazuje (budoucí
   DUZP je tu záměr, koncept se edituje celý měsíc).
 
-### Ruční generování a plán
+### 17.3.1 Ruční generování a plán
 
 U režimu *Až při vystavení* dialog nabízí volbu **Nahradit plánovaný termín
 a posunout plán o jeden interval** (výchozí zapnuto). Další termín se počítá
@@ -313,7 +313,7 @@ na 1. 2. 2027. Dialog před potvrzením ukazuje výsledný příští termín.
 Režim *Na začátku období* dál pracuje s plánovaným konceptem; mimořádné
 generování bez posunu plánu v něm není dostupné.
 
-### Oprava příštího termínu
+### 17.3.2 Oprava příštího termínu
 
 Na detailu šablony otevři **… → Změnit příští vygenerování…**. Dialog ukáže
 aktuální datum, nové datum a upozornění na přeskočení nebo opakované

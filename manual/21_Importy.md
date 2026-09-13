@@ -122,7 +122,7 @@ Import to řeší takto:
 
 ## 21.6 21.4b Zahraniční doklady a režim OSS
 
-Import vydaných faktur umí sám poznat plnění v [režimu OSS](43_OSS.md) a vyplnit
+Import vydaných faktur umí sám poznat plnění v [režimu OSS](45_OSS.md) a vyplnit
 na položce příznak OSS, zemi spotřeby, typ sazby i typ plnění. Nemusíš je
 proklikávat ručně.
 
@@ -141,7 +141,7 @@ proklikávat ručně.
 ### 21.6.2 Jak se import rozhoduje
 
 Rozhodovací pravidlo je společné všem vstupním kanálům a popisuje ho
-[§ 43.3](43_OSS.md#434-jak-vznika-oss-radek). Ve zkratce: **autoritou pro místo
+[§ 43.3](45_OSS.md#454-jak-vznika-oss-radek). Ve zkratce: **autoritou pro místo
 plnění je číselník sazeb států OSS, ne tvoje tabulka DPH sazeb** — a do tuzemského
 přiznání smí jen řádek, u kterého číselník potvrdí, že sazba v zemi dodavatele
 k datu plnění opravdu platí. Každá jiná odpověď znamená buď zařazení do OSS, nebo
@@ -164,7 +164,7 @@ Specifika importu ze souboru:
   jako duplicity.
 - **Nejednoznačnou sazbu import zařadí do OSS** a označí k ručnímu posouzení, ne
   naopak. Proč právě tímto směrem, vysvětluje
-  [§ 43.4.1](43_OSS.md#4351-dva-stavy-ktere-vypadaji-podobne).
+  [§ 43.4.1](45_OSS.md#4551-dva-stavy-ktere-vypadaji-podobne).
 - **Doklad, který se rozpadne** mezi OSS podání a tuzemské přiznání, se neodmítá
   (smíšená faktura umí vzniknout legitimně), ale hlásí se zvlášť a jeho řádky se
   označí k posouzení.
@@ -182,7 +182,7 @@ Specifika importu ze souboru:
 
 Kolik čeho vzniklo, říká souhrn importu ([§ 21.5](#217-report)); souhrn ale po
 zavření stránky zmizí, kdežto filtr **Místo plnění (OSS)** v seznamu faktur ne.
-Všechny tři první body má [hromadná úprava OSS](43_OSS.md#436-hromadna-editace-oss)
+Všechny tři první body má [hromadná úprava OSS](45_OSS.md#456-hromadna-editace-oss)
 jako samostatný výběr položek — nemusíš je hledat po jednom.
 
 > [!TIP]

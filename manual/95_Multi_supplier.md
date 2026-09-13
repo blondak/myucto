@@ -237,7 +237,7 @@ vystavení srovná a doklad dostane číslo hned za posledním vydaným. Srovná
 zapíše do auditní historie i s původní hodnotou počítadla. Ručně nastavený začátek
 řady („příští faktura bude č. 100") tím zůstává nedotčený. Mezeru po smazaném
 dokladu uprostřed řady aplikace nezaplňuje, tu ukáže sestava
-[Úplnost číselné řady](82_Ucetni_kontroly_a_inventarizace.md#828-uplnost-ciselne-rady-vydanych-dokladu).
+[Úplnost číselné řady](46_Ucetni_kontroly_a_inventarizace.md#468-uplnost-ciselne-rady-vydanych-dokladu).
 Stejně se chová i interní číslování přijatých faktur.
 
 **Vlastní řada mimo dodavatele:**
@@ -357,7 +357,7 @@ a Pohoda kódy, viz [§ 95.5.6](#9556-pohoda-kody)), je pole **Režim účetnict
 > zapne až po úspěšné kontrole a doúčtování, takže účetní sestavy mezitím nevypadají
 > jako úplné. Průvodce založí účtový rozvrh, nechá zkontrolovat otevírací rozvahu,
 > provede kontrolu nanečisto a teprve potom zpracuje faktury, pokladnu a banku.
-> Podrobný postup je v [§ 94.10.3](94_Danova_evidence.md#94103-pruvodce-aktivaci-podvojneho-ucetnictvi).
+> Podrobný postup je v [§ 94.10.3](74_Danova_evidence.md#74103-pruvodce-aktivaci-podvojneho-ucetnictvi).
 
 U nové firmy bez historie se režim přepne přímo a výchozí účtový rozvrh se založí
 automaticky. Pokud byla podvojná evidence zapnuta dříve a historie není kompletní,
@@ -370,7 +370,7 @@ Stejný úkol se zobrazí i na Přehledu.
 > Zákon u OSVČ navíc vyžaduje jednorázovou **úpravu základu daně** o neuhrazené
 > pohledávky/závazky a zásoby k datu přechodu (příloha č. 3 ZDP) — to je daňová
 > záležitost mimo účetní zápisy, systém k ní jen připraví podklady. Podrobně viz
-> [Daňová evidence § 51.10](94_Danova_evidence.md).
+> [Daňová evidence § 51.10](74_Danova_evidence.md).
 
 > [!WARNING]
 > Fyzická osoba může vedení účetnictví ukončit až po **5 po sobě jdoucích účetních
@@ -388,8 +388,8 @@ Volba se v menu projeví **okamžitě** po přihlášení nebo po přepnutí dod
 | **Daňová evidence** | **Daňová evidence** | Peněžní deník, Pohledávky a závazky |
 
 Podrobný popis obou modulů najdeš v samostatných kapitolách —
-[Účetní deník](48_Ucetni_denik.md) pro podvojné účetnictví,
-[Daňová evidence](94_Danova_evidence.md) pro daňovou evidenci.
+[Účetní deník](52_Ucetni_denik.md) pro podvojné účetnictví,
+[Daňová evidence](74_Danova_evidence.md) pro daňovou evidenci.
 
 Nezávisle na zvoleném režimu zůstávají v menu i:
 
@@ -405,7 +405,7 @@ Nezávisle na zvoleném režimu zůstávají v menu i:
 Zapnutí skladové evidence (pole `stock_enabled`) je **samostatný přepínač** v detailu
 dodavatele, nezávislý na volbě daňová evidence / podvojné účetnictví — funguje shodně
 v obou režimech. Zapíná/vypíná sekci menu **Sklad** (skladové karty, příjemky/výdejky,
-e-shop číselníky, inventury, sestavy) — podrobně viz [Sklad](35_Sklad.md).
+e-shop číselníky, inventury, sestavy) — podrobně viz [Sklad](37_Sklad.md).
 
 | Pole | Co dělá |
 |---|---|

@@ -370,7 +370,7 @@ onUnmounted(stopPolling)
         <h1 class="text-2xl font-semibold">{{ t('scan_attach.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">
           {{ t('scan_attach.subtitle') }}
-          <a href="/manual?ch=33_Pripojeni_skenu" target="_blank" rel="noopener" class="text-primary-600 hover:underline whitespace-nowrap">{{ t('scan_attach.manual_link') }}</a>
+          <a href="/manual?ch=35_Pripojeni_skenu" target="_blank" rel="noopener" class="text-primary-600 hover:underline whitespace-nowrap">{{ t('scan_attach.manual_link') }}</a>
         </p>
       </div>
       <ActionBar :actions="actions" />

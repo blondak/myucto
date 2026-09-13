@@ -49,7 +49,7 @@ Vytvoříš první uživatelský účet se systémovou rolí **Superadmin** (pln
 
 Povolené jsou obě metody — uživatel si na stránce `/setup-mfa` vybere. Zúžit
 výběr jde až v konfiguraci přes `auth.allowed_mfa_methods`, viz
-[102. Bezpečnost](102_Bezpecnost.md).
+[102. Bezpečnost](101_Bezpecnost.md).
 
 Klikni **Další**.
 

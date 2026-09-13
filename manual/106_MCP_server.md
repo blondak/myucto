@@ -385,7 +385,7 @@ vzniká až v účetní vrstvě, která zůstává jen ke čtení.
 | **Příjemky, výdejky, převodky** | seznam, detail s řádky | založit koncept, upravit, zaúčtovat, stornovat, smazat koncept |
 | **Inventury** | seznam, detail s rozdíly | založit, spustit, zapsat napočítané množství, uzavřít |
 
-### 106.9.1.1 Dávkové čtení katalogu
+### 106.9.2 Dávkové čtení katalogu
 
 Když asistent potřebuje více karet najednou, použije `get_products_batch`
 nebo `get_product_prices_batch` místo stovek jednotlivých dotazů. Oba nástroje
@@ -411,7 +411,7 @@ kartu a měnu neexistuje, je `null`, ne nula.
 hodnot filtrů nad celou odpovídající množinou. `get_catalog_job` ukáže
 průběh a souhrnný výsledek úlohy, ke které má uživatel oprávnění.
 
-### 106.9.1.2 Ceny pro konkrétního odběratele
+### 106.9.3 Ceny pro konkrétního odběratele
 
 Na otázku „za kolik to prodáme firmě ACME“ asistent odpoví nástrojem
 `quote_product_prices`. Ten spočítá cenu stejně jako faktura: nejdřív
@@ -432,7 +432,7 @@ Asistent z něj umí vypsat položky, jejich ceny po měnách, individuální ce
 zákazníků i výslednou cenu pro konkrétního odběratele a měnu dokladu. Ceník také
 jen čte.
 
-### 106.9.2 Potvrzování nevratných kroků
+### 106.9.4 Potvrzování nevratných kroků
 
 Mazání, storno dokladu a uzavření inventury vyžadují **výslovné potvrzení**.
 První volání takového nástroje záměrně **nic neprovede** — jen vrátí, čeho by se
@@ -451,7 +451,7 @@ nesmaže fotku cizímu zboží.
 Praktický dopad: **asistent se tě před smazáním vždycky zeptá.** Řetězec „ukliď
 nepoužívané štítky“ neproběhne jedním vrzem, ale jako výpis a dotaz.
 
-### 106.9.3 Kolekce se nahrazují celé
+### 106.9.5 Kolekce se nahrazují celé
 
 Ceny, dodavatelé, jazykové verze, kategorie, štítky, parametry a řádky
 skladového dokladu se ukládají **jako celek** — co v uloženém seznamu není, to se
@@ -463,7 +463,7 @@ jistý, řekni si o vypsání současného stavu předem:
 
 > „Ukaž ceny toho zboží, pak k nim přidej eurovou cenu s marží 25 %.“
 
-### 106.9.4 Skladové doklady mají dvě fáze
+### 106.9.6 Skladové doklady mají dvě fáze
 
 Příjemka, výdejka i převodka vznikají jako **koncept**, který se stavem skladu
 nedělá nic — teprve zaúčtování pohyb provede, přidělí dokladu číslo a doklad
@@ -481,10 +481,10 @@ opačný protidoklad v původních cenách a oba zůstanou ve skladové knize.
 Server sám odmítne (`409`) výdej do minusu, jakýkoli pohyb na skladu
 s rozběhnutou inventurou a doklad do uzavřeného účetního období.
 
-### 106.9.5 Objednávky u dodavatele
+### 106.9.7 Objednávky u dodavatele
 
 Asistent umí celý životní cyklus objednávky
-([§ 35.11](35_Sklad.md#3511-objednavky-u-dodavatele)) — a drží se v něm stejných
+([§ 35.11](37_Sklad.md#3711-objednavky-u-dodavatele)) — a drží se v něm stejných
 pravidel jako aplikace:
 
 - **Nová objednávka vzniká jako koncept.** Nedostane číslo a do „na cestě" se
@@ -512,7 +512,7 @@ na konkrétní faktury.
 > → asistent přečte množstevní pohledy a návrh doplnění, objednávky ale založí
 > jako koncepty, které si odsouhlasíš.
 
-### 106.9.6 Inventura
+### 106.9.8 Inventura
 
 Postup kopíruje aplikaci: založit → spustit (udělá se snímek očekávaných stavů
 a **sklad se zablokuje** pro zaúčtování dokladů) → zapsat napočítané množství →
@@ -520,7 +520,7 @@ uzavřít. Uzavření vygeneruje rozdílovou příjemku na přebytky a výdejku 
 rovnou zaúčtované — proto vyžaduje potvrzení a proto asistent před ním hlásí,
 kolik řádků zůstalo nespočítaných (ty se přeskočí).
 
-### 106.9.7 Co přes MCP nejde
+### 106.9.9 Co přes MCP nejde
 
 - **Nahrát fotku ke zboží.** Přenos souborů běží mimo formát, se kterým tenhle
   server pracuje. Fotky nahraješ v aplikaci, asistent s nimi pak umí pracovat

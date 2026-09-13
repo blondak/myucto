@@ -13,13 +13,13 @@ dokladů účetní.
 > [!NOTE]
 > **Předání k úhradě není „zaplaceno".** Zařazení faktury do příkazu jen označí,
 > že jsi platbu odeslal(a) do banky — skutečnou úhradu potvrdí až spárování
-> bankovního výpisu (viz [Banka](28_Banka.md)). Stav faktury proto zůstává
+> bankovního výpisu (viz [Banka](29_Banka.md)). Stav faktury proto zůstává
 > `Přijatá` / `Zaúčtovaná`, jen dostane příznak **„Předáno k úhradě"**.
 
 ## 26.1 Účet plátce
 
 Nahoře vyber **účet plátce** — bankovní účet, ze kterého se bude platit. Nabídka
-vychází z [bankovních účtů dodavatele](29_Bankovni_ucty.md) (číselník měn): pro každou
+vychází z [bankovních účtů dodavatele](30_Bankovni_ucty.md) (číselník měn): pro každou
 měnu můžeš mít vlastní účet. Předvyplní se **výchozí CZK účet**; přepnutím na účet
 v jiné měně (např. EUR) se nabídnou faktury v dané měně.
 
@@ -164,7 +164,7 @@ Předání k úhradě je **samostatná dimenze**, ne stav faktury — faktura z�
 [Přijatých faktur](23_Prijate_faktury.md) proto najdeš filtr **„Předání k úhradě"**
 (předané / nepředané) a u řádků štítek, takže snadno odlišíš, co už čeká na zaplacení.
 
-Skutečné **Zaplaceno** nastaví až spárování bankovního výpisu ([Banka](28_Banka.md)),
+Skutečné **Zaplaceno** nastaví až spárování bankovního výpisu ([Banka](29_Banka.md)),
 ruční označení úhrady, nebo volba „označit jako zaplacené" při exportu.
 
 ## 26.10 Historie příkazů
@@ -191,7 +191,7 @@ zaplacených. V sekci pod přehledem faktur pak vyber uložený příkaz a potvr
 bankovnictví; odeslání samo nepotvrzuje úhradu. Zahájený import dávky ještě
 nepotvrzuje přijetí jednotlivých plateb. U nejasného výsledku ověř stav
 v bance, opakované odeslání stejného příkazu je blokované. Nastavení a úplný
-postup jsou v kapitole [Bankovní účty](29_Bankovni_ucty.md#2914-odeslani-prikazu-do-banky).
+postup jsou v kapitole [Bankovní účty](30_Bankovni_ucty.md#3014-odeslani-prikazu-do-banky).
 
 V internetovém bankovnictví CREDITAS najdeš předanou dávku v **Transakce → Zadané → Hromadné**. Zde zkontroluj její stav a příkazy k autorizaci.
 

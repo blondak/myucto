@@ -61,14 +61,14 @@ Každý modul má vlastní kapitolu manuálu — odkazy vedou na detail.
 | Modul | Co pokrývá |
 |---|---|
 | **Prodej a pohledávky** | Faktury, zálohy, opravné doklady, pravidelná fakturace, více měn, DPH/reverse charge/OSS, PDF s QR platbou, upomínky, saldo a cash-flow. |
-| **Nákup a AI zpracování** | Přijaté faktury a účtenky, import ISDOC/Pohoda XML/PDF, [AI extrakce](manual/49_Automat.md), kontrola součtů a DPH, návrh nákladového účtu s povinným potvrzením. |
+| **Nákup a AI zpracování** | Přijaté faktury a účtenky, import ISDOC/Pohoda XML/PDF, [AI extrakce](manual/53_Automat.md), kontrola součtů a DPH, návrh nákladového účtu s povinným potvrzením. |
 | **Banka a pokladna** | Více účtů a měn, import výpisů, automatické párování podle VS a částky, částečné úhrady, kurzové rozdíly, pokladní doklady. |
-| **Podvojné účetnictví** | Účtový rozvrh, předkontace, [automat účtování](manual/49_Automat.md), účetní deník, hlavní kniha, předvaha, rozvaha, výsledovka, saldokonto. |
-| **Daně a evidence** | [Přiznání DPH, kontrolní a souhrnné hlášení](manual/39_Vykazy_DPH.md), [režim OSS](manual/43_OSS.md), [DPFO/DPPO](manual/41_Dan_z_prijmu.md), [daňová evidence](manual/94_Danova_evidence.md), archiv XML a asistované i přímé podání přes EPO API. |
-| **Uzávěrka** | [Účetní období](manual/91_Uzaverka.md), závěrková mapa K1–K10, [kontroly a inventarizace](manual/82_Ucetni_kontroly_a_inventarizace.md), odpisy, časové rozlišení, závěrkový balíček. |
-| **Mzdy a personalistika** | [Karty zaměstnanců](manual/72_Zamestnanci.md) s více pracovními vztahy a souběhy, [mzdové složky](manual/77_Mzdove_slozky_a_vstupy.md), [absence a dovolená](manual/62_Absence_a_dovolena.md), [docházka a směny](manual/63_Dochazka_a_smeny.md), [mzdové běhy](manual/66_Mzdove_behy.md), [srážky a exekuce](manual/74_Srazky_a_exekuce.md), [roční zúčtování](manual/70_Rocni_zuctovani.md), [podání a hlášení](manual/71_Podani_a_hlaseni.md), [shoda účtování mezd](manual/67_Shoda_uctovani_mezd.md). |
+| **Podvojné účetnictví** | Účtový rozvrh, předkontace, [automat účtování](manual/53_Automat.md), účetní deník, hlavní kniha, předvaha, rozvaha, výsledovka, saldokonto. |
+| **Daně a evidence** | [Přiznání DPH, kontrolní a souhrnné hlášení](manual/41_Vykazy_DPH.md), [režim OSS](manual/45_OSS.md), [DPFO/DPPO](manual/43_Dan_z_prijmu.md), [daňová evidence](manual/74_Danova_evidence.md), archiv XML a asistované i přímé podání přes EPO API. |
+| **Uzávěrka** | [Účetní období](manual/72_Uzaverka.md), závěrková mapa K1–K10, [kontroly a inventarizace](manual/46_Ucetni_kontroly_a_inventarizace.md), odpisy, časové rozlišení, závěrkový balíček. |
+| **Mzdy a personalistika** | [Karty zaměstnanců](manual/86_Zamestnanci.md) s více pracovními vztahy a souběhy, [mzdové složky](manual/91_Mzdove_slozky_a_vstupy.md), [absence a dovolená](manual/76_Absence_a_dovolena.md), [docházka a směny](manual/77_Dochazka_a_smeny.md), [mzdové běhy](manual/80_Mzdove_behy.md), [srážky a exekuce](manual/88_Srazky_a_exekuce.md), [roční zúčtování](manual/84_Rocni_zuctovani.md), [podání a hlášení](manual/85_Podani_a_hlaseni.md), [shoda účtování mezd](manual/81_Shoda_uctovani_mezd.md). |
 | **Majetek a sklad** | Karty majetku a odpisy, skladové karty a pohyby, inventura, automatická výdejka při fakturaci, napojení e-shopu. |
-| **Reporting a portál** | Přehled tržeb, nákladů, pohledávek a cash-flow, [klientský portál](manual/46_Pruvodce_ucetniho.md), responzivní rozhraní, role admin / účetní / klient / pouze pro čtení. |
+| **Reporting a portál** | Přehled tržeb, nákladů, pohledávek a cash-flow, [klientský portál](manual/50_Pruvodce_ucetniho.md), responzivní rozhraní, role admin / účetní / klient / pouze pro čtení. |
 | **Více firem a API** | [Neomezený počet firemních agend](manual/95_Multi_supplier.md) v jedné instalaci, [REST API v1](manual/104_API.md) s osobními tokeny a scopes. |
 
 ![Vydané faktury](manual/img/08_faktury_list.webp)
@@ -84,7 +84,7 @@ Automat je systém pravidel, ne neprůhledné „AI účtování“. Položka se
 tehdy, když je výsledek jednoznačný, období otevřené, částka pod limitem a
 nechybí předkontace. Neznámá měna, nevyrovnaný zápis, uzavřené období nebo
 chybějící kurz operaci zablokují a vysvětlí proč. Detail:
-[Automat účtování](manual/49_Automat.md).
+[Automat účtování](manual/53_Automat.md).
 
 ### EPO podání a archív
 
@@ -108,7 +108,7 @@ vlastníka a výslovně povolené firemní agendy. Asistovaný a produkční př
 se pro stejný snapshot vzájemně blokují, aby nevzniklo duplicitní podání;
 zkušební přímý pokus asistovaný formulář neblokuje. Podrobný postup včetně
 získání certifikátu, testu a práce s doručenkou popisuje
-[EPO podání, archív a daňová rekonciliace](manual/93_Archiv_podani_a_rekonciliace.md).
+[EPO podání, archív a daňová rekonciliace](manual/49_Archiv_podani_a_rekonciliace.md).
 
 Pro vývoj lze zapnout `epo_test` (nebo `MYINVOICE_EPO_TEST=true`). Podepsané
 přímé operace pak používají zkušební portál
@@ -257,7 +257,7 @@ bcrypt hesla s aplikačním pepperem, TOTP 2FA, CSRF ochrana a rate limiting,
 volitelný IP allowlist, role a oprávnění po jednotlivých firmách, šifrování
 citlivých integračních údajů, auditní log a izolace firemních agend napříč API,
 reporty i souborovými cestami. Bezpečnostní model popisuje
-[kapitola Bezpečnost](manual/102_Bezpecnost.md).
+[kapitola Bezpečnost](manual/101_Bezpecnost.md).
 
 Bezpečnostní chybu **neoznamuj veřejným ticketem.** Použij kontakt na
 [MyWebdesign.cz](https://mywebdesign.cz/) s předmětem `[SECURITY] MyÚčto.cz` a
@@ -288,11 +288,11 @@ Uživatelský manuál pokrývá celý pracovní cyklus v 58 kapitolách:
 
 - [Úvod a mapa funkcí](manual/01_Uvod.md)
 - [Převod dat z MyInvoice](manual/06_Prevod_z_MyInvoice.md)
-- [Průvodce účetního](manual/46_Pruvodce_ucetniho.md)
-- [Automat účtování](manual/49_Automat.md)
-- [Daňové výkazy](manual/39_Vykazy_DPH.md) · [Daň z příjmů](manual/41_Dan_z_prijmu.md) · [Režim OSS](manual/43_OSS.md)
-- [Kontroly a inventarizace](manual/82_Ucetni_kontroly_a_inventarizace.md) · [Uzávěrka](manual/91_Uzaverka.md)
-- [Daňová evidence](manual/94_Danova_evidence.md) · [Více firem](manual/95_Multi_supplier.md)
+- [Průvodce účetního](manual/50_Pruvodce_ucetniho.md)
+- [Automat účtování](manual/53_Automat.md)
+- [Daňové výkazy](manual/41_Vykazy_DPH.md) · [Daň z příjmů](manual/43_Dan_z_prijmu.md) · [Režim OSS](manual/45_OSS.md)
+- [Kontroly a inventarizace](manual/46_Ucetni_kontroly_a_inventarizace.md) · [Uzávěrka](manual/72_Uzaverka.md)
+- [Daňová evidence](manual/74_Danova_evidence.md) · [Více firem](manual/95_Multi_supplier.md)
 - [Řešení problémů](manual/999_Reseni_problemu.md)
 
 Kompletní pořadí je v [manual/INDEX.md](manual/INDEX.md).

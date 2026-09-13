@@ -113,7 +113,7 @@ podle toho, jestli jsi plátce nebo neplátce, a podporuje speciální režimy:
   přiřazují se per položku, smíšené sazby v jedné faktuře
 - **Reverse charge (přenesená daňová povinnost)** — tuzemský RC dle § 92a–g
   i EU B2B s VAT ID; aplikace automaticky doplní zákonnou poznámku
-- **[OSS (One Stop Shop)](43_OSS.md)** pro prodej spotřebitelům v jiných členských
+- **[OSS (One Stop Shop)](45_OSS.md)** pro prodej spotřebitelům v jiných členských
   státech EU s lokálními sazbami (např. `SK-23`) — zařazení řádků se odvozuje
   automaticky, kvartální přiznání a XML `OSSEI1` jsou součástí
 - **VIES ověření** EU VAT ID — kontrola platnosti DIČ klienta v reálném čase
@@ -121,7 +121,7 @@ podle toho, jestli jsi plátce nebo neplátce, a podporuje speciální režimy:
 - **VAT klasifikace se přiřadí sama** podle sazby DPH a nese se až do
   kontrolního hlášení
 
-Detaily jsou v kapitole [38. Fakturujeme](38_Fakturujeme.md). Pozor:
+Detaily jsou v kapitole [38. Fakturujeme](40_Fakturujeme.md). Pozor:
 **správnost faktury je vždy na uživateli** — aplikace generuje doklady,
 ale není daňový poradce.
 
@@ -206,8 +206,8 @@ a aplikace platby spáruje sama:
 - **Pokladna** s příjmovými a výdajovými doklady (PPD/VPD) a pravidly
 - **Multi-currency banky** — víc účtů per dodavatel (CZK + EUR + USD)
 
-Viz [28. Banka](28_Banka.md), [29. Bankovní účty a avíza](29_Bankovni_ucty.md),
-[31. Pokladna](31_Pokladna.md) a [26. Platební příkazy](26_Platebni_prikazy.md).
+Viz [28. Banka](29_Banka.md), [29. Bankovní účty a avíza](30_Bankovni_ucty.md),
+[31. Pokladna](32_Pokladna.md) a [26. Platební příkazy](26_Platebni_prikazy.md).
 
 ## 1.8 Upomínky a chybějící doklady
 
@@ -238,7 +238,7 @@ zápis vznikají ze stejné události, takže se ta dvě čísla nemají jak roz
   popisky, výrobci, tagy, cenotvorba a marže, hromadný import, archivace místo
   mazání; skladová karta a karta zboží jsou provázané
 
-Viz [35. Sklad](35_Sklad.md) a [36. E-shop](36_Eshop.md).
+Viz [35. Sklad](37_Sklad.md) a [36. E-shop](38_Eshop.md).
 
 ## 1.10 Účetnictví — deník, hlavní kniha, sestavy
 
@@ -254,13 +254,13 @@ vede tu formu, která jí přísluší:
 - **Náhled dokladu** přímo z deníku
 - **Storno místo mazání** — auditní stopa zůstává
 
-Viz [46. Průvodce účetního](46_Pruvodce_ucetniho.md),
-[48. Účetní deník](48_Ucetni_denik.md),
-[účtový rozvrh](84_Ucetni_osnova.md),
-[hlavní kniha](51_Hlavni_kniha.md),
-[rozvaha](53_Rozvaha.md),
-[výkaz zisku a ztráty](54_Vysledovka_druhova.md) a
-[daňová evidence](94_Danova_evidence.md).
+Viz [46. Průvodce účetního](50_Pruvodce_ucetniho.md),
+[48. Účetní deník](52_Ucetni_denik.md),
+[účtový rozvrh](66_Ucetni_osnova.md),
+[hlavní kniha](55_Hlavni_kniha.md),
+[rozvaha](57_Rozvaha.md),
+[výkaz zisku a ztráty](58_Vysledovka_druhova.md) a
+[daňová evidence](74_Danova_evidence.md).
 
 ## 1.11 Automat účtování
 
@@ -280,7 +280,7 @@ Opakovanou práci odvede systém, ty ji potvrdíš:
   a rozpadu saldokonta
 - **Ranní souhrn e-mailem** a u každého zápisu dohledatelné, co ho způsobilo
 
-Viz [49. Automat účtování](49_Automat.md).
+Viz [49. Automat účtování](53_Automat.md).
 
 ## 1.12 Účetní kontroly a inventarizace
 
@@ -294,7 +294,7 @@ nesedí — ukážou konkrétní doklad:
 - **Audit kurzů (ČNB)**
 - **Kontrola integrity deníku** na pozadí — hlídá, že strana MD odpovídá straně D
 
-Viz [82. Účetní kontroly a inventarizace](82_Ucetni_kontroly_a_inventarizace.md).
+Viz [62. Účetní kontroly a inventarizace](46_Ucetni_kontroly_a_inventarizace.md).
 
 ## 1.13 DPH, kontrolní a souhrnné hlášení
 
@@ -307,8 +307,8 @@ Viz [82. Účetní kontroly a inventarizace](82_Ucetni_kontroly_a_inventarizace.
   a plánované faktury, skutečnost a odhad ale zůstávají oddělené
 - **Vývoj DPH za dvanáct měsíců** na jedné obrazovce
 
-Viz [39. Výkazy DPH](39_Vykazy_DPH.md), [40. Kniha DPH](40_Kniha_DPH.md) a
-[42. Souhrnné hlášení](42_Souhrnne_hlaseni.md).
+Viz [39. Výkazy DPH](41_Vykazy_DPH.md), [40. Kniha DPH](42_Kniha_DPH.md) a
+[42. Souhrnné hlášení](44_Souhrnne_hlaseni.md).
 
 ## 1.14 Daň z příjmů — průběžně, ne až v březnu
 
@@ -330,9 +330,9 @@ zaplatíme" existuje odpověď v systému:
 - **Daňový optimalizátor** — porovnání režimů a predikce ročních limitů
 
 Díky tomu se dá daňová optimalizace řešit v říjnu, ne v březnu, kdy už je pozdě.
-Viz [41. Daň z příjmů](41_Dan_z_prijmu.md),
-[93. EPO podání, archív a rekonciliace](93_Archiv_podani_a_rekonciliace.md) a
-[44. Daňový optimalizátor](44_Danovy_optimalizator.md).
+Viz [41. Daň z příjmů](43_Dan_z_prijmu.md),
+[93. EPO podání, archív a rekonciliace](49_Archiv_podani_a_rekonciliace.md) a
+[44. Daňový optimalizátor](47_Danovy_optimalizator.md).
 
 **Daňové výstupy jsou pomůcka** — před podáním je vždy ověř s účetní nebo
 daňovým poradcem a samotné odeslání na portál či do datové schránky necháváme
@@ -363,7 +363,7 @@ mimo jiné:
 - **Rozdělení výsledku hospodaření** z účtu `431` na `428/421/364`
 
 Na konci vznikne **závěrkový balíček** a nový rok se otevře automaticky včetně
-řad dokladů. Viz [91. Účetní období a uzávěrka](91_Uzaverka.md).
+řad dokladů. Viz [91. Účetní období a uzávěrka](72_Uzaverka.md).
 
 ## 1.16 Majetek, mzdy, kniha jízd a dokumenty
 
@@ -382,9 +382,9 @@ Agendy, kvůli kterým účetní v jednodušších systémech vede paralelní ta
 - **Kniha jízd** — vozidla, cesty, tankování a daňové souhrny
 - **Dokumenty** — archiv s fulltextem a přiřazením k dokladům
 
-Viz [61. Úplné mzdy](61_Uplne_mzdy.md), [60. Mzdová rekapitulace](60_Mzdy.md),
-[81. Majetek a odpisy](81_Majetek.md), [34. Kniha jízd](34_Kniha_jizd.md)
-a [32. Dokumenty](32_Dokumenty.md).
+Viz [63. Úplné mzdy](75_Uplne_mzdy.md), [60. Mzdová rekapitulace](64_Mzdy.md),
+[61. Majetek a odpisy](28_Majetek.md), [34. Kniha jízd](36_Kniha_jizd.md)
+a [32. Dokumenty](34_Dokumenty.md).
 
 ## 1.17 Exporty, importy a API
 
@@ -413,7 +413,7 @@ Nad tím vším je **REST API v1 popsané specifikací OpenAPI 3.1** s tokenovou
 autentizací a výběrem firmy hlavičkou `X-Supplier-Id`. Napojí se na
 něj e-shop, CRM, BI nástroj i automatizační platforma typu Make nebo Zapier.
 Viz [104. REST API](104_API.md), [20. Exporty](20_Exporty.md),
-[21. Importy](21_Importy.md) a [45. Hromadný export](45_Hromadny_export.md).
+[21. Importy](21_Importy.md) a [45. Hromadný export](48_Hromadny_export.md).
 
 ## 1.18 Multi-supplier — víc firem z jedné instalace
 
@@ -445,13 +445,13 @@ Viz [95. Více dodavatelů](95_Multi_supplier.md).
 - **Zálohování** databáze, dokladů i dokumentů, volitelně šifrované
 
 Viz [96. Nastavení](96_Nastaveni.md),
-[100. Elektronické podpisy](100_Elektronicke_podpisy.md) a
-[103. Aktualizace](103_Aktualizace.md).
+[100. Elektronické podpisy](99_Elektronicke_podpisy.md) a
+[103. Aktualizace](102_Aktualizace.md).
 
 ## 1.20 Bezpečnost
 
 Bezpečnost má dvě roviny — **kdo se dostane dovnitř** a **co se uvnitř může
-stát s účetnictvím** (detail v [102. Bezpečnost](102_Bezpecnost.md)):
+stát s účetnictvím** (detail v [102. Bezpečnost](101_Bezpecnost.md)):
 
 **Přístup a přihlášení**
 

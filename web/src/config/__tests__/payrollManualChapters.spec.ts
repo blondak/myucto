@@ -8,32 +8,33 @@ import {
 } from '@/config/payrollManualChapters'
 
 const EXPECTED_CHAPTERS = new Map<string, string>([
-  ['/payroll', '61_Uplne_mzdy'],
-  ['/payroll/absences', '62_Absence_a_dovolena'],
-  ['/payroll/time', '63_Dochazka_a_smeny'],
-  ['/payroll/travel', '64_Cestovni_nahrady'],
-  ['/payroll/quick-inputs', '65_Rychly_mesicni_vstup'],
-  ['/payroll/runs', '66_Mzdove_behy'],
-  ['/payroll/posting-reconciliation', '67_Shoda_uctovani_mezd'],
-  ['/payroll/payments', '68_Platby_a_uhrady'],
-  ['/payroll/documents', '69_Dokumenty_a_vystupy'],
-  ['/payroll/annual-settlement', '70_Rocni_zuctovani'],
-  ['/payroll/submissions', '71_Podani_a_hlaseni'],
+  ['/payroll', '75_Uplne_mzdy'],
+  ['/payroll/absences', '76_Absence_a_dovolena'],
+  ['/payroll/time', '77_Dochazka_a_smeny'],
+  ['/payroll/travel', '78_Cestovni_nahrady'],
+  ['/payroll/quick-inputs', '79_Rychly_mesicni_vstup'],
+  ['/payroll/runs', '80_Mzdove_behy'],
+  ['/payroll/posting-reconciliation', '81_Shoda_uctovani_mezd'],
+  ['/payroll/payments', '82_Platby_a_uhrady'],
+  ['/payroll/documents', '83_Dokumenty_a_vystupy'],
+  ['/payroll/annual-settlement', '84_Rocni_zuctovani'],
+  ['/payroll/submissions', '85_Podani_a_hlaseni'],
   // Záložka podání a karta člověka mají vlastní adresu, aby na ně šlo odkázat.
   // Kapitolu dědí po rodiči — je to tatáž agenda, ne nová.
-  ['/payroll/submissions/:tab([a-z_]+)', '71_Podani_a_hlaseni'],
-  ['/payroll/people', '72_Zamestnanci'],
-  ['/payroll/people/:id(\\d+)', '72_Zamestnanci'],
-  ['/payroll/deduction-agreements', '73_Dohody_o_srazkach'],
-  ['/payroll/enforcement', '74_Srazky_a_exekuce'],
-  ['/payroll/enforcement/cooperation', '74_Srazky_a_exekuce'],
-  ['/payroll/insolvency', '74_Srazky_a_exekuce'],
-  ['/payroll/benefit-baskets', '75_Kose_benefitu'],
-  ['/payroll/settings', '76_Nastaveni_mezd'],
-  ['/payroll/components', '77_Mzdove_slozky_a_vstupy'],
-  ['/payroll/rulesets', '78_Legislativni_pravidla_mezd'],
-  ['/payroll/retention', '79_Retencni_lhuty'],
-  ['/payroll/erasure', '80_Vymaz_osobnich_udaju'],
+  ['/payroll/submissions/:tab([a-z_]+)', '85_Podani_a_hlaseni'],
+  ['/payroll/people', '86_Zamestnanci'],
+  ['/payroll/people/:id(\\d+)', '86_Zamestnanci'],
+  ['/payroll/deduction-agreements', '87_Dohody_o_srazkach'],
+  ['/payroll/enforcement', '88_Srazky_a_exekuce'],
+  ['/payroll/enforcement/cooperation', '88_Srazky_a_exekuce'],
+  ['/payroll/insolvency', '88_Srazky_a_exekuce'],
+  ['/payroll/benefit-baskets', '89_Kose_benefitu'],
+  ['/payroll/settings', '90_Nastaveni_mezd'],
+  ['/payroll/imports', '90_Nastaveni_mezd'],
+  ['/payroll/components', '91_Mzdove_slozky_a_vstupy'],
+  ['/payroll/rulesets', '92_Legislativni_pravidla_mezd'],
+  ['/payroll/retention', '93_Retencni_lhuty'],
+  ['/payroll/erasure', '94_Vymaz_osobnich_udaju'],
 ])
 
 describe('payroll contextual manual chapters', () => {
@@ -43,7 +44,7 @@ describe('payroll contextual manual chapters', () => {
       .filter(path => path === 'payroll' || path.startsWith('payroll/'))
       .map(path => `/${path}`)
 
-    expect(payrollPaths).toHaveLength(24)
+    expect(payrollPaths).toHaveLength(25)
     expect([...payrollPaths].sort()).toEqual([...EXPECTED_CHAPTERS.keys()].sort())
     for (const path of payrollPaths) {
       expect(payrollManualChapter(path), path).toBe(EXPECTED_CHAPTERS.get(path))
@@ -52,7 +53,7 @@ describe('payroll contextual manual chapters', () => {
 
   it('keeps every specific payroll rule before the catch-all', () => {
     const catchAllIndex = PAYROLL_MANUAL_CHAPTERS.findIndex(
-      ([pattern, chapter]) => chapter === '61_Uplne_mzdy'
+      ([pattern, chapter]) => chapter === '75_Uplne_mzdy'
         && pattern.test('/payroll')
         && pattern.test('/payroll/runs'),
     )

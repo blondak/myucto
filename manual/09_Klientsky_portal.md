@@ -138,7 +138,7 @@ U plátců DPH karta **DPH** ukáže aktuální období, daň na výstupu, daň 
 výslednou daňovou povinnost (nebo nadměrný odpočet) a termín podání. U neplátců
 se místo toho zobrazí informace „Firma není plátce DPH." Vedle karta **Daňové
 termíny** vypisuje blížící se termíny v okně 35 dní dopředu (barevně podle
-závažnosti) — souvisí s [§ 36 Výkazy DPH](39_Vykazy_DPH.md).
+závažnosti) — souvisí s [§ 36 Výkazy DPH](41_Vykazy_DPH.md).
 
 ### 9.3.5 Pruh „Účetní čeká na doklady"
 
@@ -207,7 +207,7 @@ doklad nezamyká — přeznačení „zaplaceno" není účetní úkon), ale př
 Pro účetní a admina funguje zámek jinak — otevřené období smí upravovat vždy,
 u uzavřeného období dostanou informativní chybu místo tichého zamítnutí a admin
 si může úpravu vynutit (s automatickým záznamem do historie akcí). Detaily
-vynucené editace řeší [§ 55 Bezpečnost — RBAC](102_Bezpecnost.md).
+vynucené editace řeší [§ 55 Bezpečnost — RBAC](101_Bezpecnost.md).
 
 ## 9.6 Náhled portálu pro účetní a admina
 

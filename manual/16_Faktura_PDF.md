@@ -47,7 +47,7 @@ Každá faktura i zálohová faktura může mít **více evidovaných plateb** (
 více převodů, e-mailová avíza). Platby vznikají:
 
 - **automaticky** při párování bankovního výpisu nebo e-mailového avíza
-  (viz [28. Banka](28_Banka.md)) — i částečná platba se shodným variabilním
+  (viz [28. Banka](29_Banka.md)) — i částečná platba se shodným variabilním
   symbolem se zaeviduje,
 - tlačítkem **Částečná úhrada** — modal s částkou (předvyplněn zbytek), datem
   platby, volitelným VS, referencí a poznámkou,
@@ -100,12 +100,12 @@ původní proformy.
 ### 16.1.3 Zaúčtování do deníku
 
 Vystavení faktury a její zaúčtování jsou **dva oddělené kroky** — vystavená
-faktura sama o sobě do [Účetního deníku](48_Ucetni_denik.md) nic nezapíše.
+faktura sama o sobě do [Účetního deníku](52_Ucetni_denik.md) nic nezapíše.
 Tlačítko **Zaúčtovat** (sekundární, vedle hlavní platební/upomínkové akce) se
 zobrazí jen firmám v režimu **podvojné účetnictví**, dokud faktura nemá
 ikonu **Zaúčtováno** (text a datum jsou v tooltipu) a není v konceptu ani stornu. Klikem se zeptá na
 potvrzení („Zaúčtovat doklad do účetního deníku?") a vytvoří zápis podle
-[předkontace](92_Ucetni_nastroje.md#923-predkontace).
+[předkontace](73_Ucetni_nastroje.md#733-predkontace).
 Po úspěchu se detail obnoví, badge se změní na **Zaúčtováno** (s datem v
 tooltipu) a v menu s dalšími akcemi se objeví **Zobrazit v deníku** — proklik
 rovnou na vzniklý zápis.
@@ -120,9 +120,9 @@ Pokud zaúčtování selže, appka zobrazí konkrétní důvod místo obecné ch
 | Doklad nemá řádky k zaúčtování | Faktura je proforma, záloha nebo storno — ty se neúčtují (proforma až po vyúčtování). |
 | Doklad v cizí měně nemá vyplněný směnný kurz | Doplň kurz k datu účetního případu na faktuře. |
 | Pro datum dokladu neexistuje účetní období | Založ období v **Nástroje → Uzávěrka**. |
-| Účetní období je uzavřené | Do uzavřeného období nelze účtovat — viz [Uzávěrka](91_Uzaverka.md). |
+| Účetní období je uzavřené | Do uzavřeného období nelze účtovat — viz [Uzávěrka](72_Uzaverka.md). |
 | Účetní zápis není vyvážený (MD ≠ Dal) | Zkontroluj předkontaci a částky dokladu. |
-| V účtové osnově chybí potřebný účet | Chybí nebo je deaktivovaný účet v předkontaci — doplň/aktivuj v [Účtovém rozvrhu](84_Ucetni_osnova.md). |
+| V účtové osnově chybí potřebný účet | Chybí nebo je deaktivovaný účet v předkontaci — doplň/aktivuj v [Účtovém rozvrhu](66_Ucetni_osnova.md). |
 | Zápis dokladu je stornovaný | Opravu zaúčtuj **novým** zápisem, ne přepisem stornovaného. |
 | Doklad nebyl nalezen / neexistuje | Faktura mezitím byla smazána nebo změnila stav — obnov stránku. |
 
@@ -139,14 +139,14 @@ viz [§ 96.11 Automatické zaúčtování](96_Nastaveni.md#9611-automaticke-zauc
 **Sekce Zaúčtování na detailu.** U zaúčtované faktury se pod položkami rozbalí sekce
 **Zaúčtování** s kontací tak, jak je v deníku. Kromě odkazu **Otevřít v deníku** má:
 
-- **Podle čeho se účtovalo** — [předkontaci](92_Ucetni_nastroje.md#923-predkontace),
+- **Podle čeho se účtovalo** — [předkontaci](73_Ucetni_nastroje.md#733-predkontace),
   ze které kontace vznikla (u vydané faktury podle klíče výnosu na hlavičce, výchozí
   `invoice.services.issued`), její účty MD/Dal a jestli platí firemní, nebo systémové
   výchozí nastavení. Tlačítko **Upravit předkontaci** otevře rovnou ten jeden klíč
-  v Nástrojích. Podrobně [§ 48.8.3](48_Ucetni_denik.md#4883-podle-ceho-se-uctovalo).
+  v Nástrojích. Podrobně [§ 48.8.3](52_Ucetni_denik.md#5283-podle-ceho-se-uctovalo).
 - **Přeúčtovat** (admin/účetní) — opraví kontaci, která v deníku už je. V otevřeném
   období se zápis přepíše, v zamčeném nebo uzavřeném vznikne storno a nový zápis;
-  viz [§ 48.8.2](48_Ucetni_denik.md#4882-preuctovani-z-dokladu-sekce-zauctovani).
+  viz [§ 48.8.2](52_Ucetni_denik.md#5282-preuctovani-z-dokladu-sekce-zauctovani).
 
 ## 16.2 PDF struktura
 
@@ -313,7 +313,7 @@ Odchozí e-maily lze volitelně podepisovat S/MIME certifikátem. Nastavuje se v
 Podpis se aplikuje až na sestavený e-mail včetně příloh; příjemce ho ověří v
 běžném e-mailovém klientovi.
 
-Detail nastavení je v [kapitole 74. Elektronické podpisy](100_Elektronicke_podpisy.md).
+Detail nastavení je v [kapitole 74. Elektronické podpisy](99_Elektronicke_podpisy.md).
 
 ## 16.5 Web faktura (trvalý veřejný odkaz)
 

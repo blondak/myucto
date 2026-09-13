@@ -80,7 +80,7 @@ Doporučený postup pro českého klienta:
 | Výchozí DPH | Volitelný override (jinak se použije systémový default) |
 | Reverse charge | Zatrhni pro EU B2B klienty s DIČ — DPH 0 % + text „Daň přiznává odběratel" |
 | Splatnost | Preset **7 dnů / 14 dnů / Měsíc / Vlastní**, nebo **Použít výchozí** = dědit z dodavatele. „Měsíc" = kalendářní měsíc (1. 2. → 1. 3., 31. 1. → 28. 2.), ne fixních 30 dní |
-| Cenová hladina | Zobrazí se jen se zapnutým skladem. **Default** = bez hladiny, skladové zboží se naceňuje standardní cenou. Jinak aktivní hladina firmy, podle které se naceňují skladové položky faktury (viz [§ 36.18](36_Eshop.md#3618-cenove-hladiny)) |
+| Cenová hladina | Zobrazí se jen se zapnutým skladem. **Default** = bez hladiny, skladové zboží se naceňuje standardní cenou. Jinak aktivní hladina firmy, podle které se naceňují skladové položky faktury (viz [§ 36.18](38_Eshop.md#3818-cenove-hladiny)) |
 | Poznámka | Interní text — nezobrazí se na faktuře |
 
 ### 18.2.2 18.2.1a Slovenský klient a národní daňová čísla

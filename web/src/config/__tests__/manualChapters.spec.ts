@@ -28,17 +28,17 @@ describe('contextual manual for application menu', () => {
   })
 
   it.each([
-    ['/reports/cnb-rate-audit', '82_Ucetni_kontroly_a_inventarizace'],
-    ['/reports/invoice-series-completeness', '82_Ucetni_kontroly_a_inventarizace'],
-    ['/reports/vat-coefficient', '39_Vykazy_DPH'],
-    ['/reports/s46', '39_Vykazy_DPH'],
+    ['/reports/cnb-rate-audit', '46_Ucetni_kontroly_a_inventarizace'],
+    ['/reports/invoice-series-completeness', '46_Ucetni_kontroly_a_inventarizace'],
+    ['/reports/vat-coefficient', '41_Vykazy_DPH'],
+    ['/reports/s46', '41_Vykazy_DPH'],
     ['/hosting', '105_Licence_a_aktivace'],
-    ['/admin/databox', '98_Datova_schranka'],
-    ['/admin/isds-gateway', '99_Odesilaci_brana_ISDS'],
-    ['/isds-gateway/callback', '99_Odesilaci_brana_ISDS'],
+    ['/admin/databox', '97_Datova_schranka'],
+    ['/admin/isds-gateway', '98_Odesilaci_brana_ISDS'],
+    ['/isds-gateway/callback', '98_Odesilaci_brana_ISDS'],
     ['/admin/diagnostics', '999_Reseni_problemu'],
     ['/admin/support', '999_Reseni_problemu'],
-    ['/admin/bank-rule-templates', '83_Sablony'],
+    ['/admin/bank-rule-templates', '65_Sablony'],
   ])('uses the subject-specific chapter for %s', (path, chapter) => {
     expect(manualChapter(path)).toBe(chapter)
   })
