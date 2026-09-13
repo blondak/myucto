@@ -166,6 +166,9 @@ final class PayrollEmployeeDeletionRepository
             'payroll_person_contacts',
             'payroll_person_identifiers',
             'payroll_person_accounts',
+            // Vazba osobního čísla nebo jména z importu docházky na osobu —
+            // bez osoby nemá na co ukazovat.
+            'payroll_import_links',
         ],
         'dependants' => ['payroll_dependants'],
         'tax' => [

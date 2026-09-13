@@ -344,6 +344,27 @@ final class PayrollPeopleListScaleTest extends TestCase
         self::assertSame([$ids[2]], $this->pageIds($escape));
     }
 
+    /**
+     * Osobní číslo je kód pracovního vztahu. Seznam ho ukazuje pod jménem,
+     * takže podle něj musí jít i hledat — celé i částí.
+     */
+    public function testSearchFindsPersonByPersonalNumber(): void
+    {
+        $this->seed(3);
+        $ids = $this->employeeIds();
+        $this->exec(
+            'UPDATE payroll_employments SET code = "Z0042" WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, $ids[1]],
+        );
+
+        $exact = $this->people->listForTenant($this->supplierId, 100, 0, 'all', 'Z0042');
+        $partial = $this->people->listForTenant($this->supplierId, 100, 0, 'all', 'z004');
+
+        self::assertSame(1, $exact['total']);
+        self::assertSame([$ids[1]], $this->pageIds($exact));
+        self::assertSame([$ids[1]], $this->pageIds($partial));
+    }
+
     /** @return list<int> */
     private function employeeIds(): array
     {

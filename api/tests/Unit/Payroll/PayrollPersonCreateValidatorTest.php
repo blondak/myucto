@@ -133,6 +133,23 @@ final class PayrollPersonCreateValidatorTest extends TestCase
         self::assertSame('111', $result['health_insurer_code']);
     }
 
+    /**
+     * Osobní číslo se zadává rovnou při založení; prázdné znamená, že ho
+     * služba vygeneruje. Tvar je týž jako u přejmenování vztahu.
+     */
+    public function testEmploymentCodeIsOptionalAndValidated(): void
+    {
+        self::assertNull(self::validator()->validate(self::baseInput())['employment_code']);
+        self::assertNull(self::validator()->validate(['employment_code' => ' '] + self::baseInput())['employment_code']);
+
+        $result = self::validator()->validate(['employment_code' => ' Z0042 '] + self::baseInput());
+        self::assertSame('Z0042', $result['employment_code']);
+        self::assertSame('Z0042', $result['employment']['code']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        self::validator()->validate(['employment_code' => 'os. č. 1'] + self::baseInput());
+    }
+
     /** Meze i tvar hlídá jediný validátor podmínek — tady se jen předává dál. */
     public function testRejectsWeeklyHoursOverTheLegalCeiling(): void
     {

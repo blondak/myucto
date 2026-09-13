@@ -59,6 +59,24 @@ export function employmentCodeLabel(code: string | null | undefined): string {
   return trimmed === '' || trimmed.toLowerCase() === 'legacy' ? '' : trimmed
 }
 
+type PersonalNumberTranslate = (key: string, named: Record<string, unknown>) => string
+
+/**
+ * Kód vztahu je osobní číslo zaměstnance. Holá hodnota vedle druhu vztahu
+ * („Příjem společníka · 1") se jako osobní číslo nečte, proto vždy s popiskem.
+ */
+export function personalNumberLabel(t: PersonalNumberTranslate, code: string | null | undefined): string {
+  const shown = employmentCodeLabel(code)
+  return shown === '' ? '' : t('payroll.common.personal_number_short', { code: shown })
+}
+
+/** Tvar osobního čísla stejně jako `PayrollEmploymentValidator` (po ořezu mezer). */
+const PERSONAL_NUMBER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/
+
+export function isValidPersonalNumber(code: string): boolean {
+  return PERSONAL_NUMBER_PATTERN.test(code.trim())
+}
+
 /**
  * Poznámka k události časové osy. Technické poznámky vložené migrací nejsou
  * text pro uživatele — „Legacy projekce" (migrace 1196) je značka převodu,

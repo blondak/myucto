@@ -453,6 +453,16 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/recurring-components$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/recurring-components(?:/.*)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/input-imports/(preview|apply)$#', 'payroll.inputs.write', AccessLevel::WRITE],
+        // Import registrací zakládá osoby a vztahy a zapisuje jejich identifikátory
+        // od ČSSZ — stejné právo jako ruční založení osoby.
+        ['POST', '#^/api/payroll/imports/registrations/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
+        // Založení chybějících osob z podkladů je personální zápis, ne mzdový vstup.
+        ['POST', '#^/api/payroll/imports/attendance/persons$#', 'payroll.person.write', AccessLevel::WRITE],
+        // Profily mapování sloupců jsou nastavení firmy; číst je smí každý, kdo importuje.
+        ['POST', '#^/api/payroll/imports/attendance/profiles(?:/import|/[0-9]+/copy)?$#', 'payroll.settings', AccessLevel::WRITE],
+        ['DELETE', '#^/api/payroll/imports/attendance/profiles/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/imports/attendance/(batches(?:/[0-9]+)?|profiles(?:/[0-9]+/export)?)$#', 'payroll.inputs.write', AccessLevel::READ],
+        ['POST', '#^/api/payroll/imports/attendance/(preview|apply)$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/account-options$#', 'payroll.settings', AccessLevel::READ],

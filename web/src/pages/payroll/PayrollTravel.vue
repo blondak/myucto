@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { personalNumberLabel } from './employmentLifecycleUi'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -156,7 +157,7 @@ const focusName = computed(() => {
   if (id === null) return null
   const employment = employments.value.find(item => item.id === id)
   return employment
-    ? `${employment.full_name} · ${employment.code}`
+    ? [employment.full_name, personalNumberLabel(t, employment.code)].filter(part => part !== '').join(' · ')
     : t('payroll.agendas.focus.unknown_person')
 })
 /**
@@ -600,7 +601,7 @@ onMounted(load)
               <tr v-for="trip in trips" :key="trip.id" data-test="travel-row">
                 <td v-if="tbl.isVisible('employee')" class="px-4 py-3">
                   <div class="font-medium text-neutral-900">{{ trip.employee_name }}</div>
-                  <div class="text-xs text-neutral-500">{{ trip.employment_code }}</div>
+                  <div class="text-xs text-neutral-500">{{ personalNumberLabel(t, trip.employment_code) }}</div>
                 </td>
                 <td v-if="tbl.isVisible('route')" class="px-4 py-3">
                   <div class="text-neutral-900">{{ trip.origin_place }} → {{ trip.destination_place }}</div>
@@ -677,7 +678,7 @@ onMounted(load)
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div class="min-w-0">
                 <h2 class="truncate font-semibold text-neutral-900">{{ trip.employee_name }}</h2>
-                <p class="truncate text-xs text-neutral-500">{{ trip.employment_code }}</p>
+                <p class="truncate text-xs text-neutral-500">{{ personalNumberLabel(t, trip.employment_code) }}</p>
               </div>
               <span
                 class="rounded-full px-2 py-1 text-xs font-medium"

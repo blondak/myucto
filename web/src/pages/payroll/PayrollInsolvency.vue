@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { personalNumberLabel } from './employmentLifecycleUi'
 import { useRoute } from 'vue-router'
 import { documentsApi, type DocItem } from '@/api/documents'
 import {
@@ -238,7 +239,7 @@ async function cancelApproved() {
   const employment = options.value.employments.find(item => item.id === employmentId.value)
   if (!window.confirm(t('payroll.insolvency.cancel_confirm', {
     period: period.value,
-    employment: employment?.code ?? t('payroll.insolvency.employment_unknown'),
+    employment: (employment && personalNumberLabel(t, employment.code)) || t('payroll.insolvency.employment_unknown'),
   }))) return
   saving.value = true
   try {
@@ -358,7 +359,7 @@ watch([employeeId, period], load, { immediate: true })
           <select v-model="employmentId" :disabled="!canWrite || saving" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="insolvency-employment">
             <option :value="null">{{ t('payroll.insolvency.select_employment') }}</option>
             <option v-for="item in options.employments" :key="item.id" :value="item.id">
-              {{ item.code }} · {{ item.actual_start_date || item.start_date || '—' }}<template v-if="item.end_date"> – {{ item.end_date }}</template>
+              <template v-if="personalNumberLabel(t, item.code)">{{ personalNumberLabel(t, item.code) }} · </template>{{ item.actual_start_date || item.start_date || '—' }}<template v-if="item.end_date"> – {{ item.end_date }}</template>
             </option>
           </select>
           <span v-if="options.employments.length === 0" class="mt-1 block text-danger-700">{{ t('payroll.insolvency.no_employments') }}</span>

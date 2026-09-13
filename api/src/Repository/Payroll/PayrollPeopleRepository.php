@@ -137,9 +137,15 @@ final class PayrollPeopleRepository
         $search = trim($search);
         if ($search !== '') {
             // Hledá se v účinném jméně, ne ve sloupci — po přejmenování osoby
-            // by ji hledání podle sloupce přestalo najít.
-            $sql .= ' AND ' . self::fullNameExpression()
-                . " LIKE ? ESCAPE '" . self::LIKE_ESCAPE . "'";
+            // by ji hledání podle sloupce přestalo najít. Osobní číslo je kód
+            // pracovního vztahu; osoba se najde podle kteréhokoli svého vztahu.
+            $sql .= ' AND (' . self::fullNameExpression()
+                . " LIKE ? ESCAPE '" . self::LIKE_ESCAPE . "'"
+                . ' OR EXISTS (SELECT 1 FROM payroll_employments search_employment'
+                . ' WHERE search_employment.supplier_id = employee.supplier_id'
+                . ' AND search_employment.employee_id = employee.id'
+                . " AND search_employment.code LIKE ? ESCAPE '" . self::LIKE_ESCAPE . "'))";
+            $params[] = '%' . self::escapeLike($search) . '%';
             $params[] = '%' . self::escapeLike($search) . '%';
         }
 

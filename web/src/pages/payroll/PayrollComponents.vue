@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { personalNumberLabel } from './employmentLifecycleUi'
 import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
@@ -162,7 +163,7 @@ const focusName = computed(() => {
   const employment = employments.value.find(item => item.employment_id === id)
   return employment === undefined
     ? t('payroll.agendas.focus.unknown_person')
-    : `${employment.full_name} · ${employment.code}`
+    : [employment.full_name, personalNumberLabel(t, employment.code)].filter(part => part !== '').join(' · ')
 })
 /**
  * Server zúžení uplatnil a nezbylo nic — ani opakovaná složka, ani vstup.

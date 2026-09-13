@@ -944,6 +944,21 @@ final class Routes
             $g->delete('/travel/trips/{id:[0-9]+}', [PayrollTravelAction::class, 'delete']);
             $g->post('/input-imports/preview', [PayrollInputImportsAction::class, 'preview']);
             $g->post('/input-imports/apply', [PayrollInputImportsAction::class, 'apply']);
+            // Mzdy → Importy: registrace ČSSZ (REGZEC/PREZEC) a měsíční podklady
+            // z docházkového systému. Obojí je náhled → použití nad týmiž soubory.
+            $g->post('/imports/registrations/preview', [\MyInvoice\Action\Payroll\PayrollRegistrationImportAction::class, 'preview']);
+            $g->post('/imports/registrations/apply', [\MyInvoice\Action\Payroll\PayrollRegistrationImportAction::class, 'apply']);
+            $g->post('/imports/attendance/preview', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'preview']);
+            $g->post('/imports/attendance/apply', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'apply']);
+            $g->post('/imports/attendance/persons', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'persons']);
+            $g->get('/imports/attendance/batches', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'batches']);
+            $g->get('/imports/attendance/batches/{id:[0-9]+}', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'batch']);
+            $g->get('/imports/attendance/profiles', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'profiles']);
+            $g->post('/imports/attendance/profiles', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'saveProfile']);
+            $g->delete('/imports/attendance/profiles/{id:[0-9]+}', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'deleteProfile']);
+            $g->post('/imports/attendance/profiles/{id:[0-9]+}/copy', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'copyProfile']);
+            $g->get('/imports/attendance/profiles/{id:[0-9]+}/export', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'exportProfile']);
+            $g->post('/imports/attendance/profiles/import', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'importProfile']);
             $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
             $g->get('/payments/payer-options', [PayrollPaymentAction::class, 'listPayerOptions']);
             $g->get('/payments/batches', [PayrollPaymentAction::class, 'listBatches']);

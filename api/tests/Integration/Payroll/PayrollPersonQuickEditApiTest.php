@@ -217,6 +217,71 @@ final class PayrollPersonQuickEditApiTest extends TestCase
         self::assertCount(2, $employmentAfterConflict['terms']);
     }
 
+    /**
+     * Osobní číslo (kód vztahu) se v rychlé úpravě mění přejmenováním —
+     * samotná změna čísla nesmí založit novou verzi sjednaných podmínek.
+     */
+    public function testPersonalNumberChangesWithoutNewTermsVersion(): void
+    {
+        $profile = $this->profiles->save(
+            $this->supplierId,
+            $this->employeeId,
+            $this->profileValidator->validate($this->profilePayload('Původní Zaměstnanec')),
+            0,
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $employment = $this->employments->create(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentValidator->create([
+                'code' => 'ZAM-1',
+                'relation_type' => 'employment',
+                'monthly_gross_minor' => 4_200_000,
+                'terms' => $this->termsPayload('2026-01-01', '40'),
+            ]),
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $profilePayload = [
+            ...$this->profilePayload('Původní Zaměstnanec'),
+            'row_version' => $profile['row_version'],
+            'identity_history' => [[
+                'id' => $profile['identity_history'][0]['id'],
+                'full_name' => 'Původní Zaměstnanec',
+                'first_name' => 'Původní',
+                'last_name' => 'Zaměstnanec',
+                'effective_from' => '2026-01-01',
+                'effective_to' => null,
+            ]],
+        ];
+
+        $saved = $this->put([
+            'profile' => $profilePayload,
+            'employment' => null,
+            'employment_code' => ['employment_id' => $employment['id'], 'code' => 'Z0042'],
+        ]);
+
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        self::assertSame('Z0042', $this->json($saved)['employment']['code']);
+        $stored = $this->employments->listForEmployee($this->supplierId, $this->employeeId)[0];
+        self::assertSame('Z0042', $stored['code']);
+        self::assertCount(1, $stored['terms']);
+
+        $invalid = $this->put([
+            'profile' => [...$profilePayload, 'row_version' => (int) $this->json($saved)['profile']['row_version']],
+            'employment' => null,
+            'employment_code' => ['employment_id' => $employment['id'], 'code' => 'os. č. 1'],
+        ]);
+        self::assertNotSame(200, $invalid->getStatusCode());
+        self::assertSame(
+            'Z0042',
+            $this->employments->listForEmployee($this->supplierId, $this->employeeId)[0]['code'],
+        );
+    }
+
     public function testQuickEditRequiresSessionAndBothWritePermissions(): void
     {
         $personOnly = new EffectiveRole(

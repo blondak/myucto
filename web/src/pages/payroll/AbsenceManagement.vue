@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { personalNumberLabel } from './employmentLifecycleUi'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -1369,7 +1370,7 @@ onMounted(async () => {
                 >
                 <div>
                   <h3 class="font-semibold text-neutral-900">{{ t(`payroll_absence.types.${item.absence_type}`) }}</h3>
-                  <p class="mt-0.5 text-sm text-neutral-500">{{ item.full_name }} · {{ item.employment_code }}</p>
+                  <p class="mt-0.5 text-sm text-neutral-500">{{ item.full_name }}<template v-if="personalNumberLabel(t, item.employment_code)"> · {{ personalNumberLabel(t, item.employment_code) }}</template></p>
                 </div>
               </div>
               <span class="rounded-full px-2 py-1 text-xs font-medium" :class="{
@@ -1674,7 +1675,7 @@ onMounted(async () => {
           <label v-for="candidate in leaveCandidates" :key="candidate.employment_id" class="flex items-start gap-3 p-3" :class="candidate.ready ? 'cursor-pointer' : 'bg-neutral-50'">
             <input v-if="canWrite" v-model="selectedLeaveCandidates" type="checkbox" :value="candidate.employment_id" :disabled="!candidate.ready" class="mt-1 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
             <span class="min-w-0 flex-1">
-              <span class="block font-medium text-neutral-900">{{ candidate.employee_name }} · {{ candidate.employment_code }}</span>
+              <span class="block font-medium text-neutral-900">{{ candidate.employee_name }}<template v-if="personalNumberLabel(t, candidate.employment_code)"> · {{ personalNumberLabel(t, candidate.employment_code) }}</template></span>
               <span v-if="candidate.ready" class="mt-1 block text-xs text-neutral-500">
                 {{ t('payroll_absence.leave.automatic_summary', {
                   hours: minutes(candidate.weekly_minutes ?? 0),

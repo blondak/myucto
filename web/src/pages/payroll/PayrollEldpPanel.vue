@@ -19,6 +19,7 @@ import { RouterLink } from 'vue-router'
 import { eldpRemediation, type EldpBlocker } from './payrollRemediation'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
+import { personalNumberLabel } from './employmentLifecycleUi'
 import { documentsApi, type DocItem } from '@/api/documents'
 import {
   payrollApi,
@@ -105,8 +106,8 @@ const employmentOptions = computed(() =>
   employments.value.map(employment => ({
     value: employment.id,
     label: employment.end_date
-      ? `${employment.code} (${employment.start_date ?? '?'} – ${employment.end_date})`
-      : `${employment.code} (${employment.start_date ?? '?'})`,
+      ? `${personalNumberLabel(t, employment.code) || '—'} (${employment.start_date ?? '?'} – ${employment.end_date})`
+      : `${personalNumberLabel(t, employment.code) || '—'} (${employment.start_date ?? '?'})`,
   })))
 const yearOptions = computed(() => {
   const current = new Date().getFullYear()

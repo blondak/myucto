@@ -44,7 +44,7 @@ import PayrollPersonStatutoryEvidencePanel from './PayrollPersonStatutoryEvidenc
 import PayrollPersonForeignPermitPanel from './PayrollPersonForeignPermitPanel.vue'
 import PersonDataGapBadge from './PersonDataGapBadge.vue'
 import PersonDataGapSummary from './PersonDataGapSummary.vue'
-import { todayIso } from './employmentLifecycleUi'
+import { employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import {
   payrollAgendaLabelKey,
   payrollAgendas,
@@ -181,6 +181,7 @@ const employeeForm = reactive({
   birth_number: '',
   relation_type: 'employment' as PayrollRelationType,
   planned_start_on: todayIso(),
+  employment_code: '',
   monthly_gross: null as number | null,
   weekly_hours: '40.00',
   office_id: null as number | null,
@@ -203,6 +204,11 @@ const newEmployeeFullName = computed(
     .join(' '),
 )
 const selectedNewEmployeeOffice = computed(() => officeOption(employeeForm.office_id))
+/** Prázdné osobní číslo je v pořádku (server ho přidělí), jen zadané se kontroluje. */
+const newEmployeeCodeInvalid = computed(() =>
+  employeeForm.employment_code.trim() !== ''
+  && !isValidPersonalNumber(employeeForm.employment_code),
+)
 /**
  * Editace osoby je vlastní POHLED, ne panel nad seznamem.
  *
@@ -428,7 +434,8 @@ function employmentStatusLabel(status: PayrollEmploymentStatus): string {
 
 function employmentPickerLabel(employment: PayrollPersonEmploymentRef): string {
   const parts = [relationLabel(employment.relation_type)]
-  if (employment.code !== '') parts.push(employment.code)
+  const personalNumber = personalNumberLabel(t, employment.code)
+  if (personalNumber !== '') parts.push(personalNumber)
   parts.push(employmentStatusLabel(employment.status))
   return parts.join(' · ')
 }
@@ -486,6 +493,7 @@ function resetEmployeeForm() {
   employeeForm.birth_number = ''
   employeeForm.relation_type = 'employment'
   employeeForm.planned_start_on = todayIso()
+  employeeForm.employment_code = ''
   employeeForm.monthly_gross = null
   employeeForm.weekly_hours = '40.00'
   employeeForm.office_id = null
@@ -541,12 +549,14 @@ function statusLabel(isActive: boolean): string {
  * nenarostl; `+2` je bez gramatiky, proto nepotřebuje překlad.
  */
 function personCodeLabel(person: PayrollPersonListItem): string {
-  const refs = person.employment_refs
-  if (refs.length === 0) return ''
-  const ordered = [...refs].sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
-  const shown = ordered.slice(0, 2).map(item => item.code).join(', ')
-  const rest = ordered.length - 2
-  return rest > 0 ? `${shown} +${rest}` : shown
+  const codes = [...person.employment_refs]
+    .sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
+    .map(item => employmentCodeLabel(item.code))
+    .filter(code => code !== '')
+  if (codes.length === 0) return ''
+  const shown = codes.slice(0, 2).join(', ')
+  const rest = codes.length - 2
+  return t('payroll.common.personal_number_short', { code: rest > 0 ? `${shown} +${rest}` : shown })
 }
 
 /**
@@ -823,6 +833,10 @@ async function createEmployee() {
     toast.error(employeeError.value)
     return
   }
+  if (newEmployeeCodeInvalid.value) {
+    toast.error(t('payroll.common.personal_number_invalid'))
+    return
+  }
   savingEmployee.value = true
   employeeError.value = ''
   const payload: PayrollPersonCreatePayload = {
@@ -833,6 +847,7 @@ async function createEmployee() {
     birth_number: employeeForm.birth_number.trim() || null,
     relation_type: employeeForm.relation_type,
     planned_start_on: employeeForm.planned_start_on,
+    employment_code: employeeForm.employment_code.trim() || null,
     monthly_gross: Number(employeeForm.monthly_gross) > 0
       ? Number(employeeForm.monthly_gross)
       : null,
@@ -1318,6 +1333,22 @@ onMounted(async () => {
           {{ t('payroll.people.create.planned_start') }} <RequiredMark />
           <DateInput v-model="employeeForm.planned_start_on" required class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-planned-start" />
         </label>
+        <label class="min-w-0 text-xs text-neutral-600">
+          {{ t('payroll.common.personal_number') }}
+          <input
+            v-model="employeeForm.employment_code"
+            maxlength="64"
+            autocomplete="off"
+            :aria-invalid="newEmployeeCodeInvalid"
+            class="mt-1 w-full min-w-0 rounded-md border bg-surface px-3 py-2 text-sm"
+            :class="newEmployeeCodeInvalid ? 'border-danger-500' : 'border-neutral-300'"
+            data-test="new-employee-code"
+          >
+          <span v-if="newEmployeeCodeInvalid" class="mt-1 block text-xs text-danger-700" role="alert" data-test="new-employee-code-error">
+            {{ t('payroll.common.personal_number_invalid') }}
+          </span>
+          <span v-else class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.create.personal_number_hint') }}</span>
+        </label>
       </div>
 
       <!--
@@ -1758,7 +1789,7 @@ onMounted(async () => {
                         :title="t('payroll.people.person_code')"
                         :data-test="`person-code-${person.id}`"
                       >
-                        <span class="sr-only">{{ t('payroll.people.person_code') }}: </span>{{ personCodeLabel(person) }}
+                        {{ personCodeLabel(person) }}
                       </span>
                     </span>
                     <p
@@ -1833,7 +1864,7 @@ onMounted(async () => {
                   class="mt-0.5 block text-xs font-normal text-neutral-500"
                   :data-test="`person-code-mobile-${person.id}`"
                 >
-                  <span class="sr-only">{{ t('payroll.people.person_code') }}: </span>{{ personCodeLabel(person) }}
+                  {{ personCodeLabel(person) }}
                 </span>
               </h2>
               <div class="flex flex-wrap gap-1.5">

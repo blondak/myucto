@@ -1,0 +1,218 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Payroll\Import\Attendance;
+
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceColumnMapper;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendancePersonAggregator;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceRules;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceRuleSuggester;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfile;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSheetAnalyzer;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceText;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceWorkbookReader;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Vzor GIRITON nad syntetickými podklady v téže struktuře jako skutečné
+ * exporty: datum exportu místo hlavičky nad jmény, výpočetní list s peněžními
+ * sloupci, součty, sazbami v hlavičce, kopiemi jmen a opakovanou hlavičkou,
+ * pomocný list s dalšími jmény, hlavní seznam osob a CSV mezd.
+ */
+final class AttendanceSampleProfileTest extends TestCase
+{
+    private const DURATION = '[h]:mm';
+
+    public function testSampleRulesAndComponentsAreValid(): void
+    {
+        self::assertSame(AttendanceSampleProfile::rules(), AttendanceRules::validate(AttendanceSampleProfile::rules()));
+        self::assertCount(
+            count(AttendanceSampleProfile::components()),
+            AttendanceProfileComponents::validate(AttendanceSampleProfile::components()),
+        );
+    }
+
+    public function testSampleMapsTheWholeStructureWithoutConflictsOrExtraPersons(): void
+    {
+        $result = $this->pipeline($this->files(), AttendanceSampleProfile::rules());
+
+        $used = [];
+        foreach ($result['sheets'] as $sheet) {
+            if ($sheet['person_column'] !== null && $sheet['data_rows'] > 0) {
+                $used[] = $sheet['sheet']->id();
+            }
+        }
+        self::assertSame(['podklady.xlsx#Mzdy 06-26', 'provoz.xlsx#data', 'provoz.xlsx#výpočet', 'mzdy.csv#CSV'], $used);
+
+        $persons = [];
+        foreach ($result['persons'] as $person) {
+            $persons[$person['key']] = $person;
+            self::assertSame([], $person['warnings'], $person['display_name']);
+        }
+        ksort($persons);
+        // Pomocný list „Produktivita" má vlastní jména — osoby z něj nevznikají.
+        self::assertSame(['jana novakova', 'petr svoboda'], array_keys($persons));
+
+        $jana = $persons['jana novakova'];
+        $metrics = array_column($jana['metrics'], null, 'meaning');
+        self::assertSame('160.50', $metrics['worked_hours']['hours']);
+        self::assertStringContainsString('výpočet', $metrics['worked_hours']['source']);
+        self::assertSame('16.00', $metrics['vacation_hours']['hours']);
+        self::assertStringContainsString('výpočet', $metrics['vacation_hours']['source']);
+        self::assertSame('30.00', $metrics['afternoon_hours']['hours']);
+        self::assertSame('36.50', $metrics['home_office_hours']['hours']);
+        self::assertSame('Z001', $jana['personal_number']);
+        self::assertNull($jana['monthly_wage']);
+        self::assertSame('42000', $persons['petr svoboda']['monthly_wage']);
+        self::assertSame(4_500_000, $jana['reference']['gross_minor']);
+
+        $components = array_column($jana['components'], 'amount_minor', 'component_code');
+        ksort($components);
+        self::assertSame([
+            'DOCH_PREMIE_ZA_BALENI' => 70_000,
+            'MZDA_HODINOVA_DOCH' => 2_352_000,
+            'MZDA_HODINOVA_NOC' => 172_900,
+            'MZDA_UKOLOVA' => 1_292_900,
+            'ODMENA' => 200_000,
+            'PRIPLATEK_BOZP' => 170_000,
+            'PRIPLATKY_K_HODINOVE' => 673_800,
+        ], $components);
+
+        // Kopie jmen s nulami, součty a sazby v hlavičce složku nevyrobí.
+        self::assertSame(['DOCH_PREMIE_ZA_BALENI' => 'Prémie za balení'], $result['auto_components']);
+    }
+
+    public function testPersonColumnWithoutLabelGetsPlaceholderEvenWhenNamesCarryNumbers(): void
+    {
+        $sheets = (new AttendanceWorkbookReader())->read('export.xlsx', 0, 'xlsx', AttendanceFixture::xlsx([
+            'data' => [
+                'rows' => [
+                    1 => ['A' => 46203, 'B' => 'Práce (celkem)', 'C' => 'Dovolená'],
+                    2 => ['A' => 'Zaměstnanec Z0042', 'B' => 0.5, 'C' => 0.25],
+                    3 => ['A' => 'Novák Jan (Z0990)', 'B' => 0.5, 'C' => 0.0],
+                ],
+                'formats' => ['A1' => 'd.m.yyyy', 'B2:C3' => self::DURATION],
+            ],
+        ]));
+        $layout = (new AttendanceSheetAnalyzer(new AttendanceRuleSuggester()))->analyze($sheets[0]);
+
+        self::assertSame(1, $layout->suggestedPersonColumn);
+        self::assertSame(AttendanceSheetAnalyzer::PERSON_PLACEHOLDER, $layout->headers[1]);
+    }
+
+    public function testPersonNameDetection(): void
+    {
+        self::assertTrue(AttendanceText::looksLikePersonName('Jana Nováková'));
+        self::assertTrue(AttendanceText::looksLikePersonName('Zaměstnanec Z0042'));
+        self::assertTrue(AttendanceText::looksLikePersonName('Novák Jan (Z0990)'));
+        self::assertFalse(AttendanceText::looksLikePersonName('Linka 2'));
+        self::assertFalse(AttendanceText::looksLikePersonName('Porucha A10 B20'));
+        self::assertFalse(AttendanceText::looksLikePersonName('12:30'));
+        self::assertFalse(AttendanceText::looksLikePersonName('Celkem'));
+    }
+
+    public function testWildcardRulesMatchNormalizedText(): void
+    {
+        self::assertTrue(AttendanceRules::like('výpočet*', 'vypocet'));
+        self::assertTrue(AttendanceRules::like('mzdy*', 'mzdy 07-26'));
+        self::assertTrue(AttendanceRules::like('suma hodinovky noc*', 'suma hodinovky noc vc.prescasu a bp'));
+        self::assertFalse(AttendanceRules::like('suma hodinovky noc*', 'suma hodinovky vc. prescasu'));
+        self::assertTrue(AttendanceRules::like('přesčas*25*', 'prescas den x 25%'));
+        self::assertTrue(AttendanceRules::like('úkol', 'ukol'));
+        self::assertFalse(AttendanceRules::like('úkol', 'mzda ukol'));
+    }
+
+    /** @return list<array{name:string,content:string,sha256:string,extension:string}> */
+    private function files(): array
+    {
+        $day = 1 / 24;
+        $export = AttendanceFixture::xlsx([
+            'data' => [
+                'rows' => [
+                    1 => [
+                        'A' => 46203, 'B' => 'mzda paušál', 'D' => 'Práce (celkem)', 'E' => 'Činnost A +10 Kč',
+                        'F' => 'Dovolená', 'G' => 'Práce odpolední', 'H' => 'Home Office',
+                    ],
+                    2 => ['A' => 'Jana Nováková', 'D' => 160 * $day, 'E' => 40 * $day, 'F' => 15 * $day, 'G' => 30 * $day, 'H' => 36.5 * $day],
+                    3 => ['A' => 'Petr Svoboda', 'D' => 150 * $day, 'F' => 0.0, 'G' => 0.0],
+                ],
+                'formats' => ['A1' => 'd.m.yyyy', 'D2:H3' => self::DURATION],
+            ],
+            'výpočet' => [
+                'rows' => [
+                    1 => [
+                        'A' => 46203, 'B' => 'Fond prac. doby', 'C' => 'úkol',
+                        'D' => 'Odpracováno celkem včetně přesčasů', 'E' => 'Dovolená', 'F' => 'mzda úkol',
+                        'G' => 'Suma hodinovky vč. přesčasů', 'H' => 'Suma hodinovky NOC', 'I' => 'Suma hodinovky NOC',
+                        'J' => 'Prémie za balení', 'K' => 'Součet mzdy', 'L' => 'paušál', 'M' => '140',
+                        'N' => 'Příplatky k hodinové mzdě',
+                    ],
+                    2 => [
+                        'A' => 'Jana Nováková', 'B' => 176, 'C' => 32.6, 'D' => 160.5, 'E' => 16, 'F' => 12929,
+                        'G' => 23520, 'H' => 1729, 'I' => 999, 'J' => 700, 'K' => 25249, 'L' => 'Petr Svoboda',
+                        'M' => 5 * $day, 'N' => 6738,
+                    ],
+                    3 => [
+                        'A' => 'Petr Svoboda', 'B' => 176, 'C' => 0, 'D' => 150, 'E' => 0, 'F' => 0,
+                        'G' => 21000, 'H' => 0, 'I' => 0, 'J' => 0, 'K' => 21000, 'L' => 0, 'M' => 0, 'N' => 0,
+                    ],
+                ],
+                'formats' => ['A1' => 'd.m.yyyy', 'M2:M3' => self::DURATION],
+            ],
+            'Produktivita' => [
+                'rows' => [
+                    1 => ['A' => 'pořadí', 'B' => 'Jméno', 'C' => 'Fond'],
+                    2 => ['A' => 1, 'B' => 'Jana Nováková', 'C' => 176],
+                    3 => ['A' => 2, 'B' => 'Eva Pomocná', 'C' => 176],
+                ],
+            ],
+        ]);
+        $main = AttendanceFixture::xlsx([
+            'Mzdy 06-26' => [
+                'rows' => [
+                    1 => ['A' => 2026, 'I' => 'obědy'],
+                    2 => [
+                        'A' => 'jméno a příjmení', 'B' => 'oddělení', 'C' => 'středisko', 'D' => 'týdenní fond',
+                        'E' => 'název pozice', 'F' => 'MV', 'G' => 'příplatek BOZP', 'H' => 'nový nástup/ukončení',
+                        'I' => 'Součet z výpočtu obědů', 'J' => 'Srážky', 'K' => 'Odměny/bonus/příspěvky',
+                    ],
+                    3 => ['A' => 'Jana Nováková', 'B' => 'výroba', 'C' => 'VÝROBA', 'D' => 40, 'E' => 'Operátorka', 'G' => 1700, 'I' => 610, 'K' => 2000],
+                    4 => ['A' => 'Petr Svoboda', 'B' => 'sklad', 'C' => 'SKLAD', 'D' => 40, 'E' => 'Skladník', 'F' => 42000, 'G' => 0, 'J' => 500],
+                ],
+            ],
+        ]);
+        $csv = "X,Měsíc,Rok,Zaměstnanec,Rodné číslo,Osobní číslo,Pracpoměr,Odprachod,Hrubá mzda,Čistá mzda\n"
+            . "NEPRAVDA,červen,2026,Jana Nováková," . AttendanceFixture::janaBirthNumber()
+            . ",Z001,Pracovní poměr,\"160,5\",\"45 000,00 Kč\",\"35 000,00 Kč\"\n"
+            . "NEPRAVDA,červen,2026,Petr Svoboda," . AttendanceFixture::petrBirthNumber()
+            . ",Z002,Pracovní poměr,150,\"42 000,00 Kč\",\"33 000,00 Kč\"\n";
+
+        return [
+            AttendanceFixture::file('podklady.xlsx', $main),
+            AttendanceFixture::file('provoz.xlsx', $export),
+            AttendanceFixture::file('mzdy.csv', $csv),
+        ];
+    }
+
+    /**
+     * @param list<array{name:string,content:string,sha256:string,extension:string}> $files
+     * @param list<array<string,mixed>> $rules
+     * @return array<string,mixed>
+     */
+    private function pipeline(array $files, array $rules): array
+    {
+        $reader = new AttendanceWorkbookReader();
+        $sheets = [];
+        foreach ($files as $index => $file) {
+            array_push($sheets, ...$reader->read($file['name'], $index, $file['extension'], $file['content']));
+        }
+        $suggester = new AttendanceRuleSuggester();
+        $mapper = new AttendanceColumnMapper(new AttendanceSheetAnalyzer($suggester), $suggester);
+        /** @var list<array{sheet:?string,header:string,meaning:string,unit:?string,component_code:?string}> $rules */
+        $mapped = $mapper->map($sheets, AttendanceRules::validate($rules));
+
+        return $mapped + ['persons' => (new AttendancePersonAggregator($mapper))->aggregate($mapped['sheets'])];
+    }
+}

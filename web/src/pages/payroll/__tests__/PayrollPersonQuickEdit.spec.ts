@@ -41,7 +41,9 @@ vi.mock('@/composables/useToast', () => ({
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    // Parametry se promítnou do výstupu, aby šlo ověřit, KTERÉ osobní číslo karta ukazuje.
+    t: (key: string, params?: Record<string, unknown>) =>
+      params ? `${key}:${JSON.stringify(params)}` : key,
     locale: { value: 'cs' },
   }),
 }))
@@ -410,6 +412,86 @@ describe('PayrollPersonQuickEdit', () => {
         employment: null,
       }),
     )
+  })
+
+  /**
+   * Osobní číslo je kód vztahu. Mění se přejmenováním — kdyby šlo přes
+   * `employment`, vznikla by v historii vztahu verze podmínek, ve které se nic
+   * nesjednalo.
+   */
+  it('změnu jen osobního čísla pošle zvlášť, bez nové verze podmínek, a ukáže nové číslo', async () => {
+    mocks.savePersonQuickEdit.mockResolvedValueOnce({
+      profile: profile(),
+      employment: employment({ code: 'ZAM-99', row_version: 9 }),
+    })
+    const wrapper = await mountedEditor()
+    expect(wrapper.get<HTMLInputElement>('[data-test="employment-code"]').element.value).toBe('ZAM-17')
+
+    await wrapper.get('[data-test="employment-code"]').setValue(' ZAM-99 ')
+    // Samotné číslo datum účinnosti nevyžaduje, podmínky se nemění.
+    expect(wrapper.find('[data-test="employment-effective-from-field"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const payload = mocks.savePersonQuickEdit.mock.calls[0][1]
+    expect(payload.employment).toBeNull()
+    expect(payload.employment_code).toEqual({ employment_id: 31, code: 'ZAM-99' })
+
+    // Karta se hydratuje z odpovědi: čtecí pohled i popisek sekce ukážou nové číslo.
+    expect(wrapper.get('[data-test="read-employment"]').text()).toContain('"code":"ZAM-99"')
+    await wrapper.get('[data-test="start-quick-edit"]').trigger('click')
+    expect(wrapper.get('[data-test="employment-subtitle"]').text()).toContain('"code":"ZAM-99"')
+    expect(wrapper.get<HTMLInputElement>('[data-test="employment-code"]').element.value).toBe('ZAM-99')
+
+    // Nezměněné číslo se při dalším uložení znovu neposílá.
+    await wrapper.get('[data-test="first-name"]').setValue('Jana Marie')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.savePersonQuickEdit.mock.calls[1][1].employment_code).toBeNull()
+  })
+
+  it('změnu čísla i mzdy pošle jedním požadavkem, každou svou cestou', async () => {
+    const wrapper = await mountedEditor()
+    await wrapper.get('[data-test="employment-code"]').setValue('1042')
+    await wrapper.get('[data-test="monthly-gross"]').setValue('45000')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const payload = mocks.savePersonQuickEdit.mock.calls[0][1]
+    expect(payload.employment).toEqual(expect.objectContaining({ id: 31, monthly_gross_minor: 4_500_000 }))
+    expect(payload.employment_code).toEqual({ employment_id: 31, code: '1042' })
+  })
+
+  it('osobní číslo nenechá smazat a neplatný tvar odmítne před odesláním', async () => {
+    const wrapper = await mountedEditor()
+
+    await wrapper.get('[data-test="employment-code"]').setValue('')
+    expect(wrapper.get('[data-test="employment-code-error"]').text())
+      .toContain('payroll.people.quick_edit.personal_number_required')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.savePersonQuickEdit).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="employment-code"]').setValue('ZAM 17')
+    expect(wrapper.get('[data-test="employment-code-error"]').text())
+      .toContain('payroll.common.personal_number_invalid')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.savePersonQuickEdit).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="quick-edit-error"]').text())
+      .toContain('payroll.common.personal_number_invalid')
+  })
+
+  it('interní kód legacy nenabídne jako osobní číslo a prázdné pole neposílá', async () => {
+    mocks.person.mockResolvedValueOnce(person(employment({ code: 'legacy' })))
+    const wrapper = await mountedEditor()
+    expect(wrapper.get<HTMLInputElement>('[data-test="employment-code"]').element.value).toBe('')
+
+    await wrapper.get('[data-test="first-name"]').setValue('Jana Marie')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.savePersonQuickEdit.mock.calls[0][1].employment_code).toBeNull()
   })
 
   it('umožní zaměstnance bez rodného čísla a nevytvoří prázdný identifikátor', async () => {

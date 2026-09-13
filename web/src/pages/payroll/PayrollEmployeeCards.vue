@@ -12,7 +12,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatMoneyMinor } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
-import { employmentCodeLabel } from './employmentLifecycleUi'
+import { personalNumberLabel } from './employmentLifecycleUi'
 import { payrollInputEditable } from './payrollComponentsUi'
 
 /**
@@ -101,7 +101,7 @@ function relationLabel(row: PayrollEmployeeCardRow): string {
 
 /** Pravidlo žije v `employmentLifecycleUi.ts` — karta zaměstnance ho sdílí. */
 function employmentCodeLabelOf(row: PayrollEmployeeCardRow): string {
-  return employmentCodeLabel(row.employment_code)
+  return personalNumberLabel(t, row.employment_code)
 }
 
 function statusLabel(row: PayrollEmployeeCardRow): string {

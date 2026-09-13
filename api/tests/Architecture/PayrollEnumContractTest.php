@@ -90,6 +90,37 @@ final class PayrollEnumContractTest extends TestCase
             => 'db:payroll_period_export_job_parts.part_kind',
         'payroll.ts::PayrollDeadlinePhase'
             => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::PHASES',
+        // Mzdy → Importy
+        'payrollImports.ts::RegistrationEnvironment'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::ENVIRONMENTS',
+        'payrollImports.ts::RegistrationDocumentType'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::DOCUMENT_TYPES',
+        'payrollImports.ts::RegistrationRelationType'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::RELATION_TYPES',
+        'payrollImports.ts::RegistrationMatchStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::MATCH_STATUSES',
+        'payrollImports.ts::RegistrationMatchedBy'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::MATCHED_BY',
+        'payrollImports.ts::RegistrationOperation'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::OPERATIONS',
+        'payrollImports.ts::RegistrationResultStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::RESULT_STATUSES',
+        'payrollImports.ts::RegistrationResultOperation'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::RESULT_OPERATIONS',
+        'payrollImports.ts::RegistrationSubmissionType'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::SUBMISSION_TYPES',
+        'payrollImports.ts::RegistrationOpeningBalanceStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::OPENING_BALANCE_STATUSES',
+        'payrollImports.ts::RegistrationAverageStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::AVERAGE_STATUSES',
+        'payrollImports.ts::AttendanceUnit'
+            => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::UNITS',
+        'payrollImports.ts::AttendanceMeaning'
+            => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::ALL',
+        'payrollImports.ts::AttendanceMatchStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::MATCH_STATUSES',
+        'payrollImports.ts::AttendanceProfileComponentKind'
+            => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents::KINDS',
         'payroll.ts::PayrollRegistrationChangeDuty'
             => 'const:MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService::DUTY_KINDS',
         'payroll.ts::PayrollDeadlineSource'

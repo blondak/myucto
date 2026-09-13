@@ -682,6 +682,9 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/payroll/benefit-baskets', label: t('nav.payroll_benefit_baskets'), icon: ICONS.stats, permission: 'payroll' as PermissionKey },
         // 3) Jednorázové nastavení — sáhne se do něj při zavádění a pak výjimečně.
         { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey, dividerBefore: true },
+        // Importy patří k zavádění: převzetí zaměstnanců z registrací ČSSZ
+        // a měsíčních podkladů z docházkového systému.
+        { to: '/payroll/imports', label: t('nav.payroll_imports'), icon: ICONS.exports, permission: 'payroll.inputs.write' as PermissionKey },
         { to: '/payroll/components', label: t('nav.payroll_components'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
         // Legislativní pravidla: stránka existovala od commitu 88853785, ale
         // nevedl na ni jediný odkaz — dalo se tam jen ručně napsanou URL.

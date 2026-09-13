@@ -18,6 +18,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
+import { personalNumberLabel } from './employmentLifecycleUi'
 import {
   payrollDiscountIntentsApi,
   type PayrollDiscountIntent,
@@ -64,8 +65,8 @@ const employmentOptions = computed(() =>
   employments.value.map(employment => ({
     value: employment.id,
     label: employment.end_date
-      ? `${employment.code} (${employment.start_date ?? '?'} – ${employment.end_date})`
-      : `${employment.code} (${employment.start_date ?? '?'})`,
+      ? `${personalNumberLabel(t, employment.code) || '—'} (${employment.start_date ?? '?'} – ${employment.end_date})`
+      : `${personalNumberLabel(t, employment.code) || '—'} (${employment.start_date ?? '?'})`,
   })))
 const canCreate = computed(() =>
   canWrite.value

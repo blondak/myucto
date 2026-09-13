@@ -85,6 +85,7 @@
     "payrollDocumentAccess",
     "payroll_absence",
     "payroll_bank",
+    "payroll_imports",
     "payroll_travel",
     "period_filter",
     "permissions",
@@ -178,6 +179,7 @@
       "payrollDocumentAccess",
       "payroll_absence",
       "payroll_bank",
+      "payroll_imports",
       "payroll_travel",
       "period_filter",
       "permissions",
@@ -512,6 +514,10 @@
     ],
     "payroll-settings": [
       "payroll"
+    ],
+    "payroll-imports": [
+      "payroll",
+      "payroll_imports"
     ],
     "payroll-retention": [
       "payroll"

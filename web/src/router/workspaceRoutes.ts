@@ -126,6 +126,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // takže zastaralý odkaz nekončí prázdnem.
       { path: 'payroll/submissions/:tab([a-z_]+)', name: 'payroll-submissions-tab', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/imports', name: 'payroll-imports', component: () => import('@/pages/payroll/PayrollImports.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Retenční lhůty ukazují katalog z kódu a pouštějí dvojí zápis — odchylku
       // firmy a zadržení výmazu. Jedou na `payroll.retention` — stejný klíč hlídá
       // RoutePermissionMap u /api/payroll/retention, takže menu nesvítí tam,

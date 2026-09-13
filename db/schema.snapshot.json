@@ -817,7 +817,9 @@
         "1830_integration_sample_seeded.sql",
         "1831_bank_transaction_match_reason.sql",
         "1832_stock_packaging_customer_prices.sql",
-        "1833_stock_price_levels.sql"
+        "1833_stock_price_levels.sql",
+        "1834_payroll_imports.sql",
+        "1835_payroll_import_profile_sample.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -7037,6 +7039,74 @@
                 "chk_payroll_annual_settlement_request_year": "`tax_year` between 2000 and 2199"
             }
         },
+        "payroll_attendance_import_rows": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "amount_minor": "bigint(20) NULL DEFAULT NULL",
+                "component_code": "varchar(64) NOT NULL DEFAULT ''",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "import_id": "bigint(20) unsigned NOT NULL",
+                "meaning": "varchar(48) NOT NULL",
+                "quantity_millihours": "bigint(20) NULL DEFAULT NULL",
+                "source_ref": "varchar(191) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_payroll_attendance_import_row_employment": "BTREE (supplier_id, employment_id)",
+                "idx_payroll_attendance_import_row_import": "BTREE (supplier_id, import_id)",
+                "uq_payroll_attendance_import_row": "UNIQUE BTREE (import_id, employment_id, meaning, component_code)",
+                "uq_payroll_attendance_import_row_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_attendance_import_row_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_payroll_attendance_import_row_import": "(supplier_id, import_id) -> payroll_attendance_imports (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_payroll_attendance_import_row_value": "`quantity_millihours` is not null or `amount_minor` is not null"
+            }
+        },
+        "payroll_attendance_imports": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "content_sha256": "binary(32) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "files_json": "longtext NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "input_import_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "metric_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "period_start": "date NOT NULL",
+                "person_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "rules_json": "longtext NOT NULL",
+                "source_system": "varchar(32) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_attendance_import_creator": "BTREE (created_by)",
+                "idx_payroll_attendance_import_input": "BTREE (supplier_id, input_import_id)",
+                "idx_payroll_attendance_import_period": "BTREE (supplier_id, period_start, id)",
+                "uq_payroll_attendance_import_content": "UNIQUE BTREE (supplier_id, period_start, content_sha256)",
+                "uq_payroll_attendance_import_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_attendance_import_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_attendance_import_input": "(supplier_id, input_import_id) -> payroll_input_imports (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_attendance_import_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_payroll_attendance_import_files": "json_valid(`files_json`)",
+                "chk_payroll_attendance_import_period": "dayofmonth(`period_start`) = 1",
+                "chk_payroll_attendance_import_rules": "json_valid(`rules_json`)"
+            }
+        },
         "payroll_average_earning_snapshots": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -9515,6 +9585,71 @@
                 "chk_payroll_identity_resolution_task_reason": "`reason_code` regexp '^[a-z0-9][a-z0-9._-]{0,63}$'",
                 "chk_payroll_identity_resolution_task_resolution": "`status` = 'resolved' and `resolved_at` is not null and `resolved_by` is not null and `resolution_evidence_hash` regexp '^[0-9a-f]{64}$' and (`task_kind` <> 'employment_external_id' or `resolved_external_id_id` is not null) or `status` <> 'resolved' and `resolved_at` is null and `resolved_by` is null and `resolved_external_id_id` is null and `resolution_evidence_hash` is null",
                 "chk_payroll_identity_resolution_task_version": "`row_version` > 0"
+            }
+        },
+        "payroll_import_links": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "external_key": "varchar(191) NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "key_kind": "enum('personal_number','name') NOT NULL",
+                "source_system": "varchar(32) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_import_link_creator": "BTREE (created_by)",
+                "idx_payroll_import_link_employee": "BTREE (supplier_id, employee_id)",
+                "idx_payroll_import_link_employment": "BTREE (supplier_id, employment_id)",
+                "uq_payroll_import_link_key": "UNIQUE BTREE (supplier_id, source_system, key_kind, external_key)",
+                "uq_payroll_import_link_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_import_link_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_import_link_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_payroll_import_link_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_payroll_import_link_key": "char_length(trim(`external_key`)) > 0"
+            }
+        },
+        "payroll_import_profiles": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "components_json": "longtext NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_sample": "tinyint(1) NOT NULL DEFAULT 0",
+                "name": "varchar(120) NOT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "rules_json": "longtext NOT NULL",
+                "source_system": "varchar(32) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_import_profile_user": "BTREE (updated_by)",
+                "uq_payroll_import_profile_name": "UNIQUE BTREE (supplier_id, source_system, name)",
+                "uq_payroll_import_profile_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_import_profile_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_payroll_import_profile_user": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_payroll_import_profile_name": "char_length(trim(`name`)) > 0",
+                "chk_payroll_import_profile_rules": "json_valid(`rules_json`)"
             }
         },
         "payroll_imported_jmhz_protocols": {
@@ -18970,6 +19105,7 @@
                 "payment_thanks_auto_send": "tinyint(1) NOT NULL DEFAULT 0",
                 "payment_thanks_default_checked": "tinyint(1) NOT NULL DEFAULT 0",
                 "payment_thanks_enabled": "tinyint(1) NOT NULL DEFAULT 0",
+                "payroll_attendance_sample_seeded_at": "datetime NULL DEFAULT NULL",
                 "payroll_enabled": "tinyint(1) NOT NULL DEFAULT 0",
                 "pdf_logo_show_name": "tinyint(1) NOT NULL DEFAULT 0",
                 "phone": "varchar(40) NULL DEFAULT NULL",

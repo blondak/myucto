@@ -17,7 +17,7 @@ import type { PayrollPersonSensitiveReveal } from '@/api/payroll'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
-import { todayIso } from './employmentLifecycleUi'
+import { employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import PayrollPersonContactQuickFields from './PayrollPersonContactQuickFields.vue'
 import PayrollPersonIdentityQuickFields from './PayrollPersonIdentityQuickFields.vue'
 import { addDaysIso } from '@/utils/date'
@@ -50,6 +50,7 @@ interface QuickEditForm {
   weekly_hours: string
   monthly_gross: string
   employment_effective_from: string
+  employment_code: string
 }
 
 const { t } = useI18n()
@@ -71,6 +72,7 @@ const person = ref<PayrollPerson | null>(null)
 const primaryEmployment = ref<PayrollEmployment | null>(null)
 const originalWeeklyHours = ref('')
 const originalMonthlyGrossMinor = ref<number | null>(null)
+const originalEmploymentCode = ref('')
 
 const form = reactive<QuickEditForm>({
   first_name: '',
@@ -88,6 +90,7 @@ const form = reactive<QuickEditForm>({
   weekly_hours: '',
   monthly_gross: '',
   employment_effective_from: todayIso(),
+  employment_code: '',
 })
 
 const inputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-payroll-500 focus:outline-none focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-100 disabled:text-neutral-500'
@@ -102,6 +105,19 @@ const employmentChanged = computed(() => {
   if (!writableEmployment.value) return false
   return normalizeHours(form.weekly_hours) !== normalizeHours(originalWeeklyHours.value)
     || amountMinor(form.monthly_gross) !== originalMonthlyGrossMinor.value
+})
+/**
+ * Osobní číslo se mění přejmenováním vztahu, ne novou verzí podmínek, proto
+ * má vlastní příznak a do `employmentChanged` nevstupuje.
+ */
+const employmentCodeChanged = computed(() =>
+  primaryEmployment.value !== null
+  && form.employment_code.trim() !== originalEmploymentCode.value,
+)
+const employmentCodeError = computed(() => {
+  if (!employmentCodeChanged.value) return ''
+  if (form.employment_code.trim() === '') return t('payroll.people.quick_edit.personal_number_required')
+  return isValidPersonalNumber(form.employment_code) ? '' : t('payroll.common.personal_number_invalid')
 })
 
 const currentIdentity = computed(() => {
@@ -237,6 +253,9 @@ function hydrate(
   form.employment_effective_from = nextTermsDate(employment)
   originalWeeklyHours.value = form.weekly_hours
   originalMonthlyGrossMinor.value = employment?.monthly_gross_minor ?? null
+  // Interní značka `legacy` se jako osobní číslo nenabízí (viz employmentCodeLabel).
+  form.employment_code = employmentCodeLabel(employment?.code)
+  originalEmploymentCode.value = form.employment_code
 }
 
 async function load() {
@@ -521,6 +540,10 @@ function validate(): boolean {
     saveError.value = t('payroll.people.quick_edit.gross_invalid')
     return false
   }
+  if (employmentCodeError.value !== '') {
+    saveError.value = employmentCodeError.value
+    return false
+  }
   if (employmentChanged.value
     && (!writableEmployment.value
       || !primaryEmployment.value?.terms[0]
@@ -548,6 +571,9 @@ async function save() {
             monthly_gross_minor: amountMinor(form.monthly_gross),
             terms: termsPayload(employment),
           }
+        : null,
+      employment_code: employmentCodeChanged.value && employment
+        ? { employment_id: employment.id, code: form.employment_code.trim() }
         : null,
     }
     const result = await payrollApi.savePersonQuickEdit(props.personId, payload)
@@ -640,8 +666,9 @@ onMounted(load)
       </div>
       <div v-if="primaryEmployment" class="sm:col-span-2 border-t border-neutral-200 pt-4">
         <dt class="text-xs font-medium text-neutral-500">{{ t('payroll.people.quick_edit.employment_title') }}</dt>
-        <dd class="mt-0.5 text-sm text-neutral-900">
+        <dd class="mt-0.5 text-sm text-neutral-900" data-test="read-employment">
           {{ t(`payroll.people.relations.${primaryEmployment.relation_type}`) }}
+          <template v-if="personalNumberLabel(t, primaryEmployment.code)"> · {{ personalNumberLabel(t, primaryEmployment.code) }}</template>
           <template v-if="form.weekly_hours"> · {{ form.weekly_hours }} {{ t('payroll.people.quick_edit.hours_unit') }}</template>
           <template v-if="form.monthly_gross"> · {{ form.monthly_gross }} Kč</template>
         </dd>
@@ -695,8 +722,8 @@ onMounted(load)
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div>
             <legend class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.quick_edit.employment_title') }}</legend>
-            <p v-if="primaryEmployment" class="mt-1 text-xs text-neutral-500">
-              {{ t(`payroll.people.relations.${primaryEmployment.relation_type}`) }} · {{ primaryEmployment.code }}
+            <p v-if="primaryEmployment" class="mt-1 text-xs text-neutral-500" data-test="employment-subtitle">
+              {{ t(`payroll.people.relations.${primaryEmployment.relation_type}`) }}<template v-if="personalNumberLabel(t, primaryEmployment.code)"> · {{ personalNumberLabel(t, primaryEmployment.code) }}</template>
             </p>
           </div>
           <span v-if="primaryEmployment" class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700">
@@ -710,6 +737,20 @@ onMounted(load)
           {{ t('payroll.people.quick_edit.employment_unavailable') }}
         </div>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <label :class="labelClass">
+            {{ t('payroll.common.personal_number') }}
+            <input
+              v-model="form.employment_code"
+              maxlength="64"
+              autocomplete="off"
+              :aria-invalid="employmentCodeError !== ''"
+              :class="[inputClass, employmentCodeError !== '' ? 'border-danger-500' : '']"
+              data-test="employment-code"
+            >
+            <span v-if="employmentCodeError" class="mt-1 block text-xs font-normal text-danger-700" role="alert" data-test="employment-code-error">
+              {{ employmentCodeError }}
+            </span>
+          </label>
           <label :class="labelClass">
             {{ t('payroll.people.quick_edit.weekly_hours') }}
             <input

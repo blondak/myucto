@@ -23,6 +23,7 @@ namespace MyInvoice\Service\Payroll;
  * @phpstan-type PayrollPersonCreateInput array{
  *   employee:SharedEmployeeCreateInput,
  *   employment:EmploymentCreateInput,
+ *   employment_code:?string,
  *   first_name:?string,
  *   last_name:?string,
  *   birth_number:?string,
@@ -154,8 +155,14 @@ final class PayrollPersonCreateValidator
             );
         }
 
+        /*
+         * Osobní číslo (kód vztahu) je nepovinné: prázdné znamená, že ho
+         * služba vygeneruje jako ZAM-<id osoby>. Tvar hlídá týž validátor jako
+         * přejmenování vztahu, aby šlo založit jen číslo, které jde i změnit.
+         */
+        $employmentCode = trim($this->string($input['employment_code'] ?? null));
         $employment = $this->employmentValidator->create([
-            'code' => 'ZAM-PENDING',
+            'code' => $employmentCode === '' ? 'ZAM-PENDING' : $employmentCode,
             'relation_type' => $relationType,
             'monthly_gross_minor' => $monthlyGross === null ? null : $monthlyGross * 100,
             'terms' => [
@@ -244,6 +251,7 @@ final class PayrollPersonCreateValidator
                 'is_active' => true,
             ],
             'employment' => $employment,
+            'employment_code' => $employmentCode === '' ? null : (string) $employment['code'],
             'first_name' => $firstName,
             'last_name' => $lastName,
             'birth_number' => $birthNumber,

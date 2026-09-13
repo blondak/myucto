@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { personalNumberLabel } from './employmentLifecycleUi'
 import type { RouteLocationRaw } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -415,7 +416,7 @@ function remediationLabel(
       : undefined
   if (employment !== undefined) {
     return blocker.entity_type === 'employment'
-      ? `${employment.full_name} · ${employment.code}`
+      ? [employment.full_name, personalNumberLabel(t, employment.code)].filter(part => part !== '').join(' · ')
       : employment.full_name
   }
   return t('payroll.submissions.overview.jmhz_dry_run_actions.record', {

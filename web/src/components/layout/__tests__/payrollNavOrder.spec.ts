@@ -75,7 +75,7 @@ describe('mzdové menu', () => {
   it('odděluje jednorázové nastavení od měsíční práce a řadí ho nakonec', () => {
     const items = payrollNavItems()
     const setup = [
-      '/payroll/settings', '/payroll/components', '/payroll/rulesets',
+      '/payroll/settings', '/payroll/imports', '/payroll/components', '/payroll/rulesets',
       '/payroll/retention', '/payroll/erasure',
     ]
 

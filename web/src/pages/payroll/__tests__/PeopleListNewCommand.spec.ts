@@ -170,6 +170,17 @@ describe('PeopleList — povel ?new=1 a historie karty', () => {
     expect(wrapper.find('[data-test="new-employee-form"]').exists()).toBe(true)
   })
 
+  it('nabídne nepovinné osobní číslo hned v prvním řádku, ne až v Dalších údajích', async () => {
+    m.routeQuery.new = '1'
+    const wrapper = await mountPage([person(1, 'Jan Novák')])
+
+    const code = wrapper.get('[data-test="new-employee-code"]')
+    expect(code.element.closest('details')).toBeNull()
+    expect(code.attributes('required')).toBeUndefined()
+    expect(wrapper.get('[data-test="new-employee-form"]').text())
+      .toContain('payroll.people.create.personal_number_hint')
+  })
+
   it('uklidí povel z adresy replacem, ne pushem — jednorázový příkaz do historie nepatří', async () => {
     m.routeQuery.new = '1'
     m.routeQuery.q = 'nov'

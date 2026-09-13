@@ -47,7 +47,11 @@ téže osoby; žádné slučování duplicitních karet není potřeba.
 Primárním tlačítkem **Přidat zaměstnance** založíš právě tuto společnou kartu,
 nikoli druhou osobu jen pro úplné mzdy. Formulář se otevře místo seznamu, takže
 nemusíš nikam scrollovat ani hledat založenou osobu. Nahoře je jen to, bez čeho
-uložení neprojde — jméno, druh vztahu a plánovaný nástup. Zbytek je hned pod
+uložení neprojde — jméno, druh vztahu a plánovaný nástup — a nepovinné
+**osobní číslo**. Nevyplněné osobní číslo aplikace přidělí sama (`ZAM-…`);
+zadat lze písmena, číslice a znaky `.` `_` `/` `-`, nejvýš 64 znaků. Osobní
+číslo patří k pracovnímu vztahu, takže osoba se dvěma vztahy má dvě. V seznamech
+a na kartách se zobrazuje u jména jako „os. č. …“. Zbytek je hned pod
 tím ve sbalitelné části **Další údaje**: rodné číslo, datum narození, základní
 mzda, týdenní pracovní doba, mzdová účtárna a zdravotní pojišťovna. Jedno
 uložení tak založí kartu, první pracovní vztah i jeho podmínky; nový zaměstnanec
@@ -84,7 +88,8 @@ narození ani mzda povinné nejsou a jdou doplnit kdykoli později — rodné č
 je potřeba až u přihlášky na ČSSZ (kde stačí i EČP) a u oznámení zdravotní
 pojišťovně.
 
-Toolbar nad seznamem umožňuje hledání podle jména, přepnutí mezi aktivními,
+Toolbar nad seznamem umožňuje hledání podle jména nebo osobního čísla (stačí
+i jeho část), přepnutí mezi aktivními,
 všemi a kartami vyžadujícími doplnění a rychlý přechod na měsíční zadání mezd.
 Hledání i stránkování probíhá nad celou firmou na serveru po 25 osobách, takže
 se stejným postupem pracujete s deseti i pěti sty zaměstnanci.
@@ -106,8 +111,10 @@ nezobrazuje, ale dál se interně posílá při ukládání a chrání před př
 souběžné změny.
 
 V editoru **Běžné údaje zaměstnance** bez přepínání záložek upravíš jméno
-a příjmení, rodné číslo, bydliště, e-mail, telefon, týdenní pracovní dobu
-a pravidelnou hrubou mzdu. Stát bydliště se vybírá ze společného číselníku
+a příjmení, rodné číslo, bydliště, e-mail, telefon, osobní číslo, týdenní
+pracovní dobu a pravidelnou hrubou mzdu. Změna samotného osobního čísla
+nezakládá novou verzi sjednaných podmínek; smazat ho nejde, jen změnit.
+Stát bydliště se vybírá ze společného číselníku
 zemí. Pokud je číselník dočasně nedostupný, formulář dovolí ručně zadat
 dvoupísmenný ISO kód, aby úpravu adresy nezablokoval výpadek sítě. Změna
 jména, bydliště, kontaktu, pracovní doby nebo mzdy nevynuluje historii:

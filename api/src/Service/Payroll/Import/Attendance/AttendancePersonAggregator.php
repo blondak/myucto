@@ -1,0 +1,405 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Payroll\Import\Attendance;
+
+/**
+ * Složí osoby ze všech listů a souborů a přiřadí jim hodnoty.
+ *
+ * Tvrdá pravidla:
+ *  - osoba vzniká jen ze sloupce `person_name` (první takový sloupec listu);
+ *  - stejná osoba napříč soubory = stejný normalizovaný klíč jména, osobní
+ *    číslo a rodné číslo se připojí; různá osobní čísla u téhož jména se
+ *    potichu NESLUČUJÍ;
+ *  - stejný význam z více míst se NIKDY nesčítá: platí první podle pořadí
+ *    pravidel, odlišné hodnoty jdou do `conflicts` a do varování;
+ *  - chyba vzorce ani prázdná buňka nejsou nula.
+ *
+ * @phpstan-import-type AttendanceMappedSheet from AttendanceColumnMapper
+ */
+final class AttendancePersonAggregator
+{
+    private const TEXT_FIELDS = [
+        'relation_label', 'department', 'cost_center', 'position', 'weekly_hours', 'start_end_note', 'monthly_wage',
+    ];
+
+    public function __construct(private readonly AttendanceColumnMapper $mapper)
+    {
+    }
+
+    /**
+     * @param list<AttendanceMappedSheet> $sheets
+     * @return list<array<string,mixed>>
+     */
+    public function aggregate(array $sheets): array
+    {
+        $observations = [];
+        foreach ($sheets as $mapped) {
+            if ($mapped['person_column'] === null) {
+                continue;
+            }
+            $sheet = $mapped['sheet'];
+            $rows = $this->mapper->personRows($sheet, $mapped['layout'], $mapped['person_column']);
+            foreach ($rows as $row => $name) {
+                $observations[] = $this->observe($sheet, $mapped['columns'], $row, $name);
+            }
+        }
+
+        $groups = [];
+        foreach ($observations as $observation) {
+            $groups[$observation['name_key']][] = $observation;
+        }
+
+        $persons = [];
+        foreach ($groups as $nameKey => $group) {
+            $numbers = [];
+            foreach ($group as $observation) {
+                if ($observation['personal_number'] !== null) {
+                    $numbers[mb_strtoupper($observation['personal_number'], 'UTF-8')] = $observation['personal_number'];
+                }
+            }
+            if (count($numbers) <= 1) {
+                $persons[] = $this->person((string) $nameKey, (string) $nameKey, $group, []);
+                continue;
+            }
+            $bySplit = [];
+            $unassigned = [];
+            foreach ($group as $observation) {
+                if ($observation['personal_number'] === null) {
+                    $unassigned[] = $observation;
+                    continue;
+                }
+                $bySplit[mb_strtoupper($observation['personal_number'], 'UTF-8')][] = $observation;
+            }
+            $warning = 'Jméno „' . $group[0]['name'] . '“ je v podkladech s více osobními čísly ('
+                . implode(', ', array_values($numbers)) . '). Osoby se nesloučily; zkontrolujte, zda jde o různé lidi.';
+            foreach ($bySplit as $number => $subgroup) {
+                $persons[] = $this->person((string) $nameKey . '#' . $number, (string) $nameKey, $subgroup, [$warning]);
+            }
+            if ($unassigned !== []) {
+                $persons[] = $this->person((string) $nameKey, (string) $nameKey, $unassigned, [
+                    $warning . ' Řádky bez osobního čísla nejde přiřadit ani k jedné z nich.',
+                ]);
+            }
+        }
+        usort(
+            $persons,
+            static fn (array $a, array $b): int => strcmp((string) $a['_sort'], (string) $b['_sort']),
+        );
+
+        return $persons;
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $columns
+     * @return array<string,mixed>
+     */
+    private function observe(AttendanceSheet $sheet, array $columns, int $row, string $name): array
+    {
+        $identity = [];
+        $values = [];
+        foreach ($columns as $column => $binding) {
+            $meaning = (string) $binding['meaning'];
+            if ($meaning === AttendanceMeaning::IGNORE || $meaning === AttendanceMeaning::PERSON_NAME) {
+                continue;
+            }
+            $cell = $sheet->cell($row, $column);
+            if ($cell->isEmpty()) {
+                continue;
+            }
+            $priority = [
+                $binding['rule_index'] ?? PHP_INT_MAX,
+                $sheet->fileIndex,
+                $sheet->sheetIndex,
+                $column,
+                $row,
+            ];
+            if (AttendanceMeaning::isIdentity($meaning)) {
+                $text = $this->identityText($cell, $meaning);
+                if ($text !== '' && (!isset($identity[$meaning]) || $priority < $identity[$meaning]['priority'])) {
+                    $identity[$meaning] = ['value' => $text, 'priority' => $priority];
+                }
+                continue;
+            }
+            $values[] = [
+                'meaning' => $meaning,
+                'component_code' => $binding['component_code'],
+                'unit' => $binding['unit'],
+                'header' => $binding['header'],
+                'priority' => $priority,
+                'cell' => $cell,
+                'source' => $sheet->source($row, $column),
+            ];
+        }
+        $personalNumber = $identity['personal_number']['value'] ?? null;
+
+        return [
+            'name' => $name,
+            'name_key' => AttendanceText::personKey($name),
+            'personal_number' => $personalNumber,
+            'identity' => array_map(static fn (array $item): string => $item['value'], $identity),
+            'identity_priority' => array_map(static fn (array $item): array => $item['priority'], $identity),
+            'values' => $values,
+            'sheet_id' => $sheet->id(),
+            'row' => $row,
+            'order' => [$sheet->fileIndex, $sheet->sheetIndex, $row],
+        ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $group
+     * @param list<string> $warnings
+     * @return array<string,mixed>
+     */
+    private function person(string $key, string $nameKey, array $group, array $warnings): array
+    {
+        usort($group, static fn (array $a, array $b): int => $a['order'] <=> $b['order']);
+
+        $identity = [];
+        $identityPriority = [];
+        $sources = [];
+        $candidates = [];
+        $seenRows = [];
+        foreach ($group as $observation) {
+            $sources[] = ['sheet_id' => $observation['sheet_id'], 'row' => $observation['row']];
+            $seenRows[$observation['sheet_id']][] = $observation['row'];
+            foreach ($observation['identity'] as $meaning => $value) {
+                $priority = $observation['identity_priority'][$meaning];
+                if (!isset($identity[$meaning])) {
+                    $identity[$meaning] = $value;
+                    $identityPriority[$meaning] = $priority;
+                    continue;
+                }
+                if ($meaning === 'birth_number'
+                    && self::digits($identity[$meaning]) !== self::digits($value)) {
+                    $warnings[] = 'Osoba má v podkladech dvě různá rodná čísla; k párování se rodné číslo nepoužije.';
+                    $identity['_birth_conflict'] = '1';
+                }
+                if ($priority < $identityPriority[$meaning]) {
+                    $identity[$meaning] = $value;
+                    $identityPriority[$meaning] = $priority;
+                }
+            }
+            foreach ($observation['values'] as $value) {
+                $candidates[] = $value;
+            }
+        }
+        foreach ($seenRows as $sheetId => $rows) {
+            if (count($rows) > 1) {
+                $warnings[] = "Osoba je v listu {$sheetId} vícekrát (řádky " . implode(', ', $rows)
+                    . '). Hodnoty se nesčítají, platí první řádek.';
+            }
+        }
+        usort($candidates, static fn (array $a, array $b): int => $a['priority'] <=> $b['priority']);
+
+        $metrics = [];
+        $components = [];
+        $reference = ['gross_minor' => null, 'net_minor' => null, 'hours' => null];
+        $internalMetrics = [];
+        $internalComponents = [];
+        $grouped = [];
+        foreach ($candidates as $candidate) {
+            $groupKey = $candidate['meaning'] === AttendanceMeaning::COMPONENT
+                ? 'component:' . $candidate['component_code']
+                : $candidate['meaning'];
+            $grouped[$groupKey][] = $candidate;
+        }
+        foreach ($grouped as $groupKey => $items) {
+            $meaning = (string) $items[0]['meaning'];
+            $money = AttendanceMeaning::isMoney($meaning);
+            $primary = null;
+            $conflicts = [];
+            foreach ($items as $item) {
+                $parsed = $money
+                    ? self::amountMinor($item['cell'])
+                    : self::millihours($item['cell'], (string) ($item['unit'] ?? AttendanceMeaning::UNIT_HOURS));
+                if (isset($parsed['error'])) {
+                    $warnings[] = "Buňka {$item['source']} ({$item['header']}): {$parsed['error']} Hodnota se nepoužila.";
+                    continue;
+                }
+                $value = (int) $parsed['value'];
+                if ($primary === null) {
+                    $primary = ['value' => $value, 'source' => $item['source'], 'header' => $item['header']];
+                    continue;
+                }
+                if ($value !== $primary['value'] && !in_array($value, array_column($conflicts, 'value'), true)) {
+                    $conflicts[] = ['value' => $value, 'source' => $item['source']];
+                }
+            }
+            if ($primary === null) {
+                continue;
+            }
+            $format = static fn (int $v): string => $money
+                ? AttendanceDecimal::formatMinor($v) . ' Kč'
+                : AttendanceDecimal::formatMillihours($v) . ' h';
+            if ($conflicts !== []) {
+                $warnings[] = "„{$primary['header']}“ má v podkladech rozdílné hodnoty: "
+                    . $format($primary['value']) . " ({$primary['source']}), "
+                    . implode(', ', array_map(
+                        static fn (array $c): string => $format($c['value']) . " ({$c['source']})",
+                        $conflicts,
+                    ))
+                    . '. Hodnoty se nesčítají, použila se první podle pořadí pravidel.';
+            }
+            if ($meaning === AttendanceMeaning::COMPONENT) {
+                if ($primary['value'] === 0) {
+                    continue;
+                }
+                $code = (string) $items[0]['component_code'];
+                $components[] = [
+                    'component_code' => $code,
+                    'amount' => AttendanceDecimal::formatMinor($primary['value']),
+                    'amount_minor' => $primary['value'],
+                    'source' => $primary['source'],
+                    'conflicts' => array_map(static fn (array $c): array => [
+                        'amount' => AttendanceDecimal::formatMinor($c['value']),
+                        'amount_minor' => $c['value'],
+                        'source' => $c['source'],
+                    ], $conflicts),
+                ];
+                $internalComponents[$code] = ['amount_minor' => $primary['value'], 'source' => $primary['source']];
+                continue;
+            }
+            if ($meaning === 'reference_gross' || $meaning === 'reference_net') {
+                $reference[$meaning === 'reference_gross' ? 'gross_minor' : 'net_minor'] = $primary['value'];
+                $internalMetrics[$meaning] = ['amount_minor' => $primary['value'], 'source' => $primary['source']];
+                continue;
+            }
+            if ($meaning === 'reference_hours') {
+                $reference['hours'] = AttendanceDecimal::formatMillihours($primary['value']);
+                $internalMetrics[$meaning] = ['millihours' => $primary['value'], 'source' => $primary['source']];
+                continue;
+            }
+            $metrics[] = [
+                'meaning' => $meaning,
+                'hours' => AttendanceDecimal::formatMillihours($primary['value']),
+                'source' => $primary['source'],
+                'conflicts' => array_map(static fn (array $c): array => [
+                    'hours' => AttendanceDecimal::formatMillihours($c['value']),
+                    'source' => $c['source'],
+                ], $conflicts),
+            ];
+            $internalMetrics[$meaning] = ['millihours' => $primary['value'], 'source' => $primary['source']];
+        }
+        usort(
+            $metrics,
+            static fn (array $a, array $b): int => array_search($a['meaning'], AttendanceMeaning::HOURS, true)
+                <=> array_search($b['meaning'], AttendanceMeaning::HOURS, true),
+        );
+
+        $birthNumber = isset($identity['_birth_conflict']) ? null : ($identity['birth_number'] ?? null);
+        $person = [
+            'key' => $key,
+            'display_name' => (string) $group[0]['name'],
+            'personal_number' => $identity['personal_number'] ?? null,
+            'birth_number_masked' => null,
+        ];
+        foreach (self::TEXT_FIELDS as $field) {
+            $person[$field] = $identity[$field] ?? null;
+        }
+
+        return $person + [
+            'sources' => $sources,
+            'match' => null,
+            'metrics' => $metrics,
+            'components' => $components,
+            'reference' => $reference,
+            'warnings' => array_values(array_unique($warnings)),
+            '_name_key' => $nameKey,
+            '_birth_number' => $birthNumber,
+            '_metrics' => $internalMetrics,
+            '_components' => $internalComponents,
+            '_sort' => AttendanceText::normalize((string) $group[0]['name']) . "\0" . $key,
+        ];
+    }
+
+    private function identityText(AttendanceCell $cell, string $meaning): string
+    {
+        if ($meaning === 'weekly_hours') {
+            if ($cell->kind === AttendanceCell::NUMBER && $cell->hasDurationFormat()) {
+                return AttendanceDecimal::formatMillihours(AttendanceDecimal::durationMillihours((float) $cell->number));
+            }
+            if ($cell->kind === AttendanceCell::STRING) {
+                $clock = AttendanceDecimal::parseClockMillihours($cell->textValue());
+                if ($clock !== null) {
+                    return AttendanceDecimal::formatMillihours($clock);
+                }
+                $number = AttendanceDecimal::parseNumber($cell->textValue());
+                if ($number !== null) {
+                    return $number;
+                }
+            }
+        }
+        if ($cell->kind === AttendanceCell::ERROR) {
+            return '';
+        }
+
+        return trim((string) preg_replace('/\s+/u', ' ', $cell->textValue()));
+    }
+
+    /** @return array{value:int}|array{error:string} */
+    public static function millihours(AttendanceCell $cell, string $unit): array
+    {
+        if ($cell->kind === AttendanceCell::ERROR) {
+            return ['error' => self::errorMessage($cell)];
+        }
+        if ($cell->kind === AttendanceCell::NUMBER) {
+            $value = $unit === AttendanceMeaning::UNIT_DURATION
+                ? AttendanceDecimal::durationMillihours((float) $cell->number)
+                : AttendanceDecimal::scaled(AttendanceDecimal::fromFloat((float) $cell->number, 6), 3);
+        } elseif ($cell->kind === AttendanceCell::STRING) {
+            $text = $cell->textValue();
+            $value = AttendanceDecimal::parseClockMillihours($text);
+            if ($value === null) {
+                $number = AttendanceDecimal::parseNumber($text);
+                if ($number === null) {
+                    return ['error' => "hodnotu „{$text}“ nejde přečíst jako hodiny."];
+                }
+                $value = AttendanceDecimal::scaled($number, 3);
+            }
+        } else {
+            return ['error' => 'hodnota není číslo ani čas.'];
+        }
+        if ($value < 0) {
+            return ['error' => 'hodiny nesmí být záporné.'];
+        }
+
+        return ['value' => $value];
+    }
+
+    /** @return array{value:int}|array{error:string} */
+    public static function amountMinor(AttendanceCell $cell): array
+    {
+        if ($cell->kind === AttendanceCell::ERROR) {
+            return ['error' => self::errorMessage($cell)];
+        }
+        if ($cell->kind === AttendanceCell::NUMBER) {
+            return ['value' => AttendanceDecimal::scaled(AttendanceDecimal::fromFloat((float) $cell->number, 4), 2)];
+        }
+        if ($cell->kind === AttendanceCell::STRING) {
+            $number = AttendanceDecimal::parseNumber($cell->textValue());
+            if ($number === null) {
+                return ['error' => "hodnotu „{$cell->textValue()}“ nejde přečíst jako částku."];
+            }
+
+            return ['value' => AttendanceDecimal::scaled($number, 2)];
+        }
+
+        return ['error' => 'hodnota není částka.'];
+    }
+
+    private static function errorMessage(AttendanceCell $cell): string
+    {
+        if ($cell->text === AttendanceCell::NO_CACHED_VALUE) {
+            return 'vzorec nemá uloženou hodnotu — otevřete sešit v Excelu, nechte ho přepočítat, uložte a nahrajte znovu.';
+        }
+
+        return "vzorec končí chybou {$cell->text} — opravte ho v sešitu.";
+    }
+
+    private static function digits(string $value): string
+    {
+        return (string) preg_replace('/\D/', '', $value);
+    }
+}

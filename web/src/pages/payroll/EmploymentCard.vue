@@ -38,6 +38,7 @@ import {
   employmentDiffFields,
   employmentDiffValue,
   employmentEventNote,
+  personalNumberLabel,
   todayIso,
   transitionPresentation,
 } from './employmentLifecycleUi'
@@ -940,7 +941,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             {{ t('payroll.people.end_date') }} {{ formatDate(employment.end_date) }}
           </span>
         </div>
-        <p v-if="employmentCodeLabel(employment.code) || employment.office_name" data-test="employment-code" class="mt-1 text-xs text-neutral-500">{{ employmentCodeLabel(employment.code) }}<template v-if="employment.office_name"><template v-if="employmentCodeLabel(employment.code)"> · </template>{{ employment.office_name }}</template></p>
+        <p v-if="employmentCodeLabel(employment.code) || employment.office_name" data-test="employment-code" class="mt-1 text-xs text-neutral-500">{{ personalNumberLabel(t, employment.code) }}<template v-if="employment.office_name"><template v-if="employmentCodeLabel(employment.code)"> · </template>{{ employment.office_name }}</template></p>
       </div>
       <div class="flex items-center gap-2">
         <!--

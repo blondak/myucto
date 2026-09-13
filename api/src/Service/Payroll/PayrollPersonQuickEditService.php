@@ -43,6 +43,9 @@ final class PayrollPersonQuickEditService
         $normalizedEmployment = $employmentInput === null
             ? null
             : $this->employment($employmentInput, $supplierId);
+        $codeChange = ($input['employment_code'] ?? null) === null
+            ? null
+            : $this->codeChange($this->object($input['employment_code'], 'employment_code'));
 
         return $this->transaction(function () use (
             $supplierId,
@@ -50,6 +53,7 @@ final class PayrollPersonQuickEditService
             $normalizedProfile,
             $profileVersion,
             $normalizedEmployment,
+            $codeChange,
             $userId,
             $ip,
             $userAgent,
@@ -64,40 +68,73 @@ final class PayrollPersonQuickEditService
                 $userAgent,
             );
 
-            if ($normalizedEmployment === null) {
-                return [
-                    'profile' => $profile,
-                    'employment' => $this->primaryEmployment($supplierId, $employeeId),
-                ];
-            }
-
-            $owned = false;
-            foreach ($this->employments->listForEmployee($supplierId, $employeeId) as $employment) {
-                if ($this->requiredInt($employment, 'id') === $normalizedEmployment['id']) {
-                    $owned = true;
-                    break;
-                }
-            }
-            if (!$owned) {
-                throw new PayrollEmploymentNotFoundException(
-                    'Primární pracovní vztah zaměstnance nebyl nalezen.',
+            $employment = null;
+            if ($normalizedEmployment !== null) {
+                $this->ownedEmployment($supplierId, $employeeId, $normalizedEmployment['id']);
+                $employment = $this->employments->addTerms(
+                    $supplierId,
+                    $normalizedEmployment['id'],
+                    $normalizedEmployment['terms'],
+                    $normalizedEmployment['row_version'],
+                    $userId,
+                    $ip,
+                    $userAgent,
+                    true,
+                    $normalizedEmployment['monthly_gross_minor'],
                 );
             }
 
-            $employment = $this->employments->addTerms(
-                $supplierId,
-                $normalizedEmployment['id'],
-                $normalizedEmployment['terms'],
-                $normalizedEmployment['row_version'],
-                $userId,
-                $ip,
-                $userAgent,
-                true,
-                $normalizedEmployment['monthly_gross_minor'],
-            );
+            /*
+             * Osobní číslo (kód vztahu) se mění přejmenováním, ne novou verzí
+             * podmínek — jinak by změna čísla založila v historii vztahu verzi,
+             * ve které se nic nesjednalo. Verze vztahu se bere čerstvá, protože
+             * uložení podmínek o řádek výš ji právě posunulo.
+             */
+            if ($codeChange !== null) {
+                $current = $this->ownedEmployment($supplierId, $employeeId, $codeChange['employment_id']);
+                if ($this->requiredString($current, 'code') !== $codeChange['code']) {
+                    $employment = $this->employments->rename(
+                        $supplierId,
+                        $codeChange['employment_id'],
+                        $codeChange['code'],
+                        $this->requiredInt($current, 'row_version'),
+                        $userId,
+                        $ip,
+                        $userAgent,
+                    );
+                }
+            }
 
-            return ['profile' => $profile, 'employment' => $employment];
+            return [
+                'profile' => $profile,
+                'employment' => $employment ?? $this->primaryEmployment($supplierId, $employeeId),
+            ];
         });
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     * @return array{employment_id:int,code:string}
+     */
+    private function codeChange(array $input): array
+    {
+        return [
+            'employment_id' => $this->version($input['employment_id'] ?? null, false),
+            'code' => $this->employmentValidator->code($input),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function ownedEmployment(int $supplierId, int $employeeId, int $employmentId): array
+    {
+        foreach ($this->employments->listForEmployee($supplierId, $employeeId) as $employment) {
+            if ($this->requiredInt($employment, 'id') === $employmentId) {
+                return $employment;
+            }
+        }
+        throw new PayrollEmploymentNotFoundException(
+            'Pracovní vztah zaměstnance nebyl nalezen.',
+        );
     }
 
     /**

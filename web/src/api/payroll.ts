@@ -501,6 +501,8 @@ export interface PayrollPersonCreatePayload {
   relation_type: PayrollRelationType
   planned_start_on: string
   monthly_gross: number | null
+  /** Osobní číslo (kód prvního vztahu); `null` = server ho přidělí sám. */
+  employment_code?: string | null
   office_id?: number | null
   /** Týdenní pracovní doba; bez ní dosadí server plný úvazek 40.00. */
   weekly_hours?: string | null
@@ -883,9 +885,19 @@ export interface PayrollPersonQuickEditEmploymentPayload {
   terms: PayrollEmploymentTermsPayload
 }
 
+/**
+ * Změna osobního čísla (kódu vztahu). Jde mimo `employment`, protože
+ * přejmenování nezakládá novou verzi pracovních podmínek.
+ */
+export interface PayrollPersonQuickEditEmploymentCodePayload {
+  employment_id: number
+  code: string
+}
+
 export interface PayrollPersonQuickEditPayload {
   profile: PayrollPersonProfilePayload
   employment: PayrollPersonQuickEditEmploymentPayload | null
+  employment_code?: PayrollPersonQuickEditEmploymentCodePayload | null
 }
 
 export interface PayrollPersonQuickEditResponse {

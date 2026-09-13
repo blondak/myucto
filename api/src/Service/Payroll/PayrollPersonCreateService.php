@@ -52,7 +52,7 @@ final class PayrollPersonCreateService
             )->execute([$supplierId, $employeeId]);
 
             $employment = $validated['employment'];
-            $employment['code'] = 'ZAM-' . $employeeId;
+            $employment['code'] = $validated['employment_code'] ?? 'ZAM-' . $employeeId;
             $this->employments->create(
                 $supplierId,
                 $employeeId,

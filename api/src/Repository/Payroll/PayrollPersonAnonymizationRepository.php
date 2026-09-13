@@ -72,6 +72,8 @@ final class PayrollPersonAnonymizationRepository
         'identifiers' => ['payroll_person_identifiers'],
         'accounts' => ['payroll_person_accounts'],
         'dependants' => ['payroll_dependants'],
+        // Osobní číslo a normalizované jméno z importu docházky.
+        'import_links' => ['payroll_import_links'],
     ];
 
     /**

@@ -222,3 +222,104 @@ Změny se ukládají s kontrolou souběžné editace. Pokud mezitím nastavení 
 jiný uživatel, aplikace zobrazí přesný důvod konfliktu. Tlačítko pro načtení
 aktuální verze obnoví také její nové číslo verze a teprve potom dovolí úpravu
 uložit znovu.
+
+## 76.9 Importy zaměstnanců a docházky
+
+Stránka **Mzdy → Importy** leží v menu hned za Nastavením mezd a slouží
+k převzetí dat při zavádění mezd i v běžném měsíci. Má tři záložky:
+**JMHZ** (registrace i měsíční hlášení), **Docházka** (měsíční import) a **Mapování sloupců**
+(jednorázové nastavení). Importy pracují stejně: nahrajete soubory,
+prohlédnete si náhled a teprve tlačítkem **Použít** se něco zapíše. Soubory se
+na serveru neukládají, při použití se náhled spočítá znovu ze stejných souborů.
+
+### 76.9.1 JMHZ: registrace a měsíční hlášení
+
+Záložka načte XML registrací zaměstnanců pro ČSSZ, tedy přihlášky a oznámení
+REGZEC a přihlášky před nástupem PREZEC, i měsíční hlášení JMHZ. Soubory může
+vytvořit i jiný mzdový program. Najednou lze nahrát víc souborů. Vyžaduje
+oprávnění `payroll.person.write`.
+
+Náhled ukáže každou větu zvlášť: druh akce, osobu, maskované rodné číslo,
+nástup nebo skončení, stav spárování a navrženou operaci. Osoba se hledá podle
+identifikátoru od ČSSZ (OIČ), rodného čísla a u pracovního vztahu podle ID
+zaměstnání. Podle výsledku aplikace navrhne:
+
+- **založení osoby** i s pracovním vztahem, identitou, adresou a údaji pro
+  ČSSZ, u přihlášení k nástupu, který už nastal, vztah rovnou aktivuje,
+- **nový pracovní vztah** u osoby, kterou už evidujete,
+- **aktualizaci** údajů, které se liší (zdravotní pojišťovna, adresa, titul,
+  místo narození, občanství, pracoviště, CZ-ISCO, druh činnosti); změnu jména
+  aplikace jen oznámí, provedete ji na kartě osoby,
+- **ukončení vztahu** u odhlášení, případně zápis „nenastoupil",
+- **doplnění OIČ a ID zaměstnání**, pokud je věta obsahuje.
+
+Věty, které nejde jednoznačně přiřadit, jsou označené a vybrat je nelze.
+Před použitím potvrďte, že jste údaje porovnali s podáním, které ČSSZ přijala;
+identifikátory se ukládají jako ověřený ruční opis. Opakovaný import téhož
+souboru nic nezaloží podruhé.
+
+**Měsíční hlášení z předchozího mzdového programu.** Hlášení samo osobu
+nezakládá, proto nejdřív naimportujte registrace, případně zaměstnance
+založte ručně. Náhled u každé věty ukáže období a spárovaný pracovní vztah.
+Větu bez jednoznačné shody přiřadíte ručně výběrem vztahu. Náhled se pak
+přepočítá. Z hlášení se převezme zdravotní pojišťovna, prohlášení
+poplatníka, uplatňované slevy a vyživované děti podle období, ve kterém
+platily. Opravné a stornovací podání se skládá s řádným podle pořadí.
+Údaje pro ELDP a zdravotní pojištění náhled jen ukáže, import je nepřebírá.
+
+Z historie hlášení aplikace navrhne:
+
+- **počáteční stavy ročních součtů** (základy, zálohy, slevy a bonus po
+  měsících), které potřebujete při přechodu z jiného programu během roku pro
+  roční zúčtování a limity,
+- **průměrné výdělky** po čtvrtletích, které se zakládají ke schválení
+  v Nepřítomnostech.
+
+Návrh, kterému chybí údaje nebo už je v evidenci, je označený a nepoužije se.
+Obojí zapnete zaškrtnutím před tlačítkem **Použít**.
+
+### 76.9.2 Docházka
+
+Záložka převezme měsíční podklady z docházkového systému (například GIRITON)
+nebo z tabulek, které z něj firma skládá. Obvykle jde o hlavní sešit se
+seznamem zaměstnanců, provozní sešity s hodinami a CSV s osobními čísly.
+Podporované formáty jsou XLSX (všechny listy) a CSV. Vyžaduje oprávnění
+`payroll.inputs.write`.
+
+Měsíční import má tři kroky:
+
+1. **Období a soubory.** Zvolte měsíc a nahrajte všechny soubory najednou.
+   Profil mapování se vybere sám podle toho, kolik sloupců nahraných souborů
+   rozpozná; jiný profil můžete zvolit ručně. Pod výběrem se ukáže, který
+   profil se použil, kolik sloupců rozpoznal a které sloupce s daty nezná.
+   Odkaz **Upravit mapování** otevře záložku Mapování sloupců i s nahranými
+   soubory.
+2. **Osoby.** Osoby ze všech souborů se sloučí podle jména, osobní číslo a
+   rodné číslo se k nim připojí. Každá se spáruje s pracovním vztahem podle
+   uložené vazby, rodného čísla, kódu vztahu nebo jména. Nejasné případy
+   přiřaďte ručně. Osoby, které v evidenci chybí, můžete samostatným tlačítkem
+   založit; měsíční mzda z mzdového výměru v podkladech se přitom předvyplní
+   jako pravidelná hrubá mzda vztahu.
+3. **Souhrn a použití.** Tabulka ukáže hodiny a částky každé osoby i s buňkou,
+   ze které pocházejí, a pro kontrolu i hrubou a čistou mzdu z mzdového exportu.
+   Chybí-li ve firmě mzdová složka, kterou profil používá, import ji na
+   potvrzení založí jako jednorázovou složku.
+
+Hodnoty se nikdy nesčítají napříč listy. Když stejný údaj přichází ze dvou
+listů, použije se ten s vyšší prioritou a rozdílná hodnota se ukáže jako
+konflikt. Opakuje-li se v jednom listu stejná hlavička, platí první sloupec.
+Vzorce se nepřepočítávají, bere se hodnota uložená v sešitu. Prázdná buňka ani
+chyba vzorce se nepovažují za nulu. Trvání delší než 24 hodin se převádí
+správně. Náhled nad podklady pro stovky zaměstnanců trvá jednotky sekund.
+
+Použitím vznikne dávka importu s měsíčním souhrnem hodin po pracovních
+vztazích a s původem každé hodnoty. Peněžní částky se volitelně založí jako
+**návrhy mzdových vstupů** stejnou cestou jako import vstupů v kapitole
+[Mzdové složky a vstupy](77_Mzdove_slozky_a_vstupy.md); schvalují se běžně před
+výpočtem běhu. Opakovaný import téhož souboru vrátí existující dávku. Opravený
+soubor nevytvoří druhou odměnu, protože vstup nese stálý identifikátor osoby,
+měsíce a složky; původní návrh je nutné nejdřív smazat.
+
+Import hodin nevytváří záznamy docházky ani absence s konkrétními dny. Dovolenou,
+nemoc a další nepřítomnost s daty zadejte v kapitole
+[Absence a dovolená](62_Absence_a_dovolena.md), jinak je výpočet běhu nezahrne.

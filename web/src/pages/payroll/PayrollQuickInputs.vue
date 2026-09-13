@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { personalNumberLabel } from './employmentLifecycleUi'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
@@ -1155,7 +1156,7 @@ onMounted(() => {
                 <td v-if="tbl.isVisible('person')" class="w-64 px-4 py-4">
                   <p class="break-words font-semibold text-neutral-900">{{ row.full_name }}</p>
                   <p class="mt-0.5 break-words text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }}</p>
-                  <p class="mt-1 break-words text-xs text-neutral-500">{{ row.employment_code }}</p>
+                  <p v-if="personalNumberLabel(t, row.employment_code)" class="mt-1 break-words text-xs text-neutral-500">{{ personalNumberLabel(t, row.employment_code) }}</p>
                   <span
                     :data-testid="`quick-relation-${row.employment_id}`"
                     class="mt-2 inline-flex rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700"
@@ -1488,7 +1489,7 @@ onMounted(() => {
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h2 class="font-semibold text-neutral-900">{{ row.full_name }}</h2>
-                <p class="text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }} · {{ row.employment_code }}</p>
+                <p class="text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }}<template v-if="personalNumberLabel(t, row.employment_code)"> · {{ personalNumberLabel(t, row.employment_code) }}</template></p>
                 <span
                   :data-testid="`quick-relation-mobile-${row.employment_id}`"
                   class="mt-2 inline-flex rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700"

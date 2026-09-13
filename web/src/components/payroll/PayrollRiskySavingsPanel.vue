@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
+import { personalNumberLabel } from '@/pages/payroll/employmentLifecycleUi'
 import { revealField } from '@/utils/revealField'
 import { useI18n } from 'vue-i18n'
 import {
@@ -474,7 +475,7 @@ onMounted(load)
         <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.risky_savings.employee') }}</th><th class="px-4 py-3">{{ t('payroll.risky_savings.shifts') }}</th><th class="px-4 py-3">{{ t('payroll.risky_savings.contribution') }}</th><th class="px-4 py-3">{{ t('payroll.risky_savings.status_label') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.risky_savings.actions') }}</th></tr></thead>
         <tbody class="divide-y divide-neutral-100">
           <tr v-for="item in items" :key="item.id">
-            <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.full_name }}</p><p class="text-xs text-neutral-500">{{ item.employment_code }}</p></td>
+            <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.full_name }}</p><p class="text-xs text-neutral-500">{{ personalNumberLabel(t, item.employment_code) }}</p></td>
             <td class="px-4 py-3">{{ item.qualifying_shift_eighths }} / 8</td>
             <td class="px-4 py-3"><p class="font-medium">{{ item.contribution_minor === null ? '—' : formatMoneyMinor(item.contribution_minor) }}</p><p v-if="item.payment_due_on" class="text-xs text-neutral-500">{{ t('payroll.risky_savings.due_on', { date: item.payment_due_on }) }}</p><p class="text-xs text-neutral-500">{{ item.payment_target_name }} · {{ item.institution_account_masked }}</p></td>
             <td class="px-4 py-3">{{ t(`payroll.risky_savings.status.${item.contribution_status ?? item.status}`) }}</td>

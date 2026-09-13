@@ -59,7 +59,8 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, params?: Record<string, unknown>) =>
+      (typeof params?.code === 'string' ? `${key}:${params.code}` : key),
     locale: ref('cs-CZ'),
   }),
 }))

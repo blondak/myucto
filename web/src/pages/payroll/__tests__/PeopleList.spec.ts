@@ -511,6 +511,31 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(m.saveStatutoryEvidence).not.toHaveBeenCalled()
   })
 
+  it('pošle zadané osobní číslo a neplatný tvar odmítne ještě v prohlížeči', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="add-employee"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="new-employee-first-name"]').setValue('Delta')
+    await wrapper.get('[data-test="new-employee-last-name"]').setValue('Nová')
+    await wrapper.get('[data-test="new-employee-code"]').setValue('ZAM 1')
+    expect(wrapper.find('[data-test="new-employee-code-error"]').text())
+      .toContain('payroll.common.personal_number_invalid')
+    await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createPerson).not.toHaveBeenCalled()
+    expect(m.toastError).toHaveBeenCalledWith('payroll.common.personal_number_invalid')
+
+    await wrapper.get('[data-test="new-employee-code"]').setValue(' 1042/A ')
+    expect(wrapper.find('[data-test="new-employee-code-error"]').exists()).toBe(false)
+    await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createPerson).toHaveBeenCalledWith(expect.objectContaining({
+      employment_code: '1042/A',
+    }))
+  })
+
   it('names the edited person in the header even without a structured name', async () => {
     // Osoba „test" má vyplněné jen zobrazované jméno — strukturované pole je
     // prázdné a formulář by bez hlavičky vypadal anonymně.
@@ -686,6 +711,8 @@ describe('PeopleList toolbar and shared employee creation', () => {
       birth_number: '0001010009',
       relation_type: 'employment',
       planned_start_on: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      // Nevyplněné osobní číslo přidělí server, klient pošle null.
+      employment_code: null,
       monthly_gross: null,
       office_id: null,
       // Úvazek jde nově rovnou ze zakládacího formuláře, ne až z nové verze podmínek.

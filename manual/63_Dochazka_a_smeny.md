@@ -61,7 +61,8 @@ ještě před náhledem a nic nezapíše. Bezpečnostní kontrola omezuje také 
 nekontrolovaně spotřebovat paměť serveru.
 
 Import není závislý na tom, kolik zaměstnanců je právě načteno v přehledu.
-Každý řádek se páruje přímo podle označení vztahu v dané firmě, takže stejný
+Každý řádek se páruje přímo podle osobního čísla (kódu pracovního vztahu)
+v dané firmě, takže stejný
 postup lze použít pro deset i pět set zaměstnanců. Pro rozsáhlý soubor nejdřív
 zkontrolujte souhrn platných, chybných a duplicitních řádků a teprve potom
 potvrďte zápis.
