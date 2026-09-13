@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run check:i18n && npm run check:i18n-map && npm run check:routes && npm run check:manual && vue-tsc --noEmit && vite build",
+    "build:image": "npm run check:i18n && npm run check:i18n-map && npm run check:routes && npm run check:manual && vite build",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "check:i18n": "node scripts/check-i18n.mjs",
