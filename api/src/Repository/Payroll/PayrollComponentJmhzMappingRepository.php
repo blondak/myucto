@@ -122,6 +122,108 @@ final class PayrollComponentJmhzMappingRepository
         return $this->specPackages->install($this->targets->specManifest());
     }
 
+    /**
+     * Převezme zařazení složek ze staršího balíku specifikace do aktuálního —
+     * JEDINÉ místo tohoto pravidla v aplikaci; migrace 1840 je jeho zmrazená
+     * kopie pro existující instalace (shodu hlídá
+     * `PayrollComponentJmhzLegacyPackageAdoptionTest`).
+     *
+     * Snímek hlášení čte zařazení jen z aktuálního balíku ({@see self::snapshot()}),
+     * kdežto obrazovka zařazení ukazuje i aktivní zařazení ze staršího balíku
+     * ({@see self::find()}). Po přechodu na nový balík tak složka vypadala
+     * zařazená, příprava hlášení ji blokovala jako nezařazenou a výchozí
+     * zařazení se nedoplnilo, protože složka nějaký záznam už měla.
+     *
+     * Pravidlo:
+     *  - bere se rozhodnutí, které ukazuje {@see self::find()}: aktivní zařazení
+     *    z nejnovějšího staršího balíku, jinak nejnovější deaktivované;
+     *  - převede se jen tam, kde v aktuálním balíku ještě žádný záznam není
+     *    a kde aktuální balík cílový atribut zná. Cíl, který balík nezná,
+     *    zůstane ve starším balíku aktivní a složka se dál hlásí jako
+     *    nezařazená — tiše zahodit volbu účetní by bylo horší;
+     *  - deaktivované zařazení se převede jako deaktivované: vědomé
+     *    „nezařazovat" platí dál a výchozí zařazení ho nepřepíše;
+     *  - autor zůstává: volba účetní zůstává volbou účetní, předvyplnění
+     *    aplikací (`created_by` NULL) předvyplněním;
+     *  - aktivní starší zařazení se deaktivuje všude, kde už aktuální balík
+     *    záznam má. Jinak by blokovalo zápis zařazení („nejprve deaktivujte
+     *    mapování ze staršího balíku") i změnu zacházení složky (trigger
+     *    z migrace 1344 hlídá aktivní zařazení v jakémkoli balíku).
+     *
+     * Opakované volání nic nemění. V ustáleném stavu stojí dva příkazy.
+     *
+     * @param int|null $packageId balík, do kterého se převádí; `null` = ten, který aplikace čte
+     * @return int počet převzatých zařazení
+     */
+    public function adoptLegacy(int $supplierId, ?int $packageId = null): int
+    {
+        $packageId ??= $this->currentPackageId();
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $adopt = $pdo->prepare(
+                'INSERT INTO payroll_component_jmhz_mappings
+                    (supplier_id, component_definition_id, spec_package_id, target_attribute_id,
+                     is_active, disabled_at, created_by, updated_by)
+                 SELECT legacy.supplier_id, legacy.component_definition_id, attribute.package_id,
+                        attribute.attribute_id, legacy.is_active, legacy.disabled_at,
+                        legacy.created_by, legacy.updated_by
+                   FROM (
+                         SELECT mapping.supplier_id, mapping.component_definition_id,
+                                mapping.target_attribute_id, mapping.is_active, mapping.disabled_at,
+                                mapping.created_by, mapping.updated_by,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY mapping.supplier_id, mapping.component_definition_id
+                                  ORDER BY mapping.is_active DESC, mapping.spec_package_id DESC
+                                ) AS pick
+                           FROM payroll_component_jmhz_mappings mapping
+                          WHERE mapping.supplier_id = ? AND mapping.spec_package_id <> ?
+                        ) legacy
+                   JOIN payroll_component_definitions definition
+                     ON definition.supplier_id = legacy.supplier_id
+                    AND definition.id = legacy.component_definition_id
+                    AND definition.jmhz_treatment = \'included\'
+                   JOIN payroll_jmhz_dictionary_attributes attribute
+                     ON attribute.package_id = ?
+                    AND attribute.attribute_id = legacy.target_attribute_id
+                  WHERE legacy.pick = 1
+                    AND NOT EXISTS (
+                          SELECT 1
+                            FROM payroll_component_jmhz_mappings existing
+                           WHERE existing.supplier_id = legacy.supplier_id
+                             AND existing.component_definition_id = legacy.component_definition_id
+                             AND existing.spec_package_id = ?
+                        )',
+            );
+            $adopt->execute([$supplierId, $packageId, $packageId, $packageId]);
+            $adopted = $adopt->rowCount();
+            $pdo->prepare(
+                'UPDATE payroll_component_jmhz_mappings legacy
+                   JOIN payroll_component_jmhz_mappings current_mapping
+                     ON current_mapping.supplier_id = legacy.supplier_id
+                    AND current_mapping.component_definition_id = legacy.component_definition_id
+                    AND current_mapping.spec_package_id = ?
+                    SET legacy.is_active = 0, legacy.disabled_at = CURRENT_TIMESTAMP,
+                        legacy.updated_by = NULL, legacy.row_version = legacy.row_version + 1
+                  WHERE legacy.supplier_id = ? AND legacy.spec_package_id <> ?
+                    AND legacy.is_active = 1',
+            )->execute([$packageId, $supplierId, $packageId]);
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $adopted;
+    }
+
     /** @return array<int,array<string,mixed>> */
     public function listForSupplier(int $supplierId): array
     {

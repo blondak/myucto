@@ -823,7 +823,8 @@
         "1836_payroll_import_profile_sample_version.sql",
         "1837_payroll_time_month_import_summaries.sql",
         "1838_payroll_work_summary_import_source.sql",
-        "1839_payroll_component_jmhz_kind_default_mappings.sql"
+        "1839_payroll_component_jmhz_kind_default_mappings.sql",
+        "1840_payroll_component_jmhz_legacy_package_adoption.sql"
     ],
     "tables": {
         "accounting_archives": {

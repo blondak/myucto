@@ -142,6 +142,12 @@ final class PayrollComponentJmhzMappingDefaults
      * `created_by` zůstává NULL: předvyplnění udělala aplikace, ne účetní, a
      * podle prázdného autora se to pozná i zpětně.
      *
+     * Předtím se převezmou zařazení ze staršího balíku specifikace
+     * ({@see PayrollComponentJmhzMappingRepository::adoptLegacy()}) — výchozí
+     * zařazení platí jen pro složky, které žádné rozhodnutí nemají v žádném
+     * balíku. Převzetí je fail-soft jako zbytek průchodu: instalace bez
+     * registru specifikace nesmí shodit obrazovku zařazení ani přípravu hlášení.
+     *
      * @param list<int>|null $componentIds jen tyto složky; `null` = celá firma
      * @return list<array<string,mixed>> nově založená mapování
      */
@@ -149,6 +155,10 @@ final class PayrollComponentJmhzMappingDefaults
     {
         if ($componentIds === []) {
             return [];
+        }
+        try {
+            $this->mappings->adoptLegacy($supplierId);
+        } catch (\Throwable) {
         }
         $existing = $this->mappings->listForSupplier($supplierId);
         $applied = [];
@@ -196,13 +206,18 @@ final class PayrollComponentJmhzMappingDefaults
      * Zařazuje se do balíku specifikace, který aplikace čte
      * ({@see PayrollComponentJmhzTargetCatalog::PACKAGE_KEY}); chybí-li, nainstaluje
      * se ({@see PayrollComponentJmhzMappingRepository::currentPackageId()}).
-     * V ustáleném stavu jsou to vždy dva příkazy: dohledání balíku a zápis.
+     * Nejdřív se do něj převezmou zařazení ze staršího balíku
+     * ({@see PayrollComponentJmhzMappingRepository::adoptLegacy()}), aby firma
+     * po přechodu na nový balík nepřišla o rozhodnutí účetní. V ustáleném stavu
+     * jsou to vždy čtyři příkazy: dohledání balíku, převzetí (dva) a zápis.
      *
      * @return int počet nově založených zařazení
      */
     public function seed(int $supplierId): int
     {
-        [$sql, $params] = self::seedStatement($supplierId, $this->mappings->currentPackageId());
+        $packageId = $this->mappings->currentPackageId();
+        $this->mappings->adoptLegacy($supplierId, $packageId);
+        [$sql, $params] = self::seedStatement($supplierId, $packageId);
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
 
