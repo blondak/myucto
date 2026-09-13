@@ -52,7 +52,7 @@ import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { btnFilled } from '@/components/ui/buttonStyles'
+import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { appIsoDate } from '@/utils/date'
@@ -1860,7 +1860,8 @@ function fieldErr(key: string): string | null {
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <header class="flex items-center justify-between px-5 py-3 border-b border-neutral-100">
           <h2 class="text-sm font-medium text-neutral-700">{{ t('purchase_invoice.items.title') }}</h2>
-          <button type="button" @click="addItem()" class="cursor-pointer px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md font-medium">
+          <button type="button" @click="addItem()" class="cursor-pointer px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md font-medium inline-flex items-center gap-1.5 whitespace-nowrap">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
             {{ t('purchase_invoice.items.add') }}
           </button>
         </header>

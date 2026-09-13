@@ -548,9 +548,9 @@ async function submit() {
               <div class="flex gap-2">
                 <input v-model="supplier.ic" type="text" placeholder="12345678" maxlength="8"
                   @keydown.enter.prevent="lookupAres"
-                  class="flex-1 h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+                  class="min-w-0 flex-1 h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
                 <button type="button" @click="lookupAres" :disabled="aresLoading"
-                  class="cursor-pointer h-10 px-4 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md inline-flex items-center gap-1.5">
+                  class="shrink-0 whitespace-nowrap cursor-pointer h-10 px-4 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md inline-flex items-center gap-1.5">
                   <svg v-if="!aresLoading" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/></svg>
                   <span v-else>…</span>
                   {{ aresLoading ? t('common.loading') : t('supplier.ares_load') }}

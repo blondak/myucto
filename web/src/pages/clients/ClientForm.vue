@@ -547,9 +547,9 @@ async function submit() {
               <div class="flex gap-2">
                 <input autocomplete="off" v-model="form.ic" maxlength="8" placeholder="12345678"
                   @blur="checkDuplicateIc"
-                  class="flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
                 <button type="button" @click="loadFromAres" :disabled="!form.ic || aresLoading"
-                  class="px-3 h-9 text-sm bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
+                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
                   {{ aresLoading ? '…' : 'ARES' }}
                 </button>
               </div>
@@ -567,9 +567,9 @@ async function submit() {
               <div class="flex gap-2">
                 <input autocomplete="off" v-model="form.dic" :placeholder="isSkClient ? 'SK2022638992' : 'CZ12345678'"
                   @blur="checkDuplicateDic"
-                  class="flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
                 <button type="button" @click="checkVies" :disabled="!form.dic || viesLoading"
-                  class="px-3 h-9 text-sm bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
+                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
                   {{ viesLoading ? '…' : 'VIES' }}
                 </button>
               </div>

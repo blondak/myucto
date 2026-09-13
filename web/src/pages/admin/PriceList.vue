@@ -7,6 +7,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { codebooksApi, type Currency } from '@/api/codebooks'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -76,7 +77,8 @@ onMounted(async () => {
         <h1 class="text-2xl font-semibold">{{ t('price_list.title') }}</h1>
         <p class="mt-1 text-sm text-neutral-500">{{ t('price_list.subtitle') }}</p>
       </div>
-      <button type="button" class="cursor-pointer inline-flex items-center justify-center h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md" @click="createItem">
+      <button type="button" :class="btnFilled('primary')" @click="createItem">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
         {{ t('price_list.new') }}
       </button>
     </header>
