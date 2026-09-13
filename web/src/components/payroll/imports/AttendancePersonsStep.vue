@@ -227,6 +227,7 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
                   <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
                 </ul>
                 <p v-if="resultByKey.get(person.key)?.status === 'failed'" class="mt-1 text-xs font-medium text-danger-600">{{ resultByKey.get(person.key)?.message }}</p>
+                <p v-else-if="resultByKey.get(person.key)?.message" class="mt-1 text-xs text-warning-700">{{ resultByKey.get(person.key)?.message }}</p>
               </td>
               <td class="px-3 py-2">
                 <span class="whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(person.match.status)">{{ t(`payroll_imports.attendance.persons.status.${person.match.status}`) }}</span>

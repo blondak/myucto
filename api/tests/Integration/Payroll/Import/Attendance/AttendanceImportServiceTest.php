@@ -364,6 +364,44 @@ final class AttendanceImportServiceTest extends TestCase
         );
     }
 
+    /**
+     * Úvazek z podkladů bývá text: číslo se z něj vezme a nepřečtený úvazek
+     * osobu neshodí — vztah vznikne bez něj a výsledek řekne, co doplnit.
+     */
+    public function testPersonsReadWeeklyHoursFromTextAndSurviveUnreadableOne(): void
+    {
+        $base = ['relation_type' => 'employment', 'planned_start_on' => '2026-06-01', 'activate' => false, 'birth_number' => null];
+        $result = $this->service->persons($this->supplierId, self::PERIOD, [
+            $base + [
+                'person_key' => 'nocni smena',
+                'full_name' => 'Směna Noční',
+                'first_name' => 'Směna',
+                'last_name' => 'Noční',
+                'weekly_hours' => 'noční - 18,75',
+            ],
+            $base + [
+                'person_key' => 'bez uvazku',
+                'full_name' => 'Úvazek Chybí',
+                'first_name' => 'Úvazek',
+                'last_name' => 'Chybí',
+                'weekly_hours' => 'DPP',
+            ],
+        ], $this->userId, null, null);
+
+        self::assertSame(
+            ['created', 'created'],
+            array_column($result['results'], 'status'),
+            (string) json_encode($result['results'], JSON_UNESCAPED_UNICODE),
+        );
+        self::assertNull($result['results'][0]['message']);
+        self::assertStringContainsString('Úvazek „DPP“', (string) $result['results'][1]['message']);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT weekly_hours FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?',
+        );
+        $stmt->execute([$this->supplierId, (int) $result['results'][0]['employment_id']]);
+        self::assertEquals(18.75, (float) $stmt->fetchColumn());
+    }
+
     public function testProfilesCrudAndPreviewWithProfile(): void
     {
         $rules = [['sheet' => 'výpočet', 'header' => 'Dovolená', 'meaning' => 'vacation_hours', 'unit' => 'hours', 'component_code' => null]];

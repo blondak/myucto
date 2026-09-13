@@ -59,6 +59,16 @@ const createComponents = ref(true)
 const adoptPersonalNumbers = ref(true)
 const autoCreateMissingPersons = ref(true)
 const autoCreateResult = ref<AttendancePersonsResult | null>(null)
+const autoCreateNotes = computed(() => (autoCreateResult.value?.results ?? []).filter(item => item.status === 'created' && item.message))
+
+// U chyb musí být vidět, u koho vznikly — anonymní seznam hlášek nejde vyřešit.
+function personLabel(key: string): string {
+  const person = preview.value?.persons.find(item => item.key === key)
+  if (!person) return key
+  return person.personal_number && !person.display_name.includes(person.personal_number)
+    ? `${person.display_name} (${person.personal_number})`
+    : person.display_name
+}
 const applyPhase = ref<'creating' | 'importing' | null>(null)
 const result = ref<AttendanceApplyResult | null>(null)
 const busy = ref<'preview' | 'apply' | 'persons' | null>(null)
@@ -249,6 +259,8 @@ async function apply() {
       )
       try {
         autoCreateResult.value = await createPersonsInChunks(payload)
+        // Krok Osoby pak ukáže výsledek u každého řádku.
+        createResults.value = autoCreateResult.value
       } catch (err) {
         error.value = apiErrorMessage(err, t('payroll_imports.attendance.persons_failed'))
       }
@@ -465,7 +477,17 @@ async function apply() {
           <div v-if="autoCreateResult?.results.some(item => item.status === 'failed')" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3" data-testid="attendance-auto-create-errors">
             <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.summary.auto_create_failed_title', { count: autoCreateResult.results.filter(item => item.status === 'failed').length }) }}</p>
             <ul class="mt-1 space-y-0.5 text-xs text-warning-700">
-              <li v-for="item in autoCreateResult.results.filter(entry => entry.status === 'failed')" :key="item.person_key">{{ item.message }}</li>
+              <li v-for="item in autoCreateResult.results.filter(entry => entry.status === 'failed')" :key="item.person_key">
+                <span class="font-medium">{{ personLabel(item.person_key) }}:</span> {{ item.message }}
+              </li>
+            </ul>
+          </div>
+          <div v-if="autoCreateNotes.length" class="mt-3 rounded-lg border border-neutral-200 bg-surface p-3" data-testid="attendance-auto-create-notes">
+            <p class="font-medium text-neutral-800">{{ t('payroll_imports.attendance.summary.auto_create_notes_title', { count: autoCreateNotes.length }) }}</p>
+            <ul class="mt-1 space-y-0.5 text-xs text-neutral-700">
+              <li v-for="item in autoCreateNotes" :key="item.person_key">
+                <span class="font-medium">{{ personLabel(item.person_key) }}:</span> {{ item.message }}
+              </li>
             </ul>
           </div>
         </section>

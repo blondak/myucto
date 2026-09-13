@@ -325,9 +325,9 @@ final class AttendancePersonAggregator
                 if ($clock !== null) {
                     return AttendanceDecimal::formatMillihours($clock);
                 }
-                $number = AttendanceDecimal::parseNumber($cell->textValue());
-                if ($number !== null) {
-                    return $number;
+                $hours = AttendanceDecimal::weeklyHours($cell->textValue());
+                if ($hours !== null) {
+                    return $hours;
                 }
             }
         }

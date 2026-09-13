@@ -1000,9 +1000,24 @@ final class AttendanceImportService
         ?string $ip,
         ?string $userAgent,
     ): array {
-        $weeklyHours = $item['weekly_hours'] ?? null;
-        if (is_float($weeklyHours) || is_int($weeklyHours)) {
-            $weeklyHours = rtrim(rtrim(sprintf('%.2F', $weeklyHours), '0'), '.');
+        // Úvazek z podkladů bývá i text („noční - 18,75", „DPP"); nepřečtený
+        // osobu neshodí, vztah vznikne bez něj a výsledek řekne, co doplnit.
+        $rawWeekly = $item['weekly_hours'] ?? null;
+        if (is_float($rawWeekly) || is_int($rawWeekly)) {
+            $rawWeekly = sprintf('%.2F', $rawWeekly);
+        }
+        $weeklyHours = null;
+        $weeklyNote = null;
+        if (is_string($rawWeekly) && trim($rawWeekly) !== '') {
+            $weeklyHours = AttendanceDecimal::weeklyHours($rawWeekly);
+            if ($weeklyHours === null && !in_array($item['relation_type'] ?? null, ['dpp', 'dpc'], true)) {
+                $weeklyNote = sprintf(
+                    'Úvazek „%s“ z podkladů nejde přečíst, vztah je založený bez něj. Doplňte ho na kartě zaměstnance.',
+                    mb_substr(trim($rawWeekly), 0, 40),
+                );
+            }
+        } elseif ($rawWeekly !== null) {
+            throw new \InvalidArgumentException('Týdenní pracovní doba není platná.');
         }
         $monthlyGross = $item['monthly_gross'] ?? null;
         if ($monthlyGross !== null && !is_int($monthlyGross)) {
@@ -1023,7 +1038,7 @@ final class AttendanceImportService
         $employment = $this->imports->latestEmploymentOfEmployee($supplierId, $employeeId)
             ?? throw new \LogicException('Nově založený pracovní vztah nebyl nalezen.');
 
-        $message = null;
+        $message = $weeklyNote;
         $plannedStart = is_string($input['planned_start_on']) ? $input['planned_start_on'] : '';
         if (($item['activate'] ?? false) === true) {
             if ($plannedStart <= $today) {
@@ -1039,7 +1054,7 @@ final class AttendanceImportService
                     $userAgent,
                 );
             } else {
-                $message = 'Nástup je v budoucnu, vztah zůstal plánovaný.';
+                $message = trim(($message ?? '') . ' Nástup je v budoucnu, vztah zůstal plánovaný.');
             }
         }
         // Nová osoba dostane osobní číslo z podkladů místo automatického ZAM-….

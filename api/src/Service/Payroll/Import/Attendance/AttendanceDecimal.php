@@ -58,6 +58,31 @@ final class AttendanceDecimal
     }
 
     /**
+     * Týdenní úvazek z podkladů: „37,5", „40 h", „36:30", číslo z Excelu
+     * s dlouhým rozvojem i text s jediným číslem („noční - 18,75"). Vrací
+     * hodiny s nejvýš dvěma desetinnými místy, nebo null, když se úvazek
+     * přečíst nedá („DPP") nebo leží mimo 0–168 h.
+     */
+    public static function weeklyHours(string $value): ?string
+    {
+        $clock = self::parseClockMillihours($value);
+        $decimal = $clock !== null ? self::formatMillihours($clock) : self::parseNumber($value);
+        if ($decimal === null && preg_match_all('/\d+(?:[.,]\d+)?/u', $value, $numbers) === 1) {
+            $decimal = self::parseNumber($numbers[0][0]);
+        }
+        if ($decimal === null || str_starts_with($decimal, '-')) {
+            return null;
+        }
+        $centi = self::scaled($decimal, 2);
+        if ($centi <= 0 || $centi > 16_800) {
+            return null;
+        }
+        $text = intdiv($centi, 100) . '.' . str_pad((string) ($centi % 100), 2, '0', STR_PAD_LEFT);
+
+        return rtrim(rtrim($text, '0'), '.');
+    }
+
+    /**
      * Časový zápis „8:00", „36:30", „-1:15", „7:30:00" → millihodiny.
      * Hodiny se nezkracují na čas dne, 36:30 je 36,5 h.
      */

@@ -24942,6 +24942,7 @@
         "auto_create_persons": "Create missing people automatically ({count})",
         "auto_create_persons_hint": "Creates the name, personal number, birth number and monthly wage from the source data, the employment type estimated from the data (employment otherwise), weekly hours from the data or 40 h, start on the first day of the imported period, employment active right away. Details can be filled in later on the employee's card.",
         "auto_create_failed_title": "Could not be created ({count})",
+        "auto_create_notes_title": "Created with a note ({count})",
         "phase_creating": "Creating people…",
         "phase_importing": "Importing…",
         "apply": "Apply ({count} people)",

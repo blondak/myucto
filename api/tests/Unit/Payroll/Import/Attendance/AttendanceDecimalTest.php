@@ -31,6 +31,26 @@ final class AttendanceDecimalTest extends TestCase
         self::assertSame($expected, AttendanceDecimal::parseNumber($input));
     }
 
+    /** @return iterable<string,array{string,?string}> */
+    public static function weeklyHours(): iterable
+    {
+        yield 'desetinná čárka' => ['37,5', '37.5'];
+        yield 'jednotka' => ['40 h', '40'];
+        yield 'časový zápis' => ['36:30', '36.5'];
+        yield 'dlouhý rozvoj z Excelu' => ['12,1000003814697', '12.1'];
+        yield 'jediné číslo v textu směny' => ['noční - 18,75', '18.75'];
+        yield 'bez čísla' => ['DPP', null];
+        yield 'dvě čísla nejsou jednoznačná' => ['8-16', null];
+        yield 'mimo týden' => ['200', null];
+        yield 'nula' => ['0', null];
+    }
+
+    #[DataProvider('weeklyHours')]
+    public function testReadsWeeklyHours(string $input, ?string $expected): void
+    {
+        self::assertSame($expected, AttendanceDecimal::weeklyHours($input));
+    }
+
     public function testClockValuesAreNotTruncatedToTimeOfDay(): void
     {
         self::assertSame(8000, AttendanceDecimal::parseClockMillihours('8:00'));
