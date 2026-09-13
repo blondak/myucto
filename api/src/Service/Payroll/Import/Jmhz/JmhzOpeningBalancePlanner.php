@@ -240,6 +240,10 @@ final class JmhzOpeningBalancePlanner
                 . "vedení mezd ani mzdový běh za rok {$year}. Počáteční stavy se převezmou, až to bude jasné."] + $public,
                 'source_reference' => ''];
         }
+        $contradiction = $this->boundaryContradiction($supplierId, $year, $months);
+        if ($contradiction !== null) {
+            return ['public' => ['reason' => $contradiction] + $public, 'source_reference' => ''];
+        }
         if ($boundary < sprintf('%04d-01-01', $year) || $boundary > sprintf('%04d-12-31', $year)) {
             return null;
         }
@@ -307,6 +311,31 @@ final class JmhzOpeningBalancePlanner
         }
 
         return ['public' => ['status' => 'ready'] + $public, 'source_reference' => $reference];
+    }
+
+    /**
+     * Nastavení tvrdí, že první měsíc dávky už vedlo MyÚčto, ale běh za něj
+     * v MyÚčtu není a hlášení přišlo z předchozího programu. Dřív to planner
+     * tiše zahodil a založení běhu pak podle začátku vedení mezd zapsalo
+     * všem nulové roční úhrny ({@see PayrollOpeningBalanceService::seedProvableZeroOpenings()}),
+     * což zkreslí strop sociálního pojištění, bonus i roční zúčtování.
+     *
+     * @param array<int,list<JmhzBatchItem>> $months
+     */
+    private function boundaryContradiction(int $supplierId, int $year, array $months): ?string
+    {
+        $moduleStart = $this->jmhzLookup->moduleStartPeriod($supplierId);
+        $firstRun = $this->jmhzLookup->firstRunPeriod($supplierId, $year);
+        $firstMonth = sprintf('%04d-%02d-01', $year, (int) array_key_first($months));
+        if ($moduleStart === null || $moduleStart > $firstMonth || ($firstRun !== null && $firstRun <= $firstMonth)) {
+            return null;
+        }
+        $lastMonth = sprintf('%04d-%02d', $year, (int) array_key_last($months));
+
+        return 'Začátek vedení mezd v MyÚčtu je nastavený na ' . substr($moduleStart, 0, 7)
+            . ', ale mzdový běh za ' . substr($firstMonth, 0, 7) . ' v MyÚčtu není a hlášení za něj pochází '
+            . 'z předchozího programu. Pokud měsíce do ' . $lastMonth . ' zpracoval předchozí program, posuňte '
+            . 'začátek vedení mezd na první měsíc vedený v MyÚčtu. Jinak založení běhu zapíše nulové roční úhrny.';
     }
 
     /**

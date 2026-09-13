@@ -298,6 +298,31 @@ final class JmhzReportImportServiceTest extends TestCase
         self::assertSame('approved', (string) $averages[0]['status']);
     }
 
+    /**
+     * Začátek vedení mezd v lednu, ale leden až březen doložil předchozí
+     * program a běh za ně v MyÚčtu není. Dřív počáteční stavy z náhledu tiše
+     * zmizely a běh pak zapsal nuly; teď se ukážou zablokované s návodem.
+     */
+    public function testOpeningBalancesExplainModuleStartContradiction(): void
+    {
+        $this->db->pdo()->prepare('UPDATE payroll_module_state SET start_period = ? WHERE supplier_id = ?')
+            ->execute(['2026-01-01', $this->supplierId]);
+        $this->registerEmployee(withIdentifiers: true);
+        $files = [];
+        foreach ([1, 2, 3] as $month) {
+            $files[] = $this->file("jmhz-{$month}.xml", JmhzReportFixtures::report([JmhzReportFixtures::person([
+                'oic' => $this->oic,
+                'id_ppv' => $this->idPpv,
+            ])], 2026, $month));
+        }
+
+        $openings = $this->imports->preview($this->supplierId, 'test', $files)['opening_balances'];
+
+        self::assertCount(1, $openings, $this->dump($openings));
+        self::assertSame('blocked', $openings[0]['status']);
+        self::assertStringContainsString('Začátek vedení mezd v MyÚčtu je nastavený na 2026-01', (string) $openings[0]['reason']);
+    }
+
     public function testUnpairedFormIsAssignedManually(): void
     {
         [$employeeId, $employmentId] = $this->registerEmployee(withIdentifiers: false);
