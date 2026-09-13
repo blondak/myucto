@@ -211,6 +211,11 @@ describe('PayrollJmhzDispatchPanel', () => {
     await flushPromises()
 
     await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    // Účetní vidí před odesláním týž VS, jaký odejde v obálce — ne VS registrace.
+    const confirm = wrapper.get('[data-test="jmhz-dispatch-confirm-7:3"]').text()
+    expect(confirm).toContain('1112223334')
+    expect(confirm).not.toContain('12345678')
+    expect(wrapper.text()).not.toContain('12345678')
     await wrapper.get('[data-test="jmhz-dispatch-confirm-yes-7:3"]').trigger('click')
     await flushPromises()
 

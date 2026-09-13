@@ -298,7 +298,7 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
             <p class="mt-1 text-xs text-neutral-500">
               {{ t('payroll.submissions.overview.jmhz_dispatch_reference', {
                 period: preview.period,
-                symbol: preview.office.variable_symbol,
+                symbol: envelopeVariableSymbol(preview),
               }) }}
             </p>
           </div>
@@ -351,7 +351,7 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
               ? 'payroll.submissions.overview.jmhz_dispatch_confirm_vrep'
               : 'payroll.submissions.overview.jmhz_dispatch_confirm_isds', {
               period: preview.period,
-              symbol: preview.office.variable_symbol,
+              symbol: envelopeVariableSymbol(preview),
               environment: t(environment === 'production'
                 ? 'payroll.submissions.overview.jmhz_dispatch_confirm_production'
                 : 'payroll.submissions.overview.jmhz_dispatch_confirm_test'),
