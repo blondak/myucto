@@ -2039,6 +2039,7 @@
       "deleted": "The empty payroll run was deleted.",
       "delete_failed": "The empty payroll run could not be deleted.",
       "load_failed": "Payroll runs could not be loaded.",
+      "inputs_link": "Payroll inputs and export",
       "breakdown_show": "Show per-employee breakdown",
       "breakdown_hide": "Hide per-employee breakdown",
       "breakdown_failed": "The per-employee breakdown could not be loaded. Please try again.",
@@ -2926,6 +2927,9 @@
         "export_xlsx": "Excel",
         "export_pdf": "PDF",
         "export_hint": "Downloads every input matching the filter, not just the page shown.",
+        "export_inputs": "Export inputs",
+        "export_inputs_hint": "Downloads the payroll inputs of the selected period with the current filter as Excel or PDF.",
+        "export_inputs_period": "Payroll inputs for {period} with the current filter",
         "export_failed": "The payroll input export could not be downloaded.",
         "batch_progress": "Processed {done}…",
         "batch_failed_title": "These inputs could not be processed:",
@@ -15800,6 +15804,14 @@
       "retry": "Try again"
     },
     "no_items": "No items.",
+    "expandable_list": {
+      "show_all": "Show all {count}",
+      "collapse": "Collapse list",
+      "search": "Search by name or personal number",
+      "search_label": "Search the list",
+      "no_results": "No item matches the search.",
+      "not_listed": "Listing the first {shown} of {total}; {rest} more did not fit into this overview."
+    },
     "pagination_range": "{from}–{to} of {total}",
     "view_all": "View all",
     "year": "Year",

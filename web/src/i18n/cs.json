@@ -2039,6 +2039,7 @@
       "deleted": "Prázdný mzdový běh byl smazán.",
       "delete_failed": "Prázdný mzdový běh se nepodařilo smazat.",
       "load_failed": "Mzdové běhy se nepodařilo načíst.",
+      "inputs_link": "Mzdové vstupy a export",
       "breakdown_show": "Zobrazit rozpad podle zaměstnanců",
       "breakdown_hide": "Skrýt rozpad podle zaměstnanců",
       "breakdown_failed": "Rozpad podle zaměstnanců se nepodařilo načíst. Zkuste to prosím znovu.",
@@ -2926,6 +2927,9 @@
         "export_xlsx": "Excel",
         "export_pdf": "PDF",
         "export_hint": "Stáhne všechny vstupy odpovídající filtru, ne jen zobrazenou stránku.",
+        "export_inputs": "Export vstupů",
+        "export_inputs_hint": "Stáhne mzdové vstupy za zvolené období s aktuálním filtrem do Excelu nebo PDF.",
+        "export_inputs_period": "Mzdové vstupy za {period} s aktuálním filtrem",
         "export_failed": "Export mzdových vstupů se nepodařilo stáhnout.",
         "batch_progress": "Zpracováno {done}…",
         "batch_failed_title": "Tyto vstupy se nepodařilo zpracovat:",
@@ -15800,6 +15804,14 @@
       "retry": "Zkusit znovu"
     },
     "no_items": "Žádné položky.",
+    "expandable_list": {
+      "show_all": "Zobrazit všech {count}",
+      "collapse": "Sbalit seznam",
+      "search": "Hledat podle jména nebo os. čísla",
+      "search_label": "Hledat v seznamu",
+      "no_results": "Hledání neodpovídá žádná položka.",
+      "not_listed": "Vypsáno prvních {shown} z {total}, dalších {rest} se do přehledu nevešlo."
+    },
     "pagination_range": "{from}–{to} z {total}",
     "view_all": "Zobrazit vše",
     "year": "Rok",

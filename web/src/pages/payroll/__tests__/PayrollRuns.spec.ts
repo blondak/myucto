@@ -647,6 +647,60 @@ describe('PayrollRuns', () => {
   })
 
   /*
+   * U 226 lidí visely pod jediným nálezem stovky řádků. Server posílá nejvýš
+   * 25 osob a skutečný počet v `entity_total` — nález musí svítit 225×, ne 25×,
+   * a zbytek výčtu se rozbaluje a prohledává, ne vysype.
+   */
+  it('dlouhý nález předběžné kontroly zkrátí, rozbalí a prohledá', async () => {
+    m.runs.mockResolvedValue([run({ status: 'draft' })])
+    m.readiness.mockReturnValue({ period_start: '2026-08-01', payment_date: '2026-09-15', office_id: null, ready: false, has_findings: true, findings: [{
+      code: 'time_month_not_approved', severity: 'warning', impact: 'revision', scope: 'monthly',
+      message: 'Docházka vyžaduje kontrolu.', remediation_path: null, count: 225, entity_total: 225,
+      entities: Array.from({ length: 25 }, (_, index) => ({
+        entity_type: 'employment',
+        entity_id: index + 1,
+        label: `Zaměstnanec ${index + 1}`,
+        message: 'Chybí schválení docházky.',
+        remediation_path: `/payroll/time?employment=${index + 1}&period=2026-08`,
+      })),
+    }] })
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const finding = wrapper.get('[data-testid="run-readiness-time_month_not_approved"]')
+    expect(finding.get('[data-test="run-readiness-count-time_month_not_approved"]').text()).toContain('225×')
+    expect(finding.findAll('a')).toHaveLength(8)
+    expect(finding.find('[data-test="run-readiness-entities-time_month_not_approved-not-listed"]').exists()).toBe(true)
+
+    await finding.get('[data-test="run-readiness-entities-time_month_not_approved-toggle"]').trigger('click')
+    expect(finding.findAll('a')).toHaveLength(25)
+
+    await finding.get('[data-test="run-readiness-entities-time_month_not_approved-search"]').setValue('Zaměstnanec 17')
+    const links = finding.findAll('a')
+    expect(links).toHaveLength(1)
+    expect(links[0]?.attributes('href')).toBe('/payroll/time?employment=17&period=2026-08')
+  })
+
+  it('stovky validací běhu stránkuje místo vysypání pod kartu', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: Array.from({ length: 30 }, (_, index) => validation({
+        id: 300 + index,
+        entity_id: index + 1,
+        message: `Pracovní vztah ${index + 1} nemá v období mzdovou složku.`,
+      })),
+    })])
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test^="payroll-validation-group-"]')).toHaveLength(8)
+    await wrapper.get('[data-test="payroll-run-15-validations-toggle"]').trigger('click')
+    expect(wrapper.findAll('[data-test^="payroll-validation-group-"]')).toHaveLength(25)
+    expect(wrapper.find('[data-test="payroll-run-15-validations-pagination"]').exists()).toBe(true)
+  })
+
+  /*
    * Blokátor `draft_inputs_present` dosud jen odkázal jinam, kde se schvaluje
    * řádek po řádku. U 500 zaměstnanců to je zhruba tisíc kliknutí, takže
    * zkratka musí být přímo tady.

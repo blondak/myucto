@@ -527,6 +527,28 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  /** Export vstupů je v hlavičce na každé záložce, ne jen v souhrnu vstupů. */
+  it('offers the input export from the page header and switches to the inputs tab', async () => {
+    m.routeQuery = { tab: 'catalog', period: '2026-06' }
+    const page = await m.inputs()
+    m.inputs.mockResolvedValue({
+      ...page,
+      summary: { total: 480, draft_total: 0, amount_total_minor: 25000, draft_amount_total_minor: 0 },
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-inputs-summary"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="payroll-header-export"]').trigger('click')
+    await wrapper.get('[data-testid="payroll-header-export-pdf"]').trigger('click')
+    await flushPromises()
+
+    expect(m.exportInputs).toHaveBeenCalledWith('pdf', '2026-06', undefined, {})
+    expect(wrapper.find('[data-testid="payroll-header-export-menu"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payroll-inputs-summary"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   /** Neschválené vstupy zůstanou na obrazovce seskupené po důvodu, ne jen první v toastu. */
   it('keeps grouped failure reasons of a bulk approval on screen', async () => {
     m.approveInputsBatch.mockResolvedValue({

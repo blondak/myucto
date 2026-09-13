@@ -5721,6 +5721,8 @@ export interface PayrollRunReadinessFinding {
   remediation_path: string | null
   /** Kolika vztahů/položek se nález týká. */
   count: number
+  /** Skutečný počet dotčených záznamů; `entities` je na serveru oříznutý. */
+  entity_total?: number
   /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
   entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null }[]
 }
