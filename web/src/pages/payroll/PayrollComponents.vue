@@ -179,6 +179,26 @@ const selectedInputIds = ref<number[]>([])
 const inputBatchFailures = ref<Array<{ message: string, count: number }>>([])
 /** Kolik už hromadná akce zpracovala; `null` = neběží. */
 const batchProgress = ref<number | null>(null)
+/** Právě stahovaný export; mezitím nejde spustit další. */
+const exportingInputs = ref<'xlsx' | 'pdf' | null>(null)
+
+/** Export stáhne celý filtr včetně zúžení na vztah, ne zobrazenou stránku. */
+async function exportInputs(format: 'xlsx' | 'pdf') {
+  if (exportingInputs.value !== null) return
+  exportingInputs.value = format
+  try {
+    await payrollApi.exportInputs(
+      format,
+      period.value,
+      focusEmploymentId.value ?? undefined,
+      inputFilterParams.value,
+    )
+  } catch (error: any) {
+    toast.error(apiErrorMessage(error, t('payroll.components.inputs.export_failed')))
+  } finally {
+    exportingInputs.value = null
+  }
+}
 const componentFilterOptions = computed(() => {
   const options = inputFacets.value.components.map(item => ({
     value: String(item.id),
@@ -1939,6 +1959,16 @@ onMounted(load)
           <div class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-2" data-testid="payroll-inputs-summary">
             <p class="text-sm text-neutral-700">{{ t('payroll.components.inputs.summary', { total: summaryTotal, amount: formatMoney(summaryAmount), drafts: matchingDraftCount }) }}</p>
             <div class="flex flex-wrap items-center gap-2">
+              <button type="button" data-testid="payroll-inputs-export-xlsx" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :disabled="exportingInputs !== null || summaryTotal === 0" :aria-busy="exportingInputs === 'xlsx'" :title="t('payroll.components.inputs.export_hint')" @click="exportInputs('xlsx')">
+                <svg v-if="exportingInputs === 'xlsx'" class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" /></svg>
+                <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.table" /></svg>
+                {{ t('payroll.components.inputs.export_xlsx') }}
+              </button>
+              <button type="button" data-testid="payroll-inputs-export-pdf" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :disabled="exportingInputs !== null || summaryTotal === 0" :aria-busy="exportingInputs === 'pdf'" :title="t('payroll.components.inputs.export_hint')" @click="exportInputs('pdf')">
+                <svg v-if="exportingInputs === 'pdf'" class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" /></svg>
+                <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.download" /></svg>
+                {{ t('payroll.components.inputs.export_pdf') }}
+              </button>
               <span v-if="batchProgress !== null" role="status" class="text-xs text-neutral-500">{{ t('payroll.components.inputs.batch_progress', { done: batchProgress }) }}</span>
               <button v-if="canWrite && matchingDraftCount > 0" type="button" data-testid="payroll-inputs-cancel-matching" :class="[btnOutline('danger'), 'whitespace-nowrap']" :disabled="saving" @click="cancelMatchingInputs">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>

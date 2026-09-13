@@ -303,6 +303,115 @@ final class PayrollInputRepository
         ];
     }
 
+    /**
+     * Jedna dávka exportu: TÝŽ filtr i řazení jako výpis, jen bez stropu
+     * stránky. Export si ji volá po dávkách, ať se deset tisíc řádků nenačítá
+     * do paměti naráz; `input.id` na konci řazení drží dávky stabilní.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function exportPage(
+        int $supplierId,
+        PayrollInputFilter $filter,
+        int $limit,
+        int $offset,
+    ): array {
+        $limit = max(1, $limit);
+        $offset = max(0, $offset);
+        $where = $filter->where($supplierId);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT input.id, input.employee_id, input.row_version, input.amount_minor,
+                    input.quantity_milliunits, input.status, input.source_kind,
+                    input.import_id, input.external_id,
+                    employee.full_name AS employee_name,
+                    employment.code AS employment_code,
+                    employment.relation_type,
+                    component.code AS component_code,
+                    component.name AS component_name,
+                    component.component_kind,
+                    batch.source_name AS import_name
+             ' . self::FILTER_FROM . '
+               LEFT JOIN payroll_input_imports batch
+                 ON batch.supplier_id = input.supplier_id
+                AND batch.id = input.import_id
+              WHERE ' . $where['sql']
+            . ' ORDER BY employee.full_name, employment.code, component.code, input.id
+              LIMIT ? OFFSET ?'
+        );
+        $position = self::bindAll($stmt, $where['params']);
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return array_map(
+            self::cast(...),
+            PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'payroll_input_export'),
+        );
+    }
+
+    /**
+     * Čitelné názvy pro popis filtru v hlavičce exportu: místo `employee_id=8`
+     * jméno, místo `component_id=5,7` kódy složek. Co ve firmě neexistuje,
+     * se vrátí jako null a popis ukáže aspoň číslo.
+     *
+     * @return array{employee:?string,employment:?string,components:array<int,string>,import:?string}
+     */
+    public function exportFilterLabels(int $supplierId, PayrollInputFilter $filter): array
+    {
+        $pdo = $this->db->pdo();
+        $employee = null;
+        if ($filter->employeeId !== null) {
+            $stmt = $pdo->prepare(
+                'SELECT full_name FROM payroll_employees WHERE supplier_id = ? AND id = ?'
+            );
+            $stmt->execute([$supplierId, $filter->employeeId]);
+            $value = $stmt->fetchColumn();
+            $employee = $value === false ? null : (string) $value;
+        }
+        $employment = null;
+        if ($filter->employmentId !== null) {
+            $stmt = $pdo->prepare(
+                'SELECT CONCAT(employee.full_name, " · ", employment.code)
+                   FROM payroll_employments employment
+                   JOIN payroll_employees employee
+                     ON employee.supplier_id = employment.supplier_id
+                    AND employee.id = employment.employee_id
+                  WHERE employment.supplier_id = ? AND employment.id = ?'
+            );
+            $stmt->execute([$supplierId, $filter->employmentId]);
+            $value = $stmt->fetchColumn();
+            $employment = $value === false ? null : (string) $value;
+        }
+        $components = [];
+        if ($filter->componentIds !== []) {
+            $stmt = $pdo->prepare(
+                'SELECT id, code, name FROM payroll_component_definitions
+                  WHERE supplier_id = ? AND id IN ('
+                . implode(', ', array_fill(0, count($filter->componentIds), '?')) . ')'
+            );
+            $stmt->execute([$supplierId, ...$filter->componentIds]);
+            foreach (PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'export_components') as $row) {
+                $components[(int) $row['id']] = $row['code'] . ' ' . $row['name'];
+            }
+        }
+        $import = null;
+        if ($filter->importId !== null) {
+            $stmt = $pdo->prepare(
+                'SELECT source_name FROM payroll_input_imports WHERE supplier_id = ? AND id = ?'
+            );
+            $stmt->execute([$supplierId, $filter->importId]);
+            $value = $stmt->fetchColumn();
+            $import = $value === false ? null : (string) $value;
+        }
+
+        return [
+            'employee' => $employee,
+            'employment' => $employment,
+            'components' => $components,
+            'import' => $import,
+        ];
+    }
+
     /** Spojení, nad kterými stojí WHERE z {@see PayrollInputFilter::where()}. */
     private const FILTER_FROM = 'FROM payroll_inputs input
                JOIN payroll_employees employee

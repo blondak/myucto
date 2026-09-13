@@ -113,6 +113,7 @@ use MyInvoice\Action\Payroll\PayrollHealthInsuranceIsdsAction;
 use MyInvoice\Action\Payroll\PayrollHealthNotificationAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
+use MyInvoice\Action\Payroll\PayrollInputsExportAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollInsuranceBreakdownAction;
 use MyInvoice\Action\Payroll\PayrollJmhzCorrectionAction;
@@ -911,6 +912,8 @@ final class Routes
                 [PayrollBenefitBasketOverviewAction::class, 'list'],
             );
             $g->get('/inputs', [PayrollInputsAction::class, 'list']);
+            // Export celého filtru výpisu; parametry filtru jsou tytéž jako u `/inputs`.
+            $g->get('/inputs/export.{format:xlsx|pdf}', [PayrollInputsExportAction::class, 'export']);
             $g->post('/inputs/preview', [PayrollInputsAction::class, 'preview']);
             $g->post('/inputs', [PayrollInputsAction::class, 'create']);
             $g->put('/inputs/{id:[0-9]+}', [PayrollInputsAction::class, 'update']);

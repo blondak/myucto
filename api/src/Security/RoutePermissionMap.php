@@ -445,6 +445,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/enforcement(?:/|$)#', 'payroll.enforcement', AccessLevel::READ],
         ['*', '#^/api/payroll/enforcement(?:/|$)#', 'payroll.enforcement', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/inputs$#', 'payroll', AccessLevel::READ],
+        // Export je jen jiná podoba výpisu, proto stejné právo; musí předejít
+        // catch-all níž, který by na něj chtěl zápis vstupů.
+        ['GET', '#^/api/payroll/inputs/export\.(?:xlsx|pdf)$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/inputs/approve-batch$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/inputs/[0-9]+/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['*', '#^/api/payroll/inputs(?:/.*)?$#', 'payroll.inputs.write', AccessLevel::WRITE],

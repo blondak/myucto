@@ -99,6 +99,18 @@ pruhem seskupené podle důvodu. Stejně funguje **Zrušit N konceptů**, které
 vždy zeptá na potvrzení. Zaškrtnutím řádků schválíte nebo zrušíte jen vybrané
 vstupy.
 
+Tlačítka **Excel** a **PDF** v souhrnném pruhu stáhnou všechny vstupy
+odpovídající filtru, ne jen zobrazenou stránku. Sešit Excel má na listu
+**Vstupy** jeden řádek na vstup (osobní číslo, jméno, vztah, složka, množství,
+sazba, částka, stav, zdroj a importní dávka) a pod tabulkou součet; na listu
+**Info** je firma, období, použitý filtr a čas exportu. Sazba je dopočtená jako
+částka lomená množstvím. Poslední dva sloupce jsou skryté a identifikují vstup,
+proto je list zamčený bez hesla: filtrovat v něm jde, pro řazení ho odemkněte
+(Revize, Odemknout list). PDF je tisková sestava na šířku seskupená podle
+zaměstnanců s mezisoučty a na konci s rekapitulací podle složek. Tisková
+sestava pojme nejvýše 5 000 vstupů a Excel 20 000; při větším výběru aplikace
+požádá o zúžení filtru.
+
 Blokace neschválených vstupů v mzdovém běhu odkazuje rovnou na koncepty
 daného měsíce a u ní je i tlačítko pro jejich hromadné schválení. Hromadné
 zadání přes [rychlý měsíční vstup](65_Rychly_mesicni_vstup.md) uloží řádky

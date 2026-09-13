@@ -1,4 +1,5 @@
 import { api } from './client'
+import { downloadApiFile } from '@/utils/downloadFile'
 // Step-up (heslo / TOTP / passkey proof) je sdílený s EPO — volba podpisového
 // certifikátu je rozhodnutí stejné třídy jako správa klíče samotného, takže
 // kódování důkazu se nesmí rozejít se zbytkem aplikace.
@@ -7842,6 +7843,24 @@ export const payrollApi = {
       group_total: response.data.group_total ?? null,
       facets: response.data.facets ?? null,
     })),
+  /**
+   * Stáhne CELÝ filtr výpisu jako XLSX nebo PDF, ne zobrazenou stránku.
+   * `filters` jsou tytéž parametry jako u `inputs()`; seskupení export nemění.
+   */
+  exportInputs: (
+    format: 'xlsx' | 'pdf',
+    period: string,
+    employmentId?: number,
+    filters: Record<string, string | number> = {},
+  ): Promise<void> => {
+    const params = new URLSearchParams({ period })
+    if (employmentId) params.set('employment_id', String(employmentId))
+    for (const [key, value] of Object.entries(filters)) params.set(key, String(value))
+    return downloadApiFile(
+      `/payroll/inputs/export.${format}?${params.toString()}`,
+      `mzdove-vstupy-${period}.${format}`,
+    ).then(() => undefined)
+  },
   quickInputs: (period: string, page?: PayrollPageParams, employmentId?: number, q?: string) =>
     api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', {
       params: {

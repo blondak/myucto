@@ -1,0 +1,28 @@
+{% if recap is not empty %}
+<div class="recap-title">Rekapitulace podle složky</div>
+<table class="inputs">
+    <thead>
+        <tr>
+            <th style="width:16%;">Kód složky</th>
+            <th style="width:54%;">Název složky</th>
+            <th class="num" style="width:12%;">Počet vstupů</th>
+            <th class="num" style="width:18%;">Částka Kč</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in recap %}
+            <tr>
+                <td>{{ item.code }}</td>
+                <td>{{ item.name }}</td>
+                <td class="num">{{ item.count }}</td>
+                <td class="num">{{ item.amount }}</td>
+            </tr>
+        {% endfor %}
+        <tr class="grand-total">
+            <td colspan="2">Celkem</td>
+            <td class="num">{{ row_count }}</td>
+            <td class="num">{{ total }}</td>
+        </tr>
+    </tbody>
+</table>
+{% endif %}

@@ -4,6 +4,7 @@ import { ref } from 'vue'
 
 const m = vi.hoisted(() => ({
   approveInputsBatch: vi.fn(),
+  exportInputs: vi.fn(),
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
   components: vi.fn(),
@@ -67,6 +68,7 @@ vi.mock('@/api/payroll', () => ({
     updateInput: vi.fn(),
     approveInput: vi.fn(),
     approveInputsBatch: m.approveInputsBatch,
+    exportInputs: m.exportInputs,
     riskySavings: m.riskySavings,
     institutionAccounts: m.institutionAccounts,
   },
@@ -494,6 +496,34 @@ describe('PayrollComponents', () => {
       filter: { q: 'Novák', status: 'draft', import_id: 7 },
       after_id: 0,
     })
+    wrapper.unmount()
+  })
+
+  /** Export dostane tentýž filtr i zúžení na vztah jako výpis, ne jen stránku. */
+  it('exports the whole current filter and blocks another export meanwhile', async () => {
+    m.routeQuery = { tab: 'inputs', period: '2026-06', status: 'draft', q: 'Novák', employment: '12' }
+    const page = await m.inputs()
+    m.inputs.mockResolvedValue({
+      ...page,
+      summary: { total: 480, draft_total: 1, amount_total_minor: 25000, draft_amount_total_minor: 25000 },
+    })
+    let finish: () => void = () => {}
+    m.exportInputs.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="payroll-inputs-export-xlsx"]').trigger('click')
+    expect(m.exportInputs).toHaveBeenCalledWith('xlsx', '2026-06', 12, { q: 'Novák', status: 'draft' })
+    expect(wrapper.get('[data-testid="payroll-inputs-export-pdf"]').attributes('disabled')).toBeDefined()
+    finish()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="payroll-inputs-export-pdf"]').attributes('disabled')).toBeUndefined()
+
+    m.exportInputs.mockRejectedValueOnce(new Error('export_too_large'))
+    await wrapper.get('[data-testid="payroll-inputs-export-pdf"]').trigger('click')
+    await flushPromises()
+    expect(m.exportInputs).toHaveBeenLastCalledWith('pdf', '2026-06', 12, { q: 'Novák', status: 'draft' })
+    expect(m.toastError).toHaveBeenCalled()
     wrapper.unmount()
   })
 
