@@ -31,7 +31,10 @@ Po kliknutí:
 - E-mail jde na: kontakty klienta s účelem **Upomínky** *(viz
   [§ 18.2.2](18_Klienti.md))*; bez nich kontakty **Doklady**; bez kontaktů
   na `klient.hlavni_email + zakazka.fakturacni_emaily[]`. Příjemce
-  vidíš v potvrzovacím dialogu vč. zdroje.
+  vidíš v potvrzovacím dialogu vč. zdroje a můžeš je upravit stejně jako
+  při odeslání faktury: doplnit další adresy (čárkou oddělené) nebo přes
+  **+ CC / BCC** přidat kopii, třeba stavbyvedoucímu nebo nákupčímu, který
+  platbu schvaluje. Uložené kontakty klienta ani faktura se tím nemění.
 - Šablona: `invoice_reminder` (CZ / EN podle jazyka klienta)
 - Status faktury → `reminded`
 - `last_reminder_at` = teď

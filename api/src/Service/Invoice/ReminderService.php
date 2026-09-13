@@ -41,12 +41,23 @@ final class ReminderService
     ) {}
 
     /**
-     * @return array{sent_to: string[], days_overdue: int}
+     * @param list<string>|null $to  ruční příjemci z modalu (#60); null = jen resolver
+     * @param list<string> $cc  bez `$to` se přidají k vyřešeným, s `$to` jsou celý seznam
+     * @param list<string> $bcc dtto
+     * @return array{sent_to: string[], cc: string[], bcc: string[], days_overdue: int}
      * @throws \RuntimeException při chybě (recipient/PDF/SMTP/...)
      * @throws \DomainException když faktura nesplňuje podmínky pro upomínku
+     * @throws \InvalidArgumentException při neplatné ručně zadané adrese
      */
-    public function send(int $invoiceId, ?int $userId = null, ?string $ip = null, ?string $userAgent = null): array
-    {
+    public function send(
+        int $invoiceId,
+        ?int $userId = null,
+        ?string $ip = null,
+        ?string $userAgent = null,
+        ?array $to = null,
+        array $cc = [],
+        array $bcc = [],
+    ): array {
         $invoice = $this->repo->find($invoiceId);
         if ($invoice === null) {
             throw new \DomainException('Faktura nenalezena.');
@@ -83,14 +94,26 @@ final class ReminderService
         // Jednotný resolver (#86): účel `reminders`, fallback na `documents`,
         // bez kontaktů legacy chování (main_email + e-maily zakázky), včetně
         // kopie dodavateli (supplier.self_copy / cfg smtp.cc_supplier_on_reminder).
-        $r = $this->recipients->resolve(RecipientResolver::TYPE_REMINDERS, $invoice);
+        // Ruční příjemci z modalu (#60) — typicky člověk, který platbu schvaluje,
+        // přidaný bez zásahu do uložených kontaktů klienta.
+        $manualRecipients = $to !== null || $cc !== [] || $bcc !== [];
+        $r = RecipientResolver::applyOverrides(
+            $this->recipients->resolve(RecipientResolver::TYPE_REMINDERS, $invoice),
+            $to,
+            $cc,
+            $bcc,
+        );
         $to = $r['to'];
+        $cc = $r['cc'];
         $bcc = $r['bcc'];
         if (empty($to)) {
             throw new \DomainException(self::NO_RECIPIENT_MESSAGE);
         }
-
-        $cc = $r['cc'];
+        foreach ([...$to, ...$cc, ...$bcc] as $em) {
+            if (!filter_var($em, FILTER_VALIDATE_EMAIL)) {
+                throw new \InvalidArgumentException("Neplatný email: $em");
+            }
+        }
 
         $locale = (string) ($invoice['language'] ?? 'cs');
 
@@ -137,10 +160,11 @@ final class ReminderService
             'cc'           => $cc,
             'bcc'          => $bcc,
             'resolved_recipients' => $r['resolved'],
+            'manual_recipients' => $manualRecipients,
             'days_overdue' => $daysOverdue,
             'reminder_no'  => (int) $invoice['reminder_count'] + 1,
         ], $ip, $userAgent);
 
-        return ['sent_to' => $to, 'days_overdue' => $daysOverdue];
+        return ['sent_to' => $to, 'cc' => $cc, 'bcc' => $bcc, 'days_overdue' => $daysOverdue];
     }
 }

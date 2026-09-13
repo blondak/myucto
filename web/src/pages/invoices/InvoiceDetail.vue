@@ -1288,21 +1288,50 @@ const daysOverdue = computed(() => {
 // #86 — příjemci upomínky z resolveru (kontakty s účelem `reminders`, fallback documents/main).
 const reminderResolved = ref<Array<{ email: string; recipient: 'to' | 'cc' | 'bcc'; source: 'contact' | 'project' | 'main_email'; usage: string | null; label: string | null }>>([])
 
+// #60 — příjemci upomínky editovatelní jako u odeslání faktury (další člověk bez
+// zásahu do kontaktů klienta).
+const reminderTo = ref('')
+const reminderCcText = ref('')
+const reminderBccText = ref('')
+const reminderCcBccVisible = ref(false)
+
 async function openReminderModal() {
   if (!invoice.value) return
   reminderResolved.value = []
+  reminderCcText.value = ''
+  reminderBccText.value = ''
+  reminderCcBccVisible.value = false
   try {
     const r = await invoicesApi.recipients(invoice.value.id, 'reminders')
+    reminderTo.value = r.to.join(', ')
+    reminderCcText.value = r.cc.join(', ')
+    reminderBccText.value = r.bcc.join(', ')
+    reminderCcBccVisible.value = r.cc.length > 0 || r.bcc.length > 0
     reminderResolved.value = r.resolved
-  } catch { /* fallback na legacy zobrazení níže */ }
+  } catch {
+    const main = invoice.value.client_main_email || ''
+    const billing = (invoice.value.project_billing_emails || []).map(b => b.email)
+    reminderTo.value = Array.from(new Set([main, ...billing].filter(Boolean))).join(', ')
+  }
   reminderOpen.value = true
 }
 
 async function sendReminder() {
   if (!invoice.value) return
+  const to = reminderTo.value.split(',').map(e => e.trim()).filter(Boolean)
+  if (!to.length) {
+    toast.error(t('invoice.recipients_required'))
+    return
+  }
   busy.value = 'reminder'
   try {
-    const r = await invoicesApi.sendReminder(invoice.value.id)
+    const cc = reminderCcText.value.split(',').map(e => e.trim()).filter(Boolean)
+    const bcc = reminderBccText.value.split(',').map(e => e.trim()).filter(Boolean)
+    const r = await invoicesApi.sendReminder(invoice.value.id, {
+      to,
+      ...(cc.length ? { cc } : {}),
+      ...(bcc.length ? { bcc } : {}),
+    })
     invoice.value = r.invoice
     reminderOpen.value = false
     toast.success( t('invoice.reminder_sent_ok', { recipients: r.sent_to.join(', '), days: r.days_overdue }))
@@ -1859,20 +1888,31 @@ const invoiceActions = computed<ActionItem[]>(() => {
           <h3 class="text-lg font-semibold mb-1">{{ t('invoice.modals.reminder_title') }}</h3>
           <p class="text-sm text-warning-600 font-medium mb-3">{{ t('invoice.modals.reminder_overdue', { days: daysOverdue }) }}</p>
           <p class="text-sm text-neutral-600 mb-3">{{ t('invoice.modals.reminder_body') }}</p>
-          <!-- #86: příjemci z resolveru s provenancí; fallback legacy zobrazení při chybě API -->
-          <div v-if="reminderResolved.length" class="bg-neutral-50 border border-neutral-200 rounded-md px-3 py-2 mb-4 text-xs">
-            <div class="text-neutral-500 mb-0.5">{{ t('invoice.modals.reminder_recipients') }}</div>
-            <div v-for="rr in reminderResolved" :key="rr.email" class="font-mono">
-              ✉ {{ rr.email }}<span class="text-neutral-400 font-sans"> ({{ recipientSourceLabel(rr) }}<template v-if="rr.recipient !== 'to'">, {{ rr.recipient.toUpperCase() }}</template>)</span>
+          <!-- #60: příjemci editovatelní jako u odeslání faktury; předvyplní je resolver (#86) -->
+          <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.modals.reminder_recipients') }}</label>
+          <input v-model="reminderTo" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-2 text-sm" />
+          <template v-if="reminderCcBccVisible">
+            <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.modals.send_cc_label') }}</label>
+            <input v-model="reminderCcText" type="text" class="w-full h-9 px-3 border border-neutral-300 rounded-md mb-2 text-sm" />
+            <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.modals.send_bcc_label') }}</label>
+            <input v-model="reminderBccText" type="text" class="w-full h-9 px-3 border border-neutral-300 rounded-md mb-2 text-sm" />
+          </template>
+          <button v-else type="button" @click="reminderCcBccVisible = true"
+            class="cursor-pointer text-xs text-primary-700 hover:text-primary-800 mb-2">+ CC / BCC</button>
+          <div v-if="reminderResolved.length" class="rounded-md bg-neutral-50 border border-neutral-200 px-2.5 py-2 mb-2">
+            <div class="text-[11px] text-neutral-500 mb-1">{{ t('invoice.modals.send_sources_label') }}</div>
+            <div class="flex flex-wrap gap-1.5">
+              <span v-for="rr in reminderResolved" :key="rr.email"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface border border-neutral-200 text-xs"
+                :title="rr.email">
+                <span class="font-mono">{{ rr.email }}</span>
+                <span class="text-neutral-400">·</span>
+                <span class="text-neutral-500">{{ recipientSourceLabel(rr) }}</span>
+                <span v-if="rr.recipient !== 'to'" class="uppercase text-[10px] font-semibold text-primary-700">{{ rr.recipient }}</span>
+              </span>
             </div>
           </div>
-          <div v-else-if="invoice && (invoice.client_main_email || invoice.project_billing_emails?.length)" class="bg-neutral-50 border border-neutral-200 rounded-md px-3 py-2 mb-4 text-xs">
-            <div class="text-neutral-500 mb-0.5">{{ t('invoice.modals.reminder_recipients') }}</div>
-            <div v-if="invoice.client_main_email" class="font-mono">✉ {{ invoice.client_main_email }}</div>
-            <div v-for="b in (invoice.project_billing_emails || []).filter(b => b.email !== invoice!.client_main_email)" :key="b.email" class="font-mono">
-              ✉ {{ b.email }}<span v-if="b.label" class="text-neutral-400"> ({{ b.label }})</span>
-            </div>
-          </div>
+          <p class="text-xs text-neutral-500 mb-4">{{ t('invoice.modals.reminder_default_hint') }}</p>
           <div v-if="invoice && invoice.reminder_count > 0" class="text-xs text-neutral-500 mb-4">
             {{ t('invoice.reminder_at', { count: invoice.reminder_count, date: formatDate(invoice.last_reminder_at) }) }}
           </div>

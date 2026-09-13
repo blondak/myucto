@@ -147,6 +147,36 @@ final class RecipientResolver
     }
 
     /**
+     * Ruční úprava příjemců z modalu nad výsledkem resolve() (#60). Explicitní `to`
+     * je autoritativní: modal předvyplnil i cc/bcc včetně kopie dodavateli, takže
+     * co přišlo, je celý seznam, který uživatel viděl a schválil. Bez `to` se ručně
+     * přidané cc/bcc připojí k vyřešeným. Stejnou sémantiku má SendEmailAction.
+     *
+     * @param array{to: list<string>, cc: list<string>, bcc: list<string>, resolved: list<array<string,mixed>>} $resolved
+     * @param list<string>|null $to
+     * @param list<string> $cc
+     * @param list<string> $bcc
+     * @return array{to: list<string>, cc: list<string>, bcc: list<string>, resolved: list<array<string,mixed>>}
+     */
+    public static function applyOverrides(array $resolved, ?array $to, array $cc, array $bcc): array
+    {
+        $clean = static fn (array $list): array => array_values(array_unique(array_filter(
+            array_map(static fn ($e) => trim((string) $e), $list),
+            static fn (string $e) => $e !== '',
+        )));
+
+        if ($to !== null) {
+            return ['to' => $clean($to), 'cc' => $clean($cc), 'bcc' => $clean($bcc), 'resolved' => []];
+        }
+        return [
+            'to'       => $resolved['to'],
+            'cc'       => $clean([...$resolved['cc'], ...$cc]),
+            'bcc'      => $clean([...$resolved['bcc'], ...$bcc]),
+            'resolved' => $resolved['resolved'],
+        ];
+    }
+
+    /**
      * Kopie odchozí zprávy na e-mail dodavatele (audit vlastní pošty).
      *
      * Priorita: supplier.self_copy[$type] ('off'|'cc'|'bcc') > cfg flag (legacy

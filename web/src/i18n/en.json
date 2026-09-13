@@ -16334,7 +16334,8 @@
       "reminder_title": "Send reminder",
       "reminder_overdue": "Invoice is {days} days overdue.",
       "reminder_body": "Client will receive an email reminder with the invoice PDF. Status will change to \"Reminded\" and the reminder count will be incremented.",
-      "reminder_recipients": "Recipients"
+      "reminder_recipients": "Recipients (comma separated)",
+      "reminder_default_hint": "Pre-filled from client contacts (Reminders purpose, otherwise Documents), project billing emails and the main email. You can add more recipients, e.g. the person who approves the payment. Client contacts and the invoice stay unchanged."
     },
     "select_month": "Select all invoices for {month}",
     "bulk_pdf": "PDF export ({n})",

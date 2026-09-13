@@ -16334,7 +16334,8 @@
       "reminder_title": "Odeslat upomínku",
       "reminder_overdue": "Faktura je {days} dní po splatnosti.",
       "reminder_body": "Klient dostane e-mail s upomínkou a fakturou v PDF. Stav faktury se změní na „Upomínka“ a zaznamená se počet upomínek.",
-      "reminder_recipients": "Příjemci"
+      "reminder_recipients": "Příjemci (čárkou oddělené)",
+      "reminder_default_hint": "Předvyplněno podle kontaktů klienta (účel Upomínky, jinak Doklady), e-mailů zakázky a hlavního e-mailu. Můžeš přidat další příjemce, třeba člověka, který platbu schvaluje. Kontakty klienta ani faktura se tím nemění."
     },
     "select_month": "Označit všechny faktury za {month}",
     "bulk_pdf": "PDF export ({n})",

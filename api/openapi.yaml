@@ -2244,18 +2244,69 @@ paths:
       description: |
         Šablona `invoice_reminder` (per locale, per supplier override). Klient
         nemá vliv na obsah — text je z nastavení.
+
+        Body je volitelné — když chybí, příjemce vyřeší jednotný resolver (#86):
+        kontakty klienta s účelem `reminders` (fallback `documents`), bez kontaktů
+        `client.main_email` + `project.billing_emails`. Explicitní `to` je
+        autoritativní (celý seznam včetně `cc`/`bcc`); samotné `cc`/`bcc` bez `to`
+        se přidají k vyřešeným příjemcům (#60). Kontakty klienta se nemění.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to:
+                  type: array
+                  items: { type: string, format: email }
+                cc:
+                  type: array
+                  items: { type: string, format: email }
+                bcc:
+                  type: array
+                  items: { type: string, format: email }
       responses:
         '200':
-          description: OK
+          description: OK — upomínka odeslána, faktura přešla do stavu `reminded`
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok: { type: boolean }
-                  reminder_count: { type: integer, description: Kolikátá upomínka }
+                  invoice: { $ref: '#/components/schemas/Invoice' }
+                  sent_to:
+                    type: array
+                    description: Adresy v poli To, na které se skutečně odesílalo.
+                    items: { type: string, format: email }
+                  cc:
+                    type: array
+                    items: { type: string, format: email }
+                  bcc:
+                    type: array
+                    items: { type: string, format: email }
+                  days_overdue: { type: integer, description: Počet dní po splatnosti }
+                  sent_at:
+                    type: string
+                    description: "Čas odeslání ve formátu `YYYY-MM-DD HH:MM:SS` (čas serveru)."
+        '400':
+          description: Neplatná adresa příjemce (`invalid_email`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Faktura nenalezena
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Faktura není po splatnosti / je již zaplacená
+          description: |
+            Upomínku nelze poslat (`invalid_state`) — faktura není po splatnosti,
+            je zaplacená, nemá platbu převodem nebo nemá žádného příjemce.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: Nepodařilo se vygenerovat PDF nebo SMTP odmítl zprávu (`send_failed`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

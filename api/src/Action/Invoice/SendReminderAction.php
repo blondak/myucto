@@ -32,10 +32,27 @@ final class SendReminderAction
         $userId = isset($user['id']) ? (int) $user['id'] : null;
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
 
+        // Volitelné body (#60) — příjemci upravení v modalu, sémantika jako u
+        // POST /send: explicitní `to` je celý seznam, samotné cc/bcc se přidají.
+        $body = (array) ($request->getParsedBody() ?? []);
+        $list = static fn (string $key): ?array => isset($body[$key]) && is_array($body[$key])
+            ? array_values(array_filter($body[$key], 'is_string'))
+            : null;
+
         try {
-            $result = $this->reminders->send($id, $userId, $ip, $request->getHeaderLine('User-Agent'));
+            $result = $this->reminders->send(
+                $id,
+                $userId,
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+                $list('to'),
+                $list('cc') ?? [],
+                $list('bcc') ?? [],
+            );
         } catch (\DomainException $e) {
             return Json::error($response, 'invalid_state', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'invalid_email', $e->getMessage(), 400);
         } catch (\Throwable $e) {
             return Json::error($response, 'send_failed', 'Upomínku se nepodařilo odeslat: ' . $e->getMessage(), 502);
         }
@@ -43,6 +60,8 @@ final class SendReminderAction
         return Json::ok($response, [
             'invoice'      => $this->repo->find($id),
             'sent_to'      => $result['sent_to'],
+            'cc'           => $result['cc'],
+            'bcc'          => $result['bcc'],
             'days_overdue' => $result['days_overdue'],
             'sent_at'      => date('Y-m-d H:i:s'),
         ]);

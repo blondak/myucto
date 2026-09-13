@@ -904,9 +904,10 @@ export const invoicesApi = {
       resolved: Array<{ email: string; recipient: 'to' | 'cc' | 'bcc'; source: 'contact' | 'project' | 'main_email'; usage: string | null; label: string | null }>
     }>(`/invoices/${id}/recipients`, { params: { type } }).then(r => r.data),
 
-  sendReminder: (id: number) =>
-    api.post<{ invoice: Invoice; sent_to: string[]; days_overdue: number; sent_at: string }>(
+  sendReminder: (id: number, payload?: { to?: string[]; cc?: string[]; bcc?: string[] }) =>
+    api.post<{ invoice: Invoice; sent_to: string[]; cc: string[]; bcc: string[]; days_overdue: number; sent_at: string }>(
       `/invoices/${id}/reminder`,
+      payload ?? {},
     ).then(r => r.data),
 
   bulkSendReminders: (invoiceIds: number[]) =>
