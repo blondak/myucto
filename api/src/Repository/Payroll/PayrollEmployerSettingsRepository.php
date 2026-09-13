@@ -239,6 +239,31 @@ final class PayrollEmployerSettingsRepository
     }
 
     /**
+     * Testovací VS účtáren podle id, jen vyplněné a platné. Testovací prostředí
+     * ČSSZ má vlastní přidělený VS, jiný než ostrý.
+     *
+     * @return array<int,string>
+     */
+    public function testVariableSymbols(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, test_social_security_variable_symbol
+               FROM payroll_offices
+              WHERE supplier_id = ? AND test_social_security_variable_symbol IS NOT NULL'
+        );
+        $stmt->execute([$supplierId]);
+        $symbols = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $symbol = trim((string) $row['test_social_security_variable_symbol']);
+            if (preg_match('/^\d{10}$/D', $symbol) === 1) {
+                $symbols[(int) $row['id']] = $symbol;
+            }
+        }
+
+        return $symbols;
+    }
+
+    /**
      * @return list<array{
      *   id:int,
      *   code:string,

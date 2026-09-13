@@ -1030,6 +1030,42 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    /**
+     * Testovací prostředí ČSSZ má vlastní přidělený VS účtárny a obálka ho do
+     * testu posílá; hlavička se s ní musí shodovat. Bez testovacího VS dané
+     * účtárny (a v produkci vždy) zůstává VS registrace.
+     */
+    public function testTestEnvironmentHeaderCarriesTheOfficeTestVariableSymbol(): void
+    {
+        $preparation = $this->multiOfficePreparation();
+
+        $test = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(),
+            null,
+            4,
+            [4 => '1112223334', 5 => '5556667778'],
+        );
+        $otherOfficeOnly = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(),
+            null,
+            4,
+            [5 => '5556667778'],
+        );
+        $production = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(),
+            null,
+            4,
+        );
+
+        self::assertSame([], $test->blockers);
+        self::assertSame('1112223334', $test->candidate?->payload['header']['variable_symbol']);
+        self::assertSame('1234567890', $otherOfficeOnly->candidate?->payload['header']['variable_symbol']);
+        self::assertSame('1234567890', $production->candidate?->payload['header']['variable_symbol']);
+    }
+
     public function testSelectedRegistrationIgnoresReadinessIssuesFromAnotherOffice(): void
     {
         $preparation = $this->multiOfficePreparation();

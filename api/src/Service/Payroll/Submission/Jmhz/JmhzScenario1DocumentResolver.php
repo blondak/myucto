@@ -105,12 +105,15 @@ final class JmhzScenario1DocumentResolver
      * @param int|null $officeId mzdová účtárna, za jejíž REGISTRACI u OSSZ se
      *        hlášení sestavuje; `null` uspěje jen u přípravy s jedinou
      *        registrací (zpětně kompatibilní jednoúčtárenský běh)
+     * @param array<int,string> $testVariableSymbols testovací VS účtáren podle
+     *        id — jen pro testovací prostředí ČSSZ, jinak prázdné
      */
     public function resolve(
         JmhzVerifiedPreparationSnapshot $preparation,
         ?JmhzPvpojPreview $pvpoj,
         ?string $pvpojFailureCode = null,
         ?int $officeId = null,
+        array $testVariableSymbols = [],
     ): JmhzScenario1Resolution {
         if (!in_array(
             $preparation->builderVersion,
@@ -680,6 +683,18 @@ final class JmhzScenario1DocumentResolver
                 $previewSymbol = null;
             }
             $variableSymbol = $previewSymbol;
+        }
+        /*
+         * Testovací prostředí ČSSZ má vlastní přidělený VS (Nastavení mezd →
+         * účtárna), jiný než ostrý. Obálka ho do testu posílá, a protože se
+         * s hlavičkou musí shodovat, patří i sem. Bez vyplněného testovacího
+         * VS zůstává VS registrace; produkce testovací VS nikdy nedostane.
+         */
+        if ($variableSymbol !== null
+            && $registration['id'] !== null
+            && isset($testVariableSymbols[$registration['id']])
+        ) {
+            $variableSymbol = $testVariableSymbols[$registration['id']];
         }
 
         // Nálezy zůstávají na revizi (ne na osobě): adresnost už nese readiness

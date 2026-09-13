@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   sendTransport: vi.fn(),
   enqueueIsds: vi.fn(),
   gatewayStart: vi.fn(),
+  employerSettings: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -19,6 +20,7 @@ vi.mock('@/api/payroll', () => ({
     freezeJmhzSubmission: m.freezeSubmission,
     sendJmhzTransport: m.sendTransport,
     enqueueJmhzIsds: m.enqueueIsds,
+    employerSettings: m.employerSettings,
   },
 }))
 vi.mock('@/api/dataBox', () => ({
@@ -84,6 +86,7 @@ beforeEach(() => {
   vi.stubGlobal('crypto', { randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000001') })
   m.freezePreparation.mockResolvedValue({ id: 55 })
   m.freezeSubmission.mockResolvedValue({ submission_id: 66, status: 'ready' })
+  m.employerSettings.mockResolvedValue({ offices: [] })
   m.enqueueIsds.mockResolvedValue({
     outbox_id: 77,
     created: true,
@@ -190,6 +193,28 @@ describe('PayrollJmhzDispatchPanel', () => {
       'test',
       expect.any(String),
     )
+  })
+
+  it('v testovacím prostředí pošle do obálky testovací VS účtárny', async () => {
+    m.employerSettings.mockResolvedValue({
+      offices: [{ id: 3, test_social_security_variable_symbol: ' 1112223334 ' }],
+    })
+    m.sendTransport.mockResolvedValue({
+      attempt: { id: 77, status: 'submitted' },
+      acknowledgement: null,
+      settled: false,
+      report: null,
+    })
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: { environment: 'test', previews: [preview], obligations: [] },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-yes-7:3"]').trigger('click')
+    await flushPromises()
+
+    expect(m.sendTransport).toHaveBeenCalledWith(66, '1112223334', 'test', expect.any(String))
   })
 
   it('znovu použije existující zmrazené podání ve stavu ready', async () => {

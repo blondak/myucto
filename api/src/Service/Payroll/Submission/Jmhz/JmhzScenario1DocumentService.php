@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
+
 final readonly class JmhzScenario1DocumentService
 {
     public function __construct(
@@ -12,6 +14,7 @@ final readonly class JmhzScenario1DocumentService
         private JmhzScenario1DocumentResolver $resolver,
         private JmhzScenario2DocumentResolver $scenario2Resolver,
         private JmhzSpecialScenarioDocumentResolver $specialScenarios,
+        private PayrollEmployerSettingsRepository $employerSettings,
     ) {}
 
     public function resolveScenario2(
@@ -60,12 +63,16 @@ final readonly class JmhzScenario1DocumentService
             $environment,
             $preparationId,
         );
+        // Testovací prostředí ČSSZ má vlastní přidělený VS; produkce ho nikdy nedostane.
+        $testVariableSymbols = $environment === 'test'
+            ? $this->employerSettings->testVariableSymbols($supplierId)
+            : [];
         if (!in_array(
             $preparation->builderVersion,
             JmhzScenario1DocumentResolver::SUPPORTED_BUILDER_VERSIONS,
             true,
         )) {
-            return $this->resolver->resolve($preparation, null, null, $officeId);
+            return $this->resolver->resolve($preparation, null, null, $officeId, $testVariableSymbols);
         }
         try {
             $pvpoj = $this->pvpoj->preview(
@@ -73,7 +80,7 @@ final readonly class JmhzScenario1DocumentService
                 $preparation->sourceRevisionId,
                 $officeId,
             );
-            return $this->resolver->resolve($preparation, $pvpoj, null, $officeId);
+            return $this->resolver->resolve($preparation, $pvpoj, null, $officeId, $testVariableSymbols);
         } catch (JmhzPvpojPreviewException $exception) {
             return $this->resolver->resolve(
                 $preparation,
@@ -82,6 +89,7 @@ final readonly class JmhzScenario1DocumentService
                     ? 'jmhz_scenario1_pvpoj_unavailable'
                     : 'jmhz_scenario1_pvpoj_source_mismatch',
                 $officeId,
+                $testVariableSymbols,
             );
         }
     }

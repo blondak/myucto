@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
@@ -43,6 +43,31 @@ interface DispatchState {
 }
 
 const states = ref<Record<string, DispatchState>>({})
+
+// Testovací prostředí ČSSZ má vlastní přidělený VS účtárny. Hlavička zmrazeného
+// XML ho v testu nese (JmhzScenario1DocumentResolver), obálka se s ní musí shodovat.
+const testVariableSymbols = ref<Map<number, string>>(new Map())
+
+onMounted(async () => {
+  try {
+    const settings = await payrollApi.employerSettings()
+    const symbols = new Map<number, string>()
+    for (const office of settings.offices ?? []) {
+      const symbol = (office.test_social_security_variable_symbol ?? '').trim()
+      if (/^\d{10}$/.test(symbol)) symbols.set(office.id, symbol)
+    }
+    testVariableSymbols.value = symbols
+  } catch {
+    testVariableSymbols.value = new Map()
+  }
+})
+
+function envelopeVariableSymbol(preview: PayrollJmhzPvpojPreview): string {
+  if (props.environment === 'test') {
+    return testVariableSymbols.value.get(preview.office.office_id) ?? preview.office.variable_symbol
+  }
+  return preview.office.variable_symbol
+}
 
 function key(preview: PayrollJmhzPvpojPreview): string {
   return `${preview.revision_id}:${preview.office.office_id}`
@@ -196,7 +221,7 @@ async function dispatch(preview: PayrollJmhzPvpojPreview, channel: 'isds' | 'vre
     if (channel === 'vrep') {
       const result = await payrollApi.sendJmhzTransport(
         id,
-        preview.office.variable_symbol,
+        envelopeVariableSymbol(preview),
         props.environment,
         crypto.randomUUID(),
       )
