@@ -820,7 +820,8 @@
         "1833_stock_price_levels.sql",
         "1834_payroll_imports.sql",
         "1835_payroll_import_profile_sample.sql",
-        "1836_payroll_import_profile_sample_version.sql"
+        "1836_payroll_import_profile_sample_version.sql",
+        "1837_payroll_time_month_import_summaries.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -15061,6 +15062,47 @@
                 "chk_payroll_time_event_jmhz_work_summary": "`jmhz_work_summary_revision_id` is null and `jmhz_work_summary_hash` is null or `action` = 'approved' and `jmhz_work_summary_revision_id` is not null and `jmhz_work_summary_hash` regexp '^[0-9a-f]{64}$'"
             }
         },
+        "payroll_time_month_import_summaries": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "attendance_import_id": "bigint(20) unsigned NOT NULL",
+                "content_sha256": "char(64) NOT NULL COLLATE ascii_bin",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "period_start": "date NOT NULL",
+                "sources_json": "longtext NOT NULL COLLATE utf8mb4_bin",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "time_month_id": "bigint(20) unsigned NOT NULL",
+                "time_month_revision_no": "smallint(5) unsigned NOT NULL",
+                "values_json": "longtext NOT NULL COLLATE utf8mb4_bin",
+                "worked_days": "tinyint(3) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_time_import_summary_creator": "BTREE (created_by)",
+                "idx_payroll_time_import_summary_employment": "BTREE (supplier_id, employment_id, period_start)",
+                "idx_payroll_time_import_summary_import": "BTREE (supplier_id, attendance_import_id)",
+                "uq_payroll_time_import_summary_revision": "UNIQUE BTREE (supplier_id, time_month_id, time_month_revision_no)",
+                "uq_payroll_time_import_summary_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_time_import_summary_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_time_import_summary_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_payroll_time_import_summary_import": "(supplier_id, attendance_import_id) -> payroll_attendance_imports (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_payroll_time_import_summary_month": "(supplier_id, time_month_id) -> payroll_time_months (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_payroll_time_import_summary_days": "`worked_days` is null or `worked_days` <= dayofmonth(last_day(`period_start`))",
+                "chk_payroll_time_import_summary_hash": "`content_sha256` regexp '^[0-9a-f]{64}$'",
+                "chk_payroll_time_import_summary_period": "dayofmonth(`period_start`) = 1",
+                "chk_payroll_time_import_summary_sources": "json_valid(`sources_json`)",
+                "chk_payroll_time_import_summary_values": "json_valid(`values_json`)"
+            }
+        },
         "payroll_time_months": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -15080,7 +15122,8 @@
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "status": "enum('open','approved') NOT NULL DEFAULT 'open'",
                 "supplier_id": "int(10) unsigned NOT NULL",
-                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "work_source": "enum('entries','import_summary') NOT NULL DEFAULT 'entries'"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
@@ -21094,6 +21137,8 @@
         "trg_payroll_submission_receipt_update": "BEFORE UPDATE ON payroll_submission_receipts #f99923036d7e7db5836dbc43651059c391d64f19",
         "trg_payroll_surcharge_materialization_immutable_delete": "BEFORE DELETE ON payroll_surcharge_input_materializations #b1859f3ac1a51f21f361a33532d550675f3ae8a4",
         "trg_payroll_surcharge_materialization_immutable_update": "BEFORE UPDATE ON payroll_surcharge_input_materializations #b1859f3ac1a51f21f361a33532d550675f3ae8a4",
+        "trg_payroll_time_import_summary_no_delete": "BEFORE DELETE ON payroll_time_month_import_summaries #9e66912fca98485fa5fe04286e89678c85cf0be7",
+        "trg_payroll_time_import_summary_no_update": "BEFORE UPDATE ON payroll_time_month_import_summaries #9e66912fca98485fa5fe04286e89678c85cf0be7",
         "trg_payroll_time_month_event_jmhz_guard": "BEFORE INSERT ON payroll_time_month_events #9c2b1e3761a000e407e0b0ad998da0b1187b93ed",
         "trg_payroll_time_month_event_no_delete": "BEFORE DELETE ON payroll_time_month_events #2b3307b6f74298b48adc0b68b4f564c2faa17606",
         "trg_payroll_time_month_event_no_update": "BEFORE UPDATE ON payroll_time_month_events #2b3307b6f74298b48adc0b68b4f564c2faa17606",

@@ -78,12 +78,14 @@ final class PayrollAttendanceImportAction
                 $this->profileId($body),
                 ($body['adopt_personal_numbers'] ?? false) === true,
                 ($body['adopt_monthly_wage'] ?? false) === true,
+                ($body['write_time_summary'] ?? false) === true,
             );
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
         $batch = PayrollTimeValue::row($result['batch'] ?? null, 'batch');
         $inputs = PayrollTimeValue::row($result['inputs'] ?? null, 'inputs');
+        $timeSummary = is_array($result['time_summary'] ?? null) ? $result['time_summary'] : [];
         $this->logger->log(
             'payroll.attendance_import.applied',
             $this->userId($request),
@@ -97,6 +99,8 @@ final class PayrollAttendanceImportAction
                 'components_created' => $result['components_created'] ?? [],
                 'links_saved' => $result['links_saved'] ?? 0,
                 'monthly_wages_adopted' => $result['monthly_wages_adopted'] ?? 0,
+                'time_summaries_written' => $timeSummary['written'] ?? 0,
+                'time_summary_exceptions' => count(is_array($timeSummary['exceptions'] ?? null) ? $timeSummary['exceptions'] : []),
                 'replayed' => $result['replayed'] ?? false,
             ],
             $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),

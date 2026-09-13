@@ -22,6 +22,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Time\PayrollTimeImportSummaryWriter;
 
 /**
  * Import měsíčních podkladů z docházkového systému (typicky GIRITON):
@@ -83,6 +84,7 @@ final class AttendanceImportService
         private readonly LicenseCapacityGate $license,
         private readonly Connection $db,
         private readonly PayrollEmploymentValidator $employmentValidator,
+        private readonly PayrollTimeImportSummaryWriter $timeSummaries,
     ) {
     }
 
@@ -131,6 +133,7 @@ final class AttendanceImportService
         ?int $profileId = null,
         bool $adoptPersonalNumbers = false,
         bool $adoptMonthlyWage = false,
+        bool $writeTimeSummary = false,
     ): array {
         $periodStart = $this->period($period);
         $read = $this->readFiles($files);
@@ -230,9 +233,19 @@ final class AttendanceImportService
             )
             : ['adopted' => 0, 'conflicts' => [], 'runs_needing_refresh' => []];
 
+        /*
+         * Souhrn pracovního měsíce se zapisuje až po dávce a i při opakování
+         * téže dávky. Zápis je idempotentní a volba není v otisku dávky, takže
+         * zapnutí nad už použitými podklady souhrn jen doplní.
+         */
+        $timeSummary = fn (int $importId): ?array => $writeTimeSummary
+            ? $this->timeSummaries->writeFromBatch($supplierId, $importId, $userId)
+            : null;
+
         $existing = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint);
         if ($existing !== null) {
-            return self::replay($existing, $skipped, $adoptWages());
+            return self::replay($existing, $skipped, $adoptWages())
+                + ['time_summary' => $timeSummary((int) $existing['id'])];
         }
 
         $result = $this->transactional(function () use (
@@ -335,9 +348,11 @@ final class AttendanceImportService
             $winner = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint)
                 ?? throw new \RuntimeException('Souběžně založenou dávku importu nelze načíst.');
 
-            return self::replay($winner, $skipped, $adoptWages());
+            return self::replay($winner, $skipped, $adoptWages())
+                + ['time_summary' => $timeSummary((int) $winner['id'])];
         }
         $wages = $adoptWages();
+        $summary = $timeSummary((int) $result['import_id']);
 
         return [
             'replayed' => false,
@@ -352,6 +367,7 @@ final class AttendanceImportService
             'wage_conflicts' => $wages['conflicts'],
             'runs_needing_refresh' => $wages['runs_needing_refresh'],
             'skipped_persons' => $skipped,
+            'time_summary' => $summary,
         ];
     }
 

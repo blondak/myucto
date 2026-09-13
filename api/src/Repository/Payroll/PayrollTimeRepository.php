@@ -635,6 +635,12 @@ final class PayrollTimeRepository
                 $monthVersion,
                 $userId,
             );
+            if (($month['work_source'] ?? 'entries') === 'import_summary') {
+                throw new \InvalidArgumentException(
+                    'Pracovní měsíc bere docházku ze souhrnu importu. Časový záznam by byl druhým '
+                    . 'zdrojem téhož měsíce, proto se neuložil.'
+                );
+            }
             $seriesKey = bin2hex(random_bytes(16));
             $revision = 1;
             if ($supersedesId !== null) {
@@ -940,6 +946,260 @@ final class PayrollTimeRepository
         );
         $stmt->execute([$supplierId, $employmentId, $periodStart]);
         return self::row($stmt);
+    }
+
+    /**
+     * Údaje pro kalendář podle úvazku: druh vztahu, první den vztahu
+     * v období a týdenní doba z podmínek účinných právě ten den.
+     *
+     * `first_day` je null, když vztah v období netrvá ani den (nebo nemá
+     * datum nástupu). Legacy projekce bez data nástupu platí od začátku
+     * období, stejně jako při párování osob v importu docházky.
+     *
+     * @param string $periodEnd první den následujícího měsíce (výlučná hranice)
+     * @return array{relation_type:string,first_day:?string,weekly_hours:?string}|null
+     */
+    public function calendarProvisioningFacts(
+        int $supplierId,
+        int $employmentId,
+        string $periodStart,
+        string $periodEnd,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT relation_type, is_legacy_projection,
+                    COALESCE(actual_start_date, start_date) AS started_on, end_date
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        $lastDay = (new \DateTimeImmutable($periodEnd))->modify('-1 day')->format('Y-m-d');
+        $startedOn = is_string($row['started_on'] ?? null) ? $row['started_on'] : null;
+        if ($startedOn === null && (int) ($row['is_legacy_projection'] ?? 0) === 1) {
+            $startedOn = $periodStart;
+        }
+        $endDate = is_string($row['end_date'] ?? null) ? $row['end_date'] : null;
+        $firstDay = $startedOn === null ? null : max($periodStart, $startedOn);
+        if ($firstDay !== null && ($firstDay > $lastDay || ($endDate !== null && $endDate < $firstDay))) {
+            $firstDay = null;
+        }
+
+        $weeklyHours = null;
+        if ($firstDay !== null) {
+            $terms = $this->db->pdo()->prepare(
+                'SELECT weekly_hours
+                   FROM payroll_employment_terms
+                  WHERE supplier_id = ? AND employment_id = ?
+                    AND effective_from <= ?
+                    AND (effective_to IS NULL OR effective_to >= ?)
+                  ORDER BY effective_from DESC, id DESC
+                  LIMIT 1'
+            );
+            $terms->execute([$supplierId, $employmentId, $firstDay, $firstDay]);
+            $value = $terms->fetchColumn();
+            $weeklyHours = $value === false || $value === null ? null : (string) $value;
+        }
+
+        return [
+            'relation_type' => (string) ($row['relation_type'] ?? ''),
+            'first_day' => $firstDay,
+            'weekly_hours' => $weeklyHours,
+        ];
+    }
+
+    /**
+     * Souhrn aktuální revize pracovního měsíce z importu docházky.
+     *
+     * @return array{id:int,time_month_id:int,time_month_revision_no:int,attendance_import_id:int,values:array<string,int>,worked_days:?int,sources:array<string,mixed>,content_sha256:string,created_by:?int,created_at:string}|null
+     */
+    public function importSummary(int $supplierId, int $employmentId, string $periodStart): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT summary.id, summary.time_month_id, summary.time_month_revision_no,
+                    summary.attendance_import_id, summary.values_json, summary.worked_days,
+                    summary.sources_json, summary.content_sha256, summary.created_by,
+                    summary.created_at
+               FROM payroll_time_month_import_summaries summary
+               INNER JOIN payroll_time_months month_row
+                 ON month_row.supplier_id = summary.supplier_id
+                AND month_row.id = summary.time_month_id
+                AND month_row.revision_no = summary.time_month_revision_no
+              WHERE summary.supplier_id = ?
+                AND summary.employment_id = ?
+                AND summary.period_start = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId, $periodStart]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        $values = json_decode((string) $row['values_json'], true, flags: JSON_THROW_ON_ERROR);
+        $sources = json_decode((string) $row['sources_json'], true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($values) || !is_array($sources)) {
+            throw new \UnexpectedValueException('Souhrn pracovního měsíce z importu je neplatný.');
+        }
+        $typedValues = [];
+        foreach ($values as $meaning => $millihours) {
+            $typedValues[(string) $meaning] = PayrollTimeValue::int($millihours, 'values');
+        }
+
+        return [
+            'id' => PayrollTimeValue::int($row['id'] ?? null, 'id'),
+            'time_month_id' => PayrollTimeValue::int($row['time_month_id'] ?? null, 'time_month_id'),
+            'time_month_revision_no' => PayrollTimeValue::int(
+                $row['time_month_revision_no'] ?? null,
+                'time_month_revision_no',
+            ),
+            'attendance_import_id' => PayrollTimeValue::int(
+                $row['attendance_import_id'] ?? null,
+                'attendance_import_id',
+            ),
+            'values' => $typedValues,
+            'worked_days' => $row['worked_days'] === null ? null : PayrollTimeValue::int($row['worked_days'], 'worked_days'),
+            'sources' => $sources,
+            'content_sha256' => (string) $row['content_sha256'],
+            'created_by' => $row['created_by'] === null ? null : PayrollTimeValue::int($row['created_by'], 'created_by'),
+            'created_at' => (string) $row['created_at'],
+        ];
+    }
+
+    /**
+     * Zapíše souhrn měsíce z dávky importu docházky k aktuální revizi měsíce
+     * a přepne měsíc na zdroj `import_summary`. Měsíc, který neexistuje,
+     * založí stejnou cestou jako první zápis času.
+     *
+     * Souhrn je neměnný. Stejná dávka se stejným obsahem je opakování (nic se
+     * nezapíše podruhé); jiná dávka nebo jiný obsah téže revize měsíce skončí
+     * výjimkou. Časové záznamy v měsíci znamenají druhý zdroj téže doby —
+     * souhrn se pak nezapíše vůbec, nic se nepřepisuje ani neslučuje.
+     *
+     * @param array<string,int> $values význam → millihodiny
+     * @param array<string,array<string,mixed>> $sources význam → původ hodnoty
+     * @return array{status:string,summary_id:int,time_month_id:int,revision_no:int}
+     */
+    public function saveImportSummary(
+        int $supplierId,
+        int $employmentId,
+        string $periodStart,
+        int $attendanceImportId,
+        array $values,
+        array $sources,
+        string $contentSha256,
+        ?int $userId,
+    ): array {
+        $pdo = $this->db->pdo();
+        $scope = $this->beginTransactionScope();
+        try {
+            $this->lockEmployment($supplierId, $employmentId);
+            $stmt = $pdo->prepare(
+                'SELECT *
+                   FROM payroll_time_months
+                  WHERE supplier_id = ? AND employment_id = ? AND period_start = ?
+                  FOR UPDATE'
+            );
+            $stmt->execute([$supplierId, $employmentId, $periodStart]);
+            $month = self::row($stmt);
+            if ($month !== null && PayrollTimeValue::string($month['status'] ?? null, 'status') !== 'open') {
+                throw new PayrollTimeLockedException(
+                    'Pracovní měsíc je schválený, souhrn z importu docházky se do něj nezapíše. '
+                    . 'Nejdřív měsíc auditovaně znovu otevřete.'
+                );
+            }
+            $month ??= $this->lockOpenMonth($supplierId, $employmentId, $periodStart, 0, $userId);
+            $monthId = PayrollTimeValue::int($month['id'] ?? null, 'id');
+            $revisionNo = PayrollTimeValue::int($month['revision_no'] ?? null, 'revision_no');
+
+            $existingStmt = $pdo->prepare(
+                'SELECT id, attendance_import_id, content_sha256
+                   FROM payroll_time_month_import_summaries
+                  WHERE supplier_id = ? AND time_month_id = ? AND time_month_revision_no = ?
+                  FOR UPDATE'
+            );
+            $existingStmt->execute([$supplierId, $monthId, $revisionNo]);
+            $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+            if (is_array($existing)) {
+                $existingImportId = PayrollTimeValue::int($existing['attendance_import_id'] ?? null, 'attendance_import_id');
+                if ($existingImportId !== $attendanceImportId
+                    || !hash_equals((string) $existing['content_sha256'], $contentSha256)
+                ) {
+                    throw new \InvalidArgumentException(sprintf(
+                        'Pracovní měsíc už má souhrn z dávky importu docházky č. %d%s. Souhrn je neměnný, '
+                        . 'druhý do téže revize měsíce zapsat nejde.',
+                        $existingImportId,
+                        $existingImportId === $attendanceImportId ? ' s jiným obsahem' : '',
+                    ));
+                }
+                $this->commitTransactionScope($scope);
+
+                return [
+                    'status' => 'replayed',
+                    'summary_id' => PayrollTimeValue::int($existing['id'] ?? null, 'id'),
+                    'time_month_id' => $monthId,
+                    'revision_no' => $revisionNo,
+                ];
+            }
+
+            [$startsAtUtc, $endsAtUtc] = self::utcMonthBounds($periodStart);
+            [$candidateStart, $candidateEnd] = self::candidateBounds($startsAtUtc, $endsAtUtc);
+            $entries = $pdo->prepare(
+                "SELECT starts_at_utc, timezone_name
+                   FROM payroll_time_entries
+                  WHERE supplier_id = ? AND employment_id = ?
+                    AND status <> 'superseded'
+                    AND starts_at_utc >= ? AND starts_at_utc < ?
+                  FOR UPDATE"
+            );
+            $entries->execute([$supplierId, $employmentId, $candidateStart, $candidateEnd]);
+            foreach (self::rows($entries) as $entry) {
+                if (self::startsInPeriod($entry, $periodStart)) {
+                    throw new \InvalidArgumentException(
+                        'Pracovní měsíc už má zapsané časové záznamy docházky. Souhrn z importu by byl '
+                        . 'druhým zdrojem téhož měsíce, proto se nezapsal a záznamy zůstaly beze změny.'
+                    );
+                }
+            }
+
+            $pdo->prepare(
+                'INSERT INTO payroll_time_month_import_summaries
+                    (supplier_id, time_month_id, time_month_revision_no, employment_id,
+                     period_start, attendance_import_id, values_json, worked_days,
+                     sources_json, content_sha256, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)'
+            )->execute([
+                $supplierId,
+                $monthId,
+                $revisionNo,
+                $employmentId,
+                $periodStart,
+                $attendanceImportId,
+                CanonicalJson::encode($values),
+                CanonicalJson::encode($sources),
+                $contentSha256,
+                $userId,
+            ]);
+            $summaryId = (int) $pdo->lastInsertId();
+            $pdo->prepare(
+                "UPDATE payroll_time_months
+                    SET work_source = 'import_summary'
+                  WHERE supplier_id = ? AND id = ?"
+            )->execute([$supplierId, $monthId]);
+            $this->touchMonth($month, $userId);
+            $this->commitTransactionScope($scope);
+        } catch (\Throwable $e) {
+            $this->rollBackTransactionScope($scope);
+            throw $e;
+        }
+
+        return [
+            'status' => 'written',
+            'summary_id' => $summaryId,
+            'time_month_id' => $monthId,
+            'revision_no' => $revisionNo,
+        ];
     }
 
     /** @return int|null */

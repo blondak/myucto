@@ -562,6 +562,7 @@ final class PayrollRetentionCatalog
                 'payroll_leave_ledger',
                 'payroll_overtime_consents',
                 'payroll_jmhz_work_month_revisions',
+                'payroll_time_month_import_summaries',
             ],
             'note' => 'Zmrazená revize pracovního měsíce pro JMHZ patří sem, a ne pod '
                 . 'evidenci pro důchodové pojištění: nese fond pracovní doby, evidenční dny '
