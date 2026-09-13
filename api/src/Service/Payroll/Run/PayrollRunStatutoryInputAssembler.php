@@ -198,7 +198,6 @@ final class PayrollRunStatutoryInputAssembler
                 continue;
             }
 
-            $before = count($this->issues);
             $social = $this->socialPerson(
                 $person,
                 $evidence,
@@ -210,13 +209,10 @@ final class PayrollRunStatutoryInputAssembler
                 $periodEnd,
                 $riskySavingsRuleset,
             );
-            if ($social !== null
-                && !$this->hasDomainIssueSince('social_insurance', $before)
-            ) {
-                $socialPeople[] = $social;
+            if ($social !== null) {
+                $socialPeople[$employeeId] = $social;
             }
 
-            $before = count($this->issues);
             $health = $this->healthPerson(
                 $evidence,
                 $employments,
@@ -224,13 +220,10 @@ final class PayrollRunStatutoryInputAssembler
                 $periodStart,
                 $periodEnd,
             );
-            if ($health !== null
-                && !$this->hasDomainIssueSince('health_insurance', $before)
-            ) {
-                $healthPeople[] = $health;
+            if ($health !== null) {
+                $healthPeople[$employeeId] = $health;
             }
 
-            $before = count($this->issues);
             $tax = $this->incomeTaxPerson(
                 $person,
                 $evidence,
@@ -241,10 +234,8 @@ final class PayrollRunStatutoryInputAssembler
                 $periodStart,
                 $taxDate,
             );
-            if ($tax !== null
-                && !$this->hasDomainIssueSince('income_tax', $before)
-            ) {
-                $incomeTax[] = $tax;
+            if ($tax !== null) {
+                $incomeTax[$employeeId] = $tax;
             }
         }
 
@@ -255,25 +246,86 @@ final class PayrollRunStatutoryInputAssembler
                 $this->issue($domain, 'person_missing');
             }
         }
+
+        /*
+         * Osobní problém vyřadí jen svou osobu, a to ze VŠECH tří vstupů:
+         * čistá mzda potřebuje pojistné i daň současně, takže osoba spočítaná
+         * v jedné doméně a chybějící v jiné by výsledek stejně neměla.
+         *
+         * Do 13. 9. 2026 shodil jediný osobní problém celou doménu a s ní celý
+         * zákonný výpočet. Běh s 225 lidmi, z nichž nikdo neměl zákonnou
+         * evidenci, tak účetní ukázal 1 125 blokujících řádků a nikomu nic
+         * nespočítal — skutečnou výjimku by mezi nimi nenašla. Firemní souhrny
+         * (odvody, JMHZ, přehledy, závazky) i schválení běhu dál vyžadují úplnost;
+         * hlídá to kořenový stav výsledku, viz PayrollRunStatutoryCalculationService.
+         *
+         * Globální problém ({@see PayrollRunStatutoryInputIssue::isGlobal()})
+         * dál blokuje všechny — nevíme u něj, komu výsledek patří.
+         */
+        $global = false;
+        $blockedPeople = [];
+        foreach ($this->issues as $issue) {
+            if ($issue->isGlobal()) {
+                $global = true;
+                continue;
+            }
+            $blockedPeople[$this->personId((string) $issue->personReference)] = true;
+        }
+        if (!$global) {
+            foreach (array_keys($seenEmployeeIds) as $employeeId) {
+                if (isset($blockedPeople[$employeeId])) {
+                    continue;
+                }
+                // Pojistka invariantu „osoba je buď ve všech třech vstupech,
+                // nebo vyřazená s důvodem". Vstup bez vlastního problému chybět
+                // nemá; kdyby přesto chyběl, osoba nesmí tiše vypadnout z běhu.
+                foreach ([
+                    'social_insurance' => $socialPeople,
+                    'health_insurance' => $healthPeople,
+                    'income_tax' => $incomeTax,
+                ] as $domain => $inputs) {
+                    if (!isset($inputs[$employeeId])) {
+                        $this->issue(
+                            $domain,
+                            'statutory_input_incomplete',
+                            "employee:{$employeeId}",
+                        );
+                    }
+                }
+            }
+        }
         $this->sortAndDeduplicateIssues();
 
-        $socialInput = $this->hasDomainIssue('social_insurance')
-            || $socialPeople === []
-            ? null
-            : new SocialInsuranceMonthInput($socialDate, $socialPeople);
-        $healthInput = $this->hasDomainIssue('health_insurance')
-            || $healthPeople === []
-            ? null
-            : new HealthInsuranceMonthInput($healthDate, $healthPeople);
-        if ($this->hasDomainIssue('income_tax')) {
-            $incomeTax = [];
+        $blockedPeople = [];
+        foreach ($this->issues as $issue) {
+            if (!$issue->isGlobal()) {
+                $blockedPeople[$this->personId((string) $issue->personReference)][] = $issue;
+            }
         }
+        ksort($blockedPeople, SORT_NUMERIC);
+        if ($global) {
+            return new PayrollRunStatutoryInputBundle(
+                null,
+                null,
+                [],
+                $this->issues,
+                $blockedPeople,
+            );
+        }
+        $socialPeople = array_values(array_diff_key($socialPeople, $blockedPeople));
+        $healthPeople = array_values(array_diff_key($healthPeople, $blockedPeople));
+        $incomeTax = array_values(array_diff_key($incomeTax, $blockedPeople));
 
         return new PayrollRunStatutoryInputBundle(
-            $socialInput,
-            $healthInput,
+            $socialPeople === []
+                ? null
+                : new SocialInsuranceMonthInput($socialDate, $socialPeople),
+            $healthPeople === []
+                ? null
+                : new HealthInsuranceMonthInput($healthDate, $healthPeople),
             $incomeTax,
             $this->issues,
+            $blockedPeople,
         );
     }
 
@@ -293,27 +345,36 @@ final class PayrollRunStatutoryInputAssembler
         string $periodEnd,
         ?array $riskySavingsRuleset,
     ): ?SocialPersonMonthInput {
+        /*
+         * Příslušnost a slevu důchodce hlásí obě, i když chybí obě naráz. Dřív
+         * chybějící příslušnost vrátila `null` hned, takže sleva se nehlásila:
+         * účetní doplnila příslušnost, přepočítala a teprve pak se dozvěděla
+         * o druhé chybějící evidenci. Editor evidence
+         * (PayrollPersonStatutoryEvidenceRepository::blockers) je hlásí obě
+         * odjakživa, takže stránka a výpočet si odporovaly.
+         */
         $socialEvidence = $this->object($evidence['social'] ?? null);
         $jurisdictionRow = $this->object($socialEvidence['jurisdiction'] ?? null);
+        $jurisdiction = null;
         if ($jurisdictionRow === null) {
             $this->issue(
                 'social_insurance',
                 'social_jurisdiction_evidence_missing',
                 $personReference,
             );
-            return null;
-        }
-        $jurisdiction = $this->enum(
-            SocialJurisdictionEvidence::class,
-            $jurisdictionRow['jurisdiction'] ?? null,
-        );
-        if (!$jurisdiction instanceof SocialJurisdictionEvidence) {
-            $this->issue(
-                'social_insurance',
-                'social_jurisdiction_evidence_invalid',
-                $personReference,
+        } else {
+            $jurisdiction = $this->enum(
+                SocialJurisdictionEvidence::class,
+                $jurisdictionRow['jurisdiction'] ?? null,
             );
-            return null;
+            if (!$jurisdiction instanceof SocialJurisdictionEvidence) {
+                $this->issue(
+                    'social_insurance',
+                    'social_jurisdiction_evidence_invalid',
+                    $personReference,
+                );
+                $jurisdiction = null;
+            }
         }
         if ($jurisdiction === SocialJurisdictionEvidence::Unverified) {
             $this->issue(
@@ -370,6 +431,9 @@ final class PayrollRunStatutoryInputAssembler
                 'working_pensioner_discount_evidence_unverified',
                 $personReference,
             );
+        }
+        if ($jurisdiction === null) {
+            return null;
         }
 
         $yearToDate = $this->socialAccumulator(
@@ -2394,26 +2458,6 @@ final class PayrollRunStatutoryInputAssembler
             $personReference,
             $relationshipReference,
         );
-    }
-
-    private function hasDomainIssue(string $domain): bool
-    {
-        foreach ($this->issues as $issue) {
-            if ($issue->domain === $domain || $issue->domain === 'snapshot') {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private function hasDomainIssueSince(string $domain, int $offset): bool
-    {
-        foreach (array_slice($this->issues, $offset) as $issue) {
-            if ($issue->domain === $domain || $issue->domain === 'snapshot') {
-                return true;
-            }
-        }
-        return false;
     }
 
     private function sortAndDeduplicateIssues(): void

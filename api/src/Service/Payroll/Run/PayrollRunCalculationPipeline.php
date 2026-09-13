@@ -209,10 +209,14 @@ final class PayrollRunCalculationPipeline
             if (!is_int($employeeId) || $employeeId <= 0) {
                 throw new \UnexpectedValueException('Výsledek osoby nemá identitu.');
             }
+            // Osoba bez vlastního výsledku (výpočet zablokoval globální
+            // problém) dostane jen odkaz na chybějící výsledek. Kořenové důvody
+            // se jí nekopírují: u běhu s 225 lidmi to bylo 225 kopií stovek
+            // řádků a vypadalo to, že každý má všechny problémy všech.
             $person['statutory'] = $byEmployee[$employeeId] ?? [
                 'person_reference' => "employee:{$employeeId}",
                 'status' => 'manual_review',
-                'issues' => $statutory['issues'] ?? ['statutory_result_missing'],
+                'issues' => ['statutory_result_missing'],
             ];
         }
         unset($person);

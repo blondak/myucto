@@ -332,8 +332,10 @@ final class PayrollExemptIncomeRunTest extends TestCase
             'statutory_calculation_manual_review',
             $statutory['validation_codes'],
         );
+        // Problém konkrétní osoby nese ta osoba, ne kořen výsledku — kořen má
+        // vlastní důvody jen tehdy, když blokuje všechny (vadný snímek).
         self::assertNotEmpty(array_filter(
-            $statutory['result']['statutory']['issues'] ?? [],
+            $statutory['result']['people'][0]['statutory']['issues'] ?? [],
             static fn (string $issue): bool => str_contains(
                 $issue,
                 'tax_component_exemption_evidence_missing',

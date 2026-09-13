@@ -18,10 +18,12 @@ const props = withDefaults(defineProps<{
 const { t, locale } = useI18n()
 const selectedEmployeeId = ref<number | null>(null)
 
+// Osoba vyřazená pro vlastní chybějící evidenci má `income_tax: null` — ve výběru
+// zůstává, aby účetní viděla její důvody.
 const taxPeople = computed(() => props.people.filter(
   (person): person is PayrollRunResultPerson & {
     statutory: NonNullable<PayrollRunResultPerson['statutory']> & {
-      income_tax: PayrollIncomeTaxResult
+      income_tax: PayrollIncomeTaxResult | null
     }
   } => person.statutory?.income_tax !== undefined,
 ))
@@ -177,21 +179,10 @@ function unavailableAdvanceLabel(): string {
       :selector-label="t('payroll.runs.tax.people_tabs')"
     />
 
-    <div v-if="selectedPerson && tax" class="space-y-5 p-4 sm:p-5">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
-            {{ t('payroll.runs.tax.calculation_date') }}
-          </p>
-          <p class="mt-1 text-sm font-medium text-neutral-900">{{ tax.calculation_date }}</p>
-        </div>
-        <span class="rounded-full bg-payroll-50 px-3 py-1 text-sm font-medium text-payroll-700">
-          {{ t(`payroll.runs.tax.regime.${regime()}`) }}
-        </span>
-      </div>
-
+    <!-- Mimo výsledek daně: osoba vyřazená pro chybějící evidenci výsledek nemá,
+         ale důvody musí vidět. -->
+    <div v-if="selectedPerson && manualReview" class="px-4 pt-4 sm:px-5 sm:pt-5">
       <div
-        v-if="manualReview"
         class="rounded-lg border border-warning-200 bg-warning-50 p-4"
         role="alert"
         data-testid="manual-review-reasons"
@@ -204,6 +195,20 @@ function unavailableAdvanceLabel(): string {
         <p v-else class="mt-3 text-sm text-warning-900">
           {{ t('payroll.runs.tax.manual_review_without_reason') }}
         </p>
+      </div>
+    </div>
+
+    <div v-if="selectedPerson && tax" class="space-y-5 p-4 sm:p-5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
+            {{ t('payroll.runs.tax.calculation_date') }}
+          </p>
+          <p class="mt-1 text-sm font-medium text-neutral-900">{{ tax.calculation_date }}</p>
+        </div>
+        <span class="rounded-full bg-payroll-50 px-3 py-1 text-sm font-medium text-payroll-700">
+          {{ t(`payroll.runs.tax.regime.${regime()}`) }}
+        </span>
       </div>
 
       <dl class="grid grid-cols-2 gap-3 lg:grid-cols-3">

@@ -234,6 +234,31 @@ describe('PayrollIncomeTaxBreakdown', () => {
       .toContain('Syntetická osoba 1')
   })
 
+  it('ukáže osobu vyřazenou pro chybějící evidenci s jejími důvody, bez výsledku daně', async () => {
+    const people: PayrollRunResultPerson[] = [
+      fixture()[0]!,
+      {
+        employee_id: 33,
+        statutory: {
+          person_reference: 'employee:33',
+          status: 'manual_review',
+          income_tax: null,
+          issues: ['tax-declaration-evidence-missing'],
+        },
+      },
+    ]
+    const wrapper = mount(PayrollIncomeTaxBreakdown, { props: { people } })
+
+    const tabs = wrapper.findAll('nav button')
+    expect(tabs).toHaveLength(2)
+    await tabs[1].trigger('click')
+
+    expect(wrapper.get('[data-testid="tax-status"]').text())
+      .toContain('payroll.runs.tax.status.manual_review')
+    expect(wrapper.get('[data-testid="manual-review-reasons"]').text())
+      .toContain('payroll.runs.tax.issues.tax-declaration-evidence-missing')
+  })
+
   it('renders nothing when the run snapshot has no income tax result', () => {
     const wrapper = mount(PayrollIncomeTaxBreakdown, {
       props: {

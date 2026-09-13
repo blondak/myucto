@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Payroll\Run;
 final class PayrollRunValidationMessageFormatter
 {
     private const MAX_MESSAGE_LENGTH = 500;
-    private const NET_PAY_ISSUE = 'income:net_pay_result_missing_or_unverified';
+    public const NET_PAY_ISSUE = 'income:net_pay_result_missing_or_unverified';
 
     public static function statutoryDetails(array $statutory): array
     {
@@ -52,7 +52,12 @@ final class PayrollRunValidationMessageFormatter
         foreach (is_array($node['issues'] ?? null) ? $node['issues'] : [] as $issue) {
             if (is_string($issue) && $issue !== '') {
                 $detail = PayrollRunIssueGuidance::describe($issue, $employeeId, $employmentId);
-                $key = $issue . ':' . $detail['entity_type'] . ':' . $detail['entity_id'] . ':' . $detail['remediation_path'];
+                // Klíčem je to, co se uloží a co účetní uvidí, ne kód issue.
+                // Assembler hlásí tentýž problém v každé ze tří domén
+                // (`social_insurance:employment_term_missing:…`,
+                // `health_insurance:…`, `income_tax:…`) a z nich vznikaly tři
+                // řádky, které se lišily jen neuloženým prefixem domény.
+                $key = $detail['entity_type'] . ':' . $detail['entity_id'] . ':' . $detail['remediation_path'] . ':' . $detail['message'];
                 $details[$key] = $detail;
             }
         }

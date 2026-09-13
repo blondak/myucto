@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Run;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Service\Payroll\Run\PayrollRunIssueGuidance;
+use MyInvoice\Service\Payroll\Run\PayrollRunValidationMessageFormatter;
 use PDO;
 use PHPUnit\Framework\TestCase;
 
@@ -133,6 +134,61 @@ final class PayrollRunValidationDetailsTest extends TestCase
             self::assertNotNull($detail['remediation_path'], $issue);
             self::assertLessThanOrEqual(500, mb_strlen($detail['message']), $issue);
         }
+    }
+
+    /**
+     * Assembler hlásí tentýž problém vztahu v každé ze tří domén. Uložené
+     * řádky se lišily jen neuloženým prefixem domény — účetní viděla tři
+     * stejné blokátory.
+     */
+    public function testSameProblemReportedByEveryDomainIsOneRowNotThree(): void
+    {
+        $this->repository->replaceStatutoryValidations(1, 2, ['statutory' => [
+            'status' => 'manual_review',
+            'issues' => [
+                'health_insurance:employment_term_missing:employee:7:employment:9',
+                'income_tax:employment_term_missing:employee:7:employment:9',
+                'social_insurance:employment_term_missing:employee:7:employment:9',
+            ],
+        ]]);
+
+        $rows = $this->rows();
+        self::assertCount(1, $rows);
+        self::assertSame(7, (int) $rows[0]['entity_id']);
+    }
+
+    /**
+     * „Chybí čistá mzda" u osoby bez jakékoli srážky je jen ozvěna zákonné
+     * validace. Osoba s pohledávkou, insolvencí nebo dohodou řádek dostane
+     * dál, stejně jako osoba se spočítaným zákonným výsledkem.
+     */
+    public function testNetPayEchoIsSkippedOnlyForPeopleWithoutAnyDeduction(): void
+    {
+        $person = static fn (int $id, string $statutoryStatus, array $input): array => [
+            'employee_id' => $id,
+            'statutory' => ['status' => $statutoryStatus],
+            'enforcement' => [
+                'input' => $input,
+                'result' => [
+                    'status' => 'manual_review',
+                    'issues' => [PayrollRunValidationMessageFormatter::NET_PAY_ISSUE],
+                ],
+            ],
+        ];
+        $nothing = ['claims' => [], 'insolvency' => ['mode' => 'none']];
+
+        $this->repository->replaceEnforcementValidations(1, 2, ['people' => [
+            $person(7, 'manual_review', $nothing),
+            $person(8, 'manual_review', ['claims' => [['id' => 'claim:12']]] + $nothing),
+            $person(9, 'manual_review', ['claims' => [], 'insolvency' => ['mode' => 'approved_standard']]),
+            $person(10, 'manual_review', $nothing + ['voluntary_agreements' => [['id' => 'agreement:3']]]),
+            $person(11, 'calculated', $nothing),
+        ]]);
+
+        self::assertSame(
+            [8, 9, 10, 11],
+            array_map('intval', array_column($this->rows(), 'entity_id')),
+        );
     }
 
     private function rows(): array

@@ -33,6 +33,28 @@ final readonly class PayrollRunStatutoryInputIssue
         }
     }
 
+    /**
+     * Problém, který nejde přičíst jediné osobě: vadný tvar snímku, duplicitní
+     * osoba nebo vztah (nevíme, komu výsledek patří), prázdný běh. Takový
+     * blokuje celý zákonný výpočet. Všechno ostatní je problém konkrétní osoby
+     * a vyřadí jen ji.
+     */
+    public function isGlobal(): bool
+    {
+        return $this->domain === 'snapshot' || $this->personReference === null;
+    }
+
+    /** Stejný tvar, jaký nese kořen zablokovaného výsledku i validace běhu. */
+    public function toIssueString(): string
+    {
+        return implode(':', array_filter([
+            $this->domain,
+            $this->code,
+            $this->personReference,
+            $this->relationshipReference,
+        ], static fn (?string $value): bool => $value !== null));
+    }
+
     /** @return array{domain:string,code:string,person_reference:?string,relationship_reference:?string} */
     public function toArray(): array
     {

@@ -107,33 +107,53 @@ final class PayrollRunStatutoryCalculationService
         ) ?? [];
 
         $bundle = $this->inputs->assemble($snapshot);
-        if ($bundle->issues !== []
-            || $bundle->socialInsurance === null
-            || $bundle->healthInsurance === null
-            || $bundle->incomeTax === []
-        ) {
-            $issues = array_map(
+        if ($bundle->globalIssues() !== []) {
+            return $this->blockedEnvelope(array_map(
                 static fn (PayrollRunStatutoryInputIssue $issue): string =>
-                    implode(':', array_filter([
-                        $issue->domain,
-                        $issue->code,
-                        $issue->personReference,
-                        $issue->relationshipReference,
-                    ], static fn (?string $value): bool => $value !== null)),
+                    $issue->toIssueString(),
                 $bundle->issues,
-            );
-            return $this->blockedEnvelope(
-                $issues === [] ? ['statutory_input_incomplete'] : $issues,
+            ));
+        }
+        /*
+         * Osoba vyřazená kvůli vlastní chybějící nebo neověřené evidenci nese
+         * jen SVÉ důvody a ostatní se spočítají — jedna účetní u pěti set lidí
+         * potřebuje vidět skutečné výjimky, ne tisíc odvozených řádků. Kořenový
+         * stav ale zůstává `manual_review` a nic se neukládá: firemní souhrny
+         * (odvody, JMHZ, přehled, závazky) i schválení běhu vyžadují úplnou
+         * množinu osob.
+         */
+        $blocked = [];
+        foreach ($bundle->blockedPeople as $employeeId => $issues) {
+            $blocked[$employeeId] = new PayrollStatutoryBlockedPerson(
+                "employee:{$employeeId}",
+                'manual_review',
+                array_values(array_unique(array_map(
+                    static fn (PayrollRunStatutoryInputIssue $issue): string =>
+                        $issue->toIssueString(),
+                    $issues,
+                ))),
             );
         }
+        if ($blocked === []
+            && ($bundle->socialInsurance === null
+                || $bundle->healthInsurance === null
+                || $bundle->incomeTax === [])
+        ) {
+            return $this->blockedEnvelope(['statutory_input_incomplete']);
+        }
 
-        $social = $this->social->calculate($bundle->socialInsurance);
+        $social = $bundle->socialInsurance === null
+            ? null
+            : $this->social->calculate($bundle->socialInsurance);
         $riskySavings = $this->riskySavingsResults(
             $snapshot,
             $social,
             $periodStart,
+            $blocked,
         );
-        $health = $this->health->calculate($bundle->healthInsurance);
+        $health = $bundle->healthInsurance === null
+            ? null
+            : $this->health->calculate($bundle->healthInsurance);
         $taxByEmployee = [];
         foreach ($bundle->incomeTax as $taxInput) {
             $employeeId = self::referenceId($taxInput->employeeReference, 'employee');
@@ -141,11 +161,11 @@ final class PayrollRunStatutoryCalculationService
         }
 
         $socialPeople = [];
-        foreach ($social->people as $person) {
+        foreach ($social?->people ?? [] as $person) {
             $socialPeople[self::referenceId($person->personId, 'employee')] = $person;
         }
         $healthPeople = [];
-        foreach ($health->people as $person) {
+        foreach ($health?->people ?? [] as $person) {
             $healthPeople[self::referenceId($person->personId, 'employee')] = $person;
         }
         $resultPeople = self::rows($baseResult['people'] ?? null, 'result.people');
@@ -161,6 +181,10 @@ final class PayrollRunStatutoryCalculationService
             $employee = self::object($person['employee'] ?? null, 'employee');
             $employeeId = self::positiveInt($employee, 'id');
             $reference = "employee:{$employeeId}";
+            if (isset($blocked[$employeeId])) {
+                $netByEmployee[$employeeId] = $blocked[$employeeId];
+                continue;
+            }
             $socialPerson = $socialPeople[$employeeId] ?? null;
             $healthPerson = $healthPeople[$employeeId] ?? null;
             $taxPerson = $taxByEmployee[$employeeId] ?? null;
@@ -256,34 +280,43 @@ final class PayrollRunStatutoryCalculationService
         ksort($taxByEmployee, SORT_NUMERIC);
         ksort($netByEmployee, SORT_NUMERIC);
 
-        $ids = $this->persister->persist(
-            $supplierId,
-            $revisionId,
-            $actorUserId,
-            $snapshot,
-            $social,
-            $health,
-            $taxByEmployee,
-            $netByEmployee,
-        );
-        // Vazba se zapisuje až po uložení výsledku a jen na to, co se do
-        // výsledku opravdu dostalo. Osoba, která z běhu vypadla na ruční
-        // kontrolu, nic vyplacené nemá.
-        $this->annualSettlements?->recordPayouts(
-            $supplierId,
-            $revisionId,
-            $periodStart,
-            array_intersect_key(
-                $annualSettlements,
-                array_filter(
-                    $netByEmployee,
-                    static fn ($result): bool
-                        => !$result instanceof PayrollStatutoryBlockedPerson,
+        $ids = [];
+        // Uložené sady výsledků nesou vždy úplnou množinu osob snímku
+        // (PayrollRunStatutoryResultPersister::assertCompletePeople) a čtou
+        // z nich firemní souhrny. S vyřazenou osobou se proto neukládá nic —
+        // stejně jako dřív u zablokovaného výpočtu; revize jde znovu spočítat,
+        // až se evidence doplní.
+        if ($blocked === [] && $social !== null && $health !== null) {
+            $ids = $this->persister->persist(
+                $supplierId,
+                $revisionId,
+                $actorUserId,
+                $snapshot,
+                $social,
+                $health,
+                $taxByEmployee,
+                $netByEmployee,
+            );
+            // Vazba se zapisuje až po uložení výsledku a jen na to, co se do
+            // výsledku opravdu dostalo. Osoba, která z běhu vypadla na ruční
+            // kontrolu, nic vyplacené nemá.
+            $this->annualSettlements?->recordPayouts(
+                $supplierId,
+                $revisionId,
+                $periodStart,
+                array_intersect_key(
+                    $annualSettlements,
+                    array_filter(
+                        $netByEmployee,
+                        static fn ($result): bool
+                            => !$result instanceof PayrollStatutoryBlockedPerson,
+                    ),
                 ),
-            ),
-        );
-        $status = $social->status === SocialCalculationStatus::Calculated
-            && $health->status === HealthCalculationStatus::Calculated
+            );
+        }
+        $status = $blocked === []
+            && $social?->status === SocialCalculationStatus::Calculated
+            && $health?->status === HealthCalculationStatus::Calculated
             && array_reduce(
                 $taxByEmployee,
                 static fn (bool $ok, $result): bool =>
@@ -312,9 +345,17 @@ final class PayrollRunStatutoryCalculationService
             $people[] = [
                 'person_reference' => "employee:{$employeeId}",
                 'status' => $personStatus,
-                'social_insurance' => $socialPeople[$employeeId]->jsonSerialize(),
-                'health_insurance' => $healthPeople[$employeeId]->jsonSerialize(),
-                'income_tax' => $taxByEmployee[$employeeId]->jsonSerialize(),
+                // Důvody vyřazení na úrovni osoby — tam, kde je obrazovka běhu
+                // hledá (stejný klíč nese i osoba bez výsledku v pipeline).
+                // Spočítaná osoba klíč nemá, aby se její výsledek nezměnil.
+                ...(isset($blocked[$employeeId])
+                    ? ['issues' => $blocked[$employeeId]->issues]
+                    : []),
+                // Osoba vyřazená už na vstupu pojistné ani daň spočítané nemá;
+                // její důvody nese `net_pay`.
+                'social_insurance' => ($socialPeople[$employeeId] ?? null)?->jsonSerialize(),
+                'health_insurance' => ($healthPeople[$employeeId] ?? null)?->jsonSerialize(),
+                'income_tax' => ($taxByEmployee[$employeeId] ?? null)?->jsonSerialize(),
                 'net_pay' => $netResult->jsonSerialize(),
                 'net_payable_minor_units' =>
                     $netResult instanceof PayrollStatutoryBlockedPerson
@@ -329,20 +370,20 @@ final class PayrollRunStatutoryCalculationService
             'issues' => [],
             'employer_social_before_discount_minor_units' =>
                 $status === 'calculated'
-                    ? ($social->employerContributionBeforeDiscountMinorUnits
+                    ? ($social?->employerContributionBeforeDiscountMinorUnits
                         ?? throw new \LogicException(
                             'Vypočtený zákonný výsledek nemá pojistné před slevou.',
                         ))
                     : null,
             'employer_social_part_time_discount_minor_units' =>
                 $status === 'calculated'
-                    ? ($social->partTimeDiscountMinorUnits
+                    ? ($social?->partTimeDiscountMinorUnits
                         ?? throw new \LogicException(
                             'Vypočtený zákonný výsledek nemá slevu zaměstnavatele.',
                         ))
                     : null,
             'employer_social_minor_units' => $status === 'calculated'
-                ? ($social->employerContributionMinorUnits
+                ? ($social?->employerContributionMinorUnits
                     ?? throw new \LogicException(
                         'Vypočtený zákonný výsledek nemá pojistné zaměstnavatele.',
                     ))
@@ -356,7 +397,7 @@ final class PayrollRunStatutoryCalculationService
                 ? array_map(
                     static fn (SocialEmployerCategoryResult $category): array =>
                         $category->jsonSerialize(),
-                    $social->employerCategories,
+                    $social?->employerCategories ?? [],
                 )
                 : [],
             'result_set_ids' => $ids,
@@ -367,16 +408,22 @@ final class PayrollRunStatutoryCalculationService
     }
 
     /**
+     * Osoba vyřazená už na vstupu vyměřovací základ nemá. Příspěvek se u ní
+     * nepočítá a nehlásí — jediný důvod by byl odvozený („chybí základ") a
+     * zakrýval by skutečnou příčinu, kterou osoba nese sama.
+     *
      * @param array<string,mixed> $snapshot
+     * @param array<int,PayrollStatutoryBlockedPerson> $blocked
      * @return list<array<string,mixed>>
      */
     private function riskySavingsResults(
         array $snapshot,
-        \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthResult $social,
+        ?\MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthResult $social,
         string $periodStart,
+        array $blocked = [],
     ): array {
         $bases = [];
-        foreach ($social->people as $person) {
+        foreach ($social?->people ?? [] as $person) {
             foreach ($person->relationships as $relationship) {
                 $employmentId = self::referenceId(
                     $relationship->relationshipId,
@@ -387,6 +434,10 @@ final class PayrollRunStatutoryCalculationService
         }
         $results = [];
         foreach (self::rows($snapshot['people'] ?? null, 'snapshot.people') as $person) {
+            $employee = self::object($person['employee'] ?? null, 'employee');
+            if (isset($blocked[self::positiveInt($employee, 'id')])) {
+                continue;
+            }
             foreach (self::rows(
                 $person['employments'] ?? null,
                 'snapshot.employments',

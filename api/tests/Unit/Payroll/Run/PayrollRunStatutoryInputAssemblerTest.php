@@ -615,8 +615,11 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
 
         self::assertNull($bundle->socialInsurance);
-        self::assertNotNull($bundle->healthInsurance);
+        // Bez ročních součtů nemá osoba čistou mzdu, takže vypadne ze všech
+        // tří vstupů — i ze zdravotního, kde sama problém nemá.
+        self::assertNull($bundle->healthInsurance);
         self::assertSame([], $bundle->incomeTax);
+        self::assertSame([42], array_keys($bundle->blockedPeople));
         self::assertSame([
             [
                 'domain' => 'income_tax',

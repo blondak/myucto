@@ -50,6 +50,38 @@ final class PayrollRunCalculationPipelineTest extends TestCase
         self::assertArrayHasKey('enforcement', $person);
     }
 
+    /**
+     * Zablokovaný výpočet osoby nemá. Každá osoba dostane jen odkaz na
+     * chybějící výsledek, ne kopii všech kořenových důvodů — u běhu s 225 lidmi
+     * to bylo 225 kopií 900 důvodů a vypadalo to, že každý má problémy všech.
+     */
+    public function testPersonWithoutStatutoryResultGetsOnlyMissingResultMarker(): void
+    {
+        $pipeline = new PayrollRunCalculationPipeline(
+            new PayrollRunCalculator(new PayrollComponentDefinitionFactory()),
+            $this->garnishments(),
+        );
+
+        $attached = (new \ReflectionMethod($pipeline, 'attachStatutoryPeople'))
+            ->invoke($pipeline, [
+                'statutory' => [
+                    'status' => 'manual_review',
+                    'issues' => [
+                        'income_tax:tax_declaration_evidence_missing:employee:11',
+                        'snapshot:duplicate_employee_reference:employee:12',
+                    ],
+                    'people' => [],
+                ],
+                'people' => [['employee_id' => 11], ['employee_id' => 12]],
+            ]);
+
+        self::assertCount(2, $attached['people']);
+        foreach ($attached['people'] as $person) {
+            self::assertSame('manual_review', $person['statutory']['status']);
+            self::assertSame(['statutory_result_missing'], $person['statutory']['issues']);
+        }
+    }
+
     private function garnishments(): PayrollRunGarnishmentProcessor
     {
         $port = new class implements PayrollGarnishmentPort {

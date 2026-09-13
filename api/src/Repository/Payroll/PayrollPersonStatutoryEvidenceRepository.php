@@ -1169,6 +1169,16 @@ final class PayrollPersonStatutoryEvidenceRepository
      * Blokátory k datu snímku pojmenované STEJNĚ jako v assembleru mzdového
      * běhu — jinak by stránka tvrdila něco jiného než chyba u výpočtu.
      *
+     * Záměrně jen PODMNOŽINA toho, co hlásí PayrollRunStatutoryInputAssembler:
+     * editor odpovídá na „chybí nebo je neověřená evidence, kterou tu jde
+     * doplnit". Assembler navíc posuzuje věci, které z evidence samotné poznat
+     * nejdou (roční součty, vztahy, mzdové složky, rozpor A1 s příslušností),
+     * a čte je ze zmrazeného snímku běhu, ne z živých tabulek — sloučit obojí do
+     * jedné metody by editor svázalo se snímkem běhu. Kontrakt drží dvě věci:
+     * stejné kódy, a to, že assembler hlásí u osoby VŠECHNY chybějící položky
+     * naráz (i slevu důchodce vedle chybějící příslušnosti), takže účetní na
+     * obou místech vidí týž seznam.
+     *
      * @return list<string>
      */
     private function blockers(int $supplierId, int $employeeId, string $effectiveOn): array

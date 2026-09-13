@@ -5342,7 +5342,8 @@ export interface PayrollRunResultPerson {
   statutory?: {
     person_reference: string
     status: 'calculated' | 'manual_review' | 'error'
-    income_tax?: PayrollIncomeTaxResult
+    // Osoba vyřazená pro vlastní chybějící evidenci nemá výsledek daně, jen své důvody.
+    income_tax?: PayrollIncomeTaxResult | null
     issues?: string[]
   }
 }

@@ -1448,6 +1448,7 @@ final class PayrollRunRepository
                 : null;
             if (!is_array($enforcementResult)
                 || ($enforcementResult['status'] ?? null) !== 'manual_review'
+                || self::enforcementOnlyAwaitsStatutoryResult($person)
             ) {
                 continue;
             }
@@ -1466,6 +1467,47 @@ final class PayrollRunRepository
                 ]);
             }
         }
+    }
+
+    /**
+     * Osoba bez exekuce, insolvence i dohody o srážkách, jejíž zákonný výpočet
+     * není uzavřený, dostala od srážek jediný důvod: „chybí čistá mzda". Ten je
+     * jen ozvěnou zákonné validace té osoby a běh blokuje ta. Hlásit ho znovu
+     * znamenalo u běhu s 225 lidmi bez evidence dalších 225 blokujících řádků,
+     * přestože nikdo z nich exekuci neměl.
+     *
+     * Osoba, která pohledávku, insolvenci nebo dohodu MÁ, řádek dostane dál —
+     * i když je jediným důvodem chybějící čistá mzda: srážka na ni čeká
+     * a účetní to má vidět.
+     *
+     * @param array<string,mixed> $person
+     */
+    private static function enforcementOnlyAwaitsStatutoryResult(array $person): bool
+    {
+        $statutory = $person['statutory'] ?? null;
+        if (!is_array($statutory)
+            || ($statutory['status'] ?? null) === 'calculated'
+        ) {
+            return false;
+        }
+        $enforcement = is_array($person['enforcement'] ?? null)
+            ? $person['enforcement']
+            : [];
+        $issues = is_array($enforcement['result'] ?? null)
+            ? ($enforcement['result']['issues'] ?? null)
+            : null;
+        if ($issues !== [PayrollRunValidationMessageFormatter::NET_PAY_ISSUE]) {
+            return false;
+        }
+        $input = is_array($enforcement['input'] ?? null) ? $enforcement['input'] : null;
+        if ($input === null) {
+            return false;
+        }
+
+        return ($input['claims'] ?? null) === []
+            && !array_key_exists('voluntary_agreements', $input)
+            && is_array($input['insolvency'] ?? null)
+            && ($input['insolvency']['mode'] ?? null) === 'none';
     }
 
     /** @param array<string,mixed> $result */
