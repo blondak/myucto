@@ -109,9 +109,19 @@ dosažená mzda a příplatková část je nulová.
 v rychlém vstupu, schválení měsíce docházky s přesčasovými hodinami se zastaví
 a naopak; jeden přesčas nelze vykázat dvakrát.
 
-Ostatní zákonné příplatky — noční práce, víkend, svátek a ztížené prostředí —
-se tady zadat nedají. Vznikají výhradně z
-[docházky](63_Dochazka_a_smeny.md#6393-zakonne-priplatky-ke-mzde-114-az-118).
+Ostatní zákonné příplatky, tedy noční práci (§ 116), sobotu a neděli (§ 118),
+práci ve svátek (§ 115) a ztížené prostředí (§ 117), zadáte po stisku
+**Zadat i příplatky**. Přepínač odkryje příplatkové sloupce pro všechny řádky
+najednou a aplikace si jeho stav pamatuje; drží-li některý řádek v měsíci
+příplatek, sloupce se ukážou samy. Zadáváte počet hodin za měsíc, u ztíženého
+prostředí i počet ztěžujících vlivů. Částku dopočte aplikace ze schváleného
+průměrného výdělku (u § 117 ze základní sazby minimální mzdy) a ze sjednané
+sazby a ukáže ji přímo u pole. Příplatek, který za měsíc už vznikl ze
+schválené [docházky](63_Dochazka_a_smeny.md#6393-zakonne-priplatky-ke-mzde-114-az-118),
+tady ručně zadat nejde, protože by se vyplatil dvakrát. Pole, do kterého
+příplatek zadat nejde, je neaktivní a místo hodnoty ukazuje **Nedostupné**;
+důvod zobrazí popisek po najetí myší. Platí-li stejný důvod pro více řádků,
+vypíše se jednou v pruhu nad tabulkou.
 
 Hromadné uložení vytváří běžné vstupy složek `MZDA_MESICNI`,
 `PREMIE_PRIPLATKY` a `ODMENA`, takže nevzniká paralelní evidence mezd.
@@ -133,14 +143,35 @@ zpět s červeným označením **konkrétního pole** a s důvodem přímo u ně
 ostatní řádky se uloží. Opravte označená pole a uložení zopakujte.
 
 Rozpracované vstupy se mění s kontrolou jejich verze; už zpracovaný nebo
-uzamčený vstup formulář nikdy nepřepíše. Pokud základní mzdu už spravuje pravidelný či jiný měsíční vstup,
-rychlý formulář ji zobrazí pouze pro čtení. Kontroluje také verzi pracovního
+uzamčený vstup formulář nikdy nepřepíše. Hodnotu, kterou už spravuje
+pravidelný nebo jiný měsíční vstup (typicky import docházky), formulář zobrazí
+jen pro čtení s ikonou odkazu; ikona vede do mzdových složek daného vztahu a
+po najetí myší ukáže plné vysvětlení. Kontroluje také verzi pracovního
 vztahu, takže po souběžné změně smlouvy vyžádá obnovení formuláře. Historický
 měsíc zachová vztah, který byl tehdy účinný a později archivován. Při nástupu,
 ukončení nebo pozastavení v průběhu měsíce nepředvyplní plnou měsíční mzdu a
 vyžádá skutečnou částku za zpracovávané období. Plný měsíční pravidelný předpis
 v takovém měsíci také nepřevezme automaticky; zůstane v ruční kontrole, dokud
 není doložené správné časové rozpočítání.
+
+Upozornění, která by se opakovala u mnoha řádků, stojí jednou v pruhu nad
+tabulkou:
+
+- kolik řádků na stránce má hodnotu spravovanou jiným vstupem (importem
+  docházky nebo pravidelnou složkou), s odkazem **Otevřít mzdové vstupy** na
+  rozpracované vstupy téhož měsíce;
+- u kterých lidí na stránce chybí rodné číslo; jméno otevře kartu osoby, kde
+  údaj doplníte;
+- u kolika vztahů nejde přesčas zadat v hodinách, protože chybí schválený
+  průměrný výdělek. Na počítači stojí tahle věta v hlavičce sloupce
+  **Přesčas**, v buňce je tlačítko hodin jen neaktivní.
+
+V řádku pak zůstává jen ikona stavu u pole (koncept, schváleno, uzamčeno,
+spravuje jiný vstup) s plným vysvětlením v popisku po najetí myší. Štítek
+druhu vztahu a vlastní popisek pole základu mají jen vztahy, které nejsou
+běžným pracovním poměrem (DPP, DPČ, zaměstnání malého rozsahu, odměna za
+výkon funkce, příjem společníka). Způsob zadání přesčasu přepínáte u každého
+řádku malým přepínačem **h / Kč**; volba platí jen pro daný řádek.
 
 Částky zadávej v Kč s nejvýše dvěma desetinnými místy a hodiny s nejvýše
 třemi. Prázdná hodnota neznamená nulu; pokud složka v měsíci není, zadej

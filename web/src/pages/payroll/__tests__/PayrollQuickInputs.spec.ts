@@ -222,8 +222,9 @@ describe('PayrollQuickInputs', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-layout="desktop"]').findAll('tbody tr')).toHaveLength(2)
-    expect(wrapper.get('[data-testid="quick-relation-12"]').text())
-      .toBe('payroll.people.relations.employment')
+    // Běžný pracovní poměr je výchozí stav a štítek ani popisek u pole nenese.
+    expect(wrapper.find('[data-testid="quick-relation-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-income-label-12"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="quick-relation-13"]').text())
       .toBe('payroll.people.relations.statutory_body')
     expect(wrapper.get('[data-testid="quick-income-label-13"]').text())
@@ -275,7 +276,7 @@ describe('PayrollQuickInputs', () => {
 
     expect(wrapper.get('[data-layout="mobile"]').text()).toContain('Syntetická osoba')
     expect(wrapper.find('[data-testid="quick-base-mobile-12"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="quick-relation-mobile-12"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="quick-relation-mobile-12"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('******/**42')
     expect(wrapper.text()).not.toContain('123456/7842')
     const actionBar = wrapper.get('[data-testid="quick-payroll-save"]').element.parentElement
@@ -335,8 +336,14 @@ describe('PayrollQuickInputs', () => {
       .toBe('payroll.quick_inputs.field_state.approved')
     expect(wrapper.get('[data-testid="quick-bonus-state-12"]').text())
       .toBe('payroll.quick_inputs.field_state.draft')
-    expect(wrapper.get('[data-testid="quick-bonus-state-13"]').text())
-      .toBe('payroll.quick_inputs.field_state.managed')
+    // Spravované pole: hodnota jen ke čtení a ikona se zdrojem; plná věta je
+    // jen v `title` a `sr-only`, ne jako odstavec pod polem.
+    const managedState = wrapper.get('[data-testid="quick-bonus-state-13"]')
+    expect(managedState.text()).toContain('payroll.quick_inputs.field_state.managed')
+    expect(managedState.get('.sr-only').text()).toBe(managedState.text())
+    expect(managedState.attributes('title')).toContain('payroll.quick_inputs.field_state.managed')
+    expect(wrapper.find('[data-testid="quick-bonus-13"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="quick-bonus-readonly-13"]').text()).toBe('500,00')
   })
 
   it('offers the way to the wage component on both layouts, not just the table', async () => {
@@ -872,10 +879,17 @@ describe('PayrollQuickInputs', () => {
 
     const note = wrapper.get('[data-testid="quick-surcharge-column-note-holiday"]')
     expect(note.text()).toContain('holiday_arrangement_missing')
+    // V buňce žádná značka pod polem: neaktivní pole s placeholderem,
+    // důvod v `title` pole a pro odečítače v `sr-only`.
     for (const id of [12, 13]) {
-      const cell = wrapper.get(`[data-testid="quick-surcharge-blocked-holiday-${id}"]`)
-      expect(cell.attributes('title')).toContain('holiday_arrangement_missing')
-      expect(cell.text()).toContain('unavailable_badge')
+      const input = wrapper.get(`[data-testid="quick-surcharge-holiday-${id}"]`)
+      expect(input.attributes('disabled')).toBeDefined()
+      expect(input.attributes('placeholder'))
+        .toBe('payroll.quick_inputs.surcharges.unavailable_placeholder')
+      expect(input.attributes('title')).toContain('holiday_arrangement_missing')
+      const reason = wrapper.get(`[data-testid="quick-surcharge-blocked-holiday-${id}"]`)
+      expect(reason.classes()).toContain('sr-only')
+      expect(reason.text()).toContain('holiday_arrangement_missing')
     }
   })
 
@@ -918,8 +932,11 @@ describe('PayrollQuickInputs', () => {
 
     expect(wrapper.get('[data-testid="quick-surcharge-column-note-holiday"]').text())
       .toContain('basis_missing')
+    // Výjimka nese vlastní důvod v `title` svého pole, ne společný důvod sloupce.
+    expect(wrapper.get('[data-testid="quick-surcharge-holiday-14"]').attributes('title'))
+      .toContain('holiday_compensatory_time_off')
     const odd = wrapper.get('[data-testid="quick-surcharge-blocked-holiday-14"]')
-    expect(odd.attributes('title')).toBeUndefined()
+    expect(odd.classes()).toContain('sr-only')
     expect(odd.text()).toContain('holiday_compensatory_time_off')
   })
 
@@ -1023,6 +1040,65 @@ describe('PayrollQuickInputs', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quick-overtime-split-12"]').exists()).toBe(true)
+  })
+
+  /*
+   * Po importu docházky spravuje přesčas jiný vstup skoro u každého řádku.
+   * Věta o tom se dřív opakovala dvakrát na řádek (blokátor u osoby a odstavec
+   * pod polem). Teď musí stát JEDNOU nad tabulkou; v řádku zbude jen ikona,
+   * jejíž plné vysvětlení je v `title` a `sr-only`, tedy mimo viditelný text.
+   */
+  it('says "managed by another input" once for N locked rows, not N times', async () => {
+    const managed = (id: number, overrides: Partial<PayrollQuickInputRow> = {}) => fixture({
+      employment_id: id,
+      employee_id: id,
+      full_name: `Osoba ${id}`,
+      overtime_managed_elsewhere: true,
+      blockers: ['overtime_managed_elsewhere'],
+      ...overrides,
+    })
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 4,
+      items: [
+        managed(12),
+        managed(13, { birth_number_masked: null }),
+        managed(14),
+        fixture({ employment_id: 15, employee_id: 15, full_name: 'Osoba 15', birth_number_masked: null }),
+      ],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const visible = wrapper.element.cloneNode(true) as HTMLElement
+    visible.querySelectorAll('.sr-only').forEach(node => node.remove())
+    const text = visible.textContent ?? ''
+    const occurrences = (pattern: RegExp) => (text.match(pattern) ?? []).length
+
+    expect(wrapper.findAll('[data-testid="quick-managed-summary"]')).toHaveLength(1)
+    expect(occurrences(/quick_inputs\.managed_summary(?!_)/g)).toBe(1)
+    expect(occurrences(/blockers\.overtime_managed_elsewhere/g)).toBe(0)
+    expect(occurrences(/field_state\.managed/g)).toBe(0)
+    for (const id of [12, 13, 14]) {
+      expect(wrapper.get(`[data-testid="quick-overtime-state-${id}"]`).attributes('title'))
+        .toContain('payroll.quick_inputs.field_state.managed')
+    }
+
+    const link = wrapper.get('[data-test="quick-managed-summary-link"]')
+    expect(JSON.parse(link.attributes('data-to') ?? '{}')).toMatchObject({
+      name: 'payroll-components',
+      query: { tab: 'inputs', status: 'draft' },
+    })
+
+    // Chybějící rodné číslo: jeden souhrn se jmény, v řádcích nic.
+    expect(wrapper.findAll('[data-testid="quick-identifier-missing-summary"]')).toHaveLength(1)
+    expect(wrapper.find('[data-test="quick-identifier-missing-link-13"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="quick-identifier-missing-link-15"]').exists()).toBe(true)
+    expect(occurrences(/quick_inputs\.identifier_missing(?!_)/g)).toBe(0)
+
+    // Hodiny bez průměru: jedna věta v hlavičce (a jedna pro mobil), ne u řádku.
+    expect(wrapper.findAll('[data-testid="quick-hours-unavailable-note"]')).toHaveLength(1)
+    expect(occurrences(/quick_inputs\.hours_unavailable(?!_)/g)).toBe(1)
   })
 
   it('u řádku bez přesčasu a u starší odpovědi bez rozpadu mlčí', async () => {

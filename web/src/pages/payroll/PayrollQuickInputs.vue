@@ -20,6 +20,7 @@ import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import PayrollQuickFieldState from '@/components/payroll/PayrollQuickFieldState.vue'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -390,10 +391,14 @@ const surchargeColumnNotes = computed<Partial<Record<PayrollQuickSurchargeKind, 
   return notes
 })
 
-/** Buňka ukazuje jen značku tehdy, když plný důvod stojí nad tabulkou. */
-function surchargeNoteHoisted(row: UiRow, kind: PayrollQuickSurchargeKind): boolean {
-  const key = surchargeUnavailableKey(row, kind)
-  return key !== null && surchargeColumnNotes.value[kind] === key
+/**
+ * Nedostupné pole říká „Nedostupné" placeholderem, ne značkou pod sebou —
+ * řádek pak zůstane na výšku jednoho pole. Důvod nese `title` a `sr-only`.
+ */
+function surchargePlaceholder(row: UiRow, kind: PayrollQuickSurchargeKind): string | undefined {
+  return surchargeUnavailableKey(row, kind) === null
+    ? undefined
+    : t('payroll.quick_inputs.surcharges.unavailable_placeholder')
 }
 
 /** Sloupce, ke kterým se nad tabulkou vypisuje společné vysvětlení. */
@@ -500,15 +505,90 @@ function fieldState(
   return null
 }
 
-function fieldStateClass(state: ReturnType<typeof fieldState>): string {
-  if (state === 'draft') return 'text-payroll-700'
-  if (state === 'managed') return 'text-warning-700'
-  return 'text-neutral-500'
-}
-
 function fieldStateMessage(row: UiRow, kind: 'base' | 'overtime' | 'bonus'): string {
   const state = fieldState(row, kind)
   return state === null ? '' : t(`payroll.quick_inputs.field_state.${state}`)
+}
+
+function fieldStateShort(row: UiRow, kind: 'base' | 'overtime' | 'bonus'): string {
+  const state = fieldState(row, kind)
+  return state === null ? '' : t(`payroll.quick_inputs.field_state_short.${state}`)
+}
+
+function fieldManaged(row: UiRow, kind: 'base' | 'overtime' | 'bonus'): boolean {
+  return fieldState(row, kind) === 'managed'
+}
+
+/** Předpis spravovaného pole bydlí v Mzdových složkách u téhož vztahu. */
+function componentsLink(row: UiRow): { name: string; query: Record<string, string> } {
+  return { name: 'payroll-components', query: { employment: String(row.employment_id) } }
+}
+
+/** Hodnota spravovaného pole jen ke čtení — tentýž tvar, jaký by stál v poli. */
+function managedDisplay(row: UiRow, kind: 'base' | 'overtime' | 'bonus'): string {
+  const value = kind === 'base'
+    ? row.baseAmount
+    : kind === 'bonus'
+      ? row.bonusAmount
+      : row.overtime_mode === 'hours' && row.overtimeHours !== ''
+        ? `${row.overtimeHours} h`
+        : row.overtimeAmount
+  return value === '' ? '—' : value
+}
+
+/*
+ * „Spravuje jiný vstup" je vlastnost POLE, ne člověka.
+ *
+ * Blokátor `*_managed_elsewhere` stál v buňce Osoba a tatáž věta ještě jednou
+ * pod polem; po importu docházky to měl skoro každý řádek. U pole zůstává
+ * ikona se zdrojem a nad tabulkou jeden souhrn, v buňce Osoba jen to, co se
+ * konkrétního pole netýká (částečný měsíc, ruční kontrola jiné složky…).
+ */
+const MANAGED_BLOCKER_SUFFIX = '_managed_elsewhere'
+
+function personBlockers(row: UiRow): string[] {
+  return row.blockers.filter(blocker => !blocker.endsWith(MANAGED_BLOCKER_SUFFIX))
+}
+
+function rowManagedElsewhere(row: UiRow): boolean {
+  return row.base_managed_elsewhere || row.overtime_managed_elsewhere
+    || row.bonus_managed_elsewhere
+    || row.blockers.some(blocker => blocker.endsWith(MANAGED_BLOCKER_SUFFIX))
+}
+
+const managedRowCount = computed(() => rows.value.filter(rowManagedElsewhere).length)
+
+const managedInputsLink = computed(() => ({
+  name: 'payroll-components',
+  query: { tab: 'inputs', period: loadedPeriod.value ?? period.value, status: 'draft' },
+}))
+
+/** Chybějící rodné číslo se hlásí jednou nad tabulkou, ne v každém řádku. */
+const IDENTIFIER_SUMMARY_LIMIT = 8
+const missingIdentifierRows = computed(() => rows.value.filter(row => row.birth_number_masked === null))
+
+/** Vztahy, u kterých by šel přesčas v hodinách, kdyby byl schválený průměr. */
+const hoursUnavailableCount = computed(() => rows.value.filter(row =>
+  row.overtime_hours_relation_supported && !row.overtime_hours_available
+  && !row.overtime_managed_elsewhere).length)
+
+const hasRowNotes = computed(() => managedRowCount.value > 0
+  || missingIdentifierRows.value.length > 0 || hoursUnavailableCount.value > 0)
+
+/** Běžný pracovní poměr je výchozí stav; štítek nese jen vztah, který se liší. */
+function showRelationBadge(row: UiRow): boolean {
+  return row.relation_type !== 'employment'
+}
+
+/** Popisek u pole jen tam, kde se liší od hlavičky sloupce (jiný druh příjmu). */
+function incomeLabelDiffers(row: UiRow): boolean {
+  return row.relation_type !== 'employment' && row.relation_type !== 'small_scale_employment'
+}
+
+function personMeta(row: UiRow): string {
+  return [personalNumberLabel(t, row.employment_code), row.birth_number_masked]
+    .filter((part): part is string => typeof part === 'string' && part !== '')
+    .join(' · ')
 }
 
 function parsedAmount(value: string): number | null {
@@ -681,9 +761,11 @@ function validationMessage(code: ValidationCode | null): string {
   return code === null ? '' : t(`payroll.quick_inputs.validation.${code}`)
 }
 
-function fieldClass(error: ValidationCode | null, alignRight = false): string[] {
+/** `compact` = tabulka: nízký řádek je u 500 lidí rozdíl mezi přehledem a scrollováním. */
+function fieldClass(error: ValidationCode | null, alignRight = false, compact = false): string[] {
   return [
-    'h-10 rounded-md border bg-surface px-3 text-sm text-neutral-900 outline-none',
+    compact ? 'h-8 px-2' : 'h-10 px-3',
+    'rounded-md border bg-surface text-sm text-neutral-900 outline-none',
     'focus:ring-2 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
     alignRight ? 'text-right tabular-nums' : '',
     error === null
@@ -701,6 +783,20 @@ function modeButtonClass(active: boolean): string[] {
       : 'border-neutral-300 bg-surface text-neutral-600 hover:border-payroll-300 hover:text-payroll-700',
   ]
 }
+
+/** Segment „h | Kč" u přesčasu v tabulce — dvě plná tlačítka by řádek zdvojila. */
+function modeSegmentClass(active: boolean): string[] {
+  return [
+    'h-8 min-w-8 cursor-pointer px-2 text-xs font-medium transition-colors',
+    'disabled:cursor-not-allowed disabled:opacity-40',
+    active
+      ? 'bg-payroll-600 text-white'
+      : 'bg-surface text-neutral-600 hover:bg-payroll-50 hover:text-payroll-700',
+  ]
+}
+
+/** Hodnota, kterou spravuje jiný vstup: vypadá jako pole, ale nejde do ní psát. */
+const READONLY_VALUE_CLASS = 'inline-flex h-8 items-center justify-end rounded-md border border-dashed border-neutral-300 bg-neutral-50 px-2 text-sm tabular-nums text-neutral-600'
 
 function validAmount(value: string): number {
   const parsed = parsedAmount(value)
@@ -1062,6 +1158,61 @@ onMounted(() => {
             <DensityToggle :ctrl="tbl" />
           </div>
         </div>
+        <!--
+          Co se opakuje u mnoha řádků, stojí JEDNOU tady: spravované hodnoty,
+          chybějící rodné číslo a přesčas bez schváleného průměru. V řádku z nich
+          zbude ikona u pole s plným vysvětlením v `title` a `sr-only`.
+        -->
+        <div
+          v-if="hasRowNotes"
+          data-testid="quick-payroll-row-notes"
+          class="space-y-1 border-b border-warning-200 bg-warning-50/70 px-4 py-2 text-xs text-neutral-700"
+        >
+          <p
+            v-if="managedRowCount > 0"
+            data-testid="quick-managed-summary"
+            class="flex flex-wrap items-center gap-x-2 gap-y-1"
+          >
+            <svg class="h-4 w-4 shrink-0 text-warning-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+            <span>{{ t('payroll.quick_inputs.managed_summary', { count: managedRowCount }) }}</span>
+            <RouterLink
+              :to="managedInputsLink"
+              data-test="quick-managed-summary-link"
+              class="whitespace-nowrap font-medium text-warning-800 underline decoration-dotted underline-offset-2 hover:text-warning-900"
+            >
+              {{ t('payroll.quick_inputs.managed_summary_link') }}
+            </RouterLink>
+          </p>
+          <p
+            v-if="missingIdentifierRows.length > 0"
+            data-testid="quick-identifier-missing-summary"
+            class="flex flex-wrap items-center gap-x-1.5 gap-y-1"
+          >
+            <svg class="h-4 w-4 shrink-0 text-warning-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+            <span class="font-medium text-warning-800">
+              {{ t('payroll.quick_inputs.identifier_missing_summary', { count: missingIdentifierRows.length }) }}
+            </span>
+            <template v-for="(row, index) in missingIdentifierRows.slice(0, IDENTIFIER_SUMMARY_LIMIT)" :key="row.employment_id">
+              <RouterLink
+                :to="{ name: 'payroll-people', query: { person: String(row.employee_id) } }"
+                :data-test="`quick-identifier-missing-link-${row.employment_id}`"
+                class="underline decoration-dotted underline-offset-2 hover:text-warning-900"
+              >{{ row.full_name }}</RouterLink><span v-if="index < Math.min(missingIdentifierRows.length, IDENTIFIER_SUMMARY_LIMIT) - 1" aria-hidden="true">,</span>
+            </template>
+            <span v-if="missingIdentifierRows.length > IDENTIFIER_SUMMARY_LIMIT">
+              {{ t('payroll.quick_inputs.identifier_missing_more', { count: missingIdentifierRows.length - IDENTIFIER_SUMMARY_LIMIT }) }}
+            </span>
+          </p>
+          <!-- Na desktopu stojí tahle věta v hlavičce sloupce Přesčas. -->
+          <p
+            v-if="hoursUnavailableCount > 0"
+            data-testid="quick-hours-unavailable-mobile"
+            class="lg:hidden"
+          >
+            {{ t('payroll.quick_inputs.hours_unavailable_note', { count: hoursUnavailableCount }) }}.
+            {{ t('payroll.quick_inputs.hours_unavailable') }}
+          </p>
+        </div>
         <p
           v-if="surchargesVisible"
           class="border-b border-neutral-200 bg-payroll-50/60 px-4 py-2 text-xs text-neutral-600"
@@ -1070,14 +1221,14 @@ onMounted(() => {
         </p>
         <!--
           Vysvětlení, které platí pro celý sloupec, stojí JEDNOU tady, ne
-          v každé buňce. V tabulce ho pak zastupuje značka „nedostupné"
-          s týmž textem v `title` a pro odečítače v `sr-only`. Na mobilu se
-          pruh neukazuje — v kartách je věta u pole a `title` tam nefunguje.
+          v každé buňce. Nedostupné pole je v řádku jen neaktivní s
+          placeholderem „Nedostupné"; důvod nese `title` a `sr-only`. Pruh je
+          vidět i na mobilu, kde `title` nejde vyvolat.
         -->
         <div
           v-if="surchargesVisible && surchargeNoteColumns.length"
           data-testid="quick-surcharge-column-notes"
-          class="hidden border-b border-warning-200 bg-warning-50/70 px-4 py-2 lg:block"
+          class="border-b border-warning-200 bg-warning-50/70 px-4 py-2"
         >
           <p class="text-xs font-medium text-warning-800">
             {{ t('payroll.quick_inputs.surcharges.unavailable_note_title') }}
@@ -1099,10 +1250,25 @@ onMounted(() => {
           <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th v-if="tbl.isVisible('person')" class="w-64 px-4 py-3">{{ t('payroll.quick_inputs.person') }}</th>
-                <th v-if="tbl.isVisible('income_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.income_amount') }}</th>
-                <th v-if="tbl.isVisible('overtime')" class="px-4 py-3">{{ t('payroll.quick_inputs.overtime') }}</th>
-                <th v-if="tbl.isVisible('bonus_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.bonus_amount') }}</th>
+                <th v-if="tbl.isVisible('person')" class="w-64 px-3 py-2 align-bottom">{{ t('payroll.quick_inputs.person') }}</th>
+                <th v-if="tbl.isVisible('income_amount')" class="px-3 py-2 align-bottom">{{ t('payroll.quick_inputs.income_amount') }}</th>
+                <!--
+                  Proč nejdou hodiny, platí pro všechny řádky bez schváleného
+                  průměru stejně — stojí proto jednou v hlavičce, ne v buňkách.
+                -->
+                <th v-if="tbl.isVisible('overtime')" class="px-3 py-2 align-bottom">
+                  <span class="block">{{ t('payroll.quick_inputs.overtime') }}</span>
+                  <span
+                    v-if="hoursUnavailableCount > 0"
+                    data-testid="quick-hours-unavailable-note"
+                    :title="t('payroll.quick_inputs.hours_unavailable')"
+                    class="block max-w-56 font-normal normal-case text-warning-700"
+                  >
+                    {{ t('payroll.quick_inputs.hours_unavailable_note', { count: hoursUnavailableCount }) }}
+                    <span class="sr-only">. {{ t('payroll.quick_inputs.hours_unavailable') }}</span>
+                  </span>
+                </th>
+                <th v-if="tbl.isVisible('bonus_amount')" class="px-3 py-2 align-bottom">{{ t('payroll.quick_inputs.bonus_amount') }}</th>
                 <!--
                   Paragraf je druhý řádek hlavičky, ne pokračování názvu:
                   `whitespace-nowrap` ho drží pohromadě, aby se „§ 116"
@@ -1111,12 +1277,12 @@ onMounted(() => {
                 <th
                   v-for="kind in (surchargesVisible ? SURCHARGE_KINDS : [])"
                   :key="kind"
-                  class="px-4 py-3 align-bottom"
+                  class="px-3 py-2 align-bottom"
                   :data-testid="`quick-surcharge-head-${kind}`"
                 >
                   <span class="block">{{ t(`payroll.quick_inputs.surcharges.kinds.${kind}`) }}</span>
                   <span class="block whitespace-nowrap font-normal normal-case text-neutral-400">
-                    {{ t(`payroll.quick_inputs.surcharges.sections.${kind}`) }}
+                    {{ t(`payroll.quick_inputs.surcharges.sections.${kind}`) }} · {{ t('payroll.quick_inputs.surcharges.hours_short') }}<template v-if="kind === 'difficult_environment'"> × {{ t('payroll.quick_inputs.surcharges.factors_short') }}</template>
                   </span>
                 </th>
                 <!--
@@ -1138,63 +1304,72 @@ onMounted(() => {
                   v něm láme. Dlouhé jméno nebo kód vztahu jinak roztáhne
                   celou tabulku a vodorovný posun se objeví i tam, kde nemá.
                 -->
-                <td v-if="tbl.isVisible('person')" class="w-64 px-4 py-4">
-                  <p class="break-words font-semibold text-neutral-900">{{ row.full_name }}</p>
-                  <p class="mt-0.5 break-words text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }}</p>
-                  <p v-if="personalNumberLabel(t, row.employment_code)" class="mt-1 break-words text-xs text-neutral-500">{{ personalNumberLabel(t, row.employment_code) }}</p>
-                  <span
-                    :data-testid="`quick-relation-${row.employment_id}`"
-                    class="mt-2 inline-flex rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700"
-                  >
-                    {{ relationLabel(row) }}
-                  </span>
-                  <span
-                    v-if="row.effective_status !== 'active' || row.suspended_in_month"
-                    :data-testid="`quick-status-${row.employment_id}`"
-                    class="ml-1 mt-2 inline-flex rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700"
-                  >
-                    {{ employmentStatusLabel(row) }}
-                  </span>
-                  <template v-for="blocker in row.blockers" :key="blocker">
-                    <p class="mt-2 text-xs text-warning-700">
-                      {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
-                      <!--
-                        Blokátor říkal, CO brání zápisu, ale ne KDE se to mění.
-                        Předpis základní mzdy bydlí v Mzdových složkách a u firmy
-                        s pevnou měsíční mzdou je tenhle stav každý měsíc, takže
-                        účetní hledala pokaždé znovu.
-                      -->
-                      <RouterLink
-                        v-if="blocker === 'base_managed_elsewhere'"
-                        :to="{ name: 'payroll-components', query: { employment: String(row.employment_id) } }"
-                        class="underline decoration-dotted underline-offset-2 hover:text-warning-900"
-                        :data-test="`quick-base-managed-link-${row.employment_id}`"
-                      >
-                        {{ t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') }}
-                      </RouterLink>
-                    </p>
-                  </template>
+                <td v-if="tbl.isVisible('person')" class="w-64 px-3 py-2">
+                  <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <span class="break-words font-semibold text-neutral-900">{{ row.full_name }}</span>
+                    <span
+                      v-if="showRelationBadge(row)"
+                      :data-testid="`quick-relation-${row.employment_id}`"
+                      class="inline-flex rounded-full bg-payroll-50 px-1.5 py-0.5 text-[11px] font-medium text-payroll-700"
+                    >
+                      {{ relationLabel(row) }}
+                    </span>
+                    <span
+                      v-if="row.effective_status !== 'active' || row.suspended_in_month"
+                      :data-testid="`quick-status-${row.employment_id}`"
+                      class="inline-flex rounded-full bg-warning-50 px-1.5 py-0.5 text-[11px] font-medium text-warning-700"
+                    >
+                      {{ employmentStatusLabel(row) }}
+                    </span>
+                  </div>
+                  <p v-if="personMeta(row)" class="mt-0.5 break-words text-xs text-neutral-500">{{ personMeta(row) }}</p>
+                  <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-1 text-xs text-warning-700">
+                    {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
+                  </p>
                 </td>
-                <td v-if="tbl.isVisible('income_amount')" class="px-4 py-4">
+                <td v-if="tbl.isVisible('income_amount')" class="px-3 py-2">
                   <p
+                    v-if="incomeLabelDiffers(row)"
                     :data-testid="`quick-income-label-${row.employment_id}`"
-                    class="mb-1 text-xs font-medium text-neutral-600"
+                    class="mb-0.5 text-xs font-medium text-neutral-600"
                   >
                     {{ incomeLabel(row) }}
                   </p>
-                  <input
-                    :data-testid="`quick-base-${row.employment_id}`"
-                    v-model="row.baseAmount"
-                    type="text"
-                    inputmode="decimal"
-                    autocomplete="off"
-                    :aria-label="incomeLabel(row)"
-                    :aria-invalid="baseError(row) !== null"
-                    :aria-describedby="baseError(row) ? `quick-base-error-${row.employment_id}` : undefined"
-                    :class="[fieldClass(baseError(row), true), 'w-32']"
-                    :disabled="loading || saving || !canWrite || row.base_managed_elsewhere || !editable(row.inputs.base)"
-                    @input="markDirty(row)"
-                  >
+                  <!--
+                    Spravované pole je jen ke čtení a ikona vede tam, kde se
+                    předpis mění. U firmy s pevnou měsíční mzdou je to stav
+                    každý měsíc, takže cesta dál musí být přímo u hodnoty.
+                  -->
+                  <div class="flex items-center gap-1.5">
+                    <span
+                      v-if="row.base_managed_elsewhere"
+                      :data-testid="`quick-base-readonly-${row.employment_id}`"
+                      :class="[READONLY_VALUE_CLASS, 'w-32']"
+                    >{{ managedDisplay(row, 'base') }}</span>
+                    <input
+                      v-else
+                      :data-testid="`quick-base-${row.employment_id}`"
+                      v-model="row.baseAmount"
+                      type="text"
+                      inputmode="decimal"
+                      autocomplete="off"
+                      :aria-label="incomeLabel(row)"
+                      :aria-invalid="baseError(row) !== null"
+                      :aria-describedby="baseError(row) ? `quick-base-error-${row.employment_id}` : undefined"
+                      :class="[fieldClass(baseError(row), true, true), 'w-32']"
+                      :disabled="loading || saving || !canWrite || !editable(row.inputs.base)"
+                      @input="markDirty(row)"
+                    >
+                    <PayrollQuickFieldState
+                      v-if="fieldState(row, 'base')"
+                      :data-testid="`quick-base-state-${row.employment_id}`"
+                      :data-test="fieldManaged(row, 'base') ? `quick-base-managed-link-${row.employment_id}` : undefined"
+                      :state="fieldState(row, 'base')!"
+                      :message="fieldStateMessage(row, 'base')"
+                      :to="fieldManaged(row, 'base') ? componentsLink(row) : null"
+                      :link-hint="fieldManaged(row, 'base') ? t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') : null"
+                    />
+                  </div>
                   <p
                     v-if="baseError(row)"
                     :id="`quick-base-error-${row.employment_id}`"
@@ -1210,13 +1385,6 @@ onMounted(() => {
                     {{ serverError(row, 'base') ?? serverError(row, 'row') }}
                   </p>
                   <p
-                    v-if="fieldState(row, 'base')"
-                    :data-testid="`quick-base-state-${row.employment_id}`"
-                    :class="['mt-1 max-w-48 text-xs', fieldStateClass(fieldState(row, 'base'))]"
-                  >
-                    {{ fieldStateMessage(row, 'base') }}
-                  </p>
-                  <p
                     v-if="prorationHint(row)"
                     :data-testid="`quick-base-proration-${row.employment_id}`"
                     class="mt-1 max-w-48 text-xs text-neutral-600"
@@ -1224,58 +1392,95 @@ onMounted(() => {
                     {{ prorationHint(row) }}
                   </p>
                 </td>
-                <td v-if="tbl.isVisible('overtime')" class="px-4 py-4">
-                  <p class="mb-1 text-xs font-medium text-neutral-600">{{ additionalIncomeLabel(row) }}</p>
-                  <div
-                    v-if="row.overtime_hours_relation_supported"
-                    class="flex flex-wrap gap-1"
-                    role="group"
-                    :aria-label="t('payroll.quick_inputs.overtime_mode')"
+                <td v-if="tbl.isVisible('overtime')" class="px-3 py-2">
+                  <!--
+                    U vztahu bez hodinového přesčasu (DPP, DPČ, funkce…) jde
+                    o jinou věc než přesčas, takže popisek nese jen tenhle řádek.
+                  -->
+                  <p
+                    v-if="!row.overtime_hours_relation_supported"
+                    :title="t('payroll.quick_inputs.amount_only_relation_hint')"
+                    class="mb-0.5 text-xs font-medium text-neutral-600"
                   >
-                    <button
-                      :data-testid="`overtime-mode-hours-${row.employment_id}`"
-                      type="button"
-                      class="cursor-pointer"
-                      :class="modeButtonClass(row.overtime_mode === 'hours')"
-                      :aria-pressed="row.overtime_mode === 'hours'"
-                      :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !row.overtime_hours_available || !editable(row.inputs.overtime)"
-                      @click="setOvertimeMode(row, 'hours')"
-                    >{{ t('payroll.quick_inputs.hours') }}</button>
-                    <button
-                      type="button"
-                      class="cursor-pointer"
-                      :class="modeButtonClass(row.overtime_mode === 'amount')"
-                      :aria-pressed="row.overtime_mode === 'amount'"
-                      :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
-                      @click="setOvertimeMode(row, 'amount')"
-                    >{{ t('payroll.quick_inputs.total_amount') }}</button>
+                    {{ additionalIncomeLabel(row) }}<span class="sr-only"> ({{ t('payroll.quick_inputs.amount_only_relation_hint') }})</span>
+                  </p>
+                  <div class="flex items-center gap-1.5">
+                    <span
+                      v-if="row.overtime_managed_elsewhere"
+                      :data-testid="`quick-overtime-readonly-${row.employment_id}`"
+                      :class="[READONLY_VALUE_CLASS, 'w-32']"
+                    >{{ managedDisplay(row, 'overtime') }}</span>
+                    <template v-else>
+                      <!--
+                        Režim zůstává u řádku: přepnout ho za celý sloupec by
+                        měnilo ukládaná data i u řádků, na které uživatel
+                        nesáhl (uložená částka by se změnila na prázdné hodiny).
+                        Proč nejdou hodiny, říká hlavička sloupce.
+                      -->
+                      <div
+                        v-if="row.overtime_hours_relation_supported"
+                        class="inline-flex shrink-0 divide-x divide-neutral-300 overflow-hidden rounded-md border border-neutral-300"
+                        role="group"
+                        :aria-label="t('payroll.quick_inputs.overtime_mode')"
+                      >
+                        <button
+                          :data-testid="`overtime-mode-hours-${row.employment_id}`"
+                          type="button"
+                          :class="modeSegmentClass(row.overtime_mode === 'hours')"
+                          :aria-pressed="row.overtime_mode === 'hours'"
+                          :aria-label="t('payroll.quick_inputs.hours')"
+                          :title="row.overtime_hours_available ? t('payroll.quick_inputs.hours') : t('payroll.quick_inputs.hours_unavailable')"
+                          :disabled="loading || saving || !canWrite || !row.overtime_hours_available || !editable(row.inputs.overtime)"
+                          @click="setOvertimeMode(row, 'hours')"
+                        >{{ t('payroll.quick_inputs.mode_hours_short') }}</button>
+                        <button
+                          :data-testid="`overtime-mode-amount-${row.employment_id}`"
+                          type="button"
+                          :class="modeSegmentClass(row.overtime_mode === 'amount')"
+                          :aria-pressed="row.overtime_mode === 'amount'"
+                          :aria-label="t('payroll.quick_inputs.total_amount')"
+                          :title="t('payroll.quick_inputs.total_amount')"
+                          :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
+                          @click="setOvertimeMode(row, 'amount')"
+                        >{{ t('payroll.quick_inputs.mode_amount_short') }}</button>
+                      </div>
+                      <input
+                        v-if="row.overtime_hours_relation_supported && row.overtime_mode === 'hours'"
+                        v-model="row.overtimeHours"
+                        type="text"
+                        inputmode="decimal"
+                        autocomplete="off"
+                        :aria-label="t('payroll.quick_inputs.overtime_hours')"
+                        :aria-invalid="overtimeError(row) !== null"
+                        :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
+                        :class="[fieldClass(overtimeError(row), true, true), 'w-24']"
+                        :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
+                        @input="markDirty(row)"
+                      >
+                      <input
+                        v-else
+                        v-model="row.overtimeAmount"
+                        type="text"
+                        inputmode="decimal"
+                        autocomplete="off"
+                        :aria-label="additionalIncomeLabel(row)"
+                        :aria-invalid="overtimeError(row) !== null"
+                        :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
+                        :class="[fieldClass(overtimeError(row), true, true), row.overtime_hours_relation_supported ? 'w-24' : 'w-32']"
+                        :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
+                        @input="markDirty(row)"
+                      >
+                    </template>
+                    <PayrollQuickFieldState
+                      v-if="fieldState(row, 'overtime')"
+                      :data-testid="`quick-overtime-state-${row.employment_id}`"
+                      :data-test="fieldManaged(row, 'overtime') ? `quick-overtime-managed-link-${row.employment_id}` : undefined"
+                      :state="fieldState(row, 'overtime')!"
+                      :message="fieldStateMessage(row, 'overtime')"
+                      :to="fieldManaged(row, 'overtime') ? componentsLink(row) : null"
+                      :link-hint="fieldManaged(row, 'overtime') ? t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') : null"
+                    />
                   </div>
-                  <input
-                    v-if="row.overtime_hours_relation_supported && row.overtime_mode === 'hours'"
-                    v-model="row.overtimeHours"
-                    type="text"
-                    inputmode="decimal"
-                    autocomplete="off"
-                    :aria-label="t('payroll.quick_inputs.overtime_hours')"
-                    :aria-invalid="overtimeError(row) !== null"
-                    :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
-                    :class="[fieldClass(overtimeError(row), true), 'mt-2 w-32']"
-                    :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
-                    @input="markDirty(row)"
-                  >
-                  <input
-                    v-else
-                    v-model="row.overtimeAmount"
-                    type="text"
-                    inputmode="decimal"
-                    autocomplete="off"
-                    :aria-label="additionalIncomeLabel(row)"
-                    :aria-invalid="overtimeError(row) !== null"
-                    :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
-                    :class="[fieldClass(overtimeError(row), true), 'mt-2 w-32']"
-                    :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
-                    @input="markDirty(row)"
-                  >
                   <p
                     v-if="overtimeError(row)"
                     :id="`quick-overtime-error-${row.employment_id}`"
@@ -1283,14 +1488,8 @@ onMounted(() => {
                   >
                     {{ validationMessage(overtimeError(row)) }}
                   </p>
-                  <p v-if="row.overtime_hours_relation_supported && row.overtime_mode === 'hours' && row.overtime_hourly_rate_minor" class="mt-1 text-xs text-neutral-500">
+                  <p v-if="!row.overtime_managed_elsewhere && row.overtime_hours_relation_supported && row.overtime_mode === 'hours' && row.overtime_hourly_rate_minor" class="mt-0.5 text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.rate_hint', { rate: formatMoney(row.overtime_hourly_rate_minor) }) }}
-                  </p>
-                  <p v-else-if="row.overtime_hours_relation_supported && !row.overtime_hours_available" class="mt-1 max-w-xs text-xs text-warning-700">
-                    {{ t('payroll.quick_inputs.hours_unavailable') }}
-                  </p>
-                  <p v-else-if="!row.overtime_hours_relation_supported" class="mt-1 max-w-xs text-xs text-neutral-500">
-                    {{ t('payroll.quick_inputs.amount_only_relation_hint') }}
                   </p>
                   <p
                     v-if="serverError(row, 'overtime')"
@@ -1309,28 +1508,38 @@ onMounted(() => {
                       premium: formatMoney(overtimeSplit(row)!.premium),
                     }) }}
                   </p>
-                  <p
-                    v-if="fieldState(row, 'overtime')"
-                    :data-testid="`quick-overtime-state-${row.employment_id}`"
-                    :class="['mt-1 max-w-56 text-xs', fieldStateClass(fieldState(row, 'overtime'))]"
-                  >
-                    {{ fieldStateMessage(row, 'overtime') }}
-                  </p>
                 </td>
-                <td v-if="tbl.isVisible('bonus_amount')" class="px-4 py-4">
-                  <input
-                    v-model="row.bonusAmount"
-                    type="text"
-                    inputmode="decimal"
-                    autocomplete="off"
-                    :data-testid="`quick-bonus-${row.employment_id}`"
-                    :aria-label="t('payroll.quick_inputs.bonus_amount')"
-                    :aria-invalid="bonusError(row) !== null"
-                    :aria-describedby="bonusError(row) ? `quick-bonus-error-${row.employment_id}` : undefined"
-                    :class="[fieldClass(bonusError(row), true), 'w-32']"
-                    :disabled="loading || saving || !canWrite || row.bonus_managed_elsewhere || !editable(row.inputs.bonus)"
-                    @input="markDirty(row)"
-                  >
+                <td v-if="tbl.isVisible('bonus_amount')" class="px-3 py-2">
+                  <div class="flex items-center gap-1.5">
+                    <span
+                      v-if="row.bonus_managed_elsewhere"
+                      :data-testid="`quick-bonus-readonly-${row.employment_id}`"
+                      :class="[READONLY_VALUE_CLASS, 'w-32']"
+                    >{{ managedDisplay(row, 'bonus') }}</span>
+                    <input
+                      v-else
+                      v-model="row.bonusAmount"
+                      type="text"
+                      inputmode="decimal"
+                      autocomplete="off"
+                      :data-testid="`quick-bonus-${row.employment_id}`"
+                      :aria-label="t('payroll.quick_inputs.bonus_amount')"
+                      :aria-invalid="bonusError(row) !== null"
+                      :aria-describedby="bonusError(row) ? `quick-bonus-error-${row.employment_id}` : undefined"
+                      :class="[fieldClass(bonusError(row), true, true), 'w-32']"
+                      :disabled="loading || saving || !canWrite || !editable(row.inputs.bonus)"
+                      @input="markDirty(row)"
+                    >
+                    <PayrollQuickFieldState
+                      v-if="fieldState(row, 'bonus')"
+                      :data-testid="`quick-bonus-state-${row.employment_id}`"
+                      :data-test="fieldManaged(row, 'bonus') ? `quick-bonus-managed-link-${row.employment_id}` : undefined"
+                      :state="fieldState(row, 'bonus')!"
+                      :message="fieldStateMessage(row, 'bonus')"
+                      :to="fieldManaged(row, 'bonus') ? componentsLink(row) : null"
+                      :link-hint="fieldManaged(row, 'bonus') ? t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') : null"
+                    />
+                  </div>
                   <p
                     v-if="bonusError(row)"
                     :id="`quick-bonus-error-${row.employment_id}`"
@@ -1345,29 +1554,19 @@ onMounted(() => {
                   >
                     {{ serverError(row, 'bonus') }}
                   </p>
-                  <p
-                    v-if="fieldState(row, 'bonus')"
-                    :data-testid="`quick-bonus-state-${row.employment_id}`"
-                    :class="['mt-1 max-w-48 text-xs', fieldStateClass(fieldState(row, 'bonus'))]"
-                  >
-                    {{ fieldStateMessage(row, 'bonus') }}
-                  </p>
                 </td>
                 <td
                   v-for="kind in (surchargesVisible ? SURCHARGE_KINDS : [])"
                   :key="kind"
-                  class="px-4 py-4"
+                  class="px-3 py-2"
                 >
                   <!--
-                    Hodiny a počet vlivů jsou dvojice vedle sebe, každý se svým
-                    popiskem. Dřív visel input na vlivy pod textem mimo mřížku
-                    a u § 117 to vypadalo jako rozbité rozložení.
+                    Hodiny a počet vlivů jsou dvojice vedle sebe. Co které pole
+                    znamená, říká hlavička sloupce; popisek nad polem v každém
+                    řádku byl tentýž text N-krát. Pole mají `aria-label`.
                   -->
-                  <div class="flex flex-wrap items-end gap-2">
+                  <div class="flex items-center gap-1.5">
                     <label class="block">
-                      <span class="mb-1 block text-[11px] font-medium uppercase tracking-wide text-neutral-500">
-                        {{ t('payroll.quick_inputs.surcharges.hours_short') }}
-                      </span>
                       <input
                         :data-testid="`quick-surcharge-${kind}-${row.employment_id}`"
                         v-model="row.surchargeHours[kind]"
@@ -1378,7 +1577,10 @@ onMounted(() => {
                           kind: t(`payroll.quick_inputs.surcharges.kinds.${kind}`),
                         })"
                         :aria-invalid="surchargeHoursError(row, kind) !== null"
-                        :class="[fieldClass(surchargeHoursError(row, kind), true), 'w-24']"
+                        :aria-describedby="surchargeUnavailableKey(row, kind) ? `quick-surcharge-reason-${kind}-${row.employment_id}` : undefined"
+                        :placeholder="surchargePlaceholder(row, kind)"
+                        :title="surchargeUnavailableText(row, kind) || undefined"
+                        :class="[fieldClass(surchargeHoursError(row, kind), true, true), 'w-24 placeholder:text-xs placeholder:text-neutral-400']"
                         :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
                         @input="markDirty(row)"
                       >
@@ -1387,10 +1589,8 @@ onMounted(() => {
                       § 117 přiznává příplatek ZA KAŽDÝ ztěžující vliv, takže
                       počet vlivů je součást zadání, ne detail.
                     -->
-                    <label v-if="surchargeState(row, kind)?.requires_factors" class="block">
-                      <span class="mb-1 block text-[11px] font-medium uppercase tracking-wide text-neutral-500">
-                        {{ t('payroll.quick_inputs.surcharges.factors_short') }}
-                      </span>
+                    <label v-if="surchargeState(row, kind)?.requires_factors" class="flex items-center gap-1">
+                      <span class="text-xs text-neutral-400" aria-hidden="true">×</span>
                       <input
                         :data-testid="`quick-surcharge-factors-${kind}-${row.employment_id}`"
                         v-model="row.surchargeFactors[kind]"
@@ -1399,7 +1599,7 @@ onMounted(() => {
                         autocomplete="off"
                         :aria-label="t('payroll.quick_inputs.surcharges.factors')"
                         :aria-invalid="surchargeFactorsError(row, kind) !== null"
-                        :class="[fieldClass(surchargeFactorsError(row, kind), true), 'w-16']"
+                        :class="[fieldClass(surchargeFactorsError(row, kind), true, true), 'w-14']"
                         :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
                         @input="markDirty(row)"
                       >
@@ -1428,32 +1628,19 @@ onMounted(() => {
                     {{ serverError(row, `surcharge_${kind}`) }}
                   </p>
                   <!--
-                    Důvod, který platí pro celý sloupec, stojí nad tabulkou —
-                    v buňce z něj zbude značka. Řádek, který se od sloupce
-                    liší, si plnou větu nechává u sebe.
+                    Nedostupné pole nemá pod sebou žádnou značku: placeholder
+                    „Nedostupné" stačí a důvod je v `title` pole a tady pro
+                    odečítače. Společný důvod sloupce stojí jednou nad tabulkou.
                   -->
-                  <template v-else-if="surchargeUnavailableKey(row, kind)">
-                    <p
-                      v-if="surchargeNoteHoisted(row, kind)"
-                      :data-testid="`quick-surcharge-blocked-${kind}-${row.employment_id}`"
-                      :title="surchargeUnavailableText(row, kind)"
-                      class="mt-1 inline-flex items-center gap-1 rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700"
-                    >
-                      <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.bell" /></svg>
-                      {{ t('payroll.quick_inputs.surcharges.unavailable_badge') }}
-                      <span class="sr-only"> — {{ surchargeUnavailableText(row, kind) }}</span>
-                    </p>
-                    <p
-                      v-else
-                      :data-testid="`quick-surcharge-blocked-${kind}-${row.employment_id}`"
-                      class="mt-1 max-w-48 text-xs text-warning-700"
-                    >
-                      {{ surchargeUnavailableText(row, kind) }}
-                    </p>
-                  </template>
+                  <span
+                    v-if="surchargeUnavailableKey(row, kind)"
+                    :id="`quick-surcharge-reason-${kind}-${row.employment_id}`"
+                    :data-testid="`quick-surcharge-blocked-${kind}-${row.employment_id}`"
+                    class="sr-only"
+                  >{{ surchargeUnavailableText(row, kind) }}</span>
                 </td>
-                <td v-if="tbl.isVisible('gross_preview')" class="px-4 py-4 text-right">
-                  <p class="text-base font-semibold text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
+                <td v-if="tbl.isVisible('gross_preview')" class="px-3 py-2 text-right">
+                  <p class="font-semibold tabular-nums text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
                   <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.other_inputs', { amount: formatMoney(row.other_amount_minor) }) }}
                   </p>
@@ -1474,19 +1661,25 @@ onMounted(() => {
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h2 class="font-semibold text-neutral-900">{{ row.full_name }}</h2>
-                <p class="text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }}<template v-if="personalNumberLabel(t, row.employment_code)"> · {{ personalNumberLabel(t, row.employment_code) }}</template></p>
-                <span
-                  :data-testid="`quick-relation-mobile-${row.employment_id}`"
-                  class="mt-2 inline-flex rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700"
+                <p v-if="personMeta(row)" class="text-xs text-neutral-500">{{ personMeta(row) }}</p>
+                <div
+                  v-if="showRelationBadge(row) || row.effective_status !== 'active' || row.suspended_in_month"
+                  class="mt-1 flex flex-wrap gap-1"
                 >
-                  {{ relationLabel(row) }}
-                </span>
-                <span
-                  v-if="row.effective_status !== 'active' || row.suspended_in_month"
-                  class="ml-1 mt-2 inline-flex rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700"
-                >
-                  {{ employmentStatusLabel(row) }}
-                </span>
+                  <span
+                    v-if="showRelationBadge(row)"
+                    :data-testid="`quick-relation-mobile-${row.employment_id}`"
+                    class="inline-flex rounded-full bg-payroll-50 px-2 py-0.5 text-xs font-medium text-payroll-700"
+                  >
+                    {{ relationLabel(row) }}
+                  </span>
+                  <span
+                    v-if="row.effective_status !== 'active' || row.suspended_in_month"
+                    class="inline-flex rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700"
+                  >
+                    {{ employmentStatusLabel(row) }}
+                  </span>
+                </div>
               </div>
               <div class="text-right">
                 <strong class="text-payroll-700">{{ formatMoney(grossPreview(row)) }}</strong>
@@ -1501,40 +1694,48 @@ onMounted(() => {
                 </p>
               </div>
             </div>
-            <!--
-              Odkaz „kde se to mění" musí být i tady. Na mobilu blokátor
-              zůstával bez cesty dál, takže účetní věděla, CO brání zápisu, ale
-              hledala předpis mzdy ručně — a to je přesně to místo, kde se
-              průchod měsícem zasekne.
-            -->
-            <p v-for="blocker in row.blockers" :key="blocker" class="mt-2 text-xs text-warning-700">
+            <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-2 text-xs text-warning-700">
               {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
-              <RouterLink
-                v-if="blocker === 'base_managed_elsewhere'"
-                :to="{ name: 'payroll-components', query: { employment: String(row.employment_id) } }"
-                class="underline decoration-dotted underline-offset-2 hover:text-warning-900"
-                :data-test="`quick-base-managed-link-mobile-${row.employment_id}`"
-              >
-                {{ t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') }}
-              </RouterLink>
             </p>
-            <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <label class="block">
+            <!--
+              Na mobilu `title` nejde vyvolat, takže stav pole nese vedle ikony
+              krátký štítek. Spravované pole je odkaz tam, kde se předpis mění.
+            -->
+            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <div class="mb-1 flex items-center justify-between gap-2">
+                  <span
+                    :id="`quick-income-label-mobile-${row.employment_id}`"
+                    :data-testid="`quick-income-label-mobile-${row.employment_id}`"
+                    class="text-xs font-medium text-neutral-600"
+                  >
+                    {{ incomeLabel(row) }}
+                  </span>
+                  <PayrollQuickFieldState
+                    v-if="fieldState(row, 'base')"
+                    :data-test="fieldManaged(row, 'base') ? `quick-base-managed-link-mobile-${row.employment_id}` : undefined"
+                    :state="fieldState(row, 'base')!"
+                    :message="fieldStateMessage(row, 'base')"
+                    :label="fieldStateShort(row, 'base')"
+                    :to="fieldManaged(row, 'base') ? componentsLink(row) : null"
+                    :link-hint="fieldManaged(row, 'base') ? t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') : null"
+                  />
+                </div>
                 <span
-                  :data-testid="`quick-income-label-mobile-${row.employment_id}`"
-                  class="mb-1 block text-xs font-medium text-neutral-600"
-                >
-                  {{ incomeLabel(row) }}
-                </span>
+                  v-if="row.base_managed_elsewhere"
+                  :class="[READONLY_VALUE_CLASS, 'h-10 w-full']"
+                >{{ managedDisplay(row, 'base') }}</span>
                 <input
+                  v-else
                   :data-testid="`quick-base-mobile-${row.employment_id}`"
                   v-model="row.baseAmount"
                   type="text"
                   inputmode="decimal"
                   autocomplete="off"
+                  :aria-labelledby="`quick-income-label-mobile-${row.employment_id}`"
                   :aria-invalid="baseError(row) !== null"
                   :class="[fieldClass(baseError(row)), 'w-full']"
-                  :disabled="loading || saving || !canWrite || row.base_managed_elsewhere || !editable(row.inputs.base)"
+                  :disabled="loading || saving || !canWrite || !editable(row.inputs.base)"
                   @input="markDirty(row)"
                 >
                 <span v-if="baseError(row)" class="mt-1 block text-xs text-danger-700">
@@ -1544,29 +1745,39 @@ onMounted(() => {
                   {{ serverError(row, 'base') ?? serverError(row, 'row') }}
                 </span>
                 <span
-                  v-if="fieldState(row, 'base')"
-                  :class="['mt-1 block text-xs', fieldStateClass(fieldState(row, 'base'))]"
-                >
-                  {{ fieldStateMessage(row, 'base') }}
-                </span>
-                <span
                   v-if="prorationHint(row)"
                   :data-testid="`quick-base-proration-mobile-${row.employment_id}`"
                   class="mt-1 block text-xs text-neutral-600"
                 >
                   {{ prorationHint(row) }}
                 </span>
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.quick_inputs.bonus_amount') }}</span>
+              </div>
+              <div>
+                <div class="mb-1 flex items-center justify-between gap-2">
+                  <span :id="`quick-bonus-label-mobile-${row.employment_id}`" class="text-xs font-medium text-neutral-600">{{ t('payroll.quick_inputs.bonus_amount') }}</span>
+                  <PayrollQuickFieldState
+                    v-if="fieldState(row, 'bonus')"
+                    :state="fieldState(row, 'bonus')!"
+                    :message="fieldStateMessage(row, 'bonus')"
+                    :label="fieldStateShort(row, 'bonus')"
+                    :to="fieldManaged(row, 'bonus') ? componentsLink(row) : null"
+                    :link-hint="fieldManaged(row, 'bonus') ? t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') : null"
+                  />
+                </div>
+                <span
+                  v-if="row.bonus_managed_elsewhere"
+                  :class="[READONLY_VALUE_CLASS, 'h-10 w-full']"
+                >{{ managedDisplay(row, 'bonus') }}</span>
                 <input
+                  v-else
                   v-model="row.bonusAmount"
                   type="text"
                   inputmode="decimal"
                   autocomplete="off"
+                  :aria-labelledby="`quick-bonus-label-mobile-${row.employment_id}`"
                   :aria-invalid="bonusError(row) !== null"
                   :class="[fieldClass(bonusError(row)), 'w-full']"
-                  :disabled="loading || saving || !canWrite || row.bonus_managed_elsewhere || !editable(row.inputs.bonus)"
+                  :disabled="loading || saving || !canWrite || !editable(row.inputs.bonus)"
                   @input="markDirty(row)"
                 >
                 <span v-if="bonusError(row)" class="mt-1 block text-xs text-danger-700">
@@ -1575,21 +1786,29 @@ onMounted(() => {
                 <span v-if="serverError(row, 'bonus')" class="mt-1 block text-xs font-medium text-danger-700">
                   {{ serverError(row, 'bonus') }}
                 </span>
-                <span
-                  v-if="fieldState(row, 'bonus')"
-                  :class="['mt-1 block text-xs', fieldStateClass(fieldState(row, 'bonus'))]"
-                >
-                  {{ fieldStateMessage(row, 'bonus') }}
-                </span>
-              </label>
+              </div>
               <div class="sm:col-span-2">
-                <span class="mb-1 block text-xs font-medium text-neutral-600">{{ additionalIncomeLabel(row) }}</span>
-                <div class="flex flex-wrap gap-2" role="group" :aria-label="t('payroll.quick_inputs.overtime_mode')">
+                <div class="mb-1 flex items-center justify-between gap-2">
+                  <span class="text-xs font-medium text-neutral-600">{{ additionalIncomeLabel(row) }}</span>
+                  <PayrollQuickFieldState
+                    v-if="fieldState(row, 'overtime')"
+                    :state="fieldState(row, 'overtime')!"
+                    :message="fieldStateMessage(row, 'overtime')"
+                    :label="fieldStateShort(row, 'overtime')"
+                    :to="fieldManaged(row, 'overtime') ? componentsLink(row) : null"
+                    :link-hint="fieldManaged(row, 'overtime') ? t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') : null"
+                  />
+                </div>
+                <span
+                  v-if="row.overtime_managed_elsewhere"
+                  :class="[READONLY_VALUE_CLASS, 'h-10 w-full']"
+                >{{ managedDisplay(row, 'overtime') }}</span>
+                <div v-else class="flex flex-wrap gap-2" role="group" :aria-label="t('payroll.quick_inputs.overtime_mode')">
                   <template v-if="row.overtime_hours_relation_supported">
                     <button type="button" class="cursor-pointer"
-  :class="modeButtonClass(row.overtime_mode === 'hours')" :aria-pressed="row.overtime_mode === 'hours'" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !row.overtime_hours_available || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'hours')">{{ t('payroll.quick_inputs.hours') }}</button>
+  :class="modeButtonClass(row.overtime_mode === 'hours')" :aria-pressed="row.overtime_mode === 'hours'" :disabled="loading || saving || !canWrite || !row.overtime_hours_available || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'hours')">{{ t('payroll.quick_inputs.hours') }}</button>
                     <button type="button" class="cursor-pointer"
-  :class="modeButtonClass(row.overtime_mode === 'amount')" :aria-pressed="row.overtime_mode === 'amount'" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'amount')">{{ t('payroll.quick_inputs.total_amount') }}</button>
+  :class="modeButtonClass(row.overtime_mode === 'amount')" :aria-pressed="row.overtime_mode === 'amount'" :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'amount')">{{ t('payroll.quick_inputs.total_amount') }}</button>
                   </template>
                   <input
                     v-if="row.overtime_hours_relation_supported && row.overtime_mode === 'hours'"
@@ -1600,7 +1819,7 @@ onMounted(() => {
                     :aria-label="t('payroll.quick_inputs.overtime_hours')"
                     :aria-invalid="overtimeError(row) !== null"
                     :class="[fieldClass(overtimeError(row)), 'min-w-0 flex-1']"
-                    :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
+                    :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
                     @input="markDirty(row)"
                   >
                   <input
@@ -1612,7 +1831,7 @@ onMounted(() => {
                     :aria-label="additionalIncomeLabel(row)"
                     :aria-invalid="overtimeError(row) !== null"
                     :class="[fieldClass(overtimeError(row)), 'min-w-0 flex-1']"
-                    :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
+                    :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
                     @input="markDirty(row)"
                   >
                 </div>
@@ -1622,11 +1841,10 @@ onMounted(() => {
                 <p v-if="serverError(row, 'overtime')" class="mt-1 text-xs font-medium text-danger-700">
                   {{ serverError(row, 'overtime') }}
                 </p>
-                <p v-else-if="row.overtime_mode === 'hours' && row.overtime_hourly_rate_minor" class="mt-1 text-xs text-neutral-500">
+                <p v-else-if="!row.overtime_managed_elsewhere && row.overtime_mode === 'hours' && row.overtime_hourly_rate_minor" class="mt-1 text-xs text-neutral-500">
                   {{ t('payroll.quick_inputs.rate_hint', { rate: formatMoney(row.overtime_hourly_rate_minor) }) }}
                 </p>
-                <p v-if="row.overtime_hours_relation_supported && !row.overtime_hours_available" class="mt-1 text-xs text-warning-700">{{ t('payroll.quick_inputs.hours_unavailable') }}</p>
-                <p v-else-if="!row.overtime_hours_relation_supported" class="mt-1 text-xs text-neutral-500">{{ t('payroll.quick_inputs.amount_only_relation_hint') }}</p>
+                <p v-if="!row.overtime_hours_relation_supported" class="mt-1 text-xs text-neutral-500">{{ t('payroll.quick_inputs.amount_only_relation_hint') }}</p>
                 <p
                   v-if="overtimeSplit(row)"
                   :data-testid="`quick-overtime-split-mobile-${row.employment_id}`"
@@ -1636,12 +1854,6 @@ onMounted(() => {
                     wage: formatMoney(overtimeSplit(row)!.wage),
                     premium: formatMoney(overtimeSplit(row)!.premium),
                   }) }}
-                </p>
-                <p
-                  v-if="fieldState(row, 'overtime')"
-                  :class="['mt-1 text-xs', fieldStateClass(fieldState(row, 'overtime'))]"
-                >
-                  {{ fieldStateMessage(row, 'overtime') }}
                 </p>
               </div>
               <!--
@@ -1674,8 +1886,10 @@ onMounted(() => {
                         kind: t(`payroll.quick_inputs.surcharges.kinds.${kind}`),
                       })"
                       :aria-invalid="surchargeHoursError(row, kind) !== null"
+                      :aria-describedby="surchargeUnavailableKey(row, kind) ? `quick-surcharge-reason-mobile-${kind}-${row.employment_id}` : undefined"
+                      :title="surchargeUnavailableText(row, kind) || undefined"
                       :class="[fieldClass(surchargeHoursError(row, kind)), 'w-full']"
-                      :placeholder="t('payroll.quick_inputs.surcharges.hours_placeholder')"
+                      :placeholder="surchargePlaceholder(row, kind) ?? t('payroll.quick_inputs.surcharges.hours_placeholder')"
                       :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
                       @input="markDirty(row)"
                     >
@@ -1715,17 +1929,12 @@ onMounted(() => {
                     >
                       {{ serverError(row, `surcharge_${kind}`) }}
                     </span>
-                    <!--
-                      Na mobilu zůstává věta viditelná: `title` se na dotykovém
-                      displeji nedá vyvolat a v kartách se stejně neopakuje
-                      tolikrát jako ve sloupci tabulky.
-                    -->
+                    <!-- Společný důvod je v pruhu nad kartami, u pole jen pro odečítače. -->
                     <span
-                      v-else-if="surchargeUnavailableKey(row, kind)"
-                      class="mt-1 block text-xs text-warning-700"
-                    >
-                      {{ surchargeUnavailableText(row, kind) }}
-                    </span>
+                      v-if="surchargeUnavailableKey(row, kind)"
+                      :id="`quick-surcharge-reason-mobile-${kind}-${row.employment_id}`"
+                      class="sr-only"
+                    >{{ surchargeUnavailableText(row, kind) }}</span>
                   </label>
                 </div>
               </fieldset>
