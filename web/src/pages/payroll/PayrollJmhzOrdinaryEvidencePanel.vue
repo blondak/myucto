@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, markRaw, ref, watch } from 'vue'
 import { jmhzEvidenceGuidance } from './jmhzEvidenceGuidance'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -9,6 +9,7 @@ import {
   type PayrollJmhzOrdinaryEvidenceScope,
   type PayrollRun,
 } from '@/api/payroll'
+import ExpandableList from '@/components/ui/ExpandableList.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatPeriod } from '@/composables/useFormat'
 
@@ -22,6 +23,28 @@ interface EvidenceState {
   scopes: PayrollJmhzOrdinaryEvidenceScope[]
 }
 
+type Guidance = ReturnType<typeof jmhzEvidenceGuidance>
+
+interface AttentionEntry {
+  scope: PayrollJmhzOrdinaryEvidenceScope
+  guidance: Guidance
+}
+
+interface AttentionGroup {
+  key: string
+  guidance: Guidance
+  /** Všechny vztahy skupiny vedou na totéž místo — odkaz stačí jednou. */
+  sharedAction: boolean
+  entries: AttentionEntry[]
+}
+
+interface EvidenceView {
+  automatic: number
+  confirmed: number
+  attention: number
+  groups: AttentionGroup[]
+}
+
 const states = ref<Record<number, EvidenceState>>({})
 
 function revisionId(run: PayrollRun): number | null {
@@ -33,18 +56,62 @@ function state(run: PayrollRun): EvidenceState | null {
   return id === null ? null : states.value[id] ?? null
 }
 
-function attentionScopes(run: PayrollRun): PayrollJmhzOrdinaryEvidenceScope[] {
-  return state(run)?.scopes.filter(scope => scope.resolution === 'attention_required') ?? []
+/**
+ * Souhrn revize se počítá jednou za načtení, ne v šabloně.
+ *
+ * Firma s 226 vztahy zamrazila prohlížeč: šablona filtrovala vztahy několikrát
+ * za překreslení a návod k nápravě počítala osmkrát na každou kartu. Stejný
+ * problém u stovek lidí je navíc jedna věc k vyřízení, ne stovky karet, proto
+ * se vztahy seskupí podle návodu a vypíšou se sbaleně po stránkách.
+ */
+function buildView(scopes: PayrollJmhzOrdinaryEvidenceScope[], period: string): EvidenceView {
+  let automatic = 0
+  let confirmed = 0
+  let attention = 0
+  const groups = new Map<string, AttentionGroup>()
+  for (const scope of scopes) {
+    if (scope.resolution === 'automatic_on_preparation') {
+      automatic++
+      continue
+    }
+    if (scope.resolution === 'confirmed') {
+      confirmed++
+      continue
+    }
+    if (scope.resolution !== 'attention_required') continue
+    attention++
+    const guidance = jmhzEvidenceGuidance(scope, period)
+    const key = JSON.stringify([
+      guidance.problemKey, guidance.fieldKey, guidance.stepKey, guidance.actionKey, guidance.versions,
+    ])
+    const group = groups.get(key)
+    if (group === undefined) {
+      groups.set(key, { key, guidance, sharedAction: true, entries: [{ scope, guidance }] })
+      continue
+    }
+    group.entries.push({ scope, guidance })
+    if (guidance.path !== group.guidance.path || guidance.agreementsPath !== group.guidance.agreementsPath) {
+      group.sharedAction = false
+    }
+  }
+  return { automatic, confirmed, attention, groups: [...groups.values()] }
 }
 
-function automaticCount(run: PayrollRun): number {
-  return state(run)?.scopes.filter(
-    scope => scope.resolution === 'automatic_on_preparation',
-  ).length ?? 0
-}
+const views = computed(() => {
+  const result: Record<number, EvidenceView> = {}
+  for (const run of props.runs) {
+    const id = revisionId(run)
+    const current = id === null ? undefined : states.value[id]
+    if (id !== null && current !== undefined && !current.loading) {
+      result[id] = buildView(current.scopes, run.period_start)
+    }
+  }
+  return result
+})
 
-function confirmedCount(run: PayrollRun): number {
-  return state(run)?.scopes.filter(scope => scope.resolution === 'confirmed').length ?? 0
+function view(run: PayrollRun): EvidenceView | null {
+  const id = revisionId(run)
+  return id === null ? null : views.value[id] ?? null
 }
 
 function scopeLabel(scope: PayrollJmhzOrdinaryEvidenceScope): string {
@@ -75,7 +142,9 @@ async function loadRun(run: PayrollRun) {
   if (id === null) return
   states.value[id] = { loading: true, error: '', scopes: [] }
   try {
-    states.value[id].scopes = (await payrollApi.jmhzOrdinaryEvidence(id)).scopes
+    // Vztahy se jen čtou a celé se nahrazují; hluboké proxy nad stovkami
+    // řádků by jen zdržovaly každé překreslení.
+    states.value[id].scopes = markRaw((await payrollApi.jmhzOrdinaryEvidence(id)).scopes)
   } catch (exception) {
     const code = apiErrorCode(exception)
     states.value[id].failure = { code, technical: apiErrorMessage(exception) }
@@ -98,7 +167,13 @@ async function load() {
 }
 
 const hasRuns = computed(() => props.runs.length > 0)
-watch(() => props.runs, load, { immediate: true, deep: true })
+// Hlídá se výčet revizí, ne celé běhy: `deep` procházel při každé změně
+// i výsledek mzdy všech lidí, přitom evidence závisí jen na revizi.
+watch(
+  () => [props.runs, props.runs.map(run => revisionId(run) ?? `run-${run.id}`).join(',')],
+  load,
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -133,60 +208,90 @@ watch(() => props.runs, load, { immediate: true, deep: true })
         <p v-if="state(run)?.loading" class="mt-3 text-sm text-neutral-500">
           {{ t('common.loading') }}
         </p>
-        <template v-else>
+        <template v-else-if="view(run)">
           <div class="mt-3 flex flex-wrap gap-2 text-sm">
             <span
-              v-if="automaticCount(run) > 0"
+              v-if="view(run)!.automatic > 0"
               class="rounded-full bg-info-50 px-3 py-1 text-info-700"
             >
-              {{ t('payroll.submissions.overview.jmhz_evidence_automatic_count', automaticCount(run)) }}
+              {{ t('payroll.submissions.overview.jmhz_evidence_automatic_count', view(run)!.automatic) }}
             </span>
             <span
-              v-if="confirmedCount(run) > 0"
+              v-if="view(run)!.confirmed > 0"
               class="rounded-full bg-success-50 px-3 py-1 text-success-700"
             >
-              {{ t('payroll.submissions.overview.jmhz_evidence_confirmed_count', confirmedCount(run)) }}
+              {{ t('payroll.submissions.overview.jmhz_evidence_confirmed_count', view(run)!.confirmed) }}
             </span>
           </div>
           <p
-            v-if="attentionScopes(run).length > 0"
+            v-if="view(run)!.attention > 0"
             class="mt-3 text-sm font-medium text-warning-700"
             data-test="jmhz-ordinary-evidence-pending"
           >
-            {{ t('payroll.submissions.overview.jmhz_evidence_pending', attentionScopes(run).length) }}
+            {{ t('payroll.submissions.overview.jmhz_evidence_pending', view(run)!.attention) }}
           </p>
           <div
-            v-for="scope in attentionScopes(run)"
-            :key="scope.employment_id"
+            v-for="(group, groupIndex) in view(run)!.groups"
+            :key="group.key"
             class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3"
-            data-test="jmhz-ordinary-evidence-scope"
+            data-test="jmhz-ordinary-evidence-group"
           >
-            <p class="text-sm font-semibold text-neutral-900">{{ scopeLabel(scope) }}</p>
             <div data-test="jmhz-evidence-guidance">
-              <p class="mt-1 text-sm font-medium text-neutral-700">{{ t(jmhzEvidenceGuidance(scope, run.period_start).problemKey) }}</p>
-              <p v-if="jmhzEvidenceGuidance(scope, run.period_start).fieldKey" class="mt-1 text-sm text-neutral-700">
-                {{ t(jmhzEvidenceGuidance(scope, run.period_start).fieldKey!) }}
+              <p class="text-sm font-medium text-neutral-700">{{ t(group.guidance.problemKey) }}</p>
+              <p v-if="group.guidance.fieldKey" class="mt-1 text-sm text-neutral-700">
+                {{ t(group.guidance.fieldKey) }}
               </p>
-              <p v-for="version in jmhzEvidenceGuidance(scope, run.period_start).versions" :key="version.key" class="mt-1 text-sm text-neutral-600">
+              <p v-for="version in group.guidance.versions" :key="version.key" class="mt-1 text-sm text-neutral-600">
                 {{ t(version.key, { old: version.old, current: version.current }) }}
               </p>
-              <p class="mt-2 text-sm text-neutral-700">{{ t(jmhzEvidenceGuidance(scope, run.period_start).stepKey) }}</p>
-              <div class="mt-3 flex flex-wrap items-center gap-3">
-                <RouterLink :to="jmhzEvidenceGuidance(scope, run.period_start).path" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']">
+              <p class="mt-2 text-sm text-neutral-700">{{ t(group.guidance.stepKey) }}</p>
+              <p class="mt-2 text-xs font-medium text-neutral-600">
+                {{ t('payroll.submissions.overview.jmhz_evidence_group_affected', group.entries.length) }}
+              </p>
+              <div v-if="group.sharedAction" class="mt-3 flex flex-wrap items-center gap-3">
+                <RouterLink :to="group.guidance.path" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']">
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
-                  {{ t(jmhzEvidenceGuidance(scope, run.period_start).actionKey) }}
+                  {{ t(group.guidance.actionKey) }}
                 </RouterLink>
-                <RouterLink v-if="jmhzEvidenceGuidance(scope, run.period_start).agreementsPath" :to="jmhzEvidenceGuidance(scope, run.period_start).agreementsPath!" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']">
+                <RouterLink v-if="group.guidance.agreementsPath" :to="group.guidance.agreementsPath" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']">
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
                   {{ t('payroll.submissions.overview.jmhz_guidance.actions.agreements') }}
                 </RouterLink>
               </div>
             </div>
-            <details class="mt-3 text-xs text-neutral-500">
-              <summary class="cursor-pointer">{{ t('payroll.submissions.overview.jmhz_guidance.technical_details') }}</summary>
-              <p class="mt-2 break-words">{{ scope.attention_code }}</p>
-              <p class="mt-1 break-words">{{ scope.attention_message }}</p>
-            </details>
+            <ExpandableList
+              class="mt-3"
+              :items="group.entries"
+              :item-key="entry => entry.scope.employment_id"
+              :search-text="entry => scopeLabel(entry.scope)"
+              :test-id="`jmhz-ordinary-evidence-list-${run.revision_id}-${groupIndex}`"
+            >
+              <template #item="{ item: entry }">
+                <div
+                  class="rounded-md border border-warning-500/20 bg-surface/60 p-2"
+                  data-test="jmhz-ordinary-evidence-scope"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-sm font-semibold text-neutral-900">{{ scopeLabel(entry.scope) }}</p>
+                    <div v-if="!group.sharedAction" class="flex flex-wrap items-center gap-2">
+                      <RouterLink :to="entry.guidance.path" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                        {{ t(entry.guidance.actionKey) }}
+                      </RouterLink>
+                      <RouterLink v-if="entry.guidance.agreementsPath" :to="entry.guidance.agreementsPath" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                        {{ t('payroll.submissions.overview.jmhz_guidance.actions.agreements') }}
+                      </RouterLink>
+                    </div>
+                  </div>
+                  <details class="mt-2 text-xs text-neutral-500">
+                    <summary class="cursor-pointer">{{ t('payroll.submissions.overview.jmhz_guidance.technical_details') }}</summary>
+                    <p class="mt-2 break-words">{{ entry.scope.attention_code }}</p>
+                    <p class="mt-1 break-words">{{ entry.scope.attention_message }}</p>
+                  </details>
+                </div>
+              </template>
+            </ExpandableList>
           </div>
           <p
             v-if="state(run)?.scopes.length === 0"
@@ -195,7 +300,7 @@ watch(() => props.runs, load, { immediate: true, deep: true })
             {{ t('payroll.submissions.overview.jmhz_evidence_no_scopes') }}
           </p>
           <p
-            v-else-if="attentionScopes(run).length === 0"
+            v-else-if="view(run)!.attention === 0"
             class="mt-3 text-sm font-medium text-success-700"
           >
             {{ t('payroll.submissions.overview.jmhz_evidence_all_resolved') }}

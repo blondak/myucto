@@ -53,7 +53,9 @@ const remediationEmployments = ref<PayrollAbsenceEmployment[]>([])
 const remediationComponents = ref<Record<number, string>>({})
 const remediationContextRequested = ref(false)
 
-watch(() => props.runs, async runs => {
+// Hlídá se výčet revizí, ne celé běhy: `deep` procházel při každé změně
+// i výsledek mzdy všech lidí, přitom registrace závisí jen na revizi.
+watch(() => [props.runs, props.runs.map(item => revisionId(item) ?? `run-${item.id}`).join(',')] as const, async ([runs]) => {
   const loaded: Record<number, PayrollJmhzPvpojOffice[]> = {}
   const selected: Record<number, number | null> = {}
   const ids = runs
@@ -73,7 +75,7 @@ watch(() => props.runs, async runs => {
   })
   offices.value = loaded
   selectedOffice.value = selected
-}, { immediate: true, deep: true })
+}, { immediate: true })
 
 function revisionId(run: PayrollRun): number | null {
   return run.revision_id && run.revision_id > 0 ? run.revision_id : null

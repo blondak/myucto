@@ -37,6 +37,18 @@ vi.mock('vue-router', () => ({
   },
 }))
 
+const guidanceCalls = vi.hoisted(() => ({ count: 0 }))
+vi.mock('@/pages/payroll/jmhzEvidenceGuidance', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/pages/payroll/jmhzEvidenceGuidance')>()
+  return {
+    ...original,
+    jmhzEvidenceGuidance: (...args: Parameters<typeof original.jmhzEvidenceGuidance>) => {
+      guidanceCalls.count++
+      return original.jmhzEvidenceGuidance(...args)
+    },
+  }
+})
+
 import PayrollJmhzOrdinaryEvidencePanel from '@/pages/payroll/PayrollJmhzOrdinaryEvidencePanel.vue'
 
 const run = {
@@ -216,6 +228,57 @@ describe('PayrollJmhzOrdinaryEvidencePanel', () => {
 
     expect(wrapper.text()).toContain('srpen 2026')
     expect(wrapper.text()).not.toContain('2026-08')
+  })
+
+  /**
+   * Regrese: firma s 226 vztahy zamrazila prohlížeč. Panel kreslil kartu
+   * s návodem, odkazy a technickými údaji ke KAŽDÉMU vztahu naráz a návod
+   * počítal v šabloně osmkrát na kartu při každém překreslení. UI mezd musí
+   * unést 500 lidí: stejné problémy se seskupí, vztahy se ukážou po stránkách
+   * a návod se spočítá jednou na vztah.
+   */
+  it('u 500 vztahů s výjimkou nevykreslí stovky karet a návod nepočítá opakovaně', async () => {
+    const codes = [
+      'jmhz_ordinary_evidence_profile_missing',
+      'jmhz_ordinary_evidence_monthly_exception_required',
+      'jmhz_ordinary_evidence_deduction_conflict',
+      'jmhz_ordinary_evidence_catalog_mismatch',
+    ]
+    const count = 500
+    m.get.mockResolvedValue({
+      scopes: Array.from({ length: count }, (_, index) => ({
+        employee_id: index + 1,
+        employment_id: index + 1001,
+        employee_name: `Osoba ${index + 1}`,
+        confirmed: false,
+        resolution: 'attention_required',
+        attention_code: codes[index % codes.length],
+        attention_message: `Syntetická zpráva ${index + 1}`,
+        attention_context: { field: 'deep_mining_work_applies' },
+      })),
+      evidences: [],
+    })
+    guidanceCalls.count = 0
+    const wrapper = mount(PayrollJmhzOrdinaryEvidencePanel, {
+      props: { runs: [run] as never[] },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="jmhz-ordinary-evidence-pending"]').text())
+      .toContain('jmhz_evidence_pending')
+    expect.soft(wrapper.findAll('[data-test="jmhz-ordinary-evidence-scope"]').length)
+      .toBeLessThanOrEqual(codes.length * 8)
+    expect.soft(wrapper.findAll('a').length).toBeLessThan(80)
+    expect.soft(guidanceCalls.count).toBeLessThanOrEqual(count)
+    expect(wrapper.findAll('[data-test="jmhz-ordinary-evidence-group"]')).toHaveLength(codes.length)
+
+    const callsAfterMount = guidanceCalls.count
+    await wrapper.get('[data-test="jmhz-ordinary-evidence-list-18-0-toggle"]').trigger('click')
+    expect(wrapper.findAll('[data-test="jmhz-ordinary-evidence-scope"]').length)
+      .toBeLessThanOrEqual(25 + (codes.length - 1) * 8)
+    await wrapper.get('[data-test="jmhz-ordinary-evidence-list-18-0-search"]').setValue('Osoba 497')
+    expect(wrapper.get('[data-test="jmhz-ordinary-evidence-list-18-0"]').text()).toContain('Osoba 497')
+    expect(guidanceCalls.count).toBe(callsAfterMount)
   })
 
   it('v režimu jen pro čtení nepovolí potvrzení', async () => {
