@@ -3386,7 +3386,22 @@ paths:
                   description: |
                     Rozúčtování jedné transakce na víc řádků. Prázdné pole se ignoruje
                     (zaúčtuje se běžně na dvojici účtů); tvar řádků validuje až služba.
-                  items: { type: object }
+                  items:
+                    type: object
+                    properties:
+                      account_code: { type: string }
+                      side: { type: string, enum: [debit, credit] }
+                      amount: { type: number, description: "Částka řádku v Kč, s `amounts_in_foreign` v měně pohybu." }
+                amounts_in_foreign:
+                  type: boolean
+                  default: false
+                  description: |
+                    Jen s `lines` u cizoměnového pohybu: částky řádků jsou v měně pohybu.
+                    Koruny dopočítá server kurzem, jakým zaúčtuje banku; bankovní řádek
+                    dostane přesně korunovou částku výpisu a haléřový rozdíl z přepočtu
+                    se vyrovná na největším protiúčtu. Řádky v měně musí být vyrovnané
+                    a 221 musí sedět na částku výpisu v měně. Saldokonta (311, 321, 314,
+                    324, 325) se v tomto režimu odmítají.
                 create_rule: { type: [object, "null"] }
       responses:
         '200':

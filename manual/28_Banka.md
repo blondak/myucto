@@ -233,6 +233,16 @@ připravit, zobrazí důvod a odeslání zablokuje. Po ručním zrušení zaúč
 zůstává faktura spárovaná a kontaci lze znovu nabídnout; zápis se neobnoví
 samotným otevřením dialogu.
 
+U cizoměnového pohybu lze rozúčtování na víc řádků zadat i v měně pohybu:
+zaškrtni **Zadávat částky v EUR** (podle měny pohybu) a opiš částky z podkladu,
+například z rozpisu věřitele. Na koruny je přepočte týž kurz ČNB, jakým se
+zaúčtuje banka. Bankovní řádek dostane přesně korunovou částku z výpisu a
+haléřový rozdíl po zaokrouhlení jednotlivých řádků se vyrovná na řádku
+s největší částkou; dialog u každého řádku ukáže výslednou korunovou částku.
+Saldokonta (311, 321, 314, 324, 325) takhle zadat nejde, protože pohledávka i
+závazek se odúčtovávají kurzem předpisu. Ty rozúčtuj v korunách včetně
+kurzového rozdílu 563/663.
+
 Pohyb použitý k úhradě mzdového závazku má stav **Spárováno se mzdami**.
 Označení zaúčtování otevře existující zápis úhrady v účetním deníku, ať vznikl
 z banky, nebo ze mzdového modulu. Pokud zápis vytvořily mzdy, banka další

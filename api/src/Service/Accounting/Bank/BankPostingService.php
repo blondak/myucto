@@ -2652,7 +2652,14 @@ final class BankPostingService
                 throw new PostingException('validation_failed',
                     'Z rozúčtování na víc řádků nelze založit pravidlo — pravidlo dává smysl jen u dvojice MD/D.');
             }
-            $lines = $this->manualLines($rawLines, $signedAmount, $absAmount, $currency, $fxRate, $foreignAmount);
+            if (!empty($input['amounts_in_foreign'])) {
+                if ($fxRate === null) {
+                    throw new PostingException('validation_failed', 'Částky v cizí měně jde zadat jen u cizoměnového pohybu.');
+                }
+                $lines = $this->foreignManualLines($rawLines, $signedAmount, $absAmount, $currency, $fxRate, $foreignAmount);
+            } else {
+                $lines = $this->manualLines($rawLines, $signedAmount, $absAmount, $currency, $fxRate, $foreignAmount);
+            }
             [$debit, $credit] = $this->primaryPair($lines, $signedAmount);
         } else {
             $debit  = trim((string) ($input['debit_account_code'] ?? ''));
@@ -3518,6 +3525,135 @@ final class BankPostingService
             ));
         }
         return $lines;
+    }
+
+    /**
+     * Rozúčtování cizoměnového pohybu zadané v měně pohybu (#59). Koruny dopočítá server
+     * týmž kurzem, jakým se zaúčtuje banka: bankovní noha dostane přesně korunový
+     * ekvivalent výpisu i s cizoměnovou stopou, protiúčty kurz dne. Haléřový rozdíl
+     * po zaokrouhlení řádků se vyrovná na největším protiúčtu, aby zápis seděl.
+     *
+     * Saldokonta se tu odmítají: pohledávka i závazek se odúčtovávají kurzem předpisu,
+     * ne kurzem dne platby. Patří do rozúčtování v korunách s kurzovým rozdílem
+     * 563/663, jinak by rozdíl tiše zůstal na saldokontu.
+     *
+     * @param list<array<string,mixed>> $raw částky řádků v měně pohybu
+     * @return list<array<string,mixed>>
+     */
+    private function foreignManualLines(
+        array $raw,
+        float $signedAmount,
+        float $absAmount,
+        string $currency,
+        float $fxRate,
+        float $foreignAmount,
+    ): array {
+        $parsed = [];
+        $bankForeignCents = 0;
+        $debitForeignCents = 0;
+        $creditForeignCents = 0;
+        foreach ($raw as $i => $r) {
+            $code = trim((string) ($r['account_code'] ?? ''));
+            $side = (string) ($r['side'] ?? '');
+            $foreign = round((float) ($r['amount'] ?? 0), 2);
+            if ($code === '' || !in_array($side, ['debit', 'credit'], true)) {
+                throw new PostingException('validation_failed', 'Řádek ' . ($i + 1) . ': chybí účet nebo strana.');
+            }
+            if ($foreign <= 0.0) {
+                throw new PostingException('validation_failed', 'Řádek ' . ($i + 1) . ': částka musí být kladná.');
+            }
+            foreach (self::SALDO_BLACKLIST as $prefix) {
+                if (str_starts_with($code, $prefix)) {
+                    throw new PostingException('validation_failed', 'Řádek ' . ($i + 1)
+                        . ': saldokonto rozúčtuj v korunách, pohledávka i závazek se odúčtovávají kurzem předpisu.');
+                }
+            }
+            $cents = (int) round($foreign * 100.0);
+            $isBank = str_starts_with($code, '221');
+            if ($isBank) {
+                $bankForeignCents += $side === 'debit' ? $cents : -$cents;
+            }
+            if ($side === 'debit') {
+                $debitForeignCents += $cents;
+            } else {
+                $creditForeignCents += $cents;
+            }
+            $parsed[] = ['code' => $code, 'side' => $side, 'foreign' => $foreign, 'bank' => $isBank];
+        }
+
+        $expectedForeignCents = (int) round(($signedAmount > 0 ? $foreignAmount : -$foreignAmount) * 100.0);
+        if ($bankForeignCents !== $expectedForeignCents) {
+            throw new PostingException('validation_failed', sprintf(
+                'Pohyb na účtu 221 v zápisu (%s %s) neodpovídá částce z výpisu (%s %s).',
+                number_format($bankForeignCents / 100, 2, ',', ' '), $currency,
+                number_format($expectedForeignCents / 100, 2, ',', ' '), $currency,
+            ));
+        }
+        if ($debitForeignCents !== $creditForeignCents) {
+            throw new PostingException('validation_failed', sprintf(
+                'Řádky v %s nejsou vyrovnané: MD %s, D %s.',
+                $currency,
+                number_format($debitForeignCents / 100, 2, ',', ' '),
+                number_format($creditForeignCents / 100, 2, ',', ' '),
+            ));
+        }
+
+        $czk = [];
+        $largestBank = null;
+        $largestCounter = null;
+        foreach ($parsed as $idx => $p) {
+            $czk[$idx] = $p['bank']
+                ? self::centsToCzk($absAmount * 100.0 * $p['foreign'] / $foreignAmount)
+                : self::centsToCzk(round($p['foreign'] * 100.0) * $fxRate);
+            if ($p['bank']) {
+                if ($largestBank === null || $p['foreign'] > $parsed[$largestBank]['foreign']) $largestBank = $idx;
+            } elseif ($largestCounter === null || $p['foreign'] > $parsed[$largestCounter]['foreign']) {
+                $largestCounter = $idx;
+            }
+        }
+        if ($largestCounter === null) {
+            throw new PostingException('validation_failed', 'Rozúčtování potřebuje aspoň jeden protiúčet mimo 221.');
+        }
+
+        // Banka musí sedět na korunový ekvivalent výpisu přesně (invariant 221 = výpis).
+        $bankNetCents = 0;
+        foreach ($parsed as $idx => $p) {
+            if ($p['bank']) $bankNetCents += (int) round($czk[$idx] * 100.0) * ($p['side'] === 'debit' ? 1 : -1);
+        }
+        $bankFix = (int) round(($signedAmount > 0 ? $absAmount : -$absAmount) * 100.0) - $bankNetCents;
+        $czk[$largestBank] = round($czk[$largestBank] + ($parsed[$largestBank]['side'] === 'debit' ? $bankFix : -$bankFix) / 100, 2);
+
+        // Haléřový rozdíl z přepočtu protiúčtů vyrovná největší protiúčet.
+        $diffCents = 0;
+        foreach ($parsed as $idx => $p) {
+            $diffCents += (int) round($czk[$idx] * 100.0) * ($p['side'] === 'debit' ? 1 : -1);
+        }
+        if (abs($diffCents) > count($parsed)) {
+            throw new PostingException('validation_failed', 'Po přepočtu kurzem se zápis nepodařilo vyrovnat.');
+        }
+        $adjust = $parsed[$largestCounter]['side'] === 'credit' ? $diffCents : -$diffCents;
+        $czk[$largestCounter] = round($czk[$largestCounter] + $adjust / 100, 2);
+        if ($czk[$largestCounter] <= 0.0) {
+            throw new PostingException('validation_failed', 'Po přepočtu kurzem vyšla částka řádku nulová.');
+        }
+
+        $lines = [];
+        foreach ($parsed as $idx => $p) {
+            $line = $this->line($p['code'], $p['side'], $czk[$idx]);
+            $lines[] = $p['bank'] ? $this->withFxTrace($line, $currency, $fxRate, $p['foreign']) : $line;
+        }
+        return $lines;
+    }
+
+    /**
+     * Haléře → Kč s obchodním zaokrouhlením počítaným v haléřích. round() nad
+     * plovoucími korunami by 180,98 × 24,25 = 4 388,765 (binárně 4 388,76499…)
+     * zaokrouhlil dolů; předzaokrouhlení na 4 místa šum odstraní. Frontend
+     * (PostTransactionModal) počítá stejně, aby ukázal přesně zaúčtovanou částku.
+     */
+    private static function centsToCzk(float $cents): float
+    {
+        return round(round($cents, 4)) / 100;
     }
 
     /**

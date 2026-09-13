@@ -117,21 +117,76 @@ type SplitLine = { account_code: string; side: 'debit' | 'credit'; amount: numbe
 const splitMode = ref(false)
 const splitLines = ref<SplitLine[]>([])
 watch([splitMode, splitLines], () => { if (!applyingPreview) splitEdited.value = true }, { deep: true, flush: 'sync' })
+// #59 — rozúčtování cizoměnového pohybu zadané v měně pohybu; koruny dopočítá server.
+const canSplitInForeign = computed(() => isForeign.value && fxRate.value != null && absAmountCzk.value != null)
+const splitInForeign = ref(false)
+const splitUnit = computed(() => (splitInForeign.value ? props.currency : 'CZK'))
+
+function defaultSplitLines(): SplitLine[] {
+  // Předvyplň bankovní stranu částkou pohybu — ta je daná a nemění se.
+  // Protistrana zůstane u cizí měny prázdná: v korunách se její částka (předpis faktury)
+  // od bankovní nohy liší o kurzový rozdíl, takže předvyplnit ji by bylo zavádějící.
+  const bank = splitInForeign.value ? absAmount.value : (absAmountCzk.value ?? 0)
+  return [
+    { account_code: bankSideCode.value, side: isIncoming.value ? 'debit' : 'credit', amount: bank },
+    { account_code: '', side: isIncoming.value ? 'credit' : 'debit', amount: isForeign.value ? null : bank },
+  ]
+}
 
 function toggleSplit() {
   if (!canSplit.value) return
   splitMode.value = !splitMode.value
   if (splitMode.value && splitLines.value.length === 0) {
-    // Předvyplň bankovní stranu korunovou částkou pohybu — ta je daná a nemění se.
-    // Protistrana zůstane prázdná: u cizí měny se její částka (předpis faktury) od
-    // bankovní nohy liší o kurzový rozdíl, takže předvyplnit ji by bylo zavádějící.
-    const bank = absAmountCzk.value ?? 0
-    splitLines.value = [
-      { account_code: bankSideCode.value, side: isIncoming.value ? 'debit' : 'credit', amount: bank },
-      { account_code: '', side: isIncoming.value ? 'credit' : 'debit', amount: isForeign.value ? null : bank },
-    ]
+    splitLines.value = defaultSplitLines()
   }
 }
+watch(splitInForeign, () => {
+  if (splitMode.value && !applyingPreview) splitLines.value = defaultSplitLines()
+})
+
+/**
+ * Haléře s obchodním zaokrouhlením — shodně s BankPostingService::centsToCzk. Násobí se
+ * v haléřích a šum plovoucí čárky odstraní předzaokrouhlení na 4 místa, jinak by
+ * 180,98 × 24,25 = 4 388,765 vyšlo 4 388,76.
+ */
+function roundCents(cents: number): number {
+  return Math.round(Number(cents.toFixed(4)))
+}
+
+/**
+ * Korunové částky řádků zadaných v cizí měně — zrcadlí BankPostingService::foreignManualLines,
+ * aby uživatel viděl přesně to, co server zaúčtuje: banka dostane korunový ekvivalent výpisu,
+ * protiúčty kurz dne a haléřový rozdíl vyrovná největší protiúčet.
+ */
+const splitForeignCzk = computed(() => {
+  const rate = fxRate.value ?? 0
+  const lines = splitLines.value
+  const czkCents = lines.map(l => (l.amount != null && l.amount > 0 ? roundCents(l.account_code.startsWith(BANK_PREFIX)
+    ? (absAmountCzk.value ?? 0) * 100 * l.amount / absAmount.value
+    : Math.round(l.amount * 100) * rate) : null))
+  let roundedIndex: number | null = null
+  let roundedDiff = 0
+  const complete = czkCents.every(c => c != null)
+  if (complete && splitDiff.value === 0 && splitBankOk.value) {
+    const largest = (bank: boolean) => lines.reduce<number | null>((best, l, i) =>
+      l.account_code.startsWith(BANK_PREFIX) === bank && (best === null || (l.amount ?? 0) > (lines[best].amount ?? 0)) ? i : best, null)
+    const bankIdx = largest(true)
+    const counterIdx = largest(false)
+    if (bankIdx !== null && counterIdx !== null) {
+      const sign = (i: number) => (lines[i].side === 'debit' ? 1 : -1)
+      const bankNet = lines.reduce((s, l, i) => s + (l.account_code.startsWith(BANK_PREFIX) ? czkCents[i]! * sign(i) : 0), 0)
+      const bankFix = roundCents(splitBankExpectedCzk.value * 100) - bankNet
+      czkCents[bankIdx] = czkCents[bankIdx]! + bankFix * sign(bankIdx)
+      const diff = lines.reduce((s, _l, i) => s + czkCents[i]! * sign(i), 0)
+      czkCents[counterIdx] = czkCents[counterIdx]! - diff * sign(counterIdx)
+      roundedIndex = diff !== 0 ? counterIdx : null
+      roundedDiff = Math.abs(diff) / 100
+    }
+  }
+  return { czk: czkCents.map(c => (c == null ? null : c / 100)), roundedIndex, roundedDiff }
+})
+const splitForeignSaldo = computed(() =>
+  splitInForeign.value && splitLines.value.some(l => !!l.account_code && isSaldo(l.account_code)))
 function addSplitLine() {
   splitLines.value.push({ account_code: '', side: isIncoming.value ? 'credit' : 'debit', amount: null })
 }
@@ -149,9 +204,13 @@ const splitBankNet = computed(() =>
   Math.round(splitLines.value
     .filter(l => l.account_code.startsWith('221'))
     .reduce((s, l) => s + (l.amount ?? 0) * (l.side === 'debit' ? 1 : -1), 0) * 100) / 100)
-const splitBankExpected = computed(() => {
+const splitBankExpectedCzk = computed(() => {
   const czk = absAmountCzk.value ?? 0
   return isIncoming.value ? czk : -czk
+})
+const splitBankExpected = computed(() => {
+  if (!splitInForeign.value) return splitBankExpectedCzk.value
+  return isIncoming.value ? absAmount.value : -absAmount.value
 })
 const splitBankOk = computed(() => Math.abs(splitBankNet.value - splitBankExpected.value) < 0.005)
 const splitValid = computed(() =>
@@ -159,7 +218,8 @@ const splitValid = computed(() =>
   && splitLines.value.length >= 2
   && splitLines.value.every(l => !!accountByCode.value[l.account_code] && (l.amount ?? 0) > 0)
   && splitDiff.value === 0
-  && splitBankOk.value)
+  && splitBankOk.value
+  && !splitForeignSaldo.value)
 
 const canSubmit = computed(() =>
   !previewLoading.value && !previewError.value
@@ -255,6 +315,7 @@ async function submit() {
           lines: splitLines.value.map(l => ({
             account_code: l.account_code, side: l.side, amount: l.amount ?? 0,
           })),
+          ...(splitInForeign.value ? { amounts_in_foreign: true } : {}),
           description: description.value || undefined,
         }
       : {
@@ -306,6 +367,7 @@ async function loadPreview() {
     }
     if (preview.lines.length && !simple && !splitEdited.value && !debitEdited.value && !creditEdited.value
       && !props.tx.posting?.debit_account_code && !props.tx.posting?.credit_account_code) {
+      splitInForeign.value = false
       splitLines.value = preview.lines.map(line => ({ ...line }))
       splitMode.value = true
     }
@@ -380,12 +442,17 @@ onMounted(async () => {
       <div v-else class="space-y-2">
         <!-- U cizí měny ukaž, z čeho korunový základ vznikl — uživatel kurz nepočítá, ale musí ho vidět. -->
         <p v-if="isForeign && fxRate" class="text-xs text-neutral-500 font-mono">
-          {{ t('bank.posting.split_fx_basis', {
+          {{ t(splitInForeign ? 'bank.posting.split_fx_basis_foreign' : 'bank.posting.split_fx_basis', {
             foreign: formatMoney(absAmount, currency),
             rate: fxRate,
             czk: formatMoney(absAmountCzk ?? 0, 'CZK'),
+            currency,
           }) }}
         </p>
+        <label v-if="canSplitInForeign" class="flex items-center gap-2 text-xs text-neutral-700 cursor-pointer">
+          <input v-model="splitInForeign" type="checkbox" data-test="posting-split-foreign" class="rounded border-neutral-300" />
+          {{ t('bank.posting.split_in_foreign', { currency }) }}
+        </label>
         <div v-for="(l, i) in splitLines" :key="i" class="flex items-start gap-1.5">
           <select v-model="l.side" class="h-10 px-2 border border-neutral-300 rounded-md text-xs shrink-0">
             <option value="debit">{{ t('bank.posting.debit') }}</option>
@@ -399,8 +466,14 @@ onMounted(async () => {
             </div>
             <div v-else-if="l.account_code" class="text-xs text-danger-500 mt-0.5">{{ t('bank.posting.err_account_not_found') }}</div>
           </div>
-          <input v-model.number="l.amount" type="number" step="0.01" min="0"
-            class="w-28 h-10 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right shrink-0" />
+          <div class="w-28 shrink-0">
+            <input v-model.number="l.amount" type="number" step="0.01" min="0"
+              class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
+            <div v-if="splitInForeign && splitForeignCzk.czk[i] != null"
+              class="text-[11px] text-neutral-500 font-mono text-right mt-0.5 whitespace-nowrap">
+              = {{ formatMoney(splitForeignCzk.czk[i]!, 'CZK') }}
+            </div>
+          </div>
           <button type="button" class="h-10 px-2 text-neutral-400 hover:text-danger-500 shrink-0"
             :disabled="splitLines.length <= 2" @click="removeSplitLine(i)">×</button>
         </div>
@@ -412,16 +485,22 @@ onMounted(async () => {
         <div class="text-xs space-y-0.5 pt-1 border-t border-neutral-100">
           <div class="flex justify-between font-mono">
             <span class="text-neutral-500">{{ t('bank.posting.split_sums') }}</span>
-            <span>{{ formatMoney(splitDebitSum, 'CZK') }} / {{ formatMoney(splitCreditSum, 'CZK') }}</span>
+            <span>{{ formatMoney(splitDebitSum, splitUnit) }} / {{ formatMoney(splitCreditSum, splitUnit) }}</span>
           </div>
           <div v-if="splitDiff !== 0" class="text-danger-500">
-            {{ t('bank.posting.split_unbalanced', { diff: formatMoney(Math.abs(splitDiff), 'CZK') }) }}
+            {{ t('bank.posting.split_unbalanced', { diff: formatMoney(Math.abs(splitDiff), splitUnit) }) }}
           </div>
           <div v-else-if="!splitBankOk" class="text-danger-500">
             {{ t('bank.posting.split_bank_mismatch', {
-              got: formatMoney(splitBankNet, 'CZK'), want: formatMoney(splitBankExpected, 'CZK') }) }}
+              got: formatMoney(splitBankNet, splitUnit), want: formatMoney(splitBankExpected, splitUnit) }) }}
           </div>
+          <div v-else-if="splitForeignSaldo" class="text-danger-500">{{ t('bank.posting.split_foreign_saldo') }}</div>
           <div v-else class="text-success-600">{{ t('bank.posting.split_ok') }}</div>
+          <div v-if="splitInForeign && splitForeignCzk.roundedIndex !== null" class="text-neutral-500">
+            {{ t('bank.posting.split_rounding', {
+              diff: formatMoney(splitForeignCzk.roundedDiff, 'CZK'),
+              account: splitLines[splitForeignCzk.roundedIndex]?.account_code ?? '' }) }}
+          </div>
         </div>
       </div>
 

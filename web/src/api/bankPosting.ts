@@ -147,6 +147,8 @@ export const bankPostingApi = {
     debit_account_code?: string
     credit_account_code?: string
     lines?: Array<{ account_code: string; side: 'debit' | 'credit'; amount: number }>
+    /** Částky `lines` jsou v měně pohybu; koruny dopočítá server (#59). */
+    amounts_in_foreign?: boolean
     description?: string
     create_rule?: BankPostingRulePayload & { backfill_suggestions?: boolean }
   }) => api.post<PostResult>(`/bank-transactions/${txId}/post`, p).then(r => r.data),

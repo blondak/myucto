@@ -60,6 +60,10 @@ final class BankTransactionPostingAction
         // Rozúčtování na víc řádků; tvar řádků validuje až service (manualLines).
         if (isset($body['lines']) && is_array($body['lines']) && $body['lines'] !== []) {
             $input['lines'] = array_values(array_filter($body['lines'], 'is_array'));
+            // #59 — částky řádků v měně pohybu; koruny dopočítá service.
+            if (!empty($body['amounts_in_foreign'])) {
+                $input['amounts_in_foreign'] = true;
+            }
         }
         if (isset($body['create_rule']) && is_array($body['create_rule'])) {
             $input['create_rule'] = $body['create_rule'];

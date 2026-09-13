@@ -476,6 +476,73 @@ final class FxPaymentTest extends BankPostingTestCase
         ], $this->meta());
     }
 
+    // #59 — rozúčtování zadané v měně pohybu. Jednotlivě zaokrouhlené řádky dávají
+    // 35 352,87 Kč, banka 35 352,86 Kč; haléř se musí vyrovnat na největším řádku.
+    public function testManualLinesInForeignCurrencyAreConvertedAndBalanced(): void
+    {
+        $this->seedRate('EUR', self::YEAR . '-06-15', 24.25);
+        $tx = $this->transaction($this->statement(), 1457.85, ['match_status' => 'unmatched', 'currency' => 'EUR']);
+
+        $res = $this->service->postManual($this->supplierId, $tx, [
+            'amounts_in_foreign' => true,
+            'lines' => [
+                ['account_code' => '221', 'side' => 'debit',  'amount' => 1457.85],
+                ['account_code' => '644', 'side' => 'credit', 'amount' => 1000.12],
+                ['account_code' => '644', 'side' => 'credit', 'amount' => 180.98],
+                ['account_code' => '648', 'side' => 'credit', 'amount' => 120.00],
+                ['account_code' => '648', 'side' => 'credit', 'amount' => 156.75],
+            ],
+        ], $this->meta());
+
+        $rows = $this->entryLines((int) $res['entry_id']);
+        $bank = array_values(array_filter($rows, static fn (array $r): bool => str_starts_with($r['account_code'], '221')));
+        $counter = array_values(array_filter($rows, static fn (array $r): bool => !str_starts_with($r['account_code'], '221')));
+
+        self::assertCount(1, $bank);
+        self::assertEqualsWithDelta(35352.86, (float) $bank[0]['amount'], 0.001);
+        self::assertSame('EUR', $bank[0]['currency_code']);
+        self::assertEqualsWithDelta(1457.85, (float) $bank[0]['amount_foreign'], 0.001);
+        self::assertEqualsCanonicalizing(
+            [24252.90, 4388.77, 2910.00, 3801.19],
+            array_map(static fn (array $r): float => round((float) $r['amount'], 2), $counter),
+        );
+        foreach ($counter as $r) {
+            self::assertNull($r['amount_foreign'], 'Protiúčty zůstávají korunové.');
+        }
+        $this->assertBalanced((int) $res['entry_id']);
+    }
+
+    // Saldokonto se odúčtovává kurzem předpisu — v režimu částek v cizí měně ho nepustíme.
+    public function testManualLinesInForeignCurrencyRejectSaldo(): void
+    {
+        $this->seedRate('EUR', self::YEAR . '-06-15', 25.315);
+        $tx = $this->transaction($this->statement(), 100.00, ['match_status' => 'unmatched', 'currency' => 'EUR']);
+
+        $this->expectException(\MyInvoice\Service\Accounting\PostingException::class);
+        $this->expectExceptionMessage('saldokonto rozúčtuj v korunách');
+        $this->service->postManual($this->supplierId, $tx, [
+            'amounts_in_foreign' => true,
+            'lines' => [
+                ['account_code' => '221', 'side' => 'debit',  'amount' => 100.00],
+                ['account_code' => '311', 'side' => 'credit', 'amount' => 100.00],
+            ],
+        ], $this->meta());
+    }
+
+    /** @return list<array{account_code:string, side:string, amount:string, currency_code:?string, amount_foreign:?string}> */
+    private function entryLines(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT a.account_code, l.side, l.amount, l.currency_code, l.amount_foreign
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ?
+              ORDER BY l.line_no, l.id'
+        );
+        $stmt->execute([$entryId]);
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
     // Kurz pro UI musí být týž, jakým se pohyb zaúčtuje — jinak by fronta předvyplnila
     // jinou částku, než jakou zápis dostane.
     public function testCzkRateForMatchesPostingRate(): void
