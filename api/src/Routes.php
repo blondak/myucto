@@ -1480,6 +1480,11 @@ final class Routes
             $g->get('/deadlines', PayrollDeadlineOverviewAction::class);
             $g->get('/operational-health', PayrollOperationalHealthAction::class);
             $g->get(
+            // Seskupený přehled termínů: skupiny s počty, stránka lidí skupiny
+            // a hromadné odškrtnutí položek checklistu (POST, zapisuje).
+            $g->get('/deadlines/groups', [\MyInvoice\Action\Payroll\PayrollDeadlineGroupsAction::class, 'groups']);
+            $g->get('/deadlines/items', [\MyInvoice\Action\Payroll\PayrollDeadlineGroupsAction::class, 'items']);
+            $g->post('/deadlines/checklist/complete', [\MyInvoice\Action\Payroll\PayrollDeadlineGroupsAction::class, 'completeChecklist']);
                 '/operational-reconciliation',
                 [PayrollOperationalReconciliationAction::class, 'get'],
             );

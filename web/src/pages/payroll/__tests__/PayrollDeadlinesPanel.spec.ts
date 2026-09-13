@@ -1,20 +1,34 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PayrollDeadlineItem, PayrollDeadlineOverview } from '@/api/payroll'
+import type {
+  PayrollDeadlineChecklistCompleteResult,
+  PayrollDeadlineGroup,
+  PayrollDeadlineGroupedOverview,
+  PayrollDeadlineGroupItemsPage,
+  PayrollDeadlineItem,
+  PayrollDeadlinePersonItem,
+} from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
-  deadlines: vi.fn(),
+  deadlineGroups: vi.fn(),
+  deadlineGroupItems: vi.fn(),
+  completeDeadlineChecklist: vi.fn(),
   canRead: vi.fn(() => true),
+  canWrite: vi.fn(() => true),
 }))
 
 vi.mock('@/api/payroll', () => ({
-  payrollApi: { deadlines: m.deadlines },
+  payrollApi: {
+    deadlineGroups: m.deadlineGroups,
+    deadlineGroupItems: m.deadlineGroupItems,
+    completeDeadlineChecklist: m.completeDeadlineChecklist,
+  },
 }))
 vi.mock('@/api/errors', () => ({
   apiErrorMessage: (_error: unknown, fallback: string) => fallback,
 }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canRead: m.canRead }),
+  useAuthStore: () => ({ canRead: m.canRead, canWrite: m.canWrite }),
 }))
 vi.mock('@/composables/useFormat', () => ({
   formatDate: (value: string) => `date:${value}`,
@@ -30,7 +44,6 @@ vi.mock('vue-i18n', () => ({
       }
       return key
     },
-    // Podání i odvody mají v i18n jen část číselníku; `te` to rozhoduje.
     te: (key: string) => key !== 'payroll.payments.kind.risky_savings',
   }),
 }))
@@ -48,7 +61,7 @@ function mountPanel() {
   })
 }
 
-function item(overrides: Partial<PayrollDeadlineItem> = {}): PayrollDeadlineItem {
+function item(overrides: Partial<PayrollDeadlinePersonItem> = {}): PayrollDeadlinePersonItem {
   return {
     source: 'submission',
     reference: 'payroll_obligation:1',
@@ -64,78 +77,308 @@ function item(overrides: Partial<PayrollDeadlineItem> = {}): PayrollDeadlineItem
   }
 }
 
-function overview(items: PayrollDeadlineItem[]): PayrollDeadlineOverview {
+function group(overrides: Partial<PayrollDeadlineGroup> = {}): PayrollDeadlineGroup {
+  const items = overrides.items ?? [item()]
+  const first: PayrollDeadlineItem = items[0] ?? item()
   return {
-    as_of: '2026-08-08',
-    horizon_days: 45,
-    window: { from: '2025-07-04', to: '2026-09-22' },
-    summary: { total: items.length },
+    key: `${first.phase}:${first.source}:${first.title}`,
+    phase: first.phase,
+    source: first.source,
+    title: first.title,
+    per_person: false,
+    count: items.length,
+    oldest_due_on: first.due_on,
+    newest_due_on: first.due_on,
+    min_days_to_due: first.days_to_due,
+    max_days_to_due: first.days_to_due,
+    is_overdue: first.phase === 'overdue',
     items,
+    ...overrides,
   }
+}
+
+/** 225 lidí se stejnou nástupní povinností — přesně stav po importu docházky. */
+function contractGroup(overrides: Partial<PayrollDeadlineGroup> = {}): PayrollDeadlineGroup {
+  return group({
+    key: 'overdue:checklist:employment_contract',
+    phase: 'overdue',
+    source: 'checklist',
+    title: 'employment_contract',
+    per_person: true,
+    count: 225,
+    oldest_due_on: '2026-06-01',
+    newest_due_on: '2026-08-01',
+    min_days_to_due: -104,
+    max_days_to_due: -43,
+    is_overdue: true,
+    items: [],
+    ...overrides,
+  })
+}
+
+function overview(groups: PayrollDeadlineGroup[]): PayrollDeadlineGroupedOverview {
+  return {
+    as_of: '2026-09-13',
+    horizon_days: 45,
+    window: { from: '2025-08-09', to: '2026-10-28' },
+    summary: { total: groups.reduce((sum, g) => sum + g.count, 0) },
+    groups,
+  }
+}
+
+function person(index: number): PayrollDeadlinePersonItem {
+  return item({
+    source: 'checklist',
+    reference: `payroll_checklist_item:${index}`,
+    item_id: index,
+    title: 'employment_contract',
+    subject: `Osoba ${index}`,
+    personal_number: `OS-${index}`,
+    period: null,
+    due_on: '2026-06-01',
+    phase: 'overdue',
+    days_to_due: -104,
+    is_overdue: true,
+    employee_id: 1000 + index,
+  })
+}
+
+function page(items: PayrollDeadlinePersonItem[], total = 225, offset = 0): PayrollDeadlineGroupItemsPage {
+  return { total, offset, limit: 25, items }
+}
+
+function result(overrides: Partial<PayrollDeadlineChecklistCompleteResult> = {}): PayrollDeadlineChecklistCompleteResult {
+  return {
+    completed: [],
+    skipped: [],
+    failed: [],
+    remaining: 0,
+    complete: true,
+    next_after_id: 0,
+    ...overrides,
+  }
+}
+
+async function expandContractGroup(wrapper: ReturnType<typeof mountPanel>) {
+  await wrapper.get('[data-test="payroll-deadline-group-toggle-overdue:checklist:employment_contract"]')
+    .trigger('click')
+  await flushPromises()
 }
 
 describe('PayrollDeadlinesPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canRead.mockReturnValue(true)
-    m.deadlines.mockResolvedValue(overview([item()]))
+    m.canWrite.mockReturnValue(true)
+    m.deadlineGroups.mockResolvedValue(overview([group()]))
+    m.deadlineGroupItems.mockResolvedValue(page([person(1), person(2), person(3)]))
+    m.completeDeadlineChecklist.mockResolvedValue(result())
   })
 
-  it('groups items by phase with the overdue group first and announced as an alert', async () => {
-    m.deadlines.mockResolvedValue(overview([
-      item({ reference: 'a', phase: 'open', days_to_due: 30 }),
-      item({
-        reference: 'b',
-        source: 'levy',
-        title: 'social_insurance',
-        phase: 'overdue',
-        days_to_due: -3,
-        is_overdue: true,
-        due_on: '2026-08-05',
-        remaining_minor: 123_400,
+  it('shows 225 people with the same duty as one row with a count and the oldest delay', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([contractGroup()]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-test^="payroll-deadline-group-overdue"]')
+    expect(rows).toHaveLength(1)
+    const key = 'overdue:checklist:employment_contract'
+    expect(wrapper.get(`[data-test="payroll-deadline-group-count-${key}"]`).text())
+      .toBe('payroll.dashboard.deadlines.people_count:225')
+    expect(wrapper.get(`[data-test="payroll-deadline-group-due-${key}"]`).text())
+      .toBe('payroll.dashboard.deadlines.oldest:payroll.dashboard.deadlines.overdue_by:104')
+    expect(wrapper.get('[data-test="payroll-deadlines-chip-overdue"]').text()).toContain('225')
+    // Seznam lidí se nenačítá, dokud ho nikdo nerozbalí.
+    expect(m.deadlineGroupItems).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="payroll-deadlines-group-overdue"]').attributes('role')).toBe('alert')
+  })
+
+  it('keeps a genuinely new start visible next to the collapsed backlog', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([
+      contractGroup(),
+      group({
+        items: [person(900)].map(p => ({ ...p, phase: 'due_soon' as const, days_to_due: 3, reference: 'new' })),
+        per_person: true,
       }),
-      item({ reference: 'c', phase: 'due_today', days_to_due: 0, due_on: '2026-08-08' }),
     ]))
 
     const wrapper = mountPanel()
     await flushPromises()
 
-    const groups = wrapper.findAll('[data-test^="payroll-deadlines-group-"]')
-    expect(groups.map(node => node.attributes('data-test'))).toEqual([
-      'payroll-deadlines-group-overdue',
-      'payroll-deadlines-group-due_today',
-      'payroll-deadlines-group-open',
-    ])
-    expect(groups[0].attributes('role')).toBe('alert')
-    expect(groups[0].text()).toContain('payroll.dashboard.deadlines.overdue_hint')
-    // Zmeskany termin nese pocet dnu i zbyvajici castku odvodu.
-    expect(wrapper.get('[data-test="payroll-deadline-due-b"]').text())
-      .toBe('payroll.dashboard.deadlines.overdue_by:3')
-    expect(wrapper.get('[data-test="payroll-deadline-b"]').text()).toContain('money:123400')
-    // Ram panelu se zbarvi, jakmile je cokoli po terminu.
-    expect(wrapper.get('[data-test="payroll-deadlines"]').classes())
-      .toEqual(expect.arrayContaining(['border-danger-500/40']))
+    expect(wrapper.find('[data-test="payroll-deadlines-group-due_soon"]').exists()).toBe(true)
+    // Jednočlenná skupina se prokliká rovnou na kartu člověka.
+    expect(JSON.parse(wrapper.get('[data-test="payroll-deadline-link-new"]').attributes('data-to') ?? '{}'))
+      .toEqual({ name: 'payroll-people', query: { person: '1900' } })
   })
 
-  it('links each source to the screen where it is resolved, not to the raw server path', async () => {
-    m.deadlines.mockResolvedValue(overview([
-      item({ reference: 'sub', source: 'submission', phase: 'due_soon', days_to_due: 2 }),
-      item({
-        reference: 'lev',
-        source: 'levy',
-        title: 'advance_tax',
-        phase: 'due_soon',
-        days_to_due: 2,
-      }),
-      item({
-        reference: 'chk',
-        source: 'checklist',
-        title: 'eldp_submission',
-        phase: 'due_soon',
-        days_to_due: 2,
-        employee_id: 42,
-        // Server posila /payroll/employees/42, coz v routeru neexistuje.
-        path: '/payroll/employees/42',
+  it('loads the people of an expanded group page by page', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([contractGroup()]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await expandContractGroup(wrapper)
+
+    expect(m.deadlineGroupItems).toHaveBeenCalledWith({
+      phase: 'overdue',
+      source: 'checklist',
+      title: 'employment_contract',
+      offset: 0,
+      limit: 25,
+      horizon_days: 45,
+    })
+    const row = wrapper.get('[data-test="payroll-deadline-person-payroll_checklist_item:2"]')
+    expect(row.text()).toContain('Osoba 2')
+    expect(row.text()).toContain('OS-2')
+    expect(JSON.parse(wrapper.get('[data-test="payroll-deadline-person-link-payroll_checklist_item:2"]')
+      .attributes('data-to') ?? '{}')).toEqual({ name: 'payroll-people', query: { person: '1002' } })
+    // Mobilní karty i tabulka nesou tentýž obsah.
+    expect(wrapper.find('[data-test="payroll-deadline-people-cards"]').exists()).toBe(true)
+
+    const next = wrapper.findAll('button').find(button => button.text().includes('common.next'))
+    await next?.trigger('click')
+    await flushPromises()
+    expect(m.deadlineGroupItems).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25 }))
+  })
+
+  it('searches the group on the server', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([contractGroup()]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await expandContractGroup(wrapper)
+    await wrapper.get('[data-test="payroll-deadline-people-search"]').setValue('novak')
+    await flushPromises()
+
+    expect(m.deadlineGroupItems).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'novak', offset: 0 }))
+  })
+
+  it('marks the selected people as done with the prefilled note and reloads the overview', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([contractGroup()]))
+    m.completeDeadlineChecklist.mockResolvedValue(result({ completed: [1, 3] }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await expandContractGroup(wrapper)
+
+    const selectedButton = wrapper.get('[data-test="payroll-deadline-complete-selected"]')
+    expect(selectedButton.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="payroll-deadline-select-payroll_checklist_item:1"]').trigger('change')
+    await wrapper.get('[data-test="payroll-deadline-select-payroll_checklist_item:3"]').trigger('change')
+    expect(selectedButton.attributes('disabled')).toBeUndefined()
+    await selectedButton.trigger('click')
+
+    const note = wrapper.get('[data-test="payroll-deadline-complete-note"]').element as HTMLTextAreaElement
+    expect(note.value).toBe('payroll.dashboard.deadlines.group.note_default')
+    await wrapper.get('[data-test="payroll-deadline-complete-run"]').trigger('click')
+    await flushPromises()
+
+    expect(m.completeDeadlineChecklist).toHaveBeenCalledWith({
+      item_ids: [1, 3],
+      note: 'payroll.dashboard.deadlines.group.note_default',
+    })
+    expect(m.deadlineGroups).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="payroll-deadlines-bulk-notice"]').text())
+      .toBe('payroll.dashboard.deadlines.bulk_done:2')
+  })
+
+  it('walks a whole group in batches and lists what could not be marked', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([contractGroup()]))
+    m.completeDeadlineChecklist
+      .mockResolvedValueOnce(result({ completed: [1, 2], complete: false, remaining: 1, next_after_id: 100 }))
+      .mockResolvedValueOnce(result({
+        failed: [{ item_id: 101, employment_id: 7, subject: 'Osoba 101', code: 'prerequisite_failed', message: 'Nejdřív doplňte datum nástupu.' }],
+      }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await expandContractGroup(wrapper)
+    await wrapper.get('[data-test="payroll-deadline-complete-all"]').trigger('click')
+    await wrapper.get('[data-test="payroll-deadline-complete-run"]').trigger('click')
+    await flushPromises()
+
+    expect(m.completeDeadlineChecklist).toHaveBeenCalledTimes(2)
+    expect(m.completeDeadlineChecklist).toHaveBeenNthCalledWith(1, {
+      phase: 'overdue',
+      item_key: 'employment_contract',
+      horizon_days: 45,
+      note: 'payroll.dashboard.deadlines.group.note_default',
+    })
+    expect(m.completeDeadlineChecklist).toHaveBeenNthCalledWith(2, expect.objectContaining({ after_id: 100 }))
+    expect(wrapper.get('[data-test="payroll-deadline-complete-failures"]').text())
+      .toContain('Osoba 101: Nejdřív doplňte datum nástupu.')
+  })
+
+  it('refuses to run without a note', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([contractGroup()]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await expandContractGroup(wrapper)
+    await wrapper.get('[data-test="payroll-deadline-complete-all"]').trigger('click')
+    await wrapper.get('[data-test="payroll-deadline-complete-note"]').setValue('   ')
+
+    expect(wrapper.get('[data-test="payroll-deadline-complete-run"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="payroll-deadline-complete-note-required"]').exists()).toBe(true)
+    expect(m.completeDeadlineChecklist).not.toHaveBeenCalled()
+  })
+
+  it('offers no bulk action without the employment write permission or outside the checklist', async () => {
+    m.canWrite.mockReturnValue(false)
+    m.deadlineGroups.mockResolvedValue(overview([contractGroup()]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await expandContractGroup(wrapper)
+    expect(wrapper.find('[data-test="payroll-deadline-complete-all"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="payroll-deadline-select-page"]').exists()).toBe(false)
+
+    m.canWrite.mockReturnValue(true)
+    m.deadlineGroups.mockResolvedValue(overview([contractGroup({
+      key: 'overdue:registration_change:regzec_change',
+      source: 'registration_change',
+      title: 'regzec_change',
+      count: 3,
+    })]))
+    const other = mountPanel()
+    await flushPromises()
+    await other.get('[data-test="payroll-deadline-group-toggle-overdue:registration_change:regzec_change"]').trigger('click')
+    await flushPromises()
+    expect(other.find('[data-test="payroll-deadline-complete-all"]').exists()).toBe(false)
+  })
+
+  it('expands company-wide duties inline without asking the server', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([group({
+      items: [
+        item({ reference: 'l1', source: 'levy', title: 'health_insurance', subject: 'VZP', phase: 'overdue', days_to_due: -3, remaining_minor: 123_400 }),
+        item({ reference: 'l2', source: 'levy', title: 'health_insurance', subject: 'ZPMV', phase: 'overdue', days_to_due: -3 }),
+      ],
+    })]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="payroll-deadline-group-toggle-overdue:levy:health_insurance"]').trigger('click')
+
+    expect(m.deadlineGroupItems).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="payroll-deadline-l1"]').text()).toContain('money:123400')
+    expect(JSON.parse(wrapper.get('[data-test="payroll-deadline-link-l2"]').attributes('data-to') ?? '{}'))
+      .toEqual({ name: 'payroll-payments' })
+  })
+
+  it('links single duties to the screen where they are resolved', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([
+      group({ items: [item({ reference: 'sub', phase: 'due_soon', days_to_due: 2 })] }),
+      group({
+        items: [item({
+          reference: 'tax_statement:dpzvd6:2025',
+          source: 'tax_statement',
+          title: 'dpzvd6',
+          subject: '586/1992 Sb. § 38j',
+          period: null,
+          phase: 'overdue',
+          days_to_due: -2,
+          statement_year: 2025,
+        })],
       }),
     ]))
 
@@ -146,102 +389,50 @@ describe('PayrollDeadlinesPanel', () => {
       wrapper.get(`[data-test="payroll-deadline-link-${reference}"]`).attributes('data-to') ?? '{}',
     )
     expect(link('sub')).toEqual({ name: 'payroll-submissions' })
-    expect(link('lev')).toEqual({ name: 'payroll-payments' })
-    expect(link('chk')).toEqual({ name: 'payroll-people', query: { person: '42' } })
-  })
-
-  it('sends an annual tax statement to its panel with the year it is overdue for', async () => {
-    m.deadlines.mockResolvedValue(overview([
-      item({
-        reference: 'tax_statement:dpzvd6:2025',
-        source: 'tax_statement',
-        title: 'dpzvd6',
-        subject: '586/1992 Sb. § 38j odst. 5 a 7',
-        // Vyuctovani je rocni; mesicni obdobi by v dlazdici lhalo.
-        period: null,
-        due_on: '2026-03-20',
-        phase: 'overdue',
-        days_to_due: -2,
-        is_overdue: true,
-        statement_year: 2025,
-        statutory_due_on: '2026-03-02',
-        electronic_due_on: '2026-03-20',
-        path: '/payroll#payroll-tax-statement',
-      }),
-    ]))
-
-    const wrapper = mountPanel()
-    await flushPromises()
-
-    const tile = wrapper.get('[data-test="payroll-deadline-tax_statement:dpzvd6:2025"]')
-    expect(tile.text()).toContain('payroll.dashboard.deadlines.tax_statement.form.dpzvd6')
-    // Bez roku by dve lhuty za dve obdobi vypadaly stejne.
-    expect(tile.text()).toContain('payroll.dashboard.deadlines.tax_statement.subject:2025')
-    expect(JSON.parse(
-      wrapper.get('[data-test="payroll-deadline-link-tax_statement:dpzvd6:2025"]')
-        .attributes('data-to') ?? '{}',
-    )).toEqual({
+    expect(link('tax_statement:dpzvd6:2025')).toEqual({
       name: 'payroll-dashboard',
       query: { taxStatementYear: '2025' },
       hash: '#payroll-tax-statement',
     })
+    expect(wrapper.get('[data-test="payroll-deadline-tax_statement:dpzvd6:2025"]').text())
+      .toContain('payroll.dashboard.deadlines.tax_statement.subject:2025')
+    expect(wrapper.get('[data-test="payroll-deadline-due-sub"]').text())
+      .toBe('payroll.dashboard.deadlines.due_in:2')
   })
 
   it('falls back to the raw code when a source code has no translation', async () => {
-    m.deadlines.mockResolvedValue(overview([
-      item({ reference: 'x', source: 'levy', title: 'risky_savings', phase: 'open' }),
+    m.deadlineGroups.mockResolvedValue(overview([
+      group({ items: [item({ reference: 'x', source: 'levy', title: 'risky_savings' })] }),
     ]))
 
     const wrapper = mountPanel()
     await flushPromises()
 
     expect(wrapper.get('[data-test="payroll-deadline-x"]').text()).toContain('risky_savings')
-    expect(wrapper.get('[data-test="payroll-deadline-x"]').text())
-      .not.toContain('payroll.payments.kind.risky_savings')
   })
 
   it('stays quiet when nothing is due', async () => {
-    m.deadlines.mockResolvedValue(overview([]))
+    m.deadlineGroups.mockResolvedValue(overview([]))
 
     const wrapper = mountPanel()
     await flushPromises()
 
-    const empty = wrapper.get('[data-test="payroll-deadlines-empty"]')
-    expect(empty.text()).toBe('payroll.dashboard.deadlines.empty')
-    // Zadny alert, zadna vystrazna barva.
+    expect(wrapper.get('[data-test="payroll-deadlines-empty"]').text()).toBe('payroll.dashboard.deadlines.empty')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="payroll-deadlines"]').classes())
       .toEqual(expect.arrayContaining(['border-neutral-200']))
-    expect(wrapper.find('[data-test^="payroll-deadlines-group-"]').exists()).toBe(false)
   })
 
-  it('collapses the open group to two full grid rows and expands it on demand', async () => {
-    m.deadlines.mockResolvedValue(overview(
-      Array.from({ length: 12 }, (_, index) => item({ reference: `o${index}`, phase: 'open' })),
-    ))
-
-    const wrapper = mountPanel()
-    await flushPromises()
-
-    // Osm = dve plne rady ctyrsloupcove mrizky; tri by nechavaly v rade diru.
-    expect(wrapper.findAll('[data-test^="payroll-deadline-o"]')).toHaveLength(8)
-    await wrapper.get('[data-test="payroll-deadlines-toggle-open"]').trigger('click')
-    expect(wrapper.findAll('[data-test^="payroll-deadline-o"]')).toHaveLength(12)
-    expect(wrapper.get('[data-test="payroll-deadlines-toggle-open"]').text())
-      .toBe('payroll.dashboard.deadlines.collapse')
-  })
-
-  it('states the failure in place and recovers through retry instead of a vanishing toast', async () => {
-    m.deadlines.mockRejectedValueOnce(new Error('boom'))
+  it('states the failure in place and recovers through retry', async () => {
+    m.deadlineGroups.mockRejectedValueOnce(new Error('boom'))
 
     const wrapper = mountPanel()
     await flushPromises()
 
     const error = wrapper.get('[data-test="payroll-deadlines-error"]')
     expect(error.attributes('role')).toBe('alert')
-    expect(error.text()).toContain('payroll.dashboard.deadlines.load_failed')
 
-    m.deadlines.mockResolvedValue(overview([item({ reference: 'again' })]))
+    m.deadlineGroups.mockResolvedValue(overview([group({ items: [item({ reference: 'again' })] })]))
     await wrapper.get('[data-test="payroll-deadlines-retry"]').trigger('click')
     await flushPromises()
 
@@ -256,45 +447,13 @@ describe('PayrollDeadlinesPanel', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="payroll-deadlines"]').exists()).toBe(false)
-    expect(m.deadlines).not.toHaveBeenCalled()
+    expect(m.deadlineGroups).not.toHaveBeenCalled()
   })
 
-  it('lays the items out as a grid that grows to four columns without horizontal scroll', async () => {
-    m.deadlines.mockResolvedValue(overview([
-      item({ reference: 'a', phase: 'due_soon', days_to_due: 2 }),
-      item({ reference: 'b', phase: 'due_soon', days_to_due: 2 }),
-    ]))
-
-    const wrapper = mountPanel()
-    await flushPromises()
-
-    const grid = wrapper.get('[data-test="payroll-deadlines-group-due_soon"]').get('ul')
-    // Na mobilu jeden sloupec, na velke obrazovce ctyri — a zadny overflow-x.
-    expect(grid.classes()).toEqual(expect.arrayContaining([
-      'grid', 'grid-cols-1', 'sm:grid-cols-2', 'xl:grid-cols-3', '2xl:grid-cols-4',
-    ]))
-    expect(wrapper.html()).not.toContain('overflow-x')
-  })
-
-  it('makes the whole tile a real link so middle click and keyboard work', async () => {
-    m.deadlines.mockResolvedValue(overview([item({ reference: 'a', phase: 'due_soon' })]))
-
-    const wrapper = mountPanel()
-    await flushPromises()
-
-    const tile = wrapper.get('[data-test="payroll-deadline-link-a"]')
-    expect(tile.element.tagName).toBe('A')
-    // Cil odkazu drzi dlazdice sama, uz ne samostatny radek "Vyresit".
-    expect(JSON.parse(tile.attributes('data-to') ?? '{}'))
-      .toEqual({ name: 'payroll-submissions' })
-    // Ctecka se ale musi dozvedet, co odkaz udela.
-    expect(tile.get('.sr-only').text()).toBe('payroll.dashboard.deadlines.resolve')
-  })
-
-  it('hoists the source above the group when every item in the phase shares it', async () => {
-    m.deadlines.mockResolvedValue(overview([
-      item({ reference: 'a', source: 'checklist', title: 'eldp_submission', phase: 'overdue', days_to_due: -28, is_overdue: true, employee_id: 1 }),
-      item({ reference: 'b', source: 'checklist', title: 'eldp_submission', phase: 'overdue', days_to_due: -12, is_overdue: true, employee_id: 2 }),
+  it('hoists the source above the phase when every group in it shares it', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([
+      contractGroup(),
+      contractGroup({ key: 'overdue:checklist:tax_declaration', title: 'tax_declaration' }),
     ]))
 
     const wrapper = mountPanel()
@@ -302,45 +461,6 @@ describe('PayrollDeadlinesPanel', () => {
 
     expect(wrapper.get('[data-test="payroll-deadlines-phase-source-overdue"]').text())
       .toBe('payroll.dashboard.deadlines.source.checklist')
-    // Stejna hodnota u kazde dlazdice je jen sum.
-    expect(wrapper.find('[data-test="payroll-deadline-source-a"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="payroll-deadline-source-b"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="payroll-deadlines-group-overdue"]').text()).toContain('(450)')
   })
-
-  it('keeps the source on the tiles when the phase mixes several sources', async () => {
-    m.deadlines.mockResolvedValue(overview([
-      item({ reference: 'a', source: 'checklist', phase: 'overdue', days_to_due: -3, is_overdue: true, employee_id: 1 }),
-      item({ reference: 'b', source: 'levy', title: 'advance_tax', phase: 'overdue', days_to_due: -1, is_overdue: true }),
-    ]))
-
-    const wrapper = mountPanel()
-    await flushPromises()
-
-    expect(wrapper.find('[data-test="payroll-deadlines-phase-source-overdue"]').exists()).toBe(false)
-    expect(wrapper.get('[data-test="payroll-deadline-source-a"]').text())
-      .toBe('payroll.dashboard.deadlines.source.checklist')
-    expect(wrapper.get('[data-test="payroll-deadline-source-b"]').text())
-      .toBe('payroll.dashboard.deadlines.source.levy')
-  })
-
-  it('judges source uniformity over the whole group, not over the collapsed excerpt', async () => {
-    m.deadlines.mockResolvedValue(overview([
-      ...Array.from({ length: 8 }, (_, index) => item({
-        reference: `o${index}`,
-        phase: 'open',
-        source: 'checklist',
-        employee_id: index + 1,
-      })),
-      // Devata polozka je za sbalenim, presto rozhoduje o nadpisu skupiny.
-      item({ reference: 'o8', phase: 'open', source: 'levy', title: 'advance_tax' }),
-    ]))
-
-    const wrapper = mountPanel()
-    await flushPromises()
-
-    expect(wrapper.find('[data-test="payroll-deadlines-phase-source-open"]').exists()).toBe(false)
-    expect(wrapper.get('[data-test="payroll-deadline-source-o0"]').text())
-      .toBe('payroll.dashboard.deadlines.source.checklist')
-  })
-
 })

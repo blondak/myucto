@@ -3101,6 +3101,84 @@ export interface PayrollDeadlineOverview {
   items: PayrollDeadlineItem[]
 }
 
+/**
+ * Skupina přehledu termínů: fáze × pramen × druh povinnosti. U lidí
+ * (`per_person`) se položky neposílají — dotahuje je stránkovaně
+ * {@link payrollApi.deadlineGroupItems}; jednočlenná skupina je nese rovnou.
+ */
+export interface PayrollDeadlineGroup {
+  key: string
+  phase: PayrollDeadlinePhase
+  source: PayrollDeadlineSource
+  title: string
+  per_person: boolean
+  count: number
+  oldest_due_on: string
+  newest_due_on: string
+  /** Nejzápornější = nejstarší prodlení. */
+  min_days_to_due: number
+  max_days_to_due: number
+  is_overdue: boolean
+  items: PayrollDeadlineItem[]
+}
+
+export interface PayrollDeadlineGroupedOverview {
+  as_of: string
+  horizon_days: number
+  window: { from: string; to: string }
+  summary: Record<string, number>
+  groups: PayrollDeadlineGroup[]
+}
+
+export interface PayrollDeadlinePersonItem extends PayrollDeadlineItem {
+  item_id?: number
+  personal_number?: string | null
+}
+
+export interface PayrollDeadlineGroupItemsPage {
+  total: number
+  offset: number
+  limit: number
+  items: PayrollDeadlinePersonItem[]
+}
+
+export interface PayrollDeadlineGroupItemsQuery {
+  phase: PayrollDeadlinePhase
+  source: PayrollDeadlineSource
+  title: string
+  q?: string
+  offset?: number
+  limit?: number
+  environment?: PayrollRegzelEnvironment
+  horizon_days?: number
+}
+
+/** Buď výčet `item_ids`, nebo celá skupina (`phase` + `item_key`). */
+export type PayrollDeadlineChecklistCompletePayload = {
+  note: string
+  after_id?: number
+} & (
+  | { item_ids: number[] }
+  | { phase: PayrollDeadlinePhase; item_key: string; horizon_days?: number; q?: string }
+)
+
+export interface PayrollDeadlineChecklistFailure {
+  item_id: number
+  employment_id: number | null
+  subject: string
+  code: string
+  message: string
+}
+
+export interface PayrollDeadlineChecklistCompleteResult {
+  completed: number[]
+  skipped: { item_id: number; code: string; message: string }[]
+  failed: PayrollDeadlineChecklistFailure[]
+  remaining: number
+  complete: boolean
+  next_after_id: number
+}
+
 export interface PayrollOperationalHealth {
   document_batches: {
     queued: number
@@ -6822,6 +6900,26 @@ export const payrollApi = {
       ...(horizonDays === undefined ? {} : { horizon_days: horizonDays }),
     },
   }).then(response => response.data),
+  /** Tentýž přehled po skupinách — u stovek lidí jeden řádek na druh povinnosti. */
+  deadlineGroups: (
+    environment: PayrollRegzelEnvironment = 'production',
+    horizonDays?: number,
+  ) => api.get<PayrollDeadlineGroupedOverview>('/payroll/deadlines/groups', {
+    params: {
+      environment,
+      ...(horizonDays === undefined ? {} : { horizon_days: horizonDays }),
+    },
+  }).then(response => response.data),
+  deadlineGroupItems: (query: PayrollDeadlineGroupItemsQuery) =>
+    api.get<PayrollDeadlineGroupItemsPage>('/payroll/deadlines/items', { params: query })
+      .then(response => response.data),
+  /**
+   * Hromadné odškrtnutí položek checklistu. Velká skupina se zpracuje po
+   * dávkách: dokud `complete` není `true`, pošle se znovu s `after_id`.
+   */
+  completeDeadlineChecklist: (payload: PayrollDeadlineChecklistCompletePayload) =>
+    api.post<PayrollDeadlineChecklistCompleteResult>('/payroll/deadlines/checklist/complete', payload)
+      .then(response => response.data),
   statutoryObligationOverview: (
     environment: PayrollRegzelEnvironment,
     period: string,

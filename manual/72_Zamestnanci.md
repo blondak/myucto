@@ -548,6 +548,11 @@ zákoníku práce) a zápočtového listu ke dni skončení (§ 313 odst. 1 zák
 práce, jehož rozsah novela pro rok 2025 zúžila). U těchto položek si termín
 ověřte podle platného znění předpisu.
 
+Vyřídil-li položky za víc lidí jiný systém (typicky po převzetí mezd), není
+nutné je odškrtávat na každé kartě zvlášť. V panelu **Zákonné termíny** na
+přehledu mezd je lze označit jako splněné hromadně, s povinnou poznámkou
+(viz kapitola 71.2.2).
+
 ### 72.12.1 Upozornění na chybějící přihlášku zaměstnance
 
 Není-li zaměstnanec přihlášen na ČSSZ nebo u zdravotní pojišťovny, mzdový běh

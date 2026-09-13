@@ -193,9 +193,12 @@ final readonly class PayrollDeadlineOverviewRepository
      * povinnost podání), se do přehledu nedostane, i když ji nikdo neodklikl —
      * jinak by hlídač připomínal to, co je hotové.
      *
+     * `$itemKey` zúží výběr na jeden druh položky — seskupený přehled pak
+     * nemusí kvůli jedné skupině tahat celou firmu.
+     *
      * @return list<array{
      *   item_id:int,employment_id:int,employee_id:int,full_name:string,
-     *   phase:string,item_key:string,due_date:string,
+     *   employment_code:?string,phase:string,item_key:string,due_date:string,
      *   deadline_source:?string,deadline_source_status:?string
      * }>
      */
@@ -203,12 +206,14 @@ final readonly class PayrollDeadlineOverviewRepository
         int $supplierId,
         string $from,
         string $to,
+        ?string $itemKey = null,
     ): array {
         $statement = $this->db->pdo()->prepare(
             'SELECT item.id AS item_id,
                     item.employment_id,
                     employment.employee_id,
                     employee.full_name,
+                    employment.code AS employment_code,
                     item.phase,
                     item.item_key,
                     item.due_date,
@@ -226,6 +231,7 @@ final readonly class PayrollDeadlineOverviewRepository
                 AND item.due_date IS NOT NULL
                 AND item.due_date >= ?
                 AND item.due_date <= ?
+                AND (? IS NULL OR item.item_key = ?)
                 AND employment.status NOT IN (\'no_show\', \'archived\')
                 AND NOT EXISTS (
                       SELECT 1 FROM payroll_eldp_statements statement
@@ -264,9 +270,99 @@ final readonly class PayrollDeadlineOverviewRepository
                     )
               ORDER BY item.due_date ASC, item.id ASC'
         );
-        $statement->execute([$supplierId, $from, $to]);
+        $statement->execute([$supplierId, $from, $to, $itemKey, $itemKey]);
 
         return $this->rows($statement);
+    }
+
+    /**
+     * Položky checklistu podle id, jen v rámci firmy. Cizí nebo neexistující
+     * id se ve výsledku prostě neobjeví a volající je ohlásí jako nenalezené.
+     *
+     * @param list<int> $itemIds
+     * @return array<int,array{
+     *   item_id:int,employment_id:int,item_key:string,status:string,
+     *   row_version:int,full_name:string
+     * }> klíčem je id položky
+     */
+    public function checklistItemsByIds(int $supplierId, array $itemIds): array
+    {
+        $itemIds = array_values(array_unique(array_filter(
+            array_map('intval', $itemIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($itemIds === []) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT item.id AS item_id,
+                    item.employment_id,
+                    item.item_key,
+                    item.status,
+                    item.row_version,
+                    employee.full_name
+               FROM payroll_employment_checklist_items item
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = item.supplier_id
+                AND employment.id = item.employment_id
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = employment.supplier_id
+                AND employee.id = employment.employee_id
+              WHERE item.supplier_id = ?
+                AND item.id IN ('
+            . implode(',', array_fill(0, count($itemIds), '?'))
+            . ')'
+        );
+        $statement->execute([$supplierId, ...$itemIds]);
+
+        $items = [];
+        foreach ($this->rows($statement) as $row) {
+            $items[(int) $row['item_id']] = [
+                'item_id' => (int) $row['item_id'],
+                'employment_id' => (int) $row['employment_id'],
+                'item_key' => (string) $row['item_key'],
+                'status' => (string) $row['status'],
+                'row_version' => (int) $row['row_version'],
+                'full_name' => (string) $row['full_name'],
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Osobní čísla (kód pracovního vztahu) pro výpis lidí ve skupině termínů.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,string> klíčem je id vztahu
+     */
+    public function employmentCodes(int $supplierId, array $employmentIds): array
+    {
+        $employmentIds = array_values(array_unique(array_filter(
+            array_map('intval', $employmentIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($employmentIds === []) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, code
+               FROM payroll_employments
+              WHERE supplier_id = ?
+                AND id IN ('
+            . implode(',', array_fill(0, count($employmentIds), '?'))
+            . ')'
+        );
+        $statement->execute([$supplierId, ...$employmentIds]);
+
+        $codes = [];
+        foreach ($this->rows($statement) as $row) {
+            if ($row['code'] !== null && $row['code'] !== '') {
+                $codes[(int) $row['id']] = (string) $row['code'];
+            }
+        }
+
+        return $codes;
     }
 
     /**

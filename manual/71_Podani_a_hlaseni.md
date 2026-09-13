@@ -31,6 +31,51 @@ Za splněnou se položka považuje teprve tehdy, když je podání **odeslané a
 přijaté**. Zrušené podání povinnost nesplnilo: zůstává v seznamu jako
 nesplněné, s poznámkou, že se má připravit nové.
 
+## 71.2.2 Zákonné termíny na přehledu mezd
+
+Panel **Zákonné termíny** na přehledu mezd ukazuje za celou firmu, co je po
+termínu a co se blíží: podání, odvody, lhůty u lidí (položky nástupního a
+výstupního checklistu), změny k ohlášení, roční vyúčtování daně a dávky
+nemocenského pojištění. Pro zobrazení stačí oprávnění číst podání
+(`payroll.submissions`).
+
+Povinnosti jsou rozdělené podle naléhavosti (**Po termínu**, **Dnes**, **Do
+pěti dnů**, **Otevřené**) a uvnitř každé fáze **seskupené podle druhu**. Jeden
+řádek tak znamená například „Pracovní smlouva / dohoda, 225 osob, po termínu
+o 104 dnů (nejstarší)". Počty v souhrnu i u skupin zahrnují všechny položky,
+nic se neschovává. Skutečně nový nástup s termínem za pár dní má vlastní
+skupinu ve fázi **Do pěti dnů**, takže se mezi staršími položkami neztratí.
+
+Podání a odvody jsou za firmu. Jednotlivá povinnost je rovnou odkaz na
+obrazovku, kde se řeší, a víc povinností stejného druhu (třeba odvody více
+pojišťovnám) se rozbalí do řádků pod skupinou.
+
+Skupina lhůt u lidí se po rozbalení zobrazí jako seznam osob po stránkách
+s hledáním podle jména nebo osobního čísla (na velikosti písmen ani diakritice
+nezáleží). U každé osoby je termín, počet dnů po termínu a odkaz na její kartu.
+
+### Hromadné označení jako splněné
+
+U skupin z checklistu jde položky odškrtnout najednou:
+
+- **Označit vybrané jako splněné** označí osoby zaškrtnuté v seznamu (výběr
+  platí napříč stránkami),
+- **Označit celou skupinu jako splněnou** označí celou skupinu; když je
+  zadané hledání, jen nalezené osoby.
+
+Před provedením je nutné vyplnit **poznámku**, předvyplněnou textem „Vyřízeno
+v předchozím zpracování mezd". Je to jediná stopa, proč je položka splněná,
+a zapíše se ke každé položce. Každá položka se mění stejně jako při odškrtnutí
+na kartě vztahu, tedy se záznamem na časové ose vztahu a v auditu. Velká
+skupina se zpracuje po dávkách a průběh je vidět. Položky, které označit nejde
+(například **Doplnit datum nástupu** u vztahu bez data nástupu nebo položka,
+kterou mezitím změnil někdo jiný), se vypíšou i s důvodem a ostatní se
+označí. Už vyřízená položka se přeskočí, opakované spuštění tedy nic nepokazí.
+
+Hromadné označení vyžaduje stejné oprávnění jako odškrtnutí jedné položky
+(`payroll.employment.write`). Změny k ohlášení a dávky nemocenského se
+hromadně neoznačují, mají vlastní postup splnění.
+
 ## 71.3 Fronta „K odeslání"
 
 Záložka **K odeslání** ukazuje na jednom místě všechna připravená podání, která

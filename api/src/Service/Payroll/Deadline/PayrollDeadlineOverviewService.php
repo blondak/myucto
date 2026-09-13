@@ -110,6 +110,19 @@ final readonly class PayrollDeadlineOverviewService
      */
     private const OVERDUE_LOOKBACK_DAYS = 400;
 
+    /**
+     * Prameny, kde je položkou ČLOVĚK. Ty se v seskupeném přehledu slévají do
+     * jednoho řádku na druh povinnosti a jejich seznam se stránkuje. Podání,
+     * odvody a vyúčtování jsou za firmu a zůstávají po jednom.
+     *
+     * @var list<string>
+     */
+    public const PERSON_SOURCES = ['checklist', 'registration_change', 'sickness_case'];
+
+    public const GROUP_ITEMS_DEFAULT_LIMIT = 50;
+
+    public const GROUP_ITEMS_MAX_LIMIT = 200;
+
     public function __construct(
         private PayrollDeadlineOverviewRepository $repository,
         private PayrollDeadlineAssessmentService $assessments,
@@ -133,47 +146,186 @@ final readonly class PayrollDeadlineOverviewService
         string $environment,
         int $horizonDays = self::DEFAULT_HORIZON_DAYS,
     ): array {
-        if ($supplierId <= 0) {
-            throw new \InvalidArgumentException(
-                'Firma přehledu mzdových termínů není platná.',
-            );
-        }
-        if (!in_array($environment, ['production', 'test'], true)) {
-            throw new \InvalidArgumentException(
-                'Prostředí přehledu mzdových termínů musí být production nebo test.',
-            );
-        }
-        if ($horizonDays < 1 || $horizonDays > self::MAX_HORIZON_DAYS) {
-            throw new \InvalidArgumentException(
-                'Dohled přehledu mzdových termínů musí být 1 až '
-                . self::MAX_HORIZON_DAYS . ' dnů.',
-            );
-        }
-        $today = $this->today();
-        $from = $today
-            ->sub(new \DateInterval('P' . self::OVERDUE_LOOKBACK_DAYS . 'D'))
-            ->format('Y-m-d');
-        $to = $today
-            ->add(new \DateInterval('P' . $horizonDays . 'D'))
-            ->format('Y-m-d');
+        [$today, $from, $to] = $this->scope($supplierId, $environment, $horizonDays);
 
         $items = $this->buildItems($supplierId, $environment, $from, $to);
-        $summary = ['total' => count($items)]
-            + array_fill_keys(self::PHASES, 0);
-        foreach ($items as $item) {
-            $phase = (string) $item['phase'];
-            if (array_key_exists($phase, $summary) && $phase !== 'total') {
-                ++$summary[$phase];
-            }
-        }
 
         return [
             'as_of' => $today->format('Y-m-d'),
             'horizon_days' => $horizonDays,
             'window' => ['from' => $from, 'to' => $to],
-            'summary' => $summary,
+            'summary' => $this->summary($items),
             'items' => $items,
         ];
+    }
+
+    /**
+     * Tentýž přehled, ale po skupinách místo po položkách.
+     *
+     * Import docházky umí jedním tahem založit nástupní checklist dvěma stům
+     * lidí. Plochý seznam z toho udělal 675 skoro stejných dlaždic „Pracovní
+     * smlouva · jméno · po termínu o 104 dnů" a přes ně nebylo vidět nic
+     * jiného. Skupina je druh povinnosti v jedné fázi termínu: jeden řádek
+     * „Pracovní smlouva — 225 osob, nejstarší po termínu o 104 dnů".
+     *
+     * Nic se neschová, jen se jinak zobrazí: souhrn počítá tytéž položky jako
+     * {@see self::overview()} a skupina nese jejich přesný počet. Položky
+     * u lidí se v odpovědi neposílají (kromě jednočlenné skupiny, která se
+     * prokliká rovnou); dotahuje je stránkovaně {@see self::groupItems()}.
+     * Podání a odvody jsou za firmu, je jich pár, takže jedou celé.
+     *
+     * @return array{
+     *   as_of:string,horizon_days:int,window:array{from:string,to:string},
+     *   summary:array<string,int>,
+     *   groups:list<array<string,mixed>>
+     * }
+     */
+    public function groupedOverview(
+        int $supplierId,
+        string $environment,
+        int $horizonDays = self::DEFAULT_HORIZON_DAYS,
+    ): array {
+        [$today, $from, $to] = $this->scope($supplierId, $environment, $horizonDays);
+
+        $items = $this->buildItems($supplierId, $environment, $from, $to);
+
+        return [
+            'as_of' => $today->format('Y-m-d'),
+            'horizon_days' => $horizonDays,
+            'window' => ['from' => $from, 'to' => $to],
+            'summary' => $this->summary($items),
+            'groups' => $this->group($items),
+        ];
+    }
+
+    /**
+     * Stránka položek jedné skupiny ze {@see self::groupedOverview()}.
+     *
+     * Čte jen pramen dané skupiny, takže rozbalení nespouští znovu detekci
+     * změn ani ostatní dotazy. Hledá se v jménu a v osobním čísle, bez
+     * ohledu na velikost písmen a diakritiku.
+     *
+     * @return array{total:int,offset:int,limit:int,items:list<array<string,mixed>>}
+     */
+    public function groupItems(
+        int $supplierId,
+        string $environment,
+        int $horizonDays,
+        string $phase,
+        string $source,
+        string $title,
+        string $query = '',
+        int $offset = 0,
+        int $limit = self::GROUP_ITEMS_DEFAULT_LIMIT,
+    ): array {
+        $offset = max(0, $offset);
+        $limit = max(1, min(self::GROUP_ITEMS_MAX_LIMIT, $limit));
+        $items = $this->filteredGroupItems(
+            $supplierId,
+            $environment,
+            $horizonDays,
+            $phase,
+            $source,
+            $title,
+            $query,
+        );
+
+        return [
+            'total' => count($items),
+            'offset' => $offset,
+            'limit' => $limit,
+            'items' => array_slice($items, $offset, $limit),
+        ];
+    }
+
+    /** @return list<array<string,mixed>> celá skupina, seřazená pro výpis */
+    private function filteredGroupItems(
+        int $supplierId,
+        string $environment,
+        int $horizonDays,
+        string $phase,
+        string $source,
+        string $title,
+        string $query,
+    ): array {
+        [, $from, $to] = $this->scope($supplierId, $environment, $horizonDays);
+        if (!in_array($phase, self::PHASES, true)) {
+            throw new \InvalidArgumentException('Fáze skupiny termínů není platná.');
+        }
+        if (!in_array($source, self::SOURCES, true)) {
+            throw new \InvalidArgumentException('Pramen skupiny termínů není platný.');
+        }
+        if ($title === '' || strlen($title) > 64) {
+            throw new \InvalidArgumentException('Druh povinnosti ve skupině termínů chybí.');
+        }
+
+        $items = array_values(array_filter(
+            $this->sourceItems($supplierId, $environment, $source, $title, $from, $to),
+            static fn (array $item): bool
+                => $item['phase'] === $phase && $item['title'] === $title,
+        ));
+        $items = $this->withPersonalNumbers($supplierId, $items);
+        $needle = self::fold($query);
+        if ($needle !== '') {
+            $items = array_values(array_filter(
+                $items,
+                static fn (array $item): bool
+                    => str_contains(self::fold((string) $item['subject']), $needle)
+                    || str_contains(self::fold((string) ($item['personal_number'] ?? '')), $needle),
+            ));
+        }
+        usort(
+            $items,
+            static fn (array $a, array $b): int
+                => [$a['due_on'], self::fold((string) $a['subject']), $a['reference']]
+                <=> [$b['due_on'], self::fold((string) $b['subject']), $b['reference']],
+        );
+
+        return $items;
+    }
+
+    /**
+     * Nevyřízené položky checklistu jedné skupiny přehledu — podklad pro
+     * hromadné odškrtnutí. Stejný výběr jako to, co vidí účetní ve skupině
+     * (stejné okno, stejné vyřazení doložených povinností), takže „celá
+     * skupina" nikdy neodškrtne něco, co v ní nebylo.
+     *
+     * @return list<array{item_id:int,employment_id:int,item_key:string,subject:string}>
+     *         seřazené podle id položky (kurzor dávky)
+     */
+    public function checklistGroupCandidates(
+        int $supplierId,
+        int $horizonDays,
+        string $phase,
+        string $itemKey,
+        string $query = '',
+    ): array {
+        // Checklist na prostředí nezávisí; `production` je tu jen kvůli
+        // společné validaci okna.
+        $items = $this->filteredGroupItems(
+            $supplierId,
+            'production',
+            $horizonDays,
+            $phase,
+            'checklist',
+            $itemKey,
+            $query,
+        );
+        $candidates = array_map(
+            static fn (array $item): array => [
+                'item_id' => (int) $item['item_id'],
+                'employment_id' => (int) $item['employment_id'],
+                'item_key' => (string) $item['title'],
+                'subject' => (string) $item['subject'],
+            ],
+            $items,
+        );
+        usort(
+            $candidates,
+            static fn (array $a, array $b): int => $a['item_id'] <=> $b['item_id'],
+        );
+
+        return $candidates;
     }
 
     /**
@@ -249,6 +401,180 @@ final readonly class PayrollDeadlineOverviewService
         );
 
         return $items;
+    }
+
+    /**
+     * Společná validace a okno přehledu: od zmeškaných termínů do dohledu.
+     *
+     * @return array{\DateTimeImmutable,string,string} dnešek, od, do
+     */
+    private function scope(int $supplierId, string $environment, int $horizonDays): array
+    {
+        if ($supplierId <= 0) {
+            throw new \InvalidArgumentException(
+                'Firma přehledu mzdových termínů není platná.',
+            );
+        }
+        if (!in_array($environment, ['production', 'test'], true)) {
+            throw new \InvalidArgumentException(
+                'Prostředí přehledu mzdových termínů musí být production nebo test.',
+            );
+        }
+        if ($horizonDays < 1 || $horizonDays > self::MAX_HORIZON_DAYS) {
+            throw new \InvalidArgumentException(
+                'Dohled přehledu mzdových termínů musí být 1 až '
+                . self::MAX_HORIZON_DAYS . ' dnů.',
+            );
+        }
+        $today = $this->today();
+
+        return [
+            $today,
+            $today
+                ->sub(new \DateInterval('P' . self::OVERDUE_LOOKBACK_DAYS . 'D'))
+                ->format('Y-m-d'),
+            $today
+                ->add(new \DateInterval('P' . $horizonDays . 'D'))
+                ->format('Y-m-d'),
+        ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $items
+     * @return array<string,int>
+     */
+    private function summary(array $items): array
+    {
+        $summary = ['total' => count($items)]
+            + array_fill_keys(self::PHASES, 0);
+        foreach ($items as $item) {
+            $phase = (string) $item['phase'];
+            if (array_key_exists($phase, $summary) && $phase !== 'total') {
+                ++$summary[$phase];
+            }
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Skupina = fáze termínu × pramen × druh povinnosti. Pořadí je pořadí
+     * naléhavosti fáze, uvnitř ní nejstarší termín první.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
+     */
+    private function group(array $items): array
+    {
+        /** @var array<string,list<array<string,mixed>>> $buckets */
+        $buckets = [];
+        foreach ($items as $item) {
+            $key = $item['phase'] . ':' . $item['source'] . ':' . $item['title'];
+            $buckets[$key][] = $item;
+        }
+
+        $groups = [];
+        foreach ($buckets as $key => $members) {
+            $first = $members[0];
+            $perPerson = in_array($first['source'], self::PERSON_SOURCES, true);
+            $dueDates = array_map(static fn (array $m): string => (string) $m['due_on'], $members);
+            $days = array_map(static fn (array $m): int => (int) $m['days_to_due'], $members);
+            $count = count($members);
+            $groups[] = [
+                'key' => $key,
+                'phase' => $first['phase'],
+                'source' => $first['source'],
+                'title' => $first['title'],
+                'per_person' => $perPerson,
+                'count' => $count,
+                'oldest_due_on' => min($dueDates),
+                'newest_due_on' => max($dueDates),
+                'min_days_to_due' => min($days),
+                'max_days_to_due' => max($days),
+                'is_overdue' => $first['phase'] === 'overdue',
+                // Jednočlenná skupina se proklikává rovnou, takže položku
+                // potřebuje; u lidí se jinak stránkuje přes groupItems().
+                'items' => !$perPerson || $count === 1 ? $members : [],
+            ];
+        }
+        $phaseRank = array_flip(self::PHASES);
+        usort(
+            $groups,
+            static fn (array $a, array $b): int
+                => [$phaseRank[$a['phase']] ?? 99, $a['oldest_due_on'], $a['source'], $a['title']]
+                <=> [$phaseRank[$b['phase']] ?? 99, $b['oldest_due_on'], $b['source'], $b['title']],
+        );
+
+        return $groups;
+    }
+
+    /**
+     * Položky jednoho pramene. Rozbalení skupiny tak nezaplatí detekci změn
+     * ani dotazy ostatních pramenů.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function sourceItems(
+        int $supplierId,
+        string $environment,
+        string $source,
+        string $title,
+        string $from,
+        string $to,
+    ): array {
+        return match ($source) {
+            'submission' => $this->submissionItems($supplierId, $environment, $from, $to),
+            'levy' => $this->levyItems($supplierId, $from, $to),
+            'checklist' => $this->checklistItems($supplierId, $from, $to, $title),
+            'registration_change' => $this->registrationChangeItems($supplierId, $environment, $from, $to),
+            'tax_statement' => $this->taxStatementItems($supplierId, $from, $to),
+            'sickness_case' => $this->sicknessCaseItems($supplierId, $environment, $from, $to),
+            default => [],
+        };
+    }
+
+    /**
+     * Osobní číslo do výpisu lidí. Checklist ho nese z dotazu, ostatní
+     * prameny u lidí se dohledají jedním dotazem za celou stránku.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
+     */
+    private function withPersonalNumbers(int $supplierId, array $items): array
+    {
+        $missing = [];
+        foreach ($items as $item) {
+            if (!array_key_exists('personal_number', $item) && isset($item['employment_id'])) {
+                $missing[] = (int) $item['employment_id'];
+            }
+        }
+        if ($missing === []) {
+            return $items;
+        }
+        $codes = $this->repository->employmentCodes($supplierId, $missing);
+
+        return array_map(
+            static function (array $item) use ($codes): array {
+                if (!array_key_exists('personal_number', $item) && isset($item['employment_id'])) {
+                    $item['personal_number'] = $codes[(int) $item['employment_id']] ?? null;
+                }
+                return $item;
+            },
+            $items,
+        );
+    }
+
+    /** Malá písmena bez diakritiky — „novak" najde „Novák". */
+    private static function fold(string $value): string
+    {
+        $value = mb_strtolower(trim($value), 'UTF-8');
+
+        return strtr($value, [
+            'á' => 'a', 'ä' => 'a', 'č' => 'c', 'ď' => 'd', 'é' => 'e', 'ě' => 'e',
+            'ë' => 'e', 'í' => 'i', 'ĺ' => 'l', 'ľ' => 'l', 'ň' => 'n', 'ó' => 'o',
+            'ô' => 'o', 'ö' => 'o', 'ř' => 'r', 'ŕ' => 'r', 'š' => 's', 'ť' => 't',
+            'ú' => 'u', 'ů' => 'u', 'ü' => 'u', 'ý' => 'y', 'ž' => 'z',
+        ]);
     }
 
     /** @return list<array<string,mixed>> */
@@ -351,19 +677,25 @@ final readonly class PayrollDeadlineOverviewService
         int $supplierId,
         string $from,
         string $to,
+        ?string $itemKey = null,
     ): array {
         $items = [];
         foreach ($this->repository->checklistDeadlines(
             $supplierId,
             $from,
             $to,
+            $itemKey,
         ) as $row) {
             $dueOn = (string) $row['due_date'];
             $items[] = [
                 'source' => 'checklist',
                 'reference' => 'payroll_checklist_item:' . (int) $row['item_id'],
+                'item_id' => (int) $row['item_id'],
                 'title' => (string) $row['item_key'],
                 'subject' => (string) $row['full_name'],
+                'personal_number' => ($row['employment_code'] ?? null) === null
+                    ? null
+                    : (string) $row['employment_code'],
                 'period' => null,
                 'due_on' => $dueOn,
                 'phase' => $this->phase($dueOn),
