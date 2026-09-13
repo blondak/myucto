@@ -164,7 +164,10 @@ final class StockItemPromoPriceRepository
             )) p
             JOIN invoice_items ii ON ii.stock_item_id = p.stock_item_id
             JOIN invoices i ON i.id = ii.invoice_id AND i.supplier_id = ?
-            JOIN currencies c ON c.id = i.currency_id AND c.code = p.currency
+            JOIN currencies c ON c.id = i.currency_id
+                -- Textový sloupec JSON_TABLE má collation databáze, ne tabulky; na instalaci
+                -- s jinou výchozí collation (czech_ci, general_ci) by porovnání padalo na 1267.
+                AND c.code = p.currency COLLATE utf8mb4_unicode_ci
             {$unitJoin}
             WHERE i.invoice_type IN ('invoice', 'credit_note')
               AND i.status NOT IN ('draft', 'cancelled')
