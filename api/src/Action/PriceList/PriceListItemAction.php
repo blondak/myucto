@@ -54,6 +54,7 @@ final class PriceListItemAction
         }
 
         $contextualResolution = $currency !== null;
+        $pricesIncludeVatFilter = $this->pricesIncludeVatFilter($q);
         $result = $this->repo->listForSupplier(
             $supplierId,
             trim((string) ($q['q'] ?? '')),
@@ -62,7 +63,7 @@ final class PriceListItemAction
             $contextualResolution ? 200 : $perPage,
             $currency,
             $clientId > 0 ? $clientId : null,
-            array_key_exists('prices_include_vat', $q) ? !empty($q['prices_include_vat']) : null,
+            $pricesIncludeVatFilter,
         );
         if ($contextualResolution) {
             $candidates = $result['data'];
@@ -76,7 +77,7 @@ final class PriceListItemAction
                     200,
                     $currency,
                     $clientId > 0 ? $clientId : null,
-                    !empty($q['prices_include_vat']),
+                    $pricesIncludeVatFilter,
                 );
                 if ($next['data'] === []) break;
                 array_push($candidates, ...$next['data']);
@@ -351,6 +352,8 @@ final class PriceListItemAction
         }
 
         try {
+            // Zde jde o požadovaný cenový režim k ověření proti položce (resolveMany
+            // vyžaduje bool, ne filtr) — chybějící parametr úmyslně znamená false, ne "bez omezení".
             $resolved = $this->resolver->resolveMany(
                 [$id],
                 $supplierId,
@@ -421,6 +424,12 @@ final class PriceListItemAction
         }
         if ($requirePrices && !$hasBase) return 'Základní cena musí být aktivní.';
         return null;
+    }
+
+    /** @param array<string,mixed> $q */
+    private function pricesIncludeVatFilter(array $q): ?bool
+    {
+        return array_key_exists('prices_include_vat', $q) ? !empty($q['prices_include_vat']) : null;
     }
 
     private function validPrice(mixed $value): ?float
