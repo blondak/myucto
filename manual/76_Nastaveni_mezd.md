@@ -317,6 +317,31 @@ Měsíční import má tři kroky:
    Chybí-li ve firmě mzdová složka, kterou profil používá, import ji na
    potvrzení založí jako jednorázovou složku.
 
+**Měsíční mzda z podkladů.** Obsahují-li podklady měsíční mzdu (mzdový výměr),
+souhrn ukáže tabulku **Měsíční mzda z podkladů**: původní mzdu ze sjednaných
+podmínek vztahu, mzdu z podkladů a způsob zápisu. Chybějící mzda se doplní do
+platné verze podmínek, jiná mzda založí novou verzi podmínek od prvního dne
+importovaného období. Volba **Převzít měsíční mzdu z podkladů** je zapnutá,
+jen když je co převzít. Mzda se nepřevezme u osoby, která v podkladech dostává
+mzdu podle docházky (hodinovou nebo úkolovou složku), u ukončeného nebo
+nenastoupeného vztahu, u vztahu, kde po začátku období platí novější verze
+podmínek, a tam, kde by zápis zasáhl schválený, zaúčtovaný nebo vyplacený
+mzdový běh. Důvod je vidět přímo u osoby v tabulce; mzdu takové osobě upravte
+na kartě vztahu. Výsledek importu vypíše převzaté mzdy, mzdy, které se
+nepřevzaly, a mzdové běhy k přepočtu s odkazem na ně. Běh počítá ze
+zmrazeného snímku vstupů, novou mzdu proto vezme až nový snímek (viz
+[Mzdové běhy](66_Mzdove_behy.md)).
+
+**Verze vzoru.** Vzorový profil GIRITON dostane každá firma a s novou verzí
+aplikace se sám aktualizuje, pokud jste ho neupravili. Upravený vzor se
+nepřepíše: v Mapování sloupců nese štítek **Nová verze vzoru** a náhled
+měsíčního importu na novou verzi upozorní s odkazem **Otevřít mapování**.
+Tlačítko **Aktualizovat vzor** nahradí pravidla a složky profilu novou verzí a
+uloží profil; vlastní úpravy se tím ztratí, proto si profil před aktualizací
+případně duplikujte. Pravidla nové verze posílá server spolu s náhledem, takže
+tlačítko je aktivní po načtení náhledu docházky nebo po zkoušce profilu na
+souborech.
+
 Hodnoty se nikdy nesčítají napříč listy. Když stejný údaj přichází ze dvou
 listů, použije se ten s vyšší prioritou a rozdílná hodnota se ukáže jako
 konflikt. Opakuje-li se v jednom listu stejná hlavička, platí první sloupec.

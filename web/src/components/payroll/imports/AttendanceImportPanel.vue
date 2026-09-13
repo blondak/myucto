@@ -11,7 +11,9 @@ import {
 } from '@/api/payrollImports'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
-import { BTN_DISABLED_NOTE, btnFilled, btnOutline, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
+import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
+import { formatPeriod } from '@/composables/useFormat'
+import { adoptableWageChanges, uniqueRefreshRuns, upgradeMatchesProfile } from './attendanceWages'
 import ImportFilesDropzone from './ImportFilesDropzone.vue'
 import AttendancePersonsStep from './AttendancePersonsStep.vue'
 import AttendanceSummaryStep from './AttendanceSummaryStep.vue'
@@ -57,6 +59,7 @@ const saveLinks = ref(true)
 const createInputs = ref(true)
 const createComponents = ref(true)
 const adoptPersonalNumbers = ref(true)
+const adoptMonthlyWage = ref(false)
 const autoCreateMissingPersons = ref(true)
 const autoCreateResult = ref<AttendancePersonsResult | null>(null)
 const autoCreateNotes = computed(() => (autoCreateResult.value?.results ?? []).filter(item => item.status === 'created' && item.message))
@@ -80,6 +83,18 @@ const fingerprint = computed(() => `${period.value}#${filesFingerprint(files.val
 const links = computed(() => preview.value ? buildAttendanceLinks(preview.value.persons, manualLinks.value) : [])
 const fileErrors = computed(() => (preview.value?.files ?? []).filter(file => file.error))
 const willCreate = computed(() => preview.value ? componentsToCreate(preview.value.component_checks) : [])
+const adoptableWages = computed(() => adoptableWageChanges(preview.value?.wage_changes))
+// Výchozí zapnuto jen tehdy, když je co převzít. Opakované načtení náhledu
+// (třeba po založení osob) volbu účetní nepřepíše, dokud změny nezmizí.
+watch(() => adoptableWages.value.length, (count, previous) => {
+  if (count === 0) adoptMonthlyWage.value = false
+  else if (!previous) adoptMonthlyWage.value = true
+})
+const usedSampleUpgrade = computed(() => {
+  const upgrade = preview.value?.upgrade_available ?? null
+  return upgradeMatchesProfile(upgrade, preview.value?.profile?.id) ? upgrade : null
+})
+const refreshRuns = computed(() => uniqueRefreshRuns(result.value?.runs_needing_refresh))
 
 const loadBlockedReason = computed(() => {
   if (!isValidPeriod(period.value)) return t('payroll_imports.attendance.reason.no_period')
@@ -175,6 +190,8 @@ async function requestPreview(): Promise<boolean> {
       ...await previewSource(),
     })
     preview.value = response
+    // Pravidla nové verze vzoru chodí jen s náhledem; Mapování je potřebuje k aktualizaci.
+    if (response.upgrade_available) workspace.sampleUpgrade.value = response.upgrade_available
     previewFingerprint.value = current
     profileStale.value = false
     manualLinks.value = pruneManualLinks(manualLinks.value, response.persons, response.employment_options)
@@ -283,6 +300,7 @@ async function apply() {
       create_inputs: createInputs.value,
       create_components: willCreate.value.length > 0 && createComponents.value,
       adopt_personal_numbers: adoptPersonalNumbers.value,
+      adopt_monthly_wage: adoptMonthlyWage.value && adoptableWages.value.length > 0,
     })
     result.value = response
     if (response.replayed) toast.warning(t('payroll_imports.attendance.summary.replayed_toast', { id: response.batch.id }))
@@ -382,6 +400,14 @@ async function apply() {
         </button>
       </div>
 
+      <div v-if="usedSampleUpgrade" role="status" data-testid="attendance-sample-upgrade" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700">
+        <p class="max-w-3xl">{{ t('payroll_imports.attendance.upgrade_notice', { name: usedSampleUpgrade.name, version: usedSampleUpgrade.version ?? '?', latest: usedSampleUpgrade.latest_version }) }}</p>
+        <button type="button" class="whitespace-nowrap" :class="btnOutline('warning')" :disabled="busy !== null" @click="workspace.openMapping(usedSampleUpgrade.profile_id)">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.table" /></svg>
+          {{ t('payroll_imports.attendance.upgrade_open') }}
+        </button>
+      </div>
+
       <AttendanceRecognitionStrip :preview="preview" can-edit @edit-mapping="editMapping" />
 
       <!-- 2. Osoby -->
@@ -453,6 +479,10 @@ async function apply() {
               <input v-model="adoptPersonalNumbers" type="checkbox" data-testid="attendance-adopt-personal-numbers" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.adopt_personal_numbers') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.adopt_personal_numbers_hint') }}</span></span>
             </label>
+            <label v-if="adoptableWages.length" class="flex items-start gap-2 text-sm text-neutral-800">
+              <input v-model="adoptMonthlyWage" type="checkbox" data-testid="attendance-adopt-monthly-wage" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
+              <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.adopt_monthly_wage', { count: adoptableWages.length }) }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.adopt_monthly_wage_hint') }}</span></span>
+            </label>
             <label class="flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="createInputs" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.create_inputs') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.create_inputs_hint') }}</span></span>
@@ -502,7 +532,24 @@ async function apply() {
             <li>{{ t('payroll_imports.attendance.result.duplicates', { count: result.inputs.duplicates }) }}</li>
             <li>{{ t('payroll_imports.attendance.result.links_saved', { count: result.links_saved }) }}</li>
             <li v-if="result.personal_numbers_adopted" data-testid="attendance-personal-numbers-adopted">{{ t('payroll_imports.attendance.result.personal_numbers_adopted', { count: result.personal_numbers_adopted }) }}</li>
+            <li v-if="result.monthly_wages_adopted" data-testid="attendance-monthly-wages-adopted">{{ t('payroll_imports.attendance.result.monthly_wages_adopted', { count: result.monthly_wages_adopted }) }}</li>
           </ul>
+          <div v-if="result.wage_conflicts?.length" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3" data-testid="attendance-wage-conflicts">
+            <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.result.wage_conflicts_title', { count: result.wage_conflicts.length }) }}</p>
+            <ul class="mt-1 space-y-0.5 text-xs text-warning-700">
+              <li v-for="item in result.wage_conflicts" :key="item.key">{{ item.display_name }}: {{ item.reason }}</li>
+            </ul>
+          </div>
+          <div v-if="refreshRuns.length" class="mt-3 rounded-lg border border-primary-500/30 bg-surface p-3" data-testid="attendance-runs-refresh">
+            <p class="font-medium text-neutral-900">{{ t('payroll_imports.attendance.result.runs_refresh_title') }}</p>
+            <p class="mt-0.5 text-xs text-neutral-600">{{ t('payroll_imports.attendance.result.runs_refresh_hint') }}</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <RouterLink v-for="run in refreshRuns" :key="run.run_id" :to="{ name: 'payroll-runs', query: { period: run.period } }" class="whitespace-nowrap" :class="btnOutlineSm('primary')">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+                {{ t('payroll_imports.attendance.result.runs_refresh_link', { period: formatPeriod(run.period) }) }}
+              </RouterLink>
+            </div>
+          </div>
           <div v-if="result.personal_number_conflicts?.length" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3" data-testid="attendance-personal-number-conflicts">
             <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.result.personal_number_conflicts_title', { count: result.personal_number_conflicts.length }) }}</p>
             <ul class="mt-1 space-y-0.5 text-xs text-warning-700">

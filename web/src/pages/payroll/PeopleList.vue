@@ -54,6 +54,8 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import DateInput from '@/components/ui/DateInput.vue'
+import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
+import { payrollWorkingPeriod } from './payrollComponentsUi'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -103,6 +105,14 @@ const advancedProfileOpen = ref(false)
 const personProfilePanel = ref<InstanceType<typeof PayrollPersonProfilePanel> | null>(null)
 const deletingPerson = ref(false)
 const canCreatePerson = computed(() => auth.canWrite('payroll.person.write'))
+/*
+ * Hromadné doplnění výchozí zákonné evidence. Seznam stránkuje a zužuje
+ * server, takže ID celého filtru prohlížeč nezná; náhled proto bere osoby
+ * s pracovním vztahem ve zvoleném měsíci (stejný výběr jako mzdový běh)
+ * a nevhodné sám vyřadí s důvodem.
+ */
+const statutoryBulkOpen = ref(false)
+const statutoryBulkEffectiveOn = `${payrollWorkingPeriod()}-01`
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
   && auth.canWrite('payroll.employment.write'),
@@ -1486,16 +1496,39 @@ onMounted(async () => {
             />
           </label>
         </div>
-        <RouterLink
-          :to="{ name: 'payroll-quick-inputs' }"
-          :class="btnOutline('primary')"
-          data-test="quick-inputs-link"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
-          {{ t('payroll.people.quick_inputs') }}
-        </RouterLink>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-if="canCreatePerson"
+            type="button"
+            class="whitespace-nowrap"
+            :class="btnOutline('warning')"
+            data-test="statutory-bulk-open"
+            @click="statutoryBulkOpen = true"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
+            {{ t('payroll.people.statutory_bulk_action') }}
+          </button>
+          <RouterLink
+            :to="{ name: 'payroll-quick-inputs' }"
+            class="whitespace-nowrap"
+            :class="btnOutline('primary')"
+            data-test="quick-inputs-link"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
+            {{ t('payroll.people.quick_inputs') }}
+          </RouterLink>
+        </div>
       </div>
     </section>
+
+    <PayrollStatutoryBulkDefaultsDialog
+      v-if="statutoryBulkOpen"
+      :effective-on="statutoryBulkEffectiveOn"
+      :employee-ids="null"
+      period-editable
+      @close="statutoryBulkOpen = false"
+      @applied="load"
+    />
 
     <div v-if="editing && loadingDetailId !== null" class="h-24 animate-pulse rounded-lg bg-neutral-100" />
 

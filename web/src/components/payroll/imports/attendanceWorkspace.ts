@@ -3,6 +3,7 @@ import {
   payrollImportsApi,
   type AttendanceProfile,
   type AttendanceRule,
+  type AttendanceSampleUpgrade,
   type ImportFilePayload,
 } from '@/api/payrollImports'
 import { payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
@@ -35,6 +36,11 @@ export interface AttendanceWorkspace {
   /** Poslední uložený nebo smazaný profil — náhled z něj postavený přestává platit. */
   profileRevision: Ref<ProfileRevision | null>
   mappingFocus: Ref<MappingFocus | null>
+  /**
+   * Nová verze vzoru z posledního náhledu. Seznam profilů nese jen příznak,
+   * pravidla nové verze posílá server až s náhledem docházky.
+   */
+  sampleUpgrade: Ref<AttendanceSampleUpgrade | null>
   loadProfiles(): Promise<void>
   upsertProfile(profile: AttendanceProfile): void
   removeProfile(id: number): void
@@ -59,6 +65,7 @@ export function createAttendanceWorkspace(options: {
   const profilesError = ref('')
   const profileRevision = ref<ProfileRevision | null>(null)
   const mappingFocus = ref<MappingFocus | null>(null)
+  const sampleUpgrade = ref<AttendanceSampleUpgrade | null>(null)
   let sequence = 0
   let payloadCache: { fingerprint: string; files: ImportFilePayload[] } | null = null
 
@@ -113,6 +120,7 @@ export function createAttendanceWorkspace(options: {
     profilesError,
     profileRevision,
     mappingFocus,
+    sampleUpgrade,
     loadProfiles,
     upsertProfile,
     removeProfile,

@@ -135,6 +135,42 @@ důvody, například neověřené prohlášení k dani, rezidenci nebo nárok na
 Nejdřív oprav podklad na kartě osoby a potom vytvoř novou revizi výpočtu;
 historický snapshot se zpětně nemění.
 
+### 66.8.1 Hromadné doplnění výchozí zákonné evidence
+
+Po převzetí zaměstnanců z importu nemají osoby daňovou rezidenci, příslušnost
+k pojištění ani údaj o slevě pracujícího důchodce a běh proto hlásí nedokončený
+zákonný výpočet u většiny lidí. U této blokace nabízí karta běhu tlačítko
+**Doplnit výchozí údaje (N osob)**. Stejná akce je na seznamu **Mzdy →
+Zaměstnanci** jako **Doplnit výchozí zákonné údaje**; tam zvolíte měsíc, od
+kterého údaje platí. Náhled bere všechny osoby, které by vzal mzdový běh za
+daný měsíc, a nic nezapisuje. Ukáže:
+
+- kolika osobám se doplní česká daňová rezidence, česká příslušnost
+  k pojištění bez formuláře A1 a neuplatňování slevy pracujícího důchodce
+  (sleva jen u osob mladších 60 let se známým datem narození),
+- vyřazené osoby s důvodem: cizí prvek (adresa v cizině, cizí občanství,
+  povolení k pobytu nebo práci, cizí legislativa, formulář A1, zahraniční
+  pojištění nebo daňový režim, zahraniční údaj v evidenci), chybějící pracovní
+  vztah v měsíci nebo vztah ukončený ve schváleném období,
+- osoby bez zdravotní pojišťovny s odkazem na **Importy → JMHZ registrace**;
+  pojišťovnu hromadná akce nikdy nedoplní,
+- osoby bez prohlášení poplatníka.
+
+Existující záznam se nikdy nepřepíše ani neukončí. Údaje platí od prvního dne
+měsíce, u pozdějšího nástupu od měsíce nástupu; do období se schválenou mzdou
+se nezapisují a platí až od dalšího měsíce. Chybějící prohlášení poplatníka se
+zapíše jako **nepodepsané** jen po zaškrtnutí volby **Zapsat chybějící
+prohlášení jako nepodepsané**, která je výchozím stavem vypnutá. Náhled u ní
+jmenovitě vypíše osoby, kterým by nepodepsané prohlášení mohlo přepnout
+zdanění na srážkovou daň. Zápis probíhá osobu po osobě stejnou cestou jako
+karta osoby; výsledek ukáže doplněné, přeskočené a neúspěšné osoby s důvodem.
+
+Spočítaný běh počítá ze zmrazeného snímku vstupů, samotný přepočet proto
+doplněné údaje nevezme. Po uložení nabídne dialog další krok podle stavu
+běhu: u konceptu **Spočítat mzdy**, u spočítaného běhu **Zrušit** (potom
+otevřete novou revizi a spočítejte mzdy), u zrušeného nebo opravného běhu
+otevření nové revize a u schváleného běhu **Vyžádat opravu**.
+
 Výpočet odděluje hotovost zahrnutou do exekučního základu od částek, které se
 nesrážejí, například správně klasifikovaných cestovních náhrad. Vypočtená
 srážka sníží částku k výplatě, ale neměnný výsledek a ledger

@@ -102,6 +102,7 @@ function profile(overrides: Partial<AttendanceProfile> = {}): AttendanceProfile 
     id: 7,
     name: 'Vzor GIRITON',
     is_sample: true,
+    sample_version: 1,
     updated_at: '2026-06-30 10:00:00',
     rules: [
       { sheet: null, header: 'Jméno', meaning: 'person_name', unit: 'text', component_code: null },

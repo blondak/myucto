@@ -32,8 +32,14 @@ import { useToast } from '@/composables/useToast'
 import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import { runPayrollInputBatch } from '@/pages/payroll/payrollInputFilters'
 import PayrollMonthlyChecklistPanel from '@/pages/payroll/PayrollMonthlyChecklistPanel.vue'
-import type { PayrollRegzelEnvironment } from '@/api/payroll'
+import type { PayrollRegzelEnvironment, PayrollStatutoryBulkResult } from '@/api/payroll'
 import DateInput from '@/components/ui/DateInput.vue'
+import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
+import {
+  evidenceRefreshCommand,
+  firstStatutoryReviewId,
+  statutoryReviewEmployeeIds,
+} from '@/components/payroll/statutoryBulkDefaults'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -926,6 +932,54 @@ async function approveDraftInputs(run: PayrollRun) {
   }
 }
 
+/*
+ * Hromadné doplnění výchozí zákonné evidence přímo z běhu. Blokace
+ * `statutory_calculation_manual_review` u běhu z importu obvykle znamená, že
+ * stovky lidí nemají rezidenci, příslušnost ani slevu důchodce — a jediná
+ * cesta byla karta osoby, jedna po druhé.
+ */
+const canBulkDefaults = computed(() => auth.canWrite('payroll.person.write'))
+const bulkDefaultsRun = ref<PayrollRun | null>(null)
+const bulkDefaultsApplied = ref(false)
+
+function openBulkDefaults(run: PayrollRun) {
+  if (!canBulkDefaults.value) return
+  bulkDefaultsApplied.value = false
+  bulkDefaultsRun.value = run
+}
+
+function bulkDefaultsLabel(run: PayrollRun): string {
+  const count = statutoryReviewEmployeeIds(run.validations).length
+  return count > 0
+    ? t('payroll.runs.validation.statutory_bulk_action', { count })
+    : t('payroll.runs.validation.statutory_bulk_action_plain')
+}
+
+async function onBulkDefaultsApplied(result: PayrollStatutoryBulkResult) {
+  bulkDefaultsApplied.value = result.counts.applied > 0
+  await load()
+  const current = bulkDefaultsRun.value
+  if (current !== null) bulkDefaultsRun.value = reloadedRun(current) ?? current
+}
+
+/**
+ * Jediný další krok, který čerstvou evidenci do běhu opravdu dostane (nový
+ * snímek vstupů) — jen existující příkaz, na který má uživatel právo.
+ */
+const bulkDefaultsRefreshCommand = computed<PayrollRunCommand | null>(() => {
+  const run = bulkDefaultsRun.value
+  if (run === null || !bulkDefaultsApplied.value) return null
+  const command = evidenceRefreshCommand(run)
+  return command !== null && visibleCommands(run).includes(command) ? command : null
+})
+
+function continueAfterBulkDefaults() {
+  const run = bulkDefaultsRun.value
+  const command = bulkDefaultsRefreshCommand.value
+  bulkDefaultsRun.value = null
+  if (run !== null && command !== null) void runCommand(run, command)
+}
+
 function askOverride(run: PayrollRun, validation: PayrollRunValidation) {
   if (!canOverride.value || !overrideEditable(run)) return
   pendingOverride.value = { run, validation }
@@ -1715,6 +1769,24 @@ onMounted(load)
               {{ t('payroll.runs.validation.draft_inputs_approve_all') }}
             </button>
             <!--
+              Hromadné doplnění výchozí zákonné evidence. Kreslí se jednou
+              u běhu (u první validace skupiny), ne u každé osoby zvlášť.
+            -->
+            <button
+              v-if="canBulkDefaults && validation.id === firstStatutoryReviewId(run.validations)"
+              type="button"
+              :data-testid="`payroll-run-${run.id}-statutory-bulk`"
+              class="whitespace-nowrap"
+              :class="[btnOutlineSm('warning'), 'mt-2 mr-2 inline-flex']"
+              :disabled="saving"
+              @click="openBulkDefaults(run)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.clipboardCheck" />
+              </svg>
+              {{ bulkDefaultsLabel(run) }}
+            </button>
+            <!--
               Co dávka neschválila, zůstává na obrazovce. V toastu se to ztratilo
               dřív, než se podle toho dalo jednat, a znal se jen první důvod.
             -->
@@ -2012,6 +2084,36 @@ onMounted(load)
         </div>
       </form>
     </Modal>
+
+    <PayrollStatutoryBulkDefaultsDialog
+      v-if="bulkDefaultsRun"
+      :effective-on="bulkDefaultsRun.period_start"
+      :employee-ids="null"
+      @close="bulkDefaultsRun = null"
+      @applied="onBulkDefaultsApplied"
+    >
+      <template #after-apply>
+        <div
+          v-if="bulkDefaultsApplied"
+          class="rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-800"
+          data-test="statutory-bulk-refresh"
+        >
+          <p>{{ t(`payroll.runs.validation.statutory_bulk_refresh.${bulkDefaultsRefreshCommand ?? 'none'}`) }}</p>
+          <button
+            v-if="bulkDefaultsRefreshCommand"
+            type="button"
+            class="mt-2 cursor-pointer"
+            :class="commandClass(bulkDefaultsRun, bulkDefaultsRefreshCommand)"
+            :disabled="saving"
+            data-test="statutory-bulk-refresh-command"
+            @click="continueAfterBulkDefaults"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="commandIcon(bulkDefaultsRefreshCommand)" /></svg>
+            {{ commandLabel(bulkDefaultsRefreshCommand, bulkDefaultsRun) }}
+          </button>
+        </div>
+      </template>
+    </PayrollStatutoryBulkDefaultsDialog>
 
     <Modal
       v-if="pendingDelete"

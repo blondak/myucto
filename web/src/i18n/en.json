@@ -1943,6 +1943,83 @@
       },
       "open_runs": "Open payroll runs"
     },
+    "statutory_bulk": {
+      "title": "Fill in default statutory data",
+      "intro": "For people without a foreign element, fills in the missing data that follows from having no ties abroad: Czech tax residence, Czech insurance jurisdiction without an A1 form and, for people under 60, the working pensioner discount not claimed. An existing record is never overwritten. The health insurer is never filled in bulk; only the registration or the employee knows it.",
+      "period": "Data valid from month",
+      "reload": "Reload preview",
+      "scope_run": "The preview covers everyone the payroll run for {period} would include.",
+      "scope_selection": "The preview covers the selected people ({count}).",
+      "frozen": "Payroll is approved up to {date}. Nothing is written into an approved period; the data takes effect from the following month.",
+      "load_failed": "The fill-in preview could not be loaded.",
+      "retry": "Try again",
+      "summary": {
+        "people": "People in total",
+        "ready": "Will be filled in",
+        "nothing_to_add": "Nothing to add",
+        "excluded": "Excluded"
+      },
+      "sections_title": "What will be filled in",
+      "section": {
+        "tax_residences": "Tax residence: Czech Republic",
+        "social_jurisdictions": "Insurance jurisdiction: Czech, no A1",
+        "social_discount_claims": "Working pensioner discount: not claimed"
+      },
+      "section_count": "{count} people",
+      "discount_title": "The pensioner discount will not be filled in:",
+      "basis_title": "Data takes effect later than the first day of the month:",
+      "excluded_title": "Excluded people ({count})",
+      "excluded_hint": "The bulk fill-in writes nothing for them. Enter the data on the person's card.",
+      "health_title": "Without a health insurer ({count})",
+      "health_hint": "The bulk fill-in does not write the health insurer. Take it over from the JMHZ registrations or fill it in on the person's card.",
+      "health_link": "Imports → JMHZ registration",
+      "declaration_title": "Taxpayer declaration missing ({count})",
+      "declaration_label": "Record the missing declarations as not signed ({count} people)",
+      "declaration_hint": "Records the state “not signed”. Without a signed declaration neither the taxpayer credit nor other credits apply. Turn this on only when you know the declarations really were not signed.",
+      "declaration_on": "This does not create a signature. When the employee signs the declaration, record it on their card.",
+      "withholding_title": "Withholding tax risk ({count})",
+      "withholding_hint": "For these people an unsigned declaration may switch taxation to withholding tax (typically an agreement with low income). Review them before writing.",
+      "and_more": "and {count} more",
+      "person_fallback": "Person no. {id}",
+      "apply": "Fill in data ({count} people)",
+      "nothing_to_apply": "Nobody has anything to fill in.",
+      "apply_failed": "The data could not be filled in.",
+      "applied_toast": "Data filled in for {count} people.",
+      "result_title": "Fill-in result",
+      "result": {
+        "applied": "Filled in",
+        "skipped": "Skipped",
+        "failed": "Failed"
+      },
+      "skipped_title": "Skipped people ({count})",
+      "failed_title": "People whose write failed ({count})",
+      "reason": {
+        "employee_not_found": "person not found",
+        "no_employment_in_period": "no employment in the month",
+        "period_frozen": "employment ended in an approved period",
+        "foreign_element": "foreign element",
+        "nothing_to_add": "nothing to add"
+      },
+      "foreign": {
+        "address_abroad": "address abroad",
+        "foreign_citizenship": "foreign citizenship",
+        "foreign_permit": "residence or work permit",
+        "foreign_legislation": "foreign legislation in the employment terms",
+        "a1_certificate": "A1 form",
+        "foreign_insurance_or_tax_regime": "foreign insurance or tax regime",
+        "foreign_statutory_evidence": "foreign entry in the statutory records"
+      },
+      "discount": {
+        "age_60_or_more": "aged 60 or more",
+        "birth_date_missing": "birth date missing",
+        "birth_date_invalid": "invalid birth date"
+      },
+      "basis": {
+        "run_month": "from the first day of the run month",
+        "employment_start": "from the month of starting",
+        "after_frozen_period": "from the month after the approved period"
+      }
+    },
     "runs": {
       "person_picker": {
         "placeholder": "Search for an employee",
@@ -2041,7 +2118,17 @@
         "draft_inputs_approve_partial": "Approved {approved} inputs, {failed} not. The reasons are listed at the run.",
         "draft_inputs_failed_title": "The batch did not approve these inputs:",
         "draft_inputs_failed_row": "{count}× {reason}",
-        "draft_inputs_approve_failed": "Payroll inputs could not be approved in bulk."
+        "draft_inputs_approve_failed": "Payroll inputs could not be approved in bulk.",
+        "statutory_bulk_action": "Fill in default data ({count} people)",
+        "statutory_bulk_action_plain": "Fill in default data",
+        "statutory_bulk_refresh": {
+          "lock_and_calculate": "The filled-in data reaches the run when the inputs are locked. Calculate the payroll.",
+          "lock_inputs": "The filled-in data reaches the run when the inputs are locked. Lock the inputs and calculate the payroll.",
+          "reopen": "The filled-in data reaches the run only through a new revision. Open it, then calculate the payroll.",
+          "cancel": "The run calculates from a frozen snapshot of inputs, so recalculating alone will not pick up the new data. Cancel the run, open its new revision and calculate the payroll again.",
+          "request_correction": "The run is approved. The filled-in data reaches it only through a correction revision: request a correction, open a new revision and calculate the payroll.",
+          "none": "The filled-in data applies to further processing. In this state it cannot be reflected in the run calculation."
+        }
       },
       "override": {
         "awaiting": "This warning is waiting for a person. Until someone takes responsibility for it and writes down why, the payroll run cannot be approved.",
@@ -3705,6 +3792,7 @@
       "search_placeholder": "Name or personal number",
       "filter": "View",
       "quick_inputs": "Monthly payroll entry",
+      "statutory_bulk_action": "Fill in default statutory data",
       "no_results_title": "No employee matches the filter",
       "no_results_description": "Change the search text or choose another view.",
       "filters": {
@@ -24957,6 +25045,8 @@
       "profile_auto": "Automatically by files",
       "profile_hint": "The profile that best matches the file headers is used automatically. You manage profiles on the Column mapping tab.",
       "profile_stale": "The mapping profile has changed in the meantime. Reload the preview so that the import matches the saved mapping.",
+      "upgrade_notice": "The profile used, “{name}”, was created from an older sample version (version {version}, current {latest}) and you edited it, so it was not updated automatically. The new version may recognise more columns. Update the profile on the Column mapping tab.",
+      "upgrade_open": "Open mapping",
       "reload_preview": "Reload preview",
       "drop_hint": "Drag files from the attendance system here (main and auxiliary) or choose them",
       "load_preview": "Load preview",
@@ -25066,6 +25156,21 @@
         "save_links_hint": "The next import matches the same person automatically by personal number or name.",
         "adopt_personal_numbers": "Adopt personal numbers from the source files",
         "adopt_personal_numbers_hint": "Employments with an automatic number (1, ZAM-7…) get the personal number from the source files; a manually entered number is never overwritten.",
+        "adopt_monthly_wage": "Adopt the monthly wage from the source files ({count} changes)",
+        "adopt_monthly_wage_hint": "Only people without an obstacle in the Monthly wage from source files table are written. A missing wage is added to the current employment terms; a different wage creates a new version of the terms from the first day of the period.",
+        "wages_title": "Monthly wage from source files",
+        "wages_hint": "Differences between the wage in the source files and the agreed employment terms. People with a reason are not adopted; change their wage on the employment card.",
+        "wages_person": "Person",
+        "wages_current": "Now",
+        "wages_imported": "From files",
+        "wages_mode_label": "Write",
+        "wages_mode": {
+          "correct": "Fill in",
+          "add": "New version from day 1 of the period"
+        },
+        "wages_missing": "not set",
+        "wages_blocked": "Not adopted",
+        "wages_runs": "Adopting affects the payroll runs for {periods}. They will need recalculating after the import.",
         "create_inputs": "Create payroll inputs (drafts awaiting approval)",
         "create_inputs_hint": "Money components are passed to the payroll input import. Importing the same month again does not create a second bonus, only a duplicate.",
         "missing_employment_note": "{count} people have no employment and will be skipped when applying.",
@@ -25089,6 +25194,11 @@
         "links_saved": "Links saved: {count}",
         "personal_numbers_adopted": "Personal numbers adopted: {count}",
         "personal_number_conflicts_title": "Personal numbers not adopted ({count})",
+        "monthly_wages_adopted": "Monthly wages adopted: {count}",
+        "wage_conflicts_title": "Monthly wages not adopted ({count})",
+        "runs_refresh_title": "Payroll runs to recalculate",
+        "runs_refresh_hint": "A changed wage reaches the run only with a new snapshot of inputs. Open the run and proceed according to its state.",
+        "runs_refresh_link": "Run for {period}",
         "errors_title": "Inputs that were not created",
         "error_row": "Row {row}: {message}",
         "skipped_title": "Skipped people ({count})",
@@ -25134,6 +25244,12 @@
       "state_dirty": "Unsaved changes",
       "updated_at": "Updated {date}",
       "sample_hint": "Sample profile for the GIRITON attendance system that every company gets. Adjust it to your files, or duplicate it and edit the copy.",
+      "upgrade_badge": "New sample version",
+      "upgrade_title": "A new sample version is available",
+      "upgrade_hint": "The profile was created from an older sample version and you edited it, so it was not updated automatically. Updating replaces the profile rules and components with the new sample version and your own changes are lost. To keep them, duplicate the profile first.",
+      "upgrade_action": "Update sample",
+      "upgrade_confirm": "Replace the rules and components of profile “{name}” with the new sample version? Your own changes to the profile will be lost.",
+      "upgrade_needs_preview": "The server sends the new version's rules with a preview. Try the profile on the files below, then run the update.",
       "save": "Save",
       "discard": "Discard changes",
       "duplicate": "Duplicate",

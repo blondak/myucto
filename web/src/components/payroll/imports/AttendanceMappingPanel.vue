@@ -21,6 +21,7 @@ import AttendanceRecognitionStrip from './AttendanceRecognitionStrip.vue'
 import AttendanceRuleEditor from './AttendanceRuleEditor.vue'
 import AttendanceProfileCopyDialog from './AttendanceProfileCopyDialog.vue'
 import { useAttendanceWorkspace } from './attendanceWorkspace'
+import { upgradedProfile, upgradeMatchesProfile } from './attendanceWages'
 import {
   draftComponents,
   draftRules,
@@ -77,6 +78,17 @@ const issues = computed<ProfileDraftIssue[]>(() => draft.value ? profileDraftIss
 const otherSuppliers = computed(() => supplierStore.availableSuppliers.filter(supplier => supplier.id !== supplierStore.currentSupplierId))
 
 const saveBlockedReason = computed(() => issues.value.length ? t('payroll_imports.mapping.reason.issues') : '')
+/*
+ * Nová verze vzoru pro profil, který firma upravila. Seznam profilů nese jen
+ * příznak; pravidla nové verze posílá server s náhledem docházky, proto se
+ * aktualizace nabízí až s nimi.
+ */
+const upgradePending = computed(() => savedProfile.value?.upgrade_available === true)
+const upgradePayload = computed(() => {
+  const upgrade = workspace.sampleUpgrade.value
+  return upgradeMatchesProfile(upgrade, savedProfile.value?.id) ? upgrade : null
+})
+const upgradeBlockedReason = computed(() => upgradePayload.value ? '' : t('payroll_imports.mapping.upgrade_needs_preview'))
 const savedOnlyReason = computed(() => dirty.value ? t('payroll_imports.mapping.reason.save_first') : '')
 
 const currentTestSignature = computed(() => draft.value
@@ -234,6 +246,21 @@ async function save() {
   }
 }
 
+// Uloží pravidla a složky nové verze vzoru běžnou cestou uložení profilu;
+// server pak vzor při dalším načtení označí jako aktuální.
+async function updateSample() {
+  const profile = savedProfile.value
+  const upgrade = upgradePayload.value
+  if (!profile || !upgrade || !props.canManage || busy.value !== null) return
+  if (!window.confirm(t('payroll_imports.mapping.upgrade_confirm', { name: profile.name }))) return
+  draft.value = profileToDraft(upgradedProfile(profile, upgrade))
+  await save()
+  if (!dirty.value) {
+    workspace.sampleUpgrade.value = null
+    await workspace.loadProfiles()
+  }
+}
+
 async function remove() {
   const profile = savedProfile.value
   if (!profile || busy.value !== null) return
@@ -327,6 +354,7 @@ async function runTest() {
       profile_id: null,
       components: draftComponents(current),
     })
+    if (testPreview.value.upgrade_available) workspace.sampleUpgrade.value = testPreview.value.upgrade_available
     testSignature.value = signature
   } catch (err) {
     testError.value = apiErrorMessage(err, t('payroll_imports.mapping.test.failed'))
@@ -419,7 +447,10 @@ watch(workspace.mappingFocus, focus => {
             @click="selectProfile(profile)">
             <span class="flex flex-wrap items-center justify-between gap-2">
               <strong class="min-w-0 truncate">{{ profile.name }}</strong>
-              <span v-if="profile.is_sample" class="rounded bg-accent-50 px-2 py-0.5 text-xs font-medium text-accent-700">{{ t('payroll_imports.sample_badge') }}</span>
+              <span class="flex flex-wrap gap-1">
+                <span v-if="profile.is_sample" class="rounded bg-accent-50 px-2 py-0.5 text-xs font-medium text-accent-700">{{ t('payroll_imports.sample_badge') }}</span>
+                <span v-if="profile.upgrade_available" :data-testid="`attendance-profile-${profile.id}-upgrade`" class="whitespace-nowrap rounded bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700">{{ t('payroll_imports.mapping.upgrade_badge') }}</span>
+              </span>
             </span>
             <span class="mt-1 block text-xs text-neutral-500">
               {{ t('payroll_imports.mapping.list_meta', { rules: profile.rules.length, date: formatDate(profile.updated_at) }) }}
@@ -448,6 +479,19 @@ watch(workspace.mappingFocus, focus => {
             </div>
           </div>
           <p v-if="draft.is_sample" class="mt-3 rounded-lg bg-accent-50 px-3 py-2 text-sm text-accent-700">{{ t('payroll_imports.mapping.sample_hint') }}</p>
+          <div v-if="upgradePending" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-800" data-testid="attendance-profile-upgrade">
+            <p class="font-medium">{{ t('payroll_imports.mapping.upgrade_title') }}</p>
+            <p class="mt-0.5 text-xs">{{ t('payroll_imports.mapping.upgrade_hint') }}</p>
+            <div v-if="canManage" class="mt-2 flex flex-col items-start gap-1.5">
+              <button type="button" data-testid="attendance-profile-upgrade-run" class="whitespace-nowrap" :class="btnOutline('warning')"
+                :disabled="busy !== null || upgradeBlockedReason !== ''"
+                :title="disabledTitle(upgradeBlockedReason !== '', upgradeBlockedReason)" @click="updateSample">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+                {{ busy === 'save' ? t('payroll_imports.common.working') : t('payroll_imports.mapping.upgrade_action') }}
+              </button>
+              <p v-if="upgradeBlockedReason" :class="BTN_DISABLED_NOTE">{{ upgradeBlockedReason }}</p>
+            </div>
+          </div>
           <div class="mt-4">
             <ActionBar :actions="actions" />
           </div>

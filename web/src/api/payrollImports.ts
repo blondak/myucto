@@ -385,6 +385,40 @@ export interface AttendancePreviewProfile {
   auto: boolean
 }
 
+/** Mzdový běh, který po převzetí měsíční mzdy potřebuje přepočet. */
+export interface AttendanceRunNeedingRefresh {
+  run_id: number
+  /** YYYY-MM */
+  period: string
+  status: string
+}
+
+/**
+ * Rozdíl mezi měsíční mzdou z podkladů a sjednanými podmínkami vztahu.
+ * Zapíše se jen změna s `reason === null`.
+ */
+export interface AttendanceWageChange {
+  key: string
+  display_name: string
+  employment_id: number
+  current_minor: number | null
+  imported_minor: number
+  /** `correct` = doplnění chybějící mzdy, `add` = nová verze podmínek od 1. dne období. */
+  mode: 'correct' | 'add'
+  reason: string | null
+  runs_needing_refresh: AttendanceRunNeedingRefresh[]
+}
+
+/** Nová verze vzorového profilu pro profil, který firma upravila. */
+export interface AttendanceSampleUpgrade {
+  profile_id: number
+  name: string
+  version: number | null
+  latest_version: number
+  rules: AttendanceRule[]
+  components: AttendanceProfileComponent[]
+}
+
 export interface AttendancePreview {
   period: string
   content_hash: string
@@ -396,6 +430,8 @@ export interface AttendancePreview {
   employment_options: AttendanceEmploymentOption[]
   persons: AttendancePerson[]
   component_checks: AttendanceComponentCheck[]
+  wage_changes: AttendanceWageChange[]
+  upgrade_available: AttendanceSampleUpgrade | null
   summary: {
     persons: number
     matched: number
@@ -429,6 +465,7 @@ export interface AttendanceApplyPayload {
   create_inputs: boolean
   create_components: boolean
   adopt_personal_numbers: boolean
+  adopt_monthly_wage: boolean
   components?: AttendanceProfileComponent[] | null
   profile_id?: number | null
 }
@@ -464,6 +501,9 @@ export interface AttendanceApplyResult {
   skipped_persons: { key: string; display_name: string; reason: string }[]
   personal_numbers_adopted: number
   personal_number_conflicts: AttendancePersonalNumberConflict[]
+  monthly_wages_adopted: number
+  wage_conflicts: { key: string; display_name: string; reason: string }[]
+  runs_needing_refresh: AttendanceRunNeedingRefresh[]
 }
 
 export interface AttendancePersonCreate {
@@ -507,6 +547,10 @@ export interface AttendanceProfile {
   rules: AttendanceRule[]
   components: AttendanceProfileComponent[]
   is_sample: boolean
+  /** Verze vzoru, ze které profil vznikl; `null` u vlastního profilu. */
+  sample_version: number | null
+  /** Seznam profilů: upravený vzor má novější verzi. Uložení profilu příznak nevrací. */
+  upgrade_available?: boolean
   updated_at: string
 }
 

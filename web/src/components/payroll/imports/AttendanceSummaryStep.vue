@@ -8,7 +8,8 @@ import type {
   AttendancePerson,
   AttendancePreview,
 } from '@/api/payrollImports'
-import { formatMoneyMinor } from '@/composables/useFormat'
+import { formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
+import { previewRefreshRuns } from './attendanceWages'
 import {
   effectiveEmploymentId,
   formatHours,
@@ -34,6 +35,24 @@ const hasReference = computed(() => props.preview.persons.some(person =>
   person.reference.gross_minor !== null || person.reference.net_minor !== null || person.reference.hours !== null))
 const skippedCount = computed(() => props.preview.persons.filter(person => employmentOf(person) === null).length)
 const conflictCount = computed(() => props.preview.persons.filter(personHasConflicts).length)
+const wageChanges = computed(() => props.preview.wage_changes ?? [])
+const wageRefreshPeriods = computed(() => previewRefreshRuns(wageChanges.value).map(run => formatPeriod(run.period)).join(', '))
+
+function wageBadgeClass(change: { reason: string | null, mode: string }): string {
+  if (change.reason !== null) return 'bg-warning-50 text-warning-700'
+  return change.mode === 'add' ? 'bg-primary-50 text-primary-700' : 'bg-success-50 text-success-700'
+}
+
+function wageBadgeLabel(change: { reason: string | null, mode: string }): string {
+  if (change.reason !== null) return t('payroll_imports.attendance.summary.wages_blocked')
+  const key = `payroll_imports.attendance.summary.wages_mode.${change.mode}`
+  return te(key) ? t(key) : change.mode
+}
+
+function currentWage(minor: number | null): string {
+  return minor === null ? t('payroll_imports.attendance.summary.wages_missing') : formatMoneyMinor(minor)
+}
+
 const visiblePersons = computed(() => onlyIssues.value
   ? props.preview.persons.filter(person => personHasConflicts(person) || person.warnings.length > 0 || employmentOf(person) === null)
   : props.preview.persons)
@@ -104,6 +123,49 @@ function checkClass(check: AttendanceComponentCheck): string {
           <span v-if="check.message" class="text-xs text-neutral-600">{{ check.message }}</span>
         </li>
       </ul>
+    </section>
+
+    <!--
+      Měsíční mzda z podkladů proti sjednaným podmínkám. Řádek s důvodem se
+      nepřevezme a důvod musí být vidět u člověka, ne až ve výsledku.
+    -->
+    <section v-if="wageChanges.length" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm" data-testid="attendance-wage-changes">
+      <h3 class="text-sm font-semibold text-neutral-900">{{ t('payroll_imports.attendance.summary.wages_title') }}</h3>
+      <p class="mt-1 max-w-3xl text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.wages_hint') }}</p>
+      <div class="mt-3 hidden max-h-[50vh] overflow-auto md:block">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+              <th class="px-2 py-1.5">{{ t('payroll_imports.attendance.summary.wages_person') }}</th>
+              <th class="px-2 py-1.5 text-right">{{ t('payroll_imports.attendance.summary.wages_current') }}</th>
+              <th class="px-2 py-1.5 text-right">{{ t('payroll_imports.attendance.summary.wages_imported') }}</th>
+              <th class="px-2 py-1.5">{{ t('payroll_imports.attendance.summary.wages_mode_label') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="change in wageChanges" :key="change.key" class="border-t border-neutral-100 align-top" :class="change.reason !== null ? 'bg-warning-50/60' : ''" data-testid="attendance-wage-row">
+              <td class="px-2 py-1.5">
+                <p class="font-medium text-neutral-900">{{ change.display_name }}</p>
+                <p v-if="change.reason" class="mt-0.5 max-w-md text-xs text-warning-700">{{ change.reason }}</p>
+              </td>
+              <td class="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-neutral-600">{{ currentWage(change.current_minor) }}</td>
+              <td class="whitespace-nowrap px-2 py-1.5 text-right font-medium tabular-nums text-neutral-900">{{ formatMoneyMinor(change.imported_minor) }}</td>
+              <td class="px-2 py-1.5"><span class="whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium" :class="wageBadgeClass(change)">{{ wageBadgeLabel(change) }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-3 space-y-2 md:hidden">
+        <article v-for="change in wageChanges" :key="change.key" class="rounded-lg p-3 text-sm" :class="change.reason !== null ? 'bg-warning-50' : 'bg-neutral-50'">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="font-medium text-neutral-900">{{ change.display_name }}</p>
+            <span class="whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium" :class="wageBadgeClass(change)">{{ wageBadgeLabel(change) }}</span>
+          </div>
+          <p class="mt-1 tabular-nums text-neutral-700">{{ currentWage(change.current_minor) }} → <span class="font-medium text-neutral-900">{{ formatMoneyMinor(change.imported_minor) }}</span></p>
+          <p v-if="change.reason" class="mt-1 text-xs text-warning-700">{{ change.reason }}</p>
+        </article>
+      </div>
+      <p v-if="wageRefreshPeriods" class="mt-3 text-xs text-neutral-600" data-testid="attendance-wage-runs">{{ t('payroll_imports.attendance.summary.wages_runs', { periods: wageRefreshPeriods }) }}</p>
     </section>
 
     <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">

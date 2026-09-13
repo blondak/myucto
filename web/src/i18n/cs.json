@@ -1943,6 +1943,83 @@
       },
       "open_runs": "Otevřít mzdové běhy"
     },
+    "statutory_bulk": {
+      "title": "Doplnit výchozí zákonné údaje",
+      "intro": "Osobám bez cizího prvku doplní chybějící údaje, které plynou z toho, že s cizinou nemají nic společného: daňovou rezidenci v Česku, českou příslušnost k pojištění bez formuláře A1 a u osob mladších 60 let neuplatňování slevy pracujícího důchodce. Existující záznam se nikdy nepřepíše. Zdravotní pojišťovnu hromadně nedoplníme, zná ji jen registrace nebo zaměstnanec.",
+      "period": "Údaje platí od měsíce",
+      "reload": "Načíst náhled znovu",
+      "scope_run": "Náhled zahrnuje všechny osoby, které by vzal mzdový běh za {period}.",
+      "scope_selection": "Náhled zahrnuje vybrané osoby ({count}).",
+      "frozen": "Mzdy jsou schválené do {date}. Do schváleného období se nezapisuje, údaje začnou platit až od dalšího měsíce.",
+      "load_failed": "Náhled doplnění se nepodařilo načíst.",
+      "retry": "Zkusit znovu",
+      "summary": {
+        "people": "Osob celkem",
+        "ready": "Doplní se",
+        "nothing_to_add": "Nic k doplnění",
+        "excluded": "Vyřazeno"
+      },
+      "sections_title": "Co se doplní",
+      "section": {
+        "tax_residences": "Daňová rezidence: Česko",
+        "social_jurisdictions": "Příslušnost k pojištění: česká, bez A1",
+        "social_discount_claims": "Sleva pracujícího důchodce: neuplatňuje se"
+      },
+      "section_count": "{count} osob",
+      "discount_title": "Sleva důchodce se nedoplní:",
+      "basis_title": "Údaje začnou platit později než prvním dnem měsíce:",
+      "excluded_title": "Vyřazené osoby ({count})",
+      "excluded_hint": "U nich hromadné doplnění nic nezapíše. Údaje zapište na kartě osoby.",
+      "health_title": "Bez zdravotní pojišťovny ({count})",
+      "health_hint": "Pojišťovnu hromadné doplnění nezapisuje. Převezměte ji z registrací JMHZ, nebo ji doplňte na kartě osoby.",
+      "health_link": "Importy → JMHZ registrace",
+      "declaration_title": "Prohlášení poplatníka chybí ({count})",
+      "declaration_label": "Zapsat chybějící prohlášení jako nepodepsané ({count} osob)",
+      "declaration_hint": "Zapíše stav „nepodepsal“. Bez podepsaného prohlášení se neuplatní sleva na poplatníka ani další slevy. Zapněte jen tehdy, když víte, že prohlášení opravdu nepodepsali.",
+      "declaration_on": "Podpis se tím nevytváří. Až zaměstnanec prohlášení podepíše, zapište to na jeho kartě.",
+      "withholding_title": "Riziko srážkové daně ({count})",
+      "withholding_hint": "U těchto osob může nepodepsané prohlášení přepnout zdanění na srážkovou daň (typicky dohoda s nízkým příjmem). Zkontrolujte je před zápisem.",
+      "and_more": "a dalších {count}",
+      "person_fallback": "Osoba č. {id}",
+      "apply": "Doplnit údaje ({count} osob)",
+      "nothing_to_apply": "Žádná osoba nemá co doplnit.",
+      "apply_failed": "Údaje se nepodařilo doplnit.",
+      "applied_toast": "Údaje doplněny u {count} osob.",
+      "result_title": "Výsledek doplnění",
+      "result": {
+        "applied": "Doplněno",
+        "skipped": "Přeskočeno",
+        "failed": "Selhalo"
+      },
+      "skipped_title": "Přeskočené osoby ({count})",
+      "failed_title": "Osoby, u kterých zápis selhal ({count})",
+      "reason": {
+        "employee_not_found": "osoba nebyla nalezena",
+        "no_employment_in_period": "nemá v měsíci pracovní vztah",
+        "period_frozen": "vztah skončil ve schváleném období",
+        "foreign_element": "cizí prvek",
+        "nothing_to_add": "nic k doplnění"
+      },
+      "foreign": {
+        "address_abroad": "adresa v cizině",
+        "foreign_citizenship": "cizí státní občanství",
+        "foreign_permit": "povolení k pobytu nebo práci",
+        "foreign_legislation": "cizí legislativa ve smluvních podmínkách",
+        "a1_certificate": "formulář A1",
+        "foreign_insurance_or_tax_regime": "zahraniční pojištění nebo daňový režim",
+        "foreign_statutory_evidence": "zahraniční údaj v zákonné evidenci"
+      },
+      "discount": {
+        "age_60_or_more": "věk 60 let a více",
+        "birth_date_missing": "chybí datum narození",
+        "birth_date_invalid": "neplatné datum narození"
+      },
+      "basis": {
+        "run_month": "od prvního dne měsíce běhu",
+        "employment_start": "od měsíce nástupu",
+        "after_frozen_period": "od měsíce po schváleném období"
+      }
+    },
     "runs": {
       "person_picker": {
         "placeholder": "Vyhledat zaměstnance",
@@ -2041,7 +2118,17 @@
         "draft_inputs_approve_partial": "Schváleno {approved} vstupů, {failed} ne. Důvody jsou vypsané u běhu.",
         "draft_inputs_failed_title": "Tyhle vstupy dávka neschválila:",
         "draft_inputs_failed_row": "{count}× {reason}",
-        "draft_inputs_approve_failed": "Mzdové vstupy se nepodařilo hromadně schválit."
+        "draft_inputs_approve_failed": "Mzdové vstupy se nepodařilo hromadně schválit.",
+        "statutory_bulk_action": "Doplnit výchozí údaje ({count} osob)",
+        "statutory_bulk_action_plain": "Doplnit výchozí údaje",
+        "statutory_bulk_refresh": {
+          "lock_and_calculate": "Doplněné údaje se do běhu dostanou uzamčením vstupů. Spočítejte mzdy.",
+          "lock_inputs": "Doplněné údaje se do běhu dostanou uzamčením vstupů. Uzamkněte vstupy a spočítejte mzdy.",
+          "reopen": "Doplněné údaje se do běhu dostanou až novou revizí. Otevřete ji a potom spočítejte mzdy.",
+          "cancel": "Běh počítá ze zmrazeného snímku vstupů, samotný přepočet doplněné údaje nevezme. Běh zrušte, otevřete jeho novou revizi a spočítejte mzdy znovu.",
+          "request_correction": "Běh je schválený. Doplněné údaje se do něj dostanou jen opravnou revizí: vyžádejte opravu, otevřete novou revizi a spočítejte mzdy.",
+          "none": "Doplněné údaje platí pro další zpracování. V tomto stavu je do výpočtu běhu promítnout nelze."
+        }
       },
       "override": {
         "awaiting": "Tohle varování čeká na rozhodnutí člověka. Dokud za něj někdo nepřevezme odpovědnost a nenapíše proč, mzdový běh schválit nejde.",
@@ -3705,6 +3792,7 @@
       "search_placeholder": "Jméno nebo osobní číslo",
       "filter": "Zobrazení",
       "quick_inputs": "Měsíční zadání mezd",
+      "statutory_bulk_action": "Doplnit výchozí zákonné údaje",
       "no_results_title": "Žádný zaměstnanec neodpovídá filtru",
       "no_results_description": "Upravte hledaný text nebo zvolte jiné zobrazení.",
       "filters": {
@@ -24957,6 +25045,8 @@
       "profile_auto": "Automaticky podle souborů",
       "profile_hint": "Automaticky se použije profil, který nejlépe odpovídá hlavičkám souborů. Profily spravujete v záložce Mapování sloupců.",
       "profile_stale": "Profil mapování se mezitím změnil. Načtěte náhled znovu, ať import odpovídá uloženému mapování.",
+      "upgrade_notice": "Použitý profil „{name}“ vznikl ze starší verze vzoru (verze {version}, aktuální {latest}) a upravili jste ho, proto se sám neaktualizoval. Nová verze může rozpoznat víc sloupců. Aktualizujte profil v Mapování sloupců.",
+      "upgrade_open": "Otevřít mapování",
       "reload_preview": "Načíst náhled znovu",
       "drop_hint": "Přetáhněte sem soubory z docházkového systému (hlavní i pomocné) nebo je vyberte",
       "load_preview": "Načíst náhled",
@@ -25066,6 +25156,21 @@
         "save_links_hint": "Příští import stejné osoby spáruje automaticky podle osobního čísla nebo jména.",
         "adopt_personal_numbers": "Převzít osobní čísla z podkladů",
         "adopt_personal_numbers_hint": "Vztahy s automatickým číslem (1, ZAM-7…) dostanou osobní číslo z podkladů; ručně zadané číslo se nepřepisuje.",
+        "adopt_monthly_wage": "Převzít měsíční mzdu z podkladů ({count} změn)",
+        "adopt_monthly_wage_hint": "Zapíše se jen u osob bez překážky v tabulce Měsíční mzda z podkladů. Chybějící mzda se doplní do platných podmínek vztahu, jiná mzda založí novou verzi podmínek od prvního dne období.",
+        "wages_title": "Měsíční mzda z podkladů",
+        "wages_hint": "Rozdíly mezi mzdou v podkladech a sjednanými podmínkami vztahu. Osoby s důvodem se nepřevezmou; mzdu jim upravte na kartě vztahu.",
+        "wages_person": "Osoba",
+        "wages_current": "Nyní",
+        "wages_imported": "Z podkladů",
+        "wages_mode_label": "Zápis",
+        "wages_mode": {
+          "correct": "Doplnění",
+          "add": "Nová verze od 1. dne období"
+        },
+        "wages_missing": "neuvedena",
+        "wages_blocked": "Nepřevezme se",
+        "wages_runs": "Převzetí se dotkne mzdových běhů za {periods}. Po importu je bude potřeba přepočítat.",
         "create_inputs": "Vytvořit mzdové vstupy (návrhy ke schválení)",
         "create_inputs_hint": "Peněžní složky se předají do importu mzdových vstupů. Opakovaný import téhož měsíce nevytvoří druhou odměnu, jen duplicitu.",
         "missing_employment_note": "{count} osob nemá pracovní vztah a při použití se přeskočí.",
@@ -25089,6 +25194,11 @@
         "links_saved": "Uloženo vazeb: {count}",
         "personal_numbers_adopted": "Převzato osobních čísel: {count}",
         "personal_number_conflicts_title": "Osobní čísla, která se nepřevzala ({count})",
+        "monthly_wages_adopted": "Převzato měsíčních mezd: {count}",
+        "wage_conflicts_title": "Měsíční mzdy, které se nepřevzaly ({count})",
+        "runs_refresh_title": "Mzdové běhy k přepočtu",
+        "runs_refresh_hint": "Změněná mzda se do běhu dostane až s novým snímkem vstupů. Otevřete běh a postupujte podle jeho stavu.",
+        "runs_refresh_link": "Běh za {period}",
         "errors_title": "Vstupy, které se nevytvořily",
         "error_row": "Řádek {row}: {message}",
         "skipped_title": "Přeskočené osoby ({count})",
@@ -25134,6 +25244,12 @@
       "state_dirty": "Neuložené změny",
       "updated_at": "Upraveno {date}",
       "sample_hint": "Ukázkový profil pro docházkový systém GIRITON, který dostane každá firma. Upravte ho podle svých souborů, nebo si ho duplikujte a upravujte kopii.",
+      "upgrade_badge": "Nová verze vzoru",
+      "upgrade_title": "K dispozici je nová verze vzoru",
+      "upgrade_hint": "Profil vznikl ze starší verze vzoru a upravili jste ho, proto se sám neaktualizoval. Aktualizace nahradí pravidla a složky profilu novou verzí vzoru a vlastní úpravy se ztratí. Chcete-li je zachovat, profil nejdřív duplikujte.",
+      "upgrade_action": "Aktualizovat vzor",
+      "upgrade_confirm": "Nahradit pravidla a složky profilu „{name}“ novou verzí vzoru? Vlastní úpravy profilu se ztratí.",
+      "upgrade_needs_preview": "Pravidla nové verze posílá server s náhledem. Vyzkoušejte profil na souborech níže, potom aktualizaci spusťte.",
       "save": "Uložit",
       "discard": "Zahodit změny",
       "duplicate": "Duplikovat",

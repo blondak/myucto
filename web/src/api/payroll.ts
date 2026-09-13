@@ -713,6 +713,85 @@ export interface PayrollStatutoryEvidencePayload {
   sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
 }
 
+/** Sekce s výchozím stavem bez cizího prvku, které hromadné doplnění umí zapsat. */
+export interface PayrollStatutoryBulkSectionCounts {
+  tax_residences: number
+  social_jurisdictions: number
+  social_discount_claims: number
+}
+
+export interface PayrollStatutoryBulkPersonRef {
+  employee_id: number
+  full_name: string | null
+}
+
+export interface PayrollStatutoryBulkExcluded extends PayrollStatutoryBulkPersonRef {
+  /** Kódy: employee_not_found, no_employment_in_period, period_frozen, foreign_element. */
+  reasons: string[]
+  /** Kódy cizího prvku: address_abroad, foreign_citizenship, foreign_permit, … */
+  foreign_elements: string[]
+}
+
+export interface PayrollStatutoryBulkSectionState {
+  state: 'add' | 'exists' | 'excluded' | 'missing'
+  /** U slevy důchodce: age_60_or_more, birth_date_missing, birth_date_invalid. */
+  reason: string | null
+}
+
+export interface PayrollStatutoryBulkPerson {
+  employee_id: number
+  full_name: string | null
+  status: 'ready' | 'nothing_to_add' | 'excluded'
+  reasons: string[]
+  foreign_elements: string[]
+  effective_from: string | null
+  /** run_month, employment_start, after_frozen_period */
+  effective_from_basis: string | null
+  sections: Record<string, PayrollStatutoryBulkSectionState>
+  health_insurer_missing: boolean
+  unsigned_declaration_withholding_risk: boolean
+  withholding_employment_ids: number[]
+}
+
+export interface PayrollStatutoryBulkPreview {
+  effective_on: string
+  month_start: string
+  frozen_through: string | null
+  summary: {
+    people: number
+    ready: number
+    nothing_to_add: number
+    excluded: number
+    sections: PayrollStatutoryBulkSectionCounts
+    declaration_missing: number
+    unsigned_declaration_withholding_risk: number
+    health_insurer_missing: number
+  }
+  ready_employee_ids: number[]
+  declaration_missing_employee_ids: number[]
+  excluded: PayrollStatutoryBulkExcluded[]
+  health_insurer_missing: PayrollStatutoryBulkPersonRef[]
+  unsigned_declaration_withholding_risk: Array<PayrollStatutoryBulkPersonRef & { employment_ids: number[] }>
+  people: PayrollStatutoryBulkPerson[]
+}
+
+export interface PayrollStatutoryBulkApplyPayload {
+  effective_on: string
+  employee_ids: number[]
+  sections?: string[]
+  /** Server bere jen doslovné `true`. */
+  record_unsigned_declaration?: boolean
+}
+
+export interface PayrollStatutoryBulkResult {
+  effective_on: string
+  sections: string[]
+  counts: { applied: number, skipped: number, failed: number }
+  applied: Array<{ employee_id: number, sections: string[], effective_from: string }>
+  skipped: Array<{ employee_id: number, reasons: string[], foreign_elements?: string[] }>
+  failed: Array<{ employee_id: number, message: string }>
+}
+
 export type PayrollForeignPermitKind = 'residence' | 'work'
 export type PayrollForeignPermitStatus = 'future' | 'valid' | 'expiring' | 'expired' | 'superseded'
 
@@ -6272,6 +6351,17 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/statutory-evidence`,
       payload,
     ).then(response => response.data.evidence),
+  /** Náhled hromadného doplnění výchozí zákonné evidence; `employee_ids: null` = osoby běhu za měsíc. */
+  statutoryBulkDefaultsPreview: (payload: { effective_on: string, employee_ids?: number[] | null }) =>
+    api.post<{ preview: PayrollStatutoryBulkPreview }>(
+      '/payroll/statutory-evidence/bulk-defaults/preview',
+      payload,
+    ).then(response => response.data.preview),
+  statutoryBulkDefaultsApply: (payload: PayrollStatutoryBulkApplyPayload) =>
+    api.post<{ result: PayrollStatutoryBulkResult }>(
+      '/payroll/statutory-evidence/bulk-defaults/apply',
+      payload,
+    ).then(response => response.data.result),
   foreignPermits: (employeeId: number, asOf?: string) =>
     api.get<{ permits: PayrollForeignPermitView }>(
       `/payroll/people/${employeeId}/foreign-permits`,
