@@ -8658,6 +8658,7 @@
         "absences": "Otevřít absence tohoto vztahu",
         "calendar": "Najít pracovní kalendář vztahu",
         "entries": "Zkontrolovat docházku vztahu",
+        "imports": "Otevřít importy docházky",
         "average": "Doplnit průměr tohoto vztahu"
       },
       "eldp": {
@@ -8703,6 +8704,10 @@
           "month_boundary": "Začátek a konec evidované práce leží v různých kalendářních měsících.",
           "overlap": "Ve stejnou dobu je evidováno více základních nebo přesčasových pracovních intervalů.",
           "break": "U některého záznamu je přestávka delší než celý interval práce.",
+          "integrity": "Uložená docházka měsíce nemá úplné nebo platné údaje, souhrn z ní nelze bezpečně sestavit.",
+          "work_source": "Měsíc bere docházku ze souhrnu importu, ale má i časové záznamy. Dva zdroje téže doby se neslučují.",
+          "import_missing": "Měsíc bere docházku ze souhrnu importu, ale jeho aktuální revize žádný souhrn nemá (typicky po znovuotevření měsíce).",
+          "import_values": "Souhrn z importu docházky neuvádí odpracované hodiny nebo uvádí přesčas, který odpracované hodiny převyšuje.",
           "unknown": "Souhrn pracovní doby nelze ověřit. Příčinu musí posoudit podpora."
         },
         "steps": {
@@ -8712,6 +8717,10 @@
           "month_boundary": "Zkontrolujte začátek a konec práce u tohoto vztahu. Práci přes hranici měsíců rozdělte na skutečně odpracované části příslušných měsíců, aniž byste změnili celkovou dobu. Pokud ji editor neumí opravit, kontaktujte podporu. Poté obnovte souhrn.",
           "overlap": "Porovnejte záznamy tohoto vztahu po dnech a druzích práce. Odstraňte pouze chybnou duplicitu nebo opravte skutečný čas; běžnou práci a přesčas nezapisujte dvakrát do stejného intervalu. Pokud opravu editor nenabízí, kontaktujte podporu. Poté obnovte souhrn.",
           "break": "Zkontrolujte začátek, konec a délku přestávky u záznamů tohoto vztahu. Opravte nesprávně zadaný čas podle skutečné docházky. Pokud opravu editor nenabízí, kontaktujte podporu. Poté obnovte souhrn.",
+          "integrity": "Kontaktujte podporu s uvedeným měsícem, pracovním vztahem a technickými podrobnostmi níže. Docházku kvůli této chybě neupravujte naslepo.",
+          "work_source": "Rozhodněte, který zdroj docházky pro měsíc platí. Platí-li podklady z importu, odstraňte chybně zapsané časové záznamy; platí-li záznamy, souhrn z importu pro tento měsíc nepoužívejte. Poté obnovte souhrn.",
+          "import_missing": "Otevřete Importy docházky a použijte dávku za tento měsíc znovu se zápisem souhrnu do pracovních měsíců. Poté obnovte souhrn a měsíc schvalte.",
+          "import_values": "Opravte podklady v docházkovém systému (odpracované hodiny a přesčas) a importujte je znovu. Přesčas je částí odpracované doby, nesmí ji převyšovat.",
           "unknown": "Kontaktujte podporu s uvedeným měsícem, pracovním vztahem a technickými podrobnostmi níže. Nepotvrzujte náhradní hodnoty jen kvůli dokončení hlášení."
         }
       },

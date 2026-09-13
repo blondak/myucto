@@ -484,6 +484,102 @@ final class AverageEarningDerivationServiceTest extends TestCase
         ], '2026-04-01'));
     }
 
+    /**
+     * Měsíc schválený ze souhrnu importu docházky (v6) nemá časové záznamy.
+     * Odpracovaná doba se bere ze souhrnu a porovnává v millihodinách.
+     */
+    public function testImportSummaryMonthDerivesGrossAndMinutesWithoutEntries(): void
+    {
+        $month = Derivation::monthFromRow(
+            $this->row(['input_json' => self::inputJson(['jmhz_work_summary' => self::importSummary()])]),
+            '2026-01-01',
+        );
+
+        self::assertSame([], $month['blockers']);
+        self::assertSame(4_500_000, $month['gross_earnings_minor']);
+        self::assertSame(9_630, $month['worked_minutes']);
+        self::assertNull($month['worked_days'], 'Dny podklady nenesou; null = neuvedeno.');
+        self::assertSame(43, $month['work_summary_id']);
+    }
+
+    public function testImportSummaryMonthWithRewrittenHoursIsAMismatch(): void
+    {
+        self::assertSame(
+            ['work_summary_hours_mismatch'],
+            Derivation::monthFromRow(
+                $this->row(['input_json' => self::inputJson([
+                    'jmhz_work_summary' => self::importSummary(160_500, 160_000),
+                ])]),
+                '2026-01-01',
+            )['blockers'],
+        );
+    }
+
+    public function testImportSummaryHoursThatAreNotWholeMinutesBlock(): void
+    {
+        self::assertSame(
+            ['worked_time_not_whole_minutes'],
+            Derivation::monthFromRow(
+                $this->row(['input_json' => self::inputJson([
+                    'jmhz_work_summary' => self::importSummary(160_333, 160_333),
+                ])]),
+                '2026-01-01',
+            )['blockers'],
+        );
+    }
+
+    /**
+     * Bez dnů nejde posoudit minimum § 355 odst. 1 ZP. Nula dnů by průměr
+     * tiše poslala na pravděpodobný výdělek, na který nárok není.
+     */
+    public function testMonthWithoutWorkedDaysBlocksInsteadOfProbableEarning(): void
+    {
+        $months = [
+            $this->readyMonth('2026-01-01', 4_500_000, 9_630, 21),
+            ['worked_days' => null] + $this->readyMonth('2026-02-01', 4_500_000, 9_630, 0),
+            $this->readyMonth('2026-03-01', 4_500_000, 9_630, 22),
+        ];
+
+        $combined = Derivation::combine($months, self::MINIMUM_WORKED_DAYS, false, self::probable());
+
+        self::assertFalse($combined['ready']);
+        self::assertSame(['worked_days_not_provided'], $combined['blockers']);
+        self::assertNull($combined['source_kind']);
+    }
+
+    /** @return array<string,mixed> */
+    private static function importSummary(int $importedMillihours = 160_500, ?int $confirmedMillihours = null): array
+    {
+        $source = [
+            'schema_version' => 'jmhz-work-month.v6',
+            'period_start' => '2026-01-01',
+            'import_summary' => [
+                'id' => 9,
+                'time_month_id' => 5,
+                'time_month_revision_no' => 1,
+                'attendance_import_id' => 77,
+                'values' => ['fund_hours' => 168_000, 'worked_hours' => $importedMillihours],
+                'worked_days' => null,
+                'sources' => ['worked_hours' => ['ref' => 'dochazka.xlsx!List1!C3', 'file_sha256' => null]],
+                'content_sha256' => str_repeat('c', 64),
+            ],
+        ];
+        $sourceJson = CanonicalJson::encode($source);
+
+        return [
+            'id' => 43,
+            'derivation_version' => 'jmhz-work-month.v6',
+            'source_snapshot_json' => $sourceJson,
+            'source_snapshot_sha256' => hash('sha256', $sourceJson),
+            'summary_sha256' => str_repeat('e', 64),
+            'values' => [
+                'evidence_days' => 31,
+                'worked_millihours' => $confirmedMillihours ?? $importedMillihours,
+                'worked_days' => null,
+            ],
+        ];
+    }
+
     /** @return array{hourly_minor:int,rationale:string,term_id:?int,effective_from:?string} */
     private static function probable(): array
     {

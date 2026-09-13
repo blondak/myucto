@@ -8658,6 +8658,7 @@
         "absences": "Open absences for this employment",
         "calendar": "Find the employment calendar",
         "entries": "Review attendance for this employment",
+        "imports": "Open attendance imports",
         "average": "Complete this employment’s average earnings"
       },
       "eldp": {
@@ -8703,6 +8704,10 @@
           "month_boundary": "A recorded work interval starts and ends in different calendar months.",
           "overlap": "Regular or overtime work intervals overlap.",
           "break": "A break is longer than the entire recorded work interval.",
+          "integrity": "The month’s saved attendance has incomplete or invalid data; a summary cannot safely be built from it.",
+          "work_source": "The month takes attendance from an import summary but also has time entries. Two sources of the same time are never merged.",
+          "import_missing": "The month takes attendance from an import summary, but its current revision has none (typically after the month was reopened).",
+          "import_values": "The attendance import summary has no worked hours, or its overtime exceeds the worked hours.",
           "unknown": "The working time summary could not be verified. Support must investigate."
         },
         "steps": {
@@ -8712,6 +8717,10 @@
           "month_boundary": "Check the work interval’s start and end. Split work crossing a month boundary into the actual portions worked in each month without changing the total duration. Contact support if the editor cannot correct it. Refresh the summary afterwards.",
           "overlap": "Compare this employment’s records by date and work category. Remove only an incorrect duplicate or correct the actual time; do not record regular work and overtime twice for the same interval. Contact support if the editor cannot correct it. Refresh the summary afterwards.",
           "break": "Check the start, end and break duration in this employment’s records. Correct the wrongly entered time using actual attendance. Contact support if the editor cannot correct it. Refresh the summary afterwards.",
+          "integrity": "Contact support with the month, employment and technical details below. Do not change attendance blindly because of this error.",
+          "work_source": "Decide which attendance source applies to the month. If the imported data is right, remove the wrongly recorded time entries; if the entries are right, do not use the import summary for this month. Refresh the summary afterwards.",
+          "import_missing": "Open Attendance imports and apply this month’s batch again with the summary written to working months. Then refresh the summary and approve the month.",
+          "import_values": "Correct the data in the attendance system (worked hours and overtime) and import it again. Overtime is part of the worked time and must not exceed it.",
           "unknown": "Contact support with the month, employment and technical details below. Do not confirm substitute values just to complete the report."
         }
       },

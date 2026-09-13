@@ -14,6 +14,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\ImportFiles;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -32,6 +33,7 @@ final class PayrollAttendanceImportAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly SupplierAccessResolver $supplierAccess,
+        private readonly PayrollTimeImportApprovalService $timeApprovals,
     ) {
     }
 
@@ -79,6 +81,7 @@ final class PayrollAttendanceImportAction
                 ($body['adopt_personal_numbers'] ?? false) === true,
                 ($body['adopt_monthly_wage'] ?? false) === true,
                 ($body['write_time_summary'] ?? false) === true,
+                ($body['approve_clean_time_months'] ?? false) === true,
             );
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -86,6 +89,7 @@ final class PayrollAttendanceImportAction
         $batch = PayrollTimeValue::row($result['batch'] ?? null, 'batch');
         $inputs = PayrollTimeValue::row($result['inputs'] ?? null, 'inputs');
         $timeSummary = is_array($result['time_summary'] ?? null) ? $result['time_summary'] : [];
+        $timeApproval = is_array($result['time_approval'] ?? null) ? $result['time_approval'] : null;
         $this->logger->log(
             'payroll.attendance_import.applied',
             $this->userId($request),
@@ -96,11 +100,15 @@ final class PayrollAttendanceImportAction
                 'person_count' => $batch['person_count'] ?? null,
                 'metric_count' => $batch['metric_count'] ?? null,
                 'inputs_created' => $inputs['created'] ?? 0,
+                'inputs_updated' => $inputs['updated'] ?? 0,
+                'inputs_overridden' => $inputs['overridden'] ?? 0,
                 'components_created' => $result['components_created'] ?? [],
                 'links_saved' => $result['links_saved'] ?? 0,
                 'monthly_wages_adopted' => $result['monthly_wages_adopted'] ?? 0,
                 'time_summaries_written' => $timeSummary['written'] ?? 0,
                 'time_summary_exceptions' => count(is_array($timeSummary['exceptions'] ?? null) ? $timeSummary['exceptions'] : []),
+                'time_months_approved' => $timeApproval['approved'] ?? 0,
+                'time_approval_exceptions' => self::exceptionCodes($timeApproval),
                 'replayed' => $result['replayed'] ?? false,
             ],
             $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
@@ -109,6 +117,68 @@ final class PayrollAttendanceImportAction
         );
 
         return Json::ok($response, $result, 201);
+    }
+
+    /**
+     * Dodatečné hromadné schválení pracovních měsíců z už použité dávky.
+     *
+     * Oprávnění je stejné jako u schválení docházky po jednom
+     * (`payroll.approve`), protože výsledek je týž: schválený měsíc
+     * a zmrazený pracovní souhrn pro hlášení ČSSZ.
+     *
+     * @param array{id:string} $args
+     */
+    public function approveTimeMonths(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, 'payroll.approve')) !== null) {
+            return $error;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $importId = (int) $args['id'];
+        try {
+            $result = $this->timeApprovals->applyBatch($supplierId, $importId, true, $this->userId($request));
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        $this->logger->log(
+            'payroll.attendance_import.time_months_approved',
+            $this->userId($request),
+            'payroll_attendance_import',
+            $importId,
+            [
+                'approved' => $result['approved'],
+                'already_approved' => $result['already_approved'],
+                'summaries_written' => $result['written'],
+                'exceptions' => self::exceptionCodes($result),
+                'warning_count' => count($result['warnings']),
+            ],
+            $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, ['time_approval' => $result]);
+    }
+
+    /**
+     * Výjimky hromadného schválení do auditu: vztah a kód, bez jmen osob.
+     *
+     * @param array<string,mixed>|null $approval
+     * @return list<array{employment_id:mixed,code:mixed}>
+     */
+    private static function exceptionCodes(?array $approval): array
+    {
+        $exceptions = is_array($approval['exceptions'] ?? null) ? $approval['exceptions'] : [];
+
+        return array_values(array_map(
+            static fn (mixed $exception): array => [
+                'employment_id' => is_array($exception) ? ($exception['employment_id'] ?? null) : null,
+                'code' => is_array($exception) ? ($exception['code'] ?? null) : null,
+            ],
+            $exceptions,
+        ));
     }
 
     public function persons(Request $request, Response $response): Response

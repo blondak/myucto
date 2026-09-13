@@ -16,6 +16,92 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     public const DERIVATION_VERSION = 'jmhz-work-month.v5';
 
     /**
+     * Souhrn měsíce, který bere odpracovanou dobu ze souhrnu importu docházky
+     * (`payroll_time_months.work_source = 'import_summary'`), ne z intervalů.
+     *
+     * Vlastní verze proto, že zdrojový snapshot nese `import_summary` místo
+     * `time_entries` a počet odpracovaných dnů (10267) smí zůstat NEUVEDENÝ:
+     * podklady ho nenesou a dopočítat ho dělením hodin by bylo vymyšlené číslo.
+     * Hodinové bloky nese stejné jako v5.
+     */
+    public const IMPORT_SUMMARY_DERIVATION_VERSION = 'jmhz-work-month.v6';
+
+    /**
+     * Verze s potvrzenými podmíněnými bloky 10275–10280 a 10471/10472.
+     *
+     * Jediný výčet pro všechny čtenáře souhrnu (snímek běhu, zákonné vstupy,
+     * příprava JMHZ, ELDP, průměrný výdělek). Dřív měl každý vlastní kopii
+     * a nová verze se musela dopisovat na šest míst.
+     */
+    public const CONDITIONAL_VERSIONS = [
+        'jmhz-work-month.v2',
+        'jmhz-work-month.v3',
+        'jmhz-work-month.v4',
+        'jmhz-work-month.v5',
+        'jmhz-work-month.v6',
+    ];
+
+    /** Provenience souhrnu potvrzeného hromadným schválením dávky importu. */
+    public const IMPORT_BULK_CONFIRMATION = 'import_bulk_confirmation';
+
+    /**
+     * Hodiny z importu docházky, které jdou do podmíněných bloků bez dat
+     * nepřítomnosti.
+     *
+     * Dovolená a obě překážky v práci netvoří vyloučenou dobu evidenčního
+     * listu (§ 16 odst. 4 zákona č. 155/1995 Sb.) ani vyloučený den podle
+     * § 18 odst. 7 zákona č. 187/2006 Sb. — náhrada mzdy za ně náleží. ELDP
+     * proto k nim dny od–do nepotřebuje a měsíční hodiny stačí. Návštěva
+     * lékaře je placená překážka na straně zaměstnance (§ 199 ZP), stejně jako
+     * ji aplikace vede u evidované nepřítomnosti.
+     *
+     * Svátek (`holiday_hours`) mezi neodpracované hodiny nepatří: fond
+     * pracovního kalendáře ho už nezahrnuje. Služební cesta a práce z domova
+     * jsou odpracovaná doba.
+     */
+    public const IMPORT_DATE_FREE_BLOCKS = [
+        'vacation_hours' => 'vacation',
+        'doctor_hours' => 'employee_obstacle_paid',
+        'obstacle_employee_hours' => 'employee_obstacle_paid',
+        'obstacle_employer_hours' => 'employer_obstacle',
+    ];
+
+    /**
+     * Sloupce souhrnu, které u souhrnu z importu smí nést hodiny bez dat
+     * nepřítomnosti ({@see IMPORT_DATE_FREE_BLOCKS}).
+     *
+     * @return list<string>
+     */
+    public static function importDateFreeSummaryFields(): array
+    {
+        return array_values(array_unique(array_map(
+            static fn (string $block): string => $block . '_millihours',
+            array_values(self::IMPORT_DATE_FREE_BLOCKS),
+        )));
+    }
+
+    /**
+     * Hodiny z importu, ke kterým hlášení potřebuje DATA nepřítomnosti.
+     *
+     * Nemoc se dělí oknem náhrady mzdy (§ 192 ZP) na 10278 a 10277, ošetřovné
+     * a otcovská jsou vyloučenou dobou ELDP, neplacené volno a náhradní volno
+     * tvoří vyloučené dny § 18 odst. 7 a neomluvená absence rozhoduje o době
+     * pojištění. Ze samotného měsíčního součtu hodin nic z toho odvodit nejde,
+     * proto se k nim nic nenavrhuje a hromadné schválení je vrací k ručnímu
+     * zpracování.
+     *
+     * @var list<string>
+     */
+    public const IMPORT_HOURS_REQUIRING_DATES = [
+        'sick_hours',
+        'care_hours',
+        'paternity_hours',
+        'unpaid_leave_hours',
+        'unexcused_hours',
+        'compensatory_time_off_hours',
+    ];
+
+    /**
      * Neodpracované hodiny bez vlastního atributu hlášení.
      *
      * PPM, otcovská, rodičovská dovolená, neplacené volno a neomluvená absence
@@ -50,6 +136,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v3',
         'jmhz-work-month.v4',
         'jmhz-work-month.v5',
+        'jmhz-work-month.v6',
     ];
 
     /**
@@ -65,7 +152,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     private const COMPENSATORY_TIME_OFF_FIELDS = ['compensatory_time_off_millihours'];
 
     /** Verze souhrnu, které nesou {@see COMPENSATORY_TIME_OFF_FIELDS}. */
-    public const VERSIONS_WITH_COMPENSATORY_TIME_OFF = ['jmhz-work-month.v5'];
+    public const VERSIONS_WITH_COMPENSATORY_TIME_OFF = ['jmhz-work-month.v5', 'jmhz-work-month.v6'];
 
     /** @return list<string> */
     public static function compensatoryTimeOffFields(): array
@@ -93,8 +180,17 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'overtime_millihours',
     ];
 
-    /** Verze souhrnu, které nesou {@see WORKED_BREAKDOWN_FIELDS}. */
-    public const VERSIONS_WITH_WORKED_BREAKDOWN = ['jmhz-work-month.v4', 'jmhz-work-month.v5'];
+    /**
+     * Verze souhrnu, které nesou {@see WORKED_BREAKDOWN_FIELDS}.
+     *
+     * v4 a v5 mají dny vždy vyplněné; v6 (souhrn z importu) je smí mít
+     * NEUVEDENÉ, protože podklady docházky dny nenesou.
+     */
+    public const VERSIONS_WITH_WORKED_BREAKDOWN = [
+        'jmhz-work-month.v4',
+        'jmhz-work-month.v5',
+        'jmhz-work-month.v6',
+    ];
 
     /** @return list<string> */
     public static function localEvidenceFields(): array
@@ -157,6 +253,16 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     ): array
     {
         $period = self::period($periodStart);
+        $importSource = $this->importSource($supplierId, $employmentId, $periodStart, $lockSources);
+        if ($importSource['work_source'] === 'import_summary') {
+            return $this->previewFromImportSummary(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+                $importSource['summary'],
+                $lockSources,
+            );
+        }
         $periodEnd = $period->modify('first day of next month');
         $employment = $this->employment(
             $supplierId,
@@ -189,31 +295,21 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $period,
             $periodEnd,
         );
-        [$worked, $entryIssues] = self::workedMinutes($entries, $periodStart);
+        $workedSource = PayrollWorkedTimeSource::fromEntries($entries, $periodStart);
+        $worked = [
+            'minutes' => (int) $workedSource['worked_minutes'],
+            'days' => (int) $workedSource['worked_days'],
+            'overtime_minutes' => (int) $workedSource['overtime_minutes'],
+        ];
+        $entryIssues = $workedSource['issues'];
         [$agreedMinutes, $calendarIssues] = match (true) {
             !self::requiresShiftCalendar($employment['relation_type']) => [0, []],
             self::isAgreement($employment['relation_type']) =>
                 self::agreementFundMinutes($employment, $period, $periodEnd, $calendars, $worked),
             default => self::agreedFundMinutes($calendars, $evidenceFrom, $evidenceTo),
         };
-        $employmentIssues = ($employment['term_values_consistent'] ?? false) === true
-            ? []
-            : [[
-                'code' => 'employment_terms_not_unique_for_month',
-                'message' => 'Měsíc nemá jedinou konzistentní verzi týdenní pracovní doby.',
-            ]];
-        $absenceIssues = [];
-        foreach ($absences as $absence) {
-            if ($absence['status'] === 'requested'
-                || ($absence['correction_pending'] ?? false) === true
-            ) {
-                $absenceIssues[] = [
-                    'code' => 'absence_not_final',
-                    'message' => 'Měsíc obsahuje neuzavřenou absenci nebo čekající opravu.',
-                ];
-                break;
-            }
-        }
+        $employmentIssues = self::employmentIssues($employment);
+        $absenceIssues = self::absenceIssues($absences);
         $source = [
             'schema_version' => self::DERIVATION_VERSION,
             'specification' => self::specification(),
@@ -228,6 +324,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
 
         return [
             'derivation_version' => self::DERIVATION_VERSION,
+            'work_source' => 'entries',
             'relation_type' => $employment['relation_type'],
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
@@ -265,6 +362,329 @@ final class PayrollJmhzWorkMonthSummaryBuilder
              */
             'absence_types' => self::absenceTypes($absences),
         ];
+    }
+
+    /**
+     * Náhled souhrnu měsíce, který bere odpracovanou dobu ze souhrnu importu.
+     *
+     * Zdroj se zamyká a otiskuje stejně jako u intervalů, jen místo
+     * `time_entries` nese neměnný souhrn z dávky (hodnoty, původ každého čísla
+     * a jeho otisk). Dny (10267) zůstávají neuvedené, přesčas (10269) se bere
+     * z podkladů a neodpracované hodiny z bloků, které se dají převzít bez dat
+     * nepřítomnosti ({@see importConditionalSuggestions()}).
+     *
+     * @param array<string,mixed>|null $summary
+     * @return array<string,mixed>
+     */
+    private function previewFromImportSummary(
+        int $supplierId,
+        int $employmentId,
+        string $periodStart,
+        ?array $summary,
+        bool $lockSources,
+    ): array {
+        $period = self::period($periodStart);
+        $periodEnd = $period->modify('first day of next month');
+        $employment = $this->employment($supplierId, $employmentId, $periodStart, $lockSources);
+        $calendars = $this->calendars(
+            $supplierId,
+            $employmentId,
+            $periodStart,
+            $periodEnd->format('Y-m-d'),
+            $lockSources,
+        );
+        $entries = $this->entries($supplierId, $employmentId, $periodStart, $lockSources);
+        $absences = $this->absences(
+            $supplierId,
+            $employmentId,
+            $periodStart,
+            $periodEnd->format('Y-m-d'),
+            $lockSources,
+        );
+        [$evidenceFrom, $evidenceTo, $evidenceDays] = self::evidenceInterval($employment, $period, $periodEnd);
+        $worked = PayrollWorkedTimeSource::fromImportSummary($summary);
+        $workedSuggestion = $worked['worked_millihours'] === null
+            ? null
+            : self::millihoursSuggestion($worked['worked_millihours']);
+        [$agreedSuggestion, $calendarIssues] = match (true) {
+            !self::requiresShiftCalendar($employment['relation_type']) => ['0', []],
+            self::isAgreement($employment['relation_type']) => self::importAgreementFund(
+                $employment,
+                $period,
+                $periodEnd,
+                $calendars,
+                $workedSuggestion,
+            ),
+            default => (static function () use ($calendars, $evidenceFrom, $evidenceTo): array {
+                [$minutes, $issues] = self::agreedFundMinutes($calendars, $evidenceFrom, $evidenceTo);
+
+                return [self::minutesSuggestion($minutes), $issues];
+            })(),
+        };
+        $sourceIssues = self::entriesStartInPeriod($entries, $periodStart)
+            ? [[
+                'code' => 'work_source_conflict',
+                'message' => 'Pracovní měsíc bere docházku ze souhrnu importu, ale má i časové záznamy. '
+                    . 'Dva zdroje téže doby se neslučují.',
+            ]]
+            : [];
+        $values = is_array($summary['values'] ?? null) ? $summary['values'] : [];
+        $conditional = self::importConditionalSuggestions($values);
+        $source = [
+            'schema_version' => self::IMPORT_SUMMARY_DERIVATION_VERSION,
+            'specification' => self::specification(),
+            'supplier_id' => $supplierId,
+            'employment' => $employment,
+            'period_start' => $periodStart,
+            'calendars' => $calendars,
+            PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY => $summary,
+            'absences' => $absences,
+        ];
+        $sourceJson = CanonicalJson::encode($source);
+
+        return [
+            'derivation_version' => self::IMPORT_SUMMARY_DERIVATION_VERSION,
+            'work_source' => 'import_summary',
+            'relation_type' => $employment['relation_type'],
+            'source_snapshot_json' => $sourceJson,
+            'source_snapshot_sha256' => hash('sha256', $sourceJson),
+            'suggestions' => [
+                'standard_fund_hours' => $this->standardFundSuggestion($periodStart),
+                'agreed_fund_hours' => $agreedSuggestion,
+                'weekly_work_hours' => self::weeklyWorkMissingValue($employment['relation_type'])
+                    ? self::WEEKLY_WORK_MISSING_VALUE
+                    : $employment['weekly_hours'],
+                'evidence_days' => $evidenceDays,
+                'worked_hours' => $workedSuggestion,
+                'worked_days' => $worked['worked_days'],
+                'overtime_hours' => $worked['overtime_millihours'] === null
+                    ? null
+                    : self::millihoursSuggestion($worked['overtime_millihours']),
+            ] + $conditional,
+            'issues' => array_merge(
+                self::employmentIssues($employment),
+                $calendarIssues,
+                $worked['issues'],
+                $sourceIssues,
+                self::absenceIssues($absences),
+            ),
+            'requires_unworked_hours_followup' => $absences !== []
+                || $conditional['unworked_hours_occurred'] !== false,
+            'absence_types' => self::absenceTypes($absences),
+            'import_hours_requiring_dates' => self::importHoursRequiringDates($values),
+        ];
+    }
+
+    /**
+     * Zdroj odpracované doby měsíce a souhrn importu k jeho aktuální revizi.
+     *
+     * @return array{work_source:string,summary:array<string,mixed>|null}
+     */
+    private function importSource(
+        int $supplierId,
+        int $employmentId,
+        string $periodStart,
+        bool $lockSources,
+    ): array {
+        $lock = $lockSources ? ' FOR UPDATE' : '';
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT month_row.work_source,
+                    summary.id AS summary_id, summary.time_month_id,
+                    summary.time_month_revision_no, summary.attendance_import_id,
+                    summary.values_json, summary.worked_days, summary.sources_json,
+                    summary.content_sha256
+               FROM payroll_time_months month_row
+               LEFT JOIN payroll_time_month_import_summaries summary
+                 ON summary.supplier_id = month_row.supplier_id
+                AND summary.time_month_id = month_row.id
+                AND summary.time_month_revision_no = month_row.revision_no
+              WHERE month_row.supplier_id = ? AND month_row.employment_id = ?
+                AND month_row.period_start = ?' . $lock
+        );
+        $stmt->execute([$supplierId, $employmentId, $periodStart]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return ['work_source' => 'entries', 'summary' => null];
+        }
+        $workSource = (string) $row['work_source'];
+        if ($row['summary_id'] === null) {
+            return ['work_source' => $workSource, 'summary' => null];
+        }
+        $values = json_decode((string) $row['values_json'], true, flags: JSON_THROW_ON_ERROR);
+        $sources = json_decode((string) $row['sources_json'], true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($values) || !is_array($sources)) {
+            throw new \UnexpectedValueException('Souhrn pracovního měsíce z importu je neplatný.');
+        }
+        $typedValues = [];
+        foreach ($values as $meaning => $millihours) {
+            $typedValues[(string) $meaning] = (int) $millihours;
+        }
+        ksort($typedValues);
+
+        return [
+            'work_source' => $workSource,
+            'summary' => [
+                'id' => (int) $row['summary_id'],
+                'time_month_id' => (int) $row['time_month_id'],
+                'time_month_revision_no' => (int) $row['time_month_revision_no'],
+                'attendance_import_id' => (int) $row['attendance_import_id'],
+                'values' => $typedValues,
+                'worked_days' => $row['worked_days'] === null ? null : (int) $row['worked_days'],
+                'sources' => $sources,
+                'content_sha256' => (string) $row['content_sha256'],
+            ],
+        ];
+    }
+
+    /**
+     * Návrh podmíněných bloků ze souhrnu importu docházky.
+     *
+     * Převezme jen hodiny, ke kterým hlášení data nepřítomnosti nepotřebuje
+     * ({@see IMPORT_DATE_FREE_BLOCKS}). Jakmile podklady nesou hodiny, které
+     * je potřebují ({@see IMPORT_HOURS_REQUIRING_DATES}), nenavrhne se NIC:
+     * částečný návrh by v úhrnu 10275 tiše chyběl, stejně jako u
+     * {@see conditionalSuggestions()}.
+     *
+     * @param array<string,mixed> $values význam → millihodiny
+     * @return array<string,string|bool|null>
+     */
+    public static function importConditionalSuggestions(array $values): array
+    {
+        $buckets = [
+            'unworked_total_hours' => 0,
+            'unworked_paid_hours' => 0,
+            'dpn_without_employer_compensation_hours' => 0,
+            'dpn_with_employer_compensation_hours' => 0,
+            'vacation_hours' => 0,
+            'care_hours' => 0,
+            'employee_obstacle_paid_hours' => 0,
+            'employer_obstacle_hours' => 0,
+            'maternity_hours' => 0,
+            'paternity_hours' => 0,
+            'parental_hours' => 0,
+            'unpaid_leave_hours' => 0,
+            'unexcused_hours' => 0,
+            'compensatory_time_off_hours' => 0,
+        ];
+        if (self::importHoursRequiringDates($values) !== []) {
+            return array_map(static fn (): null => null, $buckets) + [
+                'unworked_hours_occurred' => null,
+                'work_obstacles_occurred' => null,
+            ];
+        }
+        foreach (self::IMPORT_DATE_FREE_BLOCKS as $meaning => $block) {
+            $millihours = $values[$meaning] ?? 0;
+            $buckets[$block . '_hours'] += is_int($millihours) && $millihours > 0 ? $millihours : 0;
+        }
+        $obstacles = $buckets['employee_obstacle_paid_hours'] + $buckets['employer_obstacle_hours'];
+        $buckets['unworked_paid_hours'] = $buckets['vacation_hours'] + $obstacles;
+        $buckets['unworked_total_hours'] = $buckets['unworked_paid_hours'];
+
+        return array_map(
+            static fn (int $millihours): ?string => $millihours === 0 ? null : self::millihoursSuggestion($millihours),
+            $buckets,
+        ) + [
+            'unworked_hours_occurred' => $buckets['unworked_total_hours'] > 0,
+            'work_obstacles_occurred' => $obstacles > 0,
+        ];
+    }
+
+    /**
+     * Významy z importu s kladnými hodinami, ke kterým chybí data nepřítomnosti.
+     *
+     * @param array<string,mixed> $values
+     * @return list<string>
+     */
+    public static function importHoursRequiringDates(array $values): array
+    {
+        return array_values(array_filter(
+            self::IMPORT_HOURS_REQUIRING_DATES,
+            static fn (string $meaning): bool => is_int($values[$meaning] ?? null) && $values[$meaning] > 0,
+        ));
+    }
+
+    /**
+     * Sjednaný fond (10260) u dohody ze souhrnu importu — týž postup jako
+     * {@see agreementFundMinutes()}: plán směn, bez jednoznačného rozvrhu
+     * odpracovaná doba.
+     *
+     * @param array<string,mixed> $employment
+     * @param list<array<string,mixed>> $calendars
+     * @return array{?string,list<array<string,string>>}
+     */
+    private static function importAgreementFund(
+        array $employment,
+        \DateTimeImmutable $period,
+        \DateTimeImmutable $periodEnd,
+        array $calendars,
+        ?string $workedSuggestion,
+    ): array {
+        [$from, $to] = self::employmentInterval($employment, $period, $periodEnd);
+        if ($from === null || $calendars === []) {
+            return [$workedSuggestion, []];
+        }
+        [$planned, $issues] = self::agreedFundMinutes($calendars, $from, $to);
+
+        return $issues === [] ? [self::minutesSuggestion($planned), []] : [$workedSuggestion, []];
+    }
+
+    /**
+     * @param array<string,mixed> $employment
+     * @return list<array<string,string>>
+     */
+    private static function employmentIssues(array $employment): array
+    {
+        return ($employment['term_values_consistent'] ?? false) === true
+            ? []
+            : [[
+                'code' => 'employment_terms_not_unique_for_month',
+                'message' => 'Měsíc nemá jedinou konzistentní verzi týdenní pracovní doby.',
+            ]];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $absences
+     * @return list<array<string,string>>
+     */
+    private static function absenceIssues(array $absences): array
+    {
+        foreach ($absences as $absence) {
+            if ($absence['status'] === 'requested'
+                || ($absence['correction_pending'] ?? false) === true
+            ) {
+                return [[
+                    'code' => 'absence_not_final',
+                    'message' => 'Měsíc obsahuje neuzavřenou absenci nebo čekající opravu.',
+                ]];
+            }
+        }
+
+        return [];
+    }
+
+    /** @param list<array<string,mixed>> $entries */
+    private static function entriesStartInPeriod(array $entries, string $periodStart): bool
+    {
+        $utc = new \DateTimeZone('UTC');
+        foreach ($entries as $entry) {
+            $start = (new \DateTimeImmutable((string) $entry['starts_at_utc'], $utc))
+                ->setTimezone(new \DateTimeZone((string) $entry['timezone_name']));
+            if ($start->format('Y-m') === substr($periodStart, 0, 7)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function millihoursSuggestion(int $millihours): string
+    {
+        $whole = intdiv($millihours, 1000);
+        $fraction = $millihours % 1000;
+
+        return $fraction === 0
+            ? (string) $whole
+            : rtrim(sprintf('%d.%03d', $whole, $fraction), '0');
     }
 
     /**
@@ -365,8 +785,20 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * @param array<string,mixed> $input
      * @return array<string,mixed>
      */
-    public function confirm(array $preview, array $input): array
+    public function confirm(array $preview, array $input, ?string $confirmationKind = null): array
     {
+        $version = $preview['derivation_version'] ?? self::DERIVATION_VERSION;
+        if (!in_array($version, [self::DERIVATION_VERSION, self::IMPORT_SUMMARY_DERIVATION_VERSION], true)) {
+            throw new \InvalidArgumentException('Náhled pracovního souhrnu má nepodporovanou verzi.');
+        }
+        $importSource = $version === self::IMPORT_SUMMARY_DERIVATION_VERSION;
+        if ($confirmationKind !== null
+            && ($confirmationKind !== self::IMPORT_BULK_CONFIRMATION || !$importSource)
+        ) {
+            throw new \InvalidArgumentException(
+                'Hromadně lze potvrdit jen pracovní souhrn ze souhrnu importu docházky.',
+            );
+        }
         $expectedHash = $input['source_snapshot_sha256'] ?? null;
         if (!is_string($expectedHash)
             || preg_match('/^[0-9a-f]{64}$/D', $expectedHash) !== 1
@@ -415,10 +847,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
              * šly přes vstup, dala by se odpracovaná doba popsat jinými dny
              * a jiným přesčasem, než z jakých vznikly hodiny 10268.
              */
-            'worked_days' => self::nonNegativeInt(
-                $preview['suggestions']['worked_days'] ?? null,
-                'worked_days',
-            ),
+            // U souhrnu z importu smí dny zůstat NEUVEDENÉ: podklady je nenesou.
+            'worked_days' => $importSource
+                ? self::nullableNonNegativeInt($preview['suggestions']['worked_days'] ?? null, 'worked_days')
+                : self::nonNegativeInt($preview['suggestions']['worked_days'] ?? null, 'worked_days'),
             /*
              * Přesčas, který nejde vyjádřit na celé millihodiny (minuty
              * nedělitelné třemi), zůstává NEUVEDENÝ. Atribut je nepovinný,
@@ -557,11 +989,20 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 '10260' => 'explicit_confirmation_with_calendar_suggestion',
                 '10261' => 'explicit_confirmation_with_term_suggestion',
                 '10265' => 'employment_interval_derivation',
-                '10267' => 'time_entry_derivation',
-                '10268' => 'explicit_confirmation_with_time_entry_suggestion',
-                '10269' => $values['overtime_millihours'] === null
-                    ? 'not_expressible_in_millihours'
-                    : 'time_entry_derivation',
+                '10267' => match (true) {
+                    !$importSource => 'time_entry_derivation',
+                    $values['worked_days'] === null => 'not_provided_by_import',
+                    default => 'import_summary',
+                },
+                '10268' => $importSource
+                    ? 'explicit_confirmation_with_import_summary_suggestion'
+                    : 'explicit_confirmation_with_time_entry_suggestion',
+                '10269' => match (true) {
+                    $importSource && $values['overtime_millihours'] === null => 'not_provided_by_import',
+                    $importSource => 'import_summary',
+                    $values['overtime_millihours'] === null => 'not_expressible_in_millihours',
+                    default => 'time_entry_derivation',
+                },
                 '10275' => $unworkedHoursOccurred
                     ? 'explicit_confirmation'
                     : 'not_applicable_by_IN07',
@@ -605,8 +1046,26 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'decimal_policy' => 'exact_user_confirmed_value_without_rounding',
             'validated_controls' => [23, 144, 145, 286],
         ];
+        if ($importSource) {
+            /*
+             * Hromadné schválení dávky nepotvrzuje nikdo po jednom poli; hodnoty
+             * jsou návrhy náhledu převzaté beze změny. Provenience to musí říct,
+             * jinak by souhrn tvrdil výslovné potvrzení účetní, které nebylo.
+             */
+            if ($confirmationKind === self::IMPORT_BULK_CONFIRMATION) {
+                foreach (['attributes', 'local_evidence'] as $group) {
+                    foreach ($provenance[$group] as $attribute => $origin) {
+                        if (str_starts_with((string) $origin, 'explicit_confirmation')) {
+                            $provenance[$group][$attribute] = self::IMPORT_BULK_CONFIRMATION;
+                        }
+                    }
+                }
+            }
+            $provenance['confirmation_kind'] = $confirmationKind ?? 'explicit_confirmation';
+            $provenance['work_source'] = 'import_summary';
+        }
         $summaryPayload = [
-            'derivation_version' => self::DERIVATION_VERSION,
+            'derivation_version' => $version,
             'specification' => self::specification(),
             'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
             'conditional_blocks_confirmed' => true,
@@ -934,87 +1393,6 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         return [$minutes, $issues];
     }
 
-    /**
-     * Odpracované minuty (10268) i jejich rozpad na dny (10267) a přesčas (10269).
-     *
-     * Všechny tři veličiny musí vzniknout z téhož průchodu záznamy: záznam
-     * vyřazený kvůli přesahu měsíce nebo záporné čistě odpracované době se
-     * nesmí objevit ani v hodinách, ani ve dnech, ani v přesčasu. Den se bere
-     * podle LOKÁLNÍHO data začátku záznamu, stejně jako se podle lokálního
-     * měsíce rozhoduje o zařazení do období.
-     *
-     * @param list<array<string,mixed>> $entries
-     * @return array{
-     *   array{minutes:int,days:int,overtime_minutes:int},
-     *   list<array<string,string>>
-     * }
-     */
-    private static function workedMinutes(array $entries, string $periodStart): array
-    {
-        $minutes = 0;
-        $overtimeMinutes = 0;
-        $days = [];
-        $issues = [];
-        $intervals = [];
-        foreach ($entries as $entry) {
-            if (!in_array($entry['category'], ['regular', 'overtime'], true)) {
-                continue;
-            }
-            $timezone = new \DateTimeZone((string) $entry['timezone_name']);
-            $utc = new \DateTimeZone('UTC');
-            $start = new \DateTimeImmutable((string) $entry['starts_at_utc'], $utc);
-            $end = new \DateTimeImmutable((string) $entry['ends_at_utc'], $utc);
-            $periodMonth = substr($periodStart, 0, 7);
-            $localStart = $start->setTimezone($timezone);
-            $startMonth = $localStart->format('Y-m');
-            $endMonth = $end->setTimezone($timezone)->format('Y-m');
-            if ($startMonth !== $periodMonth && $endMonth !== $periodMonth) {
-                if ($startMonth === $endMonth) {
-                    continue;
-                }
-            }
-            if ($startMonth !== $periodMonth || $endMonth !== $periodMonth) {
-                $issues[] = [
-                    'code' => 'worked_interval_crosses_month',
-                    'message' => 'Odpracovaný interval překračuje místní hranici měsíce.',
-                ];
-                continue;
-            }
-            foreach ($intervals as [$seenStart, $seenEnd]) {
-                if ($start < $seenEnd && $end > $seenStart) {
-                    $issues[] = [
-                        'code' => 'worked_intervals_overlap',
-                        'message' => 'Základní a přesčasové intervaly se překrývají.',
-                    ];
-                    break;
-                }
-            }
-            $intervals[] = [$start, $end];
-            $net = intdiv($end->getTimestamp() - $start->getTimestamp(), 60)
-                - (int) $entry['break_minutes'];
-            if ($net < 0) {
-                $issues[] = [
-                    'code' => 'worked_interval_negative',
-                    'message' => 'Přestávka je delší než evidovaný pracovní interval.',
-                ];
-                continue;
-            }
-            $minutes += $net;
-            if ($entry['category'] === 'overtime') {
-                $overtimeMinutes += $net;
-            }
-            $days[$localStart->format('Y-m-d')] = true;
-        }
-        return [
-            [
-                'minutes' => $minutes,
-                'days' => count($days),
-                'overtime_minutes' => $overtimeMinutes,
-            ],
-            $issues,
-        ];
-    }
-
     private static function period(string $periodStart): \DateTimeImmutable
     {
         $period = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
@@ -1221,6 +1599,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             return $value;
         }
         throw new \InvalidArgumentException("{$field} musí být nezáporné celé číslo.");
+    }
+
+    private static function nullableNonNegativeInt(mixed $value, string $field): ?int
+    {
+        return $value === null ? null : self::nonNegativeInt($value, $field);
     }
 
     /** @return array<string,string> */

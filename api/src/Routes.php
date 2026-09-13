@@ -964,6 +964,8 @@ final class Routes
             $g->post('/imports/attendance/profiles/{id:[0-9]+}/copy', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'copyProfile']);
             $g->get('/imports/attendance/profiles/{id:[0-9]+}/export', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'exportProfile']);
             $g->post('/imports/attendance/profiles/import', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'importProfile']);
+            // Dodatečné hromadné schválení pracovních měsíců z použité dávky docházky.
+            $g->post('/time/imports/attendance/{id:[0-9]+}/apply', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'approveTimeMonths']);
             $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
             $g->get('/payments/payer-options', [PayrollPaymentAction::class, 'listPayerOptions']);
             $g->get('/payments/batches', [PayrollPaymentAction::class, 'listBatches']);

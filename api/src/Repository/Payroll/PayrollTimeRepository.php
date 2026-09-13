@@ -718,6 +718,11 @@ final class PayrollTimeRepository
         int $expectedVersion,
         ?array $jmhzWorkSummaryInput,
         ?int $userId,
+        /**
+         * Způsob potvrzení souhrnu JMHZ; `null` = výslovné potvrzení účetní.
+         * Z HTTP se nenastavuje — hromadné schválení importu ho předává samo.
+         */
+        ?string $jmhzConfirmationKind = null,
     ): array {
         $pdo = $this->db->pdo();
         $scope = $this->beginTransactionScope();
@@ -807,6 +812,7 @@ final class PayrollTimeRepository
                         true,
                     ),
                     $jmhzWorkSummaryInput,
+                    $jmhzConfirmationKind,
                 );
             }
             $nextVersion = PayrollTimeValue::int($month['row_version'] ?? null, 'row_version') + 1;
@@ -946,6 +952,31 @@ final class PayrollTimeRepository
         );
         $stmt->execute([$supplierId, $employmentId, $periodStart]);
         return self::row($stmt);
+    }
+
+    /**
+     * Má vztah v měsíci časové záznamy docházky? Rozhoduje místní měsíc
+     * začátku záznamu, stejně jako při zápisu souhrnu z importu.
+     */
+    public function hasEntriesInPeriod(int $supplierId, int $employmentId, string $periodStart): bool
+    {
+        [$startsAtUtc, $endsAtUtc] = self::utcMonthBounds($periodStart);
+        [$candidateStart, $candidateEnd] = self::candidateBounds($startsAtUtc, $endsAtUtc);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT starts_at_utc, timezone_name
+               FROM payroll_time_entries
+              WHERE supplier_id = ? AND employment_id = ?
+                AND status <> 'superseded'
+                AND starts_at_utc >= ? AND starts_at_utc < ?"
+        );
+        $stmt->execute([$supplierId, $employmentId, $candidateStart, $candidateEnd]);
+        foreach (self::rows($stmt) as $entry) {
+            if (self::startsInPeriod($entry, $periodStart)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

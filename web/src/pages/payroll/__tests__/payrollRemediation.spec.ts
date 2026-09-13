@@ -10,7 +10,9 @@ describe('mzdové úkony mají konkrétní nápravu', () => {
   it('pokrývá všechny blokace podkladů ELDP a souhrnu docházky', () => {
     for (const [files, catalog] of [
       [['Submission/Eldp/EldpAnnualStatementBuilder.php', 'Submission/Eldp/EldpExcludedPeriodDeriver.php'], eldpRemediationCodes],
-      [['Time/PayrollJmhzWorkMonthSummaryBuilder.php'], workSummaryRemediationCodes],
+      // Odpracovanou dobu ze zdroje souhrnu (intervaly i souhrn importu) hlásí
+      // PayrollWorkedTimeSource, zbytek nálezů náhledu builder.
+      [['Time/PayrollJmhzWorkMonthSummaryBuilder.php', 'Time/PayrollWorkedTimeSource.php'], workSummaryRemediationCodes],
     ] as const) {
       const codes = new Set<string>()
       for (const file of files) {

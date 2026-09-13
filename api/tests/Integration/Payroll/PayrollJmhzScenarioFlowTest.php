@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollDependantAction;
+use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -81,6 +83,64 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertStringContainsString('<form:hodinyNeodpracNahrada>16.000</form:hodinyNeodpracNahrada>', $xml);
         self::assertStringContainsString('<form:hodinyNeodpracDovol>16.000</form:hodinyNeodpracDovol>', $xml);
         self::assertStringContainsString('<form:vylouceneDobyCelkem>0</form:vylouceneDobyCelkem>', $xml);
+    }
+
+    /**
+     * Docházka převzatá z docházkového systému: měsíční součty hodin bez
+     * intervalů, hromadně schválené z dávky importu. Běh ani příprava hlášení
+     * nesmí tvrdit, že pracovní doba není schválená; nepovinné dny 10267
+     * podklady nenesou, a proto v hlášení chybí.
+     */
+    public function testImportedAttendanceMonthApprovedInBulkReachesSubmission(): void
+    {
+        $person = $this->hire('Ivo Import', 'male', '1984-11-20');
+        $imports = $this->container->get(PayrollAttendanceImportRepository::class);
+        $approvals = $this->container->get(PayrollTimeImportApprovalService::class);
+        self::assertInstanceOf(PayrollAttendanceImportRepository::class, $imports);
+        self::assertInstanceOf(PayrollTimeImportApprovalService::class, $approvals);
+        $file = 'dochazka-cervenec.xlsx';
+        $importId = $imports->insertBatch(
+            $this->supplierId,
+            self::PERIOD_START,
+            'attendance',
+            random_bytes(32),
+            [['name' => $file, 'sha256' => hash('sha256', 'syntetická docházka červenec')]],
+            [],
+            1,
+            [
+                [
+                    'employment_id' => $person['employment_id'],
+                    'meaning' => 'worked_hours',
+                    'component_code' => '',
+                    'quantity_millihours' => 176_000,
+                    'amount_minor' => null,
+                    'source_ref' => "{$file}!List1!C3",
+                ],
+                [
+                    'employment_id' => $person['employment_id'],
+                    'meaning' => 'fund_hours',
+                    'component_code' => '',
+                    'quantity_millihours' => 176_000,
+                    'amount_minor' => null,
+                    'source_ref' => "{$file}!List1!D3",
+                ],
+            ],
+            $this->actors[0],
+        );
+        self::assertNotNull($importId);
+        $approval = $approvals->applyBatch($this->supplierId, $importId, true, $this->actors[0]);
+        self::assertSame(1, $approval['approved'], 'Zaseknutí: hromadné schválení. ' . CanonicalJson::encode($approval));
+        $this->pay($person, 4_500_000);
+
+        $xml = $this->submission('import-summary');
+
+        self::assertSame(0, (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_run_validations
+              WHERE supplier_id = ? AND code IN ("time_month_missing", "time_month_not_approved")',
+            [$this->supplierId],
+        ));
+        self::assertStringContainsString('<form:odpracovaneHodiny><form:pocet>176.000</form:pocet>', $xml);
+        self::assertStringNotContainsString('<form:dnyOdpracovanePocet>', $xml);
     }
 
     public function testConcurrentFullTimeAndAgreementOfOnePerson(): void

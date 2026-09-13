@@ -25,7 +25,9 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
  * jednoho — schválený měsíc, časové záznamy jako druhý zdroj — vrátí jen jeho
  * zápis včetně kalendáře, ostatní vztahy dávky projdou.
  *
- * Měsíce se tu NEschvalují a snímek běhu ani hlášení JMHZ souhrn zatím nečtou.
+ * Měsíce se tu NEschvalují. Pracovní souhrn JMHZ z nich staví
+ * {@see PayrollJmhzWorkMonthSummaryBuilder} (verze v6) a čisté měsíce dávky
+ * schvaluje {@see PayrollTimeImportApprovalService}.
  */
 final class PayrollTimeImportSummaryWriter
 {

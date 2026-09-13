@@ -22,6 +22,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService;
 use MyInvoice\Service\Payroll\Time\PayrollTimeImportSummaryWriter;
 
 /**
@@ -85,6 +86,7 @@ final class AttendanceImportService
         private readonly Connection $db,
         private readonly PayrollEmploymentValidator $employmentValidator,
         private readonly PayrollTimeImportSummaryWriter $timeSummaries,
+        private readonly PayrollTimeImportApprovalService $timeApprovals,
     ) {
     }
 
@@ -134,7 +136,13 @@ final class AttendanceImportService
         bool $adoptPersonalNumbers = false,
         bool $adoptMonthlyWage = false,
         bool $writeTimeSummary = false,
+        bool $approveCleanTimeMonths = false,
     ): array {
+        if ($approveCleanTimeMonths && !$writeTimeSummary) {
+            throw new \InvalidArgumentException(
+                'Hromadné schválení pracovních měsíců vyžaduje zápis souhrnu docházky do pracovních měsíců.',
+            );
+        }
         $periodStart = $this->period($period);
         $read = $this->readFiles($files);
         [$validated, $profileComponents, $profileMeta] = $this->resolveMapping(
@@ -238,14 +246,25 @@ final class AttendanceImportService
          * téže dávky. Zápis je idempotentní a volba není v otisku dávky, takže
          * zapnutí nad už použitými podklady souhrn jen doplní.
          */
-        $timeSummary = fn (int $importId): ?array => $writeTimeSummary
-            ? $this->timeSummaries->writeFromBatch($supplierId, $importId, $userId)
-            : null;
+        $timeSteps = function (int $importId) use ($supplierId, $userId, $writeTimeSummary, $approveCleanTimeMonths): array {
+            if (!$writeTimeSummary) {
+                return ['time_summary' => null, 'time_approval' => null];
+            }
+            $summary = $this->timeSummaries->writeFromBatch($supplierId, $importId, $userId);
+
+            return [
+                'time_summary' => $summary,
+                // Hromadné schválení čistých měsíců stojí na právě zapsaných
+                // souhrnech; výjimky se vracejí seznamem, nic nezastaví import.
+                'time_approval' => $approveCleanTimeMonths
+                    ? $this->timeApprovals->approveWritten($supplierId, $importId, $summary, true, $userId)
+                    : null,
+            ];
+        };
 
         $existing = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint);
         if ($existing !== null) {
-            return self::replay($existing, $skipped, $adoptWages())
-                + ['time_summary' => $timeSummary((int) $existing['id'])];
+            return self::replay($existing, $skipped, $adoptWages()) + $timeSteps((int) $existing['id']);
         }
 
         $result = $this->transactional(function () use (
@@ -325,7 +344,7 @@ final class AttendanceImportService
                 );
             }
 
-            $inputs = ['import_id' => null, 'created' => 0, 'duplicates' => 0, 'errors' => []];
+            $inputs = ['import_id' => null, 'created' => 0, 'updated' => 0, 'overridden' => 0, 'duplicates' => 0, 'errors' => []];
             if ($createInputs) {
                 $inputs = $this->createInputs($supplierId, $period, $importId, $assigned, $userId);
             }
@@ -348,11 +367,10 @@ final class AttendanceImportService
             $winner = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint)
                 ?? throw new \RuntimeException('Souběžně založenou dávku importu nelze načíst.');
 
-            return self::replay($winner, $skipped, $adoptWages())
-                + ['time_summary' => $timeSummary((int) $winner['id'])];
+            return self::replay($winner, $skipped, $adoptWages()) + $timeSteps((int) $winner['id']);
         }
         $wages = $adoptWages();
-        $summary = $timeSummary((int) $result['import_id']);
+        $time = $timeSteps((int) $result['import_id']);
 
         return [
             'replayed' => false,
@@ -367,8 +385,7 @@ final class AttendanceImportService
             'wage_conflicts' => $wages['conflicts'],
             'runs_needing_refresh' => $wages['runs_needing_refresh'],
             'skipped_persons' => $skipped,
-            'time_summary' => $summary,
-        ];
+        ] + $time;
     }
 
     /**
@@ -1048,7 +1065,7 @@ final class AttendanceImportService
 
     /**
      * @param list<array{person:array<string,mixed>,employment:array<string,mixed>}> $assigned
-     * @return array{import_id:?int,created:int,duplicates:int,errors:list<array{row_number:int,error_message:string}>}
+     * @return array{import_id:?int,created:int,updated:int,overridden:int,duplicates:int,errors:list<array{row_number:int,error_message:string}>}
      */
     private function createInputs(int $supplierId, string $period, int $importId, array $assigned, ?int $userId): array
     {
@@ -1073,7 +1090,7 @@ final class AttendanceImportService
                 }
             }
             if ($lines === []) {
-                return ['import_id' => null, 'created' => 0, 'duplicates' => 0, 'errors' => []];
+                return ['import_id' => null, 'created' => 0, 'updated' => 0, 'overridden' => 0, 'duplicates' => 0, 'errors' => []];
             }
             rewind($stream);
             $csv = (string) stream_get_contents($stream);
@@ -1103,7 +1120,11 @@ final class AttendanceImportService
 
         return [
             'import_id' => $inputImportId,
+            // `accepted_count` počítá jen nové vstupy; aktualizace konceptu
+            // a ručně přepsané řádky nese brána zvlášť.
             'created' => $replayed ? 0 : (int) ($result['accepted_count'] ?? 0),
+            'updated' => $replayed ? 0 : (int) ($result['updated_count'] ?? 0),
+            'overridden' => $replayed ? 0 : (int) ($result['overridden_count'] ?? 0),
             'duplicates' => $replayed
                 ? (int) ($result['accepted_count'] ?? 0) + (int) ($result['duplicate_count'] ?? 0)
                 : (int) ($result['duplicate_count'] ?? 0),
@@ -1675,7 +1696,14 @@ final class AttendanceImportService
         return [
             'replayed' => true,
             'batch' => self::publicBatch($batch),
-            'inputs' => ['import_id' => $batch['input_import_id'], 'created' => 0, 'duplicates' => 0, 'errors' => []],
+            'inputs' => [
+                'import_id' => $batch['input_import_id'],
+                'created' => 0,
+                'updated' => 0,
+                'overridden' => 0,
+                'duplicates' => 0,
+                'errors' => [],
+            ],
             'links_saved' => 0,
             'components_created' => [],
             'personal_numbers_adopted' => 0,

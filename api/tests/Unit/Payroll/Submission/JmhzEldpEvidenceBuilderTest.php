@@ -802,6 +802,99 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
     }
 
+    /**
+     * Souhrn z importu docházky (v6) nese dovolenou a překážky jen jako
+     * měsíční hodiny. Vyloučenou dobu ani vyloučený den netvoří, takže řez
+     * projde i bez evidované nepřítomnosti.
+     */
+    public function testImportSummaryVacationAndObstacleHoursPassWithoutAbsenceRecords(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->importSummarySource(
+            ['vacation_millihours' => 16_000, 'employee_obstacle_paid_millihours' => 2_000],
+            obstacles: true,
+        );
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(0, $section['excluded_days_total']);
+    }
+
+    /**
+     * Nemoc z importu bez dat od–do: vyloučené dny z hodin spočítat nejde,
+     * tichá nula by byla nepravda. Zastaví vlastní kód.
+     */
+    public function testImportSummarySicknessHoursWithoutDatesAreAClearBlocker(): void
+    {
+        $source = $this->importSummarySource(['dpn_with_employer_compensation_millihours' => 16_000]);
+
+        try {
+            (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+            self::fail('Nemoc bez dat nesmí projít jako běžný měsíc.');
+        } catch (JmhzEldpEvidenceException $exception) {
+            self::assertSame('jmhz_eldp_import_absence_dates_missing', $exception->validationCode);
+        }
+    }
+
+    /** Uvolnění platí jen pro souhrn z importu, ne pro souhrn ze směn. */
+    public function testShiftBasedSummaryStillNeedsAbsenceRecordForVacationHours(): void
+    {
+        $source = $this->importSummarySource(['vacation_millihours' => 16_000], version: 'jmhz-work-month.v5');
+
+        try {
+            (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+            self::fail('Souhrn ze směn musí mít k dovolené evidovanou nepřítomnost.');
+        } catch (JmhzEldpEvidenceException $exception) {
+            self::assertSame('jmhz_eldp_work_summary_mismatch', $exception->validationCode);
+        }
+    }
+
+    /**
+     * @param array<string,int> $extraValues
+     * @return array<string,mixed>
+     */
+    private function importSummarySource(
+        array $extraValues,
+        bool $obstacles = false,
+        string $version = 'jmhz-work-month.v6',
+    ): array {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $summary = &$input['people'][0]['employments'][0]['time_month']['jmhz_work_summary'];
+        $summary['derivation_version'] = $version;
+        $summary['interactions'] = ['IN07' => array_sum($extraValues) > 0, 'IN08' => $obstacles];
+        $summary['values'] += [
+            'maternity_millihours' => null,
+            'paternity_millihours' => null,
+            'parental_millihours' => null,
+            'unpaid_leave_millihours' => null,
+            'unexcused_millihours' => null,
+            'compensatory_time_off_millihours' => null,
+        ];
+        $summary['values'] = array_merge($summary['values'], $extraValues);
+        $paid = 0;
+        foreach ([
+            'vacation_millihours',
+            'dpn_with_employer_compensation_millihours',
+            'employee_obstacle_paid_millihours',
+            'employer_obstacle_millihours',
+        ] as $field) {
+            $paid += $extraValues[$field] ?? 0;
+        }
+        $summary['values']['unworked_total_millihours'] = array_sum($extraValues) ?: null;
+        $summary['values']['unworked_paid_millihours'] = $paid ?: null;
+        unset($summary);
+
+        return $this->withInput($source, $input);
+    }
+
     /** @return array<string,mixed> */
     private function compensatoryTimeOffSource(string $version): array
     {

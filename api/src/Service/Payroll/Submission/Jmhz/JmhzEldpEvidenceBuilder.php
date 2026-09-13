@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 
 final class JmhzEldpEvidenceBuilder
 {
@@ -300,7 +301,7 @@ final class JmhzEldpEvidenceBuilder
         if (!is_array($workSummary)
             || !in_array(
                 $workSummary['derivation_version'] ?? null,
-                ['jmhz-work-month.v2', 'jmhz-work-month.v3', 'jmhz-work-month.v4', 'jmhz-work-month.v5'],
+                PayrollJmhzWorkMonthSummaryBuilder::CONDITIONAL_VERSIONS,
                 true,
             )
             || !is_int($workSummary['id'] ?? null)
@@ -705,15 +706,26 @@ final class JmhzEldpEvidenceBuilder
          * překážku eviduje. Souhrn v2 pro ni nemá doložený zápis do
          * evidenčního listu, takže tam zůstává zakázaná přesně jako dřív.
          */
-        $obstacleAbsences = self::hasObstacleAbsence($absences)
-            && self::carriesV3Blocks($summaryVersion);
+        if (self::fromImportSummary($summaryVersion)) {
+            $this->assertImportSummaryAbsenceDates($values, $absences, $summaryVersion);
+        }
+        /*
+         * Souhrn z importu docházky dokládá překážky měsíčními hodinami i bez
+         * evidované nepřítomnosti: vyloučenou dobu ani vyloučený den netvoří,
+         * takže ELDP k nim data od–do nepotřebuje.
+         */
+        $obstacleAbsences = (self::hasObstacleAbsence($absences)
+            && self::carriesV3Blocks($summaryVersion))
+            || (self::fromImportSummary($summaryVersion) && self::hasObstacleHours($values));
         if (($interactions['IN08'] ?? null) !== $obstacleAbsences) {
             $this->invalid(
                 'jmhz_eldp_work_summary_mismatch',
                 'Interakce IN08 pracovního souhrnu neodpovídá evidovaným překážkám v práci.',
             );
         }
-        if ($absences !== []) {
+        if ($absences !== []
+            || (self::fromImportSummary($summaryVersion) && ($interactions['IN07'] ?? null) === true)
+        ) {
             $this->assertAbsenceSliceWorkSummary(
                 $values,
                 $interactions,
@@ -761,6 +773,59 @@ final class JmhzEldpEvidenceBuilder
                 'employee_obstacle_paid_millihours',
                 'employer_obstacle_millihours',
             ]);
+    }
+
+    /**
+     * Souhrn z importu docházky (v6) nese neodpracované hodiny jako měsíční
+     * součty, bez dat od–do.
+     *
+     * Dovolená a překážky v práci se dají převzít i tak: nejsou vyloučenou
+     * dobou (§ 16 odst. 4 zákona č. 155/1995 Sb.) ani vyloučeným dnem
+     * (§ 18 odst. 7 zákona č. 187/2006 Sb.). Nemoc, ošetřovné, PPM, otcovská,
+     * rodičovská, neplacené a náhradní volno i neomluvená absence ale dny
+     * evidenčního listu tvoří — a z hodin je spočítat nejde. Bez evidované
+     * nepřítomnosti s daty by řez vykázal nula vyloučených dnů, tedy tichou
+     * nulu místo pravdy. Proto zastaví vlastním kódem, který říká, CO chybí.
+     *
+     * @param array<string,mixed> $values
+     * @param list<array<string,mixed>> $absences
+     */
+    private function assertImportSummaryAbsenceDates(
+        array $values,
+        array $absences,
+        string $summaryVersion,
+    ): void {
+        $supported = self::absenceWorkSummaryFields($summaryVersion);
+        $documented = array_fill_keys(PayrollJmhzWorkMonthSummaryBuilder::importDateFreeSummaryFields(), true);
+        foreach ($absences as $absence) {
+            foreach ($supported[(string) ($absence['absence_type'] ?? '')] ?? [] as $field) {
+                $documented[$field] = true;
+            }
+        }
+        foreach (self::unworkedFields($summaryVersion) as $field) {
+            $value = $values[$field] ?? null;
+            if (!isset($documented[$field]) && is_int($value) && $value > 0) {
+                $this->invalid(
+                    'jmhz_eldp_import_absence_dates_missing',
+                    'Pracovní souhrn převzatý z importu docházky uvádí neodpracované hodiny,'
+                        . ' ke kterým evidenční list potřebuje data nepřítomnosti od–do,'
+                        . ' ale evidence nepřítomností je nemá. Vyloučené doby ani vyloučené'
+                        . ' dny se z měsíčního součtu hodin odvodit nedají.',
+                );
+            }
+        }
+    }
+
+    /** @param array<string,mixed> $values */
+    private static function hasObstacleHours(array $values): bool
+    {
+        foreach (['employee_obstacle_paid_millihours', 'employer_obstacle_millihours'] as $field) {
+            if (is_int($values[$field] ?? null) && $values[$field] > 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param list<array<string,mixed>> $absences */
@@ -883,7 +948,7 @@ final class JmhzEldpEvidenceBuilder
     {
         return in_array(
             $summaryVersion,
-            ['jmhz-work-month.v3', 'jmhz-work-month.v4', 'jmhz-work-month.v5'],
+            PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_LOCAL_EVIDENCE,
             true,
         );
     }
@@ -891,7 +956,17 @@ final class JmhzEldpEvidenceBuilder
     /** Nese souhrn hodiny náhradního volna za přesčas (od v5)? */
     private static function carriesCompensatoryTimeOff(string $summaryVersion): bool
     {
-        return $summaryVersion === 'jmhz-work-month.v5';
+        return in_array(
+            $summaryVersion,
+            PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_COMPENSATORY_TIME_OFF,
+            true,
+        );
+    }
+
+    /** Bere souhrn odpracovanou dobu ze souhrnu importu docházky (v6)? */
+    private static function fromImportSummary(string $summaryVersion): bool
+    {
+        return $summaryVersion === PayrollJmhzWorkMonthSummaryBuilder::IMPORT_SUMMARY_DERIVATION_VERSION;
     }
 
     /**
@@ -1067,6 +1142,11 @@ final class JmhzEldpEvidenceBuilder
         $filled = [];
         foreach ($expected as $fields) {
             foreach ($fields as $field) {
+                $filled[$field] = true;
+            }
+        }
+        if (self::fromImportSummary($summaryVersion)) {
+            foreach (PayrollJmhzWorkMonthSummaryBuilder::importDateFreeSummaryFields() as $field) {
                 $filled[$field] = true;
             }
         }

@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll\Absence;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
+use MyInvoice\Service\Payroll\Time\PayrollWorkedTimeSource;
 use PDO;
 
 /**
@@ -112,19 +114,13 @@ final class AverageEarningDerivationService
     ];
 
     /**
-     * Verze odvození pracovního souhrnu, ze kterých umíme číst rozpad směn.
+     * Verze odvození pracovního souhrnu, ze kterých umíme číst odpracovanou dobu.
      *
-     * v3 se od v2 liší jen o hodiny nepřítomností bez atributu hlášení, v4
-     * od v3 o počet odpracovaných dnů a přesčas pro měsíční hlášení; zdrojový
-     * snapshot směn a jeho `schema_version` mají všechny tři verze shodné,
-     * takže se průměr počítá ze všech stejně.
+     * v2 až v5 nesou zdrojový snapshot směn (`time_entries`), v6 souhrn
+     * z importu docházky (`import_summary`). Co ze kterého zdroje plyne,
+     * rozhoduje jediná funkce {@see PayrollWorkedTimeSource::fromSnapshot()}.
      */
-    public const SUPPORTED_WORK_SUMMARY_VERSIONS = [
-        'jmhz-work-month.v2',
-        'jmhz-work-month.v3',
-        'jmhz-work-month.v4',
-        'jmhz-work-month.v5',
-    ];
+    public const SUPPORTED_WORK_SUMMARY_VERSIONS = PayrollJmhzWorkMonthSummaryBuilder::CONDITIONAL_VERSIONS;
 
     /**
      * Důvody, kvůli kterým se místo skutečného průměru smí použít pravděpodobný
@@ -306,6 +302,13 @@ final class AverageEarningDerivationService
                 'time_month_row_version' => $month['time_month_row_version'] ?? null,
             ];
             if ($month['blockers'] !== []) {
+                continue;
+            }
+            // Měsíc ze souhrnu importu docházky dny nenese. Bez nich nejde
+            // posoudit zákonné minimum § 355 odst. 1 ZP — a nula dnů by tiše
+            // poslala průměr na pravděpodobný výdělek, na který nárok není.
+            if ($month['worked_days'] === null) {
+                $blockers['worked_days_not_provided'] = true;
                 continue;
             }
             $grossMinor += (int) $month['gross_earnings_minor'];
@@ -496,14 +499,35 @@ final class AverageEarningDerivationService
         $source = self::decode($sourceJson);
         if ($source === null
             || !in_array($source['schema_version'] ?? null, self::SUPPORTED_WORK_SUMMARY_VERSIONS, true)
-            || !is_array($source['time_entries'] ?? null)
+            || (!is_array($source[PayrollWorkedTimeSource::KIND_TIME_ENTRIES] ?? null)
+                && !is_array($source[PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY] ?? null))
         ) {
             return ['blockers' => ['work_summary_source_corrupt']] + $context;
         }
 
-        $worked = self::workedFromEntries($source['time_entries'], $periodStart);
-        if ($worked === null) {
+        $worked = PayrollWorkedTimeSource::fromSnapshot($source, $periodStart);
+        if ($worked['issues'] !== []) {
             return ['blockers' => ['worked_time_not_derivable']] + $context;
+        }
+
+        if ($worked['kind'] === PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY) {
+            // Souhrn z importu nese millihodiny; porovnávají se přímo, bez
+            // převodu na minuty. Rozejít se můžou, když účetní navržené hodiny
+            // při potvrzení přepsala — pak potvrzené číslo nestojí na podkladu.
+            if ($worked['worked_millihours'] !== $confirmedMillihours) {
+                return ['blockers' => ['work_summary_hours_mismatch']] + $context;
+            }
+            // Průměr vede dobu v celých minutách. Millihodiny, které celým
+            // minutám neodpovídají, se nezaokrouhlují — to by byl jiný údaj,
+            // než jaký odešel do hlášení.
+            if ($worked['worked_minutes'] === null) {
+                return ['blockers' => ['worked_time_not_whole_minutes']] + $context;
+            }
+            $context['worked_minutes'] = $worked['worked_minutes'];
+            // Podklady docházky dny nenesou; `null` = neuvedeno, ne nula.
+            $context['worked_days'] = $worked['worked_days'];
+
+            return $context;
         }
 
         // Kontrola, že odpracované DNY stojí na téže evidenci jako odpracované
@@ -513,12 +537,12 @@ final class AverageEarningDerivationService
         // takže se nikde nezaokrouhluje. Rozejít se můžou tehdy, když účetní
         // navrženou hodinu přepsala — pak jsou dny odjinud než hodiny a návrh
         // by tvrdil souvislost, která tam není.
-        if ($worked['minutes'] * 1000 !== $confirmedMillihours * 60) {
+        if ((int) $worked['worked_minutes'] * 1000 !== $confirmedMillihours * 60) {
             return ['blockers' => ['work_summary_hours_mismatch']] + $context;
         }
 
-        $context['worked_minutes'] = $worked['minutes'];
-        $context['worked_days'] = $worked['days'];
+        $context['worked_minutes'] = $worked['worked_minutes'];
+        $context['worked_days'] = $worked['worked_days'];
 
         return $context;
     }
@@ -526,16 +550,10 @@ final class AverageEarningDerivationService
     /**
      * Odpracované minuty a dny ze zmrazeného seznamu směn.
      *
-     * Postup je záměrně TOTOŽNÝ s
-     * {@see \MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder}:
-     * bere kategorie `regular` a `overtime` (přesčas je odpracovaná doba a mzda
-     * za něj je hrubá mzda, takže do průměru podle § 353 odst. 1 ZP patří
-     * obojí), odečítá přestávku a odmítá interval přes hranici místního měsíce
-     * i překryv dvou intervalů. Kdyby se postup lišil, kontrola shody
-     * s potvrzenými hodinami by neměla žádnou vypovídací hodnotu.
-     *
-     * Den se počítá podle MÍSTNÍHO data začátku směny — týž den se nezapočítá
-     * dvakrát ani při dělené směně (základní doba ráno, přesčas odpoledne).
+     * Počítá je {@see PayrollWorkedTimeSource::fromEntries()} — TÁŽ funkce,
+     * ze které pracovní souhrn navrhl potvrzené hodiny. Kdyby měl průměr
+     * vlastní kopii postupu, kontrola shody s potvrzenými hodinami by neměla
+     * žádnou vypovídací hodnotu.
      *
      * @param array<mixed> $entries
      * @return array{minutes:int,days:int}|null `null` = evidenci nelze bez
@@ -543,61 +561,12 @@ final class AverageEarningDerivationService
      */
     public static function workedFromEntries(array $entries, string $periodStart): ?array
     {
-        $periodMonth = substr($periodStart, 0, 7);
-        $utc = new \DateTimeZone('UTC');
-        $minutes = 0;
-        $days = [];
-        $intervals = [];
-
-        foreach ($entries as $entry) {
-            if (!is_array($entry)
-                || !is_string($entry['category'] ?? null)
-                || !is_string($entry['starts_at_utc'] ?? null)
-                || !is_string($entry['ends_at_utc'] ?? null)
-                || !is_string($entry['timezone_name'] ?? null)
-                || !is_int($entry['break_minutes'] ?? null)
-            ) {
-                return null;
-            }
-            if (!in_array($entry['category'], ['regular', 'overtime'], true)) {
-                continue;
-            }
-            try {
-                $timezone = new \DateTimeZone($entry['timezone_name']);
-                $start = new \DateTimeImmutable($entry['starts_at_utc'], $utc);
-                $end = new \DateTimeImmutable($entry['ends_at_utc'], $utc);
-            } catch (\Exception) {
-                return null;
-            }
-            $startLocal = $start->setTimezone($timezone);
-            $startMonth = $startLocal->format('Y-m');
-            $endMonth = $end->setTimezone($timezone)->format('Y-m');
-            if ($startMonth !== $periodMonth && $endMonth !== $periodMonth) {
-                if ($startMonth === $endMonth) {
-                    continue;
-                }
-            }
-            if ($startMonth !== $periodMonth || $endMonth !== $periodMonth) {
-                return null;
-            }
-            foreach ($intervals as [$seenStart, $seenEnd]) {
-                if ($start < $seenEnd && $end > $seenStart) {
-                    return null;
-                }
-            }
-            $intervals[] = [$start, $end];
-            $net = intdiv($end->getTimestamp() - $start->getTimestamp(), 60)
-                - $entry['break_minutes'];
-            if ($net < 0) {
-                return null;
-            }
-            $minutes += $net;
-            if ($net > 0) {
-                $days[$startLocal->format('Y-m-d')] = true;
-            }
+        $worked = PayrollWorkedTimeSource::fromEntries($entries, $periodStart);
+        if ($worked['issues'] !== []) {
+            return null;
         }
 
-        return ['minutes' => $minutes, 'days' => count($days)];
+        return ['minutes' => (int) $worked['worked_minutes'], 'days' => (int) $worked['worked_days']];
     }
 
     /**

@@ -89,6 +89,34 @@ final class PayrollSurchargeInputMaterializer
             $month = $this->approvedTimeMonth($supplierId, $employmentId, $periodStart);
             $revisionNo = PayrollTimeValue::int($month['revision_no'] ?? null, 'revision_no');
 
+            /*
+             * Měsíc ze souhrnu importu docházky se z docházky NEMATERIALIZUJE.
+             *
+             * Příplatky takového měsíce přicházejí z docházkového systému jako
+             * spočítané částky mzdových složek (import vstupů). Časové záznamy
+             * v něm repozitář nedovolí, takže výpočet dnes vychází na nulu —
+             * ale kdyby se do měsíce záznam dostal jinou cestou (nebo výpočet
+             * začal číst hodiny ze souhrnu), vyplatil by se týž nárok podruhé.
+             * Pojistka stojí na zdroji měsíce, ne na tom, že dnes vyjde nula.
+             */
+            if (($month['work_source'] ?? 'entries') === 'import_summary') {
+                $this->commitOwned($pdo, $ownsTransaction);
+
+                return [
+                    'employment_id' => $employmentId,
+                    'period_start' => $periodStart,
+                    'time_month_revision_no' => $revisionNo,
+                    'total_minor' => 0,
+                    'written_count' => 0,
+                    'unchanged_count' => 0,
+                    'written' => [],
+                    'unchanged' => [],
+                    'requires_manual_review' => false,
+                    'findings' => [],
+                    'skipped_reason' => 'import_summary',
+                ];
+            }
+
             $result = $this->surcharges->forPeriod(
                 $supplierId,
                 $employmentId,
@@ -398,7 +426,7 @@ final class PayrollSurchargeInputMaterializer
         string $periodStart,
     ): array {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, status, revision_no
+            'SELECT id, status, revision_no, work_source
                FROM payroll_time_months
               WHERE supplier_id = ? AND employment_id = ? AND period_start = ?
               FOR UPDATE'

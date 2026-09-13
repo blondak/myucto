@@ -1656,19 +1656,15 @@ final class PayrollRunSnapshotBuilder
              * takže dřív zmrazený v2 souhrn musí i dál vydat přesně tentýž
              * výčet klíčů, jaký měl při schválení.
              */
-            $conditionalVersions = [
-                'jmhz-work-month.v2',
-                'jmhz-work-month.v3',
-                'jmhz-work-month.v4',
-                'jmhz-work-month.v5',
-            ];
+            $conditionalVersions = PayrollJmhzWorkMonthSummaryBuilder::CONDITIONAL_VERSIONS;
             if (in_array(
                 $derivationVersion,
                 PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_WORKED_BREAKDOWN,
                 true,
             )) {
-                // Dny jsou u v4 vždy vyplněné, přesčas smí být NEUVEDENÝ.
-                $values['worked_days'] = (int) $row['worked_days'];
+                // Dny jsou u v4 a v5 vždy vyplněné (CHECK), u v6 ze souhrnu
+                // importu smí být NEUVEDENÉ; přesčas smí chybět u všech.
+                $values['worked_days'] = $row['worked_days'] === null ? null : (int) $row['worked_days'];
                 $values['overtime_millihours'] = $row['overtime_millihours'] === null
                     ? null
                     : (int) $row['overtime_millihours'];
@@ -1772,12 +1768,7 @@ final class PayrollRunSnapshotBuilder
                 ? 'unverified'
                 : (in_array(
                     (string) $summary['derivation_version'],
-                    [
-                        'jmhz-work-month.v2',
-                        'jmhz-work-month.v3',
-                        'jmhz-work-month.v4',
-                        'jmhz-work-month.v5',
-                    ],
+                    PayrollJmhzWorkMonthSummaryBuilder::CONDITIONAL_VERSIONS,
                     true,
                 )
                     ? 'frozen_work_summary'
