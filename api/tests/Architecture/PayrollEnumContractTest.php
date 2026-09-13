@@ -189,6 +189,12 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRiskFactor',
         'payroll.ts::PayrollEmployeeCardStatusFilter'
             => 'const:MyInvoice\Repository\Payroll\PayrollQuickInputRepository::CARD_STATUS_FILTERS',
+        // Buňka sloupce mzdové složky v rychlém vstupu: odkud hodnota je a co s ní
+        // jde udělat. Nová hodnota bez ikony a popisku by se ukázala jako prázdná.
+        'payroll.ts::PayrollQuickComponentSource'
+            => 'const:MyInvoice\Repository\Payroll\PayrollQuickInputRepository::COMPONENT_CELL_SOURCES',
+        'payroll.ts::PayrollQuickComponentMode'
+            => 'const:MyInvoice\Repository\Payroll\PayrollQuickInputRepository::COMPONENT_CELL_MODES',
         // Proč rozklad pojistného není k dispozici. Každý důvod má na obrazovce
         // vlastní větu — nová hodnota bez věty by se projevila prázdnou kartou.
         'payrollInsurance.ts::PayrollInsuranceUnavailableReason' =>

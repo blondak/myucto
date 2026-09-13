@@ -2573,7 +2573,71 @@
       "save_partial_invalid": "Uloží se jen řádky bez chyby — {count} řádek zůstane neuložený, dokud ho neopravíte. | Uloží se jen řádky bez chyby — {count} řádky zůstanou neuložené, dokud je neopravíte. | Uloží se jen řádky bez chyby — {count} řádků zůstane neuložených, dokud je neopravíte.",
       "save_partial_conflict": "U {count} řádku je částka evidovaná dvakrát; ostatní se uloží normálně. | U {count} řádků je částka evidovaná dvakrát; ostatní se uloží normálně.",
       "save_pending_pages": "Uloží se i {count} rozepsaný řádek z jiných stránek. | Uloží se i {count} rozepsané řádky z jiných stránek. | Uloží se i {count} rozepsaných řádků z jiných stránek.",
-      "saved_partially": "Uloženo {saved} řádků, {failed} se neuložilo — důvod je u konkrétního pole."
+      "saved_partially": "Uloženo {saved} řádků, {failed} se neuložilo — důvod je u konkrétního pole.",
+      "columns_menu": {
+        "button": "Složky",
+        "title": "Sloupce rychlého vstupu",
+        "hint": "Zaškrtněte složky, které chcete vidět a zadávat. Volba se pamatuje.",
+        "preset_compact": "Kompaktní",
+        "preset_full": "Kompletní přehled",
+        "preset_full_hint": "Zákonné příplatky a všechny složky, které mají v měsíci hodnotu.",
+        "group_surcharges": "Zákonné příplatky § 115–118",
+        "rows_with_value": "{count}× v měsíci",
+        "summary_only": "jen přehled",
+        "summary_only_hint": "Tuto složku v rychlém vstupu zadat nejde (pravidelná složka, benefit nebo náhrada). Sloupec ji jen ukáže.",
+        "empty": "Firma nemá žádné další jednorázové mzdové složky.",
+        "close": "Zavřít"
+      },
+      "component_kinds": {
+        "base_wage": "Základní mzda",
+        "hourly_wage": "Hodinová mzda",
+        "task_wage": "Úkolová mzda",
+        "bonus": "Odměny",
+        "premium": "Příplatky a prémie",
+        "commission": "Provize",
+        "allowance": "Příplatky",
+        "compensation": "Náhrady",
+        "severance": "Odstupné",
+        "competitive_clause": "Konkurenční doložka",
+        "backpay": "Doplatky",
+        "non_cash": "Nepeněžní plnění",
+        "benefit_meal": "Stravování",
+        "benefit_vehicle": "Vozidlo",
+        "benefit_pension": "Penzijní produkty",
+        "benefit_care": "Péče",
+        "benefit_education": "Vzdělávání",
+        "benefit_recreation": "Rekreace",
+        "benefit_health": "Zdraví",
+        "risky_savings": "Rizikové spoření",
+        "travel_reimbursement": "Cestovní náhrady",
+        "other": "Ostatní"
+      },
+      "component_cell": {
+        "label": "{name} (Kč)",
+        "source": {
+          "import": "Z importu",
+          "recurring": "Pravidelná složka",
+          "manual": "Zadáno ručně",
+          "attendance": "Z docházky",
+          "surcharge": "Příplatek ze schválené docházky"
+        },
+        "override_title": "Z importu {import}, přepsáno na {value}",
+        "revert": "Vrátit na hodnotu z importu",
+        "revert_pending": "Po uložení se vrátí na {value} z importu.",
+        "revert_cancel": "Ponechat ruční přepis",
+        "import_hint": "Hodnota z importu. Když ji změníte, vznikne ruční přepis a import zůstane jako doklad.",
+        "managed": "Hodnotu spravuje jiný vstup (pravidelná složka, docházka nebo více vstupů). Upravte ji v Mzdových vstupech.",
+        "locked": "Uzamčeno mzdovým během — změnu proveďte opravnou revizí.",
+        "approved": "Schválený vstup — upravit ho smí jen uživatel s právem schvalovat.",
+        "not_enterable": "Tuto složku v rychlém vstupu zadat nejde."
+      },
+      "totals": {
+        "label": "Součet za období",
+        "hint": "Za všech {count} vztahů období včetně dalších stránek. Rozepsané změny jsou započtené."
+      },
+      "component_validation": {
+        "amount_required": "Zadejte částku (i 0). K hodnotě z importu se vrátíte tlačítkem Vrátit."
+      }
     },
     "risky_savings": {
       "title": "Povinné spoření u rizikové práce",

@@ -2573,7 +2573,71 @@
       "save_partial_invalid": "Only rows without errors are saved — {count} row stays unsaved until you fix it. | Only rows without errors are saved — {count} rows stay unsaved until you fix them.",
       "save_partial_conflict": "{count} row records the amount twice; the rest is saved normally. | {count} rows record the amount twice; the rest is saved normally.",
       "save_pending_pages": "{count} edited row from other pages is saved as well. | {count} edited rows from other pages are saved as well.",
-      "saved_partially": "Saved {saved} rows, {failed} were not — the reason is shown at the field."
+      "saved_partially": "Saved {saved} rows, {failed} were not — the reason is shown at the field.",
+      "columns_menu": {
+        "button": "Components",
+        "title": "Quick entry columns",
+        "hint": "Tick the components you want to see and enter. Your choice is remembered.",
+        "preset_compact": "Compact",
+        "preset_full": "Full overview",
+        "preset_full_hint": "Statutory surcharges and every component that has a value this month.",
+        "group_surcharges": "Statutory surcharges § 115–118",
+        "rows_with_value": "{count}× this month",
+        "summary_only": "overview only",
+        "summary_only_hint": "This component cannot be entered in quick entry (recurring component, benefit or compensation). The column only shows it.",
+        "empty": "The company has no other one-off payroll components.",
+        "close": "Close"
+      },
+      "component_kinds": {
+        "base_wage": "Base wage",
+        "hourly_wage": "Hourly wage",
+        "task_wage": "Piece-rate wage",
+        "bonus": "Bonuses",
+        "premium": "Surcharges and premiums",
+        "commission": "Commissions",
+        "allowance": "Allowances",
+        "compensation": "Compensation",
+        "severance": "Severance pay",
+        "competitive_clause": "Non-compete clause",
+        "backpay": "Back pay",
+        "non_cash": "Non-cash income",
+        "benefit_meal": "Meals",
+        "benefit_vehicle": "Vehicle",
+        "benefit_pension": "Pension products",
+        "benefit_care": "Care",
+        "benefit_education": "Education",
+        "benefit_recreation": "Recreation",
+        "benefit_health": "Health",
+        "risky_savings": "Hazardous work savings",
+        "travel_reimbursement": "Travel reimbursement",
+        "other": "Other"
+      },
+      "component_cell": {
+        "label": "{name} (CZK)",
+        "source": {
+          "import": "From import",
+          "recurring": "Recurring component",
+          "manual": "Entered manually",
+          "attendance": "From attendance",
+          "surcharge": "Surcharge from approved attendance"
+        },
+        "override_title": "Imported {import}, overridden to {value}",
+        "revert": "Revert to the imported value",
+        "revert_pending": "After saving it reverts to {value} from the import.",
+        "revert_cancel": "Keep the manual override",
+        "import_hint": "Imported value. Changing it creates a manual override; the import stays as evidence.",
+        "managed": "Another input manages this value (recurring component, attendance or several inputs). Change it in Payroll inputs.",
+        "locked": "Locked by a payroll run — make the change through a correction revision.",
+        "approved": "Approved input — only a user who may approve can change it.",
+        "not_enterable": "This component cannot be entered in quick entry."
+      },
+      "totals": {
+        "label": "Period total",
+        "hint": "Across all {count} relations of the period, including other pages. Pending edits are included."
+      },
+      "component_validation": {
+        "amount_required": "Enter an amount (0 is fine). Use Revert to go back to the imported value."
+      }
     },
     "risky_savings": {
       "title": "Mandatory savings for hazardous work",

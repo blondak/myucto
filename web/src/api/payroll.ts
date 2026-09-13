@@ -1970,6 +1970,69 @@ export interface PayrollQuickSurchargeState {
 export type PayrollWageReplacementTitle = 'vacation' | 'sickness_compensation'
   | 'state_benefit' | 'paid_obstacle' | 'unpaid'
 
+/** Odkud hodnota v buňce sloupce mzdové složky přišla. */
+export type PayrollQuickComponentSource = 'import' | 'recurring' | 'manual' | 'attendance' | 'surcharge'
+
+/**
+ * Co s buňkou jde udělat — rozhoduje server:
+ * `manual` vlastní zadání, `import` hodnota z importu (úprava = ruční přepis),
+ * `override` ruční přepis importu, `managed` jen ke čtení.
+ */
+export type PayrollQuickComponentMode = 'manual' | 'import' | 'override' | 'managed'
+
+export interface PayrollQuickComponentCell {
+  amount_minor: number
+  quantity_milliunits: number | null
+  status: PayrollInputStatus | null
+  source: PayrollQuickComponentSource
+  mode: PayrollQuickComponentMode
+  input_id: number | null
+  component_id: number | null
+  row_version: number | null
+  external_id: string | null
+  /** Importní hodnota, kterou ruční přepis nahradil (zůstává jako doklad dávky). */
+  override_of: {
+    input_id: number
+    amount_minor: number
+    quantity_milliunits: number | null
+    external_id: string | null
+  } | null
+  input_count: number
+  has_recurring: boolean
+  entry_available: boolean
+}
+
+/** Sloupec mzdové složky, který rychlý vstup umí ukázat. */
+export interface PayrollQuickComponentColumn {
+  code: string
+  name: string
+  kind: string
+  unit: 'money'
+  /** Jde složku v rychlém vstupu nově zadat? Jinak je sloupec jen pro přehled. */
+  editable_in_quick: boolean
+  /** Počet vztahů s hodnotou za celé (zúžené) období, ne za stránku. */
+  rows_with_value: number
+  counts_in_gross: boolean
+}
+
+/** Součtový řádek za celé (zúžené) období. */
+export interface PayrollQuickInputTotals {
+  rows: number
+  base_amount_minor: number
+  overtime_amount_minor: number
+  bonus_amount_minor: number
+  surcharge_amount_minor: number
+  other_amount_minor: number
+  excluded_from_gross_amount_minor: number
+  gross_preview_minor: number
+  surcharges: Partial<Record<PayrollQuickSurchargeKind, number>>
+  components: Record<string, {
+    amount_minor: number
+    quantity_milliunits: number | null
+    rows_with_value: number
+  }>
+}
+
 export interface PayrollQuickInputProration {
   fund_minutes: number
   replaced_minutes: number
@@ -2031,6 +2094,11 @@ export interface PayrollQuickInputRow {
   non_monetary_amount_minor: number
   excluded_from_gross_amount_minor: number
   gross_preview_minor: number
+  /**
+   * Rozpad po mzdových složkách mimo pevná pole, klíč = kód. Je to pohled na
+   * částky, které už jsou v polích a v `other_amount_minor` — nesčítat znovu.
+   */
+  components?: Record<string, PayrollQuickComponentCell>
   inputs: {
     base: PayrollQuickInputRef | null
     overtime: PayrollQuickInputRef | null
@@ -2044,6 +2112,8 @@ export interface PayrollQuickInputMonth {
   items: PayrollQuickInputRow[]
   /** Počet vztahů v měsíci; `items` je jen aktuální stránka. */
   total: number
+  columns?: PayrollQuickComponentColumn[]
+  totals?: PayrollQuickInputTotals
 }
 
 export type PayrollEmployeeCardStatusFilter = 'active' | 'away' | 'attention' | 'all'
@@ -2088,6 +2158,7 @@ export interface PayrollQuickInputFailure {
   employment_id: number
   /** `surcharge_<druh>` míří na pole konkrétního zákonného příplatku. */
   field: 'row' | 'base' | 'overtime' | 'bonus' | `surcharge_${PayrollQuickSurchargeKind}`
+    | `component:${string}`
   code: string
   message: string
   current_row_version: number | null
@@ -2187,6 +2258,14 @@ export interface PayrollQuickInputSavePayload {
       hours_milli: number | null
       factors?: number | null
     }>>
+    /**
+     * Buňky sloupců mzdových složek, na které uživatel sáhl. Složka, která tu
+     * není, se nemění. `revert` zruší ruční přepis importované hodnoty.
+     */
+    components?: Record<string,
+      | { amount_minor: number | null, row_version: number | null }
+      | { revert: true, row_version: number | null }
+    >
     versions: {
       base: number | null
       overtime: number | null

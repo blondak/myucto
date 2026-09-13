@@ -93,6 +93,75 @@ final class PayrollInputImportRepository
         return $id === false ? null : PayrollTimeValue::int($id, 'input_id');
     }
 
+    /**
+     * Importní vstup se stejným `external_id` v tomtéž vztahu a měsíci, i se
+     * stavem ručního přepisu — podklad pro rozhodnutí opakovaného importu.
+     *
+     * Přednost má živý vstup; není-li, poslední zrušený. Zrušený importní
+     * vstup s živým přepisem (`override:<id>`) je hodnota, kterou účetní
+     * vědomě opravila — import ji nesmí vrátit zpátky.
+     *
+     * @return array{input_id:int,status:string,amount_minor:int,quantity_milliunits:?int,
+     *   row_version:int,component_id:int,source_period_start:?string,override_input_id:?int}|null
+     */
+    public function existingInputState(
+        int $supplierId,
+        int $employmentId,
+        string $periodStart,
+        string $externalId,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT input.id, input.status, input.amount_minor, input.quantity_milliunits,
+                    input.row_version, input.component_id, input.source_period_start,
+                    (
+                        SELECT override_input.id
+                          FROM payroll_inputs override_input
+                         WHERE override_input.supplier_id = input.supplier_id
+                           AND override_input.employment_id = input.employment_id
+                           AND override_input.period_start = input.period_start
+                           AND override_input.source_kind = "manual"
+                           AND override_input.status <> "cancelled"
+                           AND override_input.external_id = CONCAT(?, input.id)
+                         LIMIT 1
+                    ) AS override_input_id
+               FROM payroll_inputs input
+              WHERE input.supplier_id = ? AND input.employment_id = ?
+                AND input.period_start = ?
+                AND input.source_kind = "import" AND input.external_id = ?
+              ORDER BY (input.status <> "cancelled") DESC, input.id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([
+            PayrollQuickInputRepository::OVERRIDE_PREFIX,
+            $supplierId,
+            $employmentId,
+            $periodStart,
+            $externalId,
+        ]);
+        $raw = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = PayrollTimeValue::row($raw, 'existing_import_input');
+
+        return [
+            'input_id' => PayrollTimeValue::int($row['id'] ?? null, 'id'),
+            'status' => PayrollTimeValue::string($row['status'] ?? null, 'status'),
+            'amount_minor' => PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor'),
+            'quantity_milliunits' => $row['quantity_milliunits'] === null
+                ? null
+                : PayrollTimeValue::int($row['quantity_milliunits'], 'quantity_milliunits'),
+            'row_version' => PayrollTimeValue::int($row['row_version'] ?? null, 'row_version'),
+            'component_id' => PayrollTimeValue::int($row['component_id'] ?? null, 'component_id'),
+            'source_period_start' => $row['source_period_start'] === null
+                ? null
+                : PayrollTimeValue::string($row['source_period_start'], 'source_period_start'),
+            'override_input_id' => $row['override_input_id'] === null
+                ? null
+                : PayrollTimeValue::int($row['override_input_id'], 'override_input_id'),
+        ];
+    }
+
     /** @return array<string,mixed>|null */
     public function findByHash(int $supplierId, string $periodStart, string $hash): ?array
     {
@@ -109,9 +178,14 @@ final class PayrollInputImportRepository
     }
 
     /**
-     * @param list<array{row_number:int,payload:array<string,mixed>,impact:array<string,mixed>}> $validRows
+     * @param list<array{row_number:int,payload:array<string,mixed>,impact:array<string,mixed>,
+     *   update:?array{input_id:int,row_version:int}}> $validRows `update` = koncept se stejným
+     *   `external_id`, kterému import mění hodnotu (místo založení nového vstupu)
      * @param list<array{row_number:int,error_code:string,field_name:?string,error_message:string,payload:array<string,mixed>}> $errors
-     * @param list<array{row_number:int,error_code:string,field_name:?string,error_message:string,payload:array<string,mixed>,input_id:?int}> $duplicates
+     * @param list<array{row_number:int,error_code:string,field_name:?string,error_message:string,
+     *   payload:array<string,mixed>,input_id:?int,refresh:bool}> $duplicates `refresh` = ručně
+     *   přepsaná hodnota: zrušenému importnímu vstupu se aktualizuje hodnota z dávky, aby
+     *   „Vrátit na hodnotu z importu" vrátilo tu poslední; do výpočtu nejde
      * @return array<string,mixed>
      */
     public function store(
@@ -167,10 +241,69 @@ final class PayrollInputImportRepository
                 return $replayed;
             }
 
+            // `accepted` = NOVĚ založené vstupy, `updated` = koncepty, kterým
+            // import změnil hodnotu. Oddělené, protože import docházky hlásí
+            // `accepted_count` jako „založeno" a aktualizace založením není.
             $accepted = 0;
+            $updated = 0;
             $duplicateCount = count($duplicates);
             foreach ($validRows as $row) {
                 $payload = $row['payload'];
+                $update = $row['update'] ?? null;
+                if ($update !== null) {
+                    // Opakovaný import změnil hodnotu konceptu. Mění se na
+                    // místě a jen koncept: podmínka na verzi a stav chytí
+                    // souběžné schválení i ruční přepis mezi náhledem a zápisem.
+                    $change = $pdo->prepare(
+                        'UPDATE payroll_inputs
+                            SET amount_minor = ?, quantity_milliunits = ?,
+                                source_period_start = ?, component_id = ?,
+                                row_version = row_version + 1
+                          WHERE supplier_id = ? AND id = ? AND row_version = ?
+                            AND status = "draft" AND source_kind = "import"'
+                    );
+                    $change->execute([
+                        $payload['amount_minor'],
+                        $payload['quantity_milliunits'],
+                        $payload['source_period_start'],
+                        $payload['component_id'],
+                        $supplierId,
+                        $update['input_id'],
+                        $update['row_version'],
+                    ]);
+                    if ($change->rowCount() === 1) {
+                        ++$updated;
+                        $this->insertRow(
+                            $supplierId,
+                            $importId,
+                            $row['row_number'],
+                            $payload,
+                            [[
+                                'code' => 'updated_value',
+                                'field' => 'amount_minor',
+                                'message' => 'Hodnota konceptu se stejným external_id byla aktualizována.',
+                            ]],
+                            'accepted',
+                            $update['input_id'],
+                        );
+                    } else {
+                        ++$duplicateCount;
+                        $this->insertRow(
+                            $supplierId,
+                            $importId,
+                            $row['row_number'],
+                            $payload,
+                            [[
+                                'code' => 'changed_concurrently',
+                                'field' => 'external_id',
+                                'message' => 'Vstup se mezitím změnil (schválení nebo ruční přepis); import ho nepřepsal.',
+                            ]],
+                            'duplicate',
+                            $update['input_id'],
+                        );
+                    }
+                    continue;
+                }
                 try {
                     $input = $pdo->prepare(
                         'INSERT INTO payroll_inputs
@@ -252,6 +385,22 @@ final class PayrollInputImportRepository
                 );
             }
             foreach ($duplicates as $row) {
+                if (($row['refresh'] ?? false) === true && $row['input_id'] !== null) {
+                    $payload = $row['payload'];
+                    $pdo->prepare(
+                        'UPDATE payroll_inputs
+                            SET amount_minor = ?, quantity_milliunits = ?,
+                                source_period_start = ?, row_version = row_version + 1
+                          WHERE supplier_id = ? AND id = ?
+                            AND status = "cancelled" AND source_kind = "import"'
+                    )->execute([
+                        $payload['amount_minor'] ?? null,
+                        $payload['quantity_milliunits'] ?? null,
+                        $payload['source_period_start'] ?? null,
+                        $supplierId,
+                        $row['input_id'],
+                    ]);
+                }
                 $this->insertRow(
                     $supplierId,
                     $importId,
@@ -268,7 +417,7 @@ final class PayrollInputImportRepository
             }
 
             $rejected = count($errors);
-            $status = $accepted === 0
+            $status = $accepted + $updated === 0
                 ? 'rejected'
                 : ($rejected > 0 || $duplicateCount > 0 ? 'partial' : 'accepted');
             $update = $pdo->prepare(
@@ -348,7 +497,49 @@ final class PayrollInputImportRepository
                 'payroll_input_import_rows',
             ),
         );
+        $updated = self::countRowsWithCode($result['rows'], 'updated_value');
+        $overridden = self::countRowsWithCode($result['rows'], 'overridden_manually');
+        $result['updated_count'] = $updated;
+        $result['overridden_count'] = $overridden;
+        // Věty pro výsledek importu (i importu docházky). Počty by bez nich
+        // zůstaly jen v protokolu, a ručně přepsaná hodnota, kterou import
+        // záměrně nepřepsal, je přesně to, co má účetní vidět hned.
+        $result['notices'] = array_values(array_filter([
+            $overridden === 0 ? null : self::czechCount(
+                $overridden,
+                '%d hodnota je ručně přepsaná v rychlém měsíčním vstupu; import ji nepřepsal.',
+                '%d hodnoty jsou ručně přepsané v rychlém měsíčním vstupu; import je nepřepsal.',
+                '%d hodnot je ručně přepsaných v rychlém měsíčním vstupu; import je nepřepsal.',
+            ),
+            $updated === 0 ? null : self::czechCount(
+                $updated,
+                '%d rozpracovaná hodnota byla aktualizována z importu.',
+                '%d rozpracované hodnoty byly aktualizovány z importu.',
+                '%d rozpracovaných hodnot bylo aktualizováno z importu.',
+            ),
+        ]));
         return $result;
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function countRowsWithCode(array $rows, string $code): int
+    {
+        $count = 0;
+        foreach ($rows as $row) {
+            foreach ((array) ($row['errors'] ?? []) as $error) {
+                if (is_array($error) && ($error['code'] ?? null) === $code) {
+                    ++$count;
+                    break;
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    private static function czechCount(int $count, string $one, string $few, string $many): string
+    {
+        return sprintf($count === 1 ? $one : ($count >= 2 && $count <= 4 ? $few : $many), $count);
     }
 
     /**

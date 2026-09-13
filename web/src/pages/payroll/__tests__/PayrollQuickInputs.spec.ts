@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import type {
+  PayrollQuickComponentCell,
+  PayrollQuickComponentColumn,
   PayrollQuickInputRef,
   PayrollQuickInputRow,
   PayrollQuickSurchargeKind,
@@ -14,6 +16,9 @@ const m = vi.hoisted(() => ({
   load: vi.fn(),
   getPref: vi.fn(),
   putPref: vi.fn(),
+  patchPrefs: vi.fn(),
+  // Stav preferencí tabulky; nastaví ho mock `useUserPrefs` níže.
+  pagePrefs: null as unknown as { value: Record<string, unknown> },
   save: vi.fn(),
   canWrite: vi.fn(),
   success: vi.fn(),
@@ -53,13 +58,19 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({ t: (key: string) => key, locale: ref('cs-CZ') }),
 }))
 
-// Preference tabulek jdou přes Pinii a API; v testu stačí prázdné výchozí.
+// Preference tabulek (přepínač příplatků, zvolené sloupce složek) drží stav,
+// aby šlo ověřit, co stránka ukládá a jak čte uloženou volbu.
 vi.mock('@/composables/useUserPrefs', async () => {
-  const { computed } = await import('vue')
+  const { computed, ref } = await import('vue')
+  const state = ref<Record<string, unknown>>({})
+  m.pagePrefs = state
   return {
     ensurePrefsLoaded: () => Promise.resolve(),
-    getPagePrefs: () => computed(() => ({})),
-    patchPagePrefs: () => {},
+    getPagePrefs: () => computed(() => state.value),
+    patchPagePrefs: (key: string, patch: Record<string, unknown>) => {
+      m.patchPrefs(key, patch)
+      state.value = { ...state.value, ...patch }
+    },
   }
 })
 
@@ -187,6 +198,7 @@ function mountPage() {
 describe('PayrollQuickInputs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.pagePrefs.value = {}
     m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
     m.load.mockImplementation(async period => ({
@@ -753,15 +765,17 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.find('[data-testid="quick-surcharge-night-13"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="quick-surcharge-weekend-13"]').exists()).toBe(true)
     // Stav přepínače si směnný provoz nesmí nastavovat každý měsíc znovu.
-    expect(m.putPref).toHaveBeenCalledWith(
-      'payroll.quick_inputs.surcharges',
-      { visible: true },
+    // Ukládá se do preferencí tabulky — samostatný klíč server nepřijímal.
+    expect(m.patchPrefs).toHaveBeenCalledWith(
+      'payroll-quick-inputs',
+      { flags: { surcharges: true } },
     )
+    expect(m.putPref).not.toHaveBeenCalled()
   })
 
   /** Uložená preference přepínač zapne ještě před prvním kliknutím. */
   it('restores the remembered toggle state', async () => {
-    m.getPref.mockResolvedValue({ visible: true })
+    m.pagePrefs.value = { flags: { surcharges: true } }
     const wrapper = mountPage()
     await flushPromises()
 
@@ -794,7 +808,7 @@ describe('PayrollQuickInputs', () => {
 
   /** Zadané hodiny odcházejí na server po druzích, i s verzí řádku. */
   it('sends entered hours per surcharge kind', async () => {
-    m.getPref.mockResolvedValue({ visible: true })
+    m.pagePrefs.value = { flags: { surcharges: true } }
     const wrapper = mountPage()
     await flushPromises()
 
@@ -816,7 +830,7 @@ describe('PayrollQuickInputs', () => {
    * zákonný nárok, o kterém uživatel ani nevěděl.
    */
   it('never sends kinds the user is not allowed to change', async () => {
-    m.getPref.mockResolvedValue({ visible: true })
+    m.pagePrefs.value = { flags: { surcharges: true } }
     m.load.mockImplementation(async period => ({
       period,
       total: 1,
@@ -855,7 +869,7 @@ describe('PayrollQuickInputs', () => {
    * dostupný v `title` i pro odečítače, informačně se nic neztrácí.
    */
   it('hoists a surcharge reason shared by the whole column above the table', async () => {
-    m.getPref.mockResolvedValue({ visible: true })
+    m.pagePrefs.value = { flags: { surcharges: true } }
     const blocked = {
       holiday: {
         entry_available: false,
@@ -898,7 +912,7 @@ describe('PayrollQuickInputs', () => {
    * se výjimka schovala pod společné vysvětlení, které pro ni neplatí.
    */
   it('keeps the full reason in a row that differs from the column', async () => {
-    m.getPref.mockResolvedValue({ visible: true })
+    m.pagePrefs.value = { flags: { surcharges: true } }
     m.load.mockImplementation(async period => ({
       period,
       total: 3,
@@ -945,7 +959,7 @@ describe('PayrollQuickInputs', () => {
    * odhadnout jedničku by byl tichý nedoplatek, tak se řádek radši neuloží.
    */
   it('requires the aggravating factor count for Section 117', async () => {
-    m.getPref.mockResolvedValue({ visible: true })
+    m.pagePrefs.value = { flags: { surcharges: true } }
     const wrapper = mountPage()
     await flushPromises()
 
@@ -970,7 +984,7 @@ describe('PayrollQuickInputs', () => {
    * uloží — stejně jako u náhledu hrubé mzdy.
    */
   it('previews the amount next to the entered hours', async () => {
-    m.getPref.mockResolvedValue({ visible: true })
+    m.pagePrefs.value = { flags: { surcharges: true } }
     const wrapper = mountPage()
     await flushPromises()
 
@@ -984,7 +998,7 @@ describe('PayrollQuickInputs', () => {
 
   /** Chyba serveru se ukáže u KONKRÉTNÍHO příplatkového pole, ne jen v toastu. */
   it('shows a server failure at the surcharge field it belongs to', async () => {
-    m.getPref.mockResolvedValue({ visible: true })
+    m.pagePrefs.value = { flags: { surcharges: true } }
     m.save.mockImplementation(async payload => ({
       month: { period: payload.period, total: 1, items: [fixture()] },
       failures: [{
@@ -1187,4 +1201,214 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.find('[data-testid="quick-overtime-split-13"]').exists()).toBe(false)
   })
 
+  describe('sloupce mzdových složek', () => {
+    const BOZP_COLUMN: PayrollQuickComponentColumn = {
+      code: 'PRIPLATEK_BOZP',
+      name: 'Příplatek BOZP',
+      kind: 'premium',
+      unit: 'money',
+      editable_in_quick: true,
+      rows_with_value: 1,
+      counts_in_gross: true,
+    }
+
+    function cell(overrides: Partial<PayrollQuickComponentCell> = {}): PayrollQuickComponentCell {
+      return {
+        amount_minor: 50_000,
+        quantity_milliunits: null,
+        status: 'draft',
+        source: 'import',
+        mode: 'import',
+        input_id: 501,
+        component_id: 77,
+        row_version: 3,
+        external_id: 'attendance:2026-06:12:PRIPLATEK_BOZP',
+        override_of: null,
+        input_count: 1,
+        has_recurring: false,
+        entry_available: true,
+        ...overrides,
+      }
+    }
+
+    function monthWith(components: Record<string, PayrollQuickComponentCell>) {
+      m.load.mockImplementation(async (period: string) => ({
+        period,
+        total: 1,
+        items: [fixture({ components })],
+        columns: [BOZP_COLUMN],
+        totals: {
+          rows: 3,
+          base_amount_minor: 12_600_000,
+          overtime_amount_minor: 0,
+          bonus_amount_minor: 0,
+          surcharge_amount_minor: 0,
+          other_amount_minor: 70_000,
+          excluded_from_gross_amount_minor: 0,
+          gross_preview_minor: 12_670_000,
+          surcharges: {},
+          components: { PRIPLATEK_BOZP: { amount_minor: 70_000, quantity_milliunits: null, rows_with_value: 1 } },
+        },
+      }))
+    }
+
+    /*
+     * „Zadat i příplatky" ukáže výchozí sloupce (zákonné příplatky, jako
+     * dřív) a zároveň nabídne další složky zaškrtávátky. Volba se ukládá do
+     * preferencí tabulky pod klíčem `component:<KÓD>`.
+     */
+    it('offers payroll components from the toggle and remembers the choice', async () => {
+      monthWith({})
+      const wrapper = mountPage()
+      await flushPromises()
+
+      await wrapper.get('[data-testid="quick-surcharges-toggle"]').trigger('click')
+      await flushPromises()
+
+      const menu = wrapper.get('[data-testid="quick-columns-menu"]')
+      const surcharge = menu.get('[data-testid="quick-columns-option-surcharge:night"] input')
+      const component = menu.get('[data-testid="quick-columns-option-component:PRIPLATEK_BOZP"] input')
+      expect((surcharge.element as HTMLInputElement).checked).toBe(true)
+      expect((component.element as HTMLInputElement).checked).toBe(false)
+      expect(wrapper.find('[data-testid="quick-component-head-PRIPLATEK_BOZP"]').exists()).toBe(false)
+      expect(menu.text()).toContain('payroll.quick_inputs.component_kinds.premium')
+
+      await component.setValue(true)
+      await flushPromises()
+
+      expect(m.patchPrefs).toHaveBeenLastCalledWith('payroll-quick-inputs', {
+        hidden: [],
+        shown: ['component:PRIPLATEK_BOZP'],
+      })
+      expect(wrapper.find('[data-testid="quick-component-head-PRIPLATEK_BOZP"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="quick-component-PRIPLATEK_BOZP-12"]').exists()).toBe(true)
+    })
+
+    it('full overview preset adds every component with a value', async () => {
+      monthWith({})
+      const wrapper = mountPage()
+      await flushPromises()
+      await wrapper.get('[data-testid="quick-columns-menu-toggle"]').trigger('click')
+      await flushPromises()
+
+      await wrapper.get('[data-testid="quick-columns-preset-full"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="quick-component-head-PRIPLATEK_BOZP"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="quick-surcharge-head-night"]').exists()).toBe(true)
+    })
+
+    it('edits an imported value as a manual override and sends only the touched cell', async () => {
+      m.pagePrefs.value = { flags: { surcharges: true }, shown: ['component:PRIPLATEK_BOZP'] }
+      monthWith({ PRIPLATEK_BOZP: cell() })
+      const wrapper = mountPage()
+      await flushPromises()
+
+      const input = wrapper.get('[data-testid="quick-component-PRIPLATEK_BOZP-12"]')
+      expect((input.element as HTMLInputElement).value).toBe('500,00')
+      const source = wrapper.get('[data-testid="quick-component-source-PRIPLATEK_BOZP-12"]')
+      expect(source.attributes('data-source')).toBe('import')
+
+      await input.setValue('700')
+      await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+      await flushPromises()
+
+      const row = m.save.mock.calls[0][0].rows[0]
+      expect(row.components).toEqual({ PRIPLATEK_BOZP: { amount_minor: 70_000, row_version: 3 } })
+    })
+
+    it('does not send component cells nobody touched', async () => {
+      m.pagePrefs.value = { flags: { surcharges: true }, shown: ['component:PRIPLATEK_BOZP'] }
+      monthWith({ PRIPLATEK_BOZP: cell() })
+      const wrapper = mountPage()
+      await flushPromises()
+
+      await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+      await flushPromises()
+
+      expect(m.save.mock.calls[0][0].rows[0].components).toBeUndefined()
+    })
+
+    it('refuses to clear an imported value with an empty field', async () => {
+      m.pagePrefs.value = { flags: { surcharges: true }, shown: ['component:PRIPLATEK_BOZP'] }
+      monthWith({ PRIPLATEK_BOZP: cell() })
+      const wrapper = mountPage()
+      await flushPromises()
+
+      await wrapper.get('[data-testid="quick-component-PRIPLATEK_BOZP-12"]').setValue('')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('payroll.quick_inputs.component_validation.amount_required')
+    })
+
+    it('marks a manual override and reverts it to the imported value on save', async () => {
+      m.pagePrefs.value = { flags: { surcharges: true }, shown: ['component:PRIPLATEK_BOZP'] }
+      monthWith({
+        PRIPLATEK_BOZP: cell({
+          amount_minor: 70_000,
+          mode: 'override',
+          source: 'manual',
+          external_id: 'override:501',
+          input_id: 601,
+          row_version: 5,
+          override_of: {
+            input_id: 501,
+            amount_minor: 50_000,
+            quantity_milliunits: null,
+            external_id: 'attendance:2026-06:12:PRIPLATEK_BOZP',
+          },
+        }),
+      })
+      const wrapper = mountPage()
+      await flushPromises()
+
+      const source = wrapper.get('[data-testid="quick-component-source-PRIPLATEK_BOZP-12"]')
+      expect(source.attributes('data-source')).toBe('override')
+      expect(source.attributes('title')).toBe('payroll.quick_inputs.component_cell.override_title')
+
+      await wrapper.get('[data-testid="quick-component-revert-PRIPLATEK_BOZP-12"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-testid="quick-component-revert-pending-PRIPLATEK_BOZP-12"]').exists()).toBe(true)
+
+      await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+      await flushPromises()
+
+      expect(m.save.mock.calls[0][0].rows[0].components).toEqual({
+        PRIPLATEK_BOZP: { revert: true, row_version: 5 },
+      })
+    })
+
+    it('keeps a cell managed elsewhere read-only', async () => {
+      m.pagePrefs.value = { flags: { surcharges: true }, shown: ['component:PRIPLATEK_BOZP'] }
+      monthWith({
+        PRIPLATEK_BOZP: cell({ mode: 'managed', source: 'recurring', entry_available: false, input_id: null }),
+      })
+      const wrapper = mountPage()
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="quick-component-PRIPLATEK_BOZP-12"]').exists()).toBe(false)
+      expect(wrapper.get('[data-testid="quick-component-readonly-PRIPLATEK_BOZP-12"]').attributes('title'))
+        .toBe('payroll.quick_inputs.component_cell.managed')
+    })
+
+    /** Součtový řádek je za celé období, ne za stránku, a počítá rozepsané změny. */
+    it('shows period totals and shifts them by pending edits', async () => {
+      m.pagePrefs.value = { flags: { surcharges: true }, shown: ['component:PRIPLATEK_BOZP'] }
+      monthWith({ PRIPLATEK_BOZP: cell() })
+      const wrapper = mountPage()
+      await flushPromises()
+
+      const digits = (selector: string): string =>
+        wrapper.get(selector).text().replace(/\D/g, '')
+      expect(digits('[data-testid="quick-total-gross"]')).toBe('12670000')
+      expect(digits('[data-testid="quick-total-component-PRIPLATEK_BOZP"]')).toBe('70000')
+
+      await wrapper.get('[data-testid="quick-component-PRIPLATEK_BOZP-12"]').setValue('700')
+      await flushPromises()
+
+      // 700 Kč − 500 Kč uložených = +200 Kč proti součtu za období.
+      expect(digits('[data-testid="quick-total-component-PRIPLATEK_BOZP"]')).toBe('90000')
+      expect(digits('[data-testid="quick-total-gross"]')).toBe('12690000')
+    })
+  })
 })

@@ -80,6 +80,72 @@ final class PayrollQuickInputRepository
     /** Předpona pole rychlého zadání, které nese jeden druh příplatku. */
     public const SURCHARGE_FIELD_PREFIX = 'surcharge_';
 
+    /**
+     * Ruční přepis importované hodnoty: `override:<id importního vstupu>`.
+     *
+     * Importní vstup se přepisem NEMAŽE ani nemění — přejde do stavu
+     * `cancelled` a zůstane jako doklad dávky (řádek importu na něj dál
+     * ukazuje). Do výpočtu jde jen přepis. Zrušený vstup vylučuje z výpočtu
+     * každé místo, které `payroll_inputs` čte (běh bere jen `approved`
+     * a `locked`), takže dvojí započtení nevznikne ani tam, kde o přepisu
+     * nikdo neví. Sdílí ho import ({@see PayrollInputImportRepository}), aby
+     * opakovaný import přepis poznal a nepřepsal.
+     */
+    public const OVERRIDE_PREFIX = 'override:';
+
+    /** Předpona pole rychlého zadání, které nese jednu dynamickou mzdovou složku. */
+    public const COMPONENT_FIELD_PREFIX = 'component:';
+
+    /**
+     * Hodnoty `components.*.source` v odpovědi — odkud hodnota buňky přišla
+     * ({@see self::inputSource()}). Páruje je PayrollEnumContractTest s unií
+     * `PayrollQuickComponentSource` ve frontendu.
+     */
+    public const COMPONENT_CELL_SOURCES = ['import', 'recurring', 'manual', 'attendance', 'surcharge'];
+
+    /**
+     * Hodnoty `components.*.mode` — co s buňkou sloupce složky jde udělat
+     * ({@see self::componentCells()}). Páruje je PayrollEnumContractTest
+     * s unií `PayrollQuickComponentMode`.
+     */
+    public const COMPONENT_CELL_MODES = ['manual', 'import', 'override', 'managed'];
+
+    /**
+     * Prefix `external_id` vstupu z importu docházky. Shodný se zápisem
+     * v {@see \MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService}.
+     */
+    private const ATTENDANCE_IMPORT_PREFIX = 'attendance:';
+
+    /**
+     * Druhy složek, které rychlé zadání dovolí nově zadat do vlastního sloupce.
+     *
+     * Chybí tu záměrně základní mzda (má pevné pole), náhrady (vznikají
+     * z absencí), benefity (roční koše a doklady), cestovné (z vyúčtování cest)
+     * a odstupné či zpětné doplatky — to jsou jednotlivé případy pro Mzdové
+     * vstupy, ne pro měsíční sloupec u 500 lidí.
+     */
+    private const QUICK_COMPONENT_KINDS = [
+        'hourly_wage',
+        'task_wage',
+        'bonus',
+        'premium',
+        'commission',
+        'allowance',
+        'other',
+    ];
+
+    /** Pořadí skupin v nabídce sloupců a v tabulce. */
+    private const COMPONENT_KIND_ORDER = [
+        'premium',
+        'allowance',
+        'bonus',
+        'commission',
+        'hourly_wage',
+        'task_wage',
+        'compensation',
+        'other',
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollComponentRepository $components,
@@ -114,6 +180,17 @@ final class PayrollQuickInputRepository
     }
 
     /**
+     * Kódy složek s pevným polem rychlého zadání (základ, přesčas, odměna,
+     * příplatky § 115–118). Dynamický sloupec pro ně nevzniká.
+     *
+     * @return list<string>
+     */
+    public static function fixedComponentCodes(): array
+    {
+        return self::managedCodes();
+    }
+
+    /**
      * Jeden měsíc rychlého zadání, stránkovaně.
      *
      * `$employmentId` zúží měsíc na jeden pracovní vztah. Filtr padá do TÉHOŽ
@@ -122,7 +199,18 @@ final class PayrollQuickInputRepository
      * by to kdokoli řekl. Zúžení mění i `total`, takže pager mluví o zúženém
      * seznamu, ne o celém měsíci.
      *
-     * @return array{period:string,items:list<array<string,mixed>>,total:int}
+     * Součtový řádek (`totals`) i počty řádků s hodnotou u sloupců složek
+     * (`columns`) jsou za CELÝ zúžený měsíc, ne za stránku — kontrolní součet
+     * proti podkladu, který by se měnil s listováním, nic nekontroluje. Proto
+     * se měsíc prochází po dávkách celý (stejně jako přehled karet) a stránka
+     * se z něj vyřízne. Částky jdou tou jedinou cestou, která je počítá i pro
+     * řádek, takže se součet od řádků rozejít nemůže. Do 200 vztahů je to
+     * jedna dávka se stejným počtem dotazů jako dřív stránka.
+     *
+     * @return array{
+     *   period:string,items:list<array<string,mixed>>,total:int,
+     *   columns:list<array<string,mixed>>,totals:array<string,mixed>
+     * }
      */
     public function month(
         int $supplierId,
@@ -135,7 +223,272 @@ final class PayrollQuickInputRepository
         if ($employmentId !== null && $employmentId <= 0) {
             throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
         }
-        return $this->collect($supplierId, $period, null, $limit, $offset, $employmentId, $search);
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $all = [];
+        $cursor = 0;
+        $total = 0;
+        do {
+            $batch = $this->collect(
+                $supplierId,
+                $period,
+                null,
+                self::LIST_MAX_LIMIT,
+                $cursor,
+                $employmentId,
+                $search,
+            );
+            array_push($all, ...$batch['items']);
+            $total = $batch['total'];
+            $cursor += count($batch['items']);
+        } while ($cursor < $total && $batch['items'] !== []);
+
+        return [
+            'period' => $period,
+            'items' => array_slice($all, $offset, $limit),
+            'total' => $total,
+            'columns' => $this->componentColumns($supplierId, $period . '-01', $all),
+            'totals' => self::periodTotals($all),
+        ];
+    }
+
+    /**
+     * Sloupce mzdových složek, které rychlé zadání umí ukázat.
+     *
+     * Nabízí se každá účinná jednorázová složka firmy, kterou jde zadat ručně,
+     * a k tomu KAŽDÁ složka, která má v měsíci hodnotu — i ta, kterou zadat
+     * nejde (pravidelná, benefit, náhrada). Ta je v nabídce jen pro přehled,
+     * aby účetní viděla, z čeho se hrubá mzda skládá.
+     *
+     * @param list<array<string,mixed>> $items celý zúžený měsíc
+     * @return list<array<string,mixed>>
+     */
+    private function componentColumns(int $supplierId, string $periodStart, array $items): array
+    {
+        $rowsWithValue = [];
+        foreach ($items as $item) {
+            foreach ((array) ($item['components'] ?? []) as $code => $cell) {
+                if (!is_array($cell) || !self::cellHasValue($cell)) {
+                    continue;
+                }
+                $rowsWithValue[(string) $code] = ($rowsWithValue[(string) $code] ?? 0) + 1;
+            }
+        }
+
+        $fixed = array_flip(self::managedCodes());
+        $definitions = [];
+        foreach ($this->effectiveDefinitions($supplierId, $periodStart) as $definition) {
+            $code = PayrollTimeValue::string($definition['code'] ?? null, 'code');
+            if (isset($fixed[$code])) {
+                continue;
+            }
+            $editable = self::quickEditableDefinition($definition);
+            if (!$editable && !isset($rowsWithValue[$code])) {
+                continue;
+            }
+            $definitions[$code] = $definition + ['_editable' => $editable];
+        }
+        $missing = array_values(array_diff(array_keys($rowsWithValue), array_keys($definitions)));
+        foreach ($this->definitionsByCode($supplierId, $missing) as $definition) {
+            $code = PayrollTimeValue::string($definition['code'] ?? null, 'code');
+            if (!isset($fixed[$code])) {
+                $definitions[$code] = $definition + ['_editable' => false];
+            }
+        }
+
+        $columns = [];
+        foreach ($definitions as $code => $definition) {
+            $kind = PayrollTimeValue::string($definition['component_kind'] ?? null, 'component_kind');
+            $taxTreatment = PayrollTimeValue::string(
+                $definition['tax_treatment'] ?? null,
+                'tax_treatment',
+            );
+            $columns[] = [
+                'code' => (string) $code,
+                'name' => PayrollTimeValue::string($definition['name'] ?? null, 'name'),
+                'kind' => $kind,
+                'unit' => 'money',
+                'editable_in_quick' => $definition['_editable'] === true,
+                'rows_with_value' => $rowsWithValue[(string) $code] ?? 0,
+                // Hrubý náhled tu složku sčítá? Rozhoduje totéž pravidlo jako
+                // u řádku: pevný slot, nebo zdanitelné zařazení.
+                'counts_in_gross' => self::managedSlot((string) $code, $kind) !== null
+                    || in_array($taxTreatment, ['included', 'withholding_candidate'], true),
+            ];
+        }
+        usort($columns, static function (array $left, array $right): int {
+            $order = array_flip(self::COMPONENT_KIND_ORDER);
+            return [
+                $order[$left['kind']] ?? count($order),
+                $left['name'],
+                $left['code'],
+            ] <=> [
+                $order[$right['kind']] ?? count($order),
+                $right['name'],
+                $right['code'],
+            ];
+        });
+
+        return $columns;
+    }
+
+    /**
+     * Smí se složka v rychlém zadání NOVĚ zadat? Jediné místo tohoto pravidla —
+     * řídí se jím nabídka sloupců i ukládání, aby se nerozešly.
+     *
+     * @param array<string,mixed> $definition
+     */
+    private static function quickEditableDefinition(array $definition): bool
+    {
+        $code = PayrollTimeValue::string($definition['code'] ?? null, 'code');
+
+        return !in_array($code, self::managedCodes(), true)
+            && ($definition['frequency_kind'] ?? null) === 'one_off'
+            && ($definition['value_kind'] ?? null) === 'monetary'
+            && ($definition['tax_treatment'] ?? null) !== 'manual_review'
+            && in_array($definition['component_kind'] ?? null, self::QUICK_COMPONENT_KINDS, true);
+    }
+
+    /**
+     * Účinná verze každé aktivní složky firmy k začátku měsíce.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function effectiveDefinitions(int $supplierId, string $periodStart): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ranked.id, ranked.code, ranked.name, ranked.component_kind,
+                    ranked.value_kind, ranked.frequency_kind, ranked.tax_treatment
+               FROM (
+                     SELECT component.id, component.code, component.name,
+                            component.component_kind, component.value_kind,
+                            component.frequency_kind, component.tax_treatment,
+                            ROW_NUMBER() OVER (
+                              PARTITION BY component.code
+                              ORDER BY component.valid_from DESC, component.id DESC
+                            ) AS position_no
+                       FROM payroll_component_definitions component
+                      WHERE component.supplier_id = ?
+                        AND component.is_active = 1
+                        AND component.valid_from <= ?
+                        AND (component.valid_to IS NULL OR component.valid_to >= ?)
+                    ) ranked
+              WHERE ranked.position_no = 1'
+        );
+        $stmt->execute([$supplierId, $periodStart, $periodStart]);
+
+        return PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'quick_component_definitions');
+    }
+
+    /**
+     * Nejnovější verze vyjmenovaných složek bez ohledu na účinnost — pro
+     * složky, které mají v měsíci hodnotu, ale mezitím je někdo ukončil.
+     *
+     * @param list<string> $codes
+     * @return list<array<string,mixed>>
+     */
+    private function definitionsByCode(int $supplierId, array $codes): array
+    {
+        if ($codes === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ranked.id, ranked.code, ranked.name, ranked.component_kind,
+                    ranked.value_kind, ranked.frequency_kind, ranked.tax_treatment
+               FROM (
+                     SELECT component.id, component.code, component.name,
+                            component.component_kind, component.value_kind,
+                            component.frequency_kind, component.tax_treatment,
+                            ROW_NUMBER() OVER (
+                              PARTITION BY component.code
+                              ORDER BY component.valid_from DESC, component.id DESC
+                            ) AS position_no
+                       FROM payroll_component_definitions component
+                      WHERE component.supplier_id = ?
+                        AND component.code IN ('
+            . implode(',', array_fill(0, count($codes), '?'))
+            . ')
+                    ) ranked
+              WHERE ranked.position_no = 1'
+        );
+        $stmt->execute([$supplierId, ...$codes]);
+
+        return PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'quick_component_definitions');
+    }
+
+    /**
+     * Součtový řádek za celý zúžený měsíc. Sčítají se hodnoty, které server
+     * spočítal pro jednotlivé řádky — jiná cesta by se od řádků rozešla.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return array<string,mixed>
+     */
+    private static function periodTotals(array $items): array
+    {
+        $totals = [
+            'rows' => count($items),
+            'base_amount_minor' => 0,
+            'overtime_amount_minor' => 0,
+            'bonus_amount_minor' => 0,
+            'surcharge_amount_minor' => 0,
+            'other_amount_minor' => 0,
+            'excluded_from_gross_amount_minor' => 0,
+            'gross_preview_minor' => 0,
+            'surcharges' => [],
+            'components' => [],
+        ];
+        foreach (PayrollSurchargeKind::quickManualEntry() as $kind) {
+            $totals['surcharges'][$kind->value] = 0;
+        }
+        foreach ($items as $item) {
+            foreach ([
+                'base_amount_minor',
+                'overtime_amount_minor',
+                'bonus_amount_minor',
+                'surcharge_amount_minor',
+                'other_amount_minor',
+                'excluded_from_gross_amount_minor',
+                'gross_preview_minor',
+            ] as $key) {
+                $totals[$key] += PayrollTimeValue::int($item[$key] ?? null, $key);
+            }
+            foreach ((array) ($item['surcharges'] ?? []) as $kind => $state) {
+                if (is_array($state) && isset($totals['surcharges'][$kind])) {
+                    $totals['surcharges'][$kind] += (int) ($state['amount_minor'] ?? 0)
+                        + (int) ($state['managed_amount_minor'] ?? 0);
+                }
+            }
+            foreach ((array) ($item['components'] ?? []) as $code => $cell) {
+                if (!is_array($cell)) {
+                    continue;
+                }
+                $current = $totals['components'][$code] ?? [
+                    'amount_minor' => 0,
+                    'quantity_milliunits' => null,
+                    'rows_with_value' => 0,
+                ];
+                $current['amount_minor'] += (int) $cell['amount_minor'];
+                if ($cell['quantity_milliunits'] !== null) {
+                    $current['quantity_milliunits'] = ($current['quantity_milliunits'] ?? 0)
+                        + (int) $cell['quantity_milliunits'];
+                }
+                if (self::cellHasValue($cell)) {
+                    ++$current['rows_with_value'];
+                }
+                $totals['components'][$code] = $current;
+            }
+        }
+
+        return $totals;
+    }
+
+    /** @param array<string,mixed> $cell */
+    private static function cellHasValue(array $cell): bool
+    {
+        return (int) ($cell['amount_minor'] ?? 0) !== 0
+            || ($cell['quantity_milliunits'] ?? null) !== null
+            || ($cell['input_count'] ?? 0) > 0;
     }
 
     /**
@@ -460,8 +813,11 @@ final class PayrollQuickInputRepository
             . implode(',', array_fill(0, count($employmentIdsOnPage), '?'))
             . ')';
 
+        // Zrušený importní vstup se čte jen tehdy, když na něj ukazuje živý ruční
+        // přepis — je to „hodnota z importu", ke které se lze vrátit. Do žádné
+        // částky se nesčítá (viz buildItem()).
         $inputStmt = $this->db->pdo()->prepare(
-            'SELECT input.id, input.employment_id, input.amount_minor,
+            'SELECT input.id, input.employment_id, input.component_id, input.amount_minor,
                     input.quantity_milliunits, input.source_kind, input.external_id,
                     input.status, input.row_version, input.source_snapshot_json,
                     component.code AS component_code,
@@ -472,11 +828,31 @@ final class PayrollQuickInputRepository
                  ON component.supplier_id = input.supplier_id
                 AND component.id = input.component_id
               WHERE input.supplier_id = ? AND input.period_start = ?
-                AND input.status <> "cancelled"'
+                AND (
+                      input.status <> "cancelled"
+                      OR (
+                          input.source_kind = "import"
+                          AND EXISTS (
+                              SELECT 1
+                                FROM payroll_inputs override_input
+                               WHERE override_input.supplier_id = input.supplier_id
+                                 AND override_input.employment_id = input.employment_id
+                                 AND override_input.period_start = input.period_start
+                                 AND override_input.source_kind = "manual"
+                                 AND override_input.status <> "cancelled"
+                                 AND override_input.external_id = CONCAT(?, input.id)
+                          )
+                      )
+                )'
             . sprintf($pageFilter, 'input')
             . ' ORDER BY input.id'
         );
-        $inputStmt->execute([$supplierId, $periodStart, ...$employmentIdsOnPage]);
+        $inputStmt->execute([
+            $supplierId,
+            $periodStart,
+            self::OVERRIDE_PREFIX,
+            ...$employmentIdsOnPage,
+        ]);
         $byEmployment = [];
         foreach (PayrollTimeValue::rows($inputStmt->fetchAll(PDO::FETCH_ASSOC), 'quick_inputs') as $input) {
             $byEmployment[(int) $input['employment_id']][] = $input;
@@ -734,6 +1110,8 @@ final class PayrollQuickInputRepository
      *   overtime_hours_milli:?int,overtime_amount_minor:?int,bonus_amount_minor:int,
      *   overtime_average_snapshot_id:?int,overtime_average_snapshot_version:?int,
      *   surcharges:array<string,array{hours_milli:?int,factors:?int}>,
+     *   components:array<string,array{amount_minor:?int,quantity_milliunits:?int,
+     *     quantity_provided:bool,row_version:?int,revert:bool}>,
      *   versions:array{base:?int,overtime:?int,bonus:?int,surcharges:array<string,?int>}
      * }> $rows
      * @param bool $autoApprove Zadal to někdo s právem `payroll.approve`?
@@ -783,6 +1161,8 @@ final class PayrollQuickInputRepository
                 $items[(int) $item['employment_id']] = $item;
             }
             $componentIds = $this->componentIds($supplierId, $period . '-01');
+            /** @var array<string,array<string,mixed>>|null $dynamicDefinitions načte se až u první buňky složky */
+            $dynamicDefinitions = null;
             usort($rows, static fn(array $left, array $right): int =>
                 $left['employment_id'] <=> $right['employment_id']);
             foreach ($rows as $row) {
@@ -1019,6 +1399,45 @@ final class PayrollQuickInputRepository
                         },
                     );
                 }
+
+                // Dynamické sloupce mzdových složek. Každá buňka má vlastní
+                // savepoint: zamčený importní vstup jedné složky nesmí shodit
+                // uložení ostatních.
+                foreach ($row['components'] ?? [] as $code => $entry) {
+                    $code = (string) $code;
+                    $this->guard(
+                        $pdo,
+                        $collected,
+                        $employmentId,
+                        self::COMPONENT_FIELD_PREFIX . $code,
+                        function () use (
+                            $supplierId,
+                            $employmentId,
+                            $item,
+                            $code,
+                            $entry,
+                            $period,
+                            $userId,
+                            $autoApprove,
+                            &$dynamicDefinitions,
+                        ): void {
+                            $dynamicDefinitions ??= $this->definitionMap(
+                                $this->effectiveDefinitions($supplierId, $period . '-01'),
+                            );
+                            $this->saveComponent(
+                                $supplierId,
+                                $employmentId,
+                                $item,
+                                $code,
+                                $entry,
+                                $dynamicDefinitions,
+                                $period,
+                                $userId,
+                                $autoApprove,
+                            );
+                        },
+                    );
+                }
             }
             if ($ownsTransaction) {
                 $pdo->commit();
@@ -1083,7 +1502,23 @@ final class PayrollQuickInputRepository
         $other = 0;
         $nonMonetary = 0;
         $excludedFromGross = 0;
+        $fixedCodes = array_flip(self::managedCodes());
+        /** @var array<int,array<string,mixed>> $overriddenImports */
+        $overriddenImports = [];
         foreach ($inputs as $input) {
+            if (($input['status'] ?? null) === 'cancelled') {
+                $overriddenImports[PayrollTimeValue::int($input['id'] ?? null, 'id')] = $input;
+            }
+        }
+        /** @var array<string,list<array<string,mixed>>> $componentInputs */
+        $componentInputs = [];
+        /** @var array<string,array{amount_minor:int,supported:bool}> $componentRecurring */
+        $componentRecurring = [];
+        foreach ($inputs as $input) {
+            if (($input['status'] ?? null) === 'cancelled') {
+                // Přepsaná hodnota z importu: doklad, ne částka.
+                continue;
+            }
             $code = PayrollTimeValue::string($input['component_code'] ?? null, 'component_code');
             $kind = PayrollTimeValue::string(
                 $input['component_kind'] ?? null,
@@ -1092,6 +1527,9 @@ final class PayrollQuickInputRepository
             $externalId = $input['external_id'] === null
                 ? null
                 : PayrollTimeValue::string($input['external_id'], 'external_id');
+            if (!isset($fixedCodes[$code])) {
+                $componentInputs[$code][] = $input;
+            }
             $quickSlot = self::quickSlot($code);
             $isQuick = $quickSlot !== null
                 && $externalId === self::EXTERNAL_PREFIX . $code;
@@ -1105,6 +1543,18 @@ final class PayrollQuickInputRepository
             // mapoval přes `$quickSlot`, spadl by cizí hodinový základ do
             // přesčasu a formulář by tvrdil, že přesčas spravuje jiný vstup.
             $managedSlot = self::managedSlot($code, $kind);
+            if (($managedSlot === 'overtime' || $managedSlot === 'bonus')
+                && self::hasOwnColumnOrigin($code, $externalId, $overriddenImports)
+            ) {
+                // Složka z importu docházky (a její ruční přepis nebo vlastní
+                // zadání ve sloupci složky) má VLASTNÍ sloupec. Dokud padala
+                // podle druhu do slotu přesčasu nebo odměny, `PRIPLATEK_BOZP`
+                // zamkl přesčas hláškou „spravuje jiný vstup" a ani jedno nešlo
+                // upravit. Základ se tu záměrně nepouští: hodinová mzda
+                // z docházky musí dál brzdit návrh měsíční mzdy, jinak by
+                // uložení stránky přidalo hodinovému zaměstnanci i měsíční.
+                $managedSlot = null;
+            }
             $amount = PayrollTimeValue::int($input['amount_minor'] ?? null, 'amount_minor');
             if ($managedSlot !== null) {
                 $managed[$managedSlot] = true;
@@ -1155,6 +1605,15 @@ final class PayrollQuickInputRepository
             );
             $slot = self::managedSlot($code, $kind);
             $calculation = $this->recurringAmounts->calculate($assignment, $periodStart);
+            if (!isset($fixedCodes[$code])) {
+                $supported = $calculation['status'] === 'supported'
+                    && is_int($calculation['amount_minor']);
+                $componentRecurring[$code] = [
+                    'amount_minor' => ($componentRecurring[$code]['amount_minor'] ?? 0)
+                        + ($supported ? (int) $calculation['amount_minor'] : 0),
+                    'supported' => ($componentRecurring[$code]['supported'] ?? true) && $supported,
+                ];
+            }
             if ($calculation['status'] === 'supported'
                 && is_int($calculation['amount_minor'])) {
                 $amount = $calculation['amount_minor'];
@@ -1499,9 +1958,188 @@ final class PayrollQuickInputRepository
             // přesčasu a v součtu byly taky; teď mají vlastní sloupec, ale
             // hrubý příjem se tím měnit nesmí.
             'gross_preview_minor' => $base + $overtime + $bonus + $other + $surchargeTotal,
+            // Rozpad po mzdových složkách mimo pevná pole. Je to POHLED na
+            // částky, které už jsou v polích nahoře a v `other_amount_minor`;
+            // do hrubého náhledu se znovu nepřičítá.
+            'components' => $this->componentCells($componentInputs, $componentRecurring, $overriddenImports),
             'inputs' => $quick,
             'blockers' => array_values(array_unique($blockers)),
         ];
+    }
+
+    /**
+     * Pochází vstup ze zdroje, který má v rychlém zadání vlastní sloupec?
+     *
+     * Tedy import docházky, ruční přepis importované hodnoty docházky, nebo
+     * vlastní zadání do sloupce složky. Pevné kódy mají vlastní pole a tady
+     * nikdy neprojdou.
+     *
+     * @param array<int,array<string,mixed>> $overriddenImports
+     */
+    private static function hasOwnColumnOrigin(
+        string $code,
+        ?string $externalId,
+        array $overriddenImports,
+    ): bool {
+        if ($externalId === null || in_array($code, self::managedCodes(), true)) {
+            return false;
+        }
+        if (str_starts_with($externalId, self::ATTENDANCE_IMPORT_PREFIX)
+            || $externalId === self::EXTERNAL_PREFIX . $code
+        ) {
+            return true;
+        }
+        $origin = self::overriddenImport($externalId, $overriddenImports);
+
+        return $origin !== null
+            && is_string($origin['external_id'] ?? null)
+            && str_starts_with($origin['external_id'], self::ATTENDANCE_IMPORT_PREFIX);
+    }
+
+    /**
+     * Importní vstup, na který ukazuje `override:<id>`, je-li mezi načtenými.
+     *
+     * @param array<int,array<string,mixed>> $overriddenImports
+     * @return array<string,mixed>|null
+     */
+    private static function overriddenImport(?string $externalId, array $overriddenImports): ?array
+    {
+        if ($externalId === null || !str_starts_with($externalId, self::OVERRIDE_PREFIX)) {
+            return null;
+        }
+        $id = substr($externalId, strlen(self::OVERRIDE_PREFIX));
+        if (!ctype_digit($id)) {
+            return null;
+        }
+
+        return $overriddenImports[(int) $id] ?? null;
+    }
+
+    /**
+     * Buňky dynamických sloupců jednoho řádku.
+     *
+     * `mode` říká, co s buňkou jde udělat, a rozhoduje o tom server:
+     *  - `manual`   vlastní zadání z rychlého vstupu — upravit, vymazat;
+     *  - `import`   jediný importní vstup — upravit znamená ručně přepsat;
+     *  - `override` ruční přepis importu — upravit, nebo vrátit na import;
+     *  - `managed`  cokoli jiného (pravidelná složka, více vstupů, vstup
+     *               z docházky či absence) — jen ke čtení.
+     *
+     * @param array<string,list<array<string,mixed>>> $componentInputs
+     * @param array<string,array{amount_minor:int,supported:bool}> $componentRecurring
+     * @param array<int,array<string,mixed>> $overriddenImports
+     * @return array<string,array<string,mixed>>
+     */
+    private function componentCells(
+        array $componentInputs,
+        array $componentRecurring,
+        array $overriddenImports,
+    ): array {
+        $cells = [];
+        $codes = array_values(array_unique([
+            ...array_map('strval', array_keys($componentInputs)),
+            ...array_map('strval', array_keys($componentRecurring)),
+        ]));
+        foreach ($codes as $code) {
+            $inputs = $componentInputs[$code] ?? [];
+            $recurring = $componentRecurring[$code] ?? null;
+            $amount = $recurring['amount_minor'] ?? 0;
+            $quantity = null;
+            foreach ($inputs as $input) {
+                $amount += PayrollTimeValue::int($input['amount_minor'] ?? null, 'amount_minor');
+                if ($input['quantity_milliunits'] !== null) {
+                    $quantity = ($quantity ?? 0)
+                        + PayrollTimeValue::int($input['quantity_milliunits'], 'quantity_milliunits');
+                }
+            }
+            $primary = count($inputs) === 1 && $recurring === null ? $inputs[0] : null;
+            $mode = 'managed';
+            $overrideOf = null;
+            if ($primary !== null) {
+                $sourceKind = PayrollTimeValue::string($primary['source_kind'] ?? null, 'source_kind');
+                $externalId = $primary['external_id'] === null
+                    ? null
+                    : PayrollTimeValue::string($primary['external_id'], 'external_id');
+                $origin = self::overriddenImport($externalId, $overriddenImports);
+                if ($sourceKind === 'manual' && $externalId === self::EXTERNAL_PREFIX . $code) {
+                    $mode = 'manual';
+                } elseif ($sourceKind === 'manual' && $origin !== null) {
+                    $mode = 'override';
+                    $overrideOf = [
+                        'input_id' => PayrollTimeValue::int($origin['id'] ?? null, 'id'),
+                        'amount_minor' => PayrollTimeValue::int(
+                            $origin['amount_minor'] ?? null,
+                            'amount_minor',
+                        ),
+                        'quantity_milliunits' => $origin['quantity_milliunits'] === null
+                            ? null
+                            : PayrollTimeValue::int(
+                                $origin['quantity_milliunits'],
+                                'quantity_milliunits',
+                            ),
+                        'external_id' => $origin['external_id'] === null
+                            ? null
+                            : PayrollTimeValue::string($origin['external_id'], 'external_id'),
+                    ];
+                } elseif ($sourceKind === 'import') {
+                    $mode = 'import';
+                }
+            }
+            $first = $primary ?? ($inputs[0] ?? null);
+            $status = $first === null
+                ? null
+                : PayrollTimeValue::string($first['status'] ?? null, 'status');
+            $cells[$code] = [
+                'amount_minor' => $amount,
+                'quantity_milliunits' => $quantity,
+                'status' => $status,
+                'source' => $first === null
+                    ? 'recurring'
+                    : self::inputSource(
+                        PayrollTimeValue::string($first['source_kind'] ?? null, 'source_kind'),
+                        $first['external_id'] === null
+                            ? null
+                            : PayrollTimeValue::string($first['external_id'], 'external_id'),
+                    ),
+                'mode' => $mode,
+                'input_id' => $primary === null
+                    ? null
+                    : PayrollTimeValue::int($primary['id'] ?? null, 'id'),
+                'component_id' => $primary === null
+                    ? null
+                    : PayrollTimeValue::int($primary['component_id'] ?? null, 'component_id'),
+                'row_version' => $primary === null
+                    ? null
+                    : PayrollTimeValue::int($primary['row_version'] ?? null, 'row_version'),
+                'external_id' => $primary === null || $primary['external_id'] === null
+                    ? null
+                    : PayrollTimeValue::string($primary['external_id'], 'external_id'),
+                'override_of' => $overrideOf,
+                'input_count' => count($inputs),
+                'has_recurring' => $recurring !== null,
+                // Upravit jde vlastní zadání, importní hodnotu (přepisem)
+                // a přepis. Uzamčený vstup jen opravnou revizí; schválený smí
+                // měnit jen ten, kdo schvaluje (to posoudí prohlížeč i server).
+                'entry_available' => $mode !== 'managed' && $status !== 'locked',
+            ];
+        }
+
+        return $cells;
+    }
+
+    /** Odkud hodnota v buňce přišla — pro ikonu zdroje. */
+    private static function inputSource(string $sourceKind, ?string $externalId): string
+    {
+        if ($externalId !== null && str_starts_with($externalId, self::TIME_SURCHARGE_PREFIX)) {
+            return 'surcharge';
+        }
+
+        return match ($sourceKind) {
+            'import' => 'import',
+            'recurring' => 'recurring',
+            'time' => 'attendance',
+            default => 'manual',
+        };
     }
 
     /**
@@ -1857,6 +2495,302 @@ final class PayrollQuickInputRepository
             true,
             $autoApprove,
         );
+    }
+
+    /**
+     * Uloží jednu buňku dynamického sloupce mzdové složky.
+     *
+     * ── Ruční přepis importované hodnoty ────────────────────────────────────
+     *
+     * Importní vstup se NEPŘEPISUJE. Přejde do stavu `cancelled` a vedle něj
+     * vznikne ruční vstup `override:<id>` se stejnou složkou a obdobím. Proč
+     * ne úprava na místě: řádek importu (doklad dávky) by pak ukazoval na
+     * částku, kterou dávka nikdy neobsahovala, a opakovaný import by ruční
+     * opravu tiše přemázl. Proč zrovna `cancelled`: to je jediný stav, který
+     * z výpočtu vylučuje KAŽDÉ místo, které mzdové vstupy čte — běh bere jen
+     * `approved`/`locked`, souhrny a koše vynechávají `cancelled`. Kdyby
+     * importní vstup zůstal schválený a „jen se nepočítal", muselo by o tom
+     * vědět každé z těch míst a stačilo by jedno zapomenuté ke dvojí výplatě.
+     *
+     * Obojí proběhne pod jedním savepointem pole: buď je importní vstup zrušený
+     * A přepis založený, nebo se nestane nic.
+     *
+     * @param array<string,mixed> $item
+     * @param array{amount_minor:?int,quantity_milliunits:?int,quantity_provided:bool,
+     *   row_version:?int,revert:bool} $entry
+     * @param array<string,array<string,mixed>> $definitions účinné složky podle kódu
+     */
+    private function saveComponent(
+        int $supplierId,
+        int $employmentId,
+        array $item,
+        string $code,
+        array $entry,
+        array $definitions,
+        string $period,
+        ?int $userId,
+        bool $autoApprove,
+    ): void {
+        if (in_array($code, self::managedCodes(), true)) {
+            throw new \InvalidArgumentException(
+                "Složku {$code} zadávejte v jejím vlastním poli rychlého vstupu."
+            );
+        }
+        /** @var array<string,mixed>|null $cell */
+        $cell = is_array($item['components'][$code] ?? null) ? $item['components'][$code] : null;
+        $mode = $cell === null ? 'empty' : PayrollTimeValue::string($cell['mode'] ?? null, 'mode');
+        $employeeId = PayrollTimeValue::int($item['employee_id'] ?? null, 'employee_id');
+
+        if ($entry['revert']) {
+            if ($cell === null || $mode !== 'override') {
+                throw new \DomainException(
+                    "Složka {$code} není ručně přepsaná, takže není k čemu se vracet."
+                );
+            }
+            self::assertCellVersion($cell, $entry['row_version']);
+            $this->revertOverride($supplierId, $cell, $userId, $autoApprove);
+
+            return;
+        }
+
+        $amount = $entry['amount_minor'];
+        if ($cell === null || $mode === 'manual') {
+            if ($cell === null) {
+                if ($amount === null) {
+                    // Prázdná buňka, do které nikdo nic nezadal.
+                    return;
+                }
+                $definition = $definitions[$code] ?? null;
+                if ($definition === null || !self::quickEditableDefinition($definition)) {
+                    throw new \DomainException(
+                        "Složku {$code} v rychlém vstupu zadat nelze (není účinná jednorázová "
+                        . 'peněžní složka s uzavřeným zdaněním). Zadejte ji v Mzdových vstupech.'
+                    );
+                }
+                $componentId = PayrollTimeValue::int($definition['id'] ?? null, 'id');
+            } else {
+                $componentId = PayrollTimeValue::int($cell['component_id'] ?? null, 'component_id');
+            }
+            $this->upsert(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $componentId,
+                $period,
+                $code,
+                $amount,
+                $amount === null ? null : $entry['quantity_milliunits'],
+                $entry['row_version'],
+                $userId,
+                null,
+                false,
+                $autoApprove,
+            );
+
+            return;
+        }
+
+        $currentQuantity = $cell['quantity_milliunits'] === null
+            ? null
+            : PayrollTimeValue::int($cell['quantity_milliunits'], 'quantity_milliunits');
+        $quantity = $entry['quantity_provided'] ? $entry['quantity_milliunits'] : $currentQuantity;
+        $unchanged = $amount === PayrollTimeValue::int($cell['amount_minor'] ?? null, 'amount_minor')
+            && $quantity === $currentQuantity;
+
+        if ($mode === 'managed') {
+            if ($unchanged) {
+                return;
+            }
+            throw new \DomainException(
+                "Složku {$code} v tomto měsíci spravuje jiný vstup (pravidelná složka, "
+                . 'docházka nebo více vstupů). Upravte ji v Mzdových vstupech.'
+            );
+        }
+        if ($amount === null) {
+            // Vymazat importovanou hodnotu by znamenalo nevyplatit ji, a to
+            // se nemá stát omylem prázdným políčkem. Nula je výslovná.
+            throw new \InvalidArgumentException(
+                'Zadejte částku (i nulu). K hodnotě z importu se vrátíte akcí '
+                . '„Vrátit na hodnotu z importu".'
+            );
+        }
+
+        if ($mode === 'import') {
+            if ($unchanged) {
+                return;
+            }
+            self::assertCellVersion($cell, $entry['row_version']);
+            $importId = PayrollTimeValue::int($cell['input_id'] ?? null, 'input_id');
+            $version = PayrollTimeValue::int($cell['row_version'] ?? null, 'row_version');
+            $status = PayrollTimeValue::string($cell['status'] ?? null, 'status');
+            if ($status === 'locked') {
+                throw new \DomainException(
+                    'Importovaný vstup je uzamčený mzdovým během; změnu proveďte opravnou revizí.'
+                );
+            }
+            if ($status === 'approved') {
+                if (!$autoApprove) {
+                    throw new \DomainException(
+                        'Importovaný vstup je schválený. Ručně ho přepsat smí jen uživatel '
+                        . 's právem schvalovat mzdové vstupy.'
+                    );
+                }
+                $this->inputs->revertToDraft($supplierId, $importId, $version);
+                ++$version;
+            }
+            // Nejdřív zrušit, pak založit: zrušení hlídá, že vstup není
+            // zmrazený v revizi běhu ani navázaný na jiný doklad.
+            $this->inputs->cancel($supplierId, $importId, $version);
+            $this->upsert(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                PayrollTimeValue::int($cell['component_id'] ?? null, 'component_id'),
+                $period,
+                $code,
+                $amount,
+                $quantity,
+                null,
+                $userId,
+                null,
+                // Přepis na nulu je plnohodnotný údaj („import tvrdil 500,
+                // skutečně nic") — řádek vzniknout musí.
+                true,
+                $autoApprove,
+                externalId: self::OVERRIDE_PREFIX . $importId,
+            );
+
+            return;
+        }
+
+        // $mode === 'override'
+        $origin = is_array($cell['override_of'] ?? null) ? $cell['override_of'] : [];
+        if ($amount === ($origin['amount_minor'] ?? null)
+            && $quantity === ($origin['quantity_milliunits'] ?? null)
+        ) {
+            // Přepis zpátky na importovanou hodnotu je návrat k importu, ne
+            // druhý ruční vstup se stejnou částkou.
+            self::assertCellVersion($cell, $entry['row_version']);
+            $this->revertOverride($supplierId, $cell, $userId, $autoApprove);
+
+            return;
+        }
+        $this->upsert(
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            PayrollTimeValue::int($cell['component_id'] ?? null, 'component_id'),
+            $period,
+            $code,
+            $amount,
+            $quantity,
+            $entry['row_version'],
+            $userId,
+            null,
+            true,
+            $autoApprove,
+            externalId: PayrollTimeValue::string($cell['external_id'] ?? null, 'external_id'),
+        );
+    }
+
+    /**
+     * Zruší ruční přepis a vrátí do hry importní vstup, který přepisoval.
+     *
+     * Importní vstup se obnoví jako koncept (s právem schvalovat rovnou jako
+     * schválený — stejně jako každé uložení rychlého vstupu). Obnovuje se
+     * s hodnotou, kterou má: opakovaný import ji během přepisu aktualizuje,
+     * takže je to hodnota POSLEDNÍ dávky.
+     *
+     * @param array<string,mixed> $cell
+     */
+    private function revertOverride(
+        int $supplierId,
+        array $cell,
+        ?int $userId,
+        bool $autoApprove,
+    ): void {
+        $overrideId = PayrollTimeValue::int($cell['input_id'] ?? null, 'input_id');
+        $version = PayrollTimeValue::int($cell['row_version'] ?? null, 'row_version');
+        $status = PayrollTimeValue::string($cell['status'] ?? null, 'status');
+        $origin = is_array($cell['override_of'] ?? null) ? $cell['override_of'] : [];
+        $importId = PayrollTimeValue::int($origin['input_id'] ?? null, 'override_of.input_id');
+        if ($status === 'locked') {
+            throw new \DomainException(
+                'Ruční přepis je uzamčený mzdovým během; vrátit ho lze jen opravnou revizí.'
+            );
+        }
+        if ($status === 'approved') {
+            if (!$autoApprove) {
+                throw new \DomainException(
+                    'Ruční přepis je schválený. Vrátit ho smí jen uživatel s právem '
+                    . 'schvalovat mzdové vstupy.'
+                );
+            }
+            $this->inputs->revertToDraft($supplierId, $overrideId, $version);
+            ++$version;
+        }
+        $this->inputs->cancel($supplierId, $overrideId, $version);
+
+        $pdo = $this->db->pdo();
+        try {
+            $restore = $pdo->prepare(
+                'UPDATE payroll_inputs
+                    SET status = "draft", row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ?
+                    AND source_kind = "import" AND status = "cancelled"'
+            );
+            $restore->execute([$supplierId, $importId]);
+        } catch (\PDOException $e) {
+            if ((string) $e->getCode() === '23000') {
+                throw new \DomainException(
+                    'Hodnotu z importu nejde obnovit: pro tentýž řádek importu už '
+                    . 'v měsíci existuje jiný živý vstup.',
+                    0,
+                    $e,
+                );
+            }
+            throw $e;
+        }
+        if ($restore->rowCount() !== 1) {
+            throw new \DomainException(
+                'Importovaný vstup se mezitím změnil. Obnovte formulář a zkuste to znovu.'
+            );
+        }
+        if ($autoApprove) {
+            $current = $pdo->prepare(
+                'SELECT row_version FROM payroll_inputs WHERE supplier_id = ? AND id = ?'
+            );
+            $current->execute([$supplierId, $importId]);
+            $this->inputs->approve(
+                $supplierId,
+                $importId,
+                PayrollTimeValue::int($current->fetchColumn(), 'row_version'),
+                $userId,
+            );
+        }
+    }
+
+    /** @param array<string,mixed> $cell */
+    private static function assertCellVersion(array $cell, ?int $expected): void
+    {
+        $current = $cell['row_version'] ?? null;
+        if (!is_int($current) || $expected !== $current) {
+            throw new PayrollInputConflictException(is_int($current) ? $current : 0);
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $definitions
+     * @return array<string,array<string,mixed>>
+     */
+    private function definitionMap(array $definitions): array
+    {
+        $map = [];
+        foreach ($definitions as $definition) {
+            $map[PayrollTimeValue::string($definition['code'] ?? null, 'code')] = $definition;
+        }
+
+        return $map;
     }
 
     /**
@@ -2326,9 +3260,12 @@ final class PayrollQuickInputRepository
         bool $zeroIsAnEntry = false,
         bool $autoApprove = false,
         bool $versionFromDatabase = false,
+        ?string $externalId = null,
     ): void {
         $periodStart = $period . '-01';
-        $externalId = self::EXTERNAL_PREFIX . $componentCode;
+        // Vlastní řádek rychlého zadání, nebo ruční přepis importu
+        // (`override:<id>`) — oba jsou `manual` a řídí se týmiž pravidly.
+        $externalId ??= self::EXTERNAL_PREFIX . $componentCode;
         $find = $this->db->pdo()->prepare(
             'SELECT id, amount_minor, quantity_milliunits, status, row_version
                FROM payroll_inputs

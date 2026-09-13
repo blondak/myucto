@@ -62,6 +62,34 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
     patchPagePrefs(pageKey, { hidden: null, shown: null })
   }
 
+  /*
+   * Dynamické sloupce (např. `component:PRIPLATEK_BOZP` v rychlém měsíčním
+   * vstupu) nejsou v `columns` — jejich seznam přichází ze serveru a u každé
+   * firmy je jiný. Ukládají se do TÝCHŽ polí `shown`/`hidden`: výslovně
+   * zapnutý klíč je v `shown`, výslovně vypnutý v `hidden`, a co uživatel
+   * nikdy nezměnil, řídí se výchozím stavem stránky. Předpona klíče (`component:`)
+   * zajistí, že se nepotká s pevným sloupcem a ColumnPicker ho neukáže.
+   */
+  function isDynamicShown(key: string, defaultShown: boolean): boolean {
+    if (prefs.value.shown?.includes(key)) return true
+    if (prefs.value.hidden?.includes(key)) return false
+    return defaultShown
+  }
+  function setDynamicShown(changes: Record<string, boolean>): void {
+    const hiddenSet = new Set(prefs.value.hidden ?? [])
+    const shownSet = new Set(prefs.value.shown ?? [])
+    for (const [key, shown] of Object.entries(changes)) {
+      if (shown) {
+        shownSet.add(key)
+        hiddenSet.delete(key)
+      } else {
+        hiddenSet.add(key)
+        shownSet.delete(key)
+      }
+    }
+    patchPagePrefs(pageKey, { hidden: [...hiddenSet], shown: [...shownSet] })
+  }
+
   const density = computed<'comfortable' | 'compact'>(() => prefs.value.density ?? 'comfortable')
   function setDensity(d: 'comfortable' | 'compact'): void {
     patchPagePrefs(pageKey, { density: d })
@@ -91,6 +119,7 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
   return {
     columns,
     isVisible, toggleColumn, resetColumns,
+    isDynamicShown, setDynamicShown,
     density, setDensity, densityClass,
     sort, toggleSort,
     flag, setFlag,

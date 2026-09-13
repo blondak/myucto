@@ -130,9 +130,56 @@ příplatek zadat nejde, je neaktivní a místo hodnoty ukazuje **Nedostupné**;
 důvod zobrazí popisek po najetí myší. Platí-li stejný důvod pro více řádků,
 vypíše se jednou v pruhu nad tabulkou.
 
+**Další mzdové složky ve vlastních sloupcích.** Tlačítko **Zadat i
+příplatky** zároveň otevře nabídku sloupců; kdykoli později ji otevře tlačítko
+**Složky**. Ve výchozím stavu jsou zaškrtnuté jen zákonné příplatky.
+Zaškrtnutím přidáte sloupec pro kteroukoli další mzdovou složku firmy, třeba
+`PRIPLATEK_BOZP` z importu docházky. Složky jsou v nabídce seskupené podle
+druhu (příplatky a prémie, odměny, hodinová mzda…) a u každé je vidět, u kolika
+lidí má v měsíci hodnotu. Předvolba **Kompaktní** vrátí výchozí stav,
+**Kompletní přehled** přidá každou složku, která má v měsíci hodnotu. Volba se
+pamatuje pro přihlášeného uživatele.
+
+Nově zadat lze jednorázové peněžní složky s uzavřeným zdaněním: příplatky,
+prémie, odměny, provize, hodinovou a úkolovou mzdu a ostatní. Pravidelné
+složky, benefity, náhrady a cestovné nabídka označí **jen přehled** — sloupec
+je ukáže, ale mění se v Mzdových vstupech. Základ, přesčas, bonus a zákonné
+příplatky mají svá pevná pole, vlastní sloupec nemají.
+
+Buňka ukazuje částku a ikonu zdroje:
+
+- **šipka dolů** — hodnota z importu, například z docházky;
+- **tužka** — ruční přepis importované hodnoty; popisek říká „Z importu X,
+  přepsáno na Y“;
+- **řetěz** — hodnotu spravuje jiný vstup (pravidelná složka, docházka nebo
+  více vstupů) a buňka je jen ke čtení.
+
+**Úprava importované hodnoty je ruční přepis.** Importní vstup se nemaže ani
+nemění. Zůstane jako doklad dávky ve stavu zrušeno a vedle něj vznikne ruční
+vstup téže složky a téhož období. Do mzdového běhu i do náhledu jde vždy jen
+jeden z nich, takže se částka nikdy nezapočte dvakrát. Tlačítko **Vrátit na
+hodnotu z importu** přepis při uložení zruší a platnou se znovu stane hodnota
+z importu. Přepsat na nulu jde (zadejte 0); prázdné pole importovanou hodnotu
+nesmaže. Uzamčenou hodnotu, kterou už zpracoval mzdový běh, lze změnit jen
+opravnou revizí. Schválenou hodnotu může přepsat nebo vrátit jen uživatel
+s právem schvalovat mzdové vstupy.
+
+**Opakovaný import** hodnoty nepřepisuje naslepo. Stejná hodnota je
+duplicita. Změněná hodnota rozpracovaného vstupu se aktualizuje na místě a
+druhý vstup nevznikne. Schválený vstup import nezmění a rozdíl ohlásí. Ručně
+přepsanou hodnotu import ponechá a ve výsledku napíše, kolik hodnot je ručně
+přepsaných. Novou hodnotu z importu si přitom zapamatuje, takže **Vrátit na
+hodnotu z importu** vrátí tu z poslední dávky.
+
+Pod tabulkou je **součtový řádek za celé období**: sčítá všechny vztahy
+měsíce (při hledání všechny nalezené), ne jen zobrazenou stránku, a započítá
+i rozepsané změny. Hlavička, sloupec se jménem a součtový řádek zůstávají
+při posouvání tabulky na očích.
+
 Hromadné uložení vytváří běžné vstupy složek `MZDA_MESICNI`,
-`PREMIE_PRIPLATKY` a `ODMENA`, takže nevzniká paralelní evidence mezd.
-Opakované uložení stejného měsíce nevytvoří duplicity.
+`PREMIE_PRIPLATKY`, `ODMENA` a zvolených dalších složek, takže nevzniká
+paralelní evidence mezd. Opakované uložení stejného měsíce nevytvoří
+duplicity.
 
 **Uložení a schválení je jeden krok.** Má-li přihlášený uživatel právo mzdové
 vstupy schvalovat, uloží se rozepsané řádky rovnou jako schválené a mzdový běh
@@ -151,8 +198,8 @@ ostatní řádky se uloží. Opravte označená pole a uložení zopakujte.
 
 Rozpracované vstupy se mění s kontrolou jejich verze; už zpracovaný nebo
 uzamčený vstup formulář nikdy nepřepíše. Hodnotu, kterou už spravuje
-pravidelný nebo jiný měsíční vstup (typicky import docházky), formulář zobrazí
-jen pro čtení s ikonou odkazu; ikona vede do mzdových složek daného vztahu a
+pravidelný nebo jiný měsíční vstup (typicky pravidelná složka nebo hodinová
+mzda z docházky), formulář zobrazí jen pro čtení s ikonou odkazu; ikona vede do mzdových složek daného vztahu a
 po najetí myší ukáže plné vysvětlení. Kontroluje také verzi pracovního
 vztahu, takže po souběžné změně smlouvy vyžádá obnovení formuláře. Historický
 měsíc zachová vztah, který byl tehdy účinný a později archivován. Při nástupu,

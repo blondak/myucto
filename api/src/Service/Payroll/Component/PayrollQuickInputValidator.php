@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Component;
 
+use MyInvoice\Repository\Payroll\PayrollQuickInputRepository;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollQuickSurchargeCalculator;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
 
@@ -24,6 +25,8 @@ final class PayrollQuickInputValidator
      *     overtime_average_snapshot_version:?int,
      *     bonus_amount_minor:int,
      *     surcharges:array<string,array{hours_milli:?int,factors:?int}>,
+     *     components:array<string,array{amount_minor:?int,quantity_milliunits:?int,
+     *       quantity_provided:bool,row_version:?int,revert:bool}>,
      *     versions:array{base:?int,overtime:?int,bonus:?int,surcharges:array<string,?int>}
      *   }>
      * }
@@ -118,6 +121,7 @@ final class PayrollQuickInputValidator
                     'bonus_amount_minor',
                 ),
                 'surcharges' => $this->surcharges($raw),
+                'components' => $this->components($raw),
                 'versions' => [
                     'base' => $this->nullablePositiveInt($versions['base'] ?? null, 'versions.base'),
                     'overtime' => $this->nullablePositiveInt($versions['overtime'] ?? null, 'versions.overtime'),
@@ -187,6 +191,81 @@ final class PayrollQuickInputValidator
                     PayrollQuickSurchargeCalculator::MAX_HOURS_MILLI,
                 ),
                 'factors' => $factors,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Buňky dynamických sloupců mzdových složek, klíč = kód složky.
+     *
+     * Stejně jako u příplatků: složka, která v požadavku NENÍ, se nemění.
+     * Posílají se jen buňky, na které uživatel sáhl. `amount_minor: null`
+     * vymaže vlastní zadání; importovanou hodnotu se takhle vymazat nedá
+     * (to hlídá repozitář). `revert: true` zruší ruční přepis importu.
+     * Chybějící `quantity_milliunits` znamená „množství neměnit".
+     *
+     * @param array<string,mixed> $raw
+     * @return array<string,array{amount_minor:?int,quantity_milliunits:?int,
+     *   quantity_provided:bool,row_version:?int,revert:bool}>
+     */
+    private function components(array $raw): array
+    {
+        $input = $raw['components'] ?? null;
+        if ($input === null) {
+            return [];
+        }
+        if (!is_array($input) || ($input !== [] && array_is_list($input))) {
+            throw new \InvalidArgumentException('components musí být objekt podle kódu mzdové složky.');
+        }
+        if (count($input) > 200) {
+            throw new \InvalidArgumentException('Řádek může měnit nejvýše 200 mzdových složek.');
+        }
+        $fixed = PayrollQuickInputRepository::fixedComponentCodes();
+        $result = [];
+        foreach ($input as $key => $value) {
+            $code = strtoupper(trim((string) $key));
+            if (preg_match('/^[A-Z0-9][A-Z0-9._-]{0,63}$/D', $code) !== 1) {
+                throw new \InvalidArgumentException("Kód mzdové složky {$key} není platný.");
+            }
+            if (in_array($code, $fixed, true)) {
+                throw new \InvalidArgumentException(
+                    "Složka {$code} má v rychlém vstupu vlastní pole; do components nepatří."
+                );
+            }
+            if (isset($result[$code])) {
+                throw new \InvalidArgumentException("Složka {$code} je v řádku uvedena vícekrát.");
+            }
+            if (!is_array($value)) {
+                throw new \InvalidArgumentException("components.{$code} musí být objekt.");
+            }
+            $revert = ($value['revert'] ?? false) === true;
+            if (!$revert && !array_key_exists('amount_minor', $value)) {
+                throw new \InvalidArgumentException(
+                    "components.{$code}.amount_minor musí být uvedeno; vymazání pošlete jako null."
+                );
+            }
+            $result[$code] = [
+                'amount_minor' => $revert
+                    ? null
+                    : $this->nullableNonNegativeInt(
+                        $value['amount_minor'],
+                        "components.{$code}.amount_minor",
+                    ),
+                'quantity_milliunits' => $revert
+                    ? null
+                    : $this->nullableNonNegativeInt(
+                        $value['quantity_milliunits'] ?? null,
+                        "components.{$code}.quantity_milliunits",
+                        1_000_000_000,
+                    ),
+                'quantity_provided' => !$revert && array_key_exists('quantity_milliunits', $value),
+                'row_version' => $this->nullablePositiveInt(
+                    $value['row_version'] ?? null,
+                    "components.{$code}.row_version",
+                ),
+                'revert' => $revert,
             ];
         }
 

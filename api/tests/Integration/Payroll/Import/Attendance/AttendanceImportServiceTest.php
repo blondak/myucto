@@ -224,8 +224,10 @@ final class AttendanceImportServiceTest extends TestCase
 
     /**
      * Opravený soubor (jiná odměna) je nová dávka, ale odměna se nezaloží
-     * podruhé: stabilní external_id z ní udělá duplicitu a původní částka
-     * zůstává, dokud ji účetní vědomě nezruší.
+     * podruhé — to by byla dvojí výplata. Stabilní external_id dovede import
+     * k TÉMUŽ vstupu: dokud je koncept, oprava ho aktualizuje na místě,
+     * nezměněné složky zůstávají duplicitami. Schválený vstup ani ruční přepis
+     * v rychlém vstupu import nepřepíše (PayrollQuickInputComponentsTest).
      */
     public function testCorrectedFileDoesNotCreateSecondBonus(): void
     {
@@ -237,9 +239,15 @@ final class AttendanceImportServiceTest extends TestCase
         self::assertFalse($second['replayed']);
         self::assertNotSame($first['batch']['id'], $second['batch']['id']);
         self::assertSame(0, $second['inputs']['created']);
-        self::assertSame(3, $second['inputs']['duplicates']);
+        self::assertSame(2, $second['inputs']['duplicates']);
         self::assertSame(3, $this->countRows('SELECT COUNT(*) FROM payroll_inputs WHERE supplier_id = ?', [$this->supplierId]));
-        self::assertSame(150000, $this->bonus($this->jana['employment_id']));
+        // Tentýž (jediný) vstup odměny nese opravenou částku.
+        self::assertSame(180000, $this->bonus($this->jana['employment_id']));
+        $detail = $this->container
+            ->get(\MyInvoice\Repository\Payroll\PayrollInputImportRepository::class)
+            ->detail($this->supplierId, (int) $second['inputs']['import_id']);
+        self::assertIsArray($detail);
+        self::assertSame(1, $detail['updated_count']);
     }
 
     public function testSavedLinksMatchTheNextImport(): void

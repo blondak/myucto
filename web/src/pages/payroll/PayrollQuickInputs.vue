@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -11,8 +11,10 @@ import {
   type PayrollQuickInputSavePayload,
   type PayrollQuickSurchargeKind,
   type PayrollQuickSurchargeState,
+  type PayrollQuickComponentCell,
+  type PayrollQuickComponentColumn,
+  type PayrollQuickInputTotals,
 } from '@/api/payroll'
-import { preferencesApi } from '@/api/preferences'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -21,6 +23,8 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 import PayrollQuickFieldState from '@/components/payroll/PayrollQuickFieldState.vue'
+import PayrollQuickColumnMenu from '@/components/payroll/PayrollQuickColumnMenu.vue'
+import type { PayrollQuickColumnGroup } from '@/components/payroll/payrollQuickColumns'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -43,6 +47,12 @@ interface UiRow extends PayrollQuickInputRow {
   /** Rozepsané hodiny a počty vlivů příplatků, klíč = druh. */
   surchargeHours: Record<PayrollQuickSurchargeKind, string>
   surchargeFactors: Record<PayrollQuickSurchargeKind, string>
+  /** Rozepsané částky buněk sloupců mzdových složek, klíč = kód složky. */
+  componentAmounts: Record<string, string>
+  /** Buňky, na které uživatel sáhl — jen ty odcházejí na server. */
+  componentDirty: Record<string, boolean>
+  /** Buňky, u kterých uživatel požádal o návrat na hodnotu z importu. */
+  componentRevert: Record<string, boolean>
 }
 
 /**
@@ -65,8 +75,13 @@ const SURCHARGE_KINDS: PayrollQuickSurchargeKind[] = [
  * stav neukládal, mzdová účetní by ho odklikávala každý měsíc znovu — a to je
  * přesně ten druh drobného tření, kvůli kterému se pak příplatky „radši" zadají
  * jako volná odměna a zákonný rozpad se ztratí.
+ *
+ * Stav se ukládá do preferencí tabulky (`table.payroll-quick-inputs`, příznak
+ * `surcharges`), stejně jako volba sloupců složek. Samostatný klíč
+ * `payroll.quick_inputs.surcharges` server nikdy nepřijal — není mezi
+ * povolenými klíči preferencí — takže se přepínač ve skutečnosti nepamatoval.
  */
-const SURCHARGE_PREF_KEY = 'payroll.quick_inputs.surcharges'
+const SURCHARGE_FLAG = 'surcharges'
 
 type ValidationCode =
   | 'amount_required'
@@ -123,6 +138,10 @@ let loadGeneration = 0
 const pending = ref(new Map<number, UiRow>())
 /** Co server odmítl uložit, klíč `employment_id:pole`. */
 const fieldErrors = ref<Record<string, string>>({})
+/** Sloupce mzdových složek, které server v měsíci nabízí, a součty za celé období. */
+const componentColumns = ref<PayrollQuickComponentColumn[]>([])
+const periodTotals = ref<PayrollQuickInputTotals | null>(null)
+const columnsMenuOpen = ref(false)
 /** Strop jedné dávky na serveru (PayrollQuickInputValidator). */
 const SAVE_CHUNK = 500
 
@@ -283,6 +302,9 @@ function markDirty(row: UiRow): void {
   ]) {
     delete fieldErrors.value[fieldErrorKey(row.employment_id, field)]
   }
+  for (const code of Object.keys(row.componentAmounts)) {
+    delete fieldErrors.value[fieldErrorKey(row.employment_id, `component:${code}`)]
+  }
 }
 
 /** Rozepsané řádky mimo právě zobrazenou stránku. */
@@ -314,6 +336,10 @@ function toUi(row: PayrollQuickInputRow): UiRow {
     bonusAmount: payrollMinorToInput(row.bonus_amount_minor),
     surchargeHours,
     surchargeFactors,
+    componentAmounts: Object.fromEntries(Object.entries(row.components ?? {})
+      .map(([code, cell]) => [code, payrollMinorToInput(cell.amount_minor)])),
+    componentDirty: {},
+    componentRevert: {},
   }
 }
 
@@ -390,6 +416,264 @@ function surchargeTotal(row: UiRow): number {
     0,
   )
 }
+
+/*
+ * ── Sloupce mzdových složek ─────────────────────────────────────────────────
+ *
+ * Co s buňkou jde udělat (`mode`, `entry_available`), rozhoduje server. Prohlížeč
+ * přidává jen to, co server předem neví: jestli přihlášený smí měnit schválený
+ * vstup. Buňka z importu se upravuje RUČNÍM PŘEPISEM — importní hodnota zůstává
+ * jako doklad a lze se k ní vrátit.
+ */
+function componentCell(row: UiRow, code: string): PayrollQuickComponentCell | null {
+  return row.components?.[code] ?? null
+}
+
+function componentEditable(row: UiRow, column: PayrollQuickComponentColumn): boolean {
+  if (!canWrite.value) return false
+  const cell = componentCell(row, column.code)
+  if (cell === null) return column.editable_in_quick
+  if (!cell.entry_available) return false
+  return payrollInputEditable(cell.status, canApprove.value)
+}
+
+function componentServerAmount(row: UiRow, code: string): number {
+  return componentCell(row, code)?.amount_minor ?? 0
+}
+
+type ComponentValidationCode = ValidationCode | 'component_amount_required'
+
+function componentError(row: UiRow, column: PayrollQuickComponentColumn): ComponentValidationCode | null {
+  const code = column.code
+  if (!row.componentDirty[code] || !componentEditable(row, column)) return null
+  const value = (row.componentAmounts[code] ?? '').trim()
+  if (value === '') {
+    // Importovanou hodnotu prázdné pole nesmaže — nula je výslovná a návrat
+    // k importu má vlastní tlačítko.
+    const mode = componentCell(row, code)?.mode
+    return mode === 'import' || mode === 'override' ? 'component_amount_required' : null
+  }
+  const parsed = parsedAmount(value)
+  if (parsed === null) return 'amount_format'
+  if (parsed < 0) return 'amount_non_negative'
+  if (parsed > MAX_AMOUNT_MINOR) return 'amount_limit'
+  return null
+}
+
+function componentErrorMessage(code: ComponentValidationCode | null): string {
+  if (code === 'component_amount_required') {
+    return t('payroll.quick_inputs.component_validation.amount_required')
+  }
+  return validationMessage(code)
+}
+
+function componentTouchedCodes(row: UiRow): string[] {
+  return [...new Set([
+    ...Object.keys(row.componentDirty).filter(code => row.componentDirty[code]),
+    ...Object.keys(row.componentRevert).filter(code => row.componentRevert[code]),
+  ])]
+}
+
+/** Částka, se kterou buňka po uložení počítá (rozepsaná, vrácená, nebo uložená). */
+function componentPreview(row: UiRow, code: string): number {
+  const cell = componentCell(row, code)
+  if (row.componentRevert[code] && cell?.override_of) return cell.override_of.amount_minor
+  if (!row.componentDirty[code]) return componentServerAmount(row, code)
+  return validAmount(row.componentAmounts[code] ?? '')
+}
+
+const componentColumnByCode = computed(() =>
+  new Map(componentColumns.value.map(column => [column.code, column])))
+
+/**
+ * O kolik rozepsané buňky řádku posouvají hrubý náhled. Hodnota složky už je
+ * v uloženém náhledu (v poli nebo v „dalších vstupech"), takže se přičítá jen
+ * rozdíl proti uložené částce — a jen u složky, kterou hrubý náhled sčítá.
+ */
+function componentGrossDelta(row: UiRow): number {
+  let delta = 0
+  for (const code of componentTouchedCodes(row)) {
+    if (componentColumnByCode.value.get(code)?.counts_in_gross === false) continue
+    delta += componentPreview(row, code) - componentServerAmount(row, code)
+  }
+  return delta
+}
+
+function onComponentInput(row: UiRow, code: string): void {
+  row.componentDirty[code] = true
+  row.componentRevert[code] = false
+  markDirty(row)
+}
+
+/** Návrat k importu se provede při uložení, stejně jako každá jiná změna v tabulce. */
+function requestRevert(row: UiRow, code: string): void {
+  const cell = componentCell(row, code)
+  if (!cell?.override_of) return
+  row.componentRevert[code] = true
+  row.componentDirty[code] = false
+  row.componentAmounts[code] = payrollMinorToInput(cell.override_of.amount_minor)
+  markDirty(row)
+}
+
+function cancelRevert(row: UiRow, code: string): void {
+  row.componentRevert[code] = false
+  row.componentAmounts[code] = payrollMinorToInput(componentServerAmount(row, code))
+  markDirty(row)
+}
+
+/** Popisek ikony zdroje: odkud hodnota je a proč s ní jde, nebo nejde, hýbat. */
+function componentSourceTitle(row: UiRow, column: PayrollQuickComponentColumn): string {
+  const cell = componentCell(row, column.code)
+  if (cell === null) {
+    return column.editable_in_quick ? '' : t('payroll.quick_inputs.component_cell.not_enterable')
+  }
+  if (cell.mode === 'override' && cell.override_of) {
+    return t('payroll.quick_inputs.component_cell.override_title', {
+      import: formatMoney(cell.override_of.amount_minor),
+      value: formatMoney(cell.amount_minor),
+    })
+  }
+  if (cell.status === 'locked') return t('payroll.quick_inputs.component_cell.locked')
+  if (cell.mode === 'managed') return t('payroll.quick_inputs.component_cell.managed')
+  if (cell.status === 'approved' && !canApprove.value) {
+    return t('payroll.quick_inputs.component_cell.approved')
+  }
+  if (cell.mode === 'import') return t('payroll.quick_inputs.component_cell.import_hint')
+  return t(`payroll.quick_inputs.component_cell.source.${cell.source}`)
+}
+
+/** Import ⇩, ruční přepis ✎, jiný vstup 🔗; vlastní zadání ikonu nepotřebuje. */
+function componentSourceIcon(row: UiRow, code: string): string | null {
+  const mode = componentCell(row, code)?.mode
+  if (mode === 'override') return ICONS.edit
+  if (mode === 'import') return ICONS.download
+  if (mode === 'managed') return ICONS.link
+  return null
+}
+
+function componentDisplay(row: UiRow, code: string): string {
+  const cell = componentCell(row, code)
+  return cell === null ? '—' : formatMoney(cell.amount_minor)
+}
+
+function componentRevertable(row: UiRow, column: PayrollQuickComponentColumn): boolean {
+  return componentCell(row, column.code)?.mode === 'override'
+    && componentEditable(row, column)
+    && !row.componentRevert[column.code]
+}
+
+/*
+ * Příplatky § 115–118 jsou ve výchozím stavu zapnuté (tak to bylo vždy), sloupce
+ * složek vypnuté. Volba je per uživatel v preferencích tabulky pod klíči
+ * `surcharge:<druh>` a `component:<KÓD>`.
+ */
+function surchargeColumnKey(kind: PayrollQuickSurchargeKind): string {
+  return `surcharge:${kind}`
+}
+
+function componentColumnKey(code: string): string {
+  return `component:${code}`
+}
+
+const selectedSurchargeKinds = computed(() =>
+  SURCHARGE_KINDS.filter(kind => tbl.isDynamicShown(surchargeColumnKey(kind), true)))
+const selectedComponentColumns = computed(() => componentColumns.value
+  .filter(column => tbl.isDynamicShown(componentColumnKey(column.code), false)))
+const visibleSurchargeKinds = computed(() => surchargesVisible.value ? selectedSurchargeKinds.value : [])
+const visibleComponentColumns = computed(() => surchargesVisible.value ? selectedComponentColumns.value : [])
+const selectedColumnKeys = computed(() => [
+  ...selectedSurchargeKinds.value.map(surchargeColumnKey),
+  ...selectedComponentColumns.value.map(column => componentColumnKey(column.code)),
+])
+
+const columnGroups = computed<PayrollQuickColumnGroup[]>(() => {
+  const groups: PayrollQuickColumnGroup[] = [{
+    key: 'surcharges',
+    label: t('payroll.quick_inputs.columns_menu.group_surcharges'),
+    options: SURCHARGE_KINDS.map(kind => ({
+      key: surchargeColumnKey(kind),
+      label: `${t(`payroll.quick_inputs.surcharges.kinds.${kind}`)} ${t(`payroll.quick_inputs.surcharges.sections.${kind}`)}`,
+      rowsWithValue: 0,
+      summaryOnly: false,
+    })),
+  }]
+  const byKind = new Map<string, PayrollQuickColumnGroup>()
+  for (const column of componentColumns.value) {
+    let group = byKind.get(column.kind)
+    if (!group) {
+      group = {
+        key: column.kind,
+        label: t(`payroll.quick_inputs.component_kinds.${column.kind}`),
+        options: [],
+      }
+      byKind.set(column.kind, group)
+      groups.push(group)
+    }
+    group.options.push({
+      key: componentColumnKey(column.code),
+      label: column.name,
+      code: column.code,
+      rowsWithValue: column.rows_with_value,
+      summaryOnly: !column.editable_in_quick,
+    })
+  }
+  return groups
+})
+
+function onColumnChange(key: string, checked: boolean): void {
+  tbl.setDynamicShown({ [key]: checked })
+  if (checked && !surchargesVisible.value) setSurchargesVisible(true)
+}
+
+/**
+ * „Kompaktní" = výchozí stav (jen zákonné příplatky), „Kompletní přehled" =
+ * příplatky a každá složka, která má v období hodnotu.
+ */
+function applyColumnPreset(name: 'compact' | 'full'): void {
+  const changes: Record<string, boolean> = {}
+  for (const kind of SURCHARGE_KINDS) changes[surchargeColumnKey(kind)] = true
+  for (const column of componentColumns.value) {
+    changes[componentColumnKey(column.code)] = name === 'full' && column.rows_with_value > 0
+  }
+  tbl.setDynamicShown(changes)
+  if (!surchargesVisible.value) setSurchargesVisible(true)
+}
+
+/*
+ * Součtový řádek je za CELÉ období (server), posunutý o rozepsané změny ze
+ * všech stránek. Kontrolní součet, který by se měnil s listováním, nic
+ * nekontroluje.
+ */
+const totalsView = computed(() => {
+  const totals = periodTotals.value
+  if (totals === null) return null
+  const pendingRows = Array.from(pending.value.values())
+  const sumPending = (delta: (row: UiRow) => number): number =>
+    pendingRows.reduce((sum, row) => sum + delta(row), 0)
+  const surcharges = {} as Record<PayrollQuickSurchargeKind, number>
+  for (const kind of SURCHARGE_KINDS) {
+    surcharges[kind] = (totals.surcharges[kind] ?? 0)
+      + sumPending(row => surchargePreview(row, kind) - (surchargeState(row, kind)?.amount_minor ?? 0))
+  }
+  const components: Record<string, number> = {}
+  for (const column of componentColumns.value) {
+    components[column.code] = (totals.components[column.code]?.amount_minor ?? 0)
+      + sumPending(row => componentPreview(row, column.code) - componentServerAmount(row, column.code))
+  }
+  return {
+    rows: totals.rows,
+    base: totals.base_amount_minor
+      + sumPending(row => validAmount(row.baseAmount) - row.base_amount_minor),
+    overtime: totals.overtime_amount_minor
+      + sumPending(row => overtimePreview(row) - row.overtime_amount_minor),
+    bonus: totals.bonus_amount_minor
+      + sumPending(row => validAmount(row.bonusAmount) - row.bonus_amount_minor),
+    surcharges,
+    components,
+    gross: totals.gross_preview_minor
+      + sumPending(row => grossPreview(row) - row.gross_preview_minor),
+  }
+})
 
 /**
  * Proč druh příplatku u řádku nejde zadat — klíč do
@@ -697,6 +981,7 @@ function rowInvalid(row: UiRow): boolean {
     || bonusError(row) !== null
     || SURCHARGE_KINDS.some(kind => surchargeHoursError(row, kind) !== null
       || surchargeFactorsError(row, kind) !== null)
+    || componentColumns.value.some(column => componentError(row, column) !== null)
 }
 
 /*
@@ -709,8 +994,13 @@ function rowInvalid(row: UiRow): boolean {
  * mzdová účetní doopravdy pracuje.
  */
 const surchargesVisible = ref(false)
-/** Dokud se preference nenačte, přepínač se neukládá — přepsal by uloženou. */
-const surchargePrefLoaded = ref(false)
+/*
+ * Uložená volba se přečte, až budou preference tabulky načtené. Do té doby se
+ * přepínač neukládá — přepsal by uloženou volbu výchozím stavem.
+ */
+watch(() => tbl.ready.value, (ready) => {
+  if (ready && tbl.flag(SURCHARGE_FLAG)) surchargesVisible.value = true
+}, { immediate: true })
 
 /** Řádek, který příplatek už drží (zadaný ručně i promítnutý z docházky). */
 function rowHasSurcharge(row: PayrollQuickInputRow): boolean {
@@ -722,29 +1012,17 @@ function rowHasSurcharge(row: PayrollQuickInputRow): boolean {
   })
 }
 
-async function loadSurchargePref(): Promise<void> {
-  try {
-    const saved = await preferencesApi.getPreferenceKey<{ visible?: boolean }>(
-      SURCHARGE_PREF_KEY,
-    )
-    if (typeof saved?.visible === 'boolean') surchargesVisible.value = saved.visible
-  } catch {
-    // Nedostupná preference není důvod nepustit uživatele k tabulce; sekce
-    // zůstane skrytá a otevře se sama, jakmile nějaký řádek příplatek má.
-  } finally {
-    surchargePrefLoaded.value = true
-  }
+function setSurchargesVisible(visible: boolean): void {
+  surchargesVisible.value = visible
+  if (tbl.ready.value) tbl.setFlag(SURCHARGE_FLAG, visible)
 }
 
 function toggleSurcharges(): void {
-  surchargesVisible.value = !surchargesVisible.value
-  if (!surchargePrefLoaded.value) return
-  // Přes Promise.resolve, protože uložení preference nesmí shodit přepínač ani
-  // tehdy, když volání nevrátí promise. Neuložená preference je kosmetická vada,
-  // přepínač v téhle relaci platí tak jako tak.
-  void Promise.resolve(
-    preferencesApi.putPreferenceKey(SURCHARGE_PREF_KEY, { visible: surchargesVisible.value }),
-  ).catch(() => {})
+  const next = !surchargesVisible.value
+  setSurchargesVisible(next)
+  // Odkrytí rovnou nabídne i další mzdové složky: výchozí sloupce příplatků se
+  // ukážou hned a zaškrtávátka pro ostatní jsou po ruce.
+  columnsMenuOpen.value = next
 }
 
 const hasInvalidRows = computed(() => rows.value.some(rowInvalid))
@@ -798,6 +1076,10 @@ const invalidFieldCount = computed(() => rows.value.reduce(
       (sum, kind) => sum
         + Number(surchargeHoursError(row, kind) !== null)
         + Number(surchargeFactorsError(row, kind) !== null),
+      0,
+    )
+    + componentColumns.value.reduce(
+      (sum, column) => sum + Number(componentError(row, column) !== null),
       0,
     ),
   0,
@@ -866,6 +1148,7 @@ function grossPreview(row: UiRow): number {
     + validAmount(row.bonusAmount)
     + surchargeTotal(row)
     + row.other_amount_minor
+    + componentGrossDelta(row)
 }
 
 /**
@@ -886,6 +1169,13 @@ function applyPending(row: PayrollQuickInputRow): UiRow {
     ui.overtime_mode = kept.overtime_mode
     ui.surchargeHours = { ...kept.surchargeHours }
     ui.surchargeFactors = { ...kept.surchargeFactors }
+    // Z buněk složek se přenáší jen to, na co uživatel sáhl; ostatní bere
+    // čerstvě ze serveru, stejně jako verze.
+    for (const code of componentTouchedCodes(kept)) {
+      ui.componentAmounts[code] = kept.componentAmounts[code] ?? ''
+      ui.componentDirty[code] = kept.componentDirty[code] === true
+      ui.componentRevert[code] = kept.componentRevert[code] === true
+    }
     pending.value.set(row.employment_id, ui)
   }
   return ui
@@ -912,6 +1202,8 @@ async function load(): Promise<void> {
     rows.value = month.items.map(applyPending)
     // `total` už je zúžené serverem, takže pager mluví o tom, co tabulka ukazuje.
     total.value = month.total
+    componentColumns.value = month.columns ?? []
+    periodTotals.value = month.totals ?? null
     loadedPeriod.value = requestedPeriod
     // Skrytá sekce se otevře sama, drží-li nějaký řádek příplatek. Data, která
     // v měsíci jsou, se nesmí uživateli ztratit z očí jen proto, že přepínač
@@ -950,6 +1242,7 @@ function payload(batch: UiRow[]): PayrollQuickInputSavePayload {
         : null,
       bonus_amount_minor: parsedAmount(row.bonusAmount) as number,
       ...surchargePayload(row),
+      ...componentPayload(row),
       versions: {
         base: row.inputs.base?.row_version ?? null,
         overtime: row.inputs.overtime?.row_version ?? null,
@@ -987,6 +1280,29 @@ function surchargePayload(row: UiRow): Pick<
     }
   }
   return { surcharges }
+}
+
+/**
+ * Buňky sloupců mzdových složek: posílají se JEN ty, na které uživatel sáhl,
+ * a jen tam, kde je smí měnit. Složka, která v požadavku není, se nemění —
+ * uložení tak nikdy nesáhne na hodnotu z importu, kterou nikdo neupravoval.
+ */
+function componentPayload(row: UiRow): Pick<
+  PayrollQuickInputSavePayload['rows'][number], 'components'
+> {
+  const components: NonNullable<PayrollQuickInputSavePayload['rows'][number]['components']> = {}
+  for (const code of componentTouchedCodes(row)) {
+    const column = componentColumnByCode.value.get(code)
+    if (column === undefined || !componentEditable(row, column)) continue
+    const version = componentCell(row, code)?.row_version ?? null
+    if (row.componentRevert[code]) {
+      components[code] = { revert: true, row_version: version }
+      continue
+    }
+    const raw = (row.componentAmounts[code] ?? '').trim()
+    components[code] = { amount_minor: raw === '' ? null : parsedAmount(raw), row_version: version }
+  }
+  return Object.keys(components).length === 0 ? {} : { components }
 }
 
 async function save(): Promise<void> {
@@ -1033,6 +1349,8 @@ async function save(): Promise<void> {
 
     // Uložení dostalo v query tentýž limit/offset, takže vrací TU stránku,
     // kterou měl uživatel před sebou — jinak by mu tabulka skočila na začátek.
+    componentColumns.value = last.month.columns ?? componentColumns.value
+    periodTotals.value = last.month.totals ?? null
     rows.value = last.month.items.map(applyPending)
     total.value = last.month.total
     if (failures.length === 0) {
@@ -1077,7 +1395,6 @@ function errorCode(error: unknown): string {
 }
 
 onMounted(() => {
-  void loadSurchargePref()
   void load()
 })
 </script>
@@ -1195,6 +1512,7 @@ onMounted(() => {
           <button
             type="button"
             data-testid="quick-surcharges-toggle"
+            data-quick-columns-anchor
             class="whitespace-nowrap"
             :class="surchargesVisible ? btnOutline('primary') : btnFilled('primary')"
             :aria-pressed="surchargesVisible"
@@ -1205,6 +1523,37 @@ onMounted(() => {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="surchargesVisible ? ICONS.x : ICONS.coin" /></svg>
             {{ t(surchargesVisible ? 'payroll.quick_inputs.surcharges.toggle_hide' : 'payroll.quick_inputs.surcharges.toggle_show') }}
           </button>
+          <!--
+            Nabídka dalších mzdových složek. Otevře se i sama po „Zadat i
+            příplatky"; výchozí sloupce jsou zákonné příplatky jako dřív.
+          -->
+          <div class="relative">
+            <button
+              type="button"
+              data-testid="quick-columns-menu-toggle"
+              data-quick-columns-anchor
+              class="whitespace-nowrap"
+              :class="btnOutline('neutral')"
+              :aria-expanded="columnsMenuOpen"
+              aria-haspopup="dialog"
+              @click="columnsMenuOpen = !columnsMenuOpen"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 4v16" /></svg>
+              {{ t('payroll.quick_inputs.columns_menu.button') }}
+              <span
+                v-if="selectedComponentColumns.length"
+                class="rounded-full bg-payroll-50 px-1.5 text-[11px] font-medium text-payroll-700"
+              >{{ selectedComponentColumns.length }}</span>
+            </button>
+            <PayrollQuickColumnMenu
+              v-if="columnsMenuOpen"
+              :groups="columnGroups"
+              :selected="selectedColumnKeys"
+              @change="onColumnChange"
+              @preset="applyColumnPreset"
+              @close="columnsMenuOpen = false"
+            />
+          </div>
         </div>
         <div class="hidden flex-wrap items-center gap-2 lg:flex">
           <ColumnPicker :ctrl="tbl" />
@@ -1330,11 +1679,15 @@ onMounted(() => {
             </li>
           </ul>
         </div>
-        <div id="quick-surcharge-columns" data-layout="desktop" class="hidden overflow-x-auto lg:block">
+        <!--
+          Tabulka má vlastní posuv, aby hlavička, první sloupec se jménem
+          a součtový řádek zůstaly vidět i při mnoha sloupcích složek.
+        -->
+        <div id="quick-surcharge-columns" data-layout="desktop" class="hidden max-h-[75vh] overflow-auto lg:block">
           <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
-            <thead>
+            <thead class="sticky top-0 z-20 bg-surface">
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th v-if="tbl.isVisible('person')" class="w-64 px-3 py-2 align-bottom">{{ t('payroll.quick_inputs.person') }}</th>
+                <th v-if="tbl.isVisible('person')" class="sticky left-0 z-30 w-64 bg-surface px-3 py-2 align-bottom">{{ t('payroll.quick_inputs.person') }}</th>
                 <th v-if="tbl.isVisible('income_amount')" class="px-3 py-2 align-bottom">{{ t('payroll.quick_inputs.income_amount') }}</th>
                 <!--
                   Proč nejdou hodiny, platí pro všechny řádky bez schváleného
@@ -1359,7 +1712,7 @@ onMounted(() => {
                   nezlomilo mezi značku a číslo.
                 -->
                 <th
-                  v-for="kind in (surchargesVisible ? SURCHARGE_KINDS : [])"
+                  v-for="kind in visibleSurchargeKinds"
                   :key="kind"
                   class="px-3 py-2 align-bottom"
                   :data-testid="`quick-surcharge-head-${kind}`"
@@ -1367,6 +1720,17 @@ onMounted(() => {
                   <span class="block">{{ t(`payroll.quick_inputs.surcharges.kinds.${kind}`) }}</span>
                   <span class="block whitespace-nowrap font-normal normal-case text-neutral-400">
                     {{ t(`payroll.quick_inputs.surcharges.sections.${kind}`) }} · {{ t('payroll.quick_inputs.surcharges.hours_short') }}<template v-if="kind === 'difficult_environment'"> × {{ t('payroll.quick_inputs.surcharges.factors_short') }}</template>
+                  </span>
+                </th>
+                <th
+                  v-for="column in visibleComponentColumns"
+                  :key="`component-${column.code}`"
+                  class="px-3 py-2 align-bottom"
+                  :data-testid="`quick-component-head-${column.code}`"
+                >
+                  <span class="block max-w-40 truncate" :title="column.name">{{ column.name }}</span>
+                  <span class="block whitespace-nowrap font-normal normal-case text-neutral-400">
+                    {{ column.code }}<template v-if="!column.editable_in_quick"> · {{ t('payroll.quick_inputs.columns_menu.summary_only') }}</template>
                   </span>
                 </th>
                 <!--
@@ -1388,7 +1752,7 @@ onMounted(() => {
                   v něm láme. Dlouhé jméno nebo kód vztahu jinak roztáhne
                   celou tabulku a vodorovný posun se objeví i tam, kde nemá.
                 -->
-                <td v-if="tbl.isVisible('person')" class="w-64 px-3 py-2">
+                <td v-if="tbl.isVisible('person')" class="sticky left-0 z-10 w-64 bg-surface px-3 py-2">
                   <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                     <span class="break-words font-semibold text-neutral-900">{{ row.full_name }}</span>
                     <span
@@ -1640,7 +2004,7 @@ onMounted(() => {
                   </p>
                 </td>
                 <td
-                  v-for="kind in (surchargesVisible ? SURCHARGE_KINDS : [])"
+                  v-for="kind in visibleSurchargeKinds"
                   :key="kind"
                   class="px-3 py-2"
                 >
@@ -1723,6 +2087,90 @@ onMounted(() => {
                     class="sr-only"
                   >{{ surchargeUnavailableText(row, kind) }}</span>
                 </td>
+                <!--
+                  Buňka složky: částka + ikona zdroje. Hodnota z importu se
+                  upravuje ručním přepisem (import zůstane jako doklad), přepis
+                  jde vrátit. Co s buňkou jde, rozhoduje server (`mode`).
+                -->
+                <td
+                  v-for="column in visibleComponentColumns"
+                  :key="`component-${column.code}`"
+                  class="px-3 py-2"
+                >
+                  <div class="flex items-center gap-1.5">
+                    <input
+                      v-if="componentEditable(row, column)"
+                      v-model="row.componentAmounts[column.code]"
+                      :data-testid="`quick-component-${column.code}-${row.employment_id}`"
+                      type="text"
+                      inputmode="decimal"
+                      autocomplete="off"
+                      :aria-label="t('payroll.quick_inputs.component_cell.label', { name: column.name })"
+                      :aria-invalid="componentError(row, column) !== null"
+                      :title="componentSourceTitle(row, column) || undefined"
+                      :class="[
+                        fieldClass(componentError(row, column) === null ? null : 'amount_format', true, true),
+                        'w-28',
+                        row.componentRevert[column.code] ? 'text-neutral-400 line-through' : '',
+                      ]"
+                      :disabled="loading || saving"
+                      @input="onComponentInput(row, column.code)"
+                    >
+                    <span
+                      v-else
+                      :data-testid="`quick-component-readonly-${column.code}-${row.employment_id}`"
+                      :title="componentSourceTitle(row, column) || undefined"
+                      :class="[READONLY_VALUE_CLASS, 'w-28']"
+                    >{{ componentDisplay(row, column.code) }}</span>
+                    <span
+                      v-if="componentSourceIcon(row, column.code)"
+                      :data-testid="`quick-component-source-${column.code}-${row.employment_id}`"
+                      :data-source="componentCell(row, column.code)?.mode"
+                      :title="componentSourceTitle(row, column)"
+                      class="inline-flex shrink-0"
+                      :class="componentCell(row, column.code)?.mode === 'override' ? 'text-warning-700' : 'text-neutral-400'"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="componentSourceIcon(row, column.code)!" /></svg>
+                      <span class="sr-only">{{ componentSourceTitle(row, column) }}</span>
+                    </span>
+                    <button
+                      v-if="componentRevertable(row, column)"
+                      type="button"
+                      :data-testid="`quick-component-revert-${column.code}-${row.employment_id}`"
+                      class="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md border border-warning-300 bg-surface text-warning-700 hover:bg-warning-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      :title="t('payroll.quick_inputs.component_cell.revert')"
+                      :aria-label="t('payroll.quick_inputs.component_cell.revert')"
+                      :disabled="loading || saving"
+                      @click="requestRevert(row, column.code)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+                    </button>
+                  </div>
+                  <p
+                    v-if="row.componentRevert[column.code]"
+                    :data-testid="`quick-component-revert-pending-${column.code}-${row.employment_id}`"
+                    class="mt-1 max-w-48 text-xs text-warning-700"
+                  >
+                    {{ t('payroll.quick_inputs.component_cell.revert_pending', {
+                      value: formatMoney(componentCell(row, column.code)?.override_of?.amount_minor ?? 0),
+                    }) }}
+                    <button
+                      type="button"
+                      class="cursor-pointer font-medium underline decoration-dotted underline-offset-2"
+                      @click="cancelRevert(row, column.code)"
+                    >{{ t('payroll.quick_inputs.component_cell.revert_cancel') }}</button>
+                  </p>
+                  <p v-if="componentError(row, column)" class="mt-1 max-w-48 text-xs text-danger-700">
+                    {{ componentErrorMessage(componentError(row, column)) }}
+                  </p>
+                  <p
+                    v-if="serverError(row, `component:${column.code}`)"
+                    :data-testid="`quick-component-server-error-${column.code}-${row.employment_id}`"
+                    class="mt-1 max-w-48 text-xs font-medium text-danger-700"
+                  >
+                    {{ serverError(row, `component:${column.code}`) }}
+                  </p>
+                </td>
                 <td v-if="tbl.isVisible('gross_preview')" class="px-3 py-2 text-right">
                   <p class="font-semibold tabular-nums text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
                   <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
@@ -1737,6 +2185,40 @@ onMounted(() => {
                 </td>
               </tr>
             </tbody>
+            <!--
+              Součet za CELÉ období (server), posunutý o rozepsané změny ze
+              všech stránek — kontrolní součet proti podkladu.
+            -->
+            <tfoot
+              v-if="totalsView"
+              data-testid="quick-totals-row"
+              class="sticky bottom-0 z-20 bg-neutral-50 text-sm font-semibold text-neutral-900 shadow-[0_-1px_0_0_rgba(0,0,0,0.08)]"
+            >
+              <tr>
+                <td v-if="tbl.isVisible('person')" class="sticky left-0 z-30 w-64 bg-neutral-50 px-3 py-2">
+                  <span class="block">{{ t('payroll.quick_inputs.totals.label') }}</span>
+                  <span class="block text-xs font-normal text-neutral-500">
+                    {{ t('payroll.quick_inputs.totals.hint', { count: totalsView.rows }) }}
+                  </span>
+                </td>
+                <td v-if="tbl.isVisible('income_amount')" data-testid="quick-total-base" class="px-3 py-2 tabular-nums">{{ formatMoney(totalsView.base) }}</td>
+                <td v-if="tbl.isVisible('overtime')" data-testid="quick-total-overtime" class="px-3 py-2 tabular-nums">{{ formatMoney(totalsView.overtime) }}</td>
+                <td v-if="tbl.isVisible('bonus_amount')" data-testid="quick-total-bonus" class="px-3 py-2 tabular-nums">{{ formatMoney(totalsView.bonus) }}</td>
+                <td
+                  v-for="kind in visibleSurchargeKinds"
+                  :key="`total-${kind}`"
+                  :data-testid="`quick-total-surcharge-${kind}`"
+                  class="px-3 py-2 tabular-nums"
+                >{{ formatMoney(totalsView.surcharges[kind]) }}</td>
+                <td
+                  v-for="column in visibleComponentColumns"
+                  :key="`total-${column.code}`"
+                  :data-testid="`quick-total-component-${column.code}`"
+                  class="px-3 py-2 tabular-nums"
+                >{{ formatMoney(totalsView.components[column.code] ?? 0) }}</td>
+                <td v-if="tbl.isVisible('gross_preview')" data-testid="quick-total-gross" class="px-3 py-2 text-right tabular-nums">{{ formatMoney(totalsView.gross) }}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
 
@@ -1955,7 +2437,7 @@ onMounted(() => {
                   {{ t('payroll.quick_inputs.surcharges.toggle') }}
                 </legend>
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label v-for="kind in SURCHARGE_KINDS" :key="kind" class="block">
+                  <label v-for="kind in visibleSurchargeKinds" :key="kind" class="block">
                     <span class="mb-1 block text-xs font-medium text-neutral-600">
                       {{ t(`payroll.quick_inputs.surcharges.kinds.${kind}`) }}
                       <span class="text-neutral-400">{{ t(`payroll.quick_inputs.surcharges.sections.${kind}`) }}</span>
@@ -2020,6 +2502,70 @@ onMounted(() => {
                       class="sr-only"
                     >{{ surchargeUnavailableText(row, kind) }}</span>
                   </label>
+                </div>
+              </fieldset>
+              <!-- Na mobilu jsou zvolené složky podsekcí karty, stejně jako příplatky. -->
+              <fieldset
+                v-if="visibleComponentColumns.length"
+                class="sm:col-span-2 rounded-lg border border-neutral-200 p-3"
+                data-testid="quick-components-mobile"
+              >
+                <legend class="px-1 text-xs font-medium text-neutral-600">
+                  {{ t('payroll.quick_inputs.columns_menu.button') }}
+                </legend>
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div v-for="column in visibleComponentColumns" :key="column.code">
+                    <div class="mb-1 flex items-center justify-between gap-2">
+                      <span class="truncate text-xs font-medium text-neutral-600">{{ column.name }}</span>
+                      <span
+                        v-if="componentSourceIcon(row, column.code)"
+                        :title="componentSourceTitle(row, column)"
+                        class="inline-flex shrink-0 items-center gap-1 text-xs"
+                        :class="componentCell(row, column.code)?.mode === 'override' ? 'text-warning-700' : 'text-neutral-500'"
+                      >
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="componentSourceIcon(row, column.code)!" /></svg>
+                        {{ t(`payroll.quick_inputs.component_cell.source.${componentCell(row, column.code)?.source ?? 'manual'}`) }}
+                      </span>
+                    </div>
+                    <input
+                      v-if="componentEditable(row, column)"
+                      v-model="row.componentAmounts[column.code]"
+                      :data-testid="`quick-component-mobile-${column.code}-${row.employment_id}`"
+                      type="text"
+                      inputmode="decimal"
+                      autocomplete="off"
+                      :aria-label="t('payroll.quick_inputs.component_cell.label', { name: column.name })"
+                      :aria-invalid="componentError(row, column) !== null"
+                      :class="[fieldClass(componentError(row, column) === null ? null : 'amount_format'), 'w-full']"
+                      :disabled="loading || saving"
+                      @input="onComponentInput(row, column.code)"
+                    >
+                    <span v-else :class="[READONLY_VALUE_CLASS, 'h-10 w-full']">{{ componentDisplay(row, column.code) }}</span>
+                    <span v-if="componentSourceTitle(row, column) && componentCell(row, column.code)?.mode === 'override'" class="mt-1 block text-xs text-neutral-600">
+                      {{ componentSourceTitle(row, column) }}
+                    </span>
+                    <button
+                      v-if="componentRevertable(row, column)"
+                      type="button"
+                      :class="[btnOutline('warning'), 'mt-2 w-full']"
+                      :disabled="loading || saving"
+                      @click="requestRevert(row, column.code)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+                      {{ t('payroll.quick_inputs.component_cell.revert') }}
+                    </button>
+                    <span v-if="row.componentRevert[column.code]" class="mt-1 block text-xs text-warning-700">
+                      {{ t('payroll.quick_inputs.component_cell.revert_pending', {
+                        value: formatMoney(componentCell(row, column.code)?.override_of?.amount_minor ?? 0),
+                      }) }}
+                    </span>
+                    <span v-if="componentError(row, column)" class="mt-1 block text-xs text-danger-700">
+                      {{ componentErrorMessage(componentError(row, column)) }}
+                    </span>
+                    <span v-if="serverError(row, `component:${column.code}`)" class="mt-1 block text-xs font-medium text-danger-700">
+                      {{ serverError(row, `component:${column.code}`) }}
+                    </span>
+                  </div>
                 </div>
               </fieldset>
             </div>

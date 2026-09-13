@@ -63,7 +63,19 @@ final class PayrollInputImportService
                     continue;
                 }
                 $seen[$dedupeKey] = true;
-                $existingInputId = $this->imports->existingInputId(
+                /*
+                 * Opakovaný import téhož `external_id`:
+                 *  - ručně přepsaná hodnota zůstává, import ji jen ohlásí
+                 *    (a zrušenému importnímu vstupu aktualizuje hodnotu, aby
+                 *    „Vrátit na hodnotu z importu" vrátilo poslední dávku);
+                 *  - stejná hodnota je duplicita jako dřív;
+                 *  - změněná hodnota u KONCEPTU se aktualizuje — oprava podkladu
+                 *    v docházce se tak do mezd dostane bez ručního zásahu;
+                 *  - schválený či uzamčený vstup import nepřepíše nikdy.
+                 * Zrušený vstup bez přepisu (koncept někdo zrušil) se neřeší:
+                 * řádek se naimportuje znovu jako nový, stejně jako dřív.
+                 */
+                $existing = $this->imports->existingInputState(
                     $supplierId,
                     PayrollTimeValue::int(
                         $payload['employment_id'],
@@ -75,15 +87,51 @@ final class PayrollInputImportService
                         'external_id',
                     ),
                 );
-                if ($existingInputId !== null) {
-                    $duplicates[] = $this->duplicate(
-                        $rowNumber,
-                        $payload,
-                        $existingInputId,
-                        'duplicate_external_id',
-                        'Externí vstup už v tomto vztahu a měsíci existuje.',
-                    );
+                $update = null;
+                if ($existing !== null && $existing['override_input_id'] !== null) {
+                    $duplicates[] = [
+                        ...$this->duplicate(
+                            $rowNumber,
+                            $payload,
+                            $existing['input_id'],
+                            'overridden_manually',
+                            'Hodnota je v rychlém měsíčním vstupu ručně přepsaná; import ji nepřepsal.',
+                        ),
+                        'refresh' => true,
+                    ];
                     continue;
+                }
+                if ($existing !== null && $existing['status'] !== 'cancelled') {
+                    $same = $existing['amount_minor'] === $payload['amount_minor']
+                        && $existing['quantity_milliunits'] === $payload['quantity_milliunits']
+                        && $existing['component_id'] === $payload['component_id']
+                        && $existing['source_period_start'] === $payload['source_period_start'];
+                    if ($same) {
+                        $duplicates[] = $this->duplicate(
+                            $rowNumber,
+                            $payload,
+                            $existing['input_id'],
+                            'duplicate_external_id',
+                            'Externí vstup už v tomto vztahu a měsíci existuje.',
+                        );
+                        continue;
+                    }
+                    if ($existing['status'] !== 'draft') {
+                        $duplicates[] = $this->duplicate(
+                            $rowNumber,
+                            $payload,
+                            $existing['input_id'],
+                            'changed_after_approval',
+                            'Hodnota v importu se liší od už schváleného vstupu. Schválený vstup '
+                            . 'import nepřepisuje — opravte ho v Mzdových vstupech nebo ručním '
+                            . 'přepisem v rychlém měsíčním vstupu.',
+                        );
+                        continue;
+                    }
+                    $update = [
+                        'input_id' => $existing['input_id'],
+                        'row_version' => $existing['row_version'],
+                    ];
                 }
                 $impact = $this->preview->preview($supplierId, $payload);
                 if (($impact['support_status'] ?? null) !== 'supported') {
@@ -137,6 +185,7 @@ final class PayrollInputImportService
                     'row_number' => $rowNumber,
                     'payload' => $payload,
                     'impact' => $impact,
+                    'update' => $update,
                 ];
             } catch (\InvalidArgumentException $e) {
                 $errors[] = [
@@ -149,15 +198,26 @@ final class PayrollInputImportService
             }
         }
 
+        // Aktualizace konceptu není nový vstup; náhled to počítá stejně jako zápis.
+        $updatedCount = count(array_filter(
+            $valid,
+            static fn (array $row): bool => $row['update'] !== null,
+        ));
+
         return [
             'format' => $format,
             'source_name' => $sourceName,
             'period' => substr($periodStart, 0, 7),
             'content_hash' => hash('sha256', $content),
             'row_count' => count($valid) + count($errors) + count($duplicates),
-            'accepted_count' => count($valid),
+            'accepted_count' => count($valid) - $updatedCount,
             'rejected_count' => count($errors),
             'duplicate_count' => count($duplicates),
+            'updated_count' => $updatedCount,
+            'overridden_count' => count(array_filter(
+                $duplicates,
+                static fn (array $row): bool => $row['error_code'] === 'overridden_manually',
+            )),
             'rows' => $valid,
             'errors' => array_map($this->publicError(...), $errors),
             'duplicates' => array_map($this->publicError(...), $duplicates),
@@ -440,13 +500,16 @@ final class PayrollInputImportService
     }
 
     /**
-     * @return list<array{row_number:int,payload:array<string,mixed>,impact:array<string,mixed>}>
+     * @return list<array{row_number:int,payload:array<string,mixed>,impact:array<string,mixed>,
+     *   update:?array{input_id:int,row_version:int}}>
      */
     private function validRows(mixed $value): array
     {
         $rows = PayrollTimeValue::rows($value, '_valid');
         $result = [];
         foreach ($rows as $row) {
+            $update = $row['update'] ?? null;
+            $update = $update === null ? null : PayrollTimeValue::row($update, 'update');
             $result[] = [
                 'row_number' => PayrollTimeValue::int(
                     $row['row_number'] ?? null,
@@ -454,6 +517,13 @@ final class PayrollInputImportService
                 ),
                 'payload' => PayrollTimeValue::row($row['payload'] ?? null, 'payload'),
                 'impact' => PayrollTimeValue::row($row['impact'] ?? null, 'impact'),
+                'update' => $update === null ? null : [
+                    'input_id' => PayrollTimeValue::int($update['input_id'] ?? null, 'update.input_id'),
+                    'row_version' => PayrollTimeValue::int(
+                        $update['row_version'] ?? null,
+                        'update.row_version',
+                    ),
+                ],
             ];
         }
         return $result;
@@ -461,7 +531,7 @@ final class PayrollInputImportService
 
     /**
      * @return ($duplicates is true
-     *   ? list<array{row_number:int,error_code:string,field_name:?string,error_message:string,payload:array<string,mixed>,input_id:?int}>
+     *   ? list<array{row_number:int,error_code:string,field_name:?string,error_message:string,payload:array<string,mixed>,input_id:?int,refresh:bool}>
      *   : list<array{row_number:int,error_code:string,field_name:?string,error_message:string,payload:array<string,mixed>}>)
      */
     private function errorRows(mixed $value, bool $duplicates): array
@@ -493,6 +563,7 @@ final class PayrollInputImportService
                 $normalized['input_id'] = $inputId === null
                     ? null
                     : PayrollTimeValue::int($inputId, 'input_id');
+                $normalized['refresh'] = ($row['refresh'] ?? false) === true;
             }
             $result[] = $normalized;
         }

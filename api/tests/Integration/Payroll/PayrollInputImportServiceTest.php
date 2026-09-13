@@ -433,8 +433,9 @@ final class PayrollInputImportServiceTest extends TestCase
     }
 
     /**
-     * Vstup, který v tomto vztahu a měsíci už existuje z dřívějšího importu,
-     * se pozná ještě v náhledu — a to i tehdy, když je soubor jinak úplně nový.
+     * Vstup, který v tomto vztahu a měsíci už existuje z dřívějšího importu
+     * se STEJNOU hodnotou, se pozná ještě v náhledu jako duplicita — a to
+     * i tehdy, když je soubor jinak úplně nový (jiný název, jiný obsah).
      */
     public function testExternalIdAlreadyStoredIsReportedAsDuplicate(): void
     {
@@ -447,22 +448,70 @@ final class PayrollInputImportServiceTest extends TestCase
             $this->userId,
         );
 
+        $csv = $this->csv([
+            [self::EMPLOYMENT_CODE, self::COMPONENT_CODE, '25000', 'imp-old'],
+            [self::EMPLOYMENT_CODE, self::COMPONENT_CODE, '1000', 'imp-new'],
+        ]);
         $preview = $this->imports->preview(
             $this->supplierId,
             self::PERIOD,
             'csv',
             'odmeny-2.csv',
-            $this->csv([[self::EMPLOYMENT_CODE, self::COMPONENT_CODE, '99000', 'imp-old']]),
+            $csv,
         );
 
-        self::assertSame(0, $preview['accepted_count']);
+        self::assertSame(1, $preview['accepted_count']);
+        self::assertSame(0, $preview['updated_count']);
         self::assertSame(1, $preview['duplicate_count']);
         self::assertSame(
             'duplicate_external_id',
             PayrollTimeValue::rows($preview['duplicates'], 'duplicates')[0]['error_code'],
         );
-        // Původní částka se nepřepsala.
+
+        $this->imports->apply($this->supplierId, self::PERIOD, 'csv', 'odmeny-2.csv', $csv, $this->userId);
+        // Nezměněný řádek nezaložil druhý vstup a částka zůstala.
+        self::assertSame(2, $this->countInputs());
         self::assertSame(25000, (int) $this->fetchInput('imp-old')['amount_minor']);
+    }
+
+    /**
+     * Opravený soubor se ZMĚNĚNOU částkou u téhož `external_id` nesmí založit
+     * druhý vstup — to by byla dvojí výplata. U konceptu import aktualizuje
+     * TENTÝŽ vstup a náhled i zápis to hlásí jako aktualizaci, ne jako nový
+     * řádek. Schválený vstup nepřepíše (viz PayrollQuickInputComponentsTest).
+     */
+    public function testChangedValueUpdatesTheSameDraftInsteadOfCreatingSecondInput(): void
+    {
+        $this->imports->apply(
+            $this->supplierId,
+            self::PERIOD,
+            'csv',
+            'odmeny.csv',
+            $this->csv([[self::EMPLOYMENT_CODE, self::COMPONENT_CODE, '25000', 'imp-old']]),
+            $this->userId,
+        );
+        $corrected = $this->csv([[self::EMPLOYMENT_CODE, self::COMPONENT_CODE, '99000', 'imp-old']]);
+
+        $preview = $this->imports->preview($this->supplierId, self::PERIOD, 'csv', 'odmeny-2.csv', $corrected);
+        self::assertSame(0, $preview['accepted_count']);
+        self::assertSame(1, $preview['updated_count']);
+        self::assertSame(0, $preview['duplicate_count']);
+        // Náhled nic nezapsal.
+        self::assertSame(25000, (int) $this->fetchInput('imp-old')['amount_minor']);
+
+        $applied = $this->imports->apply(
+            $this->supplierId,
+            self::PERIOD,
+            'csv',
+            'odmeny-2.csv',
+            $corrected,
+            $this->userId,
+        );
+        self::assertSame('accepted', $applied['status']);
+        self::assertSame(0, $applied['accepted_count']);
+        self::assertSame(1, $applied['updated_count']);
+        self::assertSame(1, $this->countInputs(), 'Oprava nesmí založit druhý vstup.');
+        self::assertSame(99000, (int) $this->fetchInput('imp-old')['amount_minor']);
     }
 
     /**
