@@ -284,6 +284,43 @@ final class PayrollOpeningBalanceServiceTest extends TestCase
         ];
     }
 
+    /**
+     * Začátek vedení mezd v lednu nestačí: bez běhu MyÚčta od ledna mohl leden
+     * až květen zpracovat předchozí program a nula by zkreslila roční úhrny.
+     */
+    public function testZeroOpeningNeedsMyUctoRunFromWindowStart(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO payroll_module_state (supplier_id, status, start_period) VALUES (?, "active", "2026-01-01")')
+            ->execute([$this->supplierId]);
+        $this->createEmployment($pdo, '2026-01-01');
+        $this->createRun($pdo, '2026-06-01', '2026-07-15');
+
+        self::assertSame([], $this->service->seedProvableZeroOpenings($this->supplierId, '2026-06-01'));
+        self::assertNull($this->accumulators->openingBalance($this->supplierId, $this->employeeId, 2026, 'income_tax'));
+
+        $this->createRun($pdo, '2026-01-01', '2026-02-15');
+        self::assertSame([$this->employeeId], $this->service->seedProvableZeroOpenings($this->supplierId, '2026-06-01'));
+    }
+
+    private function createEmployment(PDO $pdo, string $start): void
+    {
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, actual_start_date, monthly_gross_minor, is_legacy_projection, is_primary)
+             VALUES (?, ?, "ZAM-T", "employment", "active", ?, ?, 4000000, 0, 1)'
+        )->execute([$this->supplierId, $this->employeeId, $start, $start]);
+    }
+
+    private function createRun(PDO $pdo, string $periodStart, string $paymentDate): void
+    {
+        $pdo->prepare(
+            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status, current_revision_no)
+             VALUES (?, ?, ?, "approved", 1)'
+        )->execute([$this->supplierId, $periodStart, $paymentDate]);
+    }
+
     private function firstSupplierId(PDO $pdo): int
     {
         $stmt = $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1');

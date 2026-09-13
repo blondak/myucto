@@ -127,6 +127,7 @@ final readonly class PayrollOpeningBalanceService
         if ($moduleStart === null) {
             return [];
         }
+        $firstRun = $this->firstRunPeriod($supplierId, $year);
 
         $seeded = [];
         foreach ($this->firstEmploymentStarts($supplierId, $employeeIds) as $employeeId => $firstStart) {
@@ -136,8 +137,13 @@ final readonly class PayrollOpeningBalanceService
                 ? $firstStart
                 : $yearStart;
             $windowIsEmpty = $windowStart >= $periodStart;
-            if (!$windowIsEmpty && $moduleStart > $windowStart) {
-                // Kus roku firma zpracovala mimo aplikaci — nulu tvrdit nelze.
+            // Kus roku firma zpracovala mimo aplikaci — nulu tvrdit nelze. Nestačí
+            // začátek vedení mezd: firma ho mívá nastavený dřív, než v MyÚčtu
+            // opravdu začala, a leden až květen pak doložil předchozí program.
+            // Nula je prokazatelná, jen když MyÚčto za rok vedlo mzdy už od
+            // začátku okna (má běh nejpozději v jeho prvním měsíci).
+            if (!$windowIsEmpty
+                && ($moduleStart > $windowStart || $firstRun === null || $firstRun > substr($windowStart, 0, 8) . '01')) {
                 continue;
             }
             if ($this->hasAnyOpening($supplierId, $employeeId, $year)) {
@@ -161,6 +167,18 @@ final readonly class PayrollOpeningBalanceService
         }
 
         return $seeded;
+    }
+
+    private function firstRunPeriod(int $supplierId, int $year): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT MIN(period_start) FROM payroll_runs
+              WHERE supplier_id = ? AND status <> 'cancelled' AND period_start BETWEEN ? AND ?"
+        );
+        $stmt->execute([$supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-12-31', $year)]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? substr($value, 0, 10) : null;
     }
 
     private function moduleStartPeriod(int $supplierId): ?string
