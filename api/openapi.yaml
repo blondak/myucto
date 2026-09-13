@@ -175,6 +175,10 @@ tags:
     description: |
       E-shop / katalog zboží — číselníky (výrobci, štítky, poplatky, parametry),
       strom kategorií (i18n) a karta zboží (média, cenotvorba, dodavatelé, import).
+  - name: PriceList
+    description: |
+      Ceník položek (služby, paušály) pro firmy bez skladového modulu — ceny po měnách
+      a individuální ceny zákazníků. Veřejně zdokumentované jen čtení.
   - name: Portal
     description: Přehledový portál (dashboard souhrn napříč agendami).
   - name: Portfolio
@@ -5736,18 +5740,21 @@ paths:
   /api/v1/codebooks/currencies:
     get:
       tags: [Codebooks]
-      summary: Seznam podporovaných měn
+      summary: Měny firmy
+      description: Měny aktuální firmy s jejich ID (`currency_id` dokladů, objednávek a ceníku). Bez `include_inactive` jen aktivní.
+      parameters:
+        - in: query
+          name: include_inactive
+          schema: { type: boolean, default: false }
+          description: Vrátit i neaktivní měny (přijaté faktury v měně, ve které firma nemá účet).
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  currencies:
-                    type: array
-                    items: { $ref: '#/components/schemas/Currency' }
+                type: array
+                items: { $ref: '#/components/schemas/Currency' }
 
   /api/v1/codebooks/vat-rates:
     get:
@@ -14066,6 +14073,174 @@ paths:
       responses:
         '200': { description: Smazáno }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/price-list-items:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [PriceList]
+      summary: Ceník položek (služby a paušály)
+      description: |
+        Ceník pro firmy bez skladového modulu — položky s cenami po měnách a individuálními
+        cenami zákazníků (nezaměňovat se skladovými kartami). Bez `currency` vrací stránku
+        položek. Se `currency` vrací jen položky použitelné v dané měně (pro odběratele
+        `client_id` i s jeho individuálními cenami) a u každé doplní `resolved_price` stejně
+        jako `/resolve`; stránkuje se až vyhodnocená množina. Veřejně jen ke čtení.
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Hledání v kódu, názvu a popisu.
+        - in: query
+          name: include_archived
+          schema: { type: boolean, default: false }
+        - in: query
+          name: prices_include_vat
+          schema: { type: boolean }
+          description: Jen položky s cenami včetně DPH (true), nebo bez DPH (false).
+        - in: query
+          name: currency
+          schema: { type: string, pattern: '^[A-Za-z]{3}$' }
+          description: Kód aktivní měny firmy — zapne vyhodnocení cen.
+        - in: query
+          name: client_id
+          schema: { type: integer, minimum: 1 }
+          description: Odběratel pro individuální ceny (uplatní se se `currency`).
+        - in: query
+          name: rate_date
+          schema: { type: string, format: date }
+          description: Datum kurzu pro přepočet z jiné měny. Výchozí dnes.
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: per_page
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/PriceListItem' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409': { description: 'Firma používá skladový modul — ceník není dostupný (`price_list_unavailable`).' }
+  /api/v1/price-list-items/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [PriceList]
+      summary: Detail položky ceníku
+      description: Položka včetně cen po měnách (`prices`), použití v šablonách pravidelné fakturace (`usage`) a individuálních cen zákazníků (`customer_overrides`).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PriceListItem'
+                  - type: object
+                    properties:
+                      customer_overrides:
+                        type: array
+                        items: { $ref: '#/components/schemas/PriceListCustomerOverride' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Firma používá skladový modul — ceník není dostupný (`price_list_unavailable`).' }
+  /api/v1/price-list-items/{id}/prices:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [PriceList]
+      summary: Ceny položky ceníku po měnách
+      description: Poslední cena v každé měně včetně archivovaných.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PriceListItemPrice' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Firma používá skladový modul — ceník není dostupný (`price_list_unavailable`).' }
+  /api/v1/price-list-items/{id}/customer-overrides:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [PriceList]
+      summary: Individuální ceny zákazníků u položky ceníku
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PriceListCustomerOverride' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Firma používá skladový modul — ceník není dostupný (`price_list_unavailable`).' }
+  /api/v1/price-list-items/{id}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [PriceList]
+      summary: Výsledná cena položky ceníku pro odběratele a měnu
+      description: |
+        Pořadí zdrojů: individuální cena odběratele v měně dokladu → explicitní cena
+        položky v měně → přepočet (individuální, jinak základní) ceny kurzem k `rate_date`,
+        pokud to položka dovoluje (`allow_exchange_rate_conversion`).
+      parameters:
+        - in: query
+          name: currency_id
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: ID měny dokladu (`/codebooks/currencies`).
+        - in: query
+          name: client_id
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: prices_include_vat
+          schema: { type: boolean, default: false }
+          description: Režim ceny dokladu; musí odpovídat položce, jinak 409 `price_mode_mismatch`.
+        - in: query
+          name: rate_date
+          schema: { type: string, format: date }
+          description: Datum kurzu. Výchozí dnes.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PriceListResolvedPrice' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409':
+          description: |
+            Cenu nelze určit (`details.price_list_item_id`): `currency_not_found`,
+            `price_list_item_not_found`, `price_list_item_archived`, `price_mode_mismatch`,
+            `base_price_unavailable`, `price_unavailable`, `exchange_rate_unavailable`;
+            nebo ceník není dostupný kvůli skladovému modulu (`price_list_unavailable`).
   /api/v1/stock/intrastat/preview:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14338,18 +14513,23 @@ paths:
           type: boolean
         description: Jen karty pod minimální zásobou (`min_qty`).
       - in: query
-        name: limit
+        name: page
         schema:
           type: integer
-          default: 200
+          default: 1
           minimum: 1
-          maximum: 500
       - in: query
-        name: offset
+        name: per_page
         schema:
           type: integer
-          default: 0
-          minimum: 0
+          default: 50
+          minimum: 5
+          maximum: 200
+      - in: query
+        name: export_eshop
+        description: Jen karty publikované (true) nebo nepublikované (false) do e-shopu.
+        schema:
+          type: boolean
       - in: query
         name: warehouse_id
         schema:
@@ -14382,7 +14562,7 @@ paths:
           type: string
       - in: query
         name: missing
-        description: Chybějící údaje oddělené čárkou.
+        description: 'Chybějící údaje oddělené čárkou: `manufacturer`, `category`, `image`, `price`, `ean`.'
         schema:
           type: string
       - in: query
@@ -14390,6 +14570,10 @@ paths:
         description: Filtr fyzického množství.
         schema:
           type: string
+          enum:
+          - in_stock
+          - out_of_stock
+          - below_min
       - in: query
         name: qty_min
         description: Minimální množství.
@@ -14419,22 +14603,25 @@ paths:
           - desc
       responses:
         '200':
-          description: Úplné agregace po kartách
+          description: Stránka karet s úplnými agregacemi (množství, hodnota, platná cena).
           content:
             application/json:
               schema:
                 type: object
+                required: [data, meta]
                 properties:
-                  items:
+                  data:
                     type: array
                     items:
                       $ref: '#/components/schemas/CatalogProduct'
-                  total:
-                    type: integer
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
         '400':
-          description: Neplatný filtr
-      description: Řazení a agregace se vyhodnocují nad celým filtrovaným katalogem. Kategorie zahrnuje podstrom. Druhým řadicím
-        klíčem je ID.
+          description: Neplatný nebo neznámý filtr (`validation_failed`).
+      description: |
+        Stránkuje se `page` / `per_page` (obálka `data` + `meta`). Řazení a agregace se
+        vyhodnocují nad celým filtrovaným katalogem. Kategorie zahrnuje podstrom. Druhým
+        řadicím klíčem je ID. Neznámý query parametr vrátí 400.
     post:
       tags:
       - Stock
@@ -21383,6 +21570,17 @@ components:
         has_customer_prices:
           type: boolean
           description: Karta má aspoň jednu individuální cenu zákazníka (bez ohledu na odběratele a platnost). Vrací detail `/stock/items/{id}`.
+        effective_price:
+          type: [string, 'null']
+          description: Platná prodejní cena za základní jednotku bez DPH (CZK, dnes, bez odběratele; akční cena, pokud právě platí). Vrací seznam, detail a našeptávač `/stock/items`.
+        promo_price:
+          type: [string, 'null']
+          description: Akční cena, pokud se právě uplatňuje; jinak null.
+        promo_label:
+          type: [string, 'null']
+        promo_qty_available:
+          type: [string, 'null']
+          description: Zbývající množství akce se stropem, v základních jednotkách; null = akce bez stropu nebo žádná.
     CatalogEditorInput:
       type: object
       required:
@@ -21700,6 +21898,86 @@ components:
             promo_price: { type: string }
         promo_reason: { type: string }
         promo_qty_available: { type: [string, 'null'], description: V základních jednotkách. }
+    PriceListItemPrice:
+      type: object
+      description: Poslední cena položky ceníku v jedné měně.
+      properties:
+        id: { type: integer }
+        price_list_item_id: { type: integer }
+        currency_code: { type: string, minLength: 3, maxLength: 3 }
+        unit_price: { type: number, description: "Jednotková cena; s DPH nebo bez podle `prices_include_vat` položky." }
+        archived: { type: boolean }
+        created_at: { type: string }
+        updated_at: { type: string }
+    PriceListItem:
+      type: object
+      properties:
+        id: { type: integer }
+        supplier_id: { type: integer }
+        code: { type: string, maxLength: 50 }
+        name: { type: string, maxLength: 150 }
+        description: { type: string, maxLength: 500 }
+        unit: { type: string, maxLength: 20 }
+        vat_rate_id: { type: integer }
+        vat_code: { type: string }
+        vat_rate_percent: { type: number }
+        prices_include_vat: { type: boolean }
+        base_currency_code: { type: string, minLength: 3, maxLength: 3 }
+        allow_exchange_rate_conversion: { type: boolean, description: "Chybí-li cena v měně dokladu, smí se přepočítat ze základní ceny kurzem." }
+        archived: { type: boolean }
+        base_unit_price: { type: [number, "null"], description: "Cena v základní měně položky." }
+        base_price_archived: { type: [boolean, "null"] }
+        created_at: { type: string }
+        updated_at: { type: string }
+        prices:
+          type: array
+          items: { $ref: '#/components/schemas/PriceListItemPrice' }
+        usage:
+          type: array
+          description: Použití v šablonách pravidelné fakturace po měně a režimu ceny.
+          items:
+            type: object
+            properties:
+              currency_code: { type: string }
+              catalog_policy: { type: string }
+              count: { type: integer }
+        resolved_price:
+          description: Jen v seznamu se zadanou `currency` — výsledná cena jako z `/resolve`.
+          allOf:
+            - $ref: '#/components/schemas/PriceListResolvedPrice'
+    PriceListCustomerOverride:
+      type: object
+      description: Individuální cena zákazníka pro položku ceníku v jedné měně.
+      properties:
+        id: { type: integer }
+        price_list_item_id: { type: integer }
+        client_id: { type: integer }
+        client_name: { type: string }
+        currency_code: { type: string, minLength: 3, maxLength: 3 }
+        unit_price: { type: number }
+        affected_template_count: { type: integer, description: "Počet šablon pravidelné fakturace odběratele, které položku používají." }
+        created_at: { type: string }
+        updated_at: { type: string }
+    PriceListResolvedPrice:
+      type: object
+      properties:
+        price_list_item_id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+        description: { type: string }
+        unit: { type: string }
+        vat_rate_id: { type: integer }
+        vat_rate_percent: { type: number }
+        prices_include_vat: { type: boolean }
+        unit_price_without_vat: { type: number, description: "Výsledná jednotková cena v měně dokladu (název je historický — v režimu `prices_include_vat` jde o cenu s DPH)." }
+        target_currency_code: { type: string }
+        catalog_price_source: { type: string, enum: [customer_explicit, catalog_explicit, customer_base_converted, catalog_base_converted] }
+        catalog_source_currency_code: { type: string }
+        catalog_source_unit_price: { type: number }
+        catalog_exchange_rate: { type: [number, "null"] }
+        catalog_exchange_rate_date: { type: [string, "null"], format: date }
+        catalog_rate_fallback_used: { type: boolean }
+        catalog_rate_source: { type: [string, "null"] }
     EshopPackagingUnit:
       type: object
       properties:
@@ -24553,6 +24831,12 @@ components:
         id: { type: integer }
         code: { type: string, example: CZK }
         symbol: { type: string, example: "Kč" }
+        label: { type: [string, "null"] }
+        name_cs: { type: [string, "null"] }
+        name_en: { type: [string, "null"] }
+        decimals: { type: integer, example: 2 }
+        is_active: { type: boolean }
+        is_default: { type: boolean }
 
     Money:
       type: object

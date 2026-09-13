@@ -368,3 +368,101 @@ test('katalogové filtry a průběh úlohy používají čtecí API', async () =
   assert.equal(tool('get_catalog_facets').write, false);
   assert.equal(tool('get_catalog_job').write, false);
 });
+
+test('cenové hladiny, balení, individuální ceny a ceník jsou jen ke čtení', () => {
+  for (const name of [
+    'get_product_packaging', 'get_product_customer_prices', 'get_product_price_levels',
+    'quote_product_prices', 'list_price_levels', 'get_price_level', 'list_packaging_units',
+    'list_sales_currencies', 'list_eshop_locales', 'list_currencies',
+    'get_product_tracking', 'list_stock_locations',
+    'list_sales_orders', 'get_sales_order', 'sales_order_shortages',
+    'list_cycle_counts', 'get_cycle_count',
+    'list_price_list_items', 'get_price_list_item', 'resolve_price_list_item',
+  ]) {
+    assert.equal(tool(name).write, false, name);
+    assert.equal(tool(name).destructive, undefined, name);
+  }
+  // Odkaz z popisu jiného nástroje musí vést na existující nástroj.
+  assert.match(tool('purchase_orders_create').inputSchema.properties.currency_id.description, /list_currencies/);
+});
+
+test('nacenění pro odběratele volá čtecí POST s výchozí měnou CZK', async () => {
+  const client = new FakeClient();
+  const quote = tool('quote_product_prices');
+
+  await quote.run(client, {
+    client_id: 8,
+    date: '2026-09-13',
+    lines: [{ stock_item_id: 11, quantity: '10', unit: 'KT' }],
+  }, 'quote_product_prices');
+
+  assert.equal(quote.inputSchema.properties.lines.maxItems, 500);
+  assert.deepEqual(quote.inputSchema.required, ['lines']);
+  assert.deepEqual(client.calls, [{
+    method: 'POST_READ',
+    path: '/stock/items/quote',
+    body: {
+      client_id: 8,
+      date: '2026-09-13',
+      currency: 'CZK',
+      lines: [{ stock_item_id: 11, quantity: '10', unit: 'KT' }],
+    },
+    tool: 'quote_product_prices',
+  }]);
+});
+
+test('detail cenové hladiny přidá pravidla, jen když nejsou výslovně vypnutá', async () => {
+  const client = new FakeClient({
+    'GET /eshop/price-levels/3': { id: 3, code: 'GOLD', name: 'Gold' },
+    'GET /eshop/price-levels/3/rules': [{ id: 1, match_type: 'category', match_id: 4 }],
+  });
+
+  const withRules = await tool('get_price_level').run(client, { id: 3 }, 'get_price_level');
+  assert.deepEqual(withRules.rules, [{ id: 1, match_type: 'category', match_id: 4 }]);
+  assert.equal(withRules.code, 'GOLD');
+
+  const bare = await tool('get_price_level').run(client, { id: 3, include_rules: false }, 'get_price_level');
+  assert.equal(bare.rules, undefined);
+  assert.deepEqual(client.calls.map(({ path }) => path), [
+    '/eshop/price-levels/3', '/eshop/price-levels/3/rules', '/eshop/price-levels/3',
+  ]);
+});
+
+test('skladové čtecí nástroje posílají správné cesty a filtry', async () => {
+  const client = new FakeClient();
+  await tool('get_product_packaging').run(client, { id: 5 }, 'get_product_packaging');
+  await tool('get_product_customer_prices').run(client, { id: 5 }, 'get_product_customer_prices');
+  await tool('get_product_price_levels').run(client, { id: 5 }, 'get_product_price_levels');
+  await tool('list_price_levels').run(client, { active_only: true }, 'list_price_levels');
+  await tool('list_sales_orders').run(client, {
+    query: 'OBJ-1', fulfillment_status: 'reserved', shortage: true, limit: 20,
+  }, 'list_sales_orders');
+  await tool('resolve_price_list_item').run(client, {
+    id: 9, currency_id: 2, client_id: 8, prices_include_vat: true,
+  }, 'resolve_price_list_item');
+  await tool('list_price_list_items').run(client, { currency: 'EUR', prices_include_vat: false }, 'list_price_list_items');
+
+  assert.deepEqual(client.calls.map(({ path }) => path), [
+    '/stock/items/5/packaging',
+    '/stock/items/5/customer-prices',
+    '/stock/items/5/price-levels',
+    '/eshop/price-levels',
+    '/stock/sales-orders',
+    '/price-list-items/9/resolve',
+    '/price-list-items',
+  ]);
+  assert.equal(client.calls[3].query.active, true);
+  assert.deepEqual(client.calls[4].query, {
+    q: 'OBJ-1',
+    commercial_status: undefined,
+    payment_status: undefined,
+    fulfillment_status: 'reserved',
+    shortage: true,
+    limit: 20,
+    offset: undefined,
+  });
+  assert.equal(client.calls[5].query.currency_id, 2);
+  assert.equal(client.calls[5].query.client_id, 8);
+  assert.equal(client.calls[6].query.currency, 'EUR');
+  assert.equal(client.calls[6].query.prices_include_vat, 0);
+});

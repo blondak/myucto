@@ -44,8 +44,8 @@ Podstatné vlastnosti:
 | Mzdy | čtení zaměstnanců, pracovních podmínek a výsledků; změna sjednané mzdy, mzdové vstupy, přesčasy a absence; řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
-Nástrojů je aktuálně **195**; v režimu jen pro čtení (`MYUCTO_READ_ONLY=1`,
-[§ 106.4](#1064-nastaveni)) se jich asistentovi nabídne **114** — zbylých 81 mění
+Nástrojů je aktuálně **220**; v režimu jen pro čtení (`MYUCTO_READ_ONLY=1`,
+[§ 106.4](#1064-nastaveni)) se jich asistentovi nabídne **138** — zbylých 82 mění
 data a server je vůbec nezveřejní. Přesný počet vypíše server při startu do
 `stderr` ([§ 106.3](#1063-zprovozneni), krok 4).
 
@@ -368,13 +368,16 @@ vzniká až v účetní vrstvě, která zůstává jen ke čtení.
 |---|---|---|
 | **Zboží — skladová karta** | seznam, našeptávač, detail, skladová kniha (pohyby) | založit, upravit (SKU, název, MJ, sazba DPH, minimální zásoba, aktivita), smazat |
 | **Zboží — obsah pro e-shop** | karta i s kategoriemi, štítky a parametry; jazykové verze | výrobce, záruka, dodací lhůta, hmotnost, publikace, překlady, kategorie, štítky, parametry, poplatky |
-| **Ceny** | ceny po měnách, marže | uložit cenotvorbu (přirážka / pevná cena / zaokrouhlení), vynutit přepočet |
+| **Ceny** | ceny po měnách, marže; individuální ceny zákazníků a ceny v cenových hladinách na kartě; nacenění řádků pro konkrétního odběratele, měnu, datum a balení | uložit cenotvorbu (přirážka / pevná cena / zaokrouhlení), vynutit přepočet |
+| **Balení a šarže** | balení karty (poměr, EAN balení, výchozí prodejní jednotka), šarže a sériová čísla s expirací a historií | — |
 | **Dodavatelé zboží** | seznam s nákupní cenou a dodací lhůtou | nahradit seznam dodavatelů zboží |
 | **Nabídky dodavatelů („u dodavatele")** | přehled dvojic zboží × dodavatel napříč katalogem — nákupní cena a měna, kód u dodavatele, dodací lhůta, minimální odběr, balení a množství hlášené dodavatelem | založit a upravit nabídku (upsert podle dvojice zboží × dodavatel), odebrat nabídku |
 | **Média** | seznam obrázků a příloh | popisky, pořadí, hlavní obrázek, smazání |
 | **Kategorie** | strom, detail, překlady | založit, upravit, přesunout v stromu, uložit překlady, smazat |
-| **Číselníky** | výrobci, štítky, typy poplatků, parametry i jejich hodnoty | u všech čtyř založit / upravit / smazat |
-| **Sklady** | seznam, detail, hodnota zásob | založit, upravit, smazat |
+| **Číselníky** | výrobci, štítky, typy poplatků, parametry i jejich hodnoty; balení, cenové hladiny i s pravidly, jazyky a prodejní měny | výrobci, štítky, typy poplatků a parametry: založit / upravit / smazat |
+| **Sklady** | seznam, detail, hodnota zásob, skladové lokace | založit, upravit, smazat |
+| **Prodejní objednávky** | seznam se stavem obchodu, platby a expedice, detail s rezervacemi, fronta objednávek čekajících na zboží | — |
+| **Cyklické inventury** | seznam, detail s řádky | — |
 | **Zásoby** | stav, dostupnost s rezervacemi, sestava stavu, ocenění k datu | — |
 | **Množstevní pohledy** | všechny čtyři veličiny najednou (skladem, rezervováno, prodejné, na cestě), rozpad „na cestě" na konkrétní objednávky a rozpad rezervací na konkrétní faktury | — |
 | **Doplnění zásob** | návrh, co a kolik doobjednat (zboží pod minimem) | hromadně z návrhu založit objednávky seskupené po dodavatelích |
@@ -407,6 +410,27 @@ kartu a měnu neexistuje, je `null`, ne nula.
 štítků, dostupnosti a chybějících údajů. `get_catalog_facets` vrací počty
 hodnot filtrů nad celou odpovídající množinou. `get_catalog_job` ukáže
 průběh a souhrnný výsledek úlohy, ke které má uživatel oprávnění.
+
+### 106.9.1.2 Ceny pro konkrétního odběratele
+
+Na otázku „za kolik to prodáme firmě ACME“ asistent odpoví nástrojem
+`quote_product_prices`. Ten spočítá cenu stejně jako faktura: nejdřív
+individuální cena zákazníka, pak cenová hladina odběratele, jinak standardní
+cena; akční cena vyhraje, jen když je levnější. Počítá se v zadané měně a k datu
+a řádek může být i v balení, třeba „10 kartonů“. Nic se neukládá, stačí token
+jen pro čtení.
+
+> „Kolik zaplatí ACME za 10 kartonů kabelu k 1. říjnu?“
+> „Které cenové hladiny máme a jakou slevu dává Gold?“
+> „Má tahle karta nějaké smluvní ceny zákazníků?“
+
+Individuální ceny zákazníků, cenové hladiny, balení a číselník balení asistent
+jen čte. Nastavují se v aplikaci na kartě zboží a v číselnících e-shopu.
+
+Firmy bez skladového modulu mají místo cen na kartách **ceník služeb**.
+Asistent z něj umí vypsat položky, jejich ceny po měnách, individuální ceny
+zákazníků i výslednou cenu pro konkrétního odběratele a měnu dokladu. Ceník také
+jen čte.
 
 ### 106.9.2 Potvrzování nevratných kroků
 

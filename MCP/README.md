@@ -20,7 +20,8 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář |
 | Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník |
 | Statistika | tržby, zisk, trendy, top odběratelé i dodavatelé, cash flow, platební morálka |
-| E-shop a sklad | **čtení i zápis** — zboží a obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky/výdejky/převodky, inventury |
+| E-shop a sklad | **čtení i zápis** — zboží a obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky/výdejky/převodky, inventury; **jen čtení** — balení, individuální ceny zákazníků, cenové hladiny, nacenění pro odběratele, šarže a sériová čísla, lokace, prodejní objednávky, cyklické inventury |
+| Ceník služeb | **jen čtení** — položky, ceny po měnách, individuální ceny zákazníků a výsledná cena (jen firmy bez skladového modulu) |
 | Mzdy | čtení osob a výsledků; změna sjednané mzdy od data se zachováním historie, mzdové vstupy, přesčasy a nové absence; schvalování absencí a řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
@@ -165,8 +166,16 @@ stejného tvaru je tedy jeden objekt, ne pět nástrojů psaných ručně.
 Pro čtení většího výběru katalogu slouží `get_products_batch` (nejvýš 500
 karet) a `get_product_prices_batch` (nejvýš 500 kombinací karty a množství).
 Oba používají čtecí POST, aby se vešel strukturovaný vstup, ale klient je při
-přechodném výpadku opakuje stejně bezpečně jako GET. Běžné POST zápisy se
-neopakují.
+přechodném výpadku opakuje stejně bezpečně jako GET. Stejně jede
+`quote_product_prices` (`POST /stock/items/quote`) — cena řádků pro odběratele,
+měnu, datum a balení tak, jak ji nacení faktura. Čtecí POST je povolený jen pro
+cesty v `READ_POST_PATHS` v `src/client.mjs`; server je pouští i tokenu jen pro
+čtení. Běžné POST zápisy se neopakují.
+
+Balení, individuální ceny zákazníků, cenové hladiny, prodejní objednávky,
+cyklické inventury a ceník služeb jsou v katalogu jen ke čtení. Jejich zápis
+nahrazuje celé sady (ceny karty, pravidla hladiny) nebo hýbe rezervacemi
+a doklady; zůstává proto v aplikaci.
 
 `list_products` podporuje výrobce, dodavatele, kategorii, štítky a chybějící
 údaje. `get_catalog_facets` vrací počty hodnot filtrů nad celou množinou;

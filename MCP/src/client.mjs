@@ -25,6 +25,7 @@ const DEFAULTS = {
 const READ_POST_PATHS = new Set([
   '/catalog/products/batch',
   '/catalog/prices/batch',
+  '/stock/items/quote',
 ]);
 
 export class ApiError extends Error {

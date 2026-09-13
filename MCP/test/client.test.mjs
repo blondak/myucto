@@ -31,6 +31,23 @@ test('čtecí POST opakuje přechodnou chybu serveru', async () => {
   }
 });
 
+test('nacenění skladových řádků jde čtecím POSTem', async () => {
+  const originalFetch = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), method: init.method });
+    return new Response(JSON.stringify({ lines: [] }), { status: 200 });
+  };
+
+  try {
+    const result = await client().postRead('/stock/items/quote', { lines: [] }, 'quote');
+    assert.deepEqual(result, { lines: [] });
+    assert.deepEqual(seen, [{ url: 'https://example.test/api/v1/stock/items/quote', method: 'POST' }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('čtecí POST odmítne jinou než výslovně povolenou cestu', () => {
   assert.throws(
     () => client().postRead('/stock/items', { name: 'Test' }, 'batch'),

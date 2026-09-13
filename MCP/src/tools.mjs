@@ -1685,6 +1685,18 @@ export const TOOLS = [
     write: false,
     run: (c, _a, tool) => c.get('/settings/vat-rates', null, tool),
   },
+  {
+    name: 'list_currencies',
+    title: 'Měny dokladů',
+    description:
+      'Měny firmy s jejich ID. `currency_id` z tohoto seznamu patří do objednávek '
+      + 'u dodavatele a do `resolve_price_list_item`. Bez `include_inactive` jen aktivní měny.',
+    inputSchema: schema({
+      include_inactive: bool('Vrátit i neaktivní měny (typicky kvůli přijatým fakturám).'),
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/codebooks/currencies', { include_inactive: a.include_inactive }, tool),
+  },
 
   // ──────────────────────────────────────────────────────────────────────────
   // Statistika a přehledy
@@ -3029,6 +3041,144 @@ export const TOOLS = [
   },
 
   // ──────────────────────────────────────────────────────────────────────────
+  // E-shop — balení, cenové hladiny a individuální ceny zákazníků
+  //
+  // Cena pro konkrétního odběratele vzniká v pořadí individuální cena zákazníka
+  // → cenová hladina odběratele → standardní cena; akce vyhraje, jen když je
+  // levnější. Počítá to jediný kód na serveru, proto `quote_product_prices`
+  // volá tentýž endpoint jako editor faktury, místo aby si cenu skládal sám.
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'get_product_packaging',
+    title: 'Balení zboží',
+    description:
+      'Nadřazené jednotky karty (karton, paleta) — kód balení, poměr k základní jednotce '
+      + '(`factor` a přesný zlomek `numerator`/`denominator`), EAN balení a výchozí prodejní '
+      + 'jednotka. `in_use: true` = balení už nese řádek faktury, takže mu nejde změnit poměr.',
+    inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/items/${a.id}/packaging`, null, tool),
+  },
+  {
+    name: 'get_product_customer_prices',
+    title: 'Individuální ceny zákazníků u zboží',
+    description:
+      'Smluvní ceny jednotlivých odběratelů na kartě: pevná cena nebo sleva v %, měna, '
+      + 'platnost od–do a `resulting_price` = výsledná cena za základní jednotku bez DPH '
+      + 'podle dnešní standardní ceny. Cenu pro konkrétní doklad (k datu, v balení, '
+      + 's akcí) spočítá `quote_product_prices`.',
+    inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/items/${a.id}/customer-prices`, null, tool),
+  },
+  {
+    name: 'get_product_price_levels',
+    title: 'Ceny zboží v cenových hladinách',
+    description:
+      'Cena karty v každé aktivní cenové hladině a měně: standardní cena, výsledná cena '
+      + 'v hladině a odkud pochází (`source`: výjimka produktu, kategorie, výrobce nebo '
+      + 'výchozí sleva hladiny), včetně případné výjimky produktu. Počítá se dnes, '
+      + 'pro množství 1 a bez akce.',
+    inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/items/${a.id}/price-levels`, null, tool),
+  },
+  {
+    name: 'quote_product_prices',
+    title: 'Nacenit zboží pro odběratele',
+    description:
+      'Spočítá prodejní cenu řádků přesně tak, jak je nacení faktura: pro zadaného '
+      + 'odběratele (individuální cena → cenová hladina → standardní cena; akce jen když '
+      + 'je levnější), v měně a k datu. Řádek jde zadat v balení (`unit: "KT"`) — '
+      + '`unit_price` je pak cena za balení a `base_quantity` množství v základní jednotce. '
+      + 'Odkud cena je, říká `price_source`. Nic neukládá.\n\n'
+      + 'Karta bez ceny v měně vrací `unit_price: null`, nikdy 0.',
+    inputSchema: schema({
+      client_id: int('ID odběratele (`search_clients`). Bez něj se počítá standardní cena.', { minimum: 1 }),
+      currency: str('ISO kód měny. Výchozí CZK.', { minLength: 3, maxLength: 3 }),
+      date: date('Datum, ke kterému se cena počítá (typicky DUZP). Výchozí dnes.'),
+      lines: arrayOf(
+        'Řádky k nacenění, nejvýš 500.',
+        {
+          stock_item_id: int('ID skladové karty.', { minimum: 1 }),
+          quantity: str('Množství v jednotce řádku jako desetinný řetězec, např. `10` nebo `2.5`.', {
+            pattern: '^[0-9]{1,11}(?:\\.[0-9]{1,3})?$',
+          }),
+          unit: str('Kód balení z `get_product_packaging`. Bez zadání základní jednotka karty.', { maxLength: 20 }),
+          key: str('Vlastní klíč řádku, vrátí se v odpovědi. Výchozí pořadí řádku.'),
+        },
+        ['stock_item_id', 'quantity'],
+        { minItems: 1, maxItems: 500 },
+      ),
+    }, ['lines']),
+    write: false,
+    run: (c, a, tool) => c.postRead('/stock/items/quote', {
+      ...changed(a, ['client_id', 'date']),
+      currency: a.currency ?? 'CZK',
+      lines: a.lines,
+    }, tool),
+  },
+  {
+    name: 'list_price_levels',
+    title: 'Cenové hladiny odběratelů',
+    description:
+      'Číselník cenových hladin (např. Bronze / Silver / Gold) s výchozí slevou, počtem '
+      + 'odběratelů a počtem pravidel. Hladinu odběratele ukazuje `get_client` '
+      + '(`price_level_id`, `price_level_name`); odběratel bez hladiny se naceňuje standardní cenou.',
+    inputSchema: schema({ active_only: bool('Jen aktivní hladiny.') }),
+    write: false,
+    run: (c, a, tool) => c.get('/eshop/price-levels', { active: a.active_only }, tool),
+  },
+  {
+    name: 'get_price_level',
+    title: 'Detail cenové hladiny',
+    description:
+      'Jedna cenová hladina i s pravidly: sleva v % nebo pevná cena podle produktu, kategorie '
+      + 'nebo výrobce, volitelně jen v jedné měně. Při nacenění vyhrává produkt před kategorií '
+      + 'a výrobcem, pak vyšší `priority`; bez pravidla platí výchozí sleva hladiny.',
+    inputSchema: schema({
+      id: int('ID cenové hladiny (z `list_price_levels`).'),
+      include_rules: bool('Načíst i pravidla hladiny (výchozí ano).'),
+    }, ['id']),
+    write: false,
+    run: async (c, a, tool) => {
+      const level = await c.get(`/eshop/price-levels/${a.id}`, null, tool);
+      if (a.include_rules === false) return level;
+      return { ...level, rules: await c.get(`/eshop/price-levels/${a.id}/rules`, null, tool) };
+    },
+  },
+  {
+    name: 'list_packaging_units',
+    title: 'Číselník balení',
+    description:
+      'Kódy nadřazených jednotek firmy (KT = karton, PAL = paleta) s počtem karet, které je '
+      + 'používají (`usage_count`). Poměr ke kusům drží každá karta zvlášť — viz `get_product_packaging`.',
+    inputSchema: schema({ active_only: bool('Jen aktivní balení.') }),
+    write: false,
+    run: (c, a, tool) => c.get('/eshop/packaging-units', { active: a.active_only }, tool),
+  },
+  {
+    name: 'list_sales_currencies',
+    title: 'Prodejní měny zboží',
+    description:
+      'Měny, ve kterých má zboží prodejní a akční ceny (číselník e-shopu). Nezaměňovat '
+      + 's měnami dokladů firmy — ty vrací `list_currencies`.',
+    inputSchema: schema({ active_only: bool('Jen aktivní měny.') }),
+    write: false,
+    run: (c, a, tool) => c.get('/eshop/currencies', { active: a.active_only }, tool),
+  },
+  {
+    name: 'list_eshop_locales',
+    title: 'Jazyky zboží',
+    description:
+      'Jazykové mutace karet zboží a kategorií. Kód jazyka patří do `locale` '
+      + 'v `update_product_card` a do `locales` v `get_products_batch`.',
+    inputSchema: schema({ active_only: bool('Jen aktivní jazyky.') }),
+    write: false,
+    run: (c, a, tool) => c.get('/eshop/locales', { active: a.active_only }, tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
   // E-shop — média zboží
   //
   // Nahrání souboru tady není: API ho bere jako multipart upload a tenhle
@@ -3617,6 +3767,25 @@ export const TOOLS = [
     run: (c, a, tool) => c.get('/stock/reports/valuation', {
       warehouse_id: a.warehouse_id, date: a.date,
     }, tool),
+  },
+  {
+    name: 'get_product_tracking',
+    title: 'Šarže a sériová čísla zboží',
+    description:
+      'Režim sledování karty (`none`, `lot` šarže, `serial` sériová čísla), převodní jednotky '
+      + 'šarží, aktuální rozpis zásoby po šaržích a sériových číslech včetně expirace a úplná '
+      + 'historie jejich pohybů. Odpověď na „ze které šarže jsme to vydali".',
+    inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/items/${a.id}/tracking`, null, tool),
+  },
+  {
+    name: 'list_stock_locations',
+    title: 'Skladové lokace',
+    description: 'Lokace (regály, pozice) uvnitř skladů firmy, volitelně jen jednoho skladu.',
+    inputSchema: schema({ warehouse_id: int('Jen lokace tohoto skladu.', { minimum: 1 }) }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/locations', { warehouse_id: a.warehouse_id }, tool),
   },
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -4502,6 +4671,150 @@ export const TOOLS = [
       );
       return c.post(`/stock/takes/${a.id}/close`, {}, tool);
     },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Sklad — prodejní objednávky a cyklické inventury (jen čtení)
+  //
+  // Potvrzení, storno a fakturace prodejní objednávky hýbou rezervacemi
+  // i doklady, uzavření cyklické inventury rovnou zaúčtuje rozdíly. Zápisové
+  // kroky proto zůstávají v aplikaci; asistent tu jen odpovídá na „co čeká".
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'list_sales_orders',
+    title: 'Prodejní objednávky',
+    description:
+      'Objednávky odběratelů s odděleným obchodním, platebním a expedičním stavem. '
+      + '`shortage: true` vrátí jen objednávky, na které nestačí zásoba.',
+    inputSchema: schema({
+      query: str('Číslo objednávky, název odběratele nebo externí ID (např. z e-shopu).'),
+      commercial_status: str('Obchodní stav.', { enum: ['draft', 'confirmed', 'cancelled', 'completed'] }),
+      payment_status: str('Stav platby.', {
+        enum: ['unpaid', 'authorized', 'partially_paid', 'paid', 'refunded', 'partially_refunded'],
+      }),
+      fulfillment_status: str('Stav expedice.', {
+        enum: ['unfulfilled', 'partially_reserved', 'reserved', 'partially_fulfilled', 'fulfilled', 'cancelled'],
+      }),
+      shortage: bool('Jen objednávky s nedostatkem zásoby.'),
+      ...WINDOW,
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/sales-orders', {
+      q: a.query,
+      commercial_status: a.commercial_status,
+      payment_status: a.payment_status,
+      fulfillment_status: a.fulfillment_status,
+      shortage: a.shortage,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+  {
+    name: 'get_sales_order',
+    title: 'Detail prodejní objednávky',
+    description: 'Objednávka i s řádky (neměnné snapshoty ceny a názvu) a zbývajícími rezervacemi zásoby.',
+    inputSchema: schema({ id: int('ID prodejní objednávky.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/sales-orders/${a.id}`, null, tool),
+  },
+  {
+    name: 'sales_order_shortages',
+    title: 'Objednávky čekající na zboží',
+    description:
+      'Fronta řádků prodejních objednávek, na které chybí zásoba — od nejstarší. '
+      + 'Podklad pro doobjednání (`replenishment_suggest`).',
+    inputSchema: schema({ limit: int('Nejvýš řádků (1–500, výchozí 200).', { minimum: 1, maximum: 500 }) }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/sales-orders/shortages', { limit: a.limit }, tool),
+  },
+  {
+    name: 'list_cycle_counts',
+    title: 'Cyklické inventury',
+    description:
+      'Poslední průběžné (cyklické) inventury části skladu se stavem přípravy. '
+      + 'Klasické roční inventury vrací `list_stock_takes`.',
+    inputSchema: schema(),
+    write: false,
+    run: (c, _a, tool) => c.get('/stock/cycle-counts', null, tool),
+  },
+  {
+    name: 'get_cycle_count',
+    title: 'Detail cyklické inventury',
+    description: 'Stav přípravy, okamžik uzamčení stavu (cutoff) a řádky s očekávaným a napočítaným množstvím.',
+    inputSchema: schema({ id: int('ID cyklické inventury.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/cycle-counts/${a.id}`, null, tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Ceník služeb (jen čtení)
+  //
+  // Ceník je určený firmám BEZ skladového modulu — služby a paušály s cenami po
+  // měnách a individuálními cenami zákazníků. Se zapnutým skladem ho server
+  // vypíná (409 `price_list_unavailable`) a ceny drží skladové karty. Správu
+  // ceníku dělá administrátor v aplikaci.
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'list_price_list_items',
+    title: 'Ceník služeb',
+    description:
+      'Položky ceníku s cenami po měnách. Se zadanou měnou (`currency`) vrátí jen položky '
+      + 'použitelné v té měně a u každé doplní `resolved_price` — výslednou cenu včetně '
+      + 'individuální ceny odběratele (`client_id`) a případného přepočtu kurzem.',
+    inputSchema: schema({
+      query: str('Kód, název nebo popis položky.'),
+      include_archived: bool('Zahrnout i archivované položky.'),
+      prices_include_vat: bool('Jen položky s cenami včetně DPH (true), nebo bez DPH (false).'),
+      currency: str('ISO kód měny — zapne vyhodnocení ceny.', { minLength: 3, maxLength: 3 }),
+      client_id: int('Odběratel pro individuální ceny (jen spolu s `currency`).', { minimum: 1 }),
+      rate_date: date('Datum kurzu pro přepočet z jiné měny. Výchozí dnes.'),
+      page: int('Stránka, od 1.', { minimum: 1 }),
+      per_page: int('Počet položek na stránku (1–200, výchozí 50).', { minimum: 1, maximum: 200 }),
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/price-list-items', {
+      q: a.query,
+      include_archived: a.include_archived,
+      prices_include_vat: a.prices_include_vat === undefined ? undefined : (a.prices_include_vat ? 1 : 0),
+      currency: a.currency,
+      client_id: a.client_id,
+      rate_date: a.rate_date,
+      page: a.page,
+      per_page: a.per_page,
+    }, tool),
+  },
+  {
+    name: 'get_price_list_item',
+    title: 'Detail položky ceníku',
+    description:
+      'Položka ceníku s cenami po měnách, individuálními cenami zákazníků '
+      + '(`customer_overrides`) a použitím v šablonách pravidelné fakturace (`usage`).',
+    inputSchema: schema({ id: int('ID položky ceníku.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/price-list-items/${a.id}`, null, tool),
+  },
+  {
+    name: 'resolve_price_list_item',
+    title: 'Cena položky ceníku pro odběratele',
+    description:
+      'Výsledná jednotková cena jedné položky ceníku v měně dokladu: individuální cena '
+      + 'odběratele → explicitní cena v měně → přepočet základní ceny kurzem k datu. Zdroj '
+      + 'říká `catalog_price_source`. Když cenu určit nejde (archivovaná položka, jiný režim '
+      + 'DPH, chybí kurz), server vrátí 409 s konkrétním kódem.',
+    inputSchema: schema({
+      id: int('ID položky ceníku.'),
+      currency_id: int('ID měny dokladu (`list_currencies`).', { minimum: 1 }),
+      client_id: int('ID odběratele; bez něj ceníková cena.', { minimum: 1 }),
+      prices_include_vat: bool('Doklad je v cenách včetně DPH. Musí odpovídat režimu položky.'),
+      rate_date: date('Datum kurzu. Výchozí dnes.'),
+    }, ['id', 'currency_id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/price-list-items/${a.id}/resolve`, {
+      currency_id: a.currency_id,
+      client_id: a.client_id,
+      prices_include_vat: a.prices_include_vat,
+      rate_date: a.rate_date,
+    }, tool),
   },
 ];
 
