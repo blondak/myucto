@@ -70,7 +70,23 @@ final class PayrollLegacyRecapitulationService
         private readonly PayrollPeriodOwnershipService $ownership,
         private readonly ActivityLogger $activityLogger,
         private readonly PayrollStatutoryAccumulatorRepository $accumulators,
+        private readonly PayrollLegacyHandoverInputCarrier $inputCarrier,
     ) {}
+
+    /**
+     * Zdroj verze počátečního stavu, ze které předání odebralo měsíc.
+     *
+     * Podle něj převod mzdových vstupů ({@see PayrollLegacyHandoverInputCarrier})
+     * dohledá, kolik měsíc v openingu vážil — aktuální verze už ho nemá.
+     */
+    public static function handOverOpeningReference(int $year, int $month): string
+    {
+        return sprintf(
+            'Převod %02d/%d do modulu Mzdy — měsíc odebrán z počátečních stavů',
+            $month,
+            $year,
+        );
+    }
 
     /**
      * Co za období po ruční rekapitulaci zbývá — bez zápisu, pro obrazovku.
@@ -100,14 +116,26 @@ final class PayrollLegacyRecapitulationService
      *
      * Idempotentní: měsíc, kde už legacy nic nedrží, projde bez zápisu.
      *
+     * S `$carryOverInputs` navíc založí z odložených mzdových listů měsíce
+     * ruční mzdové vstupy základní složky ({@see PayrollLegacyHandoverInputCarrier}),
+     * ve stejné transakci. Bez volby se chová doslova jako dřív. Volba jde
+     * použít i dodatečně nad měsícem předaným bez ní — převod čte odložené
+     * listy, ne ty, které se právě odkládají.
+     *
      * @param ?string $reversalDate datum protizápisu; `null` = datum originálu
      *                (u uzamčeného data se posune na dnešek, viz PostingService)
+     * @param bool $approveCarriedInputs převedené vstupy rovnou schválit;
+     *                výchozí je koncept, který účetní schválí vědomě
      * @return array{
      *   period:string,
      *   reversed_entry_ids:list<int>,
      *   reversal_entry_ids:list<int>,
      *   retired_records:int,
-     *   ownership_released:bool
+     *   openings_adjusted:int,
+     *   ownership_released:bool,
+     *   carried_over_inputs:int,
+     *   carried_input_ids:list<int>,
+     *   skipped:list<array{employee_id:int,reason:string,message:string}>
      * }
      */
     public function handOverToModule(
@@ -119,6 +147,8 @@ final class PayrollLegacyRecapitulationService
         ?string $reversalDate = null,
         ?string $ip = null,
         ?string $userAgent = null,
+        bool $carryOverInputs = false,
+        bool $approveCarriedInputs = false,
     ): array {
         self::assertPeriod($year, $month);
         $reason = trim($reason);
@@ -195,6 +225,16 @@ final class PayrollLegacyRecapitulationService
                 $released = true;
             }
 
+            $carry = $carryOverInputs
+                ? $this->inputCarrier->carryOver(
+                    $supplierId,
+                    $year,
+                    $month,
+                    $userId,
+                    $approveCarriedInputs,
+                )
+                : ['carried_over_inputs' => 0, 'carried_input_ids' => [], 'skipped' => []];
+
             $this->activityLogger->log(
                 'payroll.legacy_recapitulation.handed_over',
                 $userId,
@@ -207,6 +247,9 @@ final class PayrollLegacyRecapitulationService
                     'retired_records' => $retired,
                     'openings_adjusted' => $openingsAdjusted,
                     'ownership_released' => $released,
+                    'carry_over_inputs' => $carryOverInputs,
+                    'carried_input_ids' => $carry['carried_input_ids'],
+                    'carry_skipped' => $carry['skipped'],
                     'reason' => $reason,
                 ],
                 $ip,
@@ -225,6 +268,9 @@ final class PayrollLegacyRecapitulationService
                 'retired_records' => $retired,
                 'openings_adjusted' => $openingsAdjusted,
                 'ownership_released' => $released,
+                'carried_over_inputs' => $carry['carried_over_inputs'],
+                'carried_input_ids' => $carry['carried_input_ids'],
+                'skipped' => $carry['skipped'],
             ];
         } catch (\Throwable $exception) {
             if ($ownsTransaction && $pdo->inTransaction()) {
@@ -354,11 +400,7 @@ final class PayrollLegacyRecapitulationService
                 $year,
                 $kind,
                 $values,
-                sprintf(
-                    'Převod %02d/%d do modulu Mzdy — měsíc odebrán z počátečních stavů',
-                    $month,
-                    $year,
-                ),
+                self::handOverOpeningReference($year, $month),
                 ['months' => $remaining],
                 sprintf(
                     'legacy-handover:%04d-%02d:%d:%s',

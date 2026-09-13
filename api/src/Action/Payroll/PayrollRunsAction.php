@@ -281,6 +281,24 @@ final class PayrollRunsAction
             return $error;
         }
         $body = $this->input($request);
+        /*
+         * Převod hrubé mzdy z odloženého listu do mzdových vstupů je volba,
+         * výchozí chování zůstává beze změny. Převedené vstupy vznikají jako
+         * koncepty; rovnou schválené jen na výslovné přání a s právem schvalovat.
+         */
+        $carryOverInputs = filter_var($body['carry_over_inputs'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $approveCarriedInputs = $carryOverInputs
+            && filter_var($body['approve_carried_inputs'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if ($approveCarriedInputs
+            && !RequestAuthorization::allows($request, 'payroll.approve', AccessLevel::WRITE)
+        ) {
+            return Json::error(
+                $response,
+                'forbidden',
+                'Schválit převedené mzdové vstupy smí jen uživatel s právem schvalovat mzdy.',
+                403,
+            );
+        }
         try {
             [$year, $month] = self::periodParts($args['period'] ?? null);
             $result = $this->legacyRecapitulations->handOverToModule(
@@ -294,6 +312,8 @@ final class PayrollRunsAction
                     : null,
                 $this->clientIp($request),
                 $request->getHeaderLine('User-Agent'),
+                $carryOverInputs,
+                $approveCarriedInputs,
             );
         } catch (\OutOfBoundsException $e) {
             return Json::error($response, 'not_found', $e->getMessage(), 404);

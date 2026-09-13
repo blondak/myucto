@@ -1024,6 +1024,38 @@ final class PayrollStatutoryAccumulatorRepository
         return $stmt->fetchColumn() !== false;
     }
 
+    /**
+     * Všechny verze počátečního stavu, od nejstarší.
+     *
+     * Počáteční stav je append-only řetěz: oprava nebo převod měsíce do
+     * modulu zakládá novou verzi a na předchůdce ukazuje přes
+     * `replaces_opening_id`. Kdo potřebuje vědět, co v openingu stálo PŘED
+     * určitou opravou (např. kolik měsíc vážil, než ho předání odebralo),
+     * najde to jen v historii — aktuální verze už ten údaj nemá.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function openingVersions(
+        int $supplierId,
+        int $employeeId,
+        int $year,
+        string $calculationKind,
+    ): array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_statutory_accumulator_openings
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
+                AND calculation_kind = ?
+              ORDER BY id'
+        );
+        $stmt->execute([$supplierId, $employeeId, $year, $calculationKind]);
+
+        return array_map(
+            fn (array $row): array => $this->castOpening($row),
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        );
+    }
+
     private function currentOpening(
         int $supplierId,
         int $employeeId,
