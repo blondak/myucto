@@ -102,7 +102,16 @@ final class PricingRuleResolver
         return $candidates[0] ?? null;
     }
 
-    private static function matches(array $rule, array $context): bool
+    /**
+     * Přednost typu shody. Sdílí ji cenové hladiny ({@see PriceLevelResolver}),
+     * aby výběr pravidla hladiny a cenového profilu nemohl rozejít.
+     */
+    public static function rank(string $matchType): int
+    {
+        return self::RANK[$matchType] ?? 0;
+    }
+
+    public static function matches(array $rule, array $context): bool
     {
         $id = $rule['match_id'] === null ? null : (int) $rule['match_id'];
         return match ((string) $rule['match_type']) {

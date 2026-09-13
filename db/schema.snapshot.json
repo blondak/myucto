@@ -816,7 +816,8 @@
         "1829_shoptet_file_integration.sql",
         "1830_integration_sample_seeded.sql",
         "1831_bank_transaction_match_reason.sql",
-        "1832_stock_packaging_customer_prices.sql"
+        "1832_stock_packaging_customer_prices.sql",
+        "1833_stock_price_levels.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -3275,6 +3276,7 @@
                 "payment_due_default": "int(10) unsigned NULL DEFAULT NULL",
                 "payment_due_unit": "enum('days','month') NULL DEFAULT NULL",
                 "phone": "varchar(40) NULL DEFAULT NULL",
+                "price_level_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "proforma_number_format": "varchar(60) NULL DEFAULT NULL",
                 "related_party": "tinyint(1) NOT NULL DEFAULT 0",
                 "related_party_note": "varchar(255) NULL DEFAULT NULL",
@@ -3300,6 +3302,7 @@
                 "idx_clients_ic": "BTREE (ic)",
                 "idx_clients_supplier": "BTREE (supplier_id)",
                 "idx_clients_vendor": "BTREE (supplier_id, is_vendor)",
+                "ix_clients_price_level": "BTREE (supplier_id, price_level_id)",
                 "ix_clients_related_party": "BTREE (supplier_id, related_party)",
                 "uq_clients_fakturoid": "UNIQUE BTREE (supplier_id, fakturoid_id)",
                 "uq_clients_idoklad": "UNIQUE BTREE (supplier_id, idoklad_id)"
@@ -18036,6 +18039,64 @@
                 "fk_spu_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
+        },
+        "stock_price_level_rules": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "currency_code": "char(3) NULL DEFAULT NULL",
+                "discount_pct": "decimal(6,3) NULL DEFAULT NULL",
+                "fixed_price": "decimal(12,2) NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "match_id": "bigint(20) unsigned NOT NULL",
+                "match_type": "enum('product','category','manufacturer') NOT NULL",
+                "price_level_id": "bigint(20) unsigned NOT NULL",
+                "priority": "int(11) NOT NULL DEFAULT 0",
+                "rule_type": "enum('discount_pct','fixed') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_splr_match": "BTREE (supplier_id, match_type, match_id)",
+                "uq_splr_match": "UNIQUE BTREE (supplier_id, price_level_id, match_type, match_id, currency_code)"
+            },
+            "foreign_keys": {
+                "fk_splr_level": "(supplier_id, price_level_id) -> stock_price_levels (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_splr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_splr_value": "`rule_type` = 'fixed' and `match_type` = 'product' and `fixed_price` is not null and `fixed_price` >= 0 and `currency_code` is not null or `rule_type` = 'discount_pct' and `discount_pct` is not null and `discount_pct` >= 0 and `discount_pct` <= 100"
+            }
+        },
+        "stock_price_levels": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "code": "varchar(50) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "default_discount_pct": "decimal(6,3) NOT NULL DEFAULT 0.000",
+                "display_order": "int(11) NOT NULL DEFAULT 0",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "name": "varchar(100) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "uq_spl_code": "UNIQUE BTREE (supplier_id, code)",
+                "uq_spl_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_spl_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_spl_default_discount": "`default_discount_pct` >= 0 and `default_discount_pct` <= 100"
+            }
         },
         "stock_pricing_exchange_rates": {
             "type": "BASE TABLE",

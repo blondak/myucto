@@ -553,6 +553,14 @@ const clientActions = computed<ActionItem[]>(() => {
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('client.due_label') }}</dt><dd>{{ formatPaymentDue(client) }}</dd></div>
           <div v-if="client.hourly_rate > 0" class="flex justify-between"><dt class="text-neutral-500">{{ t('client.hourly_rate') }}</dt><dd class="font-mono">{{ client.hourly_rate.toLocaleString('cs') }} {{ client.currency_default }}/h</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('client.rc_label') }}</dt><dd>{{ client.reverse_charge ? t('client.yes_short') : t('client.no_short') }}</dd></div>
+          <div v-if="supplierStore.currentSupplier?.stock_enabled === true" data-test="client-price-level" class="flex justify-between">
+            <dt class="text-neutral-500">{{ t('client.price_level') }}</dt>
+            <dd>
+              <span class="inline-block px-2 py-0.5 text-xs rounded" :class="client.price_level_id != null ? 'bg-primary-50 text-primary-700' : 'bg-neutral-100 text-neutral-600'">
+                {{ client.price_level_id != null ? (client.price_level_name ?? `#${client.price_level_id}`) : t('client.price_level_default') }}
+              </span>
+            </dd>
+          </div>
         </dl>
       </div>
     </div>

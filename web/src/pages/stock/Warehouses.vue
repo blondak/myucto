@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { stockApi, type Warehouse, type WarehousePayload, type WarehouseLocation } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
+import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
@@ -46,6 +47,8 @@ const editing = ref<Warehouse | null>(null)
 const saving = ref(false)
 const error = ref('')
 const form = ref<WarehousePayload>({ code: '', name: '', is_default: false, is_active: true, is_sellable: true, note: null })
+// Kód skladu backend drží do 20 znaků a unikátní v rámci firmy.
+const takenWarehouseCodes = computed(() => warehouses.value.filter(w => w.id !== editing.value?.id).map(w => w.code))
 
 function openCreate() {
   editing.value = null
@@ -102,6 +105,10 @@ async function remove(w: Warehouse) {
 const locationOpen = ref(false)
 const locationEditing = ref<WarehouseLocation | null>(null)
 const locationForm = ref({ warehouse_id: 0, code: '', name: '', is_active: true })
+// Kód lokace je unikátní v rámci skladu (backend do 50 znaků).
+const takenLocationCodes = computed(() => locations.value
+  .filter(l => l.warehouse_id === locationForm.value.warehouse_id && l.id !== locationEditing.value?.id)
+  .map(l => l.code))
 function openLocation(warehouse: Warehouse, location: WarehouseLocation | null = null) {
   locationEditing.value = location
   locationForm.value = { warehouse_id: warehouse.id, code: location?.code ?? '', name: location?.name ?? '', is_active: location?.is_active ?? true }
@@ -211,14 +218,17 @@ async function saveLocation() {
       <div class="space-y-3">
         <!-- Název je to, co uživatel opravdu vymýšlí; kód je zkratka odvozená z něj,
              proto stojí až za ním (stejné pořadí jako v ostatních číselnících). -->
-        <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.warehouses.field_name') }}</label>
-          <input v-model="form.name" type="text" maxlength="100" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.warehouses.field_code') }}</label>
-          <input v-model="form.code" type="text" maxlength="20" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
-        </div>
+        <CodeNameFields
+          v-model:code="form.code"
+          v-model:name="form.name"
+          :code-label="t('stock.warehouses.field_code')"
+          :name-label="t('stock.warehouses.field_name')"
+          :editing="!!editing"
+          code-mode="code"
+          :code-maxlength="20"
+          :name-maxlength="100"
+          :taken-codes="takenWarehouseCodes"
+        />
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.warehouses.field_note') }}</label>
           <textarea v-model="form.note" rows="2" class="w-full px-2 py-1.5 border border-neutral-300 rounded-md text-sm"></textarea>
@@ -250,8 +260,17 @@ async function saveLocation() {
 
     <Modal v-if="locationOpen" :title="locationEditing ? t('stock.locations.edit') : t('stock.locations.new')" widthClass="max-w-md" @close="locationOpen = false">
       <div class="space-y-3">
-        <input v-model="locationForm.name" :placeholder="t('stock.locations.name')" maxlength="100" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-        <input v-model="locationForm.code" :placeholder="t('stock.locations.code')" maxlength="50" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+        <CodeNameFields
+          v-model:code="locationForm.code"
+          v-model:name="locationForm.name"
+          :code-label="t('stock.locations.code')"
+          :name-label="t('stock.locations.name')"
+          :editing="!!locationEditing"
+          code-mode="code"
+          :code-maxlength="50"
+          :name-maxlength="100"
+          :taken-codes="takenLocationCodes"
+        />
         <label class="inline-flex items-center gap-2 text-sm"><input v-model="locationForm.is_active" type="checkbox" class="rounded border-neutral-300 text-primary-600" />{{ t('stock.warehouses.field_active') }}</label>
         <div class="flex flex-wrap justify-end gap-2 pt-2 border-t border-neutral-100">
           <button type="button" @click="locationOpen = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>

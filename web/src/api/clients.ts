@@ -79,6 +79,10 @@ export interface Client {
   /** Předvolená forma úhrady faktur od tohoto dodavatele (migrace 1128); null = neurčeno. */
   default_payment_method?: PaymentMethod | null
   hourly_rate: number
+  /** Cenová hladina odběratele; null = „Default" (hladina 0, bez slev). */
+  price_level_id?: number | null
+  /** Název přiřazené hladiny (jen čtení). */
+  price_level_name?: string | null
   note?: string | null
   default_expense_category_id?: number | null
   default_revenue_category_id?: number | null
@@ -262,6 +266,8 @@ export interface ClientPayload {
   /** Předvolená forma úhrady faktur od tohoto dodavatele (migrace 1128); null = neurčeno. */
   default_payment_method?: PaymentMethod | null
   hourly_rate?: number
+  /** Posílá se JEN při zapnutém skladu; bez klíče backend hladinu nemění. */
+  price_level_id?: number | null
   note?: string | null
   default_expense_category_id?: number | null
   default_revenue_category_id?: number | null
@@ -293,7 +299,8 @@ export interface ClientListResponse {
 export type ClientRoleFilter = 'all' | 'customers' | 'vendors'
 
 export const clientsApi = {
-  list: (params?: { q?: string; page?: number; per_page?: number; archived?: boolean; role?: ClientRoleFilter; sort?: 'name' | 'revenue' | 'last_activity'; expense_category_id?: number | null }) =>
+  /** `price_level`: 0 = „Default" (bez hladiny), jinak id hladiny; null/undefined = bez filtru. */
+  list: (params?: { q?: string; page?: number; per_page?: number; archived?: boolean; role?: ClientRoleFilter; sort?: 'name' | 'revenue' | 'last_activity'; expense_category_id?: number | null; price_level?: number | null }) =>
     api
       .get<ClientListResponse>('/clients', {
         params: {
@@ -303,6 +310,7 @@ export const clientsApi = {
           sort: params?.sort,
           role: params?.role && params.role !== 'all' ? params.role : undefined,
           expense_category_id: params?.expense_category_id || undefined,
+          price_level: params?.price_level ?? undefined,
           ...(params?.archived ? { 'filter[archived]': 1 } : {}),
         },
       })

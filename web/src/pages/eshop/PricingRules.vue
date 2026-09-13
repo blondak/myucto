@@ -24,6 +24,7 @@ import Modal from '@/components/ui/Modal.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
+import { useAutoSlug } from '@/composables/useAutoSlug'
 
 type DialogKind = 'profile' | 'rule' | 'rate'
 type SelectOption = { value: number; label: string; secondary?: string }
@@ -65,6 +66,9 @@ const actionError = ref('')
 
 const dialog = ref<DialogKind | null>(null)
 const profileForm = ref<ProfileForm | null>(null)
+// Kód profilu se odvodí z názvu (serverový slug, lowercase — backend chce ^[a-z0-9][a-z0-9_.-]{0,49}$),
+// dokud do něj uživatel nesáhne; u existujícího profilu se sám nemění.
+const profileSlug = useAutoSlug(value => { if (profileForm.value) profileForm.value.code = value }, { maxLen: 50 })
 const ruleForm = ref<RuleForm | null>(null)
 const rateForm = ref<RateForm | null>(null)
 const saving = ref(false)
@@ -286,6 +290,7 @@ async function resolveRuleLabels(sourceRules: PricingRule[]): Promise<void> {
 function openProfile(profile?: PricingProfile): void {
   if (!canWrite.value || saving.value || deletingKey.value) return
   profileForm.value = profile ? { ...profile } : emptyProfile()
+  profileSlug.init(profileForm.value.code, !!profile)
   ruleForm.value = null
   rateForm.value = null
   saveError.value = ''
@@ -767,12 +772,14 @@ onBeforeUnmount(() => {
 
         <div v-if="dialog === 'profile' && profileForm" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label class="block text-sm font-medium text-neutral-700">
-            {{ t('eshop.pricing.code') }}
-            <input v-model="profileForm.code" :class="FIELD_CLASS" data-test="profile-code" type="text" maxlength="50" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,49}" required autocomplete="off">
+            {{ t('eshop.pricing.name') }}
+            <input v-model="profileForm.name" :class="FIELD_CLASS" data-test="profile-name" type="text" maxlength="150" required
+              @input="profileSlug.fromName(($event.target as HTMLInputElement).value)">
           </label>
           <label class="block text-sm font-medium text-neutral-700">
-            {{ t('eshop.pricing.name') }}
-            <input v-model="profileForm.name" :class="FIELD_CLASS" data-test="profile-name" type="text" maxlength="150" required>
+            {{ t('eshop.pricing.code') }}
+            <input v-model="profileForm.code" :class="FIELD_CLASS" data-test="profile-code" type="text" maxlength="50" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,49}" required autocomplete="off"
+              @input="profileSlug.markManual(($event.target as HTMLInputElement).value)">
           </label>
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('eshop.pricing.currency') }}

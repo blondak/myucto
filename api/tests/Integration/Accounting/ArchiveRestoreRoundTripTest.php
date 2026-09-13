@@ -319,6 +319,65 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         self::assertSame('Sdílený název', $restored['variants'][0]['effective']['i18n'][0]['name']);
     }
 
+    /**
+     * Cenové hladiny (1833): `clients.price_level_id` ani polymorfní
+     * `stock_price_level_rules.match_id` nemají cizí klíč — bez remapu by obnovená firma
+     * mířila na hladinu, kartu, kategorii či výrobce PŮVODNÍ firmy. Pravidlo na smazaný
+     * cíl zůstane neúčinné (id 0), obnova kvůli němu nespadne.
+     */
+    public function testPriceLevelRoundTripRemapsClientLevelAndPolymorphicRuleTargets(): void
+    {
+        $pdo = $this->db->pdo();
+        $sid = $this->supplierId;
+        $pdo->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id = ?')->execute([$sid]);
+        $pdo->prepare("INSERT INTO stock_items (supplier_id, sku, name, unit) VALUES (?, 'ARCHIVE-PL', 'Karta hladiny', 'ks')")->execute([$sid]);
+        $item = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO stock_categories (supplier_id, code, name) VALUES (?, 'ARCHIVE-PL-KAT', 'Kategorie hladiny')")->execute([$sid]);
+        $category = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO manufacturers (supplier_id, code, name) VALUES (?, 'ARCHIVE-PL-MF', 'Výrobce hladiny')")->execute([$sid]);
+        $manufacturer = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO stock_price_levels (supplier_id, code, name, default_discount_pct) VALUES (?, 'GOLD', 'Gold', 10)")->execute([$sid]);
+        $level = (int) $pdo->lastInsertId();
+        $rule = $pdo->prepare(
+            'INSERT INTO stock_price_level_rules (supplier_id, price_level_id, match_type, match_id, rule_type, discount_pct, fixed_price, currency_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $rule->execute([$sid, $level, 'product', $item, 'fixed', null, '700.00', 'CZK']);
+        $rule->execute([$sid, $level, 'category', $category, 'discount_pct', '5', null, null]);
+        $rule->execute([$sid, $level, 'manufacturer', $manufacturer, 'discount_pct', '7', null, null]);
+        $rule->execute([$sid, $level, 'category', 999999999, 'discount_pct', '9', null, null]);
+        $czId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+        $pdo->prepare(
+            "INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, language, currency_default_id, price_level_id)
+             VALUES (?, 'Odběratel Gold', 'Test 1', 'Praha', '11000', ?, 'gold@example.test', 'cs', ?, ?)"
+        )->execute([$sid, $czId, $this->currencyId, $level]);
+
+        $meta = $this->archive->export($sid, $this->userId);
+        $path = $this->archive->filePath($sid, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        $idOf = static fn (string $sql): int => (int) $pdo->query($sql)->fetchColumn();
+        $newLevel = $idOf("SELECT id FROM stock_price_levels WHERE supplier_id = {$newSid} AND code = 'GOLD'");
+        self::assertGreaterThan(0, $newLevel);
+        self::assertNotSame($level, $newLevel);
+        self::assertSame(
+            $newLevel,
+            $idOf("SELECT price_level_id FROM clients WHERE supplier_id = {$newSid} AND company_name = 'Odběratel Gold'"),
+            'Odběratel míří na hladinu OBNOVENÉ firmy.',
+        );
+        $rules = $pdo->query("SELECT match_type, match_id, price_level_id FROM stock_price_level_rules WHERE supplier_id = {$newSid} ORDER BY id")
+            ->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame([
+            ['product', $idOf("SELECT id FROM stock_items WHERE supplier_id = {$newSid} AND sku = 'ARCHIVE-PL'"), $newLevel],
+            ['category', $idOf("SELECT id FROM stock_categories WHERE supplier_id = {$newSid} AND code = 'ARCHIVE-PL-KAT'"), $newLevel],
+            ['manufacturer', $idOf("SELECT id FROM manufacturers WHERE supplier_id = {$newSid} AND code = 'ARCHIVE-PL-MF'"), $newLevel],
+            ['category', 0, $newLevel],
+        ], array_map(static fn (array $r): array => [$r['match_type'], (int) $r['match_id'], (int) $r['price_level_id']], $rules));
+    }
+
     public function testExportRestoreRoundTripPreservesAccounting(): void
     {
         $sid = $this->supplierId;

@@ -71,31 +71,56 @@ final class CatalogPricingRuleRepository
 
     public function itemContext(int $supplierId, int $stockItemId): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT CASE WHEN v.inherit_manufacturer = 1 THEN m.manufacturer_id ELSE s.manufacturer_id END
+        return $this->itemContexts($supplierId, [$stockItemId])[$stockItemId];
+    }
+
+    /**
+     * Kontext shody pravidel pro víc karet najednou (výrobce zděděný z hlavního
+     * produktu, kategorie, dodavatelé s nákupní cenou) — tři dotazy bez ohledu na
+     * počet karet. Karta, která neexistuje, dostane prázdný kontext.
+     *
+     * @param list<int> $stockItemIds
+     * @return array<int, array{product_id:int, manufacturer_id:?int, category_ids:list<int>, vendor_ids:list<int>}>
+     */
+    public function itemContexts(int $supplierId, array $stockItemIds): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $stockItemIds)));
+        $out = [];
+        foreach ($ids as $id) {
+            $out[$id] = ['product_id' => $id, 'manufacturer_id' => null, 'category_ids' => [], 'vendor_ids' => []];
+        }
+        if ($ids === []) {
+            return $out;
+        }
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $params = array_merge([$supplierId], $ids);
+
+        $stmt = $this->db->pdo()->prepare('SELECT s.id, CASE WHEN v.inherit_manufacturer = 1 THEN m.manufacturer_id ELSE s.manufacturer_id END AS manufacturer_id
             FROM stock_items s
             LEFT JOIN product_variants v ON v.supplier_id = s.supplier_id AND v.stock_item_id = s.id
             LEFT JOIN product_masters m ON m.supplier_id = v.supplier_id AND m.id = v.master_id
-            WHERE s.supplier_id = ? AND s.id = ?');
-        $stmt->execute([$supplierId, $stockItemId]);
-        $manufacturerId = $stmt->fetchColumn();
+            WHERE s.supplier_id = ? AND s.id IN (' . $in . ')');
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['id']]['manufacturer_id'] = $r['manufacturer_id'] === null ? null : (int) $r['manufacturer_id'];
+        }
 
-        $stmt = $this->db->pdo()->prepare('SELECT category_id FROM stock_item_categories
-            WHERE supplier_id = ? AND stock_item_id = ?');
-        $stmt->execute([$supplierId, $stockItemId]);
-        $categoryIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $stmt = $this->db->pdo()->prepare('SELECT stock_item_id, category_id FROM stock_item_categories
+            WHERE supplier_id = ? AND stock_item_id IN (' . $in . ')');
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['stock_item_id']]['category_ids'][] = (int) $r['category_id'];
+        }
 
-        $stmt = $this->db->pdo()->prepare('SELECT client_id FROM stock_item_vendors
-            WHERE supplier_id = ? AND stock_item_id = ? AND purchase_price IS NOT NULL
+        $stmt = $this->db->pdo()->prepare('SELECT stock_item_id, client_id FROM stock_item_vendors
+            WHERE supplier_id = ? AND stock_item_id IN (' . $in . ') AND purchase_price IS NOT NULL
             ORDER BY is_preferred DESC, purchase_price ASC, id ASC');
-        $stmt->execute([$supplierId, $stockItemId]);
-        $vendorIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['stock_item_id']]['vendor_ids'][] = (int) $r['client_id'];
+        }
 
-        return [
-            'product_id' => $stockItemId,
-            'manufacturer_id' => $manufacturerId === false || $manufacturerId === null ? null : (int) $manufacturerId,
-            'category_ids' => $categoryIds,
-            'vendor_ids' => $vendorIds,
-        ];
+        return $out;
     }
 
     private static function cast(array $row): array

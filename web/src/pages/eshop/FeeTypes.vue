@@ -182,6 +182,7 @@ function getVatLabel(vatRateId: number | null): string {
           :code-label="t('eshop.fee_types.field_code')"
           :name-label="t('eshop.fee_types.field_name')"
           :editing="!!editing"
+          :code-maxlength="30"
         />
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.fee_types.field_vat_rate') }}</label>

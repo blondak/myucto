@@ -175,7 +175,11 @@ final class StockItemCustomerPriceService
         ];
     }
 
-    private static function decimal(mixed $v, int $scale): ?string
+    /**
+     * Nezáporné desetinné číslo s nejvýše `$scale` místy, jinak null. Sdílí ho
+     * i {@see StockPriceLevelService} (slevy a pevné ceny cenových hladin).
+     */
+    public static function decimal(mixed $v, int $scale): ?string
     {
         if (is_int($v) || is_float($v)) {
             $v = is_float($v) ? number_format($v, $scale, '.', '') : (string) $v;

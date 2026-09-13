@@ -1,4 +1,4 @@
-import type { StockQuotePriceSource } from '@/api/stock'
+import type { StockQuotePriceLevel, StockQuotePriceSource } from '@/api/stock'
 
 /**
  * Balení a nacenění skladových řádků faktury (issue #17).
@@ -38,6 +38,25 @@ export interface StockQuoteState {
   autoPrice: number | null
   source: StockQuotePriceSource | null
   discountPct: string | null
+  /** Hladina odběratele, která cenu určila (jen pro badge zdroje ceny). */
+  priceLevel?: StockQuotePriceLevel | null
+}
+
+/** Má odběratel cenovou hladinu? Bez ní je v hladině „Default" a platí standardní ceny. */
+export function clientHasPriceLevel(client: { price_level_id?: number | null } | null | undefined): boolean {
+  return client?.price_level_id != null
+}
+
+/**
+ * Jde řádek novou cestou (nacenění z backendu)? Jen se zapnutým skladem, u řádku
+ * s kartou a jen když to zapíná konfigurace: karta s balením / individuálními cenami,
+ * nebo vybraný odběratel s cenovou hladinou. Jinak původní cesta beze změny.
+ */
+export function usesStockQuote(
+  row: { stock_item_id?: number | null },
+  ctx: { stockEnabled: boolean; cardFeatures: boolean; clientHasLevel: boolean },
+): boolean {
+  return ctx.stockEnabled && row.stock_item_id != null && (ctx.cardFeatures || ctx.clientHasLevel)
 }
 
 export function sameUnit(a: string | null | undefined, b: string | null | undefined): boolean {
@@ -150,6 +169,42 @@ export function rowsToRequote<T extends PricedRow>(
 ): T[] {
   if (!ctx.stockEnabled || !ctx.loaded) return []
   return rows.filter(row => row.stock_item_id != null && isPriceStillAuto(stateOf(row), row.unit_price_without_vat))
+}
+
+export interface ContextRepricing<T> {
+  /** Řádky k nacenění (karta s funkcemi nebo odběratel s hladinou). */
+  quote: T[]
+  /** Řádky, kterým se vrátí původní cena karty (karta bez funkcí, odběratel bez hladiny). */
+  legacy: T[]
+}
+
+/**
+ * Po změně odběratele / měny rozdělí řádky s pořád automatickou cenou (rowsToRequote,
+ * tedy se všemi jeho pojistkami) na nacenění a návrat původní ceny. Ruční ceny,
+ * řádky bez karty, načtený doklad i vypnutý sklad do žádné skupiny nepatří.
+ */
+export function planContextRepricing<T extends PricedRow>(
+  rows: T[],
+  stateOf: (row: T) => StockQuoteState | null | undefined,
+  ctx: StockPricingContext & { clientHasLevel: boolean },
+  cardFeaturesOf: (row: T) => boolean,
+): ContextRepricing<T> {
+  const plan: ContextRepricing<T> = { quote: [], legacy: [] }
+  for (const row of rowsToRequote(rows, stateOf, ctx)) {
+    if (ctx.clientHasLevel || cardFeaturesOf(row)) plan.quote.push(row)
+    else plan.legacy.push(row)
+  }
+  return plan
+}
+
+/**
+ * Původní cena karty (effective_price ?? sale_price_without_vat), kterou řádek dostal
+ * dosavadní cestou. null = karta bez ceny nebo neznámá karta; řádek se pak nemění.
+ */
+export function legacyRestorePrice(si: StockSelectionSource | null | undefined): number | null {
+  if (!si) return null
+  const price = legacyStockSelection(si).price
+  return price !== null && Number.isFinite(price) ? price : null
 }
 
 /**

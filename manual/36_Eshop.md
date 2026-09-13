@@ -62,11 +62,12 @@ tabu se ukládá do URL, takže jde odkázat i naback/refresh):
 | **Tagy** | Barevné štítky zboží |
 | **Poplatky** | Typy poplatků (autorský, recyklační/PHE…) s vlastní sazbou DPH |
 | **Balení** | Kódy balení (karton, paleta…), které karty používají jako nadřazené jednotky ([§ 36.17](#3617-baleni)) |
+| **Cenové hladiny** | Hladiny odběratelů (Bronze, Silver, Gold…) s výchozí slevou a pravidly pro produkty, kategorie a výrobce ([§ 36.18](#3618-cenove-hladiny)) |
 | **Jazyky** | Jazykové mutace, ve kterých vedeš názvy a popisy zboží a kategorií ([§ 36.13](#3613-jazyky)) |
 | **Sklady** | Stejná záložka jako `Zboží → Skladové karty → Sklady` — sklady patří oběma pohledům |
 | **Import zboží** | Hromadný import/aktualizace karet z XLSX/CSV |
 
-Každý číselník (Výrobci, Kategorie, Atributy, Tagy, Poplatky, Balení, Jazyky) má stejný tvar:
+Každý číselník (Výrobci, Kategorie, Atributy, Tagy, Poplatky, Balení, Cenové hladiny, Jazyky) má stejný tvar:
 tabulka existujících záznamů, tlačítko **„Nový…"** vpravo nahoře a u každého
 řádku ikony **tužky** (upravit) a **koše** (smazat). Editace i mazání jsou
 dostupné jen uživatelům s právem zápisu — u readonly uživatele akční sloupec
@@ -663,11 +664,14 @@ Duplikace karty zákaznické ceny nepřenáší.
 Editor faktury nacení skladový řádek pro odběratele, měnu a datum dokladu:
 
 1. **Základ** je individuální cena odběratele, pokud je platná k datu dokladu a v měně
-   dokladu. Jinak je základem standardní cena z cenotvorby.
-2. **Akční cena** se použije jen tehdy, když je nižší než tento základ. Zákazník tak
+   dokladu.
+2. Jinak rozhoduje **cenová hladina** odběratele, pokud ji má přiřazenou a je aktivní
+   ([§ 36.18](#3618-cenove-hladiny)).
+3. Jinak je základem standardní cena z cenotvorby.
+4. **Akční cena** se použije jen tehdy, když je nižší než tento základ. Zákazník tak
    dostane lepší z obou cen.
 
-Karta bez individuálních cen se naceňuje přesně jako dosud. Změna odběratele nebo
+Odběratel bez individuální ceny a bez cenové hladiny se naceňuje přesně jako dosud. Změna odběratele nebo
 měny na faktuře přecení jen řádky, jejichž cenu doplnila aplikace; ručně přepsanou
 cenu nechá být. Seznam karet a našeptávač dál ukazují standardní (případně akční) cenu
 bez ohledu na odběratele.
@@ -1216,3 +1220,56 @@ počet kusů než karton jiného.
 - Kód balení, které používá nějaká karta, nejde změnit ani balení smazat. Místo
   smazání ho **deaktivuj** — nové karty ho pak nenabídnou, stávající si ho ponechají.
 - Nepoužívané balení smažeš běžně.
+
+## 36.18 Cenové hladiny
+
+Cenová hladina seskupuje odběratele, kteří nakupují za stejných podmínek, například
+**Bronze**, **Silver** a **Gold**. Hladinu přiřadíš odběrateli na jeho kartě
+([§ 18.2.1](18_Klienti.md#1821-pole-formulare)). Odběratel bez hladiny patří do hladiny
+**Default** a skladové zboží se mu naceňuje standardní cenou přesně jako dosud.
+
+Formulář hladiny: **Název**, **Kód** (vyplní se z názvu, nejvýše 50 znaků bez mezer),
+**Výchozí sleva %**, **Pořadí** a **Aktivní**. Tabulka u každé hladiny ukazuje počet
+odběratelů a pravidel.
+
+### 36.18.1 Pravidla hladiny
+
+V detailu hladiny zpřesníš slevu pro konkrétní zboží:
+
+| Cíl | Co lze nastavit |
+|---|---|
+| **Produkt** | sleva v % nebo pevná cena v konkrétní měně |
+| **Kategorie** | sleva v % pro zboží zařazené v kategorii |
+| **Výrobce** | sleva v % pro zboží výrobce |
+
+- Sleva i pevná cena jsou vždy **za základní jednotku** karty a **bez DPH**. Řádek
+  faktury v balení dostane cenu vynásobenou poměrem balení.
+- Sleva se počítá ze standardní ceny v měně dokladu a zaokrouhluje na haléře.
+- Pravidlo může platit jen v jedné měně, bez měny platí ve všech. Pevná cena má měnu vždy.
+
+Výjimku pro produkt zadáš i přímo na kartě zboží v záložce **Ceny**, v sekci **Cenové
+hladiny**. Řádek pro každou aktivní hladinu a měnu ukazuje zděděnou cenu a její zdroj
+(výchozí sleva, kategorie, výrobce). Výjimku uložíš společným tlačítkem **Uložit**
+editoru, návratem k zděděné ceně ji odebereš. Pravidla kategorií a výrobců se tím nemění.
+
+### 36.18.2 Které pravidlo platí
+
+Pro kartu a měnu dokladu se použije první, co platí:
+
+1. pravidlo **produktu**,
+2. pravidlo **kategorie** nebo **výrobce** karty. Obě mají stejnou váhu, rozhoduje
+   priorita pravidla, při shodě pravidlo pro konkrétní měnu a pak dříve založené
+   pravidlo. Stejné pořadí přednosti platí u cenových profilů v cenotvorbě,
+3. **výchozí sleva** hladiny, pokud je vyšší než nula.
+
+Pevná cena v jiné měně, než je měna dokladu, se nepoužije. Sleva bez standardní ceny
+v měně dokladu nemá z čeho počítat a hladina pak cenu neurčí.
+
+Na faktuře má přednost individuální cena odběratele, hladina rozhoduje až po ní a akční
+cena vyhraje jen tehdy, když je levnější (viz [§ 36.8.10](#36810-individualni-ceny-zakazniku)).
+U řádku faktury se ukáže, že cenu určila hladina, například „Gold −10 %“.
+
+- Hladinu, kterou mají přiřazenou odběratelé, nejde smazat. **Deaktivuj** ji — její
+  odběratelé se pak naceňují standardní cenou a hladinu mají na kartě dál, dokud ji
+  nezměníš.
+- Kód hladiny jde měnit kdykoli, odběratelé jsou na hladinu navázaní napevno.

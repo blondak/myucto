@@ -11,6 +11,7 @@ import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { useSupplierStore } from '@/stores/supplier'
 import { settingsApi, type BrandingProfile } from '@/api/settings'
+import { eshopApi, type PriceLevel } from '@/api/eshop'
 
 /**
  * V `embedded` módu komponenta nečte route, neredirektuje a vrací výsledek
@@ -144,6 +145,27 @@ const form = ref<ClientPayload>({
   default_branding_profile_id: null,
 })
 
+// Cenová hladina odběratele — jen se zapnutým skladem. Drží se mimo `form`, aby se bez
+// skladu vůbec neposlala (backend pak hladinu nemění). null = hladina „Default".
+const stockEnabled = computed(() => supplierStore.currentSupplier?.stock_enabled === true)
+const priceLevels = ref<PriceLevel[]>([])
+const priceLevelsLoaded = ref(false)
+const priceLevelId = ref<number | null>(null)
+const priceLevelName = ref<string | null>(null)
+const priceLevelOptions = computed(() => priceLevels.value.filter(l => l.is_active || l.id === priceLevelId.value))
+
+async function loadPriceLevels() {
+  if (!stockEnabled.value) return
+  try {
+    priceLevels.value = await eshopApi.listPriceLevels()
+    priceLevelsLoaded.value = true
+  } catch {
+    // Bez číselníku se hladina neposílá, ať se klientovi omylem nevynuluje.
+    priceLevels.value = []
+    priceLevelsLoaded.value = false
+  }
+}
+
 // Pro lock UI — counts of issued/received invoices se hodí znát, aby user věděl
 // proč nelze flag vypnout. Pro start: jen rely na backend error message.
 const lockCustomer = ref(false)  // true pokud klient má vydané faktury (server enforces)
@@ -207,7 +229,7 @@ const formEl = ref<HTMLFormElement | null>(null)
 // selhala" a netušil, které pole vadí (tak zapadala chyba IČO i povinné adresy).
 const INLINE_ERROR_FIELDS = [
   'company_name', 'first_name', 'last_name', 'main_email', 'hourly_rate',
-  'ic', 'street', 'zip', 'city', 'phone',
+  'ic', 'street', 'zip', 'city', 'phone', 'price_level_id',
 ]
 const unplacedErrors = computed(() =>
   Object.entries(errors.value)
@@ -256,6 +278,7 @@ async function loadVatPayerDetails() {
 }
 
 onMounted(async () => {
+  void loadPriceLevels()
   const [c, cur, ec, rc, bp] = await Promise.all([
     codebooksApi.countries(),
     codebooksApi.currencies(),
@@ -275,6 +298,8 @@ onMounted(async () => {
   if (isEdit.value && clientId.value) {
     const c = await clientsApi.get(clientId.value)
     Object.assign(form.value, sanitize(c))
+    priceLevelId.value = c.price_level_id ?? null
+    priceLevelName.value = c.price_level_name ?? null
     emailContacts.value = (c.email_contacts ?? []).map(ec => ({
       ...ec,
       usages: (ec.usages ?? []).map(u => ({ usage: u.usage, recipient: u.recipient ?? 'to' })),
@@ -451,6 +476,7 @@ async function submit() {
         usages: c.usages,
       })),
   }
+  if (stockEnabled.value && priceLevelsLoaded.value) payload.price_level_id = priceLevelId.value
   try {
     if (isEdit.value && clientId.value) {
       const updated = await clientsApi.update(clientId.value, payload)
@@ -818,6 +844,20 @@ async function submit() {
             <p class="text-xs text-neutral-500 mt-1">{{ t('client.hourly_rate_hint') }}</p>
             <p data-field-error v-if="errors.hourly_rate" class="text-xs text-danger-500 mt-1">{{ errors.hourly_rate[0] }}</p>
           </div>
+        </div>
+
+        <div v-if="stockEnabled" data-test="client-price-level" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.price_level') }}</label>
+            <select v-model="priceLevelId" :disabled="!priceLevelsLoaded"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none disabled:bg-neutral-100">
+              <option :value="null">{{ t('client.price_level_default') }}</option>
+              <option v-for="l in priceLevelOptions" :key="l.id" :value="l.id">{{ l.is_active ? l.name : t('client.price_level_inactive', { name: l.name }) }}</option>
+              <option v-if="priceLevelId !== null && !priceLevelOptions.some(l => l.id === priceLevelId)" :value="priceLevelId">{{ priceLevelName ?? `#${priceLevelId}` }}</option>
+            </select>
+            <p data-field-error v-if="errors.price_level_id" class="text-xs text-danger-500 mt-1">{{ errors.price_level_id[0] }}</p>
+          </div>
+          <p class="text-xs text-neutral-500 sm:pt-7">{{ t('client.price_level_hint') }}</p>
         </div>
 
         <div class="space-y-2">

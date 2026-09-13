@@ -538,6 +538,10 @@ paths:
         - in: query
           name: per_page
           schema: { type: integer, minimum: 5, maximum: 200, default: 50 }
+        - in: query
+          name: price_level
+          description: "Cenová hladina odběratele: `0` = bez hladiny (v UI „Default“), jinak id hladiny firmy. Bez parametru se nefiltruje. Filtr se jako filtr kategorie nákladu nepromítá do `role_counts`."
+          schema: { type: integer, minimum: 0 }
       responses:
         '200':
           description: OK
@@ -564,6 +568,8 @@ paths:
                               vendors: { type: integer }
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: "Cenová hladina z filtru nepatří firmě (`invalid_price_level`)"
         '429':
           $ref: '#/components/responses/RateLimited'
     post:
@@ -586,6 +592,8 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '403':
           $ref: '#/components/responses/InsufficientScope'
+        '422':
+          description: "Cenová hladina nepatří firmě nebo není aktivní (`invalid_price_level`)"
 
   /api/v1/clients/duplicates:
     get:
@@ -679,6 +687,8 @@ paths:
               schema: { $ref: '#/components/schemas/Client' }
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: "Cenová hladina nepatří firmě nebo není aktivní (`invalid_price_level`); hladinu, kterou už klient má, lze poslat i neaktivní"
     delete:
       tags: [Clients]
       summary: Smazání klienta (pokud nemá vystavené doklady)
@@ -12964,6 +12974,125 @@ paths:
         '200': { description: Smazáno }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Balení používají skladové karty (`packaging_unit_in_use`, `suggestion: deactivate`).' }
+  /api/v1/eshop/price-levels:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Eshop]
+      summary: Cenové hladiny odběratelů
+      parameters:
+        - in: query
+          name: active
+          schema: { type: boolean }
+          description: Jen aktivní hladiny.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EshopPriceLevel' }
+    post:
+      tags: [Eshop]
+      summary: Vytvoří cenovou hladinu
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EshopPriceLevelInput' }
+      responses:
+        '201':
+          description: Vytvořeno
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EshopPriceLevel' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409': { description: 'Hladina s tímto kódem už existuje (`price_level_code_taken`)' }
+  /api/v1/eshop/price-levels/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Eshop]
+      summary: Detail cenové hladiny
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EshopPriceLevel' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Eshop]
+      summary: Upraví cenovou hladinu
+      description: Kód hladiny není cizí klíč, takže jde měnit i u používané hladiny. Neaktivní hladina se při nacenění nepoužije — odběratelé s ní se naceňují jako bez hladiny.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EshopPriceLevelInput' }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Hladina s tímto kódem už existuje (`price_level_code_taken`)' }
+    delete:
+      tags: [Eshop]
+      summary: Smaže cenovou hladinu i s jejími pravidly
+      responses:
+        '200': { description: Smazáno }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Hladinu mají přiřazenou odběratelé (`price_level_in_use`, `client_count`, `suggestion: deactivate`).' }
+  /api/v1/eshop/price-levels/{id}/rules:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Eshop]
+      summary: Pravidla cenové hladiny
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EshopPriceLevelRule' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Eshop]
+      summary: Nahradí celou sadu pravidel cenové hladiny
+      description: |
+        Kompletní náhrada sady hladiny. Pevná cena smí být jen u produktu a vždy s měnou;
+        cíl shody musí patřit firmě (`invalid_match`); pro jeden cíl a měnu smí mít hladina
+        jen jedno pravidlo (`price_level_rule_duplicate`). Výběr pravidla při nacenění:
+        produkt > kategorie = výrobce, pak `priority` sestupně, pak pravidlo pro konkrétní
+        měnu před pravidlem bez měny, pak nižší id; jinak výchozí sleva hladiny.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 2000
+              items: { $ref: '#/components/schemas/EshopPriceLevelRuleInput' }
+      responses:
+        '200':
+          description: Uložená sada
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EshopPriceLevelRule' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/eshop/fee-types:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14157,7 +14286,7 @@ paths:
       description: |
         Jen čte. Jednotka řádku se převede na základní jednotku karty (jen balení,
         neznámá jednotka = základní), cena za základní jednotku vznikne stejně jako
-        `effective_price` (se zákaznickou cenou odběratele, akce se stropem
+        `effective_price` (se zákaznickou cenou nebo cenovou hladinou odběratele, akce se stropem
         v základních jednotkách) a `unit_price` = cena za základní jednotku × poměr
         na haléře. Karta bez ceny v požadované měně vrací `unit_price`
         i `base_unit_price` null, nikdy 0.
@@ -14567,6 +14696,56 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/StockItemCustomerPrice' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/stock/items/{id}/price-levels:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Stock]
+      summary: Cena karty v cenových hladinách odběratelů
+      description: |
+        Náhled pro každou aktivní hladinu × měnu karty (CZK vždy, další měny s cenou karty
+        nebo s výjimkou produktu): dnes, množství 1, bez akce. Cenu počítá tentýž kód jako
+        nacenění dokladu.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockItemPriceLevel' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Stock]
+      summary: Výjimky produktu v cenových hladinách
+      description: |
+        Spravuje jen pravidla typu `product` této karty; pravidla kategorií a výrobců
+        zůstanou beze změny. Položky se aplikují v pořadí těla: nastavení pravidla pro
+        hladinu a měnu (bez měny = sleva ve všech měnách), nebo `remove: true`
+        (s `currency_code` jen tu měnu, s `null` pravidlo bez měny, bez klíče všechna).
+        Vrací náhled jako GET.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 200
+              items: { $ref: '#/components/schemas/StockItemPriceLevelInput' }
+      responses:
+        '200':
+          description: Náhled po uložení
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockItemPriceLevel' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/stock/items/{id}/neighbors:
@@ -21492,9 +21671,16 @@ components:
         base_quantity: { type: string }
         unit_price: { type: [string, 'null'], description: Cena bez DPH za zvolenou jednotku; null = karta nemá cenu v měně. }
         base_unit_price: { type: [string, 'null'] }
-        price_source: { type: string, enum: [standard, customer_fixed, customer_discount, promo] }
+        price_source: { type: string, enum: [standard, customer_fixed, customer_discount, price_level_fixed, price_level_discount, promo] }
+        price_level:
+          type: [object, 'null']
+          description: "Cenová hladina odběratele, když cenu určila (i když ji pak přebila levnější akce); jinak null."
+          properties:
+            id: { type: integer }
+            code: { type: string }
+            name: { type: string }
         customer_price_id: { type: [integer, 'null'] }
-        discount_pct: { type: [string, 'null'], description: Sleva zákaznické ceny, jen u price_source = customer_discount. }
+        discount_pct: { type: [string, 'null'], description: "Sleva zákaznické ceny nebo cenové hladiny, jen u price_source = customer_discount / price_level_discount." }
         promo:
           type: [object, 'null']
           properties:
@@ -21519,6 +21705,85 @@ components:
         name: { type: string, maxLength: 100 }
         is_active: { type: boolean, default: true }
         display_order: { type: integer, default: 0 }
+    EshopPriceLevel:
+      type: object
+      properties:
+        id: { type: integer }
+        code: { type: string, maxLength: 50 }
+        name: { type: string, maxLength: 100 }
+        default_discount_pct: { type: string, description: "Výchozí sleva hladiny v % (0–100, tři desetinná místa)." }
+        is_active: { type: boolean }
+        display_order: { type: integer }
+        client_count: { type: integer, description: "Počet odběratelů s touto hladinou." }
+        rule_count: { type: integer }
+    EshopPriceLevelInput:
+      type: object
+      required: [code, name]
+      properties:
+        code: { type: string, maxLength: 50, description: "Bez mezer." }
+        name: { type: string, maxLength: 100 }
+        default_discount_pct: { type: [string, number], default: 0, description: "0–100, nejvýš 3 desetinná místa." }
+        is_active: { type: boolean, default: true }
+        display_order: { type: integer, default: 0 }
+    EshopPriceLevelRule:
+      type: object
+      properties:
+        id: { type: integer }
+        match_type: { type: string, enum: [product, category, manufacturer] }
+        match_id: { type: integer }
+        match_label: { type: [string, 'null'], description: "Název karty, kategorie nebo výrobce." }
+        match_code: { type: [string, 'null'], description: "SKU karty, kód kategorie nebo výrobce." }
+        rule_type: { type: string, enum: [discount_pct, fixed] }
+        discount_pct: { type: [string, 'null'] }
+        fixed_price: { type: [string, 'null'], description: "Za základní jednotku bez DPH." }
+        currency_code: { type: [string, 'null'], description: "NULL = sleva ve všech měnách." }
+        priority: { type: integer }
+    EshopPriceLevelRuleInput:
+      type: object
+      required: [match_type, match_id, rule_type]
+      properties:
+        match_type: { type: string, enum: [product, category, manufacturer] }
+        match_id: { type: integer, minimum: 1 }
+        rule_type: { type: string, enum: [discount_pct, fixed], description: "fixed jen pro product a vždy s měnou." }
+        discount_pct: { type: [string, number, 'null'], description: "Povinné pro discount_pct; 0–100, nejvýš 3 desetinná místa." }
+        fixed_price: { type: [string, number, 'null'], description: "Povinné pro fixed; ≥ 0, nejvýš 2 desetinná místa." }
+        currency_code: { type: [string, 'null'], minLength: 3, maxLength: 3 }
+        priority: { type: integer, default: 0 }
+    StockItemPriceLevel:
+      type: object
+      properties:
+        price_level_id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+        is_active: { type: boolean }
+        default_discount_pct: { type: string }
+        currency_code: { type: string, minLength: 3, maxLength: 3 }
+        standard_price: { type: [string, 'null'] }
+        resulting_price: { type: [string, 'null'], description: "Cena za základní jednotku bez DPH v hladině; bez pravidla standardní cena." }
+        source: { type: string, enum: [product, category, manufacturer, default, none] }
+        rule:
+          description: "Pravidlo, které cenu určilo; null u výchozí slevy nebo bez pravidla."
+          anyOf:
+            - $ref: '#/components/schemas/EshopPriceLevelRule'
+            - type: 'null'
+        product_rule:
+          description: "Výjimka této karty v hladině a měně (pravidlo typu product), pokud existuje."
+          anyOf:
+            - $ref: '#/components/schemas/EshopPriceLevelRule'
+            - type: 'null'
+        inherited_price: { type: [string, 'null'], description: "Cena bez výjimky produktu (kategorie, výrobce, výchozí sleva)." }
+        inherited_source: { type: string, enum: [category, manufacturer, default, none] }
+    StockItemPriceLevelInput:
+      type: object
+      required: [price_level_id]
+      properties:
+        price_level_id: { type: integer, minimum: 1 }
+        remove: { type: boolean, description: "true = odebrat výjimku (viz popis operace)." }
+        rule_type: { type: string, enum: [discount_pct, fixed] }
+        discount_pct: { type: [string, number, 'null'] }
+        fixed_price: { type: [string, number, 'null'] }
+        currency_code: { type: [string, 'null'], minLength: 3, maxLength: 3 }
+        priority: { type: integer, description: "Bez klíče zůstane priorita stávající výjimky (jinak 0)." }
     StockTrackingAllocationInput:
       type: object
       required: [quantity]
@@ -24309,6 +24574,8 @@ components:
         credit_note_number_format: { type: [string, "null"] }
         invoice_number_period: { type: [string, "null"], enum: [year, month, none, null] }
         default_branding_profile_id: { type: [integer, "null"], description: "Výchozí brandingový profil pro nové vydané faktury klienta." }
+        price_level_id: { type: [integer, "null"], description: "Cenová hladina odběratele (skladový modul). NULL = bez hladiny (v UI „Default“) — skladové položky se naceňují standardní cenou." }
+        price_level_name: { type: [string, "null"], readOnly: true, description: "Název přiřazené cenové hladiny (jen čtení)." }
         archived_at: { type: [string, "null"], format: date-time, description: "NULL = aktivní; vyplněno = archivováno" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -24466,6 +24733,7 @@ components:
         credit_note_number_format: { type: [string, "null"] }
         invoice_number_period: { type: [string, "null"], enum: [year, month, none, null] }
         default_branding_profile_id: { type: [integer, "null"], description: "Volitelný výchozí brandingový profil; musí patřit aktuálnímu supplier-ovi." }
+        price_level_id: { type: [integer, "null"], description: "Cenová hladina odběratele; musí patřit firmě a být aktivní (jinak 422 `invalid_price_level`). `null` = bez hladiny. Klíč vynech, pokud hladinu neměníš — bez něj zůstane beze změny." }
         email_contacts:
           type: array
           description: "E-mailové kontakty dle účelu (#86) — replace-all: pošli kompletní pole; klíč vynech, pokud kontakty neměníš. Max 10 kontaktů."

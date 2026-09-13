@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { eshopApi, type EshopCurrency, type ProductSetCard, type ProductSetDefinition, type ProductSetGroup } from '@/api/eshop'
@@ -10,6 +10,7 @@ import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ProductSetQuotePanel from '@/components/eshop/ProductSetQuotePanel.vue'
+import { createRowAutoCode, rowCodeFromName } from '@/utils/rowAutoCode'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -119,12 +120,38 @@ function addFixedComponent() {
   fixedPick.value = null
 }
 
+// Kód skupiny / volby se u nově přidaných řádků odvozuje z názvu (backend: [a-zA-Z0-9_-]{1,50}),
+// dokud ho uživatel nezmění; kódy uložených řádků se samy nemění.
+type SetOption = ProductSetGroup['options'][number]
+const groupCodes = createRowAutoCode<ProductSetGroup>((name, group) => {
+  const index = form.value.groups.findIndex(g => toRaw(g) === toRaw(group))
+  const taken = form.value.groups.filter(g => toRaw(g) !== toRaw(group)).map(g => g.code)
+  return rowCodeFromName(name, taken, `group_${index + 1}`)
+})
+const optionCodes = createRowAutoCode<SetOption>((name, option) => {
+  const group = form.value.groups.find(g => g.options.some(o => toRaw(o) === toRaw(option)))
+  const siblings = group?.options ?? []
+  const index = siblings.findIndex(o => toRaw(o) === toRaw(option))
+  return rowCodeFromName(name, siblings.filter(o => toRaw(o) !== toRaw(option)).map(o => o.code), `option_${index + 1}`)
+})
+function onGroupName(group: ProductSetGroup, event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  group.name = value
+  groupCodes.onName(group, value)
+}
+function onOptionName(option: SetOption, event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  option.name = value
+  optionCodes.onName(option, value)
+}
+
 function addGroup() {
   const base = `group_${form.value.groups.length + 1}`
   let code = base
   let suffix = 2
   while (form.value.groups.some(group => group.code === code)) code = `${base}_${suffix++}`
   form.value.groups.push({ code, name: '', min: 0, max: 1, options: [] })
+  groupCodes.track(form.value.groups[form.value.groups.length - 1]!)
 }
 
 function addOption(groupIndex: number) {
@@ -137,6 +164,9 @@ function addOption(groupIndex: number) {
   let suffix = 2
   while (group.options.some(option => option.code === code)) code = `${base}_${suffix++}`
   group.options.push({ code, name: cardMap.value.get(selected)?.name ?? '', item_id: selected, quantity: '1', surcharges: {} })
+  const added = group.options[group.options.length - 1]!
+  optionCodes.track(added)
+  if (added.name.trim() !== '') optionCodes.onName(added, added.name)
   optionPick.value[groupIndex] = null
 }
 
@@ -253,8 +283,8 @@ onMounted(() => { void load() })
               <EmptyState v-if="form.groups.length === 0" dense icon="tag" :title="t('eshop.sets.empty_groups')" :message="t('eshop.sets.empty_groups_hint')" />
               <article v-for="(group, groupIndex) in form.groups" :key="groupIndex" class="rounded-lg border border-neutral-200 p-3">
                 <div class="grid gap-3 sm:grid-cols-4">
-                  <label class="text-xs font-medium text-neutral-500">{{ t('eshop.sets.code') }}<input v-model="group.code" :class="FIELD" maxlength="50" pattern="[A-Za-z0-9_-]+"></label>
-                  <label class="text-xs font-medium text-neutral-500 sm:col-span-2">{{ t('eshop.sets.name') }}<input v-model="group.name" :class="FIELD" maxlength="150"></label>
+                  <label class="text-xs font-medium text-neutral-500 sm:col-span-2">{{ t('eshop.sets.name') }}<input :value="group.name" @input="onGroupName(group, $event)" :class="FIELD" maxlength="150"></label>
+                  <label class="text-xs font-medium text-neutral-500">{{ t('eshop.sets.code') }}<input :value="group.code" @input="groupCodes.onCode(group, ($event.target as HTMLInputElement).value)" :class="FIELD" maxlength="50" pattern="[A-Za-z0-9_-]+"></label>
                   <div class="flex items-end justify-end"><button type="button" :class="btnOutline('danger')" :disabled="!canWrite" @click="removeGroup(groupIndex)">{{ t('common.delete') }}</button></div>
                   <label class="text-xs font-medium text-neutral-500">{{ t('eshop.sets.min') }}<input v-model.number="group.min" :class="FIELD" type="number" min="0" :max="group.options.length"></label>
                   <label class="text-xs font-medium text-neutral-500">{{ t('eshop.sets.max') }}<input v-model.number="group.max" :class="FIELD" type="number" min="1" :max="group.options.length || 1"></label>
@@ -262,8 +292,8 @@ onMounted(() => { void load() })
                 <div class="mt-3 space-y-2 border-t border-neutral-100 pt-3">
                   <div v-for="(option, optionIndex) in group.options" :key="optionIndex" class="rounded-md bg-neutral-50 p-3 dark:bg-neutral-900/20">
                     <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                      <label class="text-xs font-medium text-neutral-500">{{ t('eshop.sets.code') }}<input v-model="option.code" :class="FIELD" maxlength="50"></label>
-                      <label class="text-xs font-medium text-neutral-500">{{ t('eshop.sets.name') }}<input v-model="option.name" :class="FIELD" maxlength="150"></label>
+                      <label class="text-xs font-medium text-neutral-500">{{ t('eshop.sets.name') }}<input :value="option.name" @input="onOptionName(option, $event)" :class="FIELD" maxlength="150"></label>
+                      <label class="text-xs font-medium text-neutral-500">{{ t('eshop.sets.code') }}<input :value="option.code" @input="optionCodes.onCode(option, ($event.target as HTMLInputElement).value)" :class="FIELD" maxlength="50" pattern="[A-Za-z0-9_-]+"></label>
                       <div class="text-xs font-medium text-neutral-500"><span>{{ t('eshop.sets.item') }}</span><p class="mt-1 h-9 truncate rounded-md border border-neutral-200 bg-surface px-3 py-2 text-sm text-neutral-700">{{ cardLabel(option.item_id) }}</p></div>
                       <label class="text-xs font-medium text-neutral-500">{{ t('eshop.sets.quantity') }}<input v-model="option.quantity" :class="FIELD" inputmode="decimal"></label>
                       <div class="flex items-end justify-end"><button type="button" :class="btnOutline('danger')" :disabled="!canWrite" @click="removeOption(group, optionIndex)">{{ t('common.delete') }}</button></div>

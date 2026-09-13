@@ -20,6 +20,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import { eshopApi, type PriceLevel } from '@/api/eshop'
 
 type RoleFilter = 'all' | 'customers' | 'vendors'
 
@@ -39,6 +40,13 @@ const sort = ref<'name' | 'revenue' | 'last_activity'>('name')
 // Filtr na výchozí kategorii nákladu dodavatele — jen ve vendor view.
 const expenseCategories = ref<ExpenseCategory[]>([])
 const categoryFilter = ref<number | null>(null)
+// Filtr cenové hladiny — jen se zapnutým skladem. null = vše, 0 = „Default" (bez hladiny), jinak id hladiny.
+const stockEnabled = computed(() => supplierStore.currentSupplier?.stock_enabled === true)
+const priceLevels = ref<PriceLevel[]>([])
+const priceLevelFilter = ref<number | null>(null)
+function priceLevelLabel(c: Client): string {
+  return c.price_level_id != null ? (c.price_level_name ?? `#${c.price_level_id}`) : t('client.price_level_default')
+}
 const route = useRoute()
 // Filter from ?role=vendors|all|customers (default customers).
 // Watch query.role pro proklik mezi sidebar položkami Klienti ↔ Dodavatelé
@@ -58,11 +66,12 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 const filteredItems = computed(() => items.value)
 
 // Role (Klienti/Dodavatelé) se nepočítá — tu volí záložka, ne filtr.
-const hasActiveFilters = computed(() => !!search.value || showArchived.value || categoryFilter.value !== null)
+const hasActiveFilters = computed(() => !!search.value || showArchived.value || categoryFilter.value !== null || priceLevelFilter.value !== null)
 function clearFiltersAndSearch() {
   search.value = ''
   showArchived.value = false
   categoryFilter.value = null
+  priceLevelFilter.value = null
   load()
 }
 
@@ -105,6 +114,7 @@ async function load(reset = true) {
       role: roleFilter.value,
       // Kategorie filtruje jen u dodavatelů (jinde nemá smysl).
       expense_category_id: roleFilter.value === 'vendors' ? categoryFilter.value : null,
+      price_level: stockEnabled.value ? priceLevelFilter.value : null,
       page: page.value,
     })
     if (reset) {
@@ -129,6 +139,7 @@ function buildQuery(): Record<string, string> {
   if (showArchived.value) q.archived = '1'
   if (sort.value !== 'name') q.sort = sort.value
   if (roleFilter.value === 'vendors' && categoryFilter.value !== null) q.category_id = String(categoryFilter.value)
+  if (stockEnabled.value && priceLevelFilter.value !== null) q.price_level = String(priceLevelFilter.value)
   return q
 }
 
@@ -137,6 +148,7 @@ function applyQueryToPage(q: Record<string, string>) {
   showArchived.value = q.archived === '1'
   sort.value = q.sort === 'revenue' || q.sort === 'last_activity' ? q.sort : 'name'
   categoryFilter.value = q.category_id ? Number(q.category_id) : null
+  priceLevelFilter.value = q.price_level !== undefined && q.price_level !== '' && Number.isInteger(Number(q.price_level)) ? Number(q.price_level) : null
   load(true)
 }
 
@@ -152,6 +164,8 @@ const COLUMNS: ColumnDef[] = [
   // Doplňkové sloupce — defaultně skryté, uživatel si je zapne přes ColumnPicker.
   { key: 'dic', labelKey: 'common.dic', defaultHidden: true },
   { key: 'payment_due', labelKey: 'client.payment_due_label', defaultHidden: true },
+  // Cenová hladina existuje jen se zapnutým skladem — bez něj sloupec nejde ani zapnout.
+  ...(supplierStore.currentSupplier?.stock_enabled === true ? [{ key: 'price_level', labelKey: 'client.price_level_col' }] : []),
 ]
 const tbl = useTablePrefs('clients', COLUMNS)
 const saved = useSavedFilters('clients', { getQuery: buildQuery, applyQuery: applyQueryToPage })
@@ -188,6 +202,7 @@ function onSortToggle(key: string) {
 
 onMounted(async () => {
   expenseCategories.value = await expenseCategoriesApi.list(false).catch(() => [])
+  if (stockEnabled.value) void eshopApi.listPriceLevels().then(rows => { priceLevels.value = rows }).catch(() => { priceLevels.value = [] })
   loadDuplicates()
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   load(true)
@@ -196,6 +211,7 @@ watch(showArchived, () => load(true))
 watch(sort, () => load(true))
 watch(roleFilter, () => load(true))
 watch(categoryFilter, () => load(true))
+watch(priceLevelFilter, () => load(true))
 watch(search, () => {
   if (searchTimeout) clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => load(true), 300)
@@ -330,7 +346,7 @@ function formatPaymentDue(c: Client): string {
         </button>
       </div>
 
-      <div class="px-4 py-3 border-b border-neutral-200 flex flex-col sm:flex-row sm:items-center gap-3">
+      <div class="px-4 py-3 border-b border-neutral-200 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
         <input
           v-model="search"
           type="search"
@@ -346,6 +362,13 @@ function formatPaymentDue(c: Client): string {
           :title="t('client.default_expense_category')">
           <option :value="null">{{ t('client.filter_category_all') }}</option>
           <option v-for="c in expenseCategories" :key="c.id" :value="c.id">{{ c.label }} ({{ c.code }})</option>
+        </select>
+        <select v-if="stockEnabled" v-model="priceLevelFilter" data-test="client-price-level-filter"
+          class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+          :title="t('client.price_level')">
+          <option :value="null">{{ t('client.filter_price_level_all') }}</option>
+          <option :value="0">{{ t('client.price_level_default') }}</option>
+          <option v-for="l in priceLevels.filter(pl => pl.is_active || pl.id === priceLevelFilter)" :key="l.id" :value="l.id">{{ l.name }}</option>
         </select>
         <select v-model="sort" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
           :title="t('common.sort_by')">
@@ -386,6 +409,7 @@ function formatPaymentDue(c: Client): string {
             <th v-if="tbl.isVisible('currency')" class="text-center px-4 py-2.5 font-medium">{{ t('common.currency') }}</th>
             <th v-if="tbl.isVisible('dic')" class="text-left px-4 py-2.5 font-medium">{{ t('common.dic') }}</th>
             <th v-if="tbl.isVisible('payment_due')" class="text-center px-4 py-2.5 font-medium">{{ t('client.payment_due_label') }}</th>
+            <th v-if="stockEnabled && tbl.isVisible('price_level')" class="text-left px-4 py-2.5 font-medium">{{ t('client.price_level_col') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-neutral-100">
@@ -451,6 +475,9 @@ function formatPaymentDue(c: Client): string {
             <td v-if="tbl.isVisible('currency')" class="px-4 py-3 text-center text-neutral-600 font-mono text-xs">{{ c.currency_default }}</td>
             <td v-if="tbl.isVisible('dic')" class="px-4 py-3 font-mono text-xs text-neutral-600">{{ c.dic || '—' }}</td>
             <td v-if="tbl.isVisible('payment_due')" class="px-4 py-3 text-center text-xs text-neutral-600">{{ formatPaymentDue(c) }}</td>
+            <td v-if="stockEnabled && tbl.isVisible('price_level')" class="px-4 py-3">
+              <span class="inline-block px-2 py-0.5 text-xs rounded whitespace-nowrap" :class="c.price_level_id != null ? 'bg-primary-50 text-primary-700' : 'bg-neutral-100 text-neutral-600'">{{ priceLevelLabel(c) }}</span>
+            </td>
           </tr>
         </tbody>
       </table></div>
@@ -484,7 +511,10 @@ function formatPaymentDue(c: Client): string {
               <span v-if="c.main_email" class="text-neutral-400"> · </span>
               <span v-if="c.main_email" class="truncate">{{ c.main_email }}</span>
             </div>
-            <span class="font-mono whitespace-nowrap">{{ c.currency_default }}</span>
+            <span class="flex items-center gap-1.5 whitespace-nowrap">
+              <span v-if="stockEnabled" class="px-1.5 py-0.5 rounded" :class="c.price_level_id != null ? 'bg-primary-50 text-primary-700' : 'bg-neutral-100 text-neutral-600'">{{ priceLevelLabel(c) }}</span>
+              <span class="font-mono">{{ c.currency_default }}</span>
+            </span>
           </div>
           <div class="flex items-center justify-between gap-2 mt-2 text-xs">
             <span class="text-neutral-600">

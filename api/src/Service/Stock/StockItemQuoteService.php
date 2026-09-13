@@ -138,8 +138,14 @@ final class StockItemQuoteService
                     : StockUnitConverter::applyRatio((string) $basePrice, $ratio['numerator'], $ratio['denominator'], 2)),
                 'base_unit_price'     => $basePrice !== null ? (string) $basePrice : null,
                 'price_source'        => $p['price_source'] ?? (($p['promo_applied'] ?? false) ? 'promo' : 'standard'),
+                // Cenová hladina odběratele (1833), jen když cenu určila.
+                'price_level'         => $p['price_level'] ?? null,
                 'customer_price_id'   => $p['customer_price_id'] ?? null,
-                'discount_pct'        => ($p['price_source'] ?? '') === 'customer_discount' ? $p['customer_price']['discount_pct'] : null,
+                'discount_pct'        => match ($p['price_source'] ?? '') {
+                    'customer_discount'    => $p['customer_price']['discount_pct'],
+                    'price_level_discount' => $p['discount_pct'],
+                    default                => null,
+                },
                 'promo'               => ($p !== null && $p['promo_applied'])
                     ? ['label' => $p['promo']['label'], 'promo_price' => $p['promo']['promo_price']]
                     : null,

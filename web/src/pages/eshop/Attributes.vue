@@ -441,12 +441,12 @@ async function deleteOption(opt: AttributeOption) {
             </div>
             <div class="grid grid-cols-3 gap-2 mb-2">
               <div>
-                <label class="block text-[10px] text-neutral-500 mb-0.5">{{ t('eshop.attributes.option_field_code') }}</label>
-                <input :value="optForm.code" @input="onOptCode" type="text" class="w-full h-8 px-2 border border-neutral-300 rounded text-xs font-mono" />
-              </div>
-              <div>
                 <label class="block text-[10px] text-neutral-500 mb-0.5">{{ t('eshop.attributes.option_field_label') }}</label>
                 <input :value="optForm.label" @input="onOptLabel" type="text" class="w-full h-8 px-2 border border-neutral-300 rounded text-xs" />
+              </div>
+              <div>
+                <label class="block text-[10px] text-neutral-500 mb-0.5">{{ t('eshop.attributes.option_field_code') }}</label>
+                <input :value="optForm.code" @input="onOptCode" type="text" class="w-full h-8 px-2 border border-neutral-300 rounded text-xs font-mono" />
               </div>
               <div>
                 <label class="block text-[10px] text-neutral-500 mb-0.5">{{ t('eshop.attributes.option_field_order') }}</label>

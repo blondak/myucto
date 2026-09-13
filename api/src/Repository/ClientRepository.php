@@ -22,10 +22,11 @@ final class ClientRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT c.*, co.iso2 AS country_iso2, co.is_eu AS country_is_eu,
-                    cur.code AS currency_default
+                    cur.code AS currency_default, pl.name AS price_level_name
                FROM clients c
                JOIN countries co ON co.id = c.country_id
                JOIN currencies cur ON cur.id = c.currency_default_id
+          LEFT JOIN stock_price_levels pl ON pl.supplier_id = c.supplier_id AND pl.id = c.price_level_id
               WHERE c.id = ?'
         );
         $stmt->execute([$id]);
@@ -103,6 +104,16 @@ final class ClientRepository
             $listWhere[] = 'c.default_expense_category_id = ?';
             $listParams[] = (int) $filters['expense_category_id'];
         }
+        // Cenová hladina (1833) stejně jako kategorie nákladu jen pro výpis + total:
+        // 0 = bez hladiny („Default"), jinak id hladiny (firmu ověřuje ListClientsAction).
+        if (isset($filters['price_level'])) {
+            if ((int) $filters['price_level'] === 0) {
+                $listWhere[] = 'c.price_level_id IS NULL';
+            } else {
+                $listWhere[] = 'c.price_level_id = ?';
+                $listParams[] = (int) $filters['price_level'];
+            }
+        }
         $whereSql = implode(' AND ', $listWhere);
 
         // Count
@@ -154,6 +165,7 @@ final class ClientRepository
                        c.auto_send_reminders,
                        c.payment_due_default, c.payment_due_unit, c.default_payment_method, c.hourly_rate,
                        c.default_expense_category_id, c.default_revenue_category_id,
+                       c.price_level_id, pl.name AS price_level_name,
                        c.archived_at, co.iso2 AS country_iso2, co.is_eu AS country_is_eu,
                        (SELECT COUNT(*) FROM projects p WHERE p.client_id = c.id AND p.status = 'active' AND p.archived_at IS NULL) AS active_projects_count,
                        COALESCE(crc.revenue, 0) AS revenue,
@@ -165,6 +177,7 @@ final class ClientRepository
                   FROM clients c
                   JOIN countries  co  ON co.id  = c.country_id
                   JOIN currencies cur ON cur.id = c.currency_default_id
+             LEFT JOIN stock_price_levels pl ON pl.supplier_id = c.supplier_id AND pl.id = c.price_level_id
              LEFT JOIN client_revenue_cache crc ON crc.client_id = c.id AND crc.currency_id = c.currency_default_id
              LEFT JOIN (
                        -- Costs sumarizace přes vendory. Multi-currency:
@@ -683,6 +696,13 @@ final class ClientRepository
         $this->db->pdo()->prepare('UPDATE clients SET archived_at = NULL WHERE id = ?')->execute([$id]);
     }
 
+    /** Cenová hladina odběratele (1833); platnost hladiny ověřuje StockPriceLevelService. */
+    public function setPriceLevel(int $id, int $supplierId, ?int $priceLevelId): void
+    {
+        $this->db->pdo()->prepare('UPDATE clients SET price_level_id = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([$priceLevelId, $id, $supplierId]);
+    }
+
     public function projectsForClient(int $clientId, int $limit = 10): array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -741,6 +761,9 @@ final class ClientRepository
             $row['default_branding_profile_id'] = $row['default_branding_profile_id'] !== null
                 ? (int) $row['default_branding_profile_id']
                 : null;
+        }
+        if (array_key_exists('price_level_id', $row)) {
+            $row['price_level_id'] = $row['price_level_id'] !== null ? (int) $row['price_level_id'] : null;
         }
         $row['reverse_charge']        = (bool) ($row['reverse_charge'] ?? 0);
         // EU členství země klienta — editor podle něj u identifikované osoby (#94)

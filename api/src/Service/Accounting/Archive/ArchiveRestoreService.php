@@ -113,6 +113,8 @@ final class ArchiveRestoreService
         'stock_item_fees',
         'stock_item_prices',
         'stock_item_customer_prices',
+        'stock_price_levels',
+        'stock_price_level_rules',
         'stock_item_vendors',
         'stock_item_i18n',
         'stock_levels',
@@ -171,6 +173,8 @@ final class ArchiveRestoreService
         'tax_losses' => ['source_return_id' => 'income_tax_returns'],
         'tax_loss_applications' => ['applied_return_id' => 'income_tax_returns'],
         'tax_advance_schedules' => ['source_return_id' => 'income_tax_returns'],
+        // Cenová hladina odběratele (1833) — bez FK; bez hladiny v archivu → NULL (Default).
+        'clients' => ['price_level_id' => 'stock_price_levels'],
     ];
 
     /** Tabulky bez sloupce `id` (PK = supplier_id / kompozit) — bez id-mapy. */
@@ -640,6 +644,24 @@ final class ArchiveRestoreService
                 $resolved = $this->resolveSourceId((string) ($row['source_type'] ?? ''), $val, $processedSet, $defers);
                 $cols[] = $col;
                 $vals[] = $resolved;
+                continue;
+            }
+
+            // stock_price_level_rules.match_id (1833) — polymorfní bez FK dle match_type.
+            // Pravidlo na smazanou kartu/kategorii/výrobce nic neurčuje už v originále;
+            // v obnovené firmě dostane id 0 (nikdy neshodné), nikdy staré id jiné firmy.
+            if ($table === 'stock_price_level_rules' && $col === 'match_id') {
+                $matchTable = match ((string) ($row['match_type'] ?? '')) {
+                    'category'     => 'stock_categories',
+                    'manufacturer' => 'manufacturers',
+                    default        => 'stock_items',
+                };
+                $mapped = $this->maps[$matchTable][(int) $val] ?? null;
+                if ($mapped === null) {
+                    $warnings[] = "stock_price_level_rules.match_id: cíl #{$val} ({$matchTable}) v archivu není → 0";
+                }
+                $cols[] = $col;
+                $vals[] = $mapped ?? 0;
                 continue;
             }
 

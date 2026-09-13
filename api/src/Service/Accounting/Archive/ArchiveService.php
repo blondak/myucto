@@ -102,6 +102,8 @@ final class ArchiveService
         'stock_item_fees'             => 'id',
         'stock_item_prices'           => 'id',
         'stock_item_customer_prices'  => 'id',
+        'stock_price_levels'          => 'id',
+        'stock_price_level_rules'     => 'id',
         'stock_item_vendors'          => 'id',
         'stock_item_i18n'             => 'id',
         'stock_levels'                => 'warehouse_id, stock_item_id',

@@ -109,6 +109,53 @@ export interface PackagingUnitPayload {
   display_order?: number
 }
 
+/** Cenová hladina odběratelů (Bronze / Silver / Gold). Klient bez hladiny = „Default". */
+export interface PriceLevel {
+  id: number
+  code: string
+  name: string
+  /** Výchozí sleva hladiny v % (DECIMAL string, 0–100). */
+  default_discount_pct: string
+  is_active: boolean
+  display_order: number
+  /** Počet odběratelů s touto hladinou. */
+  client_count: number
+  rule_count: number
+}
+
+export interface PriceLevelPayload {
+  code: string
+  name: string
+  default_discount_pct: string
+  is_active?: boolean
+  display_order?: number
+}
+
+export type PriceLevelMatchType = 'product' | 'category' | 'manufacturer'
+export type PriceLevelRuleType = 'discount_pct' | 'fixed'
+
+export interface PriceLevelRule {
+  id: number
+  match_type: PriceLevelMatchType
+  match_id: number
+  match_label: string | null
+  rule_type: PriceLevelRuleType
+  discount_pct: string | null
+  fixed_price: string | null
+  currency_code: string | null
+  priority: number
+}
+
+export interface PriceLevelRulePayload {
+  match_type: PriceLevelMatchType
+  match_id: number
+  rule_type: PriceLevelRuleType
+  discount_pct?: string | null
+  fixed_price?: string | null
+  currency_code?: string | null
+  priority: number
+}
+
 export interface Attribute {
   id: number
   code: string
@@ -576,6 +623,17 @@ export const eshopApi = {
   createPackagingUnit: (payload: PackagingUnitPayload) => api.post<PackagingUnit>('/eshop/packaging-units', payload).then(r => r.data),
   updatePackagingUnit: (id: number, payload: PackagingUnitPayload) => api.put<PackagingUnit>(`/eshop/packaging-units/${id}`, payload).then(r => r.data),
   deletePackagingUnit: (id: number) => api.delete<{ deleted: true }>(`/eshop/packaging-units/${id}`).then(r => r.data),
+
+  // ── Cenové hladiny (Price levels) ────────────────────────────────────────
+  listPriceLevels: () => api.get<PriceLevel[]>('/eshop/price-levels').then(r => r.data),
+  getPriceLevel: (id: number) => api.get<PriceLevel>(`/eshop/price-levels/${id}`).then(r => r.data),
+  createPriceLevel: (payload: PriceLevelPayload) => api.post<PriceLevel>('/eshop/price-levels', payload).then(r => r.data),
+  updatePriceLevel: (id: number, payload: PriceLevelPayload) => api.put<PriceLevel>(`/eshop/price-levels/${id}`, payload).then(r => r.data),
+  deletePriceLevel: (id: number) => api.delete<{ deleted: true }>(`/eshop/price-levels/${id}`).then(r => r.data),
+  getPriceLevelRules: (id: number) => api.get<PriceLevelRule[]>(`/eshop/price-levels/${id}/rules`).then(r => r.data),
+  /** Nahradí celou sadu pravidel hladiny (tělo je přímo pole pravidel). */
+  replacePriceLevelRules: (id: number, rules: PriceLevelRulePayload[]) =>
+    api.put<PriceLevelRule[]>(`/eshop/price-levels/${id}/rules`, rules).then(r => r.data),
 
   // ── Atributy (Attributes) ────────────────────────────────────────────────
   listAttributes: (filters?: any) =>

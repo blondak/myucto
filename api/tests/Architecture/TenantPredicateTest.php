@@ -107,6 +107,9 @@ final class TenantPredicateTest extends TestCase
         // Balení a individuální ceny zákazníků (1832, issue #17).
         'stock_packaging_units',
         'stock_item_customer_prices',
+        // Cenové hladiny odběratelů (1833).
+        'stock_price_levels',
+        'stock_price_level_rules',
         // Epic DP (1030_income_tax.sql, issue #18) — perzistence přiznání daně z příjmů.
         'income_tax_returns',
         // Jádro PÚ (Epic F1–F7, migrace 1003–1038) — dřív v seznamu chybělo úplně

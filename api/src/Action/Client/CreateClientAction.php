@@ -13,6 +13,8 @@ use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Service\Ares\ClientBankAccountRegistrySynchronizer;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockPriceLevelService;
 use MyInvoice\Service\Validation;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -26,6 +28,7 @@ final class CreateClientAction
         private readonly ClientEmailContactRepository $emailContacts,
         private readonly ClientBankAccountRepository $bankAccounts,
         private readonly ClientBankAccountRegistrySynchronizer $bankAccountRegistry,
+        private readonly StockPriceLevelService $priceLevels,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -48,10 +51,22 @@ final class CreateClientAction
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
+        // Cenová hladina (1833) jen když ji tělo obsahuje; ověřit PŘED založením karty.
+        $priceLevelId = null;
+        if (array_key_exists('price_level_id', $body)) {
+            try {
+                $priceLevelId = $this->priceLevels->assignableLevelId($supplierId, $body['price_level_id'], null);
+            } catch (StockException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+            }
+        }
         try {
             $id = $this->repo->create($body, $supplierId);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+        }
+        if ($priceLevelId !== null) {
+            $this->repo->setPriceLevel($id, $supplierId, $priceLevelId);
         }
 
         // E-mailové kontakty dle účelu (#86) — replace-all, validuje repo.

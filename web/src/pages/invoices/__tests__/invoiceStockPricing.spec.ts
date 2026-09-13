@@ -6,7 +6,11 @@ import {
   shouldRequoteOnUnitChange,
   usesStockPricingFeatures,
   canApplyQuote,
+  clientHasPriceLevel,
   convertUnitPrice,
+  legacyRestorePrice,
+  planContextRepricing,
+  usesStockQuote,
   priceForMissingQuote,
   initialStockUnit,
   isPriceStillAuto,
@@ -219,5 +223,63 @@ describe('invoice stock pricing: karta bez balení a individuálních cen', () =
     expect(availabilityUnit('KT', 'ks', units)).toBe('ks')
     expect(availabilityUnit('hod', 'ks', units)).toBe('hod')
     expect(availabilityUnit('ks', 'ks', units)).toBe('ks')
+  })
+})
+
+describe('invoice stock pricing: cenové hladiny odběratelů', () => {
+  const on = { stockEnabled: true, loaded: true }
+  const plainCard = { unit: 'ks', effective_price: '99.00', sale_price_without_vat: '120.00', promo_price: '99.00' }
+  const noFeatures = () => false
+
+  it('odběratel bez hladiny je „Default", s hladinou zapíná novou logiku', () => {
+    expect(clientHasPriceLevel({ price_level_id: 3 })).toBe(true)
+    expect(clientHasPriceLevel({ price_level_id: null })).toBe(false)
+    expect(clientHasPriceLevel({})).toBe(false)
+    expect(clientHasPriceLevel(undefined)).toBe(false)
+  })
+
+  it('nacenění jen se zapnutým skladem, u řádku s kartou a když to zapíná karta nebo hladina odběratele', () => {
+    const row = { stock_item_id: 1 }
+    expect(usesStockQuote(row, { stockEnabled: true, cardFeatures: false, clientHasLevel: true })).toBe(true)
+    expect(usesStockQuote(row, { stockEnabled: true, cardFeatures: true, clientHasLevel: false })).toBe(true)
+    expect(usesStockQuote(row, { stockEnabled: true, cardFeatures: false, clientHasLevel: false })).toBe(false)
+    expect(usesStockQuote(row, { stockEnabled: false, cardFeatures: true, clientHasLevel: true })).toBe(false)
+    expect(usesStockQuote({ stock_item_id: null }, { stockEnabled: true, cardFeatures: true, clientHasLevel: true })).toBe(false)
+  })
+
+  it('karta bez funkcí + odběratel s hladinou: automatický řádek jde do nacenění', () => {
+    const row = { stock_item_id: 1, unit: 'ks', unit_price_without_vat: 99 }
+    const plan = planContextRepricing([row], () => auto(99), { ...on, clientHasLevel: true }, noFeatures)
+    expect(plan.quote).toEqual([row])
+    expect(plan.legacy).toEqual([])
+  })
+
+  it('přepnutí na odběratele Default: karta bez funkcí dostane zpět původní cenu, karta s funkcemi se nacení', () => {
+    const plain = { id: 'plain', stock_item_id: 1, unit: 'ks', unit_price_without_vat: 89.1 }
+    const packed = { id: 'packed', stock_item_id: 2, unit: 'KT', unit_price_without_vat: 800 }
+    const states: Record<string, StockQuoteState> = { plain: auto(89.1), packed: auto(800) }
+    const plan = planContextRepricing([plain, packed], row => states[row.id], { ...on, clientHasLevel: false }, row => row.id === 'packed')
+    expect(plan.legacy.map(row => row.id)).toEqual(['plain'])
+    expect(plan.quote.map(row => row.id)).toEqual(['packed'])
+    expect(legacyRestorePrice(plainCard)).toBe(99)
+    expect(legacyRestorePrice({ unit: 'ks', sale_price_without_vat: '120.00' })).toBe(120)
+  })
+
+  it('ruční cena, načtený doklad, řádek bez karty i vypnutý sklad zůstanou beze změny', () => {
+    const manual = { stock_item_id: 1, unit: 'ks', unit_price_without_vat: 85 }
+    const hydrated = { stock_item_id: 2, unit: 'ks', unit_price_without_vat: 50 }
+    const freeText = { stock_item_id: null, unit: 'hod', unit_price_without_vat: 100 }
+    const stateOf = (row: { stock_item_id: number | null }) => row.stock_item_id === 2 ? undefined : auto(row.stock_item_id === 1 ? 99 : 100)
+    for (const clientHasLevel of [true, false]) {
+      expect(planContextRepricing([manual, hydrated, freeText], stateOf, { ...on, clientHasLevel }, noFeatures)).toEqual({ quote: [], legacy: [] })
+      expect(planContextRepricing([{ ...manual, unit_price_without_vat: 99 }], () => auto(99), { stockEnabled: false, loaded: true, clientHasLevel }, noFeatures)).toEqual({ quote: [], legacy: [] })
+      expect(planContextRepricing([{ ...manual, unit_price_without_vat: 99 }], () => auto(99), { stockEnabled: true, loaded: false, clientHasLevel }, noFeatures)).toEqual({ quote: [], legacy: [] })
+    }
+  })
+
+  it('karta bez ceny: návrat původní ceny nic nepřepíše nulou', () => {
+    expect(legacyRestorePrice({ unit: 'ks', sale_price_without_vat: null })).toBeNull()
+    expect(legacyRestorePrice({ unit: 'ks', effective_price: null, sale_price_without_vat: 'abc' })).toBeNull()
+    expect(legacyRestorePrice(undefined)).toBeNull()
   })
 })

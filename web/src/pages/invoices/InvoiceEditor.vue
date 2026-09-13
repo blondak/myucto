@@ -61,7 +61,10 @@ import {
   quoteFailureFallback,
   quoteQuantity,
   rowUnitOptions,
-  rowsToRequote,
+  planContextRepricing,
+  clientHasPriceLevel,
+  usesStockQuote,
+  legacyRestorePrice,
   toBaseQuantity,
   unitAfterQuote,
   type PendingQuote,
@@ -343,6 +346,27 @@ function rowHasStockFeatures(item: InvoiceItem): boolean {
   return stockEnabled.value && item.stock_item_id != null && stockFeaturesById[item.stock_item_id] === true
 }
 
+// Cenová hladina vybraného odběratele (klient bez hladiny = „Default", nic se nemění).
+const selectedClientHasLevel = computed(() =>
+  stockEnabled.value && clientHasPriceLevel(clients.value.find(c => c.id === form.value.client_id)))
+
+/** Řádek se naceňuje backendem: karta s balením / individuálními cenami, nebo odběratel s hladinou. */
+function rowUsesQuote(item: InvoiceItem): boolean {
+  return usesStockQuote(item, {
+    stockEnabled: stockEnabled.value,
+    cardFeatures: item.stock_item_id != null && stockFeaturesById[item.stock_item_id] === true,
+    clientHasLevel: selectedClientHasLevel.value,
+  })
+}
+
+/** Odběratel bez hladiny u karty bez funkcí: řádek dostane zpět původní cenu karty, jednotka zůstává. */
+function restoreLegacyStockPrice(item: InvoiceItem) {
+  const price = legacyRestorePrice(item.stock_item_id != null ? stockItemsCache.get(item.stock_item_id) : null)
+  if (price === null) return
+  item.unit_price_without_vat = price
+  stockQuoteStates.set(item, { seq: ++stockQuoteSeq, autoPrice: price, source: null, discountPct: null, priceLevel: null })
+}
+
 function onStockSelect(rowIndex: number, itemId: number | null) {
   const item = form.value.items[rowIndex]
   if (!item) return
@@ -358,15 +382,20 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
     // Sloučené pole (popis = combobox): výběr karty popis přepíše názvem — dosavadní text byl
     // vyhledávací dotaz. Řádek jde dál libovolně přepsat ručně (volný text zůstává první občan).
     item.description = si.name
-    if (!usesStockPricingFeatures(si)) {
-      // Karta bez balení a bez individuálních cen: původní chování beze změny.
+    if (!usesStockPricingFeatures(si) && !selectedClientHasLevel.value) {
+      // Karta bez balení a bez individuálních cen, odběratel bez hladiny: původní chování
+      // beze změny. Doplněná cena se jen zapamatuje (bez requestu), aby šla přecenit,
+      // když uživatel vybere odběratele s cenovou hladinou.
       stockQuoteStates.delete(item)
       item.unit = si.unit
       // Cena do řádku VŽDY přes effective_price (EffectivePriceResolver na backendu) —
       // zahrnuje platnou akční cenu. sale_price_without_vat je jen fallback pro starší
       // odpovědi bez toho pole; nikdy nesmí akci obejít.
       const price = si.effective_price ?? si.sale_price_without_vat
-      if (price != null) item.unit_price_without_vat = Number(price)
+      if (price != null) {
+        item.unit_price_without_vat = Number(price)
+        stockQuoteStates.set(item, { seq: ++stockQuoteSeq, autoPrice: Number(price), source: null, discountPct: null, priceLevel: null })
+      }
       if (si.promo_price != null) {
         toast.info(t('invoice.promo_price_applied', {
           price: formatMoney(Number(si.promo_price)),
@@ -382,7 +411,9 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
       item.unit = legacy.unit
       if (legacy.price != null) {
         item.unit_price_without_vat = legacy.price
-        stockQuoteStates.set(item, { seq: ++stockQuoteSeq, autoPrice: legacy.price, source: null, discountPct: null })
+        stockQuoteStates.set(item, { seq: ++stockQuoteSeq, autoPrice: legacy.price, source: null, discountPct: null, priceLevel: null })
+      } else {
+        stockQuoteStates.delete(item)
       }
       void quoteStockRows([item], 'select', initialStockUnit(si)).then((quoted) => {
         if (!quoted && quoteFailureFallback('select', si)?.promoToast) {
@@ -420,6 +451,7 @@ async function quoteStockRows(rows: InvoiceItem[], mode: QuoteMode, requestUnit?
       autoPrice: previous?.autoPrice ?? null,
       source: previous?.source ?? null,
       discountPct: previous?.discountPct ?? null,
+      priceLevel: previous?.priceLevel ?? null,
     })
     const unit = requestUnit ?? item.unit
     const key = `q${seq}`
@@ -456,7 +488,7 @@ async function quoteStockRows(rows: InvoiceItem[], mode: QuoteMode, requestUnit?
           const converted = priceForMissingQuote(stockQuoteStates.get(item), quote.priceAtRequest, target.priceUnit, targetUnit, pack.base_unit, pack.units)
           if (converted !== null) {
             item.unit_price_without_vat = converted
-            stockQuoteStates.set(item, { seq: quote.seq, autoPrice: converted, source: null, discountPct: null })
+            stockQuoteStates.set(item, { seq: quote.seq, autoPrice: converted, source: null, discountPct: null, priceLevel: null })
           }
         }
         continue
@@ -468,6 +500,7 @@ async function quoteStockRows(rows: InvoiceItem[], mode: QuoteMode, requestUnit?
         autoPrice: price,
         source: line.price_source ?? null,
         discountPct: line.discount_pct ?? null,
+        priceLevel: line.price_level ?? null,
       })
       if (mode === 'select' && line.price_source === 'promo') {
         toast.info(t('invoice.promo_price_applied', {
@@ -540,11 +573,25 @@ function stockRowBaseQtyText(item: InvoiceItem): string | null {
 
 /** Badge zdroje ceny, jen dokud je v řádku automaticky doplněná cena. */
 function stockRowPriceBadge(item: InvoiceItem): { label: string; cls: string } | null {
-  if (!rowHasStockFeatures(item)) return null
+  if (!rowUsesQuote(item)) return null
   const state = stockQuoteStates.get(item)
   if (!state || !isPriceStillAuto(state, item.unit_price_without_vat)) return null
   const customer = 'border-success-500/40 bg-success-50 text-success-600'
+  const level = 'border-primary-500/40 bg-primary-50 text-primary-700'
+  const levelName = state.priceLevel?.name ?? null
   switch (state.source) {
+    case 'price_level_fixed':
+      return {
+        label: levelName ? t('invoice.stock_pricing.source_price_level', { name: levelName }) : t('invoice.stock_pricing.source_price_level_generic'),
+        cls: level,
+      }
+    case 'price_level_discount':
+      return {
+        label: levelName && state.discountPct
+          ? t('invoice.stock_pricing.source_price_level_discount_pct', { name: levelName, pct: formatNumber(Number(state.discountPct), { maximumFractionDigits: 3 }) })
+          : levelName ? t('invoice.stock_pricing.source_price_level', { name: levelName }) : t('invoice.stock_pricing.source_price_level_generic'),
+        cls: level,
+      }
     case 'customer_fixed':
       return { label: t('invoice.stock_pricing.source_customer_fixed'), cls: customer }
     case 'customer_discount':
@@ -996,16 +1043,20 @@ watch(
   () => { if (loaded.value) void loadPriceListItems() },
 )
 
-// Zákaznické ceny (issue #17): po změně odběratele nebo měny přeceň skladové řádky, jejichž
-// cena je pořád ta automaticky doplněná. Ruční přepis ani ceny načteného dokladu se nemění.
+// Zákaznické ceny a cenové hladiny: po změně odběratele nebo měny přeceň skladové řádky,
+// jejichž cena je pořád ta automaticky doplněná. Karta s funkcemi nebo odběratel s hladinou
+// → nacenění; karta bez funkcí u odběratele bez hladiny → zpět původní cena karty.
+// Ruční přepis ani ceny načteného dokladu se nemění.
 watch(
   () => [form.value.client_id, form.value.currency_id] as const,
   () => {
-    const rows = rowsToRequote(form.value.items, row => stockQuoteStates.get(row), {
+    const plan = planContextRepricing(form.value.items, row => stockQuoteStates.get(row), {
       stockEnabled: stockEnabled.value,
       loaded: loaded.value,
-    })
-    if (rows.length > 0) void quoteStockRows(rows, 'context')
+      clientHasLevel: selectedClientHasLevel.value,
+    }, row => row.stock_item_id != null && stockFeaturesById[row.stock_item_id] === true)
+    for (const row of plan.legacy) restoreLegacyStockPrice(row)
+    if (plan.quote.length > 0) void quoteStockRows(plan.quote, 'context')
   },
 )
 

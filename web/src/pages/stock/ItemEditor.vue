@@ -10,6 +10,8 @@ import {
   type StockItemCustomerPrice,
   type StockItemCustomerPricePayload,
   type StockCustomerPriceType,
+  type StockItemPriceLevelRow,
+  type StockItemPriceLevelPayload,
 } from '@/api/stock'
 import {
   eshopApi,
@@ -50,6 +52,15 @@ import DateInput from '@/components/ui/DateInput.vue'
 import MarkdownEditor from '@/components/ui/MarkdownEditor.vue'
 import ProductRelationsPanel from '@/components/stock/ProductRelationsPanel.vue'
 import ProductVariantInheritance from '@/components/stock/ProductVariantInheritance.vue'
+import {
+  ALL_CURRENCIES,
+  cloneRuleSet,
+  diffPriceLevelRules,
+  invalidRule,
+  ruleSetFrom,
+  type LevelRuleSet,
+  type LevelRuleType,
+} from './itemPriceLevelRules'
 import type { ProductVariantContext, ProductWithMasterContext } from '@/api/productMasters'
 
 const { t, locale } = useI18n()
@@ -716,17 +727,203 @@ function validateCustomerPrices(): string | null {
   return null
 }
 
+// ── Cenové hladiny: výjimky této karty ─────────────────────────────────
+// Backend vrací řádek per aktivní hladina × měna karty se zděděnou cenou a jejím
+// zdrojem. Výjimky karty (pravidla match_type='product') se načítají VŠECHNY
+// z pravidel hladiny, ne jen to, které v dané měně vyhrává: „Sleva pro produkt"
+// (bez měny) + pevné ceny per měna. Uložení posílá jen rozdíl proti načtenému
+// stavu (itemPriceLevelRules.ts), takže nic, na co uživatel nesáhl, nezmizí.
+type PriceLevelMode = 'inherit' | LevelRuleType
+interface PriceLevelOverride {
+  level_id: number
+  code: string
+  name: string
+  is_active: boolean
+  /** Upravované výjimky karty v hladině podle měny ('' = sleva pro produkt). */
+  rules: LevelRuleSet
+}
+const priceLevelRows = ref<StockItemPriceLevelRow[]>([])
+const priceLevelOverrides = ref<PriceLevelOverride[]>([])
+const loadedPriceLevelRules = ref<Record<number, LevelRuleSet>>({})
+const priceLevelsLoaded = ref(false)
+const priceLevelGroups = computed(() => priceLevelOverrides.value.map(o => ({
+  o,
+  rows: priceLevelRows.value.filter(r => r.price_level_id === o.level_id),
+})))
+
+interface ItemPriceLevelsData {
+  rows: StockItemPriceLevelRow[]
+  rules: Record<number, LevelRuleSet>
+}
+/** Náhled karty + všechna pravidla karty v zobrazených hladinách. Selhání čehokoli = nic se neukládá. */
+async function fetchPriceLevels(id: number): Promise<ItemPriceLevelsData> {
+  const rows = await stockApi.getItemPriceLevels(id)
+  const levelIds = [...new Set(rows.map(r => r.price_level_id))]
+  const lists = await Promise.all(levelIds.map(levelId => eshopApi.getPriceLevelRules(levelId)))
+  const rules: Record<number, LevelRuleSet> = {}
+  levelIds.forEach((levelId, i) => {
+    rules[levelId] = ruleSetFrom((lists[i] ?? []).filter(rule => rule.match_type === 'product' && rule.match_id === id))
+  })
+  return { rows, rules }
+}
+function applyPriceLevels(data: ItemPriceLevelsData) {
+  priceLevelRows.value = data.rows
+  const loaded: Record<number, LevelRuleSet> = {}
+  const byLevel = new Map<number, PriceLevelOverride>()
+  for (const r of data.rows) {
+    if (byLevel.has(r.price_level_id)) continue
+    loaded[r.price_level_id] = cloneRuleSet(data.rules[r.price_level_id] ?? {})
+    byLevel.set(r.price_level_id, {
+      level_id: r.price_level_id, code: r.code, name: r.name, is_active: r.is_active,
+      rules: cloneRuleSet(data.rules[r.price_level_id] ?? {}),
+    })
+  }
+  loadedPriceLevelRules.value = loaded
+  priceLevelOverrides.value = [...byLevel.values()]
+}
+function editedPriceLevelRules(): Record<number, LevelRuleSet> {
+  return Object.fromEntries(priceLevelOverrides.value.map(o => [o.level_id, o.rules]))
+}
+/** Jen změny: remove pro zrušená pravidla, upsert pro nová / změněná; nedotčená hladina nic. */
+function priceLevelPayload(): StockItemPriceLevelPayload[] {
+  return diffPriceLevelRules(loadedPriceLevelRules.value, editedPriceLevelRules())
+}
+const priceLevelsDirty = computed(() => priceLevelsLoaded.value && priceLevelPayload().length > 0)
+
+/** Sleva pro produkt (pravidlo bez měny) — samostatné pole, platí ve všech měnách hladiny. */
+function levelDiscount(o: PriceLevelOverride): string {
+  const rule = o.rules[ALL_CURRENCIES]
+  return rule?.rule_type === 'discount_pct' ? rule.value : ''
+}
+function setLevelDiscount(o: PriceLevelOverride, value: string) {
+  if (value.trim() === '') delete o.rules[ALL_CURRENCIES]
+  else o.rules[ALL_CURRENCIES] = { rule_type: 'discount_pct', value }
+}
+function priceLevelMode(o: PriceLevelOverride, currency: string): PriceLevelMode {
+  return o.rules[currency.toUpperCase()]?.rule_type ?? 'inherit'
+}
+/** Sleva jen pro jednu měnu se nabízí, jen když ji karta už má (vznikla v editoru hladiny). */
+function priceLevelModes(o: PriceLevelOverride, currency: string): PriceLevelMode[] {
+  return priceLevelMode(o, currency) === 'discount_pct' ? ['inherit', 'fixed', 'discount_pct'] : ['inherit', 'fixed']
+}
+function priceLevelModeLabel(o: PriceLevelOverride, mode: PriceLevelMode): string {
+  if (mode === 'inherit' && levelDiscount(o) !== '') return t('stock.price_levels.override_level_discount')
+  return t('stock.price_levels.override_' + mode)
+}
+/** Změna jedné měny se týká JEN její výjimky; slevu pro produkt nikdy neruší. */
+function setPriceLevelMode(o: PriceLevelOverride, currency: string, mode: PriceLevelMode) {
+  const key = currency.toUpperCase()
+  if (mode === 'inherit') {
+    delete o.rules[key]
+    return
+  }
+  const current = o.rules[key]
+  o.rules[key] = { rule_type: mode, value: current?.rule_type === mode ? current.value : '' }
+}
+function priceLevelRowValue(o: PriceLevelOverride, currency: string): string {
+  return o.rules[currency.toUpperCase()]?.value ?? ''
+}
+function setPriceLevelRowValue(o: PriceLevelOverride, currency: string, value: string) {
+  const rule = o.rules[currency.toUpperCase()]
+  if (rule) rule.value = value
+}
+function formatLevelPct(value: string | number): string {
+  return new Intl.NumberFormat(locale.value, { maximumFractionDigits: 3 }).format(Number(value))
+}
+/**
+ * Název kategorie / výrobce zdroje, pokud je k dispozici: source_label, jinak
+ * match_label pravidla, jinak dohledání match_id v číselníku. Pravidlo řádku je to
+ * uplatněné, takže sedí na zděděný zdroj jen tehdy, když karta vlastní výjimku nemá.
+ */
+function priceLevelSourceLabel(r: StockItemPriceLevelRow, source: StockItemPriceLevelRow['source']): string | null {
+  if (r.source_label) return r.source_label
+  const rule = r.source === source ? r.rule : null
+  if (!rule || rule.match_type !== source) return null
+  if (rule.match_label) return rule.match_label
+  if (rule.match_id == null) return null
+  if (source === 'category') {
+    const category = categories.value.find(c => c.id === rule.match_id)
+    return category ? (category.path || category.name) : null
+  }
+  return manufacturers.value.find(m => m.id === rule.match_id)?.name ?? null
+}
+/** Zdroj ceny, kterou by karta měla bez vlastní výjimky (inherited_source; starší odpověď = source). */
+function priceLevelSourceText(r: StockItemPriceLevelRow): string {
+  const source = r.inherited_source ?? r.source
+  let base: string
+  switch (source) {
+    case 'product': return t('stock.price_levels.source_product')
+    case 'category': {
+      const label = priceLevelSourceLabel(r, source)
+      base = label ? t('stock.price_levels.source_category_label', { label }) : t('stock.price_levels.source_category')
+      break
+    }
+    case 'manufacturer': {
+      const label = priceLevelSourceLabel(r, source)
+      base = label ? t('stock.price_levels.source_manufacturer_label', { label }) : t('stock.price_levels.source_manufacturer')
+      break
+    }
+    case 'default':
+      base = t('stock.price_levels.source_default')
+      break
+    default:
+      return t('stock.price_levels.source_none')
+  }
+  const pct = source === 'default'
+    ? (r.default_discount_pct ?? null)
+    : (r.source === source && r.rule?.rule_type === 'discount_pct' ? r.rule.discount_pct : null)
+  return pct != null && pct !== '' ? t('stock.price_levels.source_pct', { source: base, pct: formatLevelPct(pct) }) : base
+}
+/** Zděděná cena (bez výjimky karty); undefined = starší odpověď bez inherited_price. */
+function priceLevelInheritedPrice(r: StockItemPriceLevelRow): number | null | undefined {
+  if (r.inherited_price !== undefined) return r.inherited_price === null ? null : Number(r.inherited_price)
+  if (r.source === 'product') return undefined
+  return r.resulting_price === null ? null : Number(r.resulting_price)
+}
+function discountedPrice(standard: string | null, pctRaw: string): number | null {
+  const pct = normalizeDecimal(pctRaw)
+  if (standard === null || pct === '' || !Number.isFinite(Number(pct))) return null
+  return Math.round(Number(standard) * (1 - Number(pct) / 100) * 100 + Number.EPSILON) / 100
+}
+/**
+ * Náhled výsledné ceny: výjimka měny → sleva pro produkt → zděděná cena.
+ * null + pending = zděděnou cenu bez výjimky dopočítá až backend po uložení.
+ */
+function priceLevelPreview(o: PriceLevelOverride, r: StockItemPriceLevelRow): { value: number | null; pending: boolean } {
+  const own = o.rules[r.currency_code.toUpperCase()]
+  if (own?.rule_type === 'fixed') {
+    const fixed = normalizeDecimal(own.value)
+    return { value: fixed === '' || !Number.isFinite(Number(fixed)) ? null : Number(fixed), pending: false }
+  }
+  if (own?.rule_type === 'discount_pct') return { value: discountedPrice(r.standard_price, own.value), pending: false }
+  const levelRule = o.rules[ALL_CURRENCIES]
+  if (levelRule?.rule_type === 'discount_pct') return { value: discountedPrice(r.standard_price, levelRule.value), pending: false }
+  const inherited = priceLevelInheritedPrice(r)
+  return inherited === undefined ? { value: null, pending: true } : { value: inherited, pending: false }
+}
+function validatePriceLevels(): string | null {
+  for (const o of priceLevelOverrides.value) {
+    for (const [key, rule] of Object.entries(o.rules)) {
+      if (invalidRule(key, rule)) return t('stock.price_levels.value_invalid', { level: o.name })
+    }
+  }
+  return null
+}
+
 /**
  * Balení a zákaznické ceny mají vlastní endpointy. Když se nenačtou, editor
  * zůstane použitelný, ale tyto sekce se neukládají. Prázdná sada by jinak
  * při uložení smazala data, která uživatel vůbec neviděl.
  */
 async function loadItemExtras(id: number) {
-  const [codebook, packaging, customer] = await Promise.all([
+  const [codebook, packaging, customer, levels] = await Promise.all([
     Promise.resolve().then(() => eshopApi.listPackagingUnits()).catch(() => [] as PackagingUnit[]),
     Promise.resolve().then(() => stockApi.getItemPackaging(id)).catch(() => null),
     Promise.resolve().then(() => stockApi.getCustomerPrices(id)).catch(() => null),
+    Promise.resolve().then(() => fetchPriceLevels(id)).catch(() => null),
   ])
+  priceLevelsLoaded.value = levels !== null
+  applyPriceLevels(levels ?? { rows: [], rules: {} })
   packagingCodebook.value = codebook
   packagingLoaded.value = packaging !== null
   if (packaging) applyPackaging(packaging)
@@ -765,6 +962,22 @@ async function saveItemExtras(id: number): Promise<boolean> {
         savedCustomerPricesSnapshot.value = customerPricesSnapshot()
       } else {
         savedCustomerPricesSnapshot.value = submitted
+      }
+    } catch (e: any) {
+      error.value = mapError(e)
+      tab.value = 'prices'
+      return false
+    }
+  }
+  if (priceLevelsDirty.value) {
+    const submitted = JSON.stringify(editedPriceLevelRules())
+    try {
+      await stockApi.replaceItemPriceLevels(id, priceLevelPayload())
+      // Odeslaný stav je teď v DB; další úpravy se porovnávají proti němu.
+      loadedPriceLevelRules.value = JSON.parse(submitted) as Record<number, LevelRuleSet>
+      if (JSON.stringify(editedPriceLevelRules()) === submitted) {
+        const fresh = await fetchPriceLevels(id).catch(() => null)
+        if (fresh) applyPriceLevels(fresh)
       }
     } catch (e: any) {
       error.value = mapError(e)
@@ -1020,7 +1233,7 @@ function markSaved(snapshotValue = snapshot()) {
   savedSnapshot.value = snapshotValue
 }
 const isDirty = computed(() => savedSnapshot.value !== ''
-  && (snapshot() !== savedSnapshot.value || packagingDirty.value || customerPricesDirty.value))
+  && (snapshot() !== savedSnapshot.value || packagingDirty.value || customerPricesDirty.value || priceLevelsDirty.value))
 function confirmDiscard(): boolean {
   return !isDirty.value || window.confirm(t('stock.items.editor_ux.discard_changes'))
 }
@@ -1070,6 +1283,12 @@ function validateBeforeSubmit(): boolean {
   const customerPriceError = customerPricesLoaded.value ? validateCustomerPrices() : null
   if (customerPriceError) {
     error.value = customerPriceError
+    tab.value = 'prices'
+    return false
+  }
+  const priceLevelError = priceLevelsLoaded.value ? validatePriceLevels() : null
+  if (priceLevelError) {
+    error.value = priceLevelError
     tab.value = 'prices'
     return false
   }
@@ -1897,6 +2116,98 @@ function onImgError(e: Event) {
               </div>
             </div>
             <p class="text-xs text-neutral-500">{{ t('stock.customer_prices.hint') }}</p>
+          </div>
+
+          <!-- ─────────── Cenové hladiny (ukládá společné Uložit) ─────────── -->
+          <div data-test="price-levels" class="pt-5 mt-1 border-t border-neutral-200 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 class="text-sm font-semibold text-neutral-800">{{ t('stock.price_levels.title') }}</h3>
+                <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.price_levels.subtitle') }}</p>
+              </div>
+              <RouterLink to="/eshop?tab=price-levels" :class="btnOutline('neutral')" class="whitespace-nowrap">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                {{ t('stock.price_levels.manage') }}
+              </RouterLink>
+            </div>
+
+            <p v-if="!priceLevelsLoaded" class="text-xs text-warning-600">{{ t('stock.price_levels.load_failed') }}</p>
+            <EmptyState v-else-if="priceLevelGroups.length === 0" dense accent="neutral" icon="tag"
+              :title="t('stock.price_levels.empty')" :message="t('stock.price_levels.empty_hint')" />
+
+            <div v-else class="space-y-3">
+              <div v-for="g in priceLevelGroups" :key="g.o.level_id" data-test="price-level-row" class="border border-neutral-200 rounded-md">
+                <div class="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-neutral-100 bg-neutral-50 rounded-t-md">
+                  <span class="font-medium text-neutral-800">{{ g.o.name }}</span>
+                  <span class="font-mono text-xs text-neutral-500">{{ g.o.code }}</span>
+                  <span v-if="!g.o.is_active" class="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500">{{ t('stock.price_levels.inactive') }}</span>
+                </div>
+                <div data-test="price-level-discount" class="flex flex-wrap items-end gap-3 px-4 py-3 border-b border-neutral-100">
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.price_levels.discount_field') }}</label>
+                    <div class="flex items-center gap-1">
+                      <input :value="levelDiscount(g.o)" @input="setLevelDiscount(g.o, ($event.target as HTMLInputElement).value)"
+                        type="text" inputmode="decimal" :aria-label="t('stock.price_levels.discount_field')"
+                        class="w-24 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
+                      <button v-if="levelDiscount(g.o) !== ''" type="button" @click="setLevelDiscount(g.o, '')"
+                        :title="t('stock.price_levels.clear_discount')" :aria-label="t('stock.price_levels.clear_discount')"
+                        class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">
+                        <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <p class="flex-1 min-w-[12rem] text-xs text-neutral-500">{{ t('stock.price_levels.discount_field_hint') }}</p>
+                </div>
+                <div class="overflow-x-auto scrollbar-slim">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="text-left text-xs text-neutral-500 border-b border-neutral-100">
+                        <th class="py-2 px-3 font-medium">{{ t('stock.price_levels.col_currency') }}</th>
+                        <th class="py-2 px-3 font-medium text-right">{{ t('stock.price_levels.col_standard') }}</th>
+                        <th class="py-2 px-3 font-medium">{{ t('stock.price_levels.col_inherited') }}</th>
+                        <th class="py-2 px-3 font-medium">{{ t('stock.price_levels.col_override') }}</th>
+                        <th class="py-2 px-3 font-medium text-right">{{ t('stock.price_levels.col_result') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="r in g.rows" :key="`${r.price_level_id}-${r.currency_code}`" class="border-b border-neutral-100 last:border-0 align-top">
+                        <td class="py-2 px-3"><div class="h-9 flex items-center font-mono font-semibold text-neutral-800">{{ r.currency_code }}</div></td>
+                        <td class="py-2 px-3"><div class="h-9 flex items-center justify-end font-mono text-neutral-600 whitespace-nowrap">{{ r.standard_price === null ? '—' : formatMoney(Number(r.standard_price), r.currency_code) }}</div></td>
+                        <td class="py-2 px-3">
+                          <div class="min-h-9 flex flex-wrap items-center gap-x-2 text-xs text-neutral-600">
+                            <span v-if="priceLevelInheritedPrice(r) != null" class="font-mono text-sm text-neutral-800 whitespace-nowrap">{{ formatMoney(priceLevelInheritedPrice(r)!, r.currency_code) }}</span>
+                            <span>{{ priceLevelSourceText(r) }}</span>
+                          </div>
+                        </td>
+                        <td class="py-2 px-3">
+                          <div class="flex flex-wrap items-center gap-2">
+                            <select :value="priceLevelMode(g.o, r.currency_code)"
+                              @change="setPriceLevelMode(g.o, r.currency_code, ($event.target as HTMLSelectElement).value as PriceLevelMode)"
+                              class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+                              <option v-for="m in priceLevelModes(g.o, r.currency_code)" :key="m" :value="m">{{ priceLevelModeLabel(g.o, m) }}</option>
+                            </select>
+                            <input v-if="priceLevelMode(g.o, r.currency_code) !== 'inherit'"
+                              :value="priceLevelRowValue(g.o, r.currency_code)"
+                              @input="setPriceLevelRowValue(g.o, r.currency_code, ($event.target as HTMLInputElement).value)"
+                              type="text" inputmode="decimal"
+                              :aria-label="t('stock.price_levels.override_' + priceLevelMode(g.o, r.currency_code))"
+                              :placeholder="priceLevelMode(g.o, r.currency_code) === 'fixed' ? t('eshop.prices.fixed_ph') : undefined"
+                              class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
+                          </div>
+                        </td>
+                        <td class="py-2 px-3">
+                          <div class="h-9 flex items-center justify-end font-mono text-neutral-800 whitespace-nowrap">
+                            <span v-if="priceLevelPreview(g.o, r).pending" class="font-sans text-xs text-neutral-400">{{ t('stock.price_levels.after_save') }}</span>
+                            <template v-else>{{ priceLevelPreview(g.o, r).value === null ? '—' : formatMoney(priceLevelPreview(g.o, r).value, r.currency_code) }}</template>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-neutral-500">{{ t('stock.price_levels.discount_shared_hint') }} {{ t('stock.price_levels.hint') }}</p>
           </div>
         </div>
       </div>

@@ -3132,6 +3132,9 @@ final class Routes
             $g->put   ('/items/{id:[0-9]+}/packaging',  [\MyInvoice\Action\Stock\StockItemPackagingAction::class, 'put']);
             $g->get   ('/items/{id:[0-9]+}/customer-prices', [\MyInvoice\Action\Stock\StockItemCustomerPriceAction::class, 'get']);
             $g->put   ('/items/{id:[0-9]+}/customer-prices', [\MyInvoice\Action\Stock\StockItemCustomerPriceAction::class, 'put']);
+            // Cenové hladiny odběratelů na kartě — náhled a výjimky produktu (1833).
+            $g->get   ('/items/{id:[0-9]+}/price-levels', [\MyInvoice\Action\Stock\StockItemPriceLevelAction::class, 'get']);
+            $g->put   ('/items/{id:[0-9]+}/price-levels', [\MyInvoice\Action\Stock\StockItemPriceLevelAction::class, 'put']);
             $g->post  ('/items/{id:[0-9]+}/neighbors',  \MyInvoice\Action\Stock\StockItemNeighborsAction::class);
             $g->post  ('/items/{id:[0-9]+}/lifecycle',  [\MyInvoice\Action\Stock\StockItemAction::class, 'lifecycle']);
             $g->post  ('/items/{id:[0-9]+}/duplicate',  [\MyInvoice\Action\Stock\StockItemAction::class, 'duplicate']);
@@ -3360,6 +3363,15 @@ final class Routes
             $g->get   ('/packaging-units/{id:[0-9]+}',   [\MyInvoice\Action\Eshop\PackagingUnitAction::class, 'get']);
             $g->put   ('/packaging-units/{id:[0-9]+}',   [\MyInvoice\Action\Eshop\PackagingUnitAction::class, 'update']);
             $g->delete('/packaging-units/{id:[0-9]+}',   [\MyInvoice\Action\Eshop\PackagingUnitAction::class, 'delete']);
+
+            // Cenové hladiny odběratelů (Bronze/Silver/Gold) — migrace 1833
+            $g->get   ('/price-levels',                  [\MyInvoice\Action\Eshop\PriceLevelAction::class, 'list']);
+            $g->post  ('/price-levels',                  [\MyInvoice\Action\Eshop\PriceLevelAction::class, 'create']);
+            $g->get   ('/price-levels/{id:[0-9]+}',      [\MyInvoice\Action\Eshop\PriceLevelAction::class, 'get']);
+            $g->put   ('/price-levels/{id:[0-9]+}',      [\MyInvoice\Action\Eshop\PriceLevelAction::class, 'update']);
+            $g->delete('/price-levels/{id:[0-9]+}',      [\MyInvoice\Action\Eshop\PriceLevelAction::class, 'delete']);
+            $g->get   ('/price-levels/{id:[0-9]+}/rules', [\MyInvoice\Action\Eshop\PriceLevelAction::class, 'rules']);
+            $g->put   ('/price-levels/{id:[0-9]+}/rules', [\MyInvoice\Action\Eshop\PriceLevelAction::class, 'replaceRules']);
 
             // Parametry/atributy (+ enum options); specifické PŘED generickými.
             $g->get   ('/attributes',                    [\MyInvoice\Action\Eshop\AttributeAction::class, 'list']);

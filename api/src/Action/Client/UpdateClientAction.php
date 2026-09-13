@@ -14,6 +14,8 @@ use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Service\Ares\ClientBankAccountRegistrySynchronizer;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockPriceLevelService;
 use MyInvoice\Service\Validation;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -27,12 +29,14 @@ final class UpdateClientAction
         private readonly ClientEmailContactRepository $emailContacts,
         private readonly ClientBankAccountRepository $bankAccounts,
         private readonly ClientBankAccountRegistrySynchronizer $bankAccountRegistry,
+        private readonly StockPriceLevelService $priceLevels,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
         $id = (int) ($args['id'] ?? 0);
-        if (!SupplierGuard::owns($request, $this->repo->find($id))) {
+        $existing = $this->repo->find($id);
+        if (!SupplierGuard::owns($request, $existing)) {
             return Json::error($response, 'not_found', 'Klient nenalezen.', 404);
         }
 
@@ -41,11 +45,28 @@ final class UpdateClientAction
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
+        // Cenová hladina (1833) se zapisuje jen když ji tělo obsahuje.
+        $priceLevelId = null;
+        $writePriceLevel = array_key_exists('price_level_id', $body);
+        if ($writePriceLevel) {
+            try {
+                $priceLevelId = $this->priceLevels->assignableLevelId(
+                    (int) $existing['supplier_id'],
+                    $body['price_level_id'],
+                    $existing['price_level_id'] ?? null,
+                );
+            } catch (StockException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+            }
+        }
 
         try {
             $backfilled = $this->repo->update($id, $body);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+        }
+        if ($writePriceLevel) {
+            $this->repo->setPriceLevel($id, (int) $existing['supplier_id'], $priceLevelId);
         }
 
         $supplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);

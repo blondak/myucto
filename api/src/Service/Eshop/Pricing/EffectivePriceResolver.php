@@ -54,6 +54,13 @@ use PDO;
  * klienta se chování nemění. Množstevní stropy akcí se posuzují v ZÁKLADNÍCH
  * jednotkách karty (`$qty` musí volající převést přes StockUnitConverter).
  *
+ * ── Cenové hladiny odběratelů (migrace 1833) ────────────────────────────────
+ * Karta bez platné zákaznické ceny dostane základ podle aktivní hladiny
+ * odběratele ({@see PriceLevelResolver}): pravidlo produktu / kategorie /
+ * výrobce, jinak výchozí sleva hladiny. Akce pak soupeří s tímto základem stejně
+ * jako se zákaznickou cenou. Odběratel bez hladiny, neaktivní hladina nebo firma
+ * bez skladu → výsledek beze změny.
+ *
  * Vše přes bcmath/string (money-safe, žádný float).
  */
 final class EffectivePriceResolver
@@ -67,6 +74,7 @@ final class EffectivePriceResolver
         private readonly StockItemPriceRepository $prices,
         private readonly StockItemPromoPriceRepository $promos,
         private readonly StockItemCustomerPriceRepository $customerPrices,
+        private readonly PriceLevelResolver $priceLevels,
     ) {}
 
     /**
@@ -143,6 +151,13 @@ final class EffectivePriceResolver
      *   customer_price       … {id,price_type,fixed_price,discount_pct,valid_from,valid_to}
      * a `base_price` je pak zákaznická cena (základ, se kterým se akce porovnává).
      *
+     * Jen když se použila cenová hladina odběratele, přibudou:
+     *   standard_price       … standardní cena z cenotvorby (string|null),
+     *   price_source         … price_level_fixed|price_level_discount|promo,
+     *   price_level          … {id,code,name},
+     *   discount_pct         … sleva hladiny (string), u pevné ceny null
+     * a `base_price` je cena podle hladiny.
+     *
      * @param list<int> $stockItemIds
      * @return array<int,array<string,mixed>> stock_item_id => výsledek
      */
@@ -168,6 +183,8 @@ final class EffectivePriceResolver
         $base = $this->basePrices($supplierId, $ids, $currency);
         $standard = $base;
         $customer = [];
+        $level = null;
+        $levelApplied = [];
         if ($clientId !== null && $clientId > 0) {
             foreach ($this->customerPrices->activeFor($supplierId, $clientId, $currency, $ids, $onDate) as $itemId => $row) {
                 $baseline = self::customerBaseline($standard[$itemId] ?? null, $row);
@@ -176,6 +193,15 @@ final class EffectivePriceResolver
                 }
                 $base[$itemId] = $baseline;
                 $customer[$itemId] = $row;
+            }
+            // Hladina odběratele až po zákaznické ceně — jen pro karty bez ní.
+            $level = $this->priceLevels->levelForClient($supplierId, $clientId);
+            if ($level !== null) {
+                $rest = array_values(array_filter($ids, static fn (int $i): bool => !isset($customer[$i])));
+                foreach ($this->priceLevels->baselines($supplierId, $level, $rest, $currency, $standard) as $itemId => $applied) {
+                    $base[$itemId] = $applied['price'];
+                    $levelApplied[$itemId] = $applied;
+                }
             }
         }
         $candidates = $this->promos->activeForItems($supplierId, $ids, $currency, $onDate);
@@ -240,6 +266,16 @@ final class EffectivePriceResolver
                     'valid_from'   => $row['valid_from'],
                     'valid_to'     => $row['valid_to'],
                 ];
+            }
+            // Klíče hladiny taky jen tam, kde hladina cenu opravdu určila.
+            $applied = $levelApplied[$itemId] ?? null;
+            if ($applied !== null && $level !== null) {
+                $result['standard_price'] = $standard[$itemId] ?? null;
+                $result['price_source'] = $result['promo_applied']
+                    ? 'promo'
+                    : ($applied['rule_type'] === 'fixed' ? 'price_level_fixed' : 'price_level_discount');
+                $result['price_level'] = ['id' => $level['id'], 'code' => $level['code'], 'name' => $level['name']];
+                $result['discount_pct'] = $applied['discount_pct'];
             }
             $out[$itemId] = $result;
         }

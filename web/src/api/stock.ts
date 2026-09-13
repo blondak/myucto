@@ -263,7 +263,56 @@ export interface StockItemCustomerPricePayload {
   note?: string | null
 }
 
-export type StockQuotePriceSource = 'standard' | 'customer_fixed' | 'customer_discount' | 'promo'
+/** Cena karty pro jednu cenovou hladinu v jedné měně (náhled „dnes, množství 1, bez akce"). */
+export interface StockItemPriceLevelRow {
+  price_level_id: number
+  code: string
+  name: string
+  is_active: boolean
+  currency_code: string
+  standard_price: string | null
+  resulting_price: string | null
+  /** Odkud výsledná cena pochází: výjimka karty, kategorie, výrobce, výchozí sleva hladiny, nic. */
+  source: 'product' | 'category' | 'manufacturer' | 'default' | 'none'
+  /** Název kategorie / výrobce, pokud ho backend pošle. */
+  source_label?: string | null
+  rule: StockPriceLevelRuleSummary | null
+  /** Výchozí sleva hladiny v %. */
+  default_discount_pct?: string
+  /** Výjimka této karty (pravidlo match_type='product') platná pro danou měnu. */
+  product_rule?: StockPriceLevelRuleSummary | null
+  /** Cena a zdroj, které by platily bez výjimky karty. */
+  inherited_price?: string | null
+  inherited_source?: 'product' | 'category' | 'manufacturer' | 'default' | 'none'
+}
+
+export interface StockPriceLevelRuleSummary {
+  rule_type: 'discount_pct' | 'fixed'
+  discount_pct: string | null
+  fixed_price: string | null
+  currency_code: string | null
+  /** Na co pravidlo míří (kategorie / výrobce / produkt), pokud ho backend pošle. */
+  match_type?: 'product' | 'category' | 'manufacturer'
+  match_id?: number
+  match_label?: string | null
+}
+
+/**
+ * Výjimka karty pro hladinu (pravidlo match_type='product'). Položky se aplikují v pořadí:
+ * upsert nahradí pravidlo své měny (bez měny = sleva ve všech měnách), `remove` bez
+ * `currency_code` odebere všechna pravidla karty v hladině, s ním jen pravidlo té měny.
+ */
+export type StockItemPriceLevelPayload =
+  | { price_level_id: number; rule_type: 'discount_pct' | 'fixed'; discount_pct?: string | null; fixed_price?: string | null; currency_code?: string | null }
+  | { price_level_id: number; remove: true; currency_code?: string | null }
+
+export interface StockQuotePriceLevel {
+  id: number
+  code: string
+  name: string
+}
+
+export type StockQuotePriceSource = 'standard' | 'customer_fixed' | 'customer_discount' | 'promo' | 'price_level_fixed' | 'price_level_discount'
 
 export interface StockQuoteRequestLine {
   key: string
@@ -294,8 +343,10 @@ export interface StockQuoteLine {
   base_unit_price: string
   price_source: StockQuotePriceSource
   customer_price_id: number | null
-  /** Sleva zákazníka v %, pokud ji backend pošle (price_source = customer_discount). */
+  /** Sleva zákazníka nebo hladiny v % (price_source = customer_discount / price_level_discount). */
   discount_pct?: string | null
+  /** Hladina odběratele, pokud cenu určila ona. */
+  price_level?: StockQuotePriceLevel | null
   promo: { label: string | null; promo_price: string } | null
   promo_reason?: string | null
   promo_qty_available?: string | null
@@ -964,6 +1015,11 @@ export const stockApi = {
   /** Nahradí celou sadu individuálních cen karty (tělo je přímo pole řádků). */
   replaceCustomerPrices: (id: number, rows: StockItemCustomerPricePayload[]) =>
     api.put<StockItemCustomerPrice[]>(`/stock/items/${id}/customer-prices`, rows).then(r => r.data),
+  getItemPriceLevels: (id: number) =>
+    api.get<StockItemPriceLevelRow[]>(`/stock/items/${id}/price-levels`).then(r => r.data),
+  /** Spravuje jen výjimky karty (pravidla match_type='product'); ostatní pravidla hladin nechá být. */
+  replaceItemPriceLevels: (id: number, rows: StockItemPriceLevelPayload[]) =>
+    api.put<StockItemPriceLevelRow[]>(`/stock/items/${id}/price-levels`, rows).then(r => r.data),
   quoteItems: (payload: StockQuoteRequest) =>
     api.post<StockQuoteResponse>('/stock/items/quote', payload).then(r => r.data),
 
