@@ -10,6 +10,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Integration\IntegrationConnectionService;
 use MyInvoice\Tests\Integration\Stock\StockTestCase;
+use MyInvoice\Tests\Support\WorkerLockWaitTrait;
 use PHPUnit\Framework\Attributes\Group;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
@@ -18,6 +19,8 @@ use Symfony\Component\Process\Process;
 #[Group('integration')]
 final class IntegrationSampleProvisionerTest extends StockTestCase
 {
+    use WorkerLockWaitTrait;
+
     private const SAMPLE = 'Ukázkové napojení (vzor Shoptet)';
 
     private IntegrationAction $action;
@@ -157,31 +160,14 @@ PHP;
             $pdo->prepare('SELECT integration_sample_seeded_at FROM supplier WHERE id = ? FOR UPDATE')->execute([$sid]);
 
             $process->start();
-            $deadline = microtime(true) + 10;
-            $control = null;
-            while ($control === null && $process->isRunning() && microtime(true) < $deadline) {
-                if (is_file($controlFile)) {
-                    $decoded = json_decode((string) file_get_contents($controlFile), true);
-                    if (is_array($decoded) && ($decoded['ready'] ?? false) === true) {
-                        $control = $decoded;
-                        break;
-                    }
-                }
-                usleep(20000);
-            }
-            self::assertIsArray($control, $process->getErrorOutput());
-            $wait = $pdo->prepare('SELECT 1 FROM information_schema.INNODB_LOCK_WAITS waits
-                JOIN information_schema.INNODB_TRX requesting ON requesting.trx_id = waits.requesting_trx_id
-                WHERE requesting.trx_mysql_thread_id = ? LIMIT 1');
-            $blocked = false;
-            while (!$blocked && $process->isRunning() && microtime(true) < $deadline) {
-                $wait->execute([(int) $control['connection_id']]);
-                $blocked = $wait->fetchColumn() !== false;
-                if (!$blocked) {
-                    usleep(20000);
-                }
-            }
-            self::assertTrue($blocked, 'Souběžný požadavek nečekal na zámek firmy. ' . $process->getOutput() . $process->getErrorOutput());
+            $control = $this->awaitWorkerReady($process, $controlFile);
+            $this->assertWorkerWaitsOnLock(
+                $pdo,
+                $process,
+                (int) $control['connection_id'],
+                '/FROM\s+supplier\s+WHERE\s+id\s*=\s*\S+\s+FOR\s+UPDATE/i',
+                'Souběžný požadavek nečekal na zámek firmy.',
+            );
             // Až teď první požadavek ukázku dokončí; čekající po odemčení musí značku uvidět.
             $this->container->get(IntegrationConnectionService::class)->createSample($sid, $this->userId);
             $pdo->prepare('UPDATE supplier SET integration_sample_seeded_at = NOW() WHERE id = ?')->execute([$sid]);

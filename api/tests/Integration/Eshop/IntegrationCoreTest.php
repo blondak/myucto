@@ -14,10 +14,13 @@ use MyInvoice\Service\Integration\IntegrationReconcileService;
 use MyInvoice\Service\Integration\IntegrationReconcileWorker;
 use MyInvoice\Service\Integration\IntegrationWebhookService;
 use MyInvoice\Tests\Integration\Stock\StockTestCase;
+use MyInvoice\Tests\Support\WorkerLockWaitTrait;
 use Symfony\Component\Process\Process;
 
 final class IntegrationCoreTest extends StockTestCase
 {
+    use WorkerLockWaitTrait;
+
     public function testEmptyMappingRoundTripStaysAJsonObjectAndCanBeEdited(): void
     {
         $sid = $this->createSupplier();
@@ -175,31 +178,14 @@ PHP;
             $this->db->pdo()->prepare("INSERT INTO integration_change_log (supplier_id, entity_id, change_type, source_area) VALUES (?, 900001, 'upsert', 'reservation')")
                 ->execute([$sid]);
             $process->start();
-            $deadline = microtime(true) + 5;
-            $control = null;
-            while ($control === null && $process->isRunning() && microtime(true) < $deadline) {
-                if (is_file($controlFile)) {
-                    $decoded = json_decode((string) file_get_contents($controlFile), true);
-                    if (is_array($decoded) && ($decoded['ready'] ?? false) === true && (int) ($decoded['connection_id'] ?? 0) > 0) {
-                        $control = $decoded;
-                        break;
-                    }
-                }
-                usleep(20000);
-            }
-            self::assertIsArray($control, $process->getErrorOutput());
-            $wait = $this->db->pdo()->prepare('SELECT 1 FROM information_schema.INNODB_LOCK_WAITS waits
-                JOIN information_schema.INNODB_TRX requesting ON requesting.trx_id = waits.requesting_trx_id
-                WHERE requesting.trx_mysql_thread_id = ? LIMIT 1');
-            $blocked = false;
-            while (!$blocked && $process->isRunning() && microtime(true) < $deadline) {
-                $wait->execute([(int) $control['connection_id']]);
-                $blocked = $wait->fetchColumn() !== false;
-                if (!$blocked) {
-                    usleep(20000);
-                }
-            }
-            self::assertTrue($blocked, 'Worker did not wait on the tenant cursor lock. ' . $process->getErrorOutput());
+            $control = $this->awaitWorkerReady($process, $controlFile);
+            $this->assertWorkerWaitsOnLock(
+                $this->db->pdo(),
+                $process,
+                (int) $control['connection_id'],
+                '/INSERT\s+INTO\s+integration_change_log\b/i',
+                'Worker did not wait on the tenant cursor lock.',
+            );
             $this->db->pdo()->commit();
             $process->wait();
             self::assertSame(0, $process->getExitCode(), $process->getErrorOutput());
