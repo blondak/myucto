@@ -7118,6 +7118,8 @@
         "items_count": "{n} položek | {n} položka | {n} položky | {n} položek",
         "oldest": "{label} (nejstarší)",
         "bulk_done": "Označeno jako splněné: {n}.",
+        "undated_label": "bez zákonné lhůty",
+        "undated_hint": "Nevyřízené položky u lidí, u kterých zákon lhůtu neukládá nebo ji aplikace neodvozuje (třeba přihláška ČSSZ u nástupu před 1. 7. 2026). Co bylo vyřízeno mimo aplikaci, označte po rozbalení skupiny hromadně.",
         "group": {
           "search": "Hledat jméno nebo osobní číslo",
           "col_name": "Jméno",
@@ -7149,7 +7151,8 @@
           "due_soon": "Do pěti dnů",
           "action_required": "Vyžaduje zásah",
           "awaiting_result": "Čeká na výsledek",
-          "open": "Otevřené"
+          "open": "Otevřené",
+          "undated": "Bez termínu"
         },
         "source": {
           "submission": "Podání",

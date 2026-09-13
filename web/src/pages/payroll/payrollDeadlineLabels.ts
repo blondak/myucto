@@ -28,22 +28,39 @@ export const PHASE_ORDER: PayrollDeadlinePhase[] = [
   'open',
 ]
 
-export const PHASE_TONE: Record<PayrollDeadlinePhase, string> = {
+/**
+ * Nevyřízené položky checklistu BEZ termínu (přihláška ČSSZ u nástupu před
+ * 1. 7. 2026, potvrzení o příjmech na žádost…). Posílá je jen seskupený
+ * přehled, vždy až za všemi lhůtami, a do fází souhrnu se nesčítají.
+ */
+export const UNDATED_PHASE = 'undated'
+
+export type PayrollDeadlinePanelPhase = PayrollDeadlinePhase | typeof UNDATED_PHASE
+
+export const PANEL_PHASE_ORDER: PayrollDeadlinePanelPhase[] = [...PHASE_ORDER, UNDATED_PHASE]
+
+export function isUndatedPhase(phase: string): boolean {
+  return phase === UNDATED_PHASE
+}
+
+export const PHASE_TONE: Record<PayrollDeadlinePanelPhase, string> = {
   overdue: 'border-danger-500/40 bg-danger-50',
   due_today: 'border-warning-500/40 bg-warning-50',
   due_soon: 'border-warning-500/25 bg-warning-50/50',
   action_required: 'border-warning-500/25 bg-warning-50/50',
   awaiting_result: 'border-neutral-200 bg-neutral-50',
   open: 'border-neutral-200 bg-neutral-50',
+  undated: 'border-dashed border-neutral-300 bg-neutral-50',
 }
 
-export const PHASE_BADGE: Record<PayrollDeadlinePhase, string> = {
+export const PHASE_BADGE: Record<PayrollDeadlinePanelPhase, string> = {
   overdue: 'bg-danger-50 text-danger-700',
   due_today: 'bg-warning-50 text-warning-800',
   due_soon: 'bg-warning-50 text-warning-700',
   action_required: 'bg-warning-50 text-warning-700',
   awaiting_result: 'bg-neutral-100 text-neutral-600',
   open: 'bg-neutral-100 text-neutral-600',
+  undated: 'bg-neutral-100 text-neutral-600',
 }
 
 export function usePayrollDeadlineLabels() {
@@ -118,6 +135,9 @@ export function usePayrollDeadlineLabels() {
   }
 
   function dueLabel(item: PayrollDeadlineItem): string {
+    if (isUndatedPhase(item.phase) || item.days_to_due === null) {
+      return t('payroll.dashboard.deadlines.undated_label')
+    }
     return daysLabel(item.days_to_due)
   }
 
@@ -130,6 +150,9 @@ export function usePayrollDeadlineLabels() {
 
   /** U skupiny se ukazuje nejstarší prodlení; „nejstarší" jen když se liší. */
   function groupDueLabel(group: PayrollDeadlineGroup): string {
+    if (isUndatedPhase(group.phase) || group.min_days_to_due === null) {
+      return t('payroll.dashboard.deadlines.undated_label')
+    }
     const label = daysLabel(group.min_days_to_due)
     return group.min_days_to_due === group.max_days_to_due
       ? label

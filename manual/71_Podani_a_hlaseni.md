@@ -1,4 +1,4 @@
-# Podání a hlášení
+# 71. Podání a hlášení
 
 ## 71.1 Účel
 
@@ -53,6 +53,14 @@ pojišťovnám) se rozbalí do řádků pod skupinou.
 Skupina lhůt u lidí se po rozbalení zobrazí jako seznam osob po stránkách
 s hledáním podle jména nebo osobního čísla (na velikosti písmen ani diakritice
 nezáleží). U každé osoby je termín, počet dnů po termínu a odkaz na její kartu.
+
+Nevyřízené položky checklistu, u kterých zákon lhůtu neukládá nebo ji aplikace
+neodvozuje, jsou ve vlastní sekci **Bez termínu** na konci panelu. Patří sem
+například **Registrace ČSSZ / JMHZ** u nástupu před 1. 7. 2026 (registrační
+povinnost zaměstnance platí až od tohoto dne, takže termín se nedopočítává),
+potvrzení o zdanitelných příjmech nebo kontrola exekucí a insolvence. Tyto
+položky se nezapočítávají do fáze **Po termínu** ani do ostatních počtů
+termínů; skupiny jsou seřazené od největší a rozbalují se stejně jako ostatní.
 
 ### Hromadné označení jako splněné
 

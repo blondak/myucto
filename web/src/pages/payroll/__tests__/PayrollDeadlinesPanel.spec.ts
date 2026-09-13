@@ -463,4 +463,88 @@ describe('PayrollDeadlinesPanel', () => {
       .toBe('payroll.dashboard.deadlines.source.checklist')
     expect(wrapper.get('[data-test="payroll-deadlines-group-overdue"]').text()).toContain('(450)')
   })
+
+  /** Přihláška ČSSZ u nástupu před 1. 7. 2026 — termín se neodvozuje, povinnost trvá. */
+  function undatedPerson(index: number): PayrollDeadlinePersonItem {
+    return {
+      ...person(index),
+      title: 'social_jmhz_registration',
+      due_on: null as unknown as string,
+      phase: 'undated' as PayrollDeadlinePersonItem['phase'],
+      days_to_due: null as unknown as number,
+      is_overdue: false,
+    }
+  }
+
+  function undatedGroup(): PayrollDeadlineGroup {
+    return contractGroup({
+      key: 'undated:checklist:social_jmhz_registration',
+      phase: 'undated' as PayrollDeadlineGroup['phase'],
+      title: 'social_jmhz_registration',
+      count: 225,
+      oldest_due_on: null as unknown as string,
+      newest_due_on: null as unknown as string,
+      min_days_to_due: null as unknown as number,
+      max_days_to_due: null as unknown as number,
+      is_overdue: false,
+    })
+  }
+
+  it('lists open items without a deadline as their own last section, outside the overdue count', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([contractGroup({ count: 3 }), undatedGroup()]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test^="payroll-deadlines-group-"]').map(s => s.attributes('data-test')))
+      .toEqual(['payroll-deadlines-group-overdue', 'payroll-deadlines-group-undated'])
+    expect(wrapper.get('[data-test="payroll-deadlines-chip-overdue"]').text())
+      .toBe('payroll.dashboard.deadlines.phase.overdue: 3')
+    expect(wrapper.get('[data-test="payroll-deadlines-chip-undated"]').text())
+      .toBe('payroll.dashboard.deadlines.phase.undated: 225')
+    const section = wrapper.get('[data-test="payroll-deadlines-group-undated"]')
+    expect(section.attributes('role')).toBeUndefined()
+    expect(section.find('[data-test="payroll-deadlines-undated-hint"]').exists()).toBe(true)
+    const key = 'undated:checklist:social_jmhz_registration'
+    expect(wrapper.get(`[data-test="payroll-deadline-group-due-${key}"]`).text())
+      .toBe('payroll.dashboard.deadlines.undated_label')
+    expect(wrapper.get(`[data-test="payroll-deadline-group-count-${key}"]`).text())
+      .toBe('payroll.dashboard.deadlines.people_count:225')
+    expect(section.text()).not.toContain('date:')
+  })
+
+  it('marks a whole group without a deadline as done in one go', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([undatedGroup()]))
+    m.deadlineGroupItems.mockResolvedValue(page([undatedPerson(1), undatedPerson(2)]))
+    m.completeDeadlineChecklist.mockResolvedValue(result({ completed: [1, 2] }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="payroll-deadline-group-toggle-undated:checklist:social_jmhz_registration"]')
+      .trigger('click')
+    await flushPromises()
+
+    expect(m.deadlineGroupItems).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'undated',
+      source: 'checklist',
+      title: 'social_jmhz_registration',
+    }))
+    const row = wrapper.get('[data-test="payroll-deadline-person-payroll_checklist_item:1"]')
+    expect(row.text()).toContain('–')
+    expect(row.text()).toContain('payroll.dashboard.deadlines.undated_label')
+    expect(row.text()).not.toContain('date:')
+
+    await wrapper.get('[data-test="payroll-deadline-complete-all"]').trigger('click')
+    await wrapper.get('[data-test="payroll-deadline-complete-run"]').trigger('click')
+    await flushPromises()
+
+    expect(m.completeDeadlineChecklist).toHaveBeenCalledWith({
+      phase: 'undated',
+      item_key: 'social_jmhz_registration',
+      horizon_days: 45,
+      note: 'payroll.dashboard.deadlines.group.note_default',
+    })
+    expect(wrapper.get('[data-test="payroll-deadlines-bulk-notice"]').text())
+      .toBe('payroll.dashboard.deadlines.bulk_done:2')
+  })
 })

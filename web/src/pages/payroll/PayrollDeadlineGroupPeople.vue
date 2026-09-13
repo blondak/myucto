@@ -374,7 +374,7 @@ onMounted(fetchPage)
               </td>
               <td class="py-1.5 pr-3 font-medium break-words text-neutral-900">{{ item.subject }}</td>
               <td class="py-1.5 pr-3 font-mono text-xs text-neutral-600">{{ item.personal_number ?? '–' }}</td>
-              <td class="py-1.5 pr-3 whitespace-nowrap">{{ formatDate(item.due_on) }}</td>
+              <td class="py-1.5 pr-3 whitespace-nowrap">{{ item.due_on ? formatDate(item.due_on) : '–' }}</td>
               <td class="py-1.5 pr-3">
                 <span class="rounded-full px-1.5 py-0.5 text-xs font-medium whitespace-nowrap" :class="PHASE_BADGE[item.phase]">
                   {{ dueLabel(item) }}
@@ -411,7 +411,7 @@ onMounted(fetchPage)
               <p class="text-sm font-medium break-words text-neutral-900">{{ item.subject }}</p>
               <p v-if="item.personal_number" class="font-mono text-xs text-neutral-500">{{ item.personal_number }}</p>
               <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                <span class="font-medium text-neutral-800">{{ formatDate(item.due_on) }}</span>
+                <span v-if="item.due_on" class="font-medium text-neutral-800">{{ formatDate(item.due_on) }}</span>
                 <span class="rounded-full px-1.5 py-0.5 font-medium" :class="PHASE_BADGE[item.phase]">{{ dueLabel(item) }}</span>
                 <RouterLink
                   :to="itemLink(item)"

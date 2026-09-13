@@ -56,9 +56,19 @@ use Psr\Clock\ClockInterface;
  *
  * Čistá mzda, srážky ze mzdy ani exekuční platby: jejich termín plyne ze
  * smlouvy nebo z rozhodnutí, ne ze zákonné lhůty, a přimíchat je by z hlídače
- * termínů udělalo výpis všech plateb. Stejně tak položky checklistu bez
- * odvozené lhůty (`due_date IS NULL`) — připomínat termín, který neexistuje,
- * je ta nejjistější cesta, jak obsluhu naučit hlášky přeskakovat.
+ * termínů udělalo výpis všech plateb.
+ *
+ * ## Položky checklistu bez termínu
+ *
+ * Nevyřízená položka bez odvozené lhůty (`due_date IS NULL`) nemá fázi
+ * termínu, takže do plochého přehledu, do fází souhrnu ani do měsíčního
+ * přehledu nepatří: připomínat termín, který neexistuje, je nejjistější cesta,
+ * jak obsluhu naučit hlášky přeskakovat. Seskupený přehled ji ale ukáže ve
+ * vlastní fázi {@see self::UNDATED_PHASE}, až za všemi lhůtami a se stejným
+ * hromadným odškrtnutím. Přihlášku ČSSZ u nástupu před 1. 7. 2026 totiž
+ * mzdový běh dál hlásí jako chybějící; kdyby šla odškrtnout jen na kartě
+ * vztahu, znamenalo by 225 lidí po importu 225 ručních kroků. Fáze souhrnu
+ * se tím nemění, počet nese zvlášť `summary.undated`.
  *
  * Cron ani e-mail tady NENÍ. Přehled je čtecí; rozeslat ho je samostatné
  * rozhodnutí s vlastními následky (komu, jak často, co s firmou bez účetní).
@@ -79,6 +89,13 @@ final readonly class PayrollDeadlineOverviewService
         'awaiting_result',
         'open',
     ];
+
+    /**
+     * Fáze skupiny nevyřízených položek checklistu BEZ termínu. Záměrně není
+     * v {@see self::PHASES}: nemá prahy ani naléhavost, nesčítá se do fází
+     * souhrnu a plochý přehled ji nezná.
+     */
+    public const UNDATED_PHASE = 'undated';
 
     /**
      * Odkud termín pochází. Účetní to řeší až jako druhé — primárně ji zajímá,
@@ -188,13 +205,17 @@ final readonly class PayrollDeadlineOverviewService
         [$today, $from, $to] = $this->scope($supplierId, $environment, $horizonDays);
 
         $items = $this->buildItems($supplierId, $environment, $from, $to);
+        $undated = $this->undatedGroups($supplierId);
 
         return [
             'as_of' => $today->format('Y-m-d'),
             'horizon_days' => $horizonDays,
             'window' => ['from' => $from, 'to' => $to],
-            'summary' => $this->summary($items),
-            'groups' => $this->group($items),
+            'summary' => $this->summary($items) + [
+                self::UNDATED_PHASE => array_sum(array_column($undated, 'count')),
+            ],
+            // Bez termínu až za všemi lhůtami; pořadí skupin s termínem se nemění.
+            'groups' => [...$this->group($items), ...$undated],
         ];
     }
 
@@ -249,18 +270,25 @@ final readonly class PayrollDeadlineOverviewService
         string $query,
     ): array {
         [, $from, $to] = $this->scope($supplierId, $environment, $horizonDays);
-        if (!in_array($phase, self::PHASES, true)) {
+        $undated = $phase === self::UNDATED_PHASE;
+        if (!$undated && !in_array($phase, self::PHASES, true)) {
             throw new \InvalidArgumentException('Fáze skupiny termínů není platná.');
         }
         if (!in_array($source, self::SOURCES, true)) {
             throw new \InvalidArgumentException('Pramen skupiny termínů není platný.');
+        }
+        // Termín chybět může jen položce checklistu; ostatní prameny ho mají vždy.
+        if ($undated && $source !== 'checklist') {
+            throw new \InvalidArgumentException('Skupina bez termínu je jen u checklistu vztahu.');
         }
         if ($title === '' || strlen($title) > 64) {
             throw new \InvalidArgumentException('Druh povinnosti ve skupině termínů chybí.');
         }
 
         $items = array_values(array_filter(
-            $this->sourceItems($supplierId, $environment, $source, $title, $from, $to),
+            $undated
+                ? $this->undatedChecklistItems($supplierId, $title)
+                : $this->sourceItems($supplierId, $environment, $source, $title, $from, $to),
             static fn (array $item): bool
                 => $item['phase'] === $phase && $item['title'] === $title,
         ));
@@ -679,41 +707,95 @@ final readonly class PayrollDeadlineOverviewService
         string $to,
         ?string $itemKey = null,
     ): array {
-        $items = [];
-        foreach ($this->repository->checklistDeadlines(
-            $supplierId,
-            $from,
-            $to,
-            $itemKey,
-        ) as $row) {
-            $dueOn = (string) $row['due_date'];
-            $items[] = [
+        return array_map(
+            fn (array $row): array => $this->checklistRowItem($row),
+            $this->repository->checklistDeadlines($supplierId, $from, $to, $itemKey),
+        );
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function undatedChecklistItems(int $supplierId, ?string $itemKey = null): array
+    {
+        return array_map(
+            fn (array $row): array => $this->checklistRowItem($row),
+            $this->repository->checklistWithoutDeadline($supplierId, $itemKey),
+        );
+    }
+
+    /**
+     * Skupiny nevyřízených položek bez termínu, jen s počty; lidé se dotahují
+     * stránkovaně jako u ostatních skupin. Seznam se neposílá ani u jednoho
+     * člověka: hromadné odškrtnutí vede přes rozbalený seznam a jednočlenná
+     * skupina by se jinak vykreslila jako odkaz s termínem, který neexistuje.
+     * Největší nedodělek jde první.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function undatedGroups(int $supplierId): array
+    {
+        $groups = [];
+        foreach ($this->repository->checklistWithoutDeadlineCounts($supplierId) as $itemKey => $count) {
+            $groups[] = [
+                'key' => self::UNDATED_PHASE . ':checklist:' . $itemKey,
+                'phase' => self::UNDATED_PHASE,
                 'source' => 'checklist',
-                'reference' => 'payroll_checklist_item:' . (int) $row['item_id'],
-                'item_id' => (int) $row['item_id'],
-                'title' => (string) $row['item_key'],
-                'subject' => (string) $row['full_name'],
-                'personal_number' => ($row['employment_code'] ?? null) === null
-                    ? null
-                    : (string) $row['employment_code'],
-                'period' => null,
-                'due_on' => $dueOn,
-                'phase' => $this->phase($dueOn),
-                'days_to_due' => $this->daysToDue($dueOn),
-                'is_overdue' => $this->phase($dueOn) === 'overdue',
-                'employment_id' => (int) $row['employment_id'],
-                'employee_id' => (int) $row['employee_id'],
-                'checklist_phase' => (string) $row['phase'],
-                'deadline_source' => $row['deadline_source'],
-                'deadline_source_status' => $row['deadline_source_status'],
-                // `/payroll/employees/{id}` neexistuje — ta cesta byla přepsaná
-                // z názvu tabulky, ne z routeru, takže odkaz z přehledu termínů
-                // vedl na prázdno. Adresa karty člověka je `/payroll/people/{id}`.
-                'path' => '/payroll/people/' . (int) $row['employee_id'],
+                'title' => (string) $itemKey,
+                'per_person' => true,
+                'count' => $count,
+                'oldest_due_on' => null,
+                'newest_due_on' => null,
+                'min_days_to_due' => null,
+                'max_days_to_due' => null,
+                'is_overdue' => false,
+                'items' => [],
             ];
         }
+        usort(
+            $groups,
+            static fn (array $a, array $b): int
+                => [$b['count'], $a['title']] <=> [$a['count'], $b['title']],
+        );
 
-        return $items;
+        return $groups;
+    }
+
+    /**
+     * Položka checklistu tak, jak ji vidí přehled. Bez termínu nese fázi
+     * {@see self::UNDATED_PHASE} a `due_on` i `days_to_due` null, tedy nic,
+     * co by se dalo splést s lhůtou.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function checklistRowItem(array $row): array
+    {
+        $dueOn = $row['due_date'] === null ? null : (string) $row['due_date'];
+        $phase = $dueOn === null ? self::UNDATED_PHASE : $this->phase($dueOn);
+
+        return [
+            'source' => 'checklist',
+            'reference' => 'payroll_checklist_item:' . (int) $row['item_id'],
+            'item_id' => (int) $row['item_id'],
+            'title' => (string) $row['item_key'],
+            'subject' => (string) $row['full_name'],
+            'personal_number' => ($row['employment_code'] ?? null) === null
+                ? null
+                : (string) $row['employment_code'],
+            'period' => null,
+            'due_on' => $dueOn,
+            'phase' => $phase,
+            'days_to_due' => $dueOn === null ? null : $this->daysToDue($dueOn),
+            'is_overdue' => $phase === 'overdue',
+            'employment_id' => (int) $row['employment_id'],
+            'employee_id' => (int) $row['employee_id'],
+            'checklist_phase' => (string) $row['phase'],
+            'deadline_source' => $row['deadline_source'],
+            'deadline_source_status' => $row['deadline_source_status'],
+            // `/payroll/employees/{id}` neexistuje — ta cesta byla přepsaná
+            // z názvu tabulky, ne z routeru, takže odkaz z přehledu termínů
+            // vedl na prázdno. Adresa karty člověka je `/payroll/people/{id}`.
+            'path' => '/payroll/people/' . (int) $row['employee_id'],
+        ];
     }
 
     /**

@@ -3049,7 +3049,7 @@ export interface PayrollMonthlyChecklistResponse {
 
 /** Fáze zákonného termínu — prahy drží backend, UI je jen barví. */
 export type PayrollDeadlinePhase = 'overdue' | 'due_today' | 'due_soon' | 'open'
-  | 'awaiting_result' | 'action_required'
+  | 'awaiting_result' | 'action_required' | 'undated'
 
 export type PayrollDeadlineSource = 'submission' | 'levy' | 'checklist'
   | 'registration_change' | 'tax_statement' | 'sickness_case'
@@ -3062,9 +3062,10 @@ export interface PayrollDeadlineItem {
   title: string
   subject: string
   period: string | null
-  due_on: string
+  /** `null` u položky bez zákonné lhůty (fáze `undated`). */
+  due_on: string | null
   phase: PayrollDeadlinePhase
-  days_to_due: number
+  days_to_due: number | null
   is_overdue: boolean
   /** Kam se to řeší — routa aplikace, ne externí odkaz. */
   path: string
@@ -3113,11 +3114,11 @@ export interface PayrollDeadlineGroup {
   title: string
   per_person: boolean
   count: number
-  oldest_due_on: string
-  newest_due_on: string
-  /** Nejzápornější = nejstarší prodlení. */
-  min_days_to_due: number
-  max_days_to_due: number
+  oldest_due_on: string | null
+  newest_due_on: string | null
+  /** Nejzápornější = nejstarší prodlení; `null` ve skupině bez termínu. */
+  min_days_to_due: number | null
+  max_days_to_due: number | null
   is_overdue: boolean
   items: PayrollDeadlineItem[]
 }

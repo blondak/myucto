@@ -6,7 +6,6 @@ import {
   payrollApi,
   type PayrollDeadlineGroup,
   type PayrollDeadlineGroupedOverview,
-  type PayrollDeadlinePhase,
   type PayrollDeadlineSource,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
@@ -15,10 +14,12 @@ import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate, formatPeriod } from '@/composables/useFormat'
 import PayrollDeadlineGroupPeople from '@/pages/payroll/PayrollDeadlineGroupPeople.vue'
 import {
+  PANEL_PHASE_ORDER,
   PHASE_BADGE,
-  PHASE_ORDER,
   PHASE_TONE,
+  UNDATED_PHASE,
   usePayrollDeadlineLabels,
+  type PayrollDeadlinePanelPhase,
 } from '@/pages/payroll/payrollDeadlineLabels'
 
 /**
@@ -42,6 +43,12 @@ import {
  * zapadl mezi otevřenými lhůtami v horizontu 45 dnů.
  *
  * **Prázdno neřve.** Firma bez zmeškaného termínu dostane jednu klidnou větu.
+ *
+ * **Bez termínu až na konci.** Nevyřízené položky checklistu, u kterých lhůta
+ * odvodit nejde (přihláška ČSSZ u nástupu před 1. 7. 2026), mají vlastní
+ * sekci za všemi lhůtami a stejné hromadné odškrtnutí. Mzdový běh je dál
+ * hlásí jako chybějící; bez téhle sekce by šly odškrtnout jen po jedné na
+ * kartě vztahu. Do „Po termínu" se nepočítají.
  */
 
 const { t } = useI18n()
@@ -68,14 +75,14 @@ const bulkNotice = ref('')
 const allowed = computed(() => auth.canRead('payroll.submissions'))
 
 interface PhaseSection {
-  phase: PayrollDeadlinePhase
+  phase: PayrollDeadlinePanelPhase
   count: number
   groups: PayrollDeadlineGroup[]
 }
 
 const sections = computed<PhaseSection[]>(() => {
   const groups = overview.value?.groups ?? []
-  return PHASE_ORDER
+  return PANEL_PHASE_ORDER
     .map(phase => {
       const inPhase = groups.filter(group => group.phase === phase)
       return {
@@ -269,6 +276,13 @@ defineExpose({ reload: load })
               {{ t('payroll.dashboard.deadlines.overdue_hint') }}
             </p>
           </div>
+          <p
+            v-if="section.phase === UNDATED_PHASE"
+            class="mt-1 text-xs text-neutral-600"
+            data-test="payroll-deadlines-undated-hint"
+          >
+            {{ t('payroll.dashboard.deadlines.undated_hint') }}
+          </p>
 
           <ul class="mt-2 divide-y divide-neutral-200 overflow-hidden rounded-md border border-neutral-200 bg-surface">
             <template v-for="group in visibleGroups(section)" :key="group.key">
@@ -354,7 +368,7 @@ defineExpose({ reload: load })
                     {{ t(`payroll.dashboard.deadlines.source.${group.source}`) }}
                   </span>
                   <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                    <span class="font-medium text-neutral-800">{{ formatDate(group.oldest_due_on) }}</span>
+                    <span v-if="group.oldest_due_on" class="font-medium text-neutral-800">{{ formatDate(group.oldest_due_on) }}</span>
                     <span
                       class="rounded-full px-1.5 py-0.5 font-medium whitespace-nowrap"
                       :class="PHASE_BADGE[group.phase]"

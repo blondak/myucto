@@ -227,17 +227,127 @@ final readonly class PayrollDeadlineOverviewRepository
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
               WHERE item.supplier_id = ?
-                AND item.status = \'pending\'
                 AND item.due_date IS NOT NULL
                 AND item.due_date >= ?
                 AND item.due_date <= ?
                 AND (? IS NULL OR item.item_key = ?)
+                AND ' . self::OPEN_CHECKLIST_ITEM . '
+              ORDER BY item.due_date ASC, item.id ASC'
+        );
+        $statement->execute([$supplierId, $from, $to, $itemKey, $itemKey]);
+
+        return $this->rows($statement);
+    }
+
+    /**
+     * Nevyřízené položky checklistu BEZ odvozeného termínu.
+     *
+     * Termín chybí tam, kde ho zákon neukládá nebo kde ho aplikace odvodit
+     * nesmí (přihláška ČSSZ u nástupu před 1. 7. 2026, potvrzení o příjmech
+     * na žádost, kontrola exekucí). Povinnost tím nezmizela: mzdový běh ji
+     * dál hlásí jako chybějící přihlášku a radí ji odškrtnout. Bez tohohle
+     * dotazu byla k vidění jen na kartě každého vztahu zvlášť, takže 225 lidí
+     * po importu znamenalo 225 ručních odškrtnutí.
+     *
+     * Výběr je TENTÝŽ jako u položek s termínem ({@see self::OPEN_CHECKLIST_ITEM}),
+     * liší se jen podmínkou na `due_date`.
+     *
+     * @return list<array{
+     *   item_id:int,employment_id:int,employee_id:int,full_name:string,
+     *   employment_code:?string,phase:string,item_key:string,due_date:null,
+     *   deadline_source:?string,deadline_source_status:?string
+     * }>
+     */
+    public function checklistWithoutDeadline(int $supplierId, ?string $itemKey = null): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT item.id AS item_id,
+                    item.employment_id,
+                    employment.employee_id,
+                    employee.full_name,
+                    employment.code AS employment_code,
+                    item.phase,
+                    item.item_key,
+                    item.due_date,
+                    item.deadline_source,
+                    item.deadline_source_status
+               FROM payroll_employment_checklist_items item
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = item.supplier_id
+                AND employment.id = item.employment_id
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = employment.supplier_id
+                AND employee.id = employment.employee_id
+              WHERE item.supplier_id = ?
+                AND item.due_date IS NULL
+                AND (? IS NULL OR item.item_key = ?)
+                AND ' . self::OPEN_CHECKLIST_ITEM . '
+              ORDER BY item.id ASC'
+        );
+        $statement->execute([$supplierId, $itemKey, $itemKey]);
+
+        return $this->rows($statement);
+    }
+
+    /**
+     * Počty nevyřízených položek bez termínu podle druhu — seskupený přehled
+     * kvůli řádku „Registrace ČSSZ / JMHZ, 225 osob" nemusí tahat jména.
+     *
+     * @return array<string,int> klíčem je `item_key`
+     */
+    public function checklistWithoutDeadlineCounts(int $supplierId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT item.item_key, COUNT(*) AS item_count
+               FROM payroll_employment_checklist_items item
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = item.supplier_id
+                AND employment.id = item.employment_id
+              WHERE item.supplier_id = ?
+                AND item.due_date IS NULL
+                AND ' . self::OPEN_CHECKLIST_ITEM . '
+              GROUP BY item.item_key'
+        );
+        $statement->execute([$supplierId]);
+
+        $counts = [];
+        foreach ($this->rows($statement) as $row) {
+            $counts[(string) $row['item_key']] = (int) $row['item_count'];
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Co je „nevyřízená položka checklistu" — sdílené oběma dotazům výše, aby
+     * skupina s termínem a skupina bez termínu nevybíraly podle dvou pravidel.
+     *
+     * Vyřazuje položky, ke kterým existuje DOKLAD (stejný výčet jako
+     * `PayrollEmploymentRepository::CHECKLIST_EVIDENCE` a její
+     * `effective_status`); jinak by hlídač připomínal to, co je hotové.
+     * Potvrzení o zdanitelných příjmech se tu dřív nevyřazovalo, protože nikdy
+     * nemělo termín a do přehledu se nedostalo; bez termínu už se dostane.
+     *
+     * Předpokládá aliasy `item` a `employment`.
+     */
+    private const OPEN_CHECKLIST_ITEM = '
+                item.status = \'pending\'
                 AND employment.status NOT IN (\'no_show\', \'archived\')
                 AND NOT EXISTS (
                       SELECT 1 FROM payroll_eldp_statements statement
                        WHERE item.item_key = \'eldp_submission\'
                          AND statement.supplier_id = item.supplier_id
                          AND statement.employment_id = item.employment_id
+                    )
+                AND NOT EXISTS (
+                      SELECT 1 FROM payroll_generated_documents document
+                       WHERE item.item_key = \'taxable_income_confirmation\'
+                         AND document.supplier_id = item.supplier_id
+                         AND document.employee_id = employment.employee_id
+                         AND document.document_kind IN (
+                               \'taxable_income_advance_certificate\',
+                               \'taxable_income_withholding_certificate\'
+                             )
                     )
                 AND NOT EXISTS (
                       SELECT 1 FROM payroll_obligations obligation
@@ -267,13 +377,7 @@ final readonly class PayrollDeadlineOverviewRepository
                                      \'payroll_health_notification:\',
                                      item.employment_id, \':employment_end:%\'))
                          )
-                    )
-              ORDER BY item.due_date ASC, item.id ASC'
-        );
-        $statement->execute([$supplierId, $from, $to, $itemKey, $itemKey]);
-
-        return $this->rows($statement);
-    }
+                    )';
 
     /**
      * Položky checklistu podle id, jen v rámci firmy. Cizí nebo neexistující

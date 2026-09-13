@@ -1,4 +1,4 @@
-# Zaměstnanci
+# 72. Zaměstnanci
 
 ## 72.1 Účel
 
@@ -566,7 +566,9 @@ příslušná položka nástupního checklistu je nesplněná, k vztahu není ev
 ani archivovaný, nástup už nastal a vztah zakládá účast na pojištění. Dohoda
 s automatickým posouzením účasti, vztah bez účasti i cizinec s formulářem A1
 tedy mlčí. Podali-li jste přihlášku mimo aplikaci, odškrtněte položku
-checklistu — tím varování umlčíte.
+checklistu — tím varování umlčíte. Týká-li se to víc lidí, označte je hromadně
+v panelu **Zákonné termíny** na přehledu mezd; u nástupu před 1. 7. 2026 je
+položka v sekci **Bez termínu** (viz kapitola 71.2.2).
 
 Časová osa zachovává stavové přechody, změny checklistu i rozdíl každé smluvní
 verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je

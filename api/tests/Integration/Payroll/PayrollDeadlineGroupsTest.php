@@ -240,6 +240,87 @@ final class PayrollDeadlineGroupsTest extends TestCase
         self::assertSame(1, $this->pendingCount($this->supplierId, 'legacy_start_date', $this->overdueOn));
     }
 
+    /**
+     * Nástup před 1. 7. 2026 nemá u přihlášky ČSSZ odvozenou lhůtu, takže
+     * položka má `due_date NULL`. Přehled ji dřív vůbec neukázal a mzdový běh
+     * přitom 225× hlásil, ať ji účetní odškrtne na kartě každého vztahu.
+     * Bez termínu = vlastní skupina se stejným hromadným odškrtnutím, ale
+     * počty „Po termínu" ani celkový souhrn termínů se nemění.
+     */
+    public function testPendingItemsWithoutDeadlineFormTheirOwnGroupWithBulkCompletion(): void
+    {
+        $this->seedPeople($this->supplierId, 3, ['employment_contract'], $this->overdueOn);
+        $this->seedPeople($this->supplierId, 1, ['employment_contract'], $this->soonOn, 'NOVY');
+        $undated = $this->seedPeople($this->supplierId, 130, ['social_jmhz_registration'], null, 'BEZLHUTY');
+        $archived = $this->seedPeople($this->supplierId, 1, ['social_jmhz_registration'], null, 'ARCHIV')[0];
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET status = "archived" WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $archived['employment_id']]);
+
+        $overview = $this->call('groups', 'GET', '/api/payroll/deadlines/groups');
+
+        self::assertSame(3, $overview['summary']['overdue'], 'Položka bez termínu nesmí nafouknout „Po termínu".');
+        self::assertSame(1, $overview['summary']['due_soon']);
+        self::assertSame(4, $overview['summary']['total']);
+        self::assertSame(130, $overview['summary']['undated'] ?? null);
+        $groups = array_column($overview['groups'], null, 'key');
+        $group = $groups['undated:checklist:social_jmhz_registration'] ?? null;
+        self::assertNotNull($group, 'Nevyřízená položka bez termínu musí mít v přehledu vlastní skupinu.');
+        self::assertSame('undated', $group['phase']);
+        self::assertSame(130, $group['count'], 'Archivovaný vztah do skupiny nepatří.');
+        self::assertTrue($group['per_person']);
+        self::assertFalse($group['is_overdue']);
+        self::assertNull($group['oldest_due_on']);
+        self::assertSame([], $group['items']);
+        self::assertSame('overdue', $overview['groups'][0]['phase'], 'Zmeškané termíny zůstávají první.');
+        self::assertSame('undated', $overview['groups'][count($overview['groups']) - 1]['phase'], 'Bez termínu jde až za všechny lhůty.');
+
+        $params = ['phase' => 'undated', 'source' => 'checklist', 'title' => 'social_jmhz_registration'];
+        $page = $this->call('items', 'GET', '/api/payroll/deadlines/items', $params + ['offset' => '125', 'limit' => '25']);
+        self::assertSame(130, $page['total']);
+        self::assertCount(5, $page['items']);
+        self::assertNull($page['items'][0]['due_on']);
+        self::assertSame('undated', $page['items'][0]['phase']);
+        self::assertArrayHasKey('item_id', $page['items'][0]);
+
+        $wrongSource = $this->respond('items', $this->request('GET', '/api/payroll/deadlines/items')
+            ->withQueryParams(['phase' => 'undated', 'source' => 'levy', 'title' => 'health_insurance']));
+        self::assertSame(422, $wrongSource->getStatusCode());
+
+        $selected = $this->call('completeChecklist', 'POST', '/api/payroll/deadlines/checklist/complete', [], [
+            'item_ids' => [$undated[0]['items']['social_jmhz_registration'], $undated[1]['items']['social_jmhz_registration']],
+            'note' => self::NOTE,
+        ]);
+        self::assertCount(2, $selected['completed']);
+
+        $body = ['phase' => 'undated', 'item_key' => 'social_jmhz_registration', 'note' => self::NOTE];
+        $completed = 0;
+        $requests = 0;
+        $afterId = 0;
+        do {
+            $result = $this->call('completeChecklist', 'POST', '/api/payroll/deadlines/checklist/complete', [], $body + ['after_id' => $afterId]);
+            $completed += count($result['completed']);
+            self::assertSame([], $result['failed']);
+            $afterId = $result['next_after_id'];
+            ++$requests;
+        } while (!$result['complete'] && $requests < 20);
+
+        self::assertSame(128, $completed);
+        self::assertGreaterThanOrEqual(2, $requests);
+        self::assertSame(0, $this->pendingCount($this->supplierId, 'social_jmhz_registration', null, 'BEZLHUTY%'));
+        self::assertSame(1, $this->pendingCount($this->supplierId, 'social_jmhz_registration', null, 'ARCHIV%'));
+        self::assertSame(3, $this->pendingCount($this->supplierId, 'employment_contract', $this->overdueOn));
+        self::assertSame(130, $this->scalar(
+            'SELECT COUNT(*) FROM payroll_employment_events
+              WHERE supplier_id = ? AND event_type = "checklist_changed" AND note = ?',
+            [$this->supplierId, self::NOTE],
+        ));
+
+        $after = $this->call('groups', 'GET', '/api/payroll/deadlines/groups');
+        self::assertArrayNotHasKey('undated:checklist:social_jmhz_registration', array_column($after['groups'], null, 'key'));
+        self::assertSame(0, $after['summary']['undated']);
+    }
+
     public function testNoteIsRequired(): void
     {
         $person = $this->seedPeople($this->supplierId, 1, ['employment_contract'], $this->overdueOn)[0];
@@ -301,7 +382,7 @@ final class PayrollDeadlineGroupsTest extends TestCase
         int $supplierId,
         int $count,
         array $itemKeys,
-        string $dueOn,
+        ?string $dueOn,
         string $prefix = 'SYN',
         bool $withStartDate = true,
     ): array {
@@ -344,16 +425,19 @@ final class PayrollDeadlineGroupsTest extends TestCase
         return $people;
     }
 
-    private function pendingCount(int $supplierId, string $itemKey, string $dueOn): int
+    private function pendingCount(int $supplierId, string $itemKey, ?string $dueOn, string $codeLike = '%'): int
     {
         return $this->scalar(
-            'SELECT COUNT(*) FROM payroll_employment_checklist_items
-              WHERE supplier_id = ? AND item_key = ? AND due_date = ? AND status = "pending"',
-            [$supplierId, $itemKey, $dueOn],
+            'SELECT COUNT(*) FROM payroll_employment_checklist_items item
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = item.supplier_id AND employment.id = item.employment_id
+              WHERE item.supplier_id = ? AND item.item_key = ? AND item.due_date <=> ?
+                AND item.status = "pending" AND employment.code LIKE ?',
+            [$supplierId, $itemKey, $dueOn, $codeLike],
         );
     }
 
-    /** @param list<int|string> $params */
+    /** @param list<int|string|null> $params */
     private function scalar(string $sql, array $params): int
     {
         $statement = $this->db->pdo()->prepare($sql);

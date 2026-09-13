@@ -7118,6 +7118,8 @@
         "items_count": "{n} items | {n} item | {n} items",
         "oldest": "{label} (oldest)",
         "bulk_done": "Marked as done: {n}.",
+        "undated_label": "no statutory deadline",
+        "undated_hint": "Open per-person items with no statutory deadline, or one the app does not derive (for example the ČSSZ registration for a start before 1 July 2026). Expand a group to mark items handled outside the app as done in bulk.",
         "group": {
           "search": "Search name or personal number",
           "col_name": "Name",
@@ -7149,7 +7151,8 @@
           "due_soon": "Within five days",
           "action_required": "Action required",
           "awaiting_result": "Awaiting result",
-          "open": "Open"
+          "open": "Open",
+          "undated": "No deadline"
         },
         "source": {
           "submission": "Filing",
