@@ -502,7 +502,7 @@ final class SettingsAction
         // přepínat i účetní, ne jen admin — cílený bypass guard() JEN pro tato pole
         // (least-invasive: guard() zůstává admin-only pro všechno ostatní; sem se
         // accountant dostane pouze pokud body neobsahuje NIC jiného než tato pole).
-        $stockOnlyFields = ['stock_enabled', 'stock_auto_issue', 'stock_in_transit_from'];
+        $stockOnlyFields = ['stock_enabled', 'stock_auto_issue', 'stock_in_transit_from', 'invoice_pdf_show_base_qty'];
         $isStockOnlyUpdate = $body !== [] && array_diff(array_keys($body), $stockOnlyFields) === [];
         if ($isStockOnlyUpdate) {
             if (!RequestAuthorization::allows($request, 'stock', AccessLevel::WRITE)) {
@@ -594,6 +594,8 @@ final class SettingsAction
             // `stock_in_transit_from` (migrace 1331) rozhoduje, od kterého stavu objednávky
             // se zboží počítá „na cestě" — čte ho InTransitRepository::inTransitStates().
             'stock_enabled', 'stock_auto_issue', 'stock_in_transit_from',
+            // Rozpis balení na základní jednotky na PDF faktury (issue #17, migrace 1832).
+            'invoice_pdf_show_base_qty',
             // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po
             // přijetí; admin-only (jako ostatní účetní nastavení firmy), účinek jen v double_entry.
             'auto_post_invoices', 'auto_post_purchases',
@@ -972,7 +974,7 @@ final class SettingsAction
             }
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit'], true)
+                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit'], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }
@@ -1280,6 +1282,8 @@ final class SettingsAction
         // v InTransitRepository::inTransitStates(), jinak by obrazovka ukazovala
         // jiný stav, než podle kterého se doopravdy počítá.
         $row['stock_in_transit_from']    = (string) ($row['stock_in_transit_from'] ?? 'sent');
+        // Rozpis balení na PDF faktury (migrace 1832) — výchozí zapnuto.
+        $row['invoice_pdf_show_base_qty'] = (bool) ($row['invoice_pdf_show_base_qty'] ?? true);
         // Auto-post hook (A2, migrace 1035) — opt-in auto-zaúčtování; FE gatuje na double_entry.
         $row['auto_post_invoices']       = (bool) ($row['auto_post_invoices'] ?? false);
         $row['auto_post_purchases']      = (bool) ($row['auto_post_purchases'] ?? false);

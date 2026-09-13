@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Eshop\Pricing;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\StockItemCustomerPriceRepository;
 use MyInvoice\Repository\StockItemPriceRepository;
 use MyInvoice\Repository\StockItemPromoPriceRepository;
 use PDO;
@@ -44,6 +45,15 @@ use PDO;
  * Akce, která NENÍ levnější než standardní cena, se ignoruje (`not_cheaper`) —
  * po snížení běžné ceny by jinak stará „akce" cenu zdražila.
  *
+ * ── Individuální ceny zákazníků (issue #17) ─────────────────────────────────
+ * S `$clientId` se nejdřív hledá zákaznická cena karty platná k `$onDate`
+ * v téže měně (`stock_item_customer_prices`). Ta NAHRAZUJE standardní cenu jako
+ * základ: pevná cena → `fixed_price`, sleva → standardní cena × (1 − pct/100)
+ * na haléře. Akční cena se pak použije jen tehdy, když je levnější než tento
+ * základ (stejná `not_cheaper` logika) — zákazník dostane lepší z obou. Bez
+ * klienta se chování nemění. Množstevní stropy akcí se posuzují v ZÁKLADNÍCH
+ * jednotkách karty (`$qty` musí volající převést přes StockUnitConverter).
+ *
  * Vše přes bcmath/string (money-safe, žádný float).
  */
 final class EffectivePriceResolver
@@ -56,6 +66,7 @@ final class EffectivePriceResolver
         private readonly Connection $db,
         private readonly StockItemPriceRepository $prices,
         private readonly StockItemPromoPriceRepository $promos,
+        private readonly StockItemCustomerPriceRepository $customerPrices,
     ) {}
 
     /**
@@ -69,9 +80,46 @@ final class EffectivePriceResolver
         string $currency = 'CZK',
         string $qty = '1',
         ?string $onDate = null,
+        ?int $clientId = null,
     ): array {
-        $all = $this->resolveMany($supplierId, [$stockItemId], $currency, $qty, $onDate);
+        $all = $this->resolveMany($supplierId, [$stockItemId], $currency, $qty, $onDate, $clientId);
         return $all[$stockItemId] ?? $this->emptyResult($stockItemId, $currency, null);
+    }
+
+    /**
+     * Standardní ceny karet v dané měně (bez zákaznické ceny a akce).
+     *
+     * @param list<int> $stockItemIds
+     * @return array<int,string>
+     */
+    public function standardPrices(int $supplierId, array $stockItemIds, string $currency = 'CZK'): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $stockItemIds), static fn (int $i): bool => $i > 0)));
+        if ($ids === []) {
+            return [];
+        }
+        $currency = strtoupper(trim($currency)) !== '' ? strtoupper(trim($currency)) : 'CZK';
+        return $this->basePrices($supplierId, $ids, $currency);
+    }
+
+    /**
+     * Cena za základní jednotku podle řádku zákaznické ceny: pevná cena, nebo
+     * standardní cena ponížená o slevu (haléře, half-up). Sleva bez standardní
+     * ceny nemá z čeho počítat → null.
+     *
+     * @param array<string,mixed> $row řádek stock_item_customer_prices
+     */
+    public static function customerBaseline(?string $standardPrice, array $row): ?string
+    {
+        if ((string) $row['price_type'] === 'fixed') {
+            return $row['fixed_price'] !== null ? bcadd((string) $row['fixed_price'], '0', self::MONEY_SCALE) : null;
+        }
+        if ($standardPrice === null || $row['discount_pct'] === null) {
+            return null;
+        }
+        $factor = bcsub('100', (string) $row['discount_pct'], 6);
+        $raw = bcdiv(bcmul($standardPrice, $factor, 10), '100', 10);
+        return bcadd($raw, '0.005', self::MONEY_SCALE);
     }
 
     /**
@@ -88,6 +136,13 @@ final class EffectivePriceResolver
      *   promo                … null nebo {id,label,promo_price,valid_from,valid_to,
      *                          qty_mode,qty_limit,qty_remaining}
      *
+     * Jen když se použila zákaznická cena (`$clientId` + platný řádek), přibudou:
+     *   standard_price       … standardní cena z cenotvorby (string|null),
+     *   price_source         … customer_fixed|customer_discount|promo,
+     *   customer_price_id    … id použité zákaznické ceny,
+     *   customer_price       … {id,price_type,fixed_price,discount_pct,valid_from,valid_to}
+     * a `base_price` je pak zákaznická cena (základ, se kterým se akce porovnává).
+     *
      * @param list<int> $stockItemIds
      * @return array<int,array<string,mixed>> stock_item_id => výsledek
      */
@@ -97,6 +152,7 @@ final class EffectivePriceResolver
         string $currency = 'CZK',
         string|array $qty = '1',
         ?string $onDate = null,
+        ?int $clientId = null,
     ): array {
         $ids = array_values(array_unique(array_filter(
             array_map('intval', $stockItemIds),
@@ -110,6 +166,18 @@ final class EffectivePriceResolver
         $qty = is_array($qty) ? array_map($this->normalizeQty(...), $qty) : $this->normalizeQty($qty);
 
         $base = $this->basePrices($supplierId, $ids, $currency);
+        $standard = $base;
+        $customer = [];
+        if ($clientId !== null && $clientId > 0) {
+            foreach ($this->customerPrices->activeFor($supplierId, $clientId, $currency, $ids, $onDate) as $itemId => $row) {
+                $baseline = self::customerBaseline($standard[$itemId] ?? null, $row);
+                if ($baseline === null) {
+                    continue;
+                }
+                $base[$itemId] = $baseline;
+                $customer[$itemId] = $row;
+            }
+        }
         $candidates = $this->promos->activeForItems($supplierId, $ids, $currency, $onDate);
         $limited = [];
         foreach ($candidates as $rows) {
@@ -146,7 +214,7 @@ final class EffectivePriceResolver
 
         $out = [];
         foreach ($ids as $itemId) {
-            $out[$itemId] = $this->decide(
+            $result = $this->decide(
                 $supplierId,
                 $itemId,
                 $currency,
@@ -155,6 +223,25 @@ final class EffectivePriceResolver
                 $candidates[$itemId] ?? [],
                 $stockQty[$itemId] ?? '0.000',
             );
+            // Klíče zákaznické ceny jen tam, kde se zákaznická cena opravdu použila —
+            // bez klienta (nebo bez jeho ceny) je výsledek bajt po bajtu dnešní.
+            $row = $customer[$itemId] ?? null;
+            if ($row !== null) {
+                $result['standard_price'] = $standard[$itemId] ?? null;
+                $result['price_source'] = $result['promo_applied']
+                    ? 'promo'
+                    : ((string) $row['price_type'] === 'fixed' ? 'customer_fixed' : 'customer_discount');
+                $result['customer_price_id'] = (int) $row['id'];
+                $result['customer_price'] = [
+                    'id'           => (int) $row['id'],
+                    'price_type'   => (string) $row['price_type'],
+                    'fixed_price'  => $row['fixed_price'],
+                    'discount_pct' => $row['discount_pct'],
+                    'valid_from'   => $row['valid_from'],
+                    'valid_to'     => $row['valid_to'],
+                ];
+            }
+            $out[$itemId] = $result;
         }
         return $out;
     }

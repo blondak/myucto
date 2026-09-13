@@ -46,6 +46,7 @@ final class PurchaseOrderReceiptService
         private readonly StockDocumentRepository $docs,
         private readonly StockDocumentService $documents,
         private readonly StockAcquisitionCostService $costs,
+        private readonly StockUnitConverter $units,
     ) {}
 
     /**
@@ -277,7 +278,8 @@ final class PurchaseOrderReceiptService
     private function invoiceCostsByOrderLine(int $supplierId, int $orderId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.purchase_order_line_id, pii.quantity, pii.total_without_vat, pii.total_with_vat,
+            'SELECT pii.purchase_order_line_id, pii.quantity, pii.unit, pii.total_without_vat, pii.total_with_vat,
+                    COALESCE(pii.stock_item_id, pol.stock_item_id) AS stock_item_id,
                     pi.id AS purchase_invoice_id, pi.exchange_rate, pi.tax_date, pi.issue_date
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
@@ -296,6 +298,11 @@ final class PurchaseOrderReceiptService
                 continue;
             }
             $context = $contexts[(int) $r['purchase_invoice_id']] ??= $this->costs->context($supplierId, $r);
+            // Řádek objednávky je v základní jednotce karty; faktura mohla přijít
+            // v balení (issue #17) — cena se rozloží na základní jednotky.
+            if ($r['stock_item_id'] !== null) {
+                $r['quantity'] = $this->units->toBase($supplierId, (int) $r['stock_item_id'], (string) $r['unit'], (string) $r['quantity']);
+            }
             $out[(int) $r['purchase_order_line_id']] = number_format($this->costs->unitCost($context, $r), 6, '.', '');
         }
 

@@ -53,6 +53,10 @@ export interface StockItem extends StockItemEffectivePrice {
   avg_unit_cost?: string
   is_active: boolean
   is_stocked: boolean
+  /** Výchozí prodejní jednotka (kód balení); null = základní jednotka. */
+  default_sale_unit?: string | null
+  /** Karta má individuální ceny zákazníků. */
+  has_customer_prices?: boolean
   lifecycle_status?: StockItemLifecycleStatus
   retired_at?: string | null
   row_version: number
@@ -193,6 +197,112 @@ export interface StockItemSearchResult extends StockItemEffectivePrice {
   tracking_mode?: StockTrackingMode
   vat_rate_id: number | null
   sale_price_without_vat: string | null
+  /** Balení karty (nadřazené jednotky) s poměrem k základní jednotce `unit`. */
+  units?: StockItemPackagingUnit[]
+  /** Výchozí prodejní jednotka; null = základní jednotka. */
+  default_sale_unit?: string | null
+  /** Kód balení, když dotaz přesně odpovídá EAN balení; jinak null. */
+  matched_unit?: string | null
+  /** Karta má individuální ceny zákazníků (zapíná nacenění v editoru faktury). */
+  has_customer_prices?: boolean
+}
+
+/**
+ * Balení skladové karty (issue #17). `numerator/denominator` je přesný zlomek:
+ * základní množství = qty × numerator / denominator. `factor` je týž poměr jako
+ * desetinný string (max 3 desetinná místa) pro formulář a výstup.
+ */
+export interface StockItemPackagingUnit {
+  unit_code: string
+  name: string | null
+  factor: string
+  numerator: number
+  denominator: number
+  ean: string | null
+  /** Kód používají vystavené doklady karty, backend proto odmítne jeho odebrání i změnu poměru. */
+  in_use?: boolean
+}
+
+export interface StockItemPackaging {
+  base_unit: string
+  default_sale_unit: string | null
+  units: StockItemPackagingUnit[]
+}
+
+export interface StockItemPackagingPayload {
+  default_sale_unit: string | null
+  units: Array<{ unit_code: string; factor: string; ean: string | null }>
+}
+
+export type StockCustomerPriceType = 'fixed' | 'discount_pct'
+
+/** Individuální cena zákazníka, VŽDY za základní jednotku a bez DPH. */
+export interface StockItemCustomerPrice {
+  id: number
+  client_id: number
+  client_name: string | null
+  currency_code: string
+  price_type: StockCustomerPriceType
+  fixed_price: string | null
+  discount_pct: string | null
+  valid_from: string | null
+  valid_to: string | null
+  note: string | null
+  /** Dnešní výsledná cena za základní jednotku (dopočet backendem). */
+  resulting_price: string | null
+}
+
+export interface StockItemCustomerPricePayload {
+  client_id: number
+  currency_code: string
+  price_type: StockCustomerPriceType
+  fixed_price?: string | null
+  discount_pct?: string | null
+  valid_from?: string | null
+  valid_to?: string | null
+  note?: string | null
+}
+
+export type StockQuotePriceSource = 'standard' | 'customer_fixed' | 'customer_discount' | 'promo'
+
+export interface StockQuoteRequestLine {
+  key: string
+  stock_item_id: number
+  unit: string | null
+  quantity: string
+}
+
+export interface StockQuoteRequest {
+  client_id: number | null
+  currency: string
+  date: string | null
+  lines: StockQuoteRequestLine[]
+}
+
+/** Nacenění řádku (POST /stock/items/quote), jediný zdroj ceny skladového řádku faktury. */
+export interface StockQuoteLine {
+  key: string
+  stock_item_id: number
+  /** Použitá jednotka (neznámá → základní). */
+  unit: string | null
+  base_unit: string
+  numerator: number
+  denominator: number
+  base_quantity: string
+  /** Cena bez DPH za ZVOLENOU jednotku; null = pro danou měnu karta cenu nemá. */
+  unit_price: string | null
+  base_unit_price: string
+  price_source: StockQuotePriceSource
+  customer_price_id: number | null
+  /** Sleva zákazníka v %, pokud ji backend pošle (price_source = customer_discount). */
+  discount_pct?: string | null
+  promo: { label: string | null; promo_price: string } | null
+  promo_reason?: string | null
+  promo_qty_available?: string | null
+}
+
+export interface StockQuoteResponse {
+  lines: StockQuoteLine[]
 }
 
 export interface StockItemListFilters {
@@ -843,6 +953,19 @@ export const stockApi = {
   },
   itemTracking: (id: number) => api.get<StockTrackingOverview>(`/stock/items/${id}/tracking`).then(r => r.data),
   replaceItemUnits: (id: number, units: Array<{ unit_code: string; numerator: number; denominator: number }>) => api.put(`/stock/items/${id}/units`, { units }).then(r => r.data),
+
+  // ── Balení a individuální ceny zákazníků (issue #17) ────────────────────
+  getItemPackaging: (id: number) =>
+    api.get<StockItemPackaging>(`/stock/items/${id}/packaging`).then(r => r.data),
+  replaceItemPackaging: (id: number, payload: StockItemPackagingPayload) =>
+    api.put<StockItemPackaging>(`/stock/items/${id}/packaging`, payload).then(r => r.data),
+  getCustomerPrices: (id: number) =>
+    api.get<StockItemCustomerPrice[]>(`/stock/items/${id}/customer-prices`).then(r => r.data),
+  /** Nahradí celou sadu individuálních cen karty (tělo je přímo pole řádků). */
+  replaceCustomerPrices: (id: number, rows: StockItemCustomerPricePayload[]) =>
+    api.put<StockItemCustomerPrice[]>(`/stock/items/${id}/customer-prices`, rows).then(r => r.data),
+  quoteItems: (payload: StockQuoteRequest) =>
+    api.post<StockQuoteResponse>('/stock/items/quote', payload).then(r => r.data),
 
   previewIntrastat: (payload: IntrastatExportRequest) =>
     api.post<IntrastatPreview>('/stock/intrastat/preview', payload).then(r => r.data),

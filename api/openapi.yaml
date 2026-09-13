@@ -12894,6 +12894,76 @@ paths:
       responses:
         '200': { description: Smazáno }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/eshop/packaging-units:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Eshop]
+      summary: Číselník balení (nadřazených jednotek)
+      parameters:
+        - in: query
+          name: active
+          schema: { type: boolean }
+          description: Jen aktivní balení.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EshopPackagingUnit' }
+    post:
+      tags: [Eshop]
+      summary: Vytvoří balení
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EshopPackagingUnitInput' }
+      responses:
+        '201': { description: Vytvořeno }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409': { description: Balení s tímto kódem už existuje (`packaging_unit_code_taken`) }
+  /api/v1/eshop/packaging-units/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Eshop]
+      summary: Detail balení
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EshopPackagingUnit' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Eshop]
+      summary: Upraví balení
+      description: Kód balení, které používá nějaká karta (`usage_count` > 0), nejde změnit (422 `packaging_unit_code_in_use`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EshopPackagingUnitInput' }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Balení s tímto kódem už existuje (`packaging_unit_code_taken`) }
+        '422': { description: Kód používají skladové karty (`packaging_unit_code_in_use`) }
+    delete:
+      tags: [Eshop]
+      summary: Smaže balení
+      responses:
+        '200': { description: Smazáno }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Balení používají skladové karty (`packaging_unit_in_use`, `suggestion: deactivate`).' }
   /api/v1/eshop/fee-types:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14063,16 +14133,51 @@ paths:
     get:
       tags: [Stock]
       summary: Našeptávač skladových karet (autocomplete)
+      description: |
+        Aktivní karty podle SKU, názvu, EAN karty nebo přesného EAN balení. Každý
+        výsledek nese i `effective_price` (CZK, dnes, bez odběratele), `default_sale_unit`,
+        `units` (balení karty, `StockItemSalesUnit`), `matched_unit` (kód balení, jehož
+        EAN přesně odpovídá `q`, jinak null) a `has_customer_prices`.
       parameters:
         - in: query
           name: q
           schema: { type: string }
-          description: Hledaný text (SKU, název, EAN).
+          description: Hledaný text (SKU, název, EAN karty nebo EAN balení).
         - in: query
           name: limit
           schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
       responses:
         '200': { description: OK }
+  /api/v1/stock/items/quote:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Stock]
+      summary: Nacenění skladových řádků dokladu v jednotce řádku
+      description: |
+        Jen čte. Jednotka řádku se převede na základní jednotku karty (jen balení,
+        neznámá jednotka = základní), cena za základní jednotku vznikne stejně jako
+        `effective_price` (se zákaznickou cenou odběratele, akce se stropem
+        v základních jednotkách) a `unit_price` = cena za základní jednotku × poměr
+        na haléře. Karta bez ceny v požadované měně vrací `unit_price`
+        i `base_unit_price` null, nikdy 0.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockItemQuoteRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items: { $ref: '#/components/schemas/StockItemQuoteLine' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/stock/items:
     parameters:
     - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14378,6 +14483,91 @@ paths:
                     $ref: '#/components/schemas/StockItemUnitInput'
       responses:
         '200': { description: Uloženo }
+        '422':
+          description: |
+            Neplatný převod, nebo `packaging_unit_code_clash` — kód už používá balení
+            karty. Tahle operace spravuje jen převodní jednotky šarží; balení nechává být.
+  /api/v1/stock/items/{id}/packaging:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Stock]
+      summary: Balení skladové karty
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockItemPackaging' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Stock]
+      summary: Uloží balení skladové karty
+      description: |
+        Kód balení musí být v aktivním číselníku balení firmy, nebo už na kartě být.
+        Balení, které nese jakýkoli řádek vydané či přijaté faktury karty (i draft),
+        nejde odebrat ani mu změnit poměr (`packaging_unit_in_use`). EAN balení je
+        unikátní v rámci firmy proti EAN karet i jiných balení (`ean_duplicate`).
+        Kód převodní jednotky šarží nejde použít (`packaging_unit_code_clash`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockItemPackagingInput' }
+      responses:
+        '200':
+          description: Uložené balení
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockItemPackaging' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/stock/items/{id}/customer-prices:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Stock]
+      summary: Individuální ceny zákazníků na skladové kartě
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockItemCustomerPrice' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Stock]
+      summary: Nahradí individuální ceny zákazníků na skladové kartě
+      description: |
+        Kompletní náhrada sady karty. Pro jednoho odběratele a měnu smí mít karta jen
+        jednu cenu (`customer_price_duplicate`); odběratel musí patřit firmě (`invalid_client`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 500
+              items: { $ref: '#/components/schemas/StockItemCustomerPriceInput' }
+      responses:
+        '200':
+          description: Uložená sada
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockItemCustomerPrice' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/stock/items/{id}/neighbors:
     parameters:
@@ -20992,6 +21182,16 @@ components:
         relations:
           type: array
           items: { type: object, additionalProperties: true }
+        default_sale_unit:
+          type: [string, 'null']
+          description: Výchozí prodejní jednotka karty — kód balení; null = základní jednotka.
+        units:
+          type: array
+          description: Balení karty (jen `is_sales_unit = 1`; převodní jednotky šarží sem nepatří). Vrací detail `/stock/items/{id}`.
+          items: { $ref: '#/components/schemas/StockItemSalesUnit' }
+        has_customer_prices:
+          type: boolean
+          description: Karta má aspoň jednu individuální cenu zákazníka (bez ohledu na odběratele a platnost). Vrací detail `/stock/items/{id}`.
     CatalogEditorInput:
       type: object
       required:
@@ -21196,6 +21396,129 @@ components:
         numerator: { type: integer, minimum: 1, maximum: 1000000 }
         denominator: { type: integer, minimum: 1, maximum: 1000000 }
       description: Přesný racionální převod na základní jednotku numerator/denominator bez float zaokrouhlení.
+    StockItemSalesUnit:
+      type: object
+      description: Balení karty — 1 `unit_code` = numerator/denominator základních jednotek.
+      properties:
+        unit_code: { type: string, maxLength: 20 }
+        name: { type: [string, 'null'], description: Název z číselníku balení. }
+        factor: { type: string, description: 'Poměr jako desetinné číslo, nejvýš 3 desetinná místa, bez koncových nul („8", „0.333").' }
+        numerator: { type: integer, minimum: 1 }
+        denominator: { type: integer, minimum: 1 }
+        ean: { type: [string, 'null'], maxLength: 20 }
+    StockItemPackaging:
+      type: object
+      properties:
+        base_unit: { type: string }
+        default_sale_unit: { type: [string, 'null'] }
+        units:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/StockItemSalesUnit'
+              - type: object
+                properties:
+                  in_use: { type: boolean, description: Balení nese nějaký řádek vydané či přijaté faktury karty (i draft). }
+    StockItemPackagingInput:
+      type: object
+      required: [units]
+      properties:
+        default_sale_unit: { type: [string, 'null'], description: Kód balení z `units`; null = základní jednotka. }
+        units:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [unit_code]
+            properties:
+              unit_code: { type: string, maxLength: 20 }
+              factor: { type: [string, number], description: 'Kladný poměr, nejvýš 3 desetinná místa. Shoduje-li se se zobrazením stávajícího zlomku, zlomek se zachová.' }
+              numerator: { type: integer, minimum: 1, maximum: 1000000, description: Přesný zlomek místo `factor`. }
+              denominator: { type: integer, minimum: 1, maximum: 1000000 }
+              ean: { type: [string, 'null'], maxLength: 20 }
+    StockItemCustomerPrice:
+      type: object
+      properties:
+        id: { type: integer }
+        client_id: { type: integer }
+        client_name: { type: string }
+        currency_code: { type: string, minLength: 3, maxLength: 3 }
+        price_type: { type: string, enum: [fixed, discount_pct] }
+        fixed_price: { type: [string, 'null'] }
+        discount_pct: { type: [string, 'null'] }
+        valid_from: { type: [string, 'null'], format: date }
+        valid_to: { type: [string, 'null'], format: date }
+        note: { type: [string, 'null'] }
+        resulting_price: { type: [string, 'null'], description: Výsledná cena za základní jednotku bez DPH podle dnešní standardní ceny. }
+    StockItemCustomerPriceInput:
+      type: object
+      required: [client_id, currency_code, price_type]
+      properties:
+        client_id: { type: integer, minimum: 1 }
+        currency_code: { type: string, minLength: 3, maxLength: 3 }
+        price_type: { type: string, enum: [fixed, discount_pct] }
+        fixed_price: { type: [string, number, 'null'], description: 'Povinné pro fixed; ≥ 0, nejvýš 2 desetinná místa, za základní jednotku bez DPH.' }
+        discount_pct: { type: [string, number, 'null'], description: 'Povinné pro discount_pct; 0–100, nejvýš 3 desetinná místa.' }
+        valid_from: { type: [string, 'null'], format: date }
+        valid_to: { type: [string, 'null'], format: date }
+        note: { type: [string, 'null'], maxLength: 255 }
+    StockItemQuoteRequest:
+      type: object
+      required: [lines]
+      properties:
+        client_id: { type: [integer, 'null'] }
+        currency: { type: string, minLength: 3, maxLength: 3, default: CZK }
+        date: { type: [string, 'null'], format: date, description: Default dnes. }
+        lines:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [stock_item_id, quantity]
+            properties:
+              key: { type: string }
+              stock_item_id: { type: integer }
+              unit: { type: [string, 'null'] }
+              quantity: { type: string, pattern: '^-?\d+(\.\d{1,3})?$' }
+    StockItemQuoteLine:
+      type: object
+      properties:
+        key: { type: string }
+        stock_item_id: { type: integer }
+        unit: { type: string, description: Použitá jednotka — kód balení, jinak základní jednotka. }
+        base_unit: { type: string }
+        numerator: { type: integer }
+        denominator: { type: integer }
+        base_quantity: { type: string }
+        unit_price: { type: [string, 'null'], description: Cena bez DPH za zvolenou jednotku; null = karta nemá cenu v měně. }
+        base_unit_price: { type: [string, 'null'] }
+        price_source: { type: string, enum: [standard, customer_fixed, customer_discount, promo] }
+        customer_price_id: { type: [integer, 'null'] }
+        discount_pct: { type: [string, 'null'], description: Sleva zákaznické ceny, jen u price_source = customer_discount. }
+        promo:
+          type: [object, 'null']
+          properties:
+            label: { type: [string, 'null'] }
+            promo_price: { type: string }
+        promo_reason: { type: string }
+        promo_qty_available: { type: [string, 'null'], description: V základních jednotkách. }
+    EshopPackagingUnit:
+      type: object
+      properties:
+        id: { type: integer }
+        code: { type: string, maxLength: 20 }
+        name: { type: string, maxLength: 100 }
+        is_active: { type: boolean }
+        display_order: { type: integer }
+        usage_count: { type: integer, description: Počet karet, které balení používají. }
+    EshopPackagingUnitInput:
+      type: object
+      required: [code, name]
+      properties:
+        code: { type: string, maxLength: 20 }
+        name: { type: string, maxLength: 100 }
+        is_active: { type: boolean, default: true }
+        display_order: { type: integer, default: 0 }
     StockTrackingAllocationInput:
       type: object
       required: [quantity]
@@ -25632,6 +25955,7 @@ components:
           enum: [sent, confirmed]
           default: sent
           description: "Od kterého stavu objednávky se zboží počítá „na cestě\" (rozhodnutí #2). 'sent' = odeslaná objednávka je závazek; 'confirmed' = počítat až od potvrzení dodavatelem."
+        invoice_pdf_show_base_qty: { type: boolean, default: true, description: "Na PDF faktury doplnit k řádku v balení množství v základní jednotce karty („celkem 80 ks\"). Platí jen se zapnutým skladem (migrace 1832)." }
         invoice_number_format:
           type: [string, "null"]
           example: "{YY}{MM}{CCC}"

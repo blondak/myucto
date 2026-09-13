@@ -815,7 +815,8 @@
         "1828_countries_iso3166_full.sql",
         "1829_shoptet_file_integration.sql",
         "1830_integration_sample_seeded.sql",
-        "1831_bank_transaction_match_reason.sql"
+        "1831_bank_transaction_match_reason.sql",
+        "1832_stock_packaging_customer_prices.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -17531,6 +17532,41 @@
             },
             "checks": []
         },
+        "stock_item_customer_prices": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "client_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "currency_code": "char(3) NOT NULL",
+                "discount_pct": "decimal(6,3) NULL DEFAULT NULL",
+                "fixed_price": "decimal(12,2) NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "note": "varchar(255) NULL DEFAULT NULL",
+                "price_type": "enum('fixed','discount_pct') NOT NULL",
+                "stock_item_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "valid_from": "date NULL DEFAULT NULL",
+                "valid_to": "date NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_sicp_client": "BTREE (client_id)",
+                "ix_sicp_client_currency": "BTREE (supplier_id, client_id, currency_code)",
+                "uq_sicp_item_client_currency": "UNIQUE BTREE (supplier_id, stock_item_id, client_id, currency_code)"
+            },
+            "foreign_keys": {
+                "fk_sicp_client": "(client_id) -> clients (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_sicp_item": "(supplier_id, stock_item_id) -> stock_items (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_sicp_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_sicp_value": "`price_type` = 'fixed' and `fixed_price` is not null and `fixed_price` >= 0 or `price_type` = 'discount_pct' and `discount_pct` is not null and `discount_pct` >= 0 and `discount_pct` <= 100",
+                "chk_sicp_window": "`valid_from` is null or `valid_to` is null or `valid_from` <= `valid_to`"
+            }
+        },
         "stock_item_fees": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -17745,7 +17781,9 @@
             "columns": {
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "denominator": "bigint(20) unsigned NOT NULL",
+                "ean": "varchar(20) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_sales_unit": "tinyint(1) NOT NULL DEFAULT 0",
                 "numerator": "bigint(20) unsigned NOT NULL",
                 "stock_item_id": "bigint(20) unsigned NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -17753,6 +17791,7 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_siu_ean": "BTREE (supplier_id, ean)",
                 "uq_stock_item_unit": "UNIQUE BTREE (supplier_id, stock_item_id, unit_code)"
             },
             "foreign_keys": {
@@ -17809,6 +17848,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "default_sale_unit": "varchar(20) NULL DEFAULT NULL",
                 "delivery_days": "smallint(5) unsigned NULL DEFAULT NULL",
                 "ean": "varchar(20) NULL DEFAULT NULL",
                 "export_eshop": "tinyint(1) NOT NULL DEFAULT 0",
@@ -17971,6 +18011,29 @@
             "foreign_keys": {
                 "fk_sm_item": "(stock_item_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_sm_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "stock_packaging_units": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "code": "varchar(20) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "display_order": "int(11) NOT NULL DEFAULT 0",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "name": "varchar(100) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "uq_stock_packaging_unit_code": "UNIQUE BTREE (supplier_id, code)"
+            },
+            "foreign_keys": {
+                "fk_spu_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },
@@ -18825,6 +18888,7 @@
                 "integration_sample_seeded_at": "datetime NULL DEFAULT NULL",
                 "invoice_number_format": "varchar(60) NULL DEFAULT NULL",
                 "invoice_number_period": "enum('year','month','none') NOT NULL DEFAULT 'month'",
+                "invoice_pdf_show_base_qty": "tinyint(1) NOT NULL DEFAULT 1",
                 "invoice_qr_include_due_date": "tinyint(1) NOT NULL DEFAULT 0",
                 "is_identified": "tinyint(1) NOT NULL DEFAULT 0",
                 "is_vat_payer": "tinyint(1) NOT NULL DEFAULT 1",

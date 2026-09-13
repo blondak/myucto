@@ -9,6 +9,10 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockLevelRepository;
+use MyInvoice\Repository\StockItemCustomerPriceRepository;
+use MyInvoice\Repository\StockPackagingUnitRepository;
+use MyInvoice\Repository\StockTrackingRepository;
+use MyInvoice\Service\Stock\StockItemPackagingService;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
@@ -56,6 +60,9 @@ final class StockItemAction
         private readonly StockItemDuplicationService $duplication,
         private readonly StockItemTemplateService $templates,
         private readonly StockItemIntrastatValidator $intrastat,
+        private readonly StockTrackingRepository $tracking,
+        private readonly StockPackagingUnitRepository $packagingUnits,
+        private readonly StockItemCustomerPriceRepository $customerPrices,
     ) {}
 
     /**
@@ -112,8 +119,44 @@ final class StockItemAction
         }
         $q = $request->getQueryParams();
         $limit = max(1, min(200, (int) ($q['limit'] ?? 50)));
-        $rows = $this->items->search($supplierId, (string) ($q['q'] ?? ''), $limit);
-        return Json::ok($response, $this->withEffectivePrice($supplierId, $rows));
+        $term = trim((string) ($q['q'] ?? ''));
+        $rows = $this->items->search($supplierId, $term, $limit);
+        return Json::ok($response, $this->withPackaging($supplierId, $this->withEffectivePrice($supplierId, $rows), $term));
+    }
+
+    /**
+     * Balení karet pro editor dokladu (issue #17): `units` jako GET /packaging
+     * (bez `in_use`; jen balení, nikdy převodní jednotky šarží), `matched_unit`
+     * = kód balení, jehož EAN přesně odpovídá hledanému textu — načtený čárový
+     * kód kartonu tak rovnou vybere karton — a `has_customer_prices`. Editor
+     * zapíná novou logiku jen pro karty s balením nebo zákaznickými cenami;
+     * `effective_price` zůstává beze změny (CZK, dnes, bez klienta).
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withPackaging(int $supplierId, array $rows, string $term): array
+    {
+        if ($rows === []) {
+            return $rows;
+        }
+        $ids = array_map(static fn (array $r): int => (int) $r['id'], $rows);
+        $units = $this->tracking->unitsForItems($supplierId, $ids);
+        $withPrices = $this->customerPrices->itemsWithPrices($supplierId, $ids);
+        $names = $units === [] ? [] : $this->packagingUnits->byLowerCode($supplierId);
+        foreach ($rows as &$row) {
+            $row['has_customer_prices'] = isset($withPrices[(int) $row['id']]);
+            $row['units'] = [];
+            $row['matched_unit'] = null;
+            foreach ($units[(int) $row['id']] ?? [] as $u) {
+                $row['units'][] = StockItemPackagingService::unitPayload($u, $names[mb_strtolower($u['unit_code'])]['name'] ?? null);
+                if ($term !== '' && $u['ean'] !== null && (string) $u['ean'] === $term) {
+                    $row['matched_unit'] = $u['unit_code'];
+                }
+            }
+        }
+        unset($row);
+        return $rows;
     }
 
     public function get(Request $request, Response $response, array $args): Response
@@ -126,7 +169,7 @@ final class StockItemAction
         if ($item === null) {
             return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
         }
-        return Json::ok($response, $this->withEffectivePrice($supplierId, [$item])[0]);
+        return Json::ok($response, $this->withPackaging($supplierId, $this->withEffectivePrice($supplierId, [$item]), '')[0]);
     }
 
     public function create(Request $request, Response $response): Response

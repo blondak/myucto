@@ -241,10 +241,11 @@ final class InTransitRepository
                      GROUP BY sl.invoice_item_id
                 )
                 SELECT ii.stock_item_id, ii.warehouse_id,
-                       SUM(GREATEST(ii.quantity - COALESCE(s.qty, 0), 0)) AS qty_reserved
+                       ROUND(SUM(GREATEST(" . \MyInvoice\Service\Stock\StockUnitConverter::sqlToBase('ii.quantity', 'ii_pk') . " - COALESCE(s.qty, 0), 0)), 3) AS qty_reserved
                   FROM invoice_items ii
                   JOIN invoices i ON i.id = ii.invoice_id AND i.supplier_id = ?
              LEFT JOIN issued s ON s.ii_id = ii.id
+                  " . \MyInvoice\Service\Stock\StockUnitConverter::sqlUnitJoin('ii_pk', 'i.supplier_id', 'ii.stock_item_id', 'ii.unit') . "
                  WHERE ii.stock_item_id IS NOT NULL
                    AND i.invoice_type = 'invoice'
                    AND i.status NOT IN ('draft', 'cancelled')
@@ -302,11 +303,12 @@ final class InTransitRepository
                 SELECT ii.stock_item_id, ii.warehouse_id, ii.id AS invoice_item_id,
                        i.id AS invoice_id, i.varsymbol AS invoice_number, i.issue_date, i.due_date,
                        c.company_name AS client_name,
-                       GREATEST(ii.quantity - COALESCE(s.qty, 0), 0) AS qty
+                       ROUND(GREATEST(" . \MyInvoice\Service\Stock\StockUnitConverter::sqlToBase('ii.quantity', 'ii_pk') . " - COALESCE(s.qty, 0), 0), 3) AS qty
                   FROM invoice_items ii
                   JOIN invoices i ON i.id = ii.invoice_id AND i.supplier_id = ?
              LEFT JOIN clients c ON c.id = i.client_id AND c.supplier_id = i.supplier_id
              LEFT JOIN issued s ON s.ii_id = ii.id
+                  " . \MyInvoice\Service\Stock\StockUnitConverter::sqlUnitJoin('ii_pk', 'i.supplier_id', 'ii.stock_item_id', 'ii.unit') . "
                  WHERE ii.stock_item_id IS NOT NULL
                    AND i.invoice_type = 'invoice'
                    AND i.status NOT IN ('draft', 'cancelled')

@@ -61,11 +61,12 @@ tabu se ukládá do URL, takže jde odkázat i naback/refresh):
 | **Atributy** | Typované parametry zboží (barva, rozměr, výkon…) vč. voleb pro výběrové atributy |
 | **Tagy** | Barevné štítky zboží |
 | **Poplatky** | Typy poplatků (autorský, recyklační/PHE…) s vlastní sazbou DPH |
+| **Balení** | Kódy balení (karton, paleta…), které karty používají jako nadřazené jednotky ([§ 36.17](#3617-baleni)) |
 | **Jazyky** | Jazykové mutace, ve kterých vedeš názvy a popisy zboží a kategorií ([§ 36.13](#3613-jazyky)) |
 | **Sklady** | Stejná záložka jako `Zboží → Skladové karty → Sklady` — sklady patří oběma pohledům |
 | **Import zboží** | Hromadný import/aktualizace karet z XLSX/CSV |
 
-Každý číselník (Výrobci, Kategorie, Atributy, Tagy, Poplatky, Jazyky) má stejný tvar:
+Každý číselník (Výrobci, Kategorie, Atributy, Tagy, Poplatky, Balení, Jazyky) má stejný tvar:
 tabulka existujících záznamů, tlačítko **„Nový…"** vpravo nahoře a u každého
 řádku ikony **tužky** (upravit) a **koše** (smazat). Editace i mazání jsou
 dostupné jen uživatelům s právem zápisu — u readonly uživatele akční sloupec
@@ -640,6 +641,42 @@ naceňuje:
 - při **vložení zboží do faktury** — do řádku se předvyplní akční cena a
   aplikace tě na to upozorní hláškou.
 
+Množstevní strop akce se posuzuje v **základní jednotce** karty: řádek faktury
+v balení 10 KT po 8 ks čerpá ze stropu 80 ks. Akční cena je vždy za základní
+jednotku; řádek v balení ji dostane vynásobenou poměrem balení.
+
+### 36.8.10 Individuální ceny zákazníků
+
+Na záložce **Ceny** editoru karty pod akčními cenami zadáš konkrétnímu odběrateli
+vlastní cenu karty: **pevnou cenu** nebo **slevu v %** ze standardní ceny. Každý řádek
+má odběratele, měnu, volitelnou platnost od–do a poznámku a ukazuje výslednou cenu
+podle dnešní standardní ceny. Ukládá se společným tlačítkem **Uložit** editoru.
+Duplikace karty zákaznické ceny nepřenáší.
+
+- Cena je vždy **za základní jednotku** karty a **bez DPH**. Řádek faktury v balení
+  (§ 35.2.6 v kapitole Sklad) dostane cenu vynásobenou poměrem balení.
+- Pro jednoho odběratele a měnu smí mít karta jen jednu individuální cenu.
+- Sleva se počítá ze standardní ceny v dané měně a zaokrouhluje na haléře.
+
+#### Která cena platí
+
+Editor faktury nacení skladový řádek pro odběratele, měnu a datum dokladu:
+
+1. **Základ** je individuální cena odběratele, pokud je platná k datu dokladu a v měně
+   dokladu. Jinak je základem standardní cena z cenotvorby.
+2. **Akční cena** se použije jen tehdy, když je nižší než tento základ. Zákazník tak
+   dostane lepší z obou cen.
+
+Karta bez individuálních cen se naceňuje přesně jako dosud. Změna odběratele nebo
+měny na faktuře přecení jen řádky, jejichž cenu doplnila aplikace; ručně přepsanou
+cenu nechá být. Seznam karet a našeptávač dál ukazují standardní (případně akční) cenu
+bez ohledu na odběratele.
+
+> [!NOTE]
+> Ceník pro firmy **bez** skladové evidence (Faktury → Ceník) má vlastní zákaznické
+> ceny položek ceníku. Individuální ceny na skladové kartě s ním nesouvisí — firma se
+> skladem nacení zboží vždy ze skladové karty.
+
 ## 36.9 Dodavatelé zboží
 
 **Cesta: `Zboží → Skladové karty → (karta) → záložka „Dodavatelé"`**
@@ -1165,3 +1202,17 @@ ani nemění.
 | Změnový feed vrací **410** | Externí systém se dlouho nepřipojil. Musí stáhnout celý katalog znovu |
 | V diagnostice přibývají čekající příchozí události | Události se přijímají, ale konkrétní konektor je zatím nezpracovává |
 | Připojení je ve stavu Chyba | Porovnání úplnosti našlo propojení na neexistující kartu. Oprav propojení a spusť porovnání znovu |
+
+## 36.17 Balení
+
+Číselník **Balení** drží kódy nadřazených jednotek firmy — například `KT` Karton,
+`PAL` Paleta, `BAL` Balík. Formulář: **Kód** (nejvýše 20 znaků bez mezer), **Název**,
+**Pořadí** a **Aktivní**. Tabulka u každého balení ukazuje, kolik karet ho používá.
+
+Samotný poměr („1 KT = 8 ks") a EAN balení se zadávají na skladové kartě
+([§ 35.2.6](35_Sklad.md#3526-baleni)), protože karton jednoho zboží obsahuje jiný
+počet kusů než karton jiného.
+
+- Kód balení, které používá nějaká karta, nejde změnit ani balení smazat. Místo
+  smazání ho **deaktivuj** — nové karty ho pak nenabídnou, stávající si ho ponechají.
+- Nepoužívané balení smažeš běžně.

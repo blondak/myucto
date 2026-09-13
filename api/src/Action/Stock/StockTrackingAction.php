@@ -65,6 +65,17 @@ final class StockTrackingAction
                 [$num, $den] = ExactUnitConversion::reduce((int) ($raw['numerator'] ?? 0), (int) ($raw['denominator'] ?? 0));
                 $units[] = ['unit_code' => $code, 'numerator' => $num, 'denominator' => $den];
             }
+            // Balení karty (issue #17, `is_sales_unit = 1`) spravuje jen editor balení;
+            // tady se jeho kód použít nesmí — obě sady sdílí unikátní klíč kódu.
+            $sales = [];
+            foreach ($this->tracking->units($supplierId, $itemId, true) as $salesUnit) {
+                $sales[mb_strtolower((string) $salesUnit['unit_code'])] = true;
+            }
+            foreach ($units as $unit) {
+                if (isset($sales[mb_strtolower($unit['unit_code'])])) {
+                    throw new StockException('packaging_unit_code_clash', 'Kód převodní jednotky už používá balení karty.', 422, ['unit_code' => $unit['unit_code']]);
+                }
+            }
             $pdo = $this->db->pdo();
             $pdo->beginTransaction();
             $this->tracking->replaceUnits($supplierId, $itemId, $units);

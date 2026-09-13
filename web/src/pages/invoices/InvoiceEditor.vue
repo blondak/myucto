@@ -26,7 +26,7 @@ import { projectsApi, type Project } from '@/api/projects'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
-import { formatMoney, formatPercent } from '@/composables/useFormat'
+import { formatMoney, formatNumber, formatPercent } from '@/composables/useFormat'
 import { evalMath } from '@/directives/vMath'
 import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
@@ -38,7 +38,7 @@ import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
-import { stockApi, type StockItemSearchResult, type Warehouse } from '@/api/stock'
+import { stockApi, type StockItemPackagingUnit, type StockItemSearchResult, type Warehouse } from '@/api/stock'
 import { smallAssetsApi, type SmallAsset } from '@/api/smallAssets'
 import { assetsApi, type AssetListItem } from '@/api/assets'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
@@ -46,6 +46,28 @@ import { cashApi, type CashRegister } from '@/api/cash'
 import { appIsoDate, addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey } from './invoiceStockAvailability'
+import {
+  availabilityQuantity,
+  availabilityUnit,
+  quotedUnitPrice,
+  shouldRequoteOnUnitChange,
+  usesStockPricingFeatures,
+  canApplyQuote,
+  priceForMissingQuote,
+  initialStockUnit,
+  isPriceStillAuto,
+  legacyStockSelection,
+  packagingRatio,
+  quoteFailureFallback,
+  quoteQuantity,
+  rowUnitOptions,
+  rowsToRequote,
+  toBaseQuantity,
+  unitAfterQuote,
+  type PendingQuote,
+  type QuoteMode,
+  type StockQuoteState,
+} from './invoiceStockPricing'
 
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
@@ -200,6 +222,14 @@ const stockRowOptions = reactive<Record<number, { value: number; label: string; 
 const stockRowLoading = reactive<Record<number, boolean>>({})
 const stockOptionById = reactive<Record<number, { value: number; label: string; secondary?: string }>>({})
 const stockItemsCache = new Map<number, StockItemSearchResult>()
+// Balení karet (issue #17): kódy a poměry k základní jednotce, klíč = stock_item_id.
+const stockPackagingById = reactive<Record<number, { base_unit: string; units: StockItemPackagingUnit[] }>>({})
+// Karta s balením nebo individuálními cenami (usesStockPricingFeatures). Jen tyhle řádky
+// dostanou novou logiku; ostatní jdou původní cestou beze změny.
+const stockFeaturesById = reactive<Record<number, boolean>>({})
+// Stav automatického nacenění per řádek; klíč je objekt řádku, takže přežije přesun i smazání.
+const stockQuoteStates = reactive(new WeakMap<InvoiceItem, StockQuoteState>())
+let stockQuoteSeq = 0
 // Dostupnost (nezávazný náhled) — jeden batch dotaz na všechny stock_item_id v řádcích.
 const availabilityMap = ref<Record<string, string>>({})
 let availabilityGeneration = 0
@@ -287,8 +317,15 @@ async function onStockSearch(rowIndex: number, q: string) {
   stockRowLoading[rowIndex] = true
   try {
     const res = await stockApi.searchItems(q, 30)
-    for (const r of res) stockItemsCache.set(r.id, r)
-    stockRowOptions[rowIndex] = res.map(r => ({ value: r.id, label: `${r.sku} — ${r.name}`, secondary: r.unit }))
+    for (const r of res) {
+      stockItemsCache.set(r.id, r)
+      rememberPackaging(r)
+    }
+    stockRowOptions[rowIndex] = res.map(r => ({
+      value: r.id,
+      label: `${r.sku} — ${r.name}`,
+      secondary: r.matched_unit ? `${r.unit} · ${r.matched_unit}` : r.unit,
+    }))
   } catch {
     stockRowOptions[rowIndex] = []
   } finally {
@@ -296,33 +333,232 @@ async function onStockSearch(rowIndex: number, q: string) {
   }
 }
 
+function rememberPackaging(si: { id: number; unit: string; units?: StockItemPackagingUnit[] | null; has_customer_prices?: boolean }) {
+  if (si.units) stockPackagingById[si.id] = { base_unit: si.unit, units: si.units }
+  stockFeaturesById[si.id] = usesStockPricingFeatures(si)
+}
+
+/** Řádek karty s balením / individuálními cenami při zapnutém skladu. */
+function rowHasStockFeatures(item: InvoiceItem): boolean {
+  return stockEnabled.value && item.stock_item_id != null && stockFeaturesById[item.stock_item_id] === true
+}
+
 function onStockSelect(rowIndex: number, itemId: number | null) {
   const item = form.value.items[rowIndex]
   if (!item) return
   item.stock_item_id = itemId
-  if (itemId === null) return
+  if (itemId === null) {
+    stockQuoteStates.delete(item)
+    return
+  }
   const si = stockItemsCache.get(itemId)
   if (si) {
     stockOptionById[si.id] = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+    rememberPackaging(si)
     // Sloučené pole (popis = combobox): výběr karty popis přepíše názvem — dosavadní text byl
     // vyhledávací dotaz. Řádek jde dál libovolně přepsat ručně (volný text zůstává první občan).
     item.description = si.name
-    item.unit = si.unit
-    // Cena do řádku VŽDY přes effective_price (EffectivePriceResolver na backendu) —
-    // zahrnuje platnou akční cenu. sale_price_without_vat je jen fallback pro starší
-    // odpovědi bez toho pole; nikdy nesmí akci obejít.
-    const price = si.effective_price ?? si.sale_price_without_vat
-    if (price != null) item.unit_price_without_vat = Number(price)
-    if (si.promo_price != null) {
-      toast.info(t('invoice.promo_price_applied', {
-        price: formatMoney(Number(si.promo_price)),
-        label: si.promo_label ?? t('invoice.promo_price_generic'),
-      }))
+    if (!usesStockPricingFeatures(si)) {
+      // Karta bez balení a bez individuálních cen: původní chování beze změny.
+      stockQuoteStates.delete(item)
+      item.unit = si.unit
+      // Cena do řádku VŽDY přes effective_price (EffectivePriceResolver na backendu) —
+      // zahrnuje platnou akční cenu. sale_price_without_vat je jen fallback pro starší
+      // odpovědi bez toho pole; nikdy nesmí akci obejít.
+      const price = si.effective_price ?? si.sale_price_without_vat
+      if (price != null) item.unit_price_without_vat = Number(price)
+      if (si.promo_price != null) {
+        toast.info(t('invoice.promo_price_applied', {
+          price: formatMoney(Number(si.promo_price)),
+          label: si.promo_label ?? t('invoice.promo_price_generic'),
+        }))
+      }
+    } else {
+      // Nejdřív dosavadní chování: základní jednotka a effective_price ?? sale_price_without_vat.
+      // Úspěšné nacenění ho přepíše cenou podle zákazníka, měny a data, u balení i jednotkou
+      // (shoda EAN balení → výchozí prodejní jednotka). Když nacenění selže, zůstane řádek
+      // i toast o akci přesně jako dřív.
+      const legacy = legacyStockSelection(si)
+      item.unit = legacy.unit
+      if (legacy.price != null) {
+        item.unit_price_without_vat = legacy.price
+        stockQuoteStates.set(item, { seq: ++stockQuoteSeq, autoPrice: legacy.price, source: null, discountPct: null })
+      }
+      void quoteStockRows([item], 'select', initialStockUnit(si)).then((quoted) => {
+        if (!quoted && quoteFailureFallback('select', si)?.promoToast) {
+          toast.info(t('invoice.promo_price_applied', {
+            price: formatMoney(Number(si.promo_price)),
+            label: si.promo_label ?? t('invoice.promo_price_generic'),
+          }))
+        }
+      })
     }
     if (si.vat_rate_id != null && vatRates.value.some(v => v.id === si.vat_rate_id)) item.vat_rate_id = si.vat_rate_id
   }
   if (item.warehouse_id == null) item.warehouse_id = defaultWarehouseId.value
   refreshAvailability()
+}
+
+/**
+ * Nacení skladové řádky přes backend (POST /stock/items/quote): cena bez DPH za zvolenou
+ * jednotku podle odběratele, měny a data dokladu (zákaznická cena, akce). Starší odpověď
+ * i odpověď na řádek, kterému mezitím uživatel přepsal cenu, se zahodí. false = nacenění
+ * selhalo a řádek si nechal dosavadní cenu.
+ */
+async function quoteStockRows(rows: InvoiceItem[], mode: QuoteMode, requestUnit?: string, priceUnit?: string): Promise<boolean> {
+  if (!stockEnabled.value) return true
+  const targets = rows.filter(row => row.stock_item_id != null)
+  if (targets.length === 0) return true
+  const currency = currencies.value.find(c => c.id === form.value.currency_id)?.code ?? form.value.currency ?? 'CZK'
+  const date = (form.value.invoice_type === 'proforma' ? form.value.issue_date : form.value.tax_date) || form.value.issue_date || null
+  const pending = new Map<string, { item: InvoiceItem; quote: PendingQuote; priceUnit: string }>()
+  const lines = targets.map((item) => {
+    const seq = ++stockQuoteSeq
+    const previous = stockQuoteStates.get(item)
+    stockQuoteStates.set(item, {
+      seq,
+      autoPrice: previous?.autoPrice ?? null,
+      source: previous?.source ?? null,
+      discountPct: previous?.discountPct ?? null,
+    })
+    const unit = requestUnit ?? item.unit
+    const key = `q${seq}`
+    pending.set(key, {
+      item,
+      quote: {
+        seq,
+        stockItemId: item.stock_item_id!,
+        requestUnit: unit,
+        unitAtRequest: item.unit,
+        priceAtRequest: Number(item.unit_price_without_vat),
+      },
+      priceUnit: priceUnit ?? item.unit,
+    })
+    return { key, stock_item_id: item.stock_item_id!, unit: unit || null, quantity: quoteQuantity(item.quantity) }
+  })
+  try {
+    const res = await stockApi.quoteItems({ client_id: form.value.client_id ?? null, currency, date, lines })
+    for (const line of res.lines ?? []) {
+      const target = pending.get(line.key)
+      if (!target) continue
+      const { item, quote } = target
+      if (!canApplyQuote(quote, item, stockQuoteStates.get(item))) continue
+      const unit = unitAfterQuote(mode, quote.requestUnit, line)
+      const price = quotedUnitPrice(line)
+      if (price === null) {
+        // Karta bez ceny v měně dokladu: jednotka (balení) se přepne i tak a dosavadní
+        // cena se jen přepočte na novou jednotku. Změna zákazníka / měny řádek nemění.
+        if (mode === 'context') continue
+        const pack = stockPackagingById[quote.stockItemId]
+        const targetUnit = unit ?? item.unit
+        if (unit !== null) item.unit = unit
+        if (pack && Number.isFinite(quote.priceAtRequest)) {
+          const converted = priceForMissingQuote(stockQuoteStates.get(item), quote.priceAtRequest, target.priceUnit, targetUnit, pack.base_unit, pack.units)
+          if (converted !== null) {
+            item.unit_price_without_vat = converted
+            stockQuoteStates.set(item, { seq: quote.seq, autoPrice: converted, source: null, discountPct: null })
+          }
+        }
+        continue
+      }
+      if (unit !== null) item.unit = unit
+      item.unit_price_without_vat = price
+      stockQuoteStates.set(item, {
+        seq: quote.seq,
+        autoPrice: price,
+        source: line.price_source ?? null,
+        discountPct: line.discount_pct ?? null,
+      })
+      if (mode === 'select' && line.price_source === 'promo') {
+        toast.info(t('invoice.promo_price_applied', {
+          price: formatMoney(price, currency),
+          label: line.promo?.label ?? t('invoice.promo_price_generic'),
+        }))
+      }
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Explicitní změna jednotky uživatelem u karty s balením / individuálními cenami.
+ * Přecení jen tento řádek, a to jen když je cena pořád automatická nebo se mění
+ * poměr jednotky. Když nacenění selže, cena zůstane beze změny.
+ */
+function onStockUnitSelect(item: InvoiceItem, newUnit: string) {
+  const oldUnit = item.unit
+  item.unit = newUnit
+  if (!rowHasStockFeatures(item)) return
+  const pack = stockPackagingById[item.stock_item_id!]
+  const baseUnit = pack?.base_unit ?? rowBaseUnit(item)
+  if (!shouldRequoteOnUnitChange(stockQuoteStates.get(item), item.unit_price_without_vat, oldUnit, newUnit, baseUnit, pack?.units)) return
+  void quoteStockRows([item], 'unit_change', undefined, oldUnit)
+}
+
+/** Jednotka v textu dostupnosti: základní jen u balení se známým poměrem, jinak jako dřív. */
+function rowAvailabilityUnit(item: InvoiceItem): string {
+  if (!rowHasStockFeatures(item)) return item.unit
+  const pack = stockPackagingById[item.stock_item_id!]
+  return availabilityUnit(item.unit, pack?.base_unit ?? item.unit, pack?.units)
+}
+
+function rowBaseUnit(item: InvoiceItem): string {
+  if (!item.stock_item_id) return item.unit
+  return stockPackagingById[item.stock_item_id]?.base_unit ?? stockItemsCache.get(item.stock_item_id)?.unit ?? item.unit
+}
+
+/** Volby jednotky skladového řádku (základní + balení karty); null = běžná položka s číselníkem. */
+function rowUnitChoices(item: InvoiceItem): string[] | null {
+  const pack = item.stock_item_id ? stockPackagingById[item.stock_item_id] : undefined
+  return rowUnitOptions(
+    item,
+    { stockEnabled: stockEnabled.value, features: rowHasStockFeatures(item) },
+    item.stock_item_id ? rowBaseUnit(item) : null,
+    pack?.units,
+    units.value.map(u => u.code),
+  )
+}
+
+/** Množství řádku v základní jednotce karty, ve které se hlídá sklad. */
+function rowBaseQuantity(item: InvoiceItem): number {
+  if (!item.stock_item_id) return Number(item.quantity) || 0
+  return toBaseQuantity(item.quantity, item.unit, rowBaseUnit(item), stockPackagingById[item.stock_item_id]?.units ?? [])
+}
+
+/** Drobný údaj pod řádkem „= 80 ks", jen u balení se známým poměrem. */
+function stockRowBaseQtyText(item: InvoiceItem): string | null {
+  if (!rowHasStockFeatures(item)) return null
+  const pack = stockPackagingById[item.stock_item_id!]
+  if (!pack || !packagingRatio(item.unit, pack.base_unit, pack.units)) return null
+  return t('invoice.stock_pricing.base_qty', {
+    qty: formatNumber(rowBaseQuantity(item), { maximumFractionDigits: 3 }),
+    unit: pack.base_unit,
+  })
+}
+
+/** Badge zdroje ceny, jen dokud je v řádku automaticky doplněná cena. */
+function stockRowPriceBadge(item: InvoiceItem): { label: string; cls: string } | null {
+  if (!rowHasStockFeatures(item)) return null
+  const state = stockQuoteStates.get(item)
+  if (!state || !isPriceStillAuto(state, item.unit_price_without_vat)) return null
+  const customer = 'border-success-500/40 bg-success-50 text-success-600'
+  switch (state.source) {
+    case 'customer_fixed':
+      return { label: t('invoice.stock_pricing.source_customer_fixed'), cls: customer }
+    case 'customer_discount':
+      return {
+        label: state.discountPct
+          ? t('invoice.stock_pricing.source_customer_discount_pct', { pct: formatNumber(Number(state.discountPct), { maximumFractionDigits: 3 }) })
+          : t('invoice.stock_pricing.source_customer_discount'),
+        cls: customer,
+      }
+    case 'promo':
+      return { label: t('invoice.stock_pricing.source_promo'), cls: 'border-warning-500/40 bg-warning-50 text-warning-600' }
+    default:
+      return null
+  }
 }
 
 /** Dostupné množství (string, DECIMAL) pro řádek — undefined = žádný stav (bez karty na skladě). */
@@ -333,7 +569,10 @@ function rowAvailability(item: InvoiceItem): string | null {
 function rowAvailabilityInsufficient(item: InvoiceItem): boolean {
   const avail = rowAvailability(item)
   if (avail === null) return false
-  return Number(avail) < Math.abs(Number(item.quantity) || 0)
+  // Dostupnost je v základní jednotce: balení se známým poměrem se porovnává přepočtené
+  // (10 KT = 80 ks), vše ostatní přesně jako dřív.
+  const pack = rowHasStockFeatures(item) ? stockPackagingById[item.stock_item_id!] : undefined
+  return Number(avail) < availabilityQuantity(item.quantity, item.unit, pack?.base_unit ?? item.unit, pack?.units)
 }
 
 /** Edit mode: dotáhne label (SKU — název) pro řádky, které už mají stock_item_id (B10: i deaktivovanou kartu). */
@@ -345,13 +584,21 @@ async function hydrateStockSelections() {
   await Promise.all(rows.map(async ({ it }) => {
     if (it.warehouse_id == null) it.warehouse_id = defaultWarehouseId.value
     try {
-      const si = await stockApi.getItem(it.stock_item_id!)
+      const [si, pack] = await Promise.all([
+        stockApi.getItem(it.stock_item_id!),
+        stockApi.getItemPackaging(it.stock_item_id!).catch(() => null),
+      ])
       stockItemsCache.set(si.id, {
         id: si.id, sku: si.sku, name: si.name, unit: si.unit, vat_rate_id: si.vat_rate_id,
         sale_price_without_vat: si.sale_price_without_vat,
         effective_price: si.effective_price, promo_price: si.promo_price,
         promo_label: si.promo_label, promo_qty_available: si.promo_qty_available,
+        units: pack?.units, default_sale_unit: pack?.default_sale_unit ?? si.default_sale_unit ?? null,
+        has_customer_prices: si.has_customer_prices,
       })
+      if (pack) stockPackagingById[si.id] = { base_unit: pack.base_unit, units: pack.units }
+      // Jen příznak pro řádky karet s novou logikou; jednotka ani cena načteného řádku se nemění.
+      stockFeaturesById[si.id] = usesStockPricingFeatures({ units: pack?.units, has_customer_prices: si.has_customer_prices })
       stockOptionById[si.id] = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
     } catch { /* karta smazána/nedostupná — necháme jen id, picker zůstane prázdný */ }
   }))
@@ -747,6 +994,19 @@ watch(() => route.query.type, () => {
 watch(
   () => [form.value.client_id, form.value.currency_id, form.value.prices_include_vat, form.value.issue_date, form.value.tax_date] as const,
   () => { if (loaded.value) void loadPriceListItems() },
+)
+
+// Zákaznické ceny (issue #17): po změně odběratele nebo měny přeceň skladové řádky, jejichž
+// cena je pořád ta automaticky doplněná. Ruční přepis ani ceny načteného dokladu se nemění.
+watch(
+  () => [form.value.client_id, form.value.currency_id] as const,
+  () => {
+    const rows = rowsToRequote(form.value.items, row => stockQuoteStates.get(row), {
+      stockEnabled: stockEnabled.value,
+      loaded: loaded.value,
+    })
+    if (rows.length > 0) void quoteStockRows(rows, 'context')
+  },
 )
 
 // Při přepnutí typu na credit_note převrať množství všech existujících položek na záporná.
@@ -2302,7 +2562,7 @@ async function deleteDraft() {
                   :options="stockRowOptions[i] ?? []"
                   :loading="stockRowLoading[i]"
                   :selected-option="stockSelectedFor(item)"
-                  :availability-text="item.stock_item_id ? t('stock.availability.in_stock', { qty: rowAvailability(item), unit: item.unit }) : null"
+                  :availability-text="item.stock_item_id ? t('stock.availability.in_stock', { qty: rowAvailability(item), unit: rowAvailabilityUnit(item) }) : null"
                   :availability-insufficient="rowAvailabilityInsufficient(item)"
                   :placeholder="t('invoice.items_table.description')"
                   multiline
@@ -2324,13 +2584,23 @@ async function deleteDraft() {
                     </option>
                   </select>
                 </label>
+                <div v-if="stockRowBaseQtyText(item) || stockRowPriceBadge(item)" data-test="stock-row-meta"
+                  class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                  <span v-if="stockRowBaseQtyText(item)" class="font-mono text-neutral-500 whitespace-nowrap">{{ stockRowBaseQtyText(item) }}</span>
+                  <span v-if="stockRowPriceBadge(item)" :title="t('invoice.stock_pricing.source_hint')"
+                    class="px-1.5 py-0.5 rounded-full border whitespace-nowrap" :class="stockRowPriceBadge(item)!.cls">{{ stockRowPriceBadge(item)!.label }}</span>
+                </div>
               </td>
               <td class="px-3 py-2">
                 <input v-model="item.quantity" v-math type="text" inputmode="decimal"
                   :class="['w-full h-9 px-2 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
               </td>
               <td class="px-3 py-2">
-                <select v-model="item.unit" class="w-full h-9 px-1 border border-neutral-300 rounded text-sm bg-surface">
+                <select v-if="rowUnitChoices(item)" :value="item.unit" @change="onStockUnitSelect(item, ($event.target as HTMLSelectElement).value)"
+                  class="w-full h-9 px-1 border border-neutral-300 rounded text-sm bg-surface">
+                  <option v-for="code in rowUnitChoices(item) ?? []" :key="code" :value="code">{{ code }}</option>
+                </select>
+                <select v-else v-model="item.unit" class="w-full h-9 px-1 border border-neutral-300 rounded text-sm bg-surface">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
                   <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ item.unit }}</option>
                 </select>
@@ -2469,7 +2739,7 @@ async function deleteDraft() {
                 :options="stockRowOptions[i] ?? []"
                 :loading="stockRowLoading[i]"
                 :selected-option="stockSelectedFor(item)"
-                :availability-text="item.stock_item_id ? t('stock.availability.in_stock', { qty: rowAvailability(item), unit: item.unit }) : null"
+                :availability-text="item.stock_item_id ? t('stock.availability.in_stock', { qty: rowAvailability(item), unit: rowAvailabilityUnit(item) }) : null"
                 :availability-insufficient="rowAvailabilityInsufficient(item)"
                 :placeholder="t('invoice.items_table.description')"
                 multiline
@@ -2491,6 +2761,11 @@ async function deleteDraft() {
                   </option>
                 </select>
               </label>
+              <div v-if="stockRowBaseQtyText(item) || stockRowPriceBadge(item)" class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                <span v-if="stockRowBaseQtyText(item)" class="font-mono text-neutral-500 whitespace-nowrap">{{ stockRowBaseQtyText(item) }}</span>
+                <span v-if="stockRowPriceBadge(item)" :title="t('invoice.stock_pricing.source_hint')"
+                  class="px-1.5 py-0.5 rounded-full border whitespace-nowrap" :class="stockRowPriceBadge(item)!.cls">{{ stockRowPriceBadge(item)!.label }}</span>
+              </div>
             </div>
             <div v-if="assetSaleMode && assetSaleAvailable">
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.asset_sale.card') }}</label>
@@ -2571,7 +2846,11 @@ async function deleteDraft() {
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.unit') }}</label>
-                <select v-model="item.unit" class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
+                <select v-if="rowUnitChoices(item)" :value="item.unit" @change="onStockUnitSelect(item, ($event.target as HTMLSelectElement).value)"
+                  class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
+                  <option v-for="code in rowUnitChoices(item) ?? []" :key="code" :value="code">{{ code }}</option>
+                </select>
+                <select v-else v-model="item.unit" class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
                   <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ item.unit }}</option>
                 </select>

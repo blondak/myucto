@@ -615,6 +615,9 @@ final class RoutePermissionMap
         ['*', '#^/api/stock/sales-orders(/|$)#', 'stock.orders.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/purchase-orders(/|$)#', 'stock.orders.write', AccessLevel::WRITE],
         ['POST', '#^/api/stock/items/[0-9]+/neighbors$#', 'stock', AccessLevel::READ],
+        // Nacenění řádků dokladu (balení, zákaznické ceny) jen čte — potřebuje ho
+        // každý, kdo vystavuje fakturu se skladovými řádky, ne jen správce karet.
+        ['POST', '#^/api/stock/items/quote$#', 'stock', AccessLevel::READ],
         ['GET', '#^/api/stock/item-templates$#', 'stock', AccessLevel::READ],
         ['GET', '#^/api/stock/fulfillment(/|$)#', 'stock', AccessLevel::READ],
         ['GET', '#^/api/stock/assemblies(/|$)#', 'stock', AccessLevel::READ],

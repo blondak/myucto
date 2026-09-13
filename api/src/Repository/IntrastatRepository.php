@@ -59,7 +59,7 @@ final class IntrastatRepository implements IntrastatDataSource
                     si.intrastat_net_mass_kg, si.intrastat_supplementary_unit,
                     si.intrastat_supplementary_unit_coefficient,
                     COALESCE(ii.description, pii.description, l.source_description, si.name) AS item_description,
-                    COALESCE(ii.quantity, pii.quantity) AS invoice_item_quantity,
+                    COALESCE(" . \MyInvoice\Service\Stock\StockUnitConverter::sqlToBase('ii.quantity', 'ii_pk') . ", " . \MyInvoice\Service\Stock\StockUnitConverter::sqlToBase('pii.quantity', 'pii_pk') . ") AS invoice_item_quantity,
                     COALESCE(ii.total_without_vat, pii.total_without_vat) AS invoice_item_value,
                     CASE WHEN i.id IS NOT NULL THEN i.total_without_vat ELSE pi.total_without_vat END AS invoice_total_value,
                     CASE WHEN i.id IS NOT NULL THEN (
@@ -180,6 +180,8 @@ final class IntrastatRepository implements IntrastatDataSource
           LEFT JOIN purchase_invoice_items pii
                  ON pii.id = l.purchase_invoice_item_id AND pii.purchase_invoice_id = pi.id
           LEFT JOIN currencies pic ON pic.id = pi.currency_id
+          " . \MyInvoice\Service\Stock\StockUnitConverter::sqlUnitJoin('ii_pk', 'd.supplier_id', 'ii.stock_item_id', 'ii.unit') . "
+          " . \MyInvoice\Service\Stock\StockUnitConverter::sqlUnitJoin('pii_pk', 'd.supplier_id', 'pii.stock_item_id', 'pii.unit') . "
           LEFT JOIN clients purchase_partner
                  ON purchase_partner.id = pi.vendor_id AND purchase_partner.supplier_id = d.supplier_id
           LEFT JOIN countries purchase_country ON purchase_country.id = purchase_partner.country_id

@@ -43,6 +43,9 @@ sekci **Vést skladovou evidenci**:
   zaúčtuje výdejka. Vypnutím přepínače přejdeš na ruční vydávání zboží ze skladu
   (výdejky si zakládáš sám/sama) — použij to, pokud chceš mít nad výdejem plnou
   kontrolu nebo výdejky slučuješ jinak, než jak fakturuješ.
+- **Na PDF faktury rozepsat balení na základní jednotky** *(zobrazí se jen po zapnutí
+  evidence, výchozí zapnuto)* — u řádku fakturovaného v balení doplní PDF faktury
+  množství v základní jednotce karty (§ 35.5.1).
 
 Sklad interně účtuje **způsobem B** dle ČÚS 015 (bod 4.3) — v průběhu roku se
 skladové pohyby neúčtují na účty, jen evidují; do účetnictví se promítne až
@@ -245,6 +248,27 @@ Historie vždy odkazuje na oba doklady. Pokud je potřeba operaci vrátit, použ
 **Stornovat kompletaci** - stornují se společně oba doklady. Samostatné storno jedné
 strany není povolené, aby se nezdvojila nebo neztratila hodnota zásob.
 
+### 35.2.6 Balení
+
+Zboží, které prodáváš nebo nakupuješ po kartonech, paletách či balících, dostane na
+kartě **balení** — nadřazené jednotky k základní jednotce karty. V editoru karty na
+záložce **Obecné** u základní jednotky přidáš řádek balení: kód z číselníku balení
+([§ 36.17](36_Eshop.md#3617-baleni)), poměr „1 KT = 8 ks" a volitelně **EAN balení**.
+Jedno z balení můžeš zvolit jako **výchozí prodejní jednotku** — editor faktury ho po
+výběru karty předvyplní. Karta bez balení se chová přesně jako dosud.
+
+- Poměr se zadává číslem s nejvýše třemi desetinnými místy a ukládá se jako přesný
+  zlomek.
+- EAN balení je v rámci firmy jedinečný — nesmí ho nést jiná karta ani jiné balení.
+  Našeptávač karet v editoru faktury najde kartu i podle EAN balení a rovnou vybere
+  příslušné balení.
+- Balení, které už nese jakýkoli řádek vydané nebo přijaté faktury (i koncept), nejde
+  odebrat ani mu změnit poměr — uložení skončí hláškou, že je balení použité.
+- Převodní jednotky šarží (§ 35.6) jsou samostatná sada: na faktury se nepromítají a
+  jejich kód nejde použít jako balení.
+
+Detail karty ukazuje balení jen jako přehled s odkazem do editoru.
+
 ## 35.3 Oceňování zásob
 
 Sklad oceňuje zásoby **váženým aritmetickým klouzavým průměrem** (§ 49 odst. 3
@@ -442,6 +466,16 @@ faktura zůstane ve stavu koncept a dá se opravit (jiné množství, jiný skla
 napřed naskladnit). Na detailu faktury najdeš i přehled výdejek/vratek navázaných na
 daný doklad.
 
+Řádek fakturovaný v **balení** (§ 35.2.6) se vyskladní v základní jednotce karty:
+10 KT při poměru 1 KT = 8 ks vydá 80 ks. Stejně se přepočítá kontrola dostupnosti před
+vystavením, vratka z dobropisu, rezervace i čerpání množstevního stropu akční ceny.
+Řádek v základní jednotce, v neznámé jednotce nebo v převodní jednotce šarží se vydá
+tak, jak je na faktuře (1:1).
+
+Na PDF faktury se u řádku v balení pod jednotkou doplní „(celkem 80 ks)". Rozpis
+vypneš přepínačem **Na PDF faktury rozepsat balení na základní jednotky** (§ 35.1);
+bez zapnuté skladové evidence se na PDF nezobrazuje nikdy.
+
 ### 35.5.2 Naskladnění z přijaté faktury
 
 Na detailu [přijaté faktury](23_Prijate_faktury.md) je tlačítko **Naskladnit**, pokud
@@ -465,6 +499,10 @@ Náklady se rozpustí do ceny přijímaného zboží stejným algoritmem jako v 
 skladového dokladu (§ 35.4.4). Po potvrzení vznikne **draft příjemka** (původ
 „Přijatá faktura") ve zvoleném skladu a datu, kterou pak podle potřeby doplníš a
 zaúčtuješ v modulu Skladové doklady.
+
+Řádek přijaté faktury v **balení** (§ 35.2.6) průvodce nabídne v základní jednotce
+karty: 10 KT po 8 ks znamená 80 ks k naskladnění a pořizovací cena za kus je hodnota
+řádku dělená 80. Hodnota řádku se tím nemění.
 
 Pokud se obsah přijaté faktury po dřívějším naskladnění změní (typicky přepsáním
 řádků faktury, které vazbu na starou příjemku „osiří"), průvodce na to upozorní, aby
@@ -499,9 +537,11 @@ a karty. Šarže dovoluje množství a volitelné datum expirace. Detail karty u
 aktuální rozpad i historii od příjmu přes převody a výdeje po vratku. Storno
 použije přesně stejné identity a množství jako původní doklad.
 
-Alternativní jednotky se definují přesným zlomkem vůči základní jednotce karty,
-například balení 12 kusů jako 12/1. Systém přijme jen převod, který lze beze zbytku
-vyjádřit v tisícinách základní jednotky; nepoužívá plovoucí desetinné zaokrouhlení.
+Převodní jednotky šarží se definují přesným zlomkem vůči základní jednotce karty,
+například 12 kusů jako 12/1, a slouží jen k zadání množství v alokacích šarží a
+sériových čísel. Systém přijme jen převod, který lze beze zbytku vyjádřit v tisícinách
+základní jednotky; nepoužívá plovoucí desetinné zaokrouhlení. Na faktury se tyto
+jednotky nepromítají — k tomu slouží balení karty (§ 35.2.6).
 
 ## 35.7 Inventury
 

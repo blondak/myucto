@@ -47,6 +47,7 @@ final class StockReceiptService
         private readonly StockDocumentService $documents,
         private readonly StockDocumentRepository $docs,
         private readonly StockAcquisitionCostService $costs,
+        private readonly StockUnitConverter $units,
     ) {}
 
     private static function isNotReceivableKind(string $documentKind): bool
@@ -83,7 +84,9 @@ final class StockReceiptService
         $stockLines    = [];
         $costCandidates = [];
         foreach ($this->purchaseInvoiceItems($supplierId, $piId) as $it) {
-            $qty            = (float) $it['quantity'];
+            // Množství řádku v ZÁKLADNÍ jednotce karty (balení 10 KT = 80 ks);
+            // příjemka i „zbývá přijmout" se počítají v něm.
+            $qty            = (float) $it['base_quantity'];
             $alreadyReceived = isset($received[(int) $it['id']]) ? (float) $received[(int) $it['id']] : 0.0;
             $remaining      = round($qty - $alreadyReceived, 3);
             if ($remaining < 0) {
@@ -91,7 +94,7 @@ final class StockReceiptService
             }
 
             if ($it['stock_item_id'] !== null) {
-                $unitCost = $this->costs->unitCost($costContext, $it);
+                $unitCost = $this->costs->unitCost($costContext, ['quantity' => $it['base_quantity']] + $it);
                 $stockLines[] = [
                     'purchase_invoice_item_id' => (int) $it['id'],
                     // Příjem z faktury musí zavírat i objednávku, na kterou je řádek
@@ -104,6 +107,8 @@ final class StockReceiptService
                     'already_received'         => number_format($alreadyReceived, 3, '.', ''),
                     'remaining_qty'            => number_format($remaining, 3, '.', ''),
                     'unit_cost'                => number_format($unitCost, 6, '.', ''),
+                    'invoice_quantity'         => number_format((float) $it['quantity'], 3, '.', ''),
+                    'invoice_unit'             => (string) $it['unit'],
                 ];
             } else {
                 $base = $this->costs->amount($costContext, $it);
@@ -199,7 +204,7 @@ final class StockReceiptService
                     ]);
                 }
                 $already   = isset($received[$piItemId]) ? (float) $received[$piItemId] : 0.0;
-                $remaining = (float) $piItem['quantity'] - $already;
+                $remaining = (float) $piItem['base_quantity'] - $already;
                 if ($qty > $remaining + 0.0005) {
                     throw new StockException('over_receipt', 'Množství přesahuje zbývající k příjmu z faktury.', 409, [
                         'purchase_invoice_item_id' => $piItemId,
@@ -211,7 +216,9 @@ final class StockReceiptService
                 if (isset($rl['unit_cost']) && $rl['unit_cost'] !== '' && $rl['unit_cost'] !== null) {
                     $unitCost = (float) $rl['unit_cost'];
                 } else {
-                    $unitCost = $this->costs->unitCost($costContext, $piItem);
+                    // Pořizovací cena za ZÁKLADNÍ jednotku: hodnota řádku se nemění,
+                    // jen se rozloží na množství v základní jednotce.
+                    $unitCost = $this->costs->unitCost($costContext, ['quantity' => $piItem['base_quantity']] + $piItem);
                 }
 
                 $docLines[] = [
@@ -222,7 +229,7 @@ final class StockReceiptService
                     'purchase_invoice_item_id' => $piItemId,
                     'purchase_order_line_id'   => $piItem['purchase_order_line_id'] ?? null,
                     'source_description'       => (string) $piItem['description'],
-                    'source_qty'               => (string) $piItem['quantity'],
+                    'source_qty'               => (string) $piItem['base_quantity'],
                 ];
             }
 
@@ -278,7 +285,7 @@ final class StockReceiptService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id, pii.stock_item_id, pii.purchase_order_line_id, pii.description,
-                    pii.quantity, pii.total_without_vat, pii.total_with_vat
+                    pii.quantity, pii.unit, pii.total_without_vat, pii.total_with_vat
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
               WHERE pi.supplier_id = ? AND pii.purchase_invoice_id = ?
@@ -286,10 +293,19 @@ final class StockReceiptService
         );
         $stmt->execute([$supplierId, $piId]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        foreach ($rows as &$r) {
+        // Balení (issue #17): `base_quantity` = množství v základní jednotce karty
+        // přes StockUnitConverter; řádek bez karty zůstává 1:1.
+        $ratios = $this->units->ratios($supplierId, array_map(
+            static fn (array $r): array => ['stock_item_id' => (int) ($r['stock_item_id'] ?? 0), 'unit' => $r['unit']],
+            $rows,
+        ));
+        foreach ($rows as $index => &$r) {
             $r['id']            = (int) $r['id'];
             $r['stock_item_id'] = $r['stock_item_id'] !== null ? (int) $r['stock_item_id'] : null;
             $r['purchase_order_line_id'] = $r['purchase_order_line_id'] !== null ? (int) $r['purchase_order_line_id'] : null;
+            $r['base_quantity'] = $r['stock_item_id'] !== null
+                ? StockUnitConverter::applyRatio((string) $r['quantity'], $ratios[$index]['numerator'], $ratios[$index]['denominator'])
+                : (string) $r['quantity'];
         }
         unset($r);
         return $rows;

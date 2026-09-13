@@ -40,6 +40,7 @@ final class StockIssueService
         private readonly StockLevelService $levels,
         private readonly CommercialFeatureAccess $commercialFeatures,
         private readonly StockCommitmentService $commitments,
+        private readonly StockUnitConverter $units,
     ) {}
 
     /**
@@ -375,6 +376,10 @@ final class StockIssueService
     /**
      * Skladové řádky faktury (stock_item_id IS NOT NULL, nenulové množství).
      *
+     * `qty` je v ZÁKLADNÍ jednotce karty — řádek fakturovaný v balení (10 KT,
+     * 1 KT = 8 ks) vydá 80 ks. Převod dělá jen {@see StockUnitConverter}; výdej,
+     * předběžná kontrola dostupnosti i vratka z dobropisu čtou řádky odsud.
+     *
      * @return list<array{id:int, stock_item_id:int, warehouse_id:?int, description:string, qty:string}>
      */
     private function stockItemsOfInvoice(int $supplierId, int $invoiceId): array
@@ -383,18 +388,24 @@ final class StockIssueService
         // konzistence se zbytkem modulu (LOW-1 security audit; downstream se stejně
         // re-filtruje, tohle je defense-in-depth).
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ii.id, ii.stock_item_id, ii.warehouse_id, ii.description, ii.quantity
+            'SELECT ii.id, ii.stock_item_id, ii.warehouse_id, ii.description, ii.quantity, ii.unit
                FROM invoice_items ii
                JOIN invoices i ON i.id = ii.invoice_id AND i.supplier_id = ?
               WHERE ii.invoice_id = ? AND ii.stock_item_id IS NOT NULL
               ORDER BY ii.order_index, ii.id'
         );
         $stmt->execute([$supplierId, $invoiceId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $ratios = $this->units->ratios($supplierId, array_map(
+            static fn (array $r): array => ['stock_item_id' => (int) $r['stock_item_id'], 'unit' => $r['unit']],
+            $rows,
+        ));
 
         $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
-            $qty = (float) $r['quantity'];
-            if ($qty === 0.0) {
+        foreach ($rows as $index => $r) {
+            $ratio = $ratios[$index];
+            $qty = StockUnitConverter::applyRatio((string) $r['quantity'], $ratio['numerator'], $ratio['denominator']);
+            if (bccomp($qty, '0', 3) === 0) {
                 continue;
             }
             $out[] = [
@@ -402,7 +413,7 @@ final class StockIssueService
                 'stock_item_id' => (int) $r['stock_item_id'],
                 'warehouse_id'  => $r['warehouse_id'] !== null ? (int) $r['warehouse_id'] : null,
                 'description'   => (string) $r['description'],
-                'qty'           => number_format($qty, 3, '.', ''),
+                'qty'           => $qty,
             ];
         }
         return $out;

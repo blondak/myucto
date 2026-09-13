@@ -493,6 +493,7 @@ async function saveSupplier() {
       stock_enabled: supplier.value.stock_enabled ?? false,
       stock_auto_issue: supplier.value.stock_auto_issue ?? true,
       stock_in_transit_from: supplier.value.stock_in_transit_from ?? 'sent',
+      invoice_pdf_show_base_qty: supplier.value.invoice_pdf_show_base_qty ?? true,
       // Tax settings (EPO výkazy DPH/KH)
       // Účetní režim posíláme jen když ho uživatel opravdu přepnul. Server na
       // něm má navěšenou historii režimu i kontrolu právní formy, takže
@@ -1341,6 +1342,14 @@ async function confirmTaxRepDelete() {
             <span>
               <span class="font-medium">{{ t('stock.settings.auto_issue_label') }}</span>
               <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.settings.auto_issue_hint') }}</p>
+            </span>
+          </label>
+          <label v-if="supplier.stock_enabled" class="flex items-start gap-2 cursor-pointer ml-6">
+            <input :checked="supplier.invoice_pdf_show_base_qty ?? true" @change="supplier.invoice_pdf_show_base_qty = ($event.target as HTMLInputElement).checked"
+              type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+            <span>
+              <span class="font-medium">{{ t('stock.settings.pdf_base_qty_label') }}</span>
+              <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.settings.pdf_base_qty_hint') }}</p>
             </span>
           </label>
           <div v-if="supplier.stock_enabled" class="ml-6">

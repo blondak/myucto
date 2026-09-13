@@ -20,7 +20,7 @@ final class StockItemRepository
     public const MISSING_FIELDS = ['manufacturer', 'category', 'image', 'price', 'ean'];
 
     private const COLUMNS =
-        'id, supplier_id, sku, name, item_type, manufacturer_id, unit, tracking_mode, ean, vat_rate_id,
+        'id, supplier_id, sku, name, item_type, manufacturer_id, unit, default_sale_unit, tracking_mode, ean, vat_rate_id,
          sale_price_without_vat, min_qty, warranty_months, delivery_days, export_eshop,
          is_stocked, weight_g, intrastat_cn8_code, intrastat_country_of_origin, intrastat_net_mass_kg,
          intrastat_supplementary_unit, intrastat_supplementary_unit_coefficient,
@@ -412,7 +412,7 @@ final class StockItemRepository
     }
 
     /**
-     * Autocomplete — aktivní karty dle sku/name/ean.
+     * Autocomplete — aktivní karty dle sku/name/ean a přesného EAN balení (issue #17).
      * @return list<array<string,mixed>>
      */
     public function search(int $supplierId, string $q, int $limit = 50): array
@@ -425,20 +425,23 @@ final class StockItemRepository
         $like = '%' . addcslashes($q, '%_\\') . '%';
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, sku, name, unit, tracking_mode, vat_rate_id, sale_price_without_vat
-               FROM stock_items
-              WHERE supplier_id = ? AND is_active = 1 AND lifecycle_status = \'ready\'
-                AND (sku LIKE ? OR name LIKE ? OR ean LIKE ?)
-              ORDER BY name ASC
+            'SELECT si.id, si.sku, si.name, si.unit, si.default_sale_unit, si.tracking_mode, si.vat_rate_id, si.sale_price_without_vat
+               FROM stock_items si
+              WHERE si.supplier_id = ? AND si.is_active = 1 AND si.lifecycle_status = \'ready\'
+                AND (si.sku LIKE ? OR si.name LIKE ? OR si.ean LIKE ?
+                     OR EXISTS (SELECT 1 FROM stock_item_units u
+                                 WHERE u.supplier_id = si.supplier_id AND u.stock_item_id = si.id AND u.ean = ?))
+              ORDER BY si.name ASC
               LIMIT ' . $lim
         );
-        $stmt->execute([$supplierId, $like, $like, $like]);
+        $stmt->execute([$supplierId, $like, $like, $like, $q]);
         return array_map(static function (array $r): array {
             return [
                 'id'                     => (int) $r['id'],
                 'sku'                    => (string) $r['sku'],
                 'name'                   => (string) $r['name'],
                 'unit'                   => (string) $r['unit'],
+                'default_sale_unit'      => $r['default_sale_unit'] !== null ? (string) $r['default_sale_unit'] : null,
                 'tracking_mode'          => (string) $r['tracking_mode'],
                 'vat_rate_id'            => $r['vat_rate_id'] !== null ? (int) $r['vat_rate_id'] : null,
                 'sale_price_without_vat' => $r['sale_price_without_vat'],

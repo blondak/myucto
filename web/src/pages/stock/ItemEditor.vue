@@ -2,7 +2,15 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
 import { useRoute, useRouter, RouterLink, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { stockApi, type StockItemPayload } from '@/api/stock'
+import {
+  stockApi,
+  type StockItemPayload,
+  type StockItemPackaging,
+  type StockItemPackagingPayload,
+  type StockItemCustomerPrice,
+  type StockItemCustomerPricePayload,
+  type StockCustomerPriceType,
+} from '@/api/stock'
 import {
   eshopApi,
   type Manufacturer,
@@ -26,6 +34,7 @@ import {
   type PromoState,
   type EshopLocale,
   type EshopCurrency,
+  type PackagingUnit,
 } from '@/api/eshop'
 import { clientsApi, type Client } from '@/api/clients'
 import { codebooksApi, type Country, type VatRate, type Unit } from '@/api/codebooks'
@@ -34,6 +43,8 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
+import { formatMoney } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import MarkdownEditor from '@/components/ui/MarkdownEditor.vue'
@@ -509,6 +520,261 @@ function vendorPayloadFrom(r: VendorRow) {
   }
 }
 
+// ── Balení (issue #17) ──────────────────────────────────────────────────
+// Nadřazené jednotky karty: kód z číselníku balení firmy, přesný poměr
+// k základní jednotce a EAN balení. Ukládá se společným Uložit (vlastní PUT
+// po uložení karty); poměr a odebrání hlídá backend proti vystaveným dokladům.
+interface PackagingRow {
+  unit_code: string
+  factor: string
+  ean: string | null
+  in_use: boolean
+}
+const packagingCodebook = ref<PackagingUnit[]>([])
+const packagingRows = ref<PackagingRow[]>([])
+const defaultSaleUnit = ref<string | null>(null)
+const packagingLoaded = ref(false)
+const savedPackagingSnapshot = ref('')
+
+function sameCode(a: string | null | undefined, b: string | null | undefined): boolean {
+  return String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase()
+}
+function normalizeDecimal(value: string | number | null | undefined): string {
+  return String(value ?? '').trim().replace(/\s+/g, '').replace(',', '.')
+}
+/** Aktivní balení z číselníku, bez základní jednotky a kódů z ostatních řádků; uložený kód vždy. */
+function packagingOptions(current: string): { code: string; name: string; known: boolean }[] {
+  const taken = packagingRows.value.map(r => r.unit_code).filter(code => code && !sameCode(code, current))
+  const opts = packagingCodebook.value
+    .filter(u => u.is_active && !sameCode(u.code, form.value.unit) && !taken.some(code => sameCode(code, u.code)))
+    .map(u => ({ code: u.code, name: u.name, known: true }))
+  if (current && !opts.some(o => sameCode(o.code, current))) {
+    const known = packagingCodebook.value.find(u => sameCode(u.code, current))
+    opts.unshift({ code: current, name: known?.name ?? current, known: !!known })
+  }
+  return opts
+}
+const activePackagingCount = computed(() => packagingCodebook.value.filter(u => u.is_active).length)
+function addPackagingRow() {
+  packagingRows.value.push({ unit_code: '', factor: '', ean: null, in_use: false })
+}
+function removePackagingRow(idx: number) {
+  const [row] = packagingRows.value.splice(idx, 1)
+  if (row && sameCode(defaultSaleUnit.value, row.unit_code)) defaultSaleUnit.value = null
+}
+watch(() => packagingRows.value.map(r => r.unit_code), (codes) => {
+  if (defaultSaleUnit.value && !codes.some(code => sameCode(code, defaultSaleUnit.value))) defaultSaleUnit.value = null
+})
+function applyPackaging(p: StockItemPackaging) {
+  packagingRows.value = (p.units ?? []).map(u => ({ unit_code: u.unit_code, factor: u.factor, ean: u.ean, in_use: !!u.in_use }))
+  defaultSaleUnit.value = p.default_sale_unit
+}
+function buildPackagingPayload(): StockItemPackagingPayload {
+  const units = packagingRows.value.map(r => ({
+    unit_code: String(r.unit_code ?? '').trim(),
+    factor: normalizeDecimal(r.factor),
+    ean: nullableCode(r.ean),
+  }))
+  const preferred = units.find(u => sameCode(u.unit_code, defaultSaleUnit.value))
+  return { default_sale_unit: preferred ? preferred.unit_code : null, units }
+}
+function packagingSnapshot(): string {
+  return JSON.stringify(buildPackagingPayload())
+}
+const packagingDirty = computed(() => packagingLoaded.value && packagingSnapshot() !== savedPackagingSnapshot.value)
+function validatePackaging(): string | null {
+  const seen: string[] = []
+  for (const row of packagingRows.value) {
+    const code = String(row.unit_code ?? '').trim()
+    const factor = Number(normalizeDecimal(row.factor))
+    if (!code || normalizeDecimal(row.factor) === '' || !Number.isFinite(factor) || factor <= 0) return t('stock.packaging.code_required')
+    if (sameCode(code, form.value.unit)) return t('stock.packaging.same_as_base')
+    if (seen.some(c => sameCode(c, code))) return t('stock.packaging.duplicate_code', { code })
+    seen.push(code)
+  }
+  return null
+}
+
+// ── Individuální ceny zákazníků (issue #17) ─────────────────────────────
+// Cena je vždy za ZÁKLADNÍ jednotku bez DPH. Zákaznická cena nahrazuje
+// standardní cenu jako základ, akce se použije jen když je levnější. To vše
+// počítá backend (EffectivePriceResolver); tady je jen náhled.
+interface CustomerPriceRow {
+  id: number | null
+  client_id: number | null
+  client_name: string | null
+  currency_code: string
+  price_type: StockCustomerPriceType
+  fixed_price: string | null
+  discount_pct: string | null
+  valid_from: string | null
+  valid_to: string | null
+  note: string | null
+  resulting_price: string | null
+  /** Otisk ceny při načtení. Dokud sedí, platí dopočet backendu (zohledňuje platnost). */
+  loadedKey: string | null
+}
+const customerPrices = ref<CustomerPriceRow[]>([])
+const customerPricesLoaded = ref(false)
+const savedCustomerPricesSnapshot = ref('')
+const CUSTOMER_PRICE_TYPES: StockCustomerPriceType[] = ['fixed', 'discount_pct']
+
+function customerPriceKey(r: CustomerPriceRow): string {
+  return JSON.stringify([r.currency_code, r.price_type, normalizeDecimal(r.fixed_price), normalizeDecimal(r.discount_pct), r.valid_from, r.valid_to])
+}
+function customerPriceRowFrom(p: StockItemCustomerPrice): CustomerPriceRow {
+  const row: CustomerPriceRow = {
+    id: p.id,
+    client_id: p.client_id,
+    client_name: p.client_name,
+    currency_code: p.currency_code,
+    price_type: p.price_type,
+    fixed_price: p.fixed_price,
+    discount_pct: p.discount_pct,
+    valid_from: p.valid_from,
+    valid_to: p.valid_to,
+    note: p.note,
+    resulting_price: p.resulting_price,
+    loadedKey: null,
+  }
+  row.loadedKey = customerPriceKey(row)
+  return row
+}
+function addCustomerPriceRow() {
+  customerPrices.value.push({
+    id: null,
+    client_id: null,
+    client_name: null,
+    currency_code: defaultCurrency.value || 'CZK',
+    price_type: 'fixed',
+    fixed_price: '',
+    discount_pct: '',
+    valid_from: null,
+    valid_to: null,
+    note: null,
+    resulting_price: null,
+    loadedKey: null,
+  })
+}
+function removeCustomerPriceRow(idx: number) {
+  customerPrices.value.splice(idx, 1)
+}
+function customerPricePayloadFrom(r: CustomerPriceRow): StockItemCustomerPricePayload {
+  const fixed = normalizeDecimal(r.fixed_price)
+  const pct = normalizeDecimal(r.discount_pct)
+  return {
+    client_id: r.client_id as number,
+    currency_code: r.currency_code.trim().toUpperCase(),
+    price_type: r.price_type,
+    fixed_price: r.price_type === 'fixed' ? (fixed === '' ? null : fixed) : null,
+    discount_pct: r.price_type === 'discount_pct' ? (pct === '' ? null : pct) : null,
+    valid_from: r.valid_from || null,
+    valid_to: r.valid_to || null,
+    note: r.note && r.note.trim() !== '' ? r.note.trim() : null,
+  }
+}
+function customerPricesSnapshot(): string {
+  return JSON.stringify(customerPrices.value.map(customerPricePayloadFrom))
+}
+const customerPricesDirty = computed(() => customerPricesLoaded.value && customerPricesSnapshot() !== savedCustomerPricesSnapshot.value)
+/** Standardní cena za základní jednotku v dané měně, základ pro náhled slevy. */
+function standardPriceFor(currency: string): number | null {
+  const row = prices.value.find(p => p.currency_code.toUpperCase() === currency.toUpperCase())
+  if (row?.computed_price != null && row.computed_price !== '') return Number(row.computed_price)
+  const sale = normalizeDecimal(form.value.sale_price_without_vat)
+  if (currency.toUpperCase() === 'CZK' && sale !== '' && Number.isFinite(Number(sale))) return Number(sale)
+  return null
+}
+function customerPricePreview(r: CustomerPriceRow): number | null {
+  if (r.loadedKey !== null && r.loadedKey === customerPriceKey(r) && r.resulting_price != null) return Number(r.resulting_price)
+  if (r.price_type === 'fixed') {
+    const fixed = normalizeDecimal(r.fixed_price)
+    return fixed === '' || !Number.isFinite(Number(fixed)) ? null : Number(fixed)
+  }
+  const pct = normalizeDecimal(r.discount_pct)
+  const standard = standardPriceFor(r.currency_code)
+  if (standard === null || pct === '' || !Number.isFinite(Number(pct))) return null
+  return Math.round(standard * (1 - Number(pct) / 100) * 100) / 100
+}
+function validateCustomerPrices(): string | null {
+  const seen = new Set<string>()
+  for (const r of customerPrices.value) {
+    if (!r.client_id) return t('stock.customer_prices.client_required')
+    if (!r.currency_code) return t('eshop.prices.currency_required')
+    const raw = normalizeDecimal(r.price_type === 'fixed' ? r.fixed_price : r.discount_pct)
+    const value = Number(raw)
+    if (raw === '' || !Number.isFinite(value) || value < 0 || (r.price_type === 'discount_pct' && value > 100)) {
+      return t('stock.customer_prices.value_invalid')
+    }
+    if (r.valid_from && r.valid_to && r.valid_from > r.valid_to) return t('stock.customer_prices.dates_invalid')
+    const key = `${r.client_id}|${r.currency_code.toUpperCase()}`
+    if (seen.has(key)) {
+      return t('stock.customer_prices.duplicate', { client: r.client_name ?? `#${r.client_id}`, currency: r.currency_code.toUpperCase() })
+    }
+    seen.add(key)
+  }
+  return null
+}
+
+/**
+ * Balení a zákaznické ceny mají vlastní endpointy. Když se nenačtou, editor
+ * zůstane použitelný, ale tyto sekce se neukládají. Prázdná sada by jinak
+ * při uložení smazala data, která uživatel vůbec neviděl.
+ */
+async function loadItemExtras(id: number) {
+  const [codebook, packaging, customer] = await Promise.all([
+    Promise.resolve().then(() => eshopApi.listPackagingUnits()).catch(() => [] as PackagingUnit[]),
+    Promise.resolve().then(() => stockApi.getItemPackaging(id)).catch(() => null),
+    Promise.resolve().then(() => stockApi.getCustomerPrices(id)).catch(() => null),
+  ])
+  packagingCodebook.value = codebook
+  packagingLoaded.value = packaging !== null
+  if (packaging) applyPackaging(packaging)
+  else { packagingRows.value = []; defaultSaleUnit.value = null }
+  savedPackagingSnapshot.value = packagingSnapshot()
+  customerPricesLoaded.value = customer !== null
+  customerPrices.value = (customer ?? []).map(customerPriceRowFrom)
+  savedCustomerPricesSnapshot.value = customerPricesSnapshot()
+}
+
+/** Uloží změněné balení a zákaznické ceny po uložení karty. false = chyba (zobrazená). */
+async function saveItemExtras(id: number): Promise<boolean> {
+  if (packagingDirty.value) {
+    const submitted = packagingSnapshot()
+    try {
+      const result = await stockApi.replaceItemPackaging(id, buildPackagingPayload())
+      if (packagingSnapshot() === submitted) {
+        if (result && Array.isArray(result.units)) applyPackaging(result)
+        savedPackagingSnapshot.value = packagingSnapshot()
+      } else {
+        savedPackagingSnapshot.value = submitted
+      }
+    } catch (e: any) {
+      error.value = mapError(e)
+      tab.value = 'general'
+      return false
+    }
+  }
+  if (customerPricesDirty.value) {
+    const submitted = customerPricesSnapshot()
+    try {
+      await stockApi.replaceCustomerPrices(id, customerPrices.value.map(customerPricePayloadFrom))
+      if (customerPricesSnapshot() === submitted) {
+        const fresh = await stockApi.getCustomerPrices(id).catch(() => null)
+        if (fresh) customerPrices.value = fresh.map(customerPriceRowFrom)
+        savedCustomerPricesSnapshot.value = customerPricesSnapshot()
+      } else {
+        savedCustomerPricesSnapshot.value = submitted
+      }
+    } catch (e: any) {
+      error.value = mapError(e)
+      tab.value = 'prices'
+      return false
+    }
+  }
+  return true
+}
+
 // ── Přílohy (média) ─────────────────────────────────────────────────────
 const media = ref<ProductMedia[]>([])
 const uploading = ref(false)
@@ -671,7 +937,10 @@ function prepareEditorRows() {
 onMounted(async () => {
   try {
     await loadCodebooks()
-    if (isEdit.value && itemId.value) await loadProduct(itemId.value)
+    if (isEdit.value && itemId.value) {
+      await loadProduct(itemId.value)
+      await loadItemExtras(itemId.value)
+    }
     prepareEditorRows()
     markSaved()
     await nextTick()
@@ -750,7 +1019,8 @@ function snapshot(): string {
 function markSaved(snapshotValue = snapshot()) {
   savedSnapshot.value = snapshotValue
 }
-const isDirty = computed(() => savedSnapshot.value !== '' && snapshot() !== savedSnapshot.value)
+const isDirty = computed(() => savedSnapshot.value !== ''
+  && (snapshot() !== savedSnapshot.value || packagingDirty.value || customerPricesDirty.value))
 function confirmDiscard(): boolean {
   return !isDirty.value || window.confirm(t('stock.items.editor_ux.discard_changes'))
 }
@@ -791,6 +1061,18 @@ function validateBeforeSubmit(): boolean {
     tab.value = 'vendors'
     return false
   }
+  const packagingError = packagingLoaded.value ? validatePackaging() : null
+  if (packagingError) {
+    error.value = packagingError
+    tab.value = 'general'
+    return false
+  }
+  const customerPriceError = customerPricesLoaded.value ? validateCustomerPrices() : null
+  if (customerPriceError) {
+    error.value = customerPriceError
+    tab.value = 'prices'
+    return false
+  }
   return true
 }
 
@@ -813,7 +1095,7 @@ async function submit() {
       }
       const saved = await eshopApi.saveProductEditor(itemId.value, payload)
       rowVersion.value = saved.row_version
-      toast.success(t('common.saved'))
+      if (await saveItemExtras(itemId.value)) toast.success(t('common.saved'))
       if (snapshot() === submittedSnapshot) {
         await loadProduct(itemId.value)
         markSaved()
@@ -1007,6 +1289,63 @@ function onImgError(e: Event) {
                 <option :value="null">—</option>
                 <option v-for="r in vatRates" :key="r.id" :value="r.id">{{ r.rate_percent }} %</option>
               </select>
+            </div>
+          </div>
+
+          <!-- Balení (nadřazené jednotky) u základní jednotky, ukládá se společným Uložit -->
+          <div v-if="isEdit" data-test="packaging-section" class="rounded-md border border-neutral-200 p-4 space-y-3">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <div class="min-w-0">
+                <h3 class="text-sm font-semibold text-neutral-800">{{ t('stock.packaging.title') }}</h3>
+                <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.packaging.hint', { unit: form.unit || '—' }) }}</p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <RouterLink to="/eshop?tab=packaging" :class="btnOutline('neutral')" class="whitespace-nowrap">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                  {{ t('stock.packaging.manage_codebook') }}
+                </RouterLink>
+                <button type="button" @click="addPackagingRow" :disabled="!packagingLoaded" :class="btnOutline('primary')" class="whitespace-nowrap">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                  {{ t('stock.packaging.add') }}
+                </button>
+              </div>
+            </div>
+
+            <p v-if="!packagingLoaded" class="text-xs text-warning-600">{{ t('stock.packaging.load_failed') }}</p>
+            <p v-else-if="packagingRows.length === 0" class="text-xs text-neutral-500">
+              {{ activePackagingCount === 0 ? t('stock.packaging.no_codebook') : t('stock.packaging.empty') }}
+            </p>
+
+            <div v-for="(row, idx) in packagingRows" :key="`packaging-${idx}`" data-test="packaging-row"
+              class="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(9rem,1fr)_auto_7rem_auto_minmax(9rem,1fr)_auto] items-center gap-2">
+              <select v-model="row.unit_code" :disabled="row.in_use" :aria-label="t('stock.packaging.field_code')"
+                class="col-span-2 sm:col-span-1 h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-100 disabled:text-neutral-500">
+                <option value="">{{ t('stock.packaging.select_code') }}</option>
+                <option v-for="o in packagingOptions(row.unit_code)" :key="o.code" :value="o.code">{{ o.code }} · {{ o.name }}{{ o.known ? '' : ' ⚠' }}</option>
+              </select>
+              <div class="col-span-2 sm:contents flex items-center gap-2">
+                <span class="text-sm text-neutral-500 whitespace-nowrap">{{ t('stock.packaging.factor_prefix', { code: row.unit_code || '?' }) }}</span>
+                <input v-model="row.factor" :disabled="row.in_use" type="text" inputmode="decimal" :aria-label="t('stock.packaging.field_factor')"
+                  class="w-28 sm:w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right disabled:bg-neutral-100 disabled:text-neutral-500" />
+                <span class="text-sm text-neutral-500 whitespace-nowrap">{{ form.unit }}</span>
+              </div>
+              <input v-model="row.ean" maxlength="20" :placeholder="t('stock.packaging.field_ean')" :aria-label="t('stock.packaging.field_ean')"
+                class="h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+              <button type="button" @click="removePackagingRow(idx)" :disabled="row.in_use"
+                :title="row.in_use ? t('stock.packaging.in_use_hint') : t('common.delete')"
+                class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1 disabled:cursor-not-allowed disabled:opacity-40">
+                <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+              </button>
+            </div>
+            <p v-if="packagingRows.some(r => r.in_use)" class="text-xs text-neutral-500">{{ t('stock.packaging.in_use_hint') }}</p>
+
+            <div v-if="packagingRows.some(r => r.unit_code)" class="max-w-sm">
+              <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.packaging.default_sale_unit') }}</label>
+              <select v-model="defaultSaleUnit" data-test="packaging-default-unit" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+                <option :value="null">{{ t('stock.packaging.default_base', { unit: form.unit || '—' }) }}</option>
+                <option v-for="r in packagingRows.filter(r => r.unit_code)" :key="r.unit_code" :value="r.unit_code">{{ r.unit_code }}</option>
+              </select>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('stock.packaging.default_sale_unit_hint') }}</p>
             </div>
           </div>
 
@@ -1472,6 +1811,92 @@ function onImgError(e: Event) {
               </div>
             </div>
             <p class="text-xs text-neutral-500">{{ t('eshop.promo.hint') }}</p>
+          </div>
+
+          <!-- ─────────── Individuální ceny zákazníků ─────────── -->
+          <div data-test="customer-prices" class="pt-5 mt-1 border-t border-neutral-200 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 class="text-sm font-semibold text-neutral-800">{{ t('stock.customer_prices.title') }}</h3>
+                <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.customer_prices.subtitle') }}</p>
+              </div>
+              <button type="button" @click="addCustomerPriceRow" :disabled="!customerPricesLoaded" :class="btnOutline('primary')" class="whitespace-nowrap">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                {{ t('stock.customer_prices.add') }}
+              </button>
+            </div>
+
+            <p v-if="!customerPricesLoaded" class="text-xs text-warning-600">{{ t('stock.customer_prices.load_failed') }}</p>
+            <EmptyState v-else-if="customerPrices.length === 0" dense accent="neutral" icon="user"
+              :title="t('stock.customer_prices.empty')" :message="t('stock.customer_prices.empty_hint')" />
+
+            <div v-else class="space-y-3">
+              <div v-for="(c, idx) in customerPrices" :key="c.id ?? `new-customer-price-${idx}`" data-test="customer-price-row"
+                class="border border-neutral-200 rounded-md p-4 space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="flex-1 min-w-0">
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.field_client') }} *</label>
+                    <ClientSearchSelect
+                      :model-value="c.client_id"
+                      :selected-label="c.client_name"
+                      :placeholder="t('stock.customer_prices.select_client')"
+                      @update:model-value="(v: number | null) => { c.client_id = v }"
+                      @selected="(client) => { c.client_name = client?.company_name ?? null }" />
+                  </div>
+                  <button type="button" @click="removeCustomerPriceRow(idx)" :title="t('common.delete')" class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1 pt-6">
+                    <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                  </button>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.field_currency') }}</label>
+                    <select v-model="c.currency_code" required class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono bg-surface">
+                      <option value="">{{ t('eshop.prices.select_currency') }}</option>
+                      <option v-for="cur in currencyOptions(c.currency_code)" :key="cur.code" :value="cur.code">{{ cur.code }}{{ cur.known ? '' : ' ⚠' }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.field_type') }}</label>
+                    <select v-model="c.price_type" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+                      <option v-for="pt in CUSTOMER_PRICE_TYPES" :key="pt" :value="pt">{{ t('stock.customer_prices.type_' + pt) }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <template v-if="c.price_type === 'fixed'">
+                      <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.field_fixed_price', { unit: form.unit || '—' }) }}</label>
+                      <input v-model="c.fixed_price" type="text" inputmode="decimal" :placeholder="t('eshop.prices.fixed_ph')"
+                        class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
+                    </template>
+                    <template v-else>
+                      <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.field_discount_pct') }}</label>
+                      <input v-model="c.discount_pct" type="text" inputmode="decimal"
+                        class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
+                    </template>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.field_from') }}</label>
+                    <DateInput v-model="c.valid_from" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.field_to') }}</label>
+                    <DateInput v-model="c.valid_to" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                  </div>
+                  <div>
+                    <span class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.preview', { unit: form.unit || '—' }) }}</span>
+                    <div class="h-9 flex items-center justify-end gap-2 rounded-md bg-neutral-50 px-2 font-mono text-sm text-neutral-800">
+                      <span v-if="!c.id" class="mr-auto font-sans text-xs text-neutral-400">{{ t('stock.customer_prices.unsaved') }}</span>
+                      {{ customerPricePreview(c) === null ? '—' : formatMoney(customerPricePreview(c), c.currency_code || 'CZK') }}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.field_note') }}</label>
+                  <input v-model="c.note" type="text" maxlength="255" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-neutral-500">{{ t('stock.customer_prices.hint') }}</p>
           </div>
         </div>
       </div>

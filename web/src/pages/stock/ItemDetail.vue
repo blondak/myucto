@@ -2,7 +2,7 @@
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { stockApi, type StockItem, type StockLedgerRow, type StockTrackingOverview } from '@/api/stock'
+import { stockApi, type StockItem, type StockItemPackaging, type StockLedgerRow, type StockTrackingOverview } from '@/api/stock'
 import { purchaseOrdersApi, type StockQuantityRow } from '@/api/purchaseOrders'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -81,8 +81,9 @@ async function loadQuantities() {
 
 const movements = ref<StockLedgerRow[]>([])
 const tracking = ref<StockTrackingOverview | null>(null)
-const conversionUnits = ref<Array<{ unit_code: string; numerator: number; denominator: number }>>([])
-const savingUnits = ref(false)
+// Balení (issue #17): detail je jen přehled, upravuje se v editoru karty
+// společně s ostatními údaji (jedno Uložit).
+const packaging = ref<StockItemPackaging | null>(null)
 const openingBalance = ref('0')
 const movLoading = ref(false)
 const movOffset = ref(0)
@@ -94,9 +95,6 @@ async function loadItem() {
   try {
     item.value = await stockApi.getItem(id.value)
     tracking.value = item.value.tracking_mode === 'none' ? null : await stockApi.itemTracking(id.value)
-    conversionUnits.value = tracking.value?.units.map(unit => ({
-      unit_code: unit.unit_code, numerator: unit.numerator, denominator: unit.denominator,
-    })) ?? []
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -104,24 +102,11 @@ async function loadItem() {
   }
 }
 
-function addConversionUnit() {
-  conversionUnits.value.push({ unit_code: '', numerator: 1, denominator: 1 })
-}
-
-async function saveConversionUnits() {
-  if (!tracking.value) return
-  savingUnits.value = true
+async function loadPackaging() {
   try {
-    const units = await stockApi.replaceItemUnits(id.value, conversionUnits.value)
-    conversionUnits.value = units.map((unit: any) => ({
-      unit_code: unit.unit_code, numerator: unit.numerator, denominator: unit.denominator,
-    }))
-    tracking.value.units = units
-    toast.success(t('common.saved'))
-  } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('common.error'))
-  } finally {
-    savingUnits.value = false
+    packaging.value = await stockApi.getItemPackaging(id.value)
+  } catch {
+    packaging.value = null
   }
 }
 
@@ -144,6 +129,7 @@ async function loadMovements(reset = false) {
 
 onMounted(async () => {
   await loadItem()
+  void loadPackaging()
   await loadMovements(true)
   loadQuantities()
   void loadProductContext()
@@ -323,6 +309,33 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
       <ItemTemplatesPanel v-if="canManageLifecycle" :item="item" @created="duplicated" />
 
       <ProductRelationsPanel :item-id="id" :can-write="canManageLifecycle" class="mb-5" />
+
+      <!-- Balení (issue #17): přehled, úpravy v editoru karty -->
+      <div v-if="packaging" data-test="packaging-overview" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
+        <div class="px-5 py-3 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2">
+          <div class="min-w-0">
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.packaging.title') }}</h3>
+            <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.packaging.overview_hint', { unit: packaging.base_unit }) }}</p>
+          </div>
+          <RouterLink v-if="auth.canWrite('stock.items.write')" :to="`/stock/items/${id}/edit`" :class="btnOutline('warning')" class="whitespace-nowrap">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 3.487a2.25 2.25 0 0 1 3.182 3.182L8.25 18.463 3.75 19.5l1.037-4.5L16.862 3.487z" /></svg>
+            {{ t('stock.packaging.edit') }}
+          </RouterLink>
+        </div>
+        <p v-if="packaging.units.length === 0" class="px-5 py-4 text-sm text-neutral-500">{{ t('stock.packaging.empty') }}</p>
+        <div v-else class="divide-y divide-neutral-100">
+          <div v-for="unit in packaging.units" :key="unit.unit_code" class="px-5 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-mono font-medium">{{ t('stock.packaging.ratio', { code: unit.unit_code, factor: unit.factor, unit: packaging.base_unit }) }}</span>
+              <span v-if="unit.name" class="text-neutral-500">{{ unit.name }}</span>
+              <span v-if="packaging.default_sale_unit && unit.unit_code.toLowerCase() === packaging.default_sale_unit.toLowerCase()"
+                class="text-xs px-2 py-0.5 rounded-full border border-primary-500/40 bg-primary-50 text-primary-600">{{ t('stock.packaging.default_badge') }}</span>
+            </div>
+            <span class="font-mono text-neutral-500">{{ unit.ean ? `EAN ${unit.ean}` : '—' }}</span>
+          </div>
+        </div>
+      </div>
+
       <div v-if="tracking" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
         <div class="px-5 py-3 border-b border-neutral-200">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.tracking.title') }}</h3>
@@ -338,36 +351,6 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
               <span class="font-mono font-semibold">{{ row.quantity }} {{ tracking.base_unit }}</span>
               <span class="ml-2 text-neutral-500">{{ row.warehouse_code }}<template v-if="row.location_code"> / {{ row.location_code }}</template></span>
             </div>
-          </div>
-        </div>
-        <div class="border-t border-neutral-200 px-5 py-4">
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h4 class="text-sm font-semibold text-neutral-700">{{ t('stock.tracking.units_title') }}</h4>
-              <p class="text-xs text-neutral-500">{{ t('stock.tracking.units_hint', { unit: tracking.base_unit }) }}</p>
-            </div>
-            <button v-if="auth.canWrite('stock.items.write')" type="button" :class="btnOutline('neutral')" @click="addConversionUnit">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
-              {{ t('stock.tracking.add_unit') }}
-            </button>
-          </div>
-          <div v-if="conversionUnits.length" class="space-y-2">
-            <div v-for="(unit, index) in conversionUnits" :key="index" class="grid grid-cols-[minmax(7rem,1fr)_minmax(5rem,.6fr)_auto_minmax(5rem,.6fr)_auto] items-center gap-2">
-              <input v-model.trim="unit.unit_code" :disabled="!auth.canWrite('stock.items.write')" :placeholder="t('stock.tracking.unit_code')" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm" />
-              <input v-model.number="unit.numerator" :disabled="!auth.canWrite('stock.items.write')" type="number" min="1" max="1000000" step="1" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-right text-sm" />
-              <span class="text-sm text-neutral-500">/</span>
-              <input v-model.number="unit.denominator" :disabled="!auth.canWrite('stock.items.write')" type="number" min="1" max="1000000" step="1" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-right text-sm" />
-              <button v-if="auth.canWrite('stock.items.write')" type="button" class="rounded p-2 text-danger-600 hover:bg-danger-50" :aria-label="t('common.delete')" @click="conversionUnits.splice(index, 1)">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-          </div>
-          <p v-else class="text-sm text-neutral-500">{{ t('stock.tracking.units_empty') }}</p>
-          <div v-if="auth.canWrite('stock.items.write')" class="mt-3 flex justify-end">
-            <button type="button" :disabled="savingUnits" :class="btnOutline('primary')" @click="saveConversionUnits">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12l4 4L19 6" /></svg>
-              {{ savingUnits ? t('common.saving') : t('common.save') }}
-            </button>
           </div>
         </div>
       </div>

@@ -360,6 +360,8 @@ final class InvoicePdfRenderer
             }
         }
 
+        $invoice['items'] = $this->withBaseQuantity($invoice);
+
         $vars = [
             'invoice'           => $invoice,
             'supplier'          => $supplierData,
@@ -668,6 +670,51 @@ final class InvoicePdfRenderer
         $hasCzk = !empty($row['account_number']) && !empty($row['bank_code']);
         $hasIban = !empty($row['iban']);
         return ($hasCzk || $hasIban) ? $row : null;
+    }
+
+    /**
+     * Balení na PDF (issue #17): řádek skladové karty fakturovaný v balení dostane
+     * `base_qty` a `base_unit` a šablona pod jednotku doplní „(celkem 80 ks)".
+     * Přepíná `supplier.invoice_pdf_show_base_qty` (čte se živě — je to volba
+     * vzhledu, ne údaj dokladu). Převod dělá jen StockUnitConverter; řádek
+     * v základní nebo neznámé jednotce zůstane beze změny.
+     *
+     * @param array<string,mixed> $invoice
+     * @return list<array<string,mixed>>|array<int|string,mixed>
+     */
+    private function withBaseQuantity(array $invoice): array
+    {
+        $items = (array) ($invoice['items'] ?? []);
+        $supplierId = (int) ($invoice['supplier_id'] ?? 0);
+        $lines = [];
+        foreach ($items as $i => $item) {
+            if (is_array($item) && !empty($item['stock_item_id']) && trim((string) ($item['unit'] ?? '')) !== '') {
+                $lines[$i] = ['stock_item_id' => (int) $item['stock_item_id'], 'unit' => (string) $item['unit']];
+            }
+        }
+        if ($lines === [] || $supplierId <= 0) {
+            return $items;
+        }
+        // Jen firma se zapnutým skladem A zapnutým rozpisem — jinak PDF beze změny.
+        $flag = $this->db->pdo()->prepare('SELECT invoice_pdf_show_base_qty, stock_enabled FROM supplier WHERE id = ?');
+        $flag->execute([$supplierId]);
+        $settings = $flag->fetch(\PDO::FETCH_ASSOC);
+        if ($settings === false || (int) $settings['invoice_pdf_show_base_qty'] !== 1 || (int) $settings['stock_enabled'] !== 1) {
+            return $items;
+        }
+        $converter = new \MyInvoice\Service\Stock\StockUnitConverter($this->db);
+        foreach ($converter->ratios($supplierId, $lines) as $i => $ratio) {
+            if ($ratio['is_base']) {
+                continue;
+            }
+            $items[$i]['base_qty'] = (float) \MyInvoice\Service\Stock\StockUnitConverter::applyRatio(
+                (string) ($items[$i]['quantity'] ?? '0'),
+                $ratio['numerator'],
+                $ratio['denominator'],
+            );
+            $items[$i]['base_unit'] = $ratio['base_unit'];
+        }
+        return $items;
     }
 
     private function getSupplierData(int $supplierId): array

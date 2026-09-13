@@ -52,21 +52,73 @@ final class StockTrackingRepository
         return $stmt->rowCount() === 1 ? $id : 0;
     }
 
-    public function units(int $supplierId, int $itemId): array
+    /**
+     * Převodní jednotky karty. `$salesUnits` = true jen balení (issue #17),
+     * false jen převodní jednotky šarží, null obojí (alokace šarží berou všechny).
+     */
+    public function units(int $supplierId, int $itemId, ?bool $salesUnits = null): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT id, supplier_id, stock_item_id, unit_code, numerator, denominator FROM stock_item_units WHERE supplier_id = ? AND stock_item_id = ? ORDER BY unit_code');
+        $stmt = $this->db->pdo()->prepare('SELECT id, supplier_id, stock_item_id, unit_code, numerator, denominator, ean, is_sales_unit FROM stock_item_units WHERE supplier_id = ? AND stock_item_id = ?' . ($salesUnits === null ? '' : ' AND is_sales_unit = ' . ($salesUnits ? '1' : '0')) . ' ORDER BY unit_code');
         $stmt->execute([$supplierId, $itemId]);
         return array_map(static function (array $row): array {
             foreach (['id', 'supplier_id', 'stock_item_id', 'numerator', 'denominator'] as $key) $row[$key] = (int) $row[$key];
+            $row['is_sales_unit'] = (bool) $row['is_sales_unit'];
             return $row;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    /**
+     * Balení karet pro seznam (našeptávač) — jeden dotaz pro všechny karty; jen
+     * `is_sales_unit = 1`, převodní jednotky šarží ven nesmí (editor dokladu by
+     * podle nich přepočítával).
+     *
+     * @param list<int> $itemIds
+     * @return array<int, list<array<string,mixed>>> stock_item_id => balení
+     */
+    public function unitsForItems(int $supplierId, array $itemIds): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $itemIds), static fn (int $i): bool => $i > 0)));
+        if ($ids === []) return [];
+        $stmt = $this->db->pdo()->prepare('SELECT stock_item_id, unit_code, numerator, denominator, ean FROM stock_item_units WHERE supplier_id = ? AND is_sales_unit = 1 AND stock_item_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY stock_item_id, unit_code');
+        $stmt->execute(array_merge([$supplierId], $ids));
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(int) $row['stock_item_id']][] = ['unit_code' => (string) $row['unit_code'], 'numerator' => (int) $row['numerator'], 'denominator' => (int) $row['denominator'], 'ean' => $row['ean']];
+        }
+        return $out;
+    }
+
+    /**
+     * Převodní jednotky ŠARŽÍ (editor sledování) — spravuje jen řádky
+     * `is_sales_unit = 0`; balení karty (issue #17) nechává být. Kolizi kódu
+     * s balením hlídá volající (unikátní klíč by jinak shodil INSERT).
+     */
     public function replaceUnits(int $supplierId, int $itemId, array $units): void
     {
-        $this->db->pdo()->prepare('DELETE FROM stock_item_units WHERE supplier_id = ? AND stock_item_id = ?')->execute([$supplierId, $itemId]);
+        $this->db->pdo()->prepare('DELETE FROM stock_item_units WHERE supplier_id = ? AND stock_item_id = ? AND is_sales_unit = 0')->execute([$supplierId, $itemId]);
         $stmt = $this->db->pdo()->prepare('INSERT INTO stock_item_units (supplier_id, stock_item_id, unit_code, numerator, denominator) VALUES (?, ?, ?, ?, ?)');
         foreach ($units as $unit) $stmt->execute([$supplierId, $itemId, $unit['unit_code'], $unit['numerator'], $unit['denominator']]);
+    }
+
+    /**
+     * Balení karty (issue #17) — spravuje jen řádky `is_sales_unit = 1`, UPSERTEM,
+     * aby řádky, které zůstávají, držely id. Převodní jednotky šarží nechává být;
+     * kolizi kódu s nimi hlídá volající.
+     *
+     * @param list<array{unit_code:string, numerator:int, denominator:int, ean:?string}> $units
+     */
+    public function replaceSalesUnits(int $supplierId, int $itemId, array $units): void
+    {
+        $codes = array_map(static fn (array $u): string => (string) $u['unit_code'], $units);
+        $sql = 'DELETE FROM stock_item_units WHERE supplier_id = ? AND stock_item_id = ? AND is_sales_unit = 1';
+        $params = [$supplierId, $itemId];
+        if ($codes !== []) {
+            $sql .= ' AND unit_code NOT IN (' . implode(',', array_fill(0, count($codes), '?')) . ')';
+            $params = array_merge($params, $codes);
+        }
+        $this->db->pdo()->prepare($sql)->execute($params);
+        $stmt = $this->db->pdo()->prepare('INSERT INTO stock_item_units (supplier_id, stock_item_id, unit_code, numerator, denominator, ean, is_sales_unit) VALUES (?, ?, ?, ?, ?, ?, 1) ON DUPLICATE KEY UPDATE unit_code = VALUES(unit_code), numerator = VALUES(numerator), denominator = VALUES(denominator), ean = VALUES(ean)');
+        foreach ($units as $unit) $stmt->execute([$supplierId, $itemId, $unit['unit_code'], $unit['numerator'], $unit['denominator'], $unit['ean'] ?? null]);
     }
 
     public function unitRatio(int $supplierId, int $itemId, string $code): ?array

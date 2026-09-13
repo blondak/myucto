@@ -91,6 +91,24 @@ export interface FeeTypePayload {
   archived: boolean
 }
 
+/** Číselník balení (nadřazených jednotek) firmy (issue #17). */
+export interface PackagingUnit {
+  id: number
+  code: string
+  name: string
+  is_active: boolean
+  display_order: number
+  /** Počet skladových karet, které balení používají. */
+  usage_count: number
+}
+
+export interface PackagingUnitPayload {
+  code: string
+  name: string
+  is_active?: boolean
+  display_order?: number
+}
+
 export interface Attribute {
   id: number
   code: string
@@ -550,6 +568,14 @@ export const eshopApi = {
   createFeeType: (payload: FeeTypePayload) => api.post<FeeType>('/eshop/fee-types', payload).then(r => r.data),
   updateFeeType: (id: number, payload: FeeTypePayload) => api.put<FeeType>(`/eshop/fee-types/${id}`, payload).then(r => r.data),
   deleteFeeType: (id: number) => api.delete<{ deleted: true }>(`/eshop/fee-types/${id}`).then(r => r.data),
+
+  // ── Balení (Packaging units) ─────────────────────────────────────────────
+  listPackagingUnits: (filters?: any) =>
+    api.get<PackagingUnit[]>('/eshop/packaging-units', { params: toParams(filters) }).then(r => r.data),
+  getPackagingUnit: (id: number) => api.get<PackagingUnit>(`/eshop/packaging-units/${id}`).then(r => r.data),
+  createPackagingUnit: (payload: PackagingUnitPayload) => api.post<PackagingUnit>('/eshop/packaging-units', payload).then(r => r.data),
+  updatePackagingUnit: (id: number, payload: PackagingUnitPayload) => api.put<PackagingUnit>(`/eshop/packaging-units/${id}`, payload).then(r => r.data),
+  deletePackagingUnit: (id: number) => api.delete<{ deleted: true }>(`/eshop/packaging-units/${id}`).then(r => r.data),
 
   // ── Atributy (Attributes) ────────────────────────────────────────────────
   listAttributes: (filters?: any) =>

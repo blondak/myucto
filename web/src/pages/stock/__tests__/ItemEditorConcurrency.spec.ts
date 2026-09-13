@@ -10,6 +10,11 @@ const m = vi.hoisted(() => ({
   saveProductEditor: vi.fn(),
   listCurrencies: vi.fn(),
   listLocales: vi.fn(),
+  listPackagingUnits: vi.fn(),
+  getItemPackaging: vi.fn(),
+  replaceItemPackaging: vi.fn(),
+  getCustomerPrices: vi.fn(),
+  replaceCustomerPrices: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -29,11 +34,18 @@ vi.mock('@/api/eshop', () => ({
     listTags: vi.fn(async () => []),
     listAttributes: vi.fn(async () => []),
     listAttributeOptions: vi.fn(async () => []),
+    listPackagingUnits: m.listPackagingUnits,
   },
 }))
 
 vi.mock('@/api/stock', () => ({
-  stockApi: { createItem: vi.fn() },
+  stockApi: {
+    createItem: vi.fn(),
+    getItemPackaging: m.getItemPackaging,
+    replaceItemPackaging: m.replaceItemPackaging,
+    getCustomerPrices: m.getCustomerPrices,
+    replaceCustomerPrices: m.replaceCustomerPrices,
+  },
 }))
 
 vi.mock('@/api/clients', () => ({
@@ -71,7 +83,8 @@ vi.mock('vue-router', () => ({
   onBeforeRouteLeave: vi.fn(),
 }))
 
-vi.mock('vue-i18n', () => ({
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({ t: (key: string) => key }),
 }))
 
@@ -144,6 +157,26 @@ const locale = (id: number, code: string, name: string) => ({
   archived: false,
 })
 
+const packagingUnit = (id: number, code: string, name: string) => ({
+  id, code, name, is_active: true, display_order: id * 10, usage_count: 0,
+})
+
+function mockItemExtras() {
+  m.listPackagingUnits.mockResolvedValue([packagingUnit(1, 'KT', 'Karton'), packagingUnit(2, 'PAL', 'Paleta')])
+  m.getItemPackaging.mockResolvedValue({
+    base_unit: 'ks',
+    default_sale_unit: null,
+    units: [{ unit_code: 'KT', name: 'Karton', factor: '8', numerator: 8, denominator: 1, ean: null, in_use: false }],
+  })
+  m.replaceItemPackaging.mockImplementation(async (_id: number, payload: any) => ({
+    base_unit: 'ks',
+    default_sale_unit: payload.default_sale_unit,
+    units: payload.units.map((u: any) => ({ ...u, name: null, numerator: Number(u.factor), denominator: 1, in_use: false })),
+  }))
+  m.getCustomerPrices.mockResolvedValue([])
+  m.replaceCustomerPrices.mockResolvedValue([])
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(resolvePromise => {
@@ -155,6 +188,7 @@ function deferred<T>() {
 describe('ItemEditor versionovaný přepočet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockItemExtras()
     m.getProduct.mockResolvedValue(product)
     m.getPrices.mockResolvedValue([price])
     m.getPromoPrices.mockResolvedValue([])
@@ -228,9 +262,104 @@ describe('ItemEditor versionovaný přepočet', () => {
   })
 })
 
+describe('ItemEditor balení a zákaznické ceny', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockItemExtras()
+    m.getProduct.mockResolvedValue(product)
+    m.getPrices.mockResolvedValue([price])
+    m.getPromoPrices.mockResolvedValue([])
+    m.getVendors.mockResolvedValue([])
+    m.saveProductEditor.mockResolvedValue({ ...product, row_version: 8 })
+    m.listCurrencies.mockResolvedValue([currency(1, 'CZK', true)])
+    m.listLocales.mockResolvedValue([])
+  })
+
+  it('nezměněné balení ani zákaznické ceny společné Uložit neposílá', async () => {
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.saveProductEditor).toHaveBeenCalledTimes(1)
+    expect(m.replaceItemPackaging).not.toHaveBeenCalled()
+    expect(m.replaceCustomerPrices).not.toHaveBeenCalled()
+  })
+
+  it('uloží změněné balení a výchozí prodejní jednotku jedním Uložit po uložení karty', async () => {
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-test="packaging-row"]')
+    expect(rows).toHaveLength(1)
+    await rows[0]!.find('input[inputmode="decimal"]').setValue('12')
+    await wrapper.find('[data-test="packaging-default-unit"]').setValue('KT')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.saveProductEditor).toHaveBeenCalledTimes(1)
+    expect(m.replaceItemPackaging).toHaveBeenCalledWith(42, {
+      default_sale_unit: 'KT',
+      units: [{ unit_code: 'KT', factor: '12', ean: null }],
+    })
+    expect(m.saveProductEditor.mock.invocationCallOrder[0]).toBeLessThan(m.replaceItemPackaging.mock.invocationCallOrder[0])
+  })
+
+  it('odmítne balení se stejným kódem jako základní jednotka a nic neuloží', async () => {
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+
+    await wrapper.find('input[list]').setValue('KT')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.saveProductEditor).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('stock.packaging.same_as_base')
+  })
+
+  it('když se balení nenačte, uložení karty ho nepřepíše prázdnou sadou', async () => {
+    m.getItemPackaging.mockRejectedValue(new Error('not deployed'))
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('stock.packaging.load_failed')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(m.saveProductEditor).toHaveBeenCalledTimes(1)
+    expect(m.replaceItemPackaging).not.toHaveBeenCalled()
+  })
+
+  it('nový řádek balení bez vybraného kódu neprojde validací', async () => {
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+    const add = wrapper.findAll('button').find(button => button.text() === 'stock.packaging.add')!
+    await add.trigger('click')
+    expect(wrapper.findAll('[data-test="packaging-row"]')).toHaveLength(2)
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(m.saveProductEditor).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('stock.packaging.code_required')
+  })
+
+  it('nová zákaznická cena bez zákazníka neprojde validací', async () => {
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+    const add = wrapper.findAll('button').find(button => button.text() === 'stock.customer_prices.add')!
+    await add.trigger('click')
+    expect(wrapper.findAll('[data-test="customer-price-row"]')).toHaveLength(1)
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(m.saveProductEditor).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('stock.customer_prices.client_required')
+  })
+})
+
 describe('ItemEditor připravené jazyky a měny', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockItemExtras()
     m.getProduct.mockResolvedValue(product)
     m.getPrices.mockResolvedValue([price])
     m.getPromoPrices.mockResolvedValue([])

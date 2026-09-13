@@ -3117,6 +3117,8 @@ final class Routes
             $g->put   ('/locations/{id:[0-9]+}',        [\MyInvoice\Action\Stock\StockTrackingAction::class, 'saveLocation']);
 
             $g->get   ('/items/search',                 [\MyInvoice\Action\Stock\StockItemAction::class, 'search']);
+            // Nacenění řádků dokladu v jednotce řádku (balení) — issue #17.
+            $g->post  ('/items/quote',                  [\MyInvoice\Action\Stock\StockItemQuoteAction::class, 'quote']);
             $g->get   ('/item-templates',               [\MyInvoice\Action\Stock\StockItemAction::class, 'templates']);
             $g->post  ('/item-templates/{templateId:[0-9]+}/apply', [\MyInvoice\Action\Stock\StockItemAction::class, 'applyTemplate']);
             $g->delete('/item-templates/{templateId:[0-9]+}', [\MyInvoice\Action\Stock\StockItemAction::class, 'deleteTemplate']);
@@ -3125,6 +3127,11 @@ final class Routes
             $g->get   ('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'get']);
             $g->get   ('/items/{id:[0-9]+}/tracking',   [\MyInvoice\Action\Stock\StockTrackingAction::class, 'item']);
             $g->put   ('/items/{id:[0-9]+}/units',      [\MyInvoice\Action\Stock\StockTrackingAction::class, 'replaceUnits']);
+            // Balení karty a individuální ceny zákazníků (issue #17).
+            $g->get   ('/items/{id:[0-9]+}/packaging',  [\MyInvoice\Action\Stock\StockItemPackagingAction::class, 'get']);
+            $g->put   ('/items/{id:[0-9]+}/packaging',  [\MyInvoice\Action\Stock\StockItemPackagingAction::class, 'put']);
+            $g->get   ('/items/{id:[0-9]+}/customer-prices', [\MyInvoice\Action\Stock\StockItemCustomerPriceAction::class, 'get']);
+            $g->put   ('/items/{id:[0-9]+}/customer-prices', [\MyInvoice\Action\Stock\StockItemCustomerPriceAction::class, 'put']);
             $g->post  ('/items/{id:[0-9]+}/neighbors',  \MyInvoice\Action\Stock\StockItemNeighborsAction::class);
             $g->post  ('/items/{id:[0-9]+}/lifecycle',  [\MyInvoice\Action\Stock\StockItemAction::class, 'lifecycle']);
             $g->post  ('/items/{id:[0-9]+}/duplicate',  [\MyInvoice\Action\Stock\StockItemAction::class, 'duplicate']);
@@ -3346,6 +3353,13 @@ final class Routes
             $g->get   ('/fee-types/{id:[0-9]+}',         [\MyInvoice\Action\Eshop\FeeTypeAction::class, 'get']);
             $g->put   ('/fee-types/{id:[0-9]+}',         [\MyInvoice\Action\Eshop\FeeTypeAction::class, 'update']);
             $g->delete('/fee-types/{id:[0-9]+}',         [\MyInvoice\Action\Eshop\FeeTypeAction::class, 'delete']);
+
+            // Balení (číselník nadřazených jednotek; převod drží karta) — issue #17
+            $g->get   ('/packaging-units',               [\MyInvoice\Action\Eshop\PackagingUnitAction::class, 'list']);
+            $g->post  ('/packaging-units',               [\MyInvoice\Action\Eshop\PackagingUnitAction::class, 'create']);
+            $g->get   ('/packaging-units/{id:[0-9]+}',   [\MyInvoice\Action\Eshop\PackagingUnitAction::class, 'get']);
+            $g->put   ('/packaging-units/{id:[0-9]+}',   [\MyInvoice\Action\Eshop\PackagingUnitAction::class, 'update']);
+            $g->delete('/packaging-units/{id:[0-9]+}',   [\MyInvoice\Action\Eshop\PackagingUnitAction::class, 'delete']);
 
             // Parametry/atributy (+ enum options); specifické PŘED generickými.
             $g->get   ('/attributes',                    [\MyInvoice\Action\Eshop\AttributeAction::class, 'list']);

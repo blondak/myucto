@@ -248,6 +248,8 @@ export interface Supplier {
   stock_auto_issue?: boolean
   /** Od kterého stavu objednávky se zboží počítá „na cestě" (migrace 1331, rozhodnutí #2). */
   stock_in_transit_from?: 'sent' | 'confirmed'
+  /** Na PDF faktury doplnit u balení celkové množství v základní jednotce (issue #17). */
+  invoice_pdf_show_base_qty?: boolean
   // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po přijetí;
   // účinek jen v režimu double_entry.
   auto_post_invoices?: boolean

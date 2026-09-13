@@ -146,8 +146,14 @@ final class StockItemPromoPriceRepository
             'to_date' => $promo['valid_to'],
             'price' => (string) $promo['promo_price'],
         ], array_values($promos));
+        // Strop akce se posuzuje v ZÁKLADNÍCH jednotkách karty a akční cena je za
+        // základní jednotku (issue #17) — řádek fakturovaný v balení se proto
+        // převádí přes StockUnitConverter: množství × poměr, cena ÷ poměr.
+        $qtyBase = \MyInvoice\Service\Stock\StockUnitConverter::sqlToBase('ii.quantity', 'ii_pk');
+        $priceBase = \MyInvoice\Service\Stock\StockUnitConverter::sqlPerBase('ii.unit_price_without_vat', 'ii_pk');
+        $unitJoin = \MyInvoice\Service\Stock\StockUnitConverter::sqlUnitJoin('ii_pk', 'i.supplier_id', 'ii.stock_item_id', 'ii.unit');
         $stmt = $this->db->pdo()->prepare("SELECT p.position,
-                SUM(CASE WHEN i.invoice_type = 'credit_note' THEN -ii.quantity ELSE ii.quantity END) AS used
+                SUM(CASE WHEN i.invoice_type = 'credit_note' THEN -{$qtyBase} ELSE {$qtyBase} END) AS used
             FROM JSON_TABLE(?, '$[*]' COLUMNS (
                 position FOR ORDINALITY,
                 stock_item_id BIGINT PATH '$.stock_item_id',
@@ -159,11 +165,12 @@ final class StockItemPromoPriceRepository
             JOIN invoice_items ii ON ii.stock_item_id = p.stock_item_id
             JOIN invoices i ON i.id = ii.invoice_id AND i.supplier_id = ?
             JOIN currencies c ON c.id = i.currency_id AND c.code = p.currency
+            {$unitJoin}
             WHERE i.invoice_type IN ('invoice', 'credit_note')
               AND i.status NOT IN ('draft', 'cancelled')
               AND COALESCE(i.tax_date, i.issue_date) >= p.from_date
               AND (p.to_date IS NULL OR COALESCE(i.tax_date, i.issue_date) <= p.to_date)
-              AND ii.unit_price_without_vat <= p.price
+              AND {$priceBase} <= p.price
             GROUP BY p.position");
         $stmt->execute([json_encode($input, JSON_THROW_ON_ERROR), $supplierId]);
         $out = array_fill(0, count($input), '0.000');
