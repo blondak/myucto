@@ -562,6 +562,33 @@ final class JmhzDispatchServiceTest extends TestCase
     }
 
     /**
+     * Testovací prostředí ČSSZ se zkouší pod fiktivním VS začínajícím 999
+     * (stejně jako REGZEL). Skutečný VS účtárny nesmí odejít ani do ledgeru.
+     */
+    public function testTestEnvironmentRefusesARealVariableSymbol(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->expects(self::never())->method('open');
+        $attempts->expects(self::never())->method('markFailed');
+
+        try {
+            $this->service($attempts, [])->send(
+                self::SUPPLIER,
+                'test',
+                self::SUBMISSION,
+                JmhzTransportSample::payload(),
+                '1234567890',
+                'jmhz-2026-04-11',
+                3,
+            );
+            self::fail('Skutečný VS neměl v testovacím prostředí projít.');
+        } catch (JmhzTransportException $exception) {
+            self::assertSame('jmhz_test_variable_symbol_required', $exception->errorCode);
+        }
+        self::assertSame([], $this->history);
+    }
+
+    /**
      * W13/P-04. Datová věta z requestu se na VREP NESMÍ dostat. Dřív se
      * posílalo přesně to, co přišlo — bez XSD, bez katalogu kontrol — a do
      * ledgeru se zapsal otisk TOHO, co přišlo, takže archiv pak tvrdil, že

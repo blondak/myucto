@@ -87,6 +87,29 @@ readonly class JmhzDispatchService
     ) {}
 
     /**
+     * Testovací prostředí ČSSZ se zkouší pod fiktivním VS začínajícím 999,
+     * stejně jako REGZEL (RegzelXmlValidator); ověřené testovací podání JMHZ
+     * proběhlo právě tak. Ostrý VS by cvičné podání svázal se skutečnou
+     * účtárnou a fiktivní VS v produkci by podání poslal do prázdna.
+     */
+    private static function assertEnvironmentVariableSymbol(string $environment, string $variableSymbol): void
+    {
+        $fictitious = str_starts_with($variableSymbol, '999');
+        if ($environment === 'test' && !$fictitious) {
+            throw new JmhzTransportException(
+                'jmhz_test_variable_symbol_required',
+                'Testovací podání vyžaduje fiktivní variabilní symbol účtárny začínající 999.',
+            );
+        }
+        if ($environment === 'production' && $fictitious) {
+            throw new JmhzTransportException(
+                'jmhz_test_variable_symbol_forbidden',
+                'Fiktivní testovací variabilní symbol nesmí jít do ostrého podání.',
+            );
+        }
+    }
+
+    /**
      * Odešle připravenou datovou větu. Idempotenční klíč je povinný: bez něj
      * by opakované kliknutí založilo druhé podání za totéž období a ČSSZ ho
      * odmítne jako duplicitu — ověřeno chybou 20022.
@@ -108,6 +131,7 @@ readonly class JmhzDispatchService
             $submissionClass,
             $idempotencyKey,
         );
+        self::assertEnvironmentVariableSymbol($environment, $variableSymbol);
         // Odesílá se VÝHRADNĚ zmrazený artefakt. Dřív se bral payload tak, jak
         // dorazil, takže na VREP šlo cokoli — bez XSD, bez katalogu kontrol —
         // a do ledgeru se zapsal otisk TOHO, co přišlo. Archiv pak tvrdil
