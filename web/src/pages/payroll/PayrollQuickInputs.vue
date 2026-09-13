@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -177,6 +177,52 @@ function clearFocus(): void {
   void router.replace({ query })
   reload()
 }
+
+/*
+ * Hledání podle jména nebo osobního čísla.
+ *
+ * Stránka je stránkovaná SERVEREM, takže hledat v načtených 25 řádcích by
+ * našlo jen toho, kdo je náhodou na zobrazené stránce. Hledá proto server,
+ * v celém měsíci a se stránkováním i počtem za výsledek. Rozepsané změny
+ * hledání neruší: `pending` drží řádky napříč stránkami i výsledky hledání
+ * a uložení je pošle, i když je aktuální hledání nevrací.
+ */
+const SEARCH_DEBOUNCE_MS = 300
+const initialSearch = typeof route.query.q === 'string' ? route.query.q.trim() : ''
+const searchQuery = ref(initialSearch)
+const appliedSearch = ref(initialSearch)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelSearchTimer(): void {
+  if (searchTimer !== null) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+}
+
+function onSearchInput(): void {
+  cancelSearchTimer()
+  searchTimer = setTimeout(applySearch, SEARCH_DEBOUNCE_MS)
+}
+
+function applySearch(): void {
+  cancelSearchTimer()
+  const next = searchQuery.value.trim()
+  if (next === appliedSearch.value) return
+  appliedSearch.value = next
+  const query = { ...route.query }
+  if (next === '') delete query.q
+  else query.q = next
+  void router.replace({ query })
+  reload()
+}
+
+function clearSearch(): void {
+  searchQuery.value = ''
+  applySearch()
+}
+
+onBeforeUnmount(cancelSearchTimer)
 
 function goToPage(nextPage: number): void {
   offset.value = Math.max(0, (nextPage - 1) * pageSize)
@@ -859,6 +905,7 @@ async function load(): Promise<void> {
       requestedPeriod,
       { limit: pageSize, offset: offset.value },
       focusEmploymentId.value ?? undefined,
+      appliedSearch.value || undefined,
     )
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
@@ -969,6 +1016,7 @@ async function save(): Promise<void> {
         payload(chunk),
         { limit: pageSize, offset: offset.value },
         focusEmploymentId.value ?? undefined,
+        appliedSearch.value || undefined,
       )
       failures.push(...last.failures)
     }
@@ -1120,26 +1168,30 @@ onMounted(() => {
       stav pod ní by totéž řekl podruhé, a ještě obecněji.
     -->
     <section v-if="!focusMissing" class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
-      <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
-      <EmptyState
-        v-else-if="loadFailed"
-        variant="failed"
-        dense
-        data-test="load-failed"
-        :message="t('payroll.quick_inputs.load_failed_hint')"
-        @action="load"
-      />
-      <div v-else-if="rows.length === 0" class="p-8 text-center">
-        <h2 class="font-semibold text-neutral-900">{{ t('payroll.quick_inputs.empty') }}</h2>
-        <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.quick_inputs.empty_hint') }}</p>
-      </div>
-      <template v-else>
-        <!--
-          Jeden přepínač nad tabulkou odkryje příplatkové sloupce pro VŠECHNY
-          řádky naráz. Rozbalování u jednotlivce by při 500 lidech znamenalo 500
-          kliknutí — přesně to, co tenhle formulář odstraňuje.
-        -->
-        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-4 py-2">
+      <!--
+        Lišta stojí MIMO přepínání načítání a prázdna: pole hledání se nesmí
+        při každém dotazu zničit a vzít uživateli kurzor uprostřed psaní.
+        Jeden přepínač odkryje příplatkové sloupce pro VŠECHNY řádky naráz;
+        rozbalování u jednotlivce by při 500 lidech znamenalo 500 kliknutí.
+      -->
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-4 py-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="relative block max-w-full">
+            <span class="sr-only">{{ t('payroll.quick_inputs.search_label') }}</span>
+            <svg class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.search" /></svg>
+            <input
+              v-model="searchQuery"
+              data-testid="quick-payroll-search"
+              type="search"
+              autocomplete="off"
+              maxlength="120"
+              :placeholder="t('payroll.quick_inputs.search_placeholder')"
+              class="h-9 w-64 max-w-full rounded-md border border-neutral-300 bg-surface pl-8 pr-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:cursor-not-allowed disabled:bg-neutral-50"
+              :disabled="saving"
+              @input="onSearchInput"
+              @keydown.enter.prevent="applySearch"
+            >
+          </label>
           <button
             type="button"
             data-testid="quick-surcharges-toggle"
@@ -1153,11 +1205,43 @@ onMounted(() => {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="surchargesVisible ? ICONS.x : ICONS.coin" /></svg>
             {{ t(surchargesVisible ? 'payroll.quick_inputs.surcharges.toggle_hide' : 'payroll.quick_inputs.surcharges.toggle_show') }}
           </button>
-          <div class="hidden flex-wrap items-center gap-2 lg:flex">
-            <ColumnPicker :ctrl="tbl" />
-            <DensityToggle :ctrl="tbl" />
-          </div>
         </div>
+        <div class="hidden flex-wrap items-center gap-2 lg:flex">
+          <ColumnPicker :ctrl="tbl" />
+          <DensityToggle :ctrl="tbl" />
+        </div>
+      </div>
+      <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
+      <EmptyState
+        v-else-if="loadFailed"
+        variant="failed"
+        dense
+        data-test="load-failed"
+        :message="t('payroll.quick_inputs.load_failed_hint')"
+        @action="load"
+      />
+      <!-- Prázdné hledání není prázdný měsíc: jiná věta a cesta zpět. -->
+      <div
+        v-else-if="rows.length === 0 && appliedSearch"
+        class="p-8 text-center"
+        data-testid="quick-payroll-search-empty"
+      >
+        <p class="text-sm text-neutral-600">{{ t('payroll.quick_inputs.search_empty', { q: appliedSearch }) }}</p>
+        <button
+          type="button"
+          :class="[btnOutline('neutral'), 'mt-3']"
+          data-testid="quick-payroll-search-clear"
+          @click="clearSearch"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+          {{ t('payroll.quick_inputs.search_clear') }}
+        </button>
+      </div>
+      <div v-else-if="rows.length === 0" class="p-8 text-center">
+        <h2 class="font-semibold text-neutral-900">{{ t('payroll.quick_inputs.empty') }}</h2>
+        <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.quick_inputs.empty_hint') }}</p>
+      </div>
+      <template v-else>
         <!--
           Co se opakuje u mnoha řádků, stojí JEDNOU tady: spravované hodnoty,
           chybějící rodné číslo a přesčas bez schváleného průměru. V řádku z nich

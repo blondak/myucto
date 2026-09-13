@@ -130,11 +130,12 @@ final class PayrollQuickInputRepository
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
         ?int $employmentId = null,
+        string $search = '',
     ): array {
         if ($employmentId !== null && $employmentId <= 0) {
             throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
         }
-        return $this->collect($supplierId, $period, null, $limit, $offset, $employmentId);
+        return $this->collect($supplierId, $period, null, $limit, $offset, $employmentId, $search);
     }
 
     /**
@@ -304,6 +305,7 @@ final class PayrollQuickInputRepository
         int $limit,
         int $offset,
         ?int $focusEmploymentId = null,
+        string $search = '',
     ): array {
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
@@ -314,9 +316,14 @@ final class PayrollQuickInputRepository
         $this->components->list($supplierId, $periodStart);
 
         $focusEmploymentId = $employmentIds === null ? $focusEmploymentId : null;
-        $employmentFilter = $employmentIds === null
+        // Hledání zužuje jen stránku měsíce. Výčet vztahů při ukládání zúžit
+        // nesmí: uložit se musí i rozepsaný řádek, který aktuální hledání
+        // zrovna nevrací.
+        $searchClause = self::searchClause($employmentIds === null ? $search : '');
+        $employmentFilter = ($employmentIds === null
             ? ($focusEmploymentId === null ? '' : ' AND employment.id = ?')
-            : ' AND employment.id IN (' . implode(',', array_fill(0, count($employmentIds), '?')) . ')';
+            : ' AND employment.id IN (' . implode(',', array_fill(0, count($employmentIds), '?')) . ')')
+            . $searchClause['sql'];
 
         $stmt = $this->db->pdo()->prepare(
             'WITH effective_employment AS (
@@ -419,6 +426,7 @@ final class PayrollQuickInputRepository
             $periodEnd,
             $periodStart,
             ...($employmentIds ?? ($focusEmploymentId === null ? [] : [$focusEmploymentId])),
+            ...$searchClause['params'],
         ];
         $position = 1;
         foreach ($params as $param) {
@@ -432,7 +440,7 @@ final class PayrollQuickInputRepository
         $rows = PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'quick_employments');
 
         $total = $employmentIds === null
-            ? $this->countMonth($supplierId, $periodStart, $periodEnd, $focusEmploymentId)
+            ? $this->countMonth($supplierId, $periodStart, $periodEnd, $focusEmploymentId, $search)
             : count($rows);
 
         // Vstupy i opakující se složky se dotahují JEN pro řádky stránky.
@@ -679,7 +687,11 @@ final class PayrollQuickInputRepository
         string $periodStart,
         string $periodEnd,
         ?int $focusEmploymentId = null,
+        string $search = '',
     ): int {
+        // Počet se zužuje TÝMŽ hledáním jako stránka, jinak by pager nabízel
+        // stránky, na kterých po hledání nikdo není.
+        $searchClause = self::searchClause($search);
         $stmt = $this->db->pdo()->prepare(
             'WITH effective_employment AS (
                     SELECT employment.*,
@@ -702,6 +714,7 @@ final class PayrollQuickInputRepository
                     ) <= ?
                 AND (employment.end_date IS NULL OR employment.end_date >= ?)'
             . ($focusEmploymentId === null ? '' : ' AND employment.id = ?')
+            . $searchClause['sql']
         );
         $stmt->execute([
             $periodEnd,
@@ -709,6 +722,7 @@ final class PayrollQuickInputRepository
             $periodEnd,
             $periodStart,
             ...($focusEmploymentId === null ? [] : [$focusEmploymentId]),
+            ...$searchClause['params'],
         ]);
 
         return (int) $stmt->fetchColumn();
@@ -747,6 +761,7 @@ final class PayrollQuickInputRepository
         ?int $focusEmploymentId = null,
         bool $autoApprove = false,
         ?array &$failures = null,
+        string $search = '',
     ): array {
         $collected = [];
         $pdo = $this->db->pdo();
@@ -1019,7 +1034,7 @@ final class PayrollQuickInputRepository
         // zúžením. Vracet natvrdo první stránku celého měsíce by ho odhodilo
         // na začátek a do formuláře nasypalo lidi, které při zúžení nevidí —
         // a právě obsah formuláře se posílá zpátky k uložení.
-        return $this->month($supplierId, $period, $limit, $offset, $focusEmploymentId);
+        return $this->month($supplierId, $period, $limit, $offset, $focusEmploymentId, $search);
     }
 
     /**
@@ -1980,6 +1995,31 @@ final class PayrollQuickInputRepository
             || ($item['overtime_conflict'] ?? false) === true
             || ($item['bonus_conflict'] ?? false) === true
             || ($item['base_requires_entry'] ?? false) === true;
+    }
+
+    /**
+     * Hledání v rychlém vstupu podle jména nebo osobního čísla (kódu vztahu).
+     *
+     * Stránka je stránkovaná serverem, takže hledat musí server — prohlížeč by
+     * našel jen toho, kdo je náhodou na zobrazené stránce. Sloupce mají
+     * `utf8mb4_unicode_ci`, takže LIKE nerozlišuje velikost písmen ani
+     * diakritiku. Napsané `%` a `_` jsou hledaný text, ne zástupné znaky.
+     * Hledá se v tomtéž jméně, které řádek zobrazuje (`employee.full_name`).
+     *
+     * @return array{sql:string,params:list<string>}
+     */
+    private static function searchClause(string $search): array
+    {
+        $search = trim($search);
+        if ($search === '') {
+            return ['sql' => '', 'params' => []];
+        }
+        $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $search) . '%';
+
+        return [
+            'sql' => " AND (employee.full_name LIKE ? ESCAPE '!' OR employment.code LIKE ? ESCAPE '!')",
+            'params' => [$like, $like],
+        ];
     }
 
     private static function normalizedSearch(string $value): string

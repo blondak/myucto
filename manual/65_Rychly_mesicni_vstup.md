@@ -46,6 +46,13 @@ maskované rodné číslo, typ vztahu, základní mzda nebo odměna ze vztahu,
 přesčas a bonus či další odměna. Pracovní poměr, DPP, DPČ, závislý příjem
 společníka a odměna za výkon funkce zůstávají v samostatných řádcích a systém
 je neslučuje.
+
+Nad tabulkou je pole pro **hledání podle jména nebo osobního čísla**. Hledá
+se v celém měsíci, ne jen na zobrazené stránce, a nezáleží na velikosti
+písmen ani na diakritice; stránkování i počet řádků se pak týkají jen
+výsledku. Hledaný text zůstává v adrese stránky, takže ho lze sdílet odkazem.
+Rozepsané a neuložené změny hledání nezruší: **Uložit měsíční podklady** je
+pošle i tehdy, když řádek aktuální hledání nevrací.
 Náhled hrubé mzdy se přepočítává okamžitě; další již existující mzdové vstupy
 jsou v něm zobrazeny samostatně. Do hrubého náhledu vstupují všechny složky
 zařazené jako zdanitelný příjem včetně nepeněžních. Osvobozené náhrady a jiné

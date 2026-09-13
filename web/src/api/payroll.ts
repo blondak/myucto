@@ -7841,12 +7841,13 @@ export const payrollApi = {
       group_total: response.data.group_total ?? null,
       facets: response.data.facets ?? null,
     })),
-  quickInputs: (period: string, page?: PayrollPageParams, employmentId?: number) =>
+  quickInputs: (period: string, page?: PayrollPageParams, employmentId?: number, q?: string) =>
     api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', {
       params: {
         period,
         ...pageParams(page),
         ...(employmentId ? { employment_id: employmentId } : {}),
+        ...(q ? { q } : {}),
       },
     }).then(response => response.data.month),
   employeeCards: (
@@ -7870,6 +7871,7 @@ export const payrollApi = {
     payload: PayrollQuickInputSavePayload,
     page?: PayrollPageParams,
     employmentId?: number,
+    q?: string,
   ) =>
     api.put<{ month: PayrollQuickInputMonth, failures?: PayrollQuickInputFailure[] }>(
       '/payroll/quick-inputs',
@@ -7878,6 +7880,7 @@ export const payrollApi = {
         params: {
           ...pageParams(page),
           ...(employmentId ? { employment_id: employmentId } : {}),
+          ...(q ? { q } : {}),
         },
       },
     ).then(response => ({

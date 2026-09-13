@@ -531,7 +531,7 @@ describe('PayrollQuickInputs', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('Starý měsíc')
-    expect(m.load).toHaveBeenLastCalledWith('2026-07', { limit: 25, offset: 0 }, undefined)
+    expect(m.load).toHaveBeenLastCalledWith('2026-07', { limit: 25, offset: 0 }, undefined, undefined)
   })
 
   /**
@@ -546,7 +546,7 @@ describe('PayrollQuickInputs', () => {
 
     // Období závisí na dnešku, na kontraktu záleží zbytek: stránka zůstává
     // normální a vztah jde na server jako parametr.
-    expect(m.load).toHaveBeenLastCalledWith(expect.any(String), { limit: 25, offset: 0 }, 9999)
+    expect(m.load).toHaveBeenLastCalledWith(expect.any(String), { limit: 25, offset: 0 }, 9999, undefined)
   })
 
   /**
@@ -1099,6 +1099,71 @@ describe('PayrollQuickInputs', () => {
     // Hodiny bez průměru: jedna věta v hlavičce (a jedna pro mobil), ne u řádku.
     expect(wrapper.findAll('[data-testid="quick-hours-unavailable-note"]')).toHaveLength(1)
     expect(occurrences(/quick_inputs\.hours_unavailable(?!_)/g)).toBe(1)
+  })
+
+  /*
+   * Stránka je stránkovaná serverem, takže hledat musí server. Hledání jde
+   * s prodlevou (ne na každé písmeno), drží se v adrese a NESMÍ zahodit
+   * rozepsané řádky: uložení je pošle, i když je hledání zrovna nevrací.
+   */
+  it('searches on the server after a debounce and keeps pending edits', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      m.load.mockImplementation(async (period, _page, _employment, q) => ({
+        period,
+        total: 1,
+        items: q
+          ? [fixture({ employment_id: 13, employee_id: 9, full_name: 'Hledaná osoba' })]
+          : [fixture()],
+      }))
+      const wrapper = mountPage()
+      await flushPromises()
+      await wrapper.get('[data-testid="quick-bonus-12"]').setValue('900')
+      m.load.mockClear()
+
+      await wrapper.get('[data-testid="quick-payroll-search"]').setValue('hledaná')
+      expect(m.load).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(300)
+      await flushPromises()
+
+      expect(m.load).toHaveBeenLastCalledWith(
+        expect.any(String), { limit: 25, offset: 0 }, undefined, 'hledaná',
+      )
+      expect(m.routerReplace).toHaveBeenCalledWith({ query: { q: 'hledaná' } })
+      expect(wrapper.find('[data-testid="quick-bonus-12"]').exists()).toBe(false)
+
+      await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+      await flushPromises()
+      const [payload, , , q] = m.save.mock.calls[0]
+      expect(q).toBe('hledaná')
+      const sent = payload.rows as { employment_id: number; bonus_amount_minor: number }[]
+      expect(sent.map(row => row.employment_id).sort()).toEqual([12, 13])
+      expect(sent.find(row => row.employment_id === 12)?.bonus_amount_minor).toBe(90_000)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('names an empty search result and offers the way back', async () => {
+    m.routeQuery = { q: 'nikdo' }
+    m.load.mockImplementation(async (period, _page, _employment, q) => ({
+      period,
+      total: q ? 0 : 1,
+      items: q ? [] : [fixture()],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.load).toHaveBeenLastCalledWith(expect.any(String), { limit: 25, offset: 0 }, undefined, 'nikdo')
+    expect(wrapper.get('[data-testid="quick-payroll-search-empty"]').text())
+      .toContain('payroll.quick_inputs.search_empty')
+    expect(wrapper.text()).not.toContain('payroll.quick_inputs.empty_hint')
+
+    await wrapper.get('[data-testid="quick-payroll-search-clear"]').trigger('click')
+    await flushPromises()
+    expect(m.load).toHaveBeenLastCalledWith(expect.any(String), { limit: 25, offset: 0 }, undefined, undefined)
+    expect(m.routerReplace).toHaveBeenLastCalledWith({ query: {} })
+    expect(wrapper.text()).toContain('Syntetická osoba')
   })
 
   it('u řádku bez přesčasu a u starší odpovědi bez rozpadu mlčí', async () => {

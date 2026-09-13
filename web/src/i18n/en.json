@@ -2540,6 +2540,10 @@
       },
       "empty": "There are no effective employments in this month",
       "empty_hint": "Create an employee and employment first.",
+      "search_label": "Search employees",
+      "search_placeholder": "Name or personal number",
+      "search_empty": "No employment in this month matches “{q}”.",
+      "search_clear": "Clear search",
       "blockers": {
         "base_conflict": "Base pay is duplicated in the quick form and another input.",
         "base_managed_elsewhere": "Base pay is managed by another monthly or recurring input.",

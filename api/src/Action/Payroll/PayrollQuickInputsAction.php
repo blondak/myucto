@@ -45,6 +45,7 @@ final class PayrollQuickInputsAction
         $employmentId = self::narrowingId($query, 'employment_id');
         try {
             $period = $this->validator->period($query['period'] ?? null);
+            $search = self::searchParam($query, 'q');
             $month = $cardsView
                 ? $this->quickInputs->employeeCards(
                     $this->currentSupplierId($request),
@@ -60,6 +61,7 @@ final class PayrollQuickInputsAction
                     $limit,
                     $offset,
                     $employmentId,
+                    $search,
                 );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -75,6 +77,8 @@ final class PayrollQuickInputsAction
             'limit' => $limit,
             'offset' => $offset,
             'employment_id' => $employmentId,
+            // Uplatněné hledání — prázdný výsledek hledání není prázdný měsíc.
+            'q' => $search,
             ...($cardsView ? ['view' => 'cards'] : []),
         ]);
     }
@@ -102,6 +106,8 @@ final class PayrollQuickInputsAction
         );
         $failures = [];
         try {
+            // Uložení vrací stránku TOHO hledání, na kterém uživatel byl.
+            $search = self::searchParam($query, 'q');
             $body = $request->getParsedBody();
             $data = $this->validator->validate(
                 is_array($body) ? PayrollTimeValue::row($body, 'request_body') : [],
@@ -116,6 +122,7 @@ final class PayrollQuickInputsAction
                 $employmentId,
                 $autoApprove,
                 $failures,
+                $search,
             );
         } catch (PayrollEmploymentConflictException $e) {
             return Json::error(
@@ -177,6 +184,7 @@ final class PayrollQuickInputsAction
             'limit' => $limit,
             'offset' => $offset,
             'employment_id' => $employmentId,
+            'q' => $search,
             // Co se neuložilo a proč — pole po poli. Prohlížeč to musí umět
             // ukázat u konkrétního políčka; zredukovat to na jeden toast
             // „nepodařilo se" znamená poslat uživatele hádat.
@@ -205,7 +213,18 @@ final class PayrollQuickInputsAction
     /** @param array<array-key,mixed> $query */
     private static function cardSearch(array $query): string
     {
-        $search = $query['search'] ?? '';
+        return self::searchParam($query, 'search');
+    }
+
+    /**
+     * Hledaný text z URL. Karty ho posílají jako `search`, tabulka rychlého
+     * vstupu jako `q`; pravidla jsou společná.
+     *
+     * @param array<array-key,mixed> $query
+     */
+    private static function searchParam(array $query, string $key): string
+    {
+        $search = $query[$key] ?? '';
         if (!is_string($search)) {
             throw new \InvalidArgumentException('Hledaný text musí být řetězec.');
         }

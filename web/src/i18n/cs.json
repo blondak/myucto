@@ -2540,6 +2540,10 @@
       },
       "empty": "V tomto měsíci nejsou účinné pracovní vztahy",
       "empty_hint": "Nejdřív založte zaměstnance a jeho pracovní vztah.",
+      "search_label": "Hledat zaměstnance",
+      "search_placeholder": "Jméno nebo osobní číslo",
+      "search_empty": "V tomto měsíci žádný pracovní vztah neodpovídá hledání „{q}“.",
+      "search_clear": "Zrušit hledání",
       "blockers": {
         "base_conflict": "Základní mzda je zadána duplicitně rychlým i jiným vstupem.",
         "base_managed_elsewhere": "Základní mzdu spravuje jiný měsíční nebo pravidelný vstup.",
