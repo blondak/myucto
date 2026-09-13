@@ -305,13 +305,13 @@ final class RoutePermissionMap
         // Detekce změn zakládá povinnosti s běžící lhůtou → zápis.
         ['POST', '#^/api/payroll/submissions/queue/detect-changes$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/deadlines$#', 'payroll.submissions', AccessLevel::READ],
-        ['GET', '#^/api/payroll/submissions/statutory-obligations$#', 'payroll.submissions', AccessLevel::READ],
-        ['POST', '#^/api/payroll/submissions/statutory-obligations/evidence$#', 'payroll.submissions', AccessLevel::WRITE],
-        ['POST', '#^/api/payroll/submissions/isds-gateway/(?:outbox/[0-9]+|callback)$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/deadlines/(groups|items)$#', 'payroll.submissions', AccessLevel::READ],
         // Hromadné odškrtnutí checklistu z přehledu termínů — totéž právo jako
         // odškrtnutí jedné položky na kartě vztahu (`checklist/{item_key}` výše).
         ['POST', '#^/api/payroll/deadlines/checklist/complete$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/statutory-obligations$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/statutory-obligations/evidence$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/isds-gateway/(?:outbox/[0-9]+|callback)$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/inbox$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/inbox/[0-9]+/(?:acknowledge|snooze)$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-employer-annual-evidence/[0-9]{4}$#', 'payroll.submissions', AccessLevel::READ],
