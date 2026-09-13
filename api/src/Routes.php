@@ -1117,6 +1117,12 @@ final class Routes
                 '/runs/{id:[0-9]+}/validations/{validationId:[0-9]+}/override',
                 [PayrollRunValidationOverrideAction::class, 'revoke'],
             );
+            // Hromadné schválení výjimky u skupiny kontrol jednoho kódu — u 225
+            // lidí bez přihlášky by to jinak bylo 225 dialogů se stejným důvodem.
+            $g->post(
+                '/runs/{id:[0-9]+}/validations/override-bulk',
+                [PayrollRunValidationOverrideAction::class, 'grantBulk'],
+            );
             $g->get('/documents', [PayrollDocumentAction::class, 'list']);
             $g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);
             // Skrytí nahrazené verze ze seznamu. DELETE proto, že se tak chová

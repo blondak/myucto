@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   deleteRun: vi.fn(),
   commandRun: vi.fn(),
   overrideValidation: vi.fn(),
+  overrideBulk: vi.fn(),
   revokeOverride: vi.fn(),
   approveInputsBatch: vi.fn(),
   canWrite: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock('@/api/payroll', () => ({
     deleteRun: m.deleteRun,
     commandRun: m.commandRun,
     overrideRunValidation: m.overrideValidation,
+    overrideRunValidationsBulk: m.overrideBulk,
     revokeRunValidationOverride: m.revokeOverride,
     approveInputsBatch: m.approveInputsBatch,
     // Rozcestník „Co následuje“ v kartě zaúčtovaného běhu je TÝŽ panel
@@ -137,6 +139,7 @@ describe('PayrollRuns', () => {
     m.deleteRun.mockResolvedValue(undefined)
     m.commandRun.mockResolvedValue({ outcome: null })
     m.overrideValidation.mockResolvedValue({ granted: true, four_eyes_met: true })
+    m.overrideBulk.mockResolvedValue({ granted_count: 0, skipped_count: 0 })
     m.revokeOverride.mockResolvedValue({ granted: false, four_eyes_met: true })
   })
 
@@ -685,8 +688,10 @@ describe('PayrollRuns', () => {
     m.runs.mockResolvedValue([run({
       status: 'calculated',
       can_delete: false,
+      // Různé kódy: varování téhož kódu se nově slévají do jedné skupiny.
       validations: Array.from({ length: 30 }, (_, index) => validation({
         id: 300 + index,
+        code: `synthetic_check_${index}`,
         entity_id: index + 1,
         message: `Pracovní vztah ${index + 1} nemá v období mzdovou složku.`,
       })),
@@ -698,6 +703,125 @@ describe('PayrollRuns', () => {
     await wrapper.get('[data-test="payroll-run-15-validations-toggle"]').trigger('click')
     expect(wrapper.findAll('[data-test^="payroll-validation-group-"]')).toHaveLength(25)
     expect(wrapper.find('[data-test="payroll-run-15-validations-pagination"]').exists()).toBe(true)
+  })
+
+  /*
+   * 225 lidí bez přihlášky u ČSSZ bylo 225 karet a 225 dialogů se stejným
+   * důvodem. Skupina teď ukáže text jednou, počet, lidi v rozbalovacím seznamu
+   * a jedno tlačítko pro všechny; jednotlivé schválení u osoby zůstává.
+   */
+  function registrationGroup(count: number, code: string, firstId: number, granted = false) {
+    const text = code === 'employment_social_registration_missing'
+      ? 'k pracovnímu vztahu chybí přihláška u ČSSZ (nemocenské pojištění).'
+      : 'k pracovnímu vztahu chybí oznámení nástupu zdravotní pojišťovně.'
+    return Array.from({ length: count }, (_, index) => validation({
+      id: firstId + index,
+      code,
+      entity_id: index + 1,
+      message: `Zaměstnanec ${index + 1}: ${text}`,
+      remediation_path: `/payroll/employees/${index + 1}`,
+      ...(granted
+        ? {
+            override_reason: 'Přihláška byla podána mimo aplikaci na podatelně.',
+            overridden_by: 7,
+            overridden_by_name: 'Syntetická účetní',
+            overridden_at: '2026-09-01T08:00:00Z',
+          }
+        : {}),
+    }))
+  }
+
+  it('seskupí varování s výjimkou podle kódu a schválí je jedním dialogem', async () => {
+    const social = registrationGroup(30, 'employment_social_registration_missing', 1000)
+    m.overrideBulk.mockResolvedValue({ granted_count: 30, skipped_count: 0 })
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [
+        ...social,
+        ...registrationGroup(30, 'employment_health_registration_missing', 2000),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const groups = wrapper.findAll('[data-test^="payroll-validation-group-override-"]')
+    expect(groups).toHaveLength(2)
+    const group = wrapper.get('[data-test="payroll-validation-group-override-employment_social_registration_missing-pending"]')
+    expect(group.text()).toContain('K pracovnímu vztahu chybí přihláška u ČSSZ (nemocenské pojištění).')
+    expect(group.get('[data-test="payroll-validation-1000-count"]').text()).toBe('30×')
+    expect(group.text()).toContain('Zaměstnanec 1')
+    expect(group.text()).not.toContain('Zaměstnanec 1: ')
+    // Osoby se stránkují přes ExpandableList, ne vysypou všech 30.
+    expect(group.findAll('[data-testid$="-person"]')).toHaveLength(8)
+    expect(group.findAll('[data-test="payroll-validation-remediation"]')[0]?.attributes('href'))
+      .toBe('/payroll/employees/1')
+    // Jednotlivé schválení u osoby zůstává dostupné.
+    expect(group.find('[data-testid="payroll-validation-1000-override"]').exists()).toBe(true)
+
+    await group.get('[data-testid="payroll-validation-1000-override-all"]').trigger('click')
+    expect(document.body.querySelector('[data-test="run-override-bulk-scope"]')).not.toBeNull()
+
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-test="run-override-reason"]')!
+    textarea.value = 'Přihlášky podala personální agentura mimo aplikaci.'
+    textarea.dispatchEvent(new Event('input'))
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-override"]')?.click()
+    await flushPromises()
+
+    expect(m.overrideBulk).toHaveBeenCalledTimes(1)
+    expect(m.overrideBulk).toHaveBeenCalledWith(
+      15,
+      {
+        row_version: 2,
+        code: 'employment_social_registration_missing',
+        validation_ids: social.map(item => item.id),
+        reason: 'Přihlášky podala personální agentura mimo aplikaci.',
+      },
+      expect.any(String),
+    )
+    expect(m.overrideValidation).not.toHaveBeenCalled()
+    expect(m.success).toHaveBeenCalledWith('payroll.runs.override.granted_all')
+  })
+
+  it('osobu ve skupině jde schválit i odvolat jednotlivě', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [
+        ...registrationGroup(3, 'employment_social_registration_missing', 1000),
+        ...registrationGroup(2, 'employment_social_registration_missing', 1100, true),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const granted = wrapper.get('[data-test="payroll-validation-group-override-employment_social_registration_missing-granted"]')
+    expect(granted.find('[data-testid="payroll-validation-1100-override-all"]').exists()).toBe(false)
+    expect(granted.text()).toContain('payroll.runs.override.granted_group')
+    await granted.get('[data-testid="payroll-validation-1101-revoke"]').trigger('click')
+    await flushPromises()
+    expect(m.revokeOverride).toHaveBeenCalledWith(15, 1101, { row_version: 2 }, expect.any(String))
+
+    const pending = wrapper.get('[data-test="payroll-validation-group-override-employment_social_registration_missing-pending"]')
+    await pending.get('[data-testid="payroll-validation-1001-override"]').trigger('click')
+    expect(document.body.querySelector('[data-test="run-override-bulk-scope"]')).toBeNull()
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-test="run-override-reason"]')!
+    textarea.value = 'Přihláška tohoto člověka byla podána osobně na úřadě.'
+    textarea.dispatchEvent(new Event('input'))
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-override"]')?.click()
+    await flushPromises()
+
+    expect(m.overrideValidation).toHaveBeenCalledWith(
+      15,
+      1001,
+      { row_version: 2, reason: 'Přihláška tohoto člověka byla podána osobně na úřadě.' },
+      expect.any(String),
+    )
+    expect(m.overrideBulk).not.toHaveBeenCalled()
   })
 
   /*

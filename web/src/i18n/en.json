@@ -2146,7 +2146,12 @@
         "revoked": "The exception was taken back, the warning is unresolved again.",
         "revoke_failed": "The exception could not be taken back.",
         "locked_after_approval": "The run is approved, so the exception can no longer be taken back — that would rewrite the record the payout was based on.",
-        "no_permission": "Only someone allowed to approve the payroll run may approve an exception."
+        "no_permission": "Only someone allowed to approve the payroll run may approve an exception.",
+        "awaiting_group": "These warnings are waiting for a person. Until someone takes responsibility for them and writes down why, the payroll run cannot be approved.",
+        "grant_all": "Approve exception for all {count}",
+        "granted_all": "The exception is approved for {count} checks, the run can continue.",
+        "granted_group": "Exception approved for {count} checks.",
+        "bulk_scope": "One reason for all {count} checks. It is recorded with each of them separately, and each exception can still be taken back individually."
       },
       "net": {
         "title": "Net pay breakdown",

@@ -98,7 +98,8 @@ const commandBlockers = ref<Record<number, string>>({})
 /** Proč se koncepty vstupů nepodařilo schválit — seskupené po větě, u běhu. */
 type DraftInputFailure = { message: string, count: number }
 const draftInputFailures = ref<Record<number, DraftInputFailure[]>>({})
-const pendingOverride = ref<{ run: PayrollRun, validation: PayrollRunValidation } | null>(null)
+/** `group` = hromadné schválení celé skupiny kontrol jednoho kódu. */
+const pendingOverride = ref<{ run: PayrollRun, validation: PayrollRunValidation, group?: DisplayValidation } | null>(null)
 const overrideReason = ref('')
 const overrideError = ref('')
 /**
@@ -152,6 +153,18 @@ type DisplayValidation = PayrollRunValidation & {
   display_message: string
   entity_labels: string[]
   remediation_links: { path: string, label: string }[]
+  /**
+   * Členové skupiny varování s `requires_override` (jeden kód, jeden stav).
+   * Prázdné u ostatních nálezů a u osamoceného varování, které se kreslí
+   * po staru.
+   */
+  override_items: OverrideItem[]
+}
+
+type OverrideItem = {
+  validation: PayrollRunValidation
+  label: string
+  remediation: string | null
 }
 
 const GROUPED_VALIDATION_CODES = new Set([
@@ -212,14 +225,64 @@ function validationDisplayMessage(validation: PayrollRunValidation, count = 1): 
     : validation.message
 }
 
+/** Odkaz k nápravě doplněný o období běhu tam, kde cílová stránka období zná. */
+function remediationHref(remediationPath: string, runPeriod: string): string {
+  let path = remediationPath
+  if ((/^\/payroll\/(runs|time|quick-inputs|insolvency)(?:\?|$)/.test(path) || path.startsWith('/payroll/components?tab=risky_savings')) && !/[?&]period=/.test(path)) {
+    path += `${path.includes('?') ? '&' : '?'}period=${encodeURIComponent(runPeriod.slice(0, 7))}`
+  }
+  return path
+}
+
+/*
+ * Varování vyžadující výjimku se seskupují podle kódu a stavu (čeká /
+ * schválené). U 225 lidí bez přihlášky to dřív bylo 225 karet a 225 dialogů.
+ */
+function overrideGroupKey(validation: PayrollRunValidation): string {
+  return `override-${validation.code}-${validation.overridden_at === null ? 'pending' : 'granted'}`
+}
+
+/** „Jana Nováková: k pracovnímu vztahu chybí …" → jméno a společný zbytek. */
+function splitPersonPrefix(message: string): { label: string, rest: string } | null {
+  const match = message.match(/^([^:\n]{1,120}):\s+(.+)$/su)
+  return match?.[1] && match[2] ? { label: match[1].trim(), rest: match[2] } : null
+}
+
+function overrideGroupParts(items: PayrollRunValidation[]): Array<{ label: string, rest: string }> | null {
+  const parts = items.map(item => splitPersonPrefix(item.message))
+  if (parts.some(part => part === null)) return null
+  const rests = new Set(parts.map(part => part!.rest))
+  return rests.size === 1 ? parts as Array<{ label: string, rest: string }> : null
+}
+
+function overrideGroupMessage(items: PayrollRunValidation[]): string {
+  const parts = overrideGroupParts(items)
+  if (parts === null) return validationDisplayMessage(items[0]!, items.length)
+  const rest = parts[0]!.rest
+  const text = rest.charAt(0).toLocaleUpperCase('cs') + rest.slice(1)
+  return containsInternalIssueCode(text) ? t('payroll.runs.validation.requires_attention') : text
+}
+
+function overrideItems(items: PayrollRunValidation[], runPeriod: string): OverrideItem[] {
+  const parts = overrideGroupParts(items)
+  return items.map((item, index) => ({
+    validation: item,
+    label: (item.entity_type === 'employee' && item.entity_id !== null
+      ? personNames.value[item.entity_id]
+      : undefined) ?? parts?.[index]?.label ?? item.message,
+    remediation: item.remediation_path ? remediationHref(item.remediation_path, runPeriod) : null,
+  }))
+}
+
 function validationGroups(validations: PayrollRunValidation[], runPeriod: string): DisplayValidation[] {
   const groups: Array<{ primary: PayrollRunValidation, items: PayrollRunValidation[] }> = []
   const grouped = new Map<string, { primary: PayrollRunValidation, items: PayrollRunValidation[] }>()
 
   for (const validation of validations) {
-    const canGroup = !validation.requires_override
-      && GROUPED_VALIDATION_CODES.has(validation.code)
-    const key = canGroup ? validationGroupingKey(validation) : `validation-${validation.id}`
+    const canGroup = GROUPED_VALIDATION_CODES.has(validation.code)
+    const key = validation.requires_override
+      ? overrideGroupKey(validation)
+      : canGroup ? validationGroupingKey(validation) : `validation-${validation.id}`
     let group = grouped.get(key)
     if (!group) {
       group = { primary: validation, items: [] }
@@ -230,6 +293,16 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
   }
 
   return groups.map(({ primary, items }) => {
+    if (primary.requires_override && items.length > 1) {
+      return {
+        ...primary,
+        group_key: overrideGroupKey(primary),
+        display_message: overrideGroupMessage(items),
+        entity_labels: [],
+        remediation_links: [],
+        override_items: overrideItems(items, runPeriod),
+      }
+    }
     const entityLabels = Array.from(new Set(items.flatMap((item) => {
       if (item.entity_type === 'employee' && item.entity_id !== null) {
         return personNames.value[item.entity_id] ? [personNames.value[item.entity_id]] : []
@@ -242,10 +315,7 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
     const links = new Map<string, string[]>()
     for (const item of items) {
       if (!item.remediation_path) continue
-      let path = item.remediation_path
-      if ((/^\/payroll\/(runs|time|quick-inputs|insolvency)(?:\?|$)/.test(path) || path.startsWith('/payroll/components?tab=risky_savings')) && !/[?&]period=/.test(path)) {
-        path += `${path.includes('?') ? '&' : '?'}period=${encodeURIComponent(runPeriod.slice(0, 7))}`
-      }
+      const path = remediationHref(item.remediation_path, runPeriod)
       const labels = links.get(path) ?? []
       const label = item.entity_type === 'employee' && item.entity_id !== null
         ? personNames.value[item.entity_id]
@@ -262,6 +332,7 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
       display_message: displayMessage,
       entity_labels: entityLabels,
       remediation_links: Array.from(links, ([path, labels]) => ({ path, label: labels.join(', ') })),
+      override_items: [],
     }
   })
 }
@@ -286,7 +357,16 @@ function validationSearchText(validation: DisplayValidation): string {
     validation.display_message,
     ...validation.entity_labels,
     ...validation.remediation_links.map(link => link.label),
+    ...validation.override_items.map(item => item.label),
   ].join(' ')
+}
+
+function overrideItemKey(item: OverrideItem): number {
+  return item.validation.id
+}
+
+function overrideItemSearchText(item: OverrideItem): string {
+  return `${item.label} ${item.validation.message}`
 }
 
 type RemediationLink = DisplayValidation['remediation_links'][number]
@@ -1038,6 +1118,20 @@ function askOverride(run: PayrollRun, validation: PayrollRunValidation) {
   overrideError.value = ''
 }
 
+/** Jeden dialog s důvodem pro celou skupinu místo stovek jednotlivých. */
+function askBulkOverride(run: PayrollRun, group: DisplayValidation) {
+  if (!canOverride.value || !overrideEditable(run)) return
+  pendingOverride.value = { run, validation: group, group }
+  overrideReason.value = ''
+  overrideError.value = ''
+}
+
+function pendingGroupIds(group: DisplayValidation): number[] {
+  return group.override_items
+    .filter(item => awaitsOverride(item.validation))
+    .map(item => item.validation.id)
+}
+
 async function confirmOverride() {
   const pending = pendingOverride.value
   if (!pending) return
@@ -1048,13 +1142,27 @@ async function confirmOverride() {
   }
   saving.value = true
   try {
-    await payrollApi.overrideRunValidation(
-      pending.run.id,
-      pending.validation.id,
-      { row_version: pending.run.row_version, reason },
-      crypto.randomUUID(),
-    )
-    toast.success(t('payroll.runs.override.granted'))
+    if (pending.group) {
+      const result = await payrollApi.overrideRunValidationsBulk(
+        pending.run.id,
+        {
+          row_version: pending.run.row_version,
+          code: pending.group.code,
+          validation_ids: pendingGroupIds(pending.group),
+          reason,
+        },
+        crypto.randomUUID(),
+      )
+      toast.success(t('payroll.runs.override.granted_all', { count: result.granted_count }))
+    } else {
+      await payrollApi.overrideRunValidation(
+        pending.run.id,
+        pending.validation.id,
+        { row_version: pending.run.row_version, reason },
+        crypto.randomUUID(),
+      )
+      toast.success(t('payroll.runs.override.granted'))
+    }
     pendingOverride.value = null
     overrideReason.value = ''
     await load()
@@ -1070,7 +1178,7 @@ async function confirmOverride() {
         toast.error(overrideError.value)
         pendingOverride.value = null
       } else {
-        pendingOverride.value = { run: fresh, validation: pending.validation }
+        pendingOverride.value = { ...pending, run: fresh }
       }
     }
   } finally {
@@ -1810,7 +1918,14 @@ onMounted(load)
             class="rounded-lg border px-3 py-2 text-sm"
             :class="validationClass(validation)"
           >
-            <p>{{ validation.display_message }}</p>
+            <p class="flex flex-wrap items-baseline gap-x-2">
+              <span>{{ validation.display_message }}</span>
+              <span
+                v-if="validation.override_items.length"
+                class="whitespace-nowrap text-xs font-semibold"
+                :data-test="`payroll-validation-${validation.id}-count`"
+              >{{ validation.override_items.length }}×</span>
+            </p>
             <p
               v-if="validation.entity_labels.length"
               class="mt-1 text-xs font-medium"
@@ -1913,11 +2028,121 @@ onMounted(load)
             </div>
 
             <!--
+              Skupina varování jednoho kódu: jedna věta, jedno tlačítko pro
+              všechny a pod tím lidé. Jednotlivé schválení i odvolání zůstává
+              u každé osoby v rozbaleném seznamu.
+            -->
+            <template v-if="validation.override_items.length">
+              <div
+                v-if="awaitsOverride(validation)"
+                class="mt-2 flex flex-wrap items-center gap-2"
+                :data-testid="`payroll-validation-${validation.id}-awaiting`"
+              >
+                <p class="flex-1 text-xs leading-snug">
+                  {{ t('payroll.runs.override.awaiting_group') }}
+                </p>
+                <button
+                  v-if="canOverride && overrideEditable(run)"
+                  type="button"
+                  :data-testid="`payroll-validation-${validation.id}-override-all`"
+                  :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"
+                  :disabled="saving"
+                  @click="askBulkOverride(run, validation)"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.badgeCheck" />
+                  </svg>
+                  {{ t('payroll.runs.override.grant_all', { count: validation.override_items.length }) }}
+                </button>
+                <p
+                  v-else-if="!canOverride"
+                  :class="BTN_DISABLED_NOTE"
+                  :data-testid="`payroll-validation-${validation.id}-no-permission`"
+                >
+                  {{ t('payroll.runs.override.no_permission') }}
+                </p>
+              </div>
+              <div
+                v-else
+                class="mt-2 flex flex-wrap items-center gap-2"
+                :data-testid="`payroll-validation-${validation.id}-resolved`"
+              >
+                <p class="flex-1 text-xs font-medium">
+                  {{ t('payroll.runs.override.granted_group', { count: validation.override_items.length }) }}
+                </p>
+                <p
+                  v-if="canOverride && !overrideEditable(run)"
+                  :class="BTN_DISABLED_NOTE"
+                  :data-testid="`payroll-validation-${validation.id}-locked`"
+                >
+                  {{ t('payroll.runs.override.locked_after_approval') }}
+                </p>
+              </div>
+              <ExpandableList
+                :items="validation.override_items"
+                :item-key="overrideItemKey"
+                :search-text="overrideItemSearchText"
+                list-class="mt-2 space-y-1"
+                :test-id="`payroll-validation-${validation.id}-people`"
+              >
+                <template #item="{ item }">
+                  <div
+                    class="flex flex-wrap items-center gap-2 rounded-md bg-surface/70 px-2.5 py-1.5"
+                    :data-testid="`payroll-validation-${item.validation.id}-person`"
+                  >
+                    <span class="min-w-0 flex-1 text-xs font-medium">{{ item.label }}</span>
+                    <a
+                      v-if="item.remediation"
+                      :href="item.remediation"
+                      data-test="payroll-validation-remediation"
+                      :class="[btnOutlineSm('neutral'), 'inline-flex whitespace-nowrap']"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.link" />
+                      </svg>
+                      {{ t('payroll.runs.validation.open_remediation') }}
+                    </a>
+                    <button
+                      v-if="canOverride && overrideEditable(run) && awaitsOverride(item.validation)"
+                      type="button"
+                      :data-testid="`payroll-validation-${item.validation.id}-override`"
+                      :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"
+                      :disabled="saving"
+                      @click="askOverride(run, item.validation)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.badgeCheck" />
+                      </svg>
+                      {{ t('payroll.runs.override.grant') }}
+                    </button>
+                    <button
+                      v-else-if="canOverride && overrideEditable(run) && item.validation.overridden_at"
+                      type="button"
+                      :data-testid="`payroll-validation-${item.validation.id}-revoke`"
+                      :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+                      :disabled="saving"
+                      @click="revokeOverride(run, item.validation)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.uturn" />
+                      </svg>
+                      {{ t('payroll.runs.override.revoke') }}
+                    </button>
+                    <p v-if="item.validation.overridden_at" class="basis-full text-xs leading-snug">
+                      {{ overrideAuthorLabel(item.validation) }}
+                      {{ t('payroll.runs.override.reason_label', { reason: item.validation.override_reason }) }}
+                    </p>
+                  </div>
+                </template>
+              </ExpandableList>
+            </template>
+
+            <!--
               Varování, které čeká na člověka. Bez téhle věty uživatel vidí jen
               nálepku a netuší, že právě ona drží celý běh.
             -->
             <div
-              v-if="awaitsOverride(validation)"
+              v-else-if="awaitsOverride(validation)"
               class="mt-2 flex flex-wrap items-center gap-2"
               :data-testid="`payroll-validation-${validation.id}-awaiting`"
             >
@@ -2137,13 +2362,24 @@ onMounted(load)
 
     <Modal
       v-if="pendingOverride"
-      :title="t('payroll.runs.override.grant')"
+      :title="pendingOverride.group
+        ? t('payroll.runs.override.grant_all', { count: pendingGroupIds(pendingOverride.group).length })
+        : t('payroll.runs.override.grant')"
       width-class="max-w-xl"
       @close="pendingOverride = null"
     >
       <form class="space-y-4" data-test="run-override-dialog" @submit.prevent="confirmOverride">
         <p class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">
-          {{ validationDisplayMessage(pendingOverride.validation) }}
+          {{ pendingOverride.group
+            ? pendingOverride.group.display_message
+            : validationDisplayMessage(pendingOverride.validation) }}
+        </p>
+        <p
+          v-if="pendingOverride.group"
+          class="text-xs leading-snug text-neutral-600"
+          data-test="run-override-bulk-scope"
+        >
+          {{ t('payroll.runs.override.bulk_scope', { count: pendingGroupIds(pendingOverride.group).length }) }}
         </p>
         <label class="block text-sm font-medium text-neutral-700">
           {{ t('payroll.runs.override.reason_prompt') }}
@@ -2178,7 +2414,9 @@ onMounted(load)
             data-test="confirm-run-override"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
-            {{ t('payroll.runs.override.grant') }}
+            {{ pendingOverride.group
+              ? t('payroll.runs.override.grant_all', { count: pendingGroupIds(pendingOverride.group).length })
+              : t('payroll.runs.override.grant') }}
           </button>
         </div>
       </form>

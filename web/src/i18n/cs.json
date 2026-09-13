@@ -2146,7 +2146,12 @@
         "revoked": "Výjimka byla vzata zpět, varování je zase nevyřešené.",
         "revoke_failed": "Výjimku se nepodařilo vzít zpět.",
         "locked_after_approval": "Běh je schválený, výjimku už zpět vzít nelze — přepsalo by to podklad, na jehož základě se vyplatilo.",
-        "no_permission": "Výjimku smí schválit jen ten, kdo má právo schvalovat mzdový běh."
+        "no_permission": "Výjimku smí schválit jen ten, kdo má právo schvalovat mzdový běh.",
+        "awaiting_group": "Tahle varování čekají na rozhodnutí člověka. Dokud za ně někdo nepřevezme odpovědnost a nenapíše proč, mzdový běh schválit nejde.",
+        "grant_all": "Schválit výjimku u všech {count}",
+        "granted_all": "Výjimka je schválená u {count} kontrol, běh může pokračovat.",
+        "granted_group": "Výjimka schválena u {count} kontrol.",
+        "bulk_scope": "Jedno odůvodnění pro všech {count} kontrol. Zapíše se ke každé z nich zvlášť, jednotlivě půjde každou výjimku i vzít zpět."
       },
       "net": {
         "title": "Rozklad čisté mzdy",

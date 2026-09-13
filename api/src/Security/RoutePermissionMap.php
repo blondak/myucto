@@ -278,6 +278,7 @@ final class RoutePermissionMap
         // mzdy („vím o vadě a přesto se vyplácí"), proto `payroll.approve`.
         ['POST', '#^/api/payroll/runs/[0-9]+/validations/[0-9]+/override$#', 'payroll.approve', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/runs/[0-9]+/validations/[0-9]+/override$#', 'payroll.approve', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/runs/[0-9]+/validations/override-bulk$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/payments/liabilities$#', 'payroll.payments', AccessLevel::READ],
         ['GET', '#^/api/payroll/payments/(payer-options|batches|reconciliation)$#', 'payroll.payments', AccessLevel::READ],
         // Nabídka pickeru je týž obsah jako `reconciliation`, jen zúžený —

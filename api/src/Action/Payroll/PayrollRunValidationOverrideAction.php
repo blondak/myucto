@@ -58,6 +58,84 @@ final class PayrollRunValidationOverrideAction
         return $this->handle($request, $response, $args, false);
     }
 
+    /**
+     * Hromadné schválení výjimky u skupiny kontrol jednoho kódu.
+     *
+     * Tělo nese `row_version`, `code`, `reason` a volitelně `validation_ids`
+     * (zúžení na to, co měl uživatel na obrazovce). Právo, pravidla i auditní
+     * stopa jsou tytéž jako u jednotlivého schválení, viz
+     * {@see PayrollRunValidationOverrideService::grantMany()}.
+     *
+     * @param array<string,string> $args
+     */
+    public function grantBulk(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.approve',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $version = filter_var($body['row_version'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        $runId = filter_var($args['id'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        $code = is_string($body['code'] ?? null) ? trim($body['code']) : '';
+        $validationIds = $this->validationIds($body['validation_ids'] ?? null);
+        $idempotencyKey = trim($request->getHeaderLine('Idempotency-Key'));
+        if (!is_int($version)
+            || !is_int($runId)
+            || $code === ''
+            || $validationIds === false
+            || $idempotencyKey === ''
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Hromadná výjimka vyžaduje row_version, kód kontroly a hlavičku '
+                    . 'Idempotency-Key; validation_ids musí být seznam čísel.',
+                422,
+            );
+        }
+
+        return $this->guarded($response, function () use (
+            $request,
+            $runId,
+            $code,
+            $validationIds,
+            $version,
+            $idempotencyKey,
+            $body,
+        ): array {
+            $result = $this->overrides->grantMany(
+                $this->currentSupplierId($request),
+                $runId,
+                $code,
+                $validationIds,
+                $version,
+                $idempotencyKey,
+                $this->actor($request),
+                $body['reason'] ?? null,
+            );
+            return [
+                'granted_count' => $result->grantedCount,
+                'skipped_count' => $result->skippedCount,
+                'four_eyes_met' => $result->fourEyesMet,
+                'idempotent_replay' => $result->idempotentReplay,
+                'run' => $result->run,
+                'validations' => $result->validations,
+            ];
+        });
+    }
+
     /** @param array<string,string> $args */
     private function handle(
         Request $request,
@@ -101,11 +179,17 @@ final class PayrollRunValidationOverrideAction
                 422,
             );
         }
-        try {
-            $userId = $this->userId($request)
-                ?? throw new \DomainException(
-                    'Uživatel schvalující výjimku není dostupný.',
-                );
+
+        return $this->guarded($response, function () use (
+            $request,
+            $runId,
+            $validationId,
+            $version,
+            $idempotencyKey,
+            $body,
+            $granting,
+        ): array {
+            $userId = $this->actor($request);
             $result = $granting
                 ? $this->overrides->grant(
                     $this->currentSupplierId($request),
@@ -125,6 +209,20 @@ final class PayrollRunValidationOverrideAction
                     $userId,
                     $body['reason'] ?? null,
                 );
+            return $this->serialize($result);
+        });
+    }
+
+    /**
+     * Společné mapování doménových chyb na HTTP pro jednotlivé i hromadné
+     * schválení — obě cesty musí odpovídat stejně.
+     *
+     * @param \Closure(): array<string,mixed> $operation
+     */
+    private function guarded(Response $response, \Closure $operation): Response
+    {
+        try {
+            $payload = $operation();
         } catch (PayrollRunConflictException $e) {
             return Json::error(
                 $response,
@@ -146,7 +244,41 @@ final class PayrollRunValidationOverrideAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
 
-        return Json::ok($response, $this->serialize($result));
+        return Json::ok($response, $payload);
+    }
+
+    private function actor(Request $request): int
+    {
+        return $this->userId($request)
+            ?? throw new \DomainException(
+                'Uživatel schvalující výjimku není dostupný.',
+            );
+    }
+
+    /**
+     * `null` = pole chybí (celá skupina kódu), `false` = neplatný tvar.
+     *
+     * @return list<int>|null|false
+     */
+    private function validationIds(mixed $raw): array|null|false
+    {
+        if ($raw === null) {
+            return null;
+        }
+        if (!is_array($raw) || !array_is_list($raw)) {
+            return false;
+        }
+        $ids = [];
+        foreach ($raw as $value) {
+            $id = filter_var($value, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+            if (!is_int($id)) {
+                return false;
+            }
+            $ids[] = $id;
+        }
+        return $ids;
     }
 
     /** @return array<string,mixed> */

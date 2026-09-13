@@ -69,6 +69,26 @@ final class PayrollOverrideEscapeHatchTest extends TestCase
             $patterns,
             'Schválenou výjimku musí jít vzít zpět, dokud běh není schválený.',
         );
+        self::assertContains(
+            'POST /api/payroll/runs/{id:[0-9]+}/validations/override-bulk',
+            $patterns,
+            'Bez hromadné cesty schvaluje účetní u 225 lidí 225 dialogů se stejným důvodem.',
+        );
+    }
+
+    public function testBulkOverrideRouteRequiresThePayrollApprovalPermission(): void
+    {
+        $policy = (new RoutePermissionMap())->match(
+            'POST',
+            '/api/payroll/runs/7/validations/override-bulk',
+        );
+        self::assertNotNull($policy, 'Hromadná výjimka nemá autorizační politiku.');
+        self::assertSame(
+            'payroll.approve',
+            $policy->key,
+            'Hromadné schválení výjimky nesmí spadnout pod slabší právo než jednotlivé.',
+        );
+        self::assertSame(AccessLevel::WRITE, $policy->minimum);
     }
 
     public function testOverrideRoutesRequireThePayrollApprovalPermission(): void

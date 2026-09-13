@@ -5488,6 +5488,16 @@ export interface PayrollRunValidationOverrideResponse {
   validation: PayrollRunValidation
 }
 
+export interface PayrollRunValidationBulkOverrideResponse {
+  granted_count: number
+  /** Validace skupiny, které už schválené byly — opakované volání je nezdvojí. */
+  skipped_count: number
+  four_eyes_met: boolean
+  idempotent_replay: boolean
+  run: PayrollRun
+  validations: PayrollRunValidation[]
+}
+
 export interface PayrollIncomeTaxRate {
   decimal: string
   numerator: number
@@ -7852,6 +7862,21 @@ export const payrollApi = {
         data: payload,
         headers: { 'Idempotency-Key': idempotencyKey },
       },
+    ).then(response => response.data),
+  /**
+   * Hromadné schválení výjimky u skupiny kontrol jednoho kódu. Jedno
+   * odůvodnění za celou skupinu; server zapíše auditní událost ke každé
+   * validaci zvlášť a už schválené přeskočí.
+   */
+  overrideRunValidationsBulk: (
+    runId: number,
+    payload: { row_version: number; code: string; validation_ids: number[]; reason: string },
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollRunValidationBulkOverrideResponse>(
+      `/payroll/runs/${runId}/validations/override-bulk`,
+      payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
   /**
    * Stažení dokumentu, o kterém známe jen `id` a název souboru.

@@ -752,6 +752,364 @@ final class PayrollRunValidationOverrideTest extends TestCase
         self::assertFalse($this->json($revoked)['granted']);
     }
 
+    /**
+     * U 225 lidí bez přihlášky je to 225 varování se stejným důvodem. Hromadné
+     * schválení je jeden příkaz, ale na každou validaci zapíše tutéž auditní
+     * událost jako schválení po jednom — a nic mimo skupinu se ho netkne.
+     */
+    public function testBulkGrantResolvesTheWholeGroupAndNothingElse(): void
+    {
+        $locked = $this->lockedRun();
+        $runId = (int) $locked['id'];
+        $revisionId = (int) $locked['revision_id'];
+        $group = [
+            $this->seedOverridableWarning($revisionId),
+            $this->seedOverridableWarning($revisionId),
+            $this->seedOverridableWarning($revisionId),
+        ];
+        $notRequiring = $this->seedWarning($revisionId, 'overtime_limit_exceeded', false);
+        $otherCode = $this->seedWarning($revisionId, 'employment_health_registration_missing', true);
+        $unresolvedBefore = $this->runs->validationCounts($this->supplierId, $revisionId)['unresolved_overrides'];
+        $version = $this->rowVersion($runId);
+        $reason = 'Přesčasy všech tří lidí jsou doložené písemným souhlasem, vyplácí se.';
+
+        $result = $this->overrides->grantMany(
+            $this->supplierId,
+            $runId,
+            'overtime_limit_exceeded',
+            null,
+            $version,
+            'bulk-grant-key',
+            $this->actors[2],
+            $reason,
+        );
+
+        self::assertSame(3, $result->grantedCount);
+        self::assertSame(0, $result->skippedCount);
+        self::assertFalse($result->idempotentReplay);
+        self::assertSame($group, array_map(
+            static fn (array $row): int => (int) $row['id'],
+            $result->validations,
+        ));
+        self::assertSame(
+            $version + 1,
+            (int) $result->run['row_version'],
+            'Celá dávka posune row_version jednou, ne za každou validaci.',
+        );
+        foreach ($group as $validationId) {
+            $state = $this->overrideState($validationId);
+            self::assertNotNull($state['overridden_at']);
+            self::assertSame($reason, $state['override_reason']);
+            self::assertSame($this->actors[2], $state['overridden_by']);
+        }
+        self::assertNull(
+            $this->overrideState($notRequiring)['overridden_at'],
+            'Kontrola bez requires_override se hromadného schválení nesmí dotknout.',
+        );
+        self::assertNull(
+            $this->overrideState($otherCode)['overridden_at'],
+            'Kontrola jiného kódu do skupiny nepatří.',
+        );
+        self::assertSame(
+            $unresolvedBefore - 3,
+            $this->runs->validationCounts($this->supplierId, $revisionId)['unresolved_overrides'],
+        );
+
+        // Audit: jedna událost na validaci, se stejným tvarem jako po jednom.
+        self::assertSame(3, $this->eventCount($runId, 'validation_override'));
+        $event = $this->lastEvent($runId, 'validation_override');
+        self::assertSame($reason, $event['reason']);
+        self::assertSame($this->actors[2], (int) $event['actor_user_id']);
+        self::assertSame($revisionId, (int) $event['revision_id']);
+        self::assertContains($event['metadata']['validation_id'], $group);
+        self::assertSame('overtime_limit_exceeded', $event['metadata']['validation_code']);
+        self::assertSame((int) $result->run['row_version'], $event['metadata']['row_version']);
+        self::assertSame(3, $event['metadata']['bulk_count']);
+        self::assertSame(
+            1,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_run_commands
+                  WHERE supplier_id = ? AND run_id = ? AND command_name = ?',
+                [$this->supplierId, $runId, PayrollRunValidationOverrideService::COMMAND_GRANT_BULK],
+            ),
+        );
+    }
+
+    /**
+     * Seznam z obrazovky nesmí propašovat kontrolu, která schválení nevyžaduje,
+     * ani kontrolu jiného kódu — dávka pak neschválí nic.
+     */
+    public function testBulkGrantWithIdsRefusesForeignMembersAndLeavesEverythingUntouched(): void
+    {
+        $locked = $this->lockedRun();
+        $runId = (int) $locked['id'];
+        $revisionId = (int) $locked['revision_id'];
+        $first = $this->seedOverridableWarning($revisionId);
+        $second = $this->seedOverridableWarning($revisionId);
+        $notRequiring = $this->seedWarning($revisionId, 'overtime_limit_exceeded', false);
+        $otherCode = $this->seedWarning($revisionId, 'employment_health_registration_missing', true);
+        $reason = 'Přesčasy jsou doložené písemným souhlasem zaměstnanců, vyplácí se.';
+
+        foreach ([
+            [[$first, $second, $notRequiring], 'nevyžaduje'],
+            [[$first, $otherCode], 'nepatří do skupiny'],
+        ] as $index => [$ids, $expected]) {
+            try {
+                $this->overrides->grantMany(
+                    $this->supplierId,
+                    $runId,
+                    'overtime_limit_exceeded',
+                    $ids,
+                    $this->rowVersion($runId),
+                    'bulk-refused-' . $index,
+                    $this->actors[2],
+                    $reason,
+                );
+                self::fail('Dávka s cizím členem nesmí projít.');
+            } catch (\DomainException $e) {
+                self::assertStringContainsString($expected, $e->getMessage());
+            }
+        }
+
+        foreach ([$first, $second, $notRequiring, $otherCode] as $validationId) {
+            self::assertNull($this->overrideState($validationId)['overridden_at']);
+        }
+        self::assertSame(0, $this->eventCount($runId, 'validation_override'));
+    }
+
+    /** Bez odůvodnění neprojde ani hromadně — pravidla jsou tatáž jako po jednom. */
+    public function testBulkGrantRequiresAReason(): void
+    {
+        $locked = $this->lockedRun();
+        $runId = (int) $locked['id'];
+        $validationId = $this->seedOverridableWarning((int) $locked['revision_id']);
+
+        foreach (['', null, 'ok'] as $index => $reason) {
+            try {
+                $this->overrides->grantMany(
+                    $this->supplierId,
+                    $runId,
+                    'overtime_limit_exceeded',
+                    null,
+                    $this->rowVersion($runId),
+                    'bulk-no-reason-' . $index,
+                    $this->actors[2],
+                    $reason,
+                );
+                self::fail('Hromadná výjimka bez odůvodnění nesmí projít.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('Důvod výjimky', $e->getMessage());
+            }
+        }
+        self::assertNull($this->overrideState($validationId)['overridden_at']);
+    }
+
+    /**
+     * Opakované volání nic nezdvojí: retry s týmž klíčem přehraje výsledek,
+     * nový příkaz nad už schválenou skupinou nic nezapíše.
+     */
+    public function testBulkGrantIsIdempotent(): void
+    {
+        $locked = $this->lockedRun();
+        $runId = (int) $locked['id'];
+        $revisionId = (int) $locked['revision_id'];
+        $group = [
+            $this->seedOverridableWarning($revisionId),
+            $this->seedOverridableWarning($revisionId),
+        ];
+        $version = $this->rowVersion($runId);
+        $reason = 'Přesčasy jsou doložené písemným souhlasem zaměstnanců, vyplácí se.';
+
+        $first = $this->overrides->grantMany(
+            $this->supplierId,
+            $runId,
+            'overtime_limit_exceeded',
+            $group,
+            $version,
+            'bulk-idempotent-key',
+            $this->actors[2],
+            $reason,
+        );
+        self::assertSame(2, $first->grantedCount);
+        $after = (int) $first->run['row_version'];
+
+        $replay = $this->overrides->grantMany(
+            $this->supplierId,
+            $runId,
+            'overtime_limit_exceeded',
+            array_reverse($group),
+            $version,
+            'bulk-idempotent-key',
+            $this->actors[2],
+            $reason,
+        );
+        self::assertTrue($replay->idempotentReplay);
+        self::assertSame(2, $replay->grantedCount);
+        self::assertCount(2, $replay->validations);
+        self::assertSame($after, $this->rowVersion($runId));
+
+        $again = $this->overrides->grantMany(
+            $this->supplierId,
+            $runId,
+            'overtime_limit_exceeded',
+            null,
+            $after,
+            'bulk-idempotent-second',
+            $this->actors[2],
+            $reason,
+        );
+        self::assertFalse($again->idempotentReplay);
+        self::assertSame(0, $again->grantedCount);
+        self::assertSame(2, $again->skippedCount);
+        self::assertSame($after, $this->rowVersion($runId), 'Prázdná dávka nesmí posunout row_version.');
+        self::assertSame(2, $this->eventCount($runId, 'validation_override'));
+
+        $this->expectException(PayrollRunIdempotencyException::class);
+        $this->overrides->grantMany(
+            $this->supplierId,
+            $runId,
+            'overtime_limit_exceeded',
+            $group,
+            $version,
+            'bulk-idempotent-key',
+            $this->actors[2],
+            'Úplně jiné odůvodnění pod stejným idempotency klíčem dávky.',
+        );
+    }
+
+    /**
+     * Multi-tenant izolace: cizí firma běh ani jeho validace nenajde a validace
+     * jednoho běhu nejdou schválit přes jiný běh téže firmy.
+     */
+    public function testBulkGrantRefusesForeignTenantAndForeignRun(): void
+    {
+        $locked = $this->lockedRun();
+        $runId = (int) $locked['id'];
+        $validationId = $this->seedOverridableWarning((int) $locked['revision_id']);
+        $reason = 'Cizí firma se pokouší hromadně schválit cizí mzdové validace.';
+
+        foreach ([null, [$validationId]] as $index => $ids) {
+            try {
+                $this->overrides->grantMany(
+                    $this->otherSupplierId,
+                    $runId,
+                    'overtime_limit_exceeded',
+                    $ids,
+                    $this->rowVersion($runId),
+                    'bulk-foreign-tenant-' . $index,
+                    $this->actors[2],
+                    $reason,
+                );
+                self::fail('Cizí tenant nesmí výjimku hromadně schválit.');
+            } catch (\OutOfBoundsException $e) {
+                self::assertStringContainsString('nebyl nalezen', $e->getMessage());
+            }
+        }
+
+        $other = $this->service->createRun(
+            $this->supplierId,
+            '2026-07-01',
+            '2026-08-15',
+            null,
+            $this->actors[0],
+        );
+        $otherLocked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $other['id'],
+            (int) $other['row_version'],
+            'bulk-foreign-run-lock',
+            $this->actors[0],
+        );
+        try {
+            $this->overrides->grantMany(
+                $this->supplierId,
+                (int) $otherLocked->run['id'],
+                'overtime_limit_exceeded',
+                [$validationId],
+                (int) $otherLocked->run['row_version'],
+                'bulk-foreign-run',
+                $this->actors[2],
+                'Validace jednoho běhu se nesmí schválit přes jiný běh téže firmy.',
+            );
+            self::fail('Validace cizího běhu nesmí projít.');
+        } catch (\OutOfBoundsException $e) {
+            self::assertStringContainsString('nebyla nalezena', $e->getMessage());
+        }
+
+        self::assertNull($this->overrideState($validationId)['overridden_at']);
+    }
+
+    /** HTTP vrstva hromadné výjimky: stejné právo, validace těla, tvar odpovědi. */
+    public function testBulkHttpEndpointEnforcesPermissionAndReturnsTheGroup(): void
+    {
+        $locked = $this->lockedRun();
+        $runId = (int) $locked['id'];
+        $revisionId = (int) $locked['revision_id'];
+        $group = [
+            $this->seedOverridableWarning($revisionId),
+            $this->seedOverridableWarning($revisionId),
+        ];
+        $args = ['id' => (string) $runId];
+        $body = [
+            'row_version' => $this->rowVersion($runId),
+            'code' => 'overtime_limit_exceeded',
+            'validation_ids' => $group,
+            'reason' => 'Přesčasy jsou doložené písemným souhlasem zaměstnanců, vyplácí se.',
+        ];
+
+        $readOnly = $this->role(['payroll' => AccessLevel::READ->value]);
+        self::assertSame(403, $this->action->grantBulk(
+            $this->apiRequest('POST', $readOnly)->withParsedBody($body),
+            new Response(),
+            $args,
+        )->getStatusCode());
+
+        $approver = $this->role([
+            'payroll' => AccessLevel::READ->value,
+            'payroll.approve' => AccessLevel::WRITE->value,
+        ]);
+        foreach ([
+            ['code' => ''],
+            ['validation_ids' => 'all'],
+            ['validation_ids' => [1, 'x']],
+        ] as $broken) {
+            self::assertSame(422, $this->action->grantBulk(
+                $this->apiRequest('POST', $approver)->withParsedBody([...$body, ...$broken]),
+                new Response(),
+                $args,
+            )->getStatusCode());
+        }
+
+        $foreign = $this->action->grantBulk(
+            $this->apiRequest('POST', $approver)
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->otherSupplierId)
+                ->withParsedBody($body),
+            new Response(),
+            $args,
+        );
+        self::assertSame(404, $foreign->getStatusCode(), 'Cizí firma běh nesmí najít.');
+
+        $ok = $this->action->grantBulk(
+            $this->apiRequest('POST', $approver)->withParsedBody($body),
+            new Response(),
+            $args,
+        );
+        self::assertSame(200, $ok->getStatusCode());
+        $payload = $this->json($ok);
+        self::assertSame(2, $payload['granted_count']);
+        self::assertSame(0, $payload['skipped_count']);
+        self::assertSame($group, array_column($payload['validations'], 'id'));
+        self::assertSame('Synthetic calculator', $payload['validations'][0]['overridden_by_name']);
+
+        $stale = $this->action->grantBulk(
+            $this->apiRequest('POST', $approver)->withParsedBody($body),
+            new Response(),
+            $args,
+        );
+        self::assertSame(409, $stale->getStatusCode());
+        self::assertSame('row_version_conflict', $this->json($stale)['error']['code']);
+    }
+
     // ── podklady ────────────────────────────────────────────────────────────
 
     /** @return array<string,mixed> */
@@ -785,19 +1143,51 @@ final class PayrollRunValidationOverrideTest extends TestCase
      */
     private function seedOverridableWarning(int $revisionId): int
     {
+        return $this->seedWarning($revisionId, 'overtime_limit_exceeded', true);
+    }
+
+    private function seedWarning(int $revisionId, string $code, bool $requiresOverride): int
+    {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_validations
                 (supplier_id, revision_id, severity, code, entity_type,
                  entity_id, message, remediation_path, requires_override)
-             VALUES (?, ?, "warning", "overtime_limit_exceeded", "employment",
-                     ?, ?, "/payroll/time", 1)'
+             VALUES (?, ?, "warning", ?, "employment", ?, ?, "/payroll/time", ?)'
         )->execute([
             $this->supplierId,
             $revisionId,
+            $code,
             $this->employmentId,
             'Přesčas překročil zákonný limit podle § 93 zákoníku práce.',
+            $requiresOverride ? 1 : 0,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** @return array{overridden_at:mixed,override_reason:mixed,overridden_by:mixed} */
+    private function overrideState(int $validationId): array
+    {
+        $row = $this->runs->validation($this->supplierId, $validationId);
+        self::assertNotNull($row);
+        return [
+            'overridden_at' => $row['overridden_at'],
+            'override_reason' => $row['override_reason'],
+            'overridden_by' => $row['overridden_by'],
+        ];
+    }
+
+    private function eventCount(int $runId, string $eventType): int
+    {
+        return (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_run_events
+              WHERE supplier_id = ? AND run_id = ? AND event_type = ?',
+            [$this->supplierId, $runId, $eventType],
+        );
+    }
+
+    private function rowVersion(int $runId): int
+    {
+        return (int) $this->runs->find($this->supplierId, $runId)['row_version'];
     }
 
     /** @return list<array<string,mixed>> */
