@@ -25284,6 +25284,62 @@
         }
       }
     },
+    "attendance_time": {
+      "options": {
+        "write_summary": "Zapsat souhrn docházky do pracovních měsíců",
+        "write_summary_hint": "Hodiny z podkladů se uloží jako souhrn pracovního měsíce každého vztahu, ze kterého vychází měsíční hlášení ČSSZ. Opravná dávka souhrn otevřeného měsíce nahradí, schválený měsíc nezmění.",
+        "approve_clean": "Bezchybné měsíce rovnou schválit",
+        "approve_clean_hint": "Schválí se jen měsíce, u kterých souhrn nic netvrdí bez podkladu. Ostatní se ve výsledku vypíšou po lidech s důvodem a odkazem na nápravu.",
+        "approve_needs_summary": "Schválení stojí na zapsaném souhrnu. Nejdřív zapněte zápis souhrnu do pracovních měsíců.",
+        "approve_no_permission": "Hromadné schválení vyžaduje oprávnění schvalovat mzdy."
+      },
+      "approve": "Schválit bezchybné měsíce",
+      "approve_hint": "Zapíše souhrny dávky do pracovních měsíců a schválí ty bezchybné. Měsíce s výjimkou zůstanou otevřené a vypíšou se s důvodem.",
+      "approving": "Schvaluji…",
+      "approve_failed": "Pracovní měsíce se nepodařilo schválit.",
+      "approved_toast": "Schváleno měsíců: {approved}, k ručnímu zpracování: {exceptions}.",
+      "result": {
+        "title": "Pracovní měsíce",
+        "approved": "Schváleno",
+        "already_approved": "Už schválené",
+        "written": "Zapsané souhrny",
+        "replayed": "Souhrn beze změny",
+        "exceptions": "K ručnímu zpracování",
+        "all_approved": "Všechny pracovní měsíce z dávky jsou schválené.",
+        "not_approved": "Měsíce se neschvalovaly. Bezchybné schválíte tlačítkem Schválit bezchybné měsíce.",
+        "exceptions_title": "Měsíce, které se neschválily",
+        "warnings_title": "Upozornění ({count})",
+        "group": "{title} ({count})",
+        "unknown_person": "Vztah č. {id}",
+        "inputs_updated": "Aktualizováno konceptů vstupů: {count}",
+        "inputs_overridden": "Ručně přepsané hodnoty, které import nezměnil: {count}"
+      },
+      "codes": {
+        "absence_hours_without_dates": "Nepřítomnost bez dat od–do",
+        "weekly_hours_missing": "Chybí týdenní pracovní doba",
+        "month_approved_other_source": "Měsíc schválený z jiného zdroje",
+        "time_entries_present": "Měsíc má časové záznamy docházky",
+        "summary_not_written": "Souhrn se nezapsal",
+        "summary_from_other_import": "Souhrn pochází z jiné dávky",
+        "not_import_summary": "Měsíc nebere docházku ze souhrnu importu",
+        "work_summary_not_derivable": "Souhrn nejde odvodit bez posouzení",
+        "approval_conflict": "Měsíc se mezitím změnil",
+        "approval_failed": "Schválení selhalo",
+        "import_overtime_exceeds_worked": "Přesčas nad odpracované hodiny",
+        "import_worked_hours_missing": "Chybí odpracované hodiny",
+        "absence_not_final": "Nepřítomnost není uzavřená",
+        "worked_days_not_provided": "Podklady neuvádějí odpracované dny",
+        "import_fund_mismatch": "Fond z podkladů nesedí s kalendářem",
+        "employment_not_in_period": "Vztah v období neplatí",
+        "time_month_approved": "Měsíc už je schválený",
+        "other": "Jiný nález souhrnu"
+      },
+      "fix": {
+        "terms": "Úvazek na kartě",
+        "absences": "Absence",
+        "time": "Docházka"
+      }
+    },
     "mapping": {
       "title": "Mapování sloupců",
       "hint": "Profil mapování říká, co který sloupec v souborech z docházkového systému znamená. Nastavuje se jednou, měsíční import ho pak použije automaticky. Pravidla se řídí názvy listů a hlaviček, takže nevadí posunuté sloupce ani drobné rozdíly mezi verzemi šablony.",

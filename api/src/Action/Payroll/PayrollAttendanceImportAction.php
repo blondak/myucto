@@ -66,6 +66,13 @@ final class PayrollAttendanceImportAction
         }
         try {
             $body = $this->input($request);
+            // Hromadné schválení měsíců při použití dávky je totéž jako
+            // dodatečné schválení (approveTimeMonths) — stejné právo.
+            if (($body['approve_clean_time_months'] ?? false) === true
+                && ($error = $this->authorize($request, $response, 'payroll.approve')) !== null
+            ) {
+                return $error;
+            }
             $result = $this->imports->apply(
                 $this->currentSupplierId($request),
                 $this->string($body, 'period'),

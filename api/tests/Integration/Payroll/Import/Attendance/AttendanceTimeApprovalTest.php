@@ -11,6 +11,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeInputMaterializer;
@@ -345,6 +347,29 @@ final class AttendanceTimeApprovalTest extends TestCase
             ['id' => '999999999'],
         );
         self::assertSame(404, $missing->getStatusCode());
+    }
+
+    /**
+     * Schválení měsíců při použití dávky je totéž co dodatečné schválení,
+     * takže samotné právo na vstupy nestačí.
+     */
+    public function testApplyWithMonthApprovalRequiresApprovePermission(): void
+    {
+        $action = $this->service(PayrollAttendanceImportAction::class);
+        $inputsOnly = new EffectiveRole(45, 'Jen vstupy', 'staff', true, [
+            'payroll.inputs.write' => AccessLevel::WRITE->value,
+        ]);
+        $request = $this->request('/api/payroll/imports/attendance/apply')
+            ->withAttribute('auth.effective_role', $inputsOnly);
+
+        $denied = $action->apply(
+            $request->withParsedBody(['period' => '2026-07', 'approve_clean_time_months' => true]),
+            new Response(),
+        );
+        self::assertSame(403, $denied->getStatusCode(), (string) $denied->getBody());
+
+        $withoutApproval = $action->apply($request->withParsedBody(['period' => '2026-07']), new Response());
+        self::assertNotSame(403, $withoutApproval->getStatusCode(), (string) $withoutApproval->getBody());
     }
 
     /**

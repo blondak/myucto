@@ -30,6 +30,7 @@ const activeTab = ref<Tab>(tabFromQuery())
 const canWriteInputs = computed(() => auth.canWrite('payroll.inputs.write'))
 const canWritePersons = computed(() => auth.canWrite('payroll.person.write'))
 const canManageProfiles = computed(() => auth.canWrite('payroll.settings'))
+const canApproveTime = computed(() => auth.canWrite('payroll.approve'))
 
 // Mapování se nastavuje jednou, import běží měsíčně — obě záložky ale pracují
 // se stejnými soubory a profily, proto sdílený stav místo dvojího nahrávání.
@@ -85,6 +86,7 @@ onMounted(() => { void workspace.loadProfiles() })
       v-show="activeTab === 'attendance'"
       :can-write="canWriteInputs"
       :can-create-persons="canWritePersons"
+      :can-approve-time="canApproveTime"
     />
     <AttendanceMappingPanel
       v-show="activeTab === 'mapping'"

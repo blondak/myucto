@@ -7,16 +7,46 @@ import {
   type AttendanceBatch,
   type AttendanceBatchRow,
 } from '@/api/payrollImports'
+import { payrollAttendanceApprovalApi, type AttendanceTimeApproval } from '@/api/payrollAttendanceApproval'
 import { apiErrorMessage } from '@/api/errors'
+import { useToast } from '@/composables/useToast'
 import { formatDateTime, formatMoneyMinor } from '@/composables/useFormat'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import AttendanceTimeApprovalResult from './AttendanceTimeApprovalResult.vue'
 import { formatHours } from './importHelpers'
 
 const props = defineProps<{
   period: string
+  /** Schválení pracovních měsíců (`payroll.approve`). */
+  canApprove?: boolean
 }>()
 
 const { t, te, locale } = useI18n()
+const toast = useToast()
+
+// Dodatečné schválení čistých měsíců z už použité dávky, výsledek pod řádkem dávky.
+const approving = ref<number | null>(null)
+const approvals = ref<Record<number, AttendanceTimeApproval>>({})
+const approveErrors = ref<Record<number, string>>({})
+
+async function approve(batch: AttendanceBatch) {
+  if (!props.canApprove || approving.value !== null) return
+  approving.value = batch.id
+  approveErrors.value = Object.fromEntries(
+    Object.entries(approveErrors.value).filter(([id]) => Number(id) !== batch.id),
+  )
+  try {
+    const approval = await payrollAttendanceApprovalApi.approveCleanTimeMonths(batch.id)
+    approvals.value = { ...approvals.value, [batch.id]: approval }
+    const params = { approved: approval.approved, exceptions: approval.exceptions.length }
+    if (approval.exceptions.length) toast.warning(t('payroll_imports.attendance_time.approved_toast', params))
+    else toast.success(t('payroll_imports.attendance_time.approved_toast', params))
+  } catch (err) {
+    approveErrors.value = { ...approveErrors.value, [batch.id]: apiErrorMessage(err, t('payroll_imports.attendance_time.approve_failed')) }
+  } finally {
+    approving.value = null
+  }
+}
 
 const batches = ref<AttendanceBatch[]>([])
 const loading = ref(false)
@@ -111,11 +141,21 @@ defineExpose({ reload })
             <span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">{{ t('payroll_imports.attendance.history.persons', { count: batch.person_count }) }}</span>
             <span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">{{ t('payroll_imports.attendance.history.metrics', { count: batch.metric_count }) }}</span>
             <span class="rounded-full bg-payroll-50 px-2 py-0.5 text-xs text-payroll-700">{{ t('payroll_imports.attendance.history.inputs', { count: batch.input_count }) }}</span>
+            <button v-if="canApprove" type="button" :class="btnOutlineSm('success')" :disabled="approving !== null"
+              :title="t('payroll_imports.attendance_time.approve_hint')" data-testid="attendance-history-approve-time" @click="approve(batch)">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.checkCircle" /></svg>
+              {{ approving === batch.id ? t('payroll_imports.attendance_time.approving') : t('payroll_imports.attendance_time.approve') }}
+            </button>
             <button type="button" :class="btnOutlineSm('neutral')" :aria-expanded="expanded === batch.id" @click="toggle(batch)">
               <svg class="h-3.5 w-3.5 transition-transform" :class="expanded === batch.id ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevron" /></svg>
               {{ t(expanded === batch.id ? 'payroll_imports.attendance.history.hide' : 'payroll_imports.attendance.history.show') }}
             </button>
           </div>
+        </div>
+
+        <div v-if="approveErrors[batch.id] || approvals[batch.id]" class="px-4 pb-3" data-testid="attendance-history-approval">
+          <p v-if="approveErrors[batch.id]" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-700">{{ approveErrors[batch.id] }}</p>
+          <AttendanceTimeApprovalResult v-else-if="approvals[batch.id]" :approval="approvals[batch.id]" :period="batch.period" />
         </div>
 
         <div v-if="expanded === batch.id" class="border-t border-neutral-100 bg-neutral-50/60 px-4 py-3">

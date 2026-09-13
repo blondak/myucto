@@ -4,11 +4,15 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import {
   payrollImportsApi,
-  type AttendanceApplyResult,
   type AttendancePersonCreate,
   type AttendancePersonsResult,
   type AttendancePreview,
 } from '@/api/payrollImports'
+import {
+  payrollAttendanceApprovalApi,
+  type AttendanceApplyWithTimeResult,
+  type AttendanceTimeApproval,
+} from '@/api/payrollAttendanceApproval'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
@@ -19,6 +23,7 @@ import AttendancePersonsStep from './AttendancePersonsStep.vue'
 import AttendanceSummaryStep from './AttendanceSummaryStep.vue'
 import AttendanceBatchHistory from './AttendanceBatchHistory.vue'
 import AttendanceRecognitionStrip from './AttendanceRecognitionStrip.vue'
+import AttendanceTimeApprovalResult from './AttendanceTimeApprovalResult.vue'
 import { useAttendanceWorkspace } from './attendanceWorkspace'
 import {
   autoPersonCreateDefaults,
@@ -38,6 +43,8 @@ import {
 const props = defineProps<{
   canWrite: boolean
   canCreatePersons: boolean
+  /** Schválení pracovních měsíců (`payroll.approve`). */
+  canApproveTime?: boolean
 }>()
 
 const { t, te } = useI18n()
@@ -60,6 +67,15 @@ const createInputs = ref(true)
 const createComponents = ref(true)
 const adoptPersonalNumbers = ref(true)
 const adoptMonthlyWage = ref(false)
+// Výchozí stav drží backend: bez volby se souhrn nezapisuje ani neschvaluje.
+const writeTimeSummary = ref(false)
+const approveCleanTimeMonths = ref(false)
+watch(writeTimeSummary, value => { if (!value) approveCleanTimeMonths.value = false })
+const approveTimeBlockedReason = computed(() => {
+  if (!props.canApproveTime) return t('payroll_imports.attendance_time.options.approve_no_permission')
+  if (!writeTimeSummary.value) return t('payroll_imports.attendance_time.options.approve_needs_summary')
+  return ''
+})
 const autoCreateMissingPersons = ref(true)
 const autoCreateResult = ref<AttendancePersonsResult | null>(null)
 const autoCreateNotes = computed(() => (autoCreateResult.value?.results ?? []).filter(item => item.status === 'created' && item.message))
@@ -73,8 +89,14 @@ function personLabel(key: string): string {
     : person.display_name
 }
 const applyPhase = ref<'creating' | 'importing' | null>(null)
-const result = ref<AttendanceApplyResult | null>(null)
-const busy = ref<'preview' | 'apply' | 'persons' | null>(null)
+const result = ref<AttendanceApplyWithTimeResult | null>(null)
+// Dodatečné schválení z výsledku nahradí výsledek schválení z importu.
+const lateApproval = ref<AttendanceTimeApproval | null>(null)
+watch(result, () => { lateApproval.value = null })
+const timeApproval = computed(() => lateApproval.value ?? result.value?.time_approval ?? null)
+const employmentLabels = computed(() => new Map((preview.value?.employment_options ?? [])
+  .map(option => [option.employment_id, { name: option.label, code: option.code }] as const)))
+const busy = ref<'preview' | 'apply' | 'persons' | 'approve' | null>(null)
 const error = ref('')
 const profileStale = ref(false)
 const history = ref<InstanceType<typeof AttendanceBatchHistory> | null>(null)
@@ -289,7 +311,7 @@ async function apply() {
       if (creationError) error.value = creationError
     }
     if (!preview.value) return
-    const response = await payrollImportsApi.applyAttendance({
+    const response = await payrollAttendanceApprovalApi.applyAttendance({
       period: period.value,
       files: await workspace.payloadFiles(),
       rules: preview.value.rules,
@@ -301,6 +323,8 @@ async function apply() {
       create_components: willCreate.value.length > 0 && createComponents.value,
       adopt_personal_numbers: adoptPersonalNumbers.value,
       adopt_monthly_wage: adoptMonthlyWage.value && adoptableWages.value.length > 0,
+      write_time_summary: writeTimeSummary.value,
+      approve_clean_time_months: writeTimeSummary.value && approveCleanTimeMonths.value && props.canApproveTime === true,
     })
     result.value = response
     if (response.replayed) toast.warning(t('payroll_imports.attendance.summary.replayed_toast', { id: response.batch.id }))
@@ -311,6 +335,23 @@ async function apply() {
   } finally {
     busy.value = null
     applyPhase.value = null
+  }
+}
+
+async function approveTimeMonths() {
+  if (!result.value || !props.canApproveTime || busy.value !== null) return
+  busy.value = 'approve'
+  error.value = ''
+  try {
+    const approval = await payrollAttendanceApprovalApi.approveCleanTimeMonths(result.value.batch.id)
+    lateApproval.value = approval
+    const params = { approved: approval.approved, exceptions: approval.exceptions.length }
+    if (approval.exceptions.length) toast.warning(t('payroll_imports.attendance_time.approved_toast', params))
+    else toast.success(t('payroll_imports.attendance_time.approved_toast', params))
+  } catch (err) {
+    error.value = apiErrorMessage(err, t('payroll_imports.attendance_time.approve_failed'))
+  } finally {
+    busy.value = null
   }
 }
 </script>
@@ -487,6 +528,20 @@ async function apply() {
               <input v-model="createInputs" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.create_inputs') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.create_inputs_hint') }}</span></span>
             </label>
+            <label class="flex items-start gap-2 text-sm text-neutral-800">
+              <input v-model="writeTimeSummary" type="checkbox" data-testid="attendance-write-time-summary" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
+              <span><span class="font-medium">{{ t('payroll_imports.attendance_time.options.write_summary') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance_time.options.write_summary_hint') }}</span></span>
+            </label>
+            <label class="ml-6 flex items-start gap-2 text-sm text-neutral-800">
+              <input v-model="approveCleanTimeMonths" type="checkbox" data-testid="attendance-approve-clean-time-months" class="mt-0.5 rounded border-neutral-300 text-payroll-600"
+                :disabled="!canWrite || busy !== null || approveTimeBlockedReason !== ''"
+                :title="disabledTitle(approveTimeBlockedReason !== '', approveTimeBlockedReason)">
+              <span>
+                <span class="font-medium">{{ t('payroll_imports.attendance_time.options.approve_clean') }}</span>
+                <span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance_time.options.approve_clean_hint') }}</span>
+                <span v-if="approveTimeBlockedReason && canWrite" class="mt-0.5 block" :class="BTN_DISABLED_NOTE" data-testid="attendance-approve-blocked">{{ approveTimeBlockedReason }}</span>
+              </span>
+            </label>
           </div>
           <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
             <button type="button" :class="btnOutline('neutral')" :disabled="busy !== null" @click="goTo(2)">
@@ -529,6 +584,8 @@ async function apply() {
           <p v-if="result.replayed" class="mt-1 font-medium text-warning-700">{{ t('payroll_imports.attendance.result.replayed') }}</p>
           <ul class="mt-2 space-y-0.5 text-neutral-700">
             <li>{{ t('payroll_imports.attendance.result.inputs_created', { count: result.inputs.created }) }}</li>
+            <li v-if="result.inputs.updated !== undefined" data-testid="attendance-inputs-updated">{{ t('payroll_imports.attendance_time.result.inputs_updated', { count: result.inputs.updated }) }}</li>
+            <li v-if="result.inputs.overridden" class="font-medium text-warning-700" data-testid="attendance-inputs-overridden">{{ t('payroll_imports.attendance_time.result.inputs_overridden', { count: result.inputs.overridden }) }}</li>
             <li>{{ t('payroll_imports.attendance.result.duplicates', { count: result.inputs.duplicates }) }}</li>
             <li>{{ t('payroll_imports.attendance.result.links_saved', { count: result.links_saved }) }}</li>
             <li v-if="result.personal_numbers_adopted" data-testid="attendance-personal-numbers-adopted">{{ t('payroll_imports.attendance.result.personal_numbers_adopted', { count: result.personal_numbers_adopted }) }}</li>
@@ -562,6 +619,13 @@ async function apply() {
               <li v-for="item in result.inputs.errors" :key="`${item.row_number}-${item.error_message}`">{{ t('payroll_imports.attendance.result.error_row', { row: item.row_number, message: item.error_message }) }}</li>
             </ul>
           </div>
+          <AttendanceTimeApprovalResult
+            v-if="timeApproval || result.time_summary"
+            :approval="timeApproval"
+            :summary="result.time_summary ?? null"
+            :period="result.batch.period"
+            :labels="employmentLabels"
+          />
           <div v-if="result.skipped_persons.length" class="mt-3">
             <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.result.skipped_title', { count: result.skipped_persons.length }) }}</p>
             <ul class="mt-1 space-y-0.5 text-xs text-warning-700">
@@ -573,11 +637,16 @@ async function apply() {
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
               {{ t('payroll_imports.attendance.result.open_inputs') }}
             </RouterLink>
+            <button v-if="canApproveTime" type="button" data-testid="attendance-result-approve-time" class="whitespace-nowrap" :class="btnFilled('success')"
+              :disabled="busy !== null" :title="t('payroll_imports.attendance_time.approve_hint')" @click="approveTimeMonths">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.checkCircle" /></svg>
+              {{ busy === 'approve' ? t('payroll_imports.attendance_time.approving') : t('payroll_imports.attendance_time.approve') }}
+            </button>
           </div>
         </section>
       </section>
     </template>
 
-    <AttendanceBatchHistory ref="history" :period="period" />
+    <AttendanceBatchHistory ref="history" :period="period" :can-approve="canApproveTime === true" />
   </section>
 </template>
