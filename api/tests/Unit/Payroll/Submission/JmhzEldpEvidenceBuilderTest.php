@@ -1110,6 +1110,90 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         ];
     }
 
+    /**
+     * Příprava JMHZ volá builder za KAŽDÝ vztah revize nad týmž zdrojem.
+     *
+     * Dřív každé volání znovu ověřilo a dekódovalo oba snímky revize a znovu
+     * načetlo resolver scénářů z disku, takže příprava rostla s kvadrátem
+     * velikosti firmy (226 vztahů ≈ 5,5 min). Test srovnává cenu dalšího
+     * vztahu s prvním, takže nezávisí na rychlosti stroje.
+     */
+    public function testDerivingEveryEmploymentOfALargeRevisionDoesNotRedoTheWholeRevision(): void
+    {
+        $count = 120;
+        $source = $this->sourceWithPeople($count);
+        $builder = new JmhzEldpEvidenceBuilder();
+
+        $started = hrtime(true);
+        $builder->deriveOrdinaryConfirmation(7, 101, $source);
+        $first = hrtime(true) - $started;
+
+        $started = hrtime(true);
+        for ($ordinal = 2; $ordinal <= $count; ++$ordinal) {
+            $confirmation = $builder->deriveOrdinaryConfirmation(7, 100 + $ordinal, $source);
+            self::assertSame('1++', $confirmation['code']);
+        }
+        $averageNext = (hrtime(true) - $started) / ($count - 1);
+
+        self::assertLessThan(
+            $first / 10,
+            $averageNext,
+            sprintf(
+                'Další vztah téže revize stojí %.2f ms, první %.2f ms — builder zřejmě znovu zpracovává celou revizi.',
+                $averageNext / 1e6,
+                $first / 1e6,
+            ),
+        );
+    }
+
+    /**
+     * Revize s `$count` osobami po jednom vztahu (101, 102, …) s výplní,
+     * aby snímek měl velikost srovnatelnou se skutečnou firmou.
+     *
+     * @return array<string,mixed>
+     */
+    private function sourceWithPeople(int $count): array
+    {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        self::assertIsArray($result);
+        $templatePerson = $input['people'][0];
+        $templateResult = $result['people'][0];
+        $input['people'] = [];
+        $resultPeople = [];
+        for ($ordinal = 1; $ordinal <= $count; ++$ordinal) {
+            $employeeId = 10 + $ordinal;
+            $employmentId = 100 + $ordinal;
+            $person = $templatePerson;
+            $person['employee']['id'] = $employeeId;
+            $person['employments'][0]['employment']['id'] = $employmentId;
+            $person['employments'][0]['employment']['employee_id'] = $employeeId;
+            $person['employments'][0]['synthetic_padding'] = str_repeat('x', 4000);
+            $input['people'][] = $person;
+
+            $resultPerson = $templateResult;
+            $resultPerson['employee_id'] = $employeeId;
+            $resultPerson['employments'][0]['employment_id'] = $employmentId;
+            $relationship = &$resultPerson['statutory']['social_insurance']['relationships'][0];
+            $relationship['relationship_id'] = "employment:{$employmentId}";
+            $relationship['participation']['relationship_id'] = "employment:{$employmentId}";
+            unset($relationship);
+            $resultPerson['synthetic_padding'] = str_repeat('y', 4000);
+            $resultPeople[] = $resultPerson;
+        }
+        $source = $this->withInput($source, $input);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($result);
+        $result['people'] = $resultPeople;
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+
+        return $source;
+    }
+
     /** @return array<string,mixed> */
     private function agreementSource(
         string $relationType,

@@ -22,6 +22,22 @@ final class JmhzOrdinaryEvidenceBuilder
         'deep_mining_work_occurred',
     ];
 
+    private ?JmhzScenarioSelectorResolver $scenarioSelector = null;
+    private ?JmhzScenarioRequirementSourceCatalog $scenarioRequirements = null;
+
+    /**
+     * Ověřené a dekódované snímky revize podle pole (`input` / `result`).
+     *
+     * Builder se volá za KAŽDÝ pracovní vztah revize nad týmž zdrojem a snímky
+     * mají u stovek lidí jednotky MB. Opakované ověření otisku, dekódování
+     * a kanonická kontrola z přehledu evidence dělaly kvadratickou úlohu
+     * (226 vztahů ≈ 40 s). Výsledek je čistá funkce dvojice (JSON, otisk),
+     * takže se znovu použije jen při shodě obou; chyby se neukládají.
+     *
+     * @var array<string,array{json:string,hash:string,decoded:array<string,mixed>}>
+     */
+    private array $canonicalSnapshots = [];
+
     /**
      * @param array<string,mixed> $facts
      * @return array<string,bool>
@@ -144,7 +160,7 @@ final class JmhzOrdinaryEvidenceBuilder
         $selectorRelationshipDetailCode = is_string($term['jmhz_relationship_detail_code'] ?? null)
             ? $term['jmhz_relationship_detail_code']
             : null;
-        $selection = JmhzScenarioSelectorResolver::load()->resolve(
+        $selection = $this->scenarioSelector()->resolve(
             $selectorActivityCode,
             $selectorRelationshipDetailCode,
         );
@@ -169,7 +185,7 @@ final class JmhzOrdinaryEvidenceBuilder
             );
         }
 
-        $catalog = JmhzScenarioRequirementSourceCatalog::load();
+        $catalog = $this->scenarioRequirements();
         $interactions = [];
         foreach (['IN13', 'IN28', 'IN30'] as $interactionId) {
             $definition = $catalog->interaction($interactionId);
@@ -503,9 +519,23 @@ final class JmhzOrdinaryEvidenceBuilder
             || $enforcementResult['insolvency_applied'] !== false;
     }
 
+    private function scenarioSelector(): JmhzScenarioSelectorResolver
+    {
+        return $this->scenarioSelector ??= JmhzScenarioSelectorResolver::load();
+    }
+
+    private function scenarioRequirements(): JmhzScenarioRequirementSourceCatalog
+    {
+        return $this->scenarioRequirements ??= JmhzScenarioRequirementSourceCatalog::load();
+    }
+
     /** @return array<string,mixed> */
     private function canonicalSnapshot(mixed $json, mixed $hash, string $field): array
     {
+        $cached = $this->canonicalSnapshots[$field] ?? null;
+        if ($cached !== null && $cached['hash'] === $hash && $cached['json'] === $json) {
+            return $cached['decoded'];
+        }
         if (!is_string($json) || !is_string($hash)
             || !hash_equals($hash, hash('sha256', $json))
         ) {
@@ -515,6 +545,7 @@ final class JmhzOrdinaryEvidenceBuilder
         if (!is_array($decoded) || array_is_list($decoded) || CanonicalJson::encode($decoded) !== $json) {
             $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Vstupní snapshot není kanonický objekt.');
         }
+        $this->canonicalSnapshots[$field] = ['json' => $json, 'hash' => $hash, 'decoded' => $decoded];
         return $decoded;
     }
 

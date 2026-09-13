@@ -137,6 +137,13 @@ final class JmhzEldpEvidenceBuilder
     /** @var array{manifest_sha256:string,payload:array<string,mixed>}|null */
     private ?array $specManifest = null;
 
+    private ?JmhzScenarioSelectorResolver $scenarioSelector = null;
+
+    private bool $sourceCatalogsVerified = false;
+
+    /** @var array<string,array{json:string,hash:string,decoded:array<string,mixed>}> */
+    private array $canonicalSnapshots = [];
+
     /**
      * Odvodí potvrzení běžného řezu. Vyloučené doby se dopočítají ze zmrazených
      * absencí týmž modulem jako u ročního evidenčního listu; odečítané doby
@@ -282,7 +289,8 @@ final class JmhzEldpEvidenceBuilder
         $relationshipDetailCode = $term['jmhz_relationship_detail_code'] ?? null;
         $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode);
         $selectorRelationshipDetailCode = is_string($relationshipDetailCode) ? $relationshipDetailCode : null;
-        $selection = JmhzScenarioSelectorResolver::load()->resolve($activityCode, $selectorRelationshipDetailCode);
+        $selection = ($this->scenarioSelector ??= JmhzScenarioSelectorResolver::load())
+            ->resolve($activityCode, $selectorRelationshipDetailCode);
         if (!$selection['supported']) {
             $this->invalid('jmhz_eldp_scenario_unsupported', 'Pracovní vztah nepatří do podporovaného scénáře.');
         }
@@ -653,6 +661,22 @@ final class JmhzEldpEvidenceBuilder
                 'Druh činnosti nebo bližší určení neodpovídá druhu pracovního vztahu.',
             );
         }
+    }
+
+    /**
+     * Fail-closed ověření, že katalogy scénářů a kontrol JMHZ jdou načíst
+     * a sedí na připnuté otisky. Zmrazení ELDP ho dřív dělalo za každý vztah
+     * znovu (u přípravy pro 226 lidí desítky sekund čtení a hashování týchž
+     * souborů); stačí jednou za životnost builderu.
+     */
+    public function verifySourceCatalogs(): void
+    {
+        if ($this->sourceCatalogsVerified) {
+            return;
+        }
+        JmhzScenarioRequirementSourceCatalog::load();
+        JmhzControlSourceCatalog::load();
+        $this->sourceCatalogsVerified = true;
     }
 
     /** @return array{manifest_sha256:string,payload:array<string,mixed>} */
@@ -1255,6 +1279,12 @@ final class JmhzEldpEvidenceBuilder
     /** @return array<string,mixed> */
     private function canonicalSnapshot(mixed $json, mixed $hash, string $field): array
     {
+        // Stejný důvod jako v JmhzOrdinaryEvidenceBuilder::$canonicalSnapshots:
+        // příprava JMHZ volá builder za každý vztah nad týmž zdrojem revize.
+        $cached = $this->canonicalSnapshots[$field] ?? null;
+        if ($cached !== null && $cached['hash'] === $hash && $cached['json'] === $json) {
+            return $cached['decoded'];
+        }
         if (!is_string($json) || !is_string($hash)
             || !hash_equals($hash, hash('sha256', $json))
         ) {
@@ -1264,6 +1294,7 @@ final class JmhzEldpEvidenceBuilder
         if (!is_array($decoded) || array_is_list($decoded) || CanonicalJson::encode($decoded) !== $json) {
             $this->invalid('jmhz_eldp_source_invalid', "Snapshot {$field} není kanonický objekt.");
         }
+        $this->canonicalSnapshots[$field] = ['json' => $json, 'hash' => $hash, 'decoded' => $decoded];
         return $decoded;
     }
 

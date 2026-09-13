@@ -41,6 +41,26 @@ final class JmhzOrdinaryEvidenceRepository
     /** @return array<string,mixed>|null */
     public function lockSource(int $supplierId, int $revisionId): ?array
     {
+        return $this->source($supplierId, $revisionId, true);
+    }
+
+    /**
+     * Týž zdroj bez zámku — pro čtecí přehled evidence.
+     *
+     * Přehled nic nezapisuje, a přesto dřív držel `FOR UPDATE` na revizi po
+     * celou dobu výpočtu; souběžný druhý požadavek pak padal na lock wait
+     * timeout. Zapisující cesty (potvrzení, příprava) zamykají dál.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function readSource(int $supplierId, int $revisionId): ?array
+    {
+        return $this->source($supplierId, $revisionId, false);
+    }
+
+    /** @return array<string,mixed>|null */
+    private function source(int $supplierId, int $revisionId, bool $forUpdate): ?array
+    {
         $statement = $this->db->pdo()->prepare(
             'SELECT revision.id, revision.run_id, revision.revision_no,
                     revision.revision_kind, revision.status,
@@ -52,8 +72,8 @@ final class JmhzOrdinaryEvidenceRepository
                JOIN payroll_runs run
                  ON run.supplier_id = revision.supplier_id
                 AND run.id = revision.run_id
-              WHERE revision.supplier_id = ? AND revision.id = ?
-              FOR UPDATE'
+              WHERE revision.supplier_id = ? AND revision.id = ?'
+            . ($forUpdate ? ' FOR UPDATE' : '')
         );
         $statement->execute([$supplierId, $revisionId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);

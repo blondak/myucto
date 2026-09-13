@@ -33,78 +33,83 @@ final readonly class JmhzOrdinaryEvidenceService
      */
     public function evidence(int $supplierId, int $revisionId): array
     {
+        $this->assertRevisionIds($supplierId, $revisionId);
+        return $this->repository->transaction(function () use ($supplierId, $revisionId): array {
+            $state = $this->state(
+                $supplierId,
+                $revisionId,
+                $this->source($supplierId, $revisionId, false),
+            );
+            return ['scopes' => $state['scopes'], 'evidences' => $state['evidences']];
+        });
+    }
+
+    private function assertRevisionIds(int $supplierId, int $revisionId): void
+    {
         if ($supplierId <= 0 || $revisionId <= 0) {
             throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_not_found', 'Ordinary evidence nebyla nalezena.');
         }
-        return $this->repository->transaction(function () use ($supplierId, $revisionId): array {
-            $source = $this->repository->lockSource($supplierId, $revisionId);
-            if ($source === null) {
-                throw new JmhzOrdinaryEvidenceException(
-                    'jmhz_ordinary_evidence_not_found',
-                    'Zdrojová revize nebyla nalezena.',
-                );
-            }
-            $revision = $source['revision'] ?? null;
-            if (!is_array($revision) || array_is_list($revision)) {
-                throw new \UnexpectedValueException('Zdrojová revize ordinary evidence není objekt.');
-            }
-            $evidences = [];
-            $confirmed = [];
-            foreach ($this->repository->findAllByRevision($supplierId, $revisionId) as $stored) {
-                $payload = $this->verifyStored($stored);
-                $evidence = $this->publicResult($stored, $payload, false);
-                $evidences[] = $evidence;
-                $confirmed[(int) $stored['employment_id']] = $this->preparationSource($stored, $payload);
-            }
-            $scopes = [];
-            foreach ($this->frozenScopes($source) as $scope) {
-                $term = $scope['term'];
-                unset($scope['term']);
-                $stored = $confirmed[$scope['employment_id']] ?? null;
-                if (is_array($stored)) {
-                    try {
-                        $this->applicability->assertApplicable(
-                            $stored,
-                            $supplierId,
-                            $revision,
-                            $scope['employee_id'],
-                            $scope['employment_id'],
-                            $term,
-                        );
-                        $scopes[] = $scope + [
-                            'confirmed' => true,
-                            'resolution' => 'confirmed',
-                            'attention_code' => null,
-                            'attention_message' => null,
-                        ];
-                    } catch (JmhzOrdinaryEvidenceApplicabilityException $exception) {
-                        $scopes[] = $scope + [
-                            'confirmed' => false,
-                            'resolution' => 'attention_required',
-                            'attention_code' => $exception->validationCode,
-                            'attention_message' => $exception->getMessage(),
-                            'attention_context' => (object) $exception->context,
-                        ];
-                    }
-                    continue;
-                }
+    }
+
+    /** @return array<string,mixed> */
+    private function source(int $supplierId, int $revisionId, bool $lock): array
+    {
+        $source = $lock
+            ? $this->repository->lockSource($supplierId, $revisionId)
+            : $this->repository->readSource($supplierId, $revisionId);
+        if ($source === null) {
+            throw new JmhzOrdinaryEvidenceException(
+                'jmhz_ordinary_evidence_not_found',
+                'Zdrojová revize nebyla nalezena.',
+            );
+        }
+        return $source;
+    }
+
+    /**
+     * @param array<string,mixed> $source
+     * @return array{
+     *   scopes:list<array<string,mixed>>,
+     *   evidences:list<array<string,mixed>>,
+     *   confirmed:array<int,array<string,mixed>>
+     * }
+     */
+    private function state(int $supplierId, int $revisionId, array $source): array
+    {
+        $revision = $source['revision'] ?? null;
+        if (!is_array($revision) || array_is_list($revision)) {
+            throw new \UnexpectedValueException('Zdrojová revize ordinary evidence není objekt.');
+        }
+        $evidences = [];
+        $confirmed = [];
+        foreach ($this->repository->findAllByRevision($supplierId, $revisionId) as $stored) {
+            $payload = $this->verifyStored($stored);
+            $evidence = $this->publicResult($stored, $payload, false);
+            $evidences[] = $evidence;
+            $confirmed[(int) $stored['employment_id']] = $this->preparationSource($stored, $payload);
+        }
+        $scopes = [];
+        foreach ($this->frozenScopes($source) as $scope) {
+            $term = $scope['term'];
+            unset($scope['term']);
+            $stored = $confirmed[$scope['employment_id']] ?? null;
+            if (is_array($stored)) {
                 try {
-                    $this->builder->build(
+                    $this->applicability->assertApplicable(
+                        $stored,
                         $supplierId,
-                        $source,
+                        $revision,
+                        $scope['employee_id'],
                         $scope['employment_id'],
-                        $this->ordinaryFacts(),
-                        1,
-                        '2000-01-01T00:00:00Z',
-                        'derived_from_frozen_payroll_sources',
+                        $term,
                     );
                     $scopes[] = $scope + [
-                        'confirmed' => false,
-                        'resolution' => 'automatic_on_preparation',
+                        'confirmed' => true,
+                        'resolution' => 'confirmed',
                         'attention_code' => null,
                         'attention_message' => null,
                     ];
-                } catch (JmhzOrdinaryEvidenceException $exception) {
+                } catch (JmhzOrdinaryEvidenceApplicabilityException $exception) {
                     $scopes[] = $scope + [
                         'confirmed' => false,
                         'resolution' => 'attention_required',
@@ -113,9 +118,35 @@ final readonly class JmhzOrdinaryEvidenceService
                         'attention_context' => (object) $exception->context,
                     ];
                 }
+                continue;
             }
-            return ['scopes' => $scopes, 'evidences' => $evidences];
-        });
+            try {
+                $this->builder->build(
+                    $supplierId,
+                    $source,
+                    $scope['employment_id'],
+                    $this->ordinaryFacts(),
+                    1,
+                    '2000-01-01T00:00:00Z',
+                    'derived_from_frozen_payroll_sources',
+                );
+                $scopes[] = $scope + [
+                    'confirmed' => false,
+                    'resolution' => 'automatic_on_preparation',
+                    'attention_code' => null,
+                    'attention_message' => null,
+                ];
+            } catch (JmhzOrdinaryEvidenceException $exception) {
+                $scopes[] = $scope + [
+                    'confirmed' => false,
+                    'resolution' => 'attention_required',
+                    'attention_code' => $exception->validationCode,
+                    'attention_message' => $exception->getMessage(),
+                    'attention_context' => (object) $exception->context,
+                ];
+            }
+        }
+        return ['scopes' => $scopes, 'evidences' => $evidences, 'confirmed' => $confirmed];
     }
 
     /**
@@ -193,6 +224,38 @@ final readonly class JmhzOrdinaryEvidenceService
         ?string $userAgent,
         string $sourceKind = 'explicit_confirmation',
     ): array {
+        return $this->confirmAgainst(
+            null,
+            $supplierId,
+            $revisionId,
+            $employmentId,
+            $facts,
+            $idempotencyKey,
+            $confirmedBy,
+            $ip,
+            $userAgent,
+            $sourceKind,
+        );
+    }
+
+    /**
+     * @param array<string,mixed>|null $lockedSource zdroj, který volající už
+     *        zamkl ve STEJNÉ transakci; `null` = zamkne se tady
+     * @param array<string,mixed> $facts
+     * @return array<string,mixed>
+     */
+    private function confirmAgainst(
+        ?array $lockedSource,
+        int $supplierId,
+        int $revisionId,
+        int $employmentId,
+        array $facts,
+        string $idempotencyKey,
+        int $confirmedBy,
+        ?string $ip,
+        ?string $userAgent,
+        string $sourceKind,
+    ): array {
         if ($supplierId <= 0 || $revisionId <= 0 || $confirmedBy <= 0 || $employmentId <= 0) {
             throw new \InvalidArgumentException('Firma, revize, vztah a potvrzující uživatel musí být kladná čísla.');
         }
@@ -216,6 +279,7 @@ final readonly class JmhzOrdinaryEvidenceService
         );
 
         return $this->repository->transaction(function () use (
+            $lockedSource,
             $supplierId,
             $revisionId,
             $employmentId,
@@ -227,7 +291,7 @@ final readonly class JmhzOrdinaryEvidenceService
             $userAgent,
             $sourceKind,
         ): array {
-            $source = $this->repository->lockSource($supplierId, $revisionId);
+            $source = $lockedSource ?? $this->repository->lockSource($supplierId, $revisionId);
             if ($source === null) {
                 throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_not_found', 'Zdrojová revize nebyla nalezena.');
             }
@@ -385,71 +449,84 @@ final readonly class JmhzOrdinaryEvidenceService
         ?int $confirmedBy = null,
     ): array
     {
-        if ($confirmedBy !== null) {
-            $state = $this->evidence($supplierId, $revisionId);
-            foreach ($state['scopes'] as $scope) {
-                if (($scope['confirmed'] ?? false) === true
-                    || ($scope['resolution'] ?? null) !== 'automatic_on_preparation'
-                ) {
-                    continue;
-                }
-                $employmentId = (int) ($scope['employment_id'] ?? 0);
-                if ($employmentId <= 0) {
-                    continue;
-                }
-                try {
-                    $this->confirm(
-                        $supplierId,
-                        $revisionId,
-                        $employmentId,
-                        $this->ordinaryFacts(),
-                        "jmhz-ordinary-derived-v1:{$revisionId}:{$employmentId}",
-                        $confirmedBy,
-                        null,
-                        null,
-                        'derived_from_frozen_payroll_sources',
-                    );
-                } catch (JmhzOrdinaryEvidenceException $exception) {
-                    if (!in_array($exception->validationCode, [
-                        'jmhz_ordinary_evidence_scenario_unsupported',
-                        'jmhz_ordinary_evidence_profile_missing',
-                        'jmhz_ordinary_evidence_profile_incomplete',
-                        'jmhz_ordinary_evidence_monthly_exception_required',
-                        'jmhz_ordinary_evidence_deduction_conflict',
-                    ], true)) {
-                        throw $exception;
+        $this->assertRevisionIds($supplierId, $revisionId);
+        /*
+         * Zdroj revize (u stovek lidí jednotky MB) se zamkne a načte JEDNOU
+         * pro celou přípravu. Dřív si ho každé automatické doložení vztahu
+         * zamykalo a stahovalo znovu, takže příprava rostla s kvadrátem
+         * velikosti firmy. Zámek i data jsou v téže transakci tytéž.
+         */
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $revisionId,
+            $confirmedBy,
+        ): array {
+            $source = $this->source($supplierId, $revisionId, true);
+            if ($confirmedBy !== null) {
+                $state = $this->state($supplierId, $revisionId, $source);
+                foreach ($state['scopes'] as $scope) {
+                    if (($scope['confirmed'] ?? false) === true
+                        || ($scope['resolution'] ?? null) !== 'automatic_on_preparation'
+                    ) {
+                        continue;
+                    }
+                    $employmentId = (int) ($scope['employment_id'] ?? 0);
+                    if ($employmentId <= 0) {
+                        continue;
+                    }
+                    try {
+                        $this->confirmAgainst(
+                            $source,
+                            $supplierId,
+                            $revisionId,
+                            $employmentId,
+                            $this->ordinaryFacts(),
+                            "jmhz-ordinary-derived-v1:{$revisionId}:{$employmentId}",
+                            $confirmedBy,
+                            null,
+                            null,
+                            'derived_from_frozen_payroll_sources',
+                        );
+                    } catch (JmhzOrdinaryEvidenceException $exception) {
+                        if (!in_array($exception->validationCode, [
+                            'jmhz_ordinary_evidence_scenario_unsupported',
+                            'jmhz_ordinary_evidence_profile_missing',
+                            'jmhz_ordinary_evidence_profile_incomplete',
+                            'jmhz_ordinary_evidence_monthly_exception_required',
+                            'jmhz_ordinary_evidence_deduction_conflict',
+                        ], true)) {
+                            throw $exception;
+                        }
                     }
                 }
             }
-        }
-        $state = $this->evidence($supplierId, $revisionId);
-        $attention = [];
-        foreach ($state['scopes'] as $scope) {
-            if (($scope['resolution'] ?? null) !== 'attention_required') {
-                continue;
+            $state = $this->state($supplierId, $revisionId, $source);
+            $attention = [];
+            foreach ($state['scopes'] as $scope) {
+                if (($scope['resolution'] ?? null) !== 'attention_required') {
+                    continue;
+                }
+                $code = $scope['attention_code'] ?? null;
+                $employmentId = $scope['employment_id'] ?? null;
+                if (is_string($code) && is_int($employmentId) && $employmentId > 0) {
+                    $attention[$employmentId] = [
+                        'code' => $code,
+                        'entity_type' => 'employment',
+                        'entity_id' => $employmentId,
+                        'attribute_ids' => ['10116', '10546'],
+                    ];
+                }
             }
-            $code = $scope['attention_code'] ?? null;
-            $employmentId = $scope['employment_id'] ?? null;
-            if (is_string($code) && is_int($employmentId) && $employmentId > 0) {
-                $attention[$employmentId] = [
-                    'code' => $code,
-                    'entity_type' => 'employment',
-                    'entity_id' => $employmentId,
-                    'attribute_ids' => ['10116', '10546'],
-                ];
+            $sources = [];
+            foreach ($state['confirmed'] as $employmentId => $confirmed) {
+                if (!isset($attention[$employmentId])) {
+                    $sources[$employmentId] = $confirmed;
+                }
             }
-        }
-        $sources = [];
-        foreach ($this->repository->findAllByRevision($supplierId, $revisionId) as $stored) {
-            $employmentId = (int) $stored['employment_id'];
-            if (isset($attention[$employmentId])) {
-                continue;
-            }
-            $sources[$employmentId] = $this->preparationSource($stored, $this->verifyStored($stored));
-        }
-        ksort($sources, SORT_NUMERIC);
-        ksort($attention, SORT_NUMERIC);
-        return ['sources' => $sources, 'issues' => array_values($attention)];
+            ksort($sources, SORT_NUMERIC);
+            ksort($attention, SORT_NUMERIC);
+            return ['sources' => $sources, 'issues' => array_values($attention)];
+        });
     }
 
     /**

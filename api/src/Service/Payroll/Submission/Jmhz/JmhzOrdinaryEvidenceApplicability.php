@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 final class JmhzOrdinaryEvidenceApplicability
 {
     private ?JmhzScenarioSelectorResolver $scenarioSelector = null;
+    private ?JmhzScenarioRequirementSourceCatalog $scenarioRequirements = null;
 
     /**
      * @param array<string,mixed> $evidence
@@ -80,7 +81,7 @@ final class JmhzOrdinaryEvidenceApplicability
         }
 
         $specification = $this->object($payload['specification'] ?? null, 'ordinary_evidence.specification');
-        $catalog = JmhzScenarioRequirementSourceCatalog::load();
+        $catalog = $this->scenarioRequirements ??= JmhzScenarioRequirementSourceCatalog::load();
         $requirementIds = $expectedScenarioKey === 'scenario_1' ? ['10116', '10546'] : ['10546'];
         $requirements = [];
         foreach ($catalog->requirementsForMatrix($expectedScenarioKey) as $requirement) {

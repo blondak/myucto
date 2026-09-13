@@ -382,6 +382,11 @@ final readonly class JmhzPreparationSnapshotService
         if (!is_array($people) || !array_is_list($people)) {
             return [$identities, $mappings, $issues, $eldpSources];
         }
+        // Zdroj pro automatické ELDP se zamkne a načte jednou za přípravu,
+        // ne za každý vztah (viz JmhzEldpEvidenceSnapshotService).
+        $eldpSource = $createdBy === null
+            ? null
+            : $this->eldpEvidence->lockSourceForPreparation($supplierId, $sourceRevisionId);
         foreach ($people as $person) {
             if (!is_array($person) || array_is_list($person)) {
                 continue;
@@ -409,6 +414,7 @@ final readonly class JmhzPreparationSnapshotService
                         $sourceRevisionId,
                         $employmentId,
                         $createdBy,
+                        $eldpSource,
                     );
                     $eldp = $eldpState['snapshot'];
                     if ($eldp !== null) {

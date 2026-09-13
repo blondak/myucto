@@ -37,6 +37,36 @@ final readonly class JmhzEldpEvidenceSnapshotService
         ?int $createdBy,
         string $sourceKind = 'explicit_confirmation',
     ): array {
+        return $this->freezeAgainst(
+            null,
+            $supplierId,
+            $sourceRevisionId,
+            $employmentId,
+            $environment,
+            $confirmation,
+            $idempotencyKey,
+            $createdBy,
+            $sourceKind,
+        );
+    }
+
+    /**
+     * @param array<string,mixed>|null $lockedSource zdroj, který volající už
+     *        zamkl ve STEJNÉ transakci; `null` = zamkne se tady
+     * @param array<string,mixed> $confirmation
+     * @return array<string,mixed>
+     */
+    private function freezeAgainst(
+        ?array $lockedSource,
+        int $supplierId,
+        int $sourceRevisionId,
+        int $employmentId,
+        string $environment,
+        array $confirmation,
+        string $idempotencyKey,
+        ?int $createdBy,
+        string $sourceKind,
+    ): array {
         if ($supplierId <= 0 || $sourceRevisionId <= 0 || $employmentId <= 0) {
             throw new \InvalidArgumentException('Firma, revize a pracovní vztah musí být kladná čísla.');
         }
@@ -63,6 +93,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
         );
 
         return $this->repository->transaction(function () use (
+            $lockedSource,
             $supplierId,
             $sourceRevisionId,
             $employmentId,
@@ -73,7 +104,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
             $createdBy,
             $sourceKind,
         ): array {
-            $source = $this->repository->lockSource($supplierId, $sourceRevisionId);
+            $source = $lockedSource ?? $this->repository->lockSource($supplierId, $sourceRevisionId);
             if ($source === null) {
                 throw new JmhzEldpEvidenceException('jmhz_eldp_revision_not_found', 'Zdrojová revize ELDP nebyla nalezena.');
             }
@@ -109,8 +140,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
                 return $this->result($stored, false);
             }
 
-            JmhzScenarioRequirementSourceCatalog::load();
-            JmhzControlSourceCatalog::load();
+            $this->builder->verifySourceCatalogs();
             $snapshot = $this->builder->build($supplierId, $employmentId, $source, $confirmation);
             $plaintext = $snapshot->canonicalJson();
             $fingerprint = $this->sensitiveData->keyedFingerprint(
@@ -216,6 +246,20 @@ final readonly class JmhzEldpEvidenceSnapshotService
     }
 
     /**
+     * Zdroj revize zamčený pro přípravu. Příprava si ho vezme JEDNOU a předává
+     * ho do {@see ensureForPreparation()} za každý vztah — dřív si ho každý
+     * vztah zamykal a stahoval (u stovek lidí jednotky MB) dvakrát.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function lockSourceForPreparation(int $supplierId, int $sourceRevisionId): ?array
+    {
+        return $this->repository->lockSource($supplierId, $sourceRevisionId);
+    }
+
+    /**
+     * @param array<string,mixed>|null $lockedSource výsledek
+     *        {@see lockSourceForPreparation()} ze STEJNÉ transakce; `null` = zamkne se tady
      * @return array{snapshot:array<string,mixed>|null,issue_code:string|null}
      */
     public function ensureForPreparation(
@@ -224,6 +268,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
         int $sourceRevisionId,
         int $employmentId,
         ?int $createdBy,
+        ?array $lockedSource = null,
     ): array {
         $existing = $this->snapshotForPreparation(
             $supplierId,
@@ -235,7 +280,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
             return ['snapshot' => $existing, 'issue_code' => null];
         }
 
-        $source = $this->repository->lockSource($supplierId, $sourceRevisionId);
+        $source = $lockedSource ?? $this->repository->lockSource($supplierId, $sourceRevisionId);
         if ($source === null) {
             return ['snapshot' => null, 'issue_code' => 'jmhz_eldp_revision_not_found'];
         }
@@ -249,7 +294,8 @@ final readonly class JmhzEldpEvidenceSnapshotService
             return ['snapshot' => null, 'issue_code' => $exception->validationCode];
         }
 
-        $this->freeze(
+        $this->freezeAgainst(
+            $lockedSource,
             $supplierId,
             $sourceRevisionId,
             $employmentId,

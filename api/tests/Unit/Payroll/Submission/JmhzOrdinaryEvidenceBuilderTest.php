@@ -298,6 +298,117 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
         }
     }
 
+    /**
+     * Přehled evidence volá builder za KAŽDÝ vztah revize nad týmž zdrojem.
+     *
+     * Dřív každé volání znovu ověřilo otisk, dekódovalo a kanonicky
+     * překódovalo oba snímky revize (u 226 lidí 7,7 MB) a znovu načetlo
+     * katalogy JMHZ z disku — přehled pro 226 vztahů trval ~40 s a webový
+     * požadavek končil timeoutem. Test srovnává cenu dalšího volání s prvním,
+     * takže nezávisí na rychlosti stroje: práce za celou revizi se smí udělat
+     * jednou, další vztah smí stát jen zlomek.
+     */
+    public function testBuildingEveryEmploymentOfALargeRevisionDoesNotRedoTheWholeRevision(): void
+    {
+        $count = 120;
+        $source = $this->sourceWithPeople($count);
+        $builder = new JmhzOrdinaryEvidenceBuilder();
+
+        $started = hrtime(true);
+        $builder->build(7, $source, 101, $this->facts(), 12, '2026-08-13T12:00:00Z');
+        $first = hrtime(true) - $started;
+
+        $started = hrtime(true);
+        for ($ordinal = 2; $ordinal <= $count; ++$ordinal) {
+            $snapshot = $builder->build(7, $source, 100 + $ordinal, $this->facts(), 12, '2026-08-13T12:00:00Z');
+            self::assertSame(100 + $ordinal, $snapshot->payload['scope']['employment_id']);
+        }
+        $averageNext = (hrtime(true) - $started) / ($count - 1);
+
+        self::assertLessThan(
+            $first / 10,
+            $averageNext,
+            sprintf(
+                'Další vztah téže revize stojí %.2f ms, první %.2f ms — builder zřejmě znovu zpracovává celou revizi.',
+                $averageNext / 1e6,
+                $first / 1e6,
+            ),
+        );
+    }
+
+    /** Totéž pro kontrolu použitelnosti už uložené evidence. */
+    public function testApplicabilityOfManyStoredEvidencesDoesNotReloadCatalogs(): void
+    {
+        $source = $this->source();
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(7, $source, 101, $this->facts(), 12, '2026-08-13T12:00:00Z');
+        $evidence = [
+            'id' => 1,
+            'source_manifest_sha256' => str_repeat('a', 64),
+            'snapshot_fingerprint' => str_repeat('b', 64),
+            'payload' => $snapshot->payload,
+        ];
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $term = $input['people'][0]['employments'][0]['term'];
+        $applicability = new JmhzOrdinaryEvidenceApplicability();
+
+        $started = hrtime(true);
+        $applicability->assertApplicable($evidence, 7, $source['revision'], 11, 101, $term);
+        $first = hrtime(true) - $started;
+
+        $count = 60;
+        $started = hrtime(true);
+        for ($i = 0; $i < $count; ++$i) {
+            $applicability->assertApplicable($evidence, 7, $source['revision'], 11, 101, $term);
+        }
+        $averageNext = (hrtime(true) - $started) / $count;
+
+        self::assertLessThan(
+            $first / 10,
+            $averageNext,
+            sprintf(
+                'Další kontrola stojí %.2f ms, první %.2f ms — katalogy se zřejmě načítají pro každý vztah znovu.',
+                $averageNext / 1e6,
+                $first / 1e6,
+            ),
+        );
+    }
+
+    /**
+     * Revize s `$count` osobami po jednom vztahu (101, 102, …). Každý vztah
+     * nese výplň, aby snímek měl velikost srovnatelnou se skutečnou firmou.
+     *
+     * @return array{revision:array<string,mixed>}
+     */
+    private function sourceWithPeople(int $count): array
+    {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        self::assertIsArray($result);
+        $templatePerson = $input['people'][0];
+        $templateResult = $result['people'][0];
+        $input['people'] = [];
+        $result['people'] = [];
+        for ($ordinal = 1; $ordinal <= $count; ++$ordinal) {
+            $employeeId = 10 + $ordinal;
+            $person = $templatePerson;
+            $person['employee']['id'] = $employeeId;
+            $person['employments'][0]['employment'] = ['id' => 100 + $ordinal, 'employee_id' => $employeeId];
+            $person['employments'][0]['synthetic_padding'] = str_repeat('x', 4000);
+            $input['people'][] = $person;
+            $resultPerson = $templateResult;
+            $resultPerson['employee_id'] = $employeeId;
+            $resultPerson['synthetic_padding'] = str_repeat('y', 4000);
+            $result['people'][] = $resultPerson;
+        }
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+        $this->replaceInput($source, $input);
+
+        return $source;
+    }
+
     /** @return array{revision:array<string,mixed>} */
     private function sourceWithTwoPeople(): array
     {
