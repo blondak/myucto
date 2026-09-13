@@ -27,7 +27,10 @@ if [ "${MYINVOICE_SKIP_MIGRATIONS:-0}" != "1" ]; then
   delay="${MYINVOICE_MIGRATE_DELAY:-3}"
   current_attempt=1
   while :; do
-    if php /var/www/html/api/bin/migrate.php; then
+    # Jako www-data, ne root: migrace zakládá pod ${MYINVOICE_DATA_DIR} schema a route
+    # cache. Root by je vytvořil s umask 022 jako root:root 0755, takže php-fpm workeři
+    # (www-data) by do vlastní cache nesměli zapisovat a setup wizard hlásí chybějící právo zápisu.
+    if su -s /bin/sh -c 'php /var/www/html/api/bin/migrate.php' www-data; then
       break
     fi
     if [ "$current_attempt" -ge "$attempts" ]; then
