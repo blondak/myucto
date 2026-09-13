@@ -347,6 +347,165 @@ final class AttendanceTimeApprovalTest extends TestCase
         self::assertSame(404, $missing->getStatusCode());
     }
 
+    /**
+     * Výjimka hromadného schválení → účetní opraví podklady → opravná dávka.
+     * Opravný souhrn otevřeného měsíce vznikne v nové revizi měsíce (původní
+     * zůstane jako auditní stopa) a čistý měsíc se hromadně schválí.
+     */
+    public function testCorrectedBatchReplacesOpenMonthSummaryAndIsApproved(): void
+    {
+        $employmentId = $this->employment('ZAM-10', '40.00');
+        $first = $this->batch([$this->hoursRows($employmentId, ['sick_hours' => 16_000])]);
+        $initial = $this->approvals->applyBatch($this->supplierId, $first, true, $this->userId);
+        self::assertSame(['absence_hours_without_dates'], array_column($initial['exceptions'], 'code'));
+        self::assertStringContainsString('importujte znovu', $initial['exceptions'][0]['message']);
+        self::assertStringContainsString('schvalte ručně', $initial['exceptions'][0]['message']);
+
+        $corrected = $this->batch([$this->hoursRows($employmentId)]);
+        $result = $this->approvals->applyBatch($this->supplierId, $corrected, true, $this->userId);
+
+        self::assertSame(1, $result['written'], (string) json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame(1, $result['approved']);
+        self::assertSame([], $result['exceptions']);
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        self::assertSame('approved', $month['status'] ?? null);
+        self::assertSame('import_summary', $month['work_source'] ?? null);
+        self::assertSame(2, (int) ($month['revision_no'] ?? 0), 'Opravný souhrn patří do nové revize měsíce.');
+        self::assertSame($corrected, $this->time->importSummary($this->supplierId, $employmentId, self::JULY)['attendance_import_id'] ?? null);
+        self::assertSame(
+            [[1, $first], [2, $corrected]],
+            array_map(
+                static fn (array $row): array => [(int) $row['time_month_revision_no'], (int) $row['attendance_import_id']],
+                $this->rows(
+                    'SELECT time_month_revision_no, attendance_import_id FROM payroll_time_month_import_summaries
+                      WHERE supplier_id = ? AND employment_id = ? ORDER BY time_month_revision_no',
+                    [$this->supplierId, $employmentId],
+                ),
+            ),
+            'Původní souhrn zůstává jako auditní stopa.',
+        );
+        self::assertStringContainsString(
+            "č. {$corrected}",
+            (string) $this->scalar(
+                'SELECT reason FROM payroll_time_month_events
+                  WHERE supplier_id = ? AND time_month_id = ? AND revision_no = 2 AND action = "changed"
+                  ORDER BY id LIMIT 1',
+                [$this->supplierId, (int) $month['id']],
+            ),
+        );
+        $revision = $this->time->jmhzWorkSummaryRevision($this->supplierId, $employmentId, self::JULY);
+        self::assertNotNull($revision);
+        self::assertSame(2, $revision['time_month_revision_no']);
+        $source = json_decode((string) $this->scalar(
+            'SELECT source_snapshot_json FROM payroll_jmhz_work_month_revisions WHERE supplier_id = ? AND id = ?',
+            [$this->supplierId, $revision['id']],
+        ), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($corrected, $source['import_summary']['attendance_import_id'] ?? null);
+    }
+
+    public function testCorrectedBatchIsApprovedThroughTheApplyEndpoint(): void
+    {
+        $employmentId = $this->employment('ZAM-11', '40.00');
+        $this->approvals->applyBatch(
+            $this->supplierId,
+            $this->batch([$this->hoursRows($employmentId, ['sick_hours' => 16_000])]),
+            true,
+            $this->userId,
+        );
+        $corrected = $this->batch([$this->hoursRows($employmentId)]);
+
+        $response = $this->service(PayrollAttendanceImportAction::class)->approveTimeMonths(
+            $this->request("/api/payroll/time/imports/attendance/{$corrected}/apply"),
+            new Response(),
+            ['id' => (string) $corrected],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $approval = $this->json($response)['time_approval'] ?? [];
+        self::assertSame(1, $approval['approved'] ?? null, (string) json_encode($approval, JSON_UNESCAPED_UNICODE));
+        self::assertSame('approved', $this->time->monthState($this->supplierId, $employmentId, self::JULY)['status'] ?? null);
+    }
+
+    public function testCorrectedBatchDoesNotOverwriteApprovedMonth(): void
+    {
+        $employmentId = $this->employment('ZAM-12', '40.00');
+        $first = $this->batch([$this->hoursRows($employmentId)]);
+        $this->approvals->applyBatch($this->supplierId, $first, true, $this->userId);
+        $revisionBefore = $this->time->jmhzWorkSummaryRevision($this->supplierId, $employmentId, self::JULY);
+
+        $result = $this->approvals->applyBatch(
+            $this->supplierId,
+            $this->batch([$this->hoursRows($employmentId, ['overtime_hours' => 2_000])]),
+            true,
+            $this->userId,
+        );
+
+        self::assertSame(0, $result['written']);
+        self::assertSame(0, $result['approved']);
+        self::assertSame(['month_approved_other_source'], array_column($result['exceptions'], 'code'));
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        self::assertSame('approved', $month['status'] ?? null);
+        self::assertSame(1, (int) ($month['revision_no'] ?? 0));
+        self::assertSame($first, $this->time->importSummary($this->supplierId, $employmentId, self::JULY)['attendance_import_id'] ?? null);
+        self::assertSame($revisionBefore, $this->time->jmhzWorkSummaryRevision($this->supplierId, $employmentId, self::JULY));
+        self::assertSame(1, $this->countRows(
+            'SELECT COUNT(*) FROM payroll_time_month_import_summaries WHERE supplier_id = ? AND employment_id = ?',
+            [$this->supplierId, $employmentId],
+        ));
+    }
+
+    /**
+     * Časový záznam, který se do měsíce ze souhrnu dostal mimo repozitář, je
+     * druhý zdroj téže doby. Opravný souhrn ho nepřepíše ani s ním nesloučí.
+     */
+    public function testCorrectedBatchDoesNotOverwriteMonthWithTimeEntries(): void
+    {
+        $employmentId = $this->employment('ZAM-13', '40.00');
+        $first = $this->batch([$this->hoursRows($employmentId, ['sick_hours' => 16_000])]);
+        $this->approvals->applyBatch($this->supplierId, $first, true, $this->userId);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_time_entries
+                (supplier_id, employment_id, series_key, revision_no, category,
+                 starts_at_utc, ends_at_utc, timezone_name, break_minutes,
+                 source_kind, source_hash, created_by)
+             VALUES (?, ?, ?, 1, 'regular', '2026-07-07 04:00:00', '2026-07-07 12:00:00',
+                     'Europe/Prague', 0, 'manual', ?, ?)",
+        )->execute([$this->supplierId, $employmentId, bin2hex(random_bytes(16)), random_bytes(32), $this->userId]);
+
+        $result = $this->approvals->applyBatch(
+            $this->supplierId,
+            $this->batch([$this->hoursRows($employmentId)]),
+            true,
+            $this->userId,
+        );
+
+        self::assertSame(0, $result['written']);
+        self::assertSame(0, $result['approved']);
+        self::assertSame(['time_entries_present'], array_column($result['exceptions'], 'code'));
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        self::assertSame('open', $month['status'] ?? null);
+        self::assertSame(1, (int) ($month['revision_no'] ?? 0));
+        self::assertSame($first, $this->time->importSummary($this->supplierId, $employmentId, self::JULY)['attendance_import_id'] ?? null);
+    }
+
+    /** Opakované použití starší dávky nesmí vrátit měsíc k podkladům, které oprava nahradila. */
+    public function testOlderBatchDoesNotReplaceNewerSummary(): void
+    {
+        $employmentId = $this->employment('ZAM-14', '40.00');
+        $older = $this->batch([$this->hoursRows($employmentId, ['sick_hours' => 16_000])]);
+        $this->approvals->applyBatch($this->supplierId, $older, true, $this->userId);
+        $newer = $this->batch([$this->hoursRows($employmentId, ['sick_hours' => 8_000])]);
+        self::assertSame(1, $this->approvals->applyBatch($this->supplierId, $newer, true, $this->userId)['written']);
+
+        $result = $this->approvals->applyBatch($this->supplierId, $older, true, $this->userId);
+
+        self::assertSame(0, $result['written']);
+        self::assertSame(['summary_not_written'], array_column($result['exceptions'], 'code'));
+        self::assertStringContainsString("č. {$newer}", $result['exceptions'][0]['message']);
+        self::assertSame($newer, $this->time->importSummary($this->supplierId, $employmentId, self::JULY)['attendance_import_id'] ?? null);
+        self::assertSame(2, (int) ($this->time->monthState($this->supplierId, $employmentId, self::JULY)['revision_no'] ?? 0));
+    }
+
     private function copyRevision(int $employmentId, string $version): int
     {
         $columns = 'supplier_id, employment_id, time_month_id, period_start, spec_package_id,
@@ -510,6 +669,18 @@ final class AttendanceTimeApprovalTest extends TestCase
         $stmt->execute($params);
 
         return $stmt->fetchColumn();
+    }
+
+    /**
+     * @param list<mixed> $params
+     * @return list<array<string,mixed>>
+     */
+    private function rows(string $sql, array $params): array
+    {
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     /** @param list<mixed> $params */

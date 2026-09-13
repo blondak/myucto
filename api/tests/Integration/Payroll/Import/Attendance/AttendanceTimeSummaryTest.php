@@ -205,7 +205,11 @@ final class AttendanceTimeSummaryTest extends TestCase
         self::assertSame(1, $this->calendarCount($employmentId));
     }
 
-    public function testSecondBatchForTheSameMonthIsAnException(): void
+    /**
+     * Opravná dávka do otevřeného měsíce: souhrn se nepřepíše, vznikne nová
+     * revize měsíce s novým souhrnem a původní zůstane jako auditní stopa.
+     */
+    public function testSecondBatchReplacesTheSummaryInANewMonthRevision(): void
     {
         $employmentId = $this->employment('ZAM-7', 'employment', '2026-01-01', '40.00');
         $first = $this->batch([$this->hoursRows($employmentId)]);
@@ -214,9 +218,16 @@ final class AttendanceTimeSummaryTest extends TestCase
 
         $result = $this->writer->writeFromBatch($this->supplierId, $second, $this->userId);
 
-        self::assertSame(0, $result['written']);
-        self::assertStringContainsString("č. {$first}", $result['exceptions'][0]['message'] ?? '');
-        self::assertSame($first, $this->time->importSummary($this->supplierId, $employmentId, self::JULY)['attendance_import_id'] ?? null);
+        self::assertSame(1, $result['written'], (string) json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame([], $result['exceptions']);
+        $summary = $this->time->importSummary($this->supplierId, $employmentId, self::JULY);
+        self::assertSame($second, $summary['attendance_import_id'] ?? null);
+        self::assertSame(150_000, $summary['values']['worked_hours'] ?? null);
+        self::assertSame(2, $summary['time_month_revision_no'] ?? null);
+        self::assertSame(2, $this->summaryCount($employmentId));
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        self::assertSame('open', $month['status'] ?? null, 'Opravný souhrn měsíc neschvaluje.');
+        self::assertSame(2, (int) ($month['revision_no'] ?? 0));
     }
 
     public function testExistingTimeEntriesBlockTheSummaryAndNothingIsWritten(): void

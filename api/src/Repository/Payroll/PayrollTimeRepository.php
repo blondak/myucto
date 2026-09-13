@@ -1104,9 +1104,14 @@ final class PayrollTimeRepository
      * založí stejnou cestou jako první zápis času.
      *
      * Souhrn je neměnný. Stejná dávka se stejným obsahem je opakování (nic se
-     * nezapíše podruhé); jiná dávka nebo jiný obsah téže revize měsíce skončí
-     * výjimkou. Časové záznamy v měsíci znamenají druhý zdroj téže doby —
-     * souhrn se pak nezapíše vůbec, nic se nepřepisuje ani neslučuje.
+     * nezapíše podruhé), stejná dávka s jiným obsahem skončí výjimkou.
+     * Novější (opravná) dávka do OTEVŘENÉHO měsíce souhrn nepřepíše: založí
+     * novou revizi měsíce s vlastním souhrnem a původní souhrn zůstane u své
+     * revize jako auditní stopa. Starší dávka novější souhrn nenahradí.
+     * Schválený měsíc se tu nemění nikdy, cesta vede přes znovuotevření
+     * s důvodem ({@see reopenMonth()}). Časové záznamy v měsíci znamenají
+     * druhý zdroj téže doby — souhrn se pak nezapíše vůbec, nic se
+     * nepřepisuje ani neslučuje.
      *
      * @param array<string,int> $values význam → millihodiny
      * @param array<string,array<string,mixed>> $sources význam → původ hodnoty
@@ -1152,26 +1157,35 @@ final class PayrollTimeRepository
             );
             $existingStmt->execute([$supplierId, $monthId, $revisionNo]);
             $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+            $replacedImportId = null;
             if (is_array($existing)) {
                 $existingImportId = PayrollTimeValue::int($existing['attendance_import_id'] ?? null, 'attendance_import_id');
-                if ($existingImportId !== $attendanceImportId
-                    || !hash_equals((string) $existing['content_sha256'], $contentSha256)
-                ) {
+                if ($existingImportId === $attendanceImportId) {
+                    if (!hash_equals((string) $existing['content_sha256'], $contentSha256)) {
+                        throw new \InvalidArgumentException(sprintf(
+                            'Pracovní měsíc už má souhrn z dávky importu docházky č. %d s jiným obsahem. '
+                            . 'Souhrn je neměnný.',
+                            $existingImportId,
+                        ));
+                    }
+                    $this->commitTransactionScope($scope);
+
+                    return [
+                        'status' => 'replayed',
+                        'summary_id' => PayrollTimeValue::int($existing['id'] ?? null, 'id'),
+                        'time_month_id' => $monthId,
+                        'revision_no' => $revisionNo,
+                    ];
+                }
+                if ($attendanceImportId < $existingImportId) {
                     throw new \InvalidArgumentException(sprintf(
-                        'Pracovní měsíc už má souhrn z dávky importu docházky č. %d%s. Souhrn je neměnný, '
-                        . 'druhý do téže revize měsíce zapsat nejde.',
+                        'Pracovní měsíc už má souhrn z novější dávky importu docházky č. %d. Starší dávka č. %d '
+                        . 'ho nenahradí; platí-li její podklady, importujte je z docházkového systému znovu.',
                         $existingImportId,
-                        $existingImportId === $attendanceImportId ? ' s jiným obsahem' : '',
+                        $attendanceImportId,
                     ));
                 }
-                $this->commitTransactionScope($scope);
-
-                return [
-                    'status' => 'replayed',
-                    'summary_id' => PayrollTimeValue::int($existing['id'] ?? null, 'id'),
-                    'time_month_id' => $monthId,
-                    'revision_no' => $revisionNo,
-                ];
+                $replacedImportId = $existingImportId;
             }
 
             [$startsAtUtc, $endsAtUtc] = self::utcMonthBounds($periodStart);
@@ -1192,6 +1206,16 @@ final class PayrollTimeRepository
                         . 'druhým zdrojem téhož měsíce, proto se nezapsal a záznamy zůstaly beze změny.'
                     );
                 }
+            }
+
+            if ($replacedImportId !== null) {
+                $month = $this->startImportSummaryRevision(
+                    $month,
+                    $attendanceImportId,
+                    $replacedImportId,
+                    $userId,
+                );
+                $revisionNo = PayrollTimeValue::int($month['revision_no'] ?? null, 'revision_no');
             }
 
             $pdo->prepare(
@@ -1218,7 +1242,9 @@ final class PayrollTimeRepository
                     SET work_source = 'import_summary'
                   WHERE supplier_id = ? AND id = ?"
             )->execute([$supplierId, $monthId]);
-            $this->touchMonth($month, $userId);
+            if ($replacedImportId === null) {
+                $this->touchMonth($month, $userId);
+            }
             $this->commitTransactionScope($scope);
         } catch (\Throwable $e) {
             $this->rollBackTransactionScope($scope);
@@ -1609,6 +1635,57 @@ final class PayrollTimeRepository
         if (PayrollTimeValue::string($month['status'] ?? null, 'status') !== 'open') {
             throw new PayrollTimeLockedException();
         }
+        return $month;
+    }
+
+    /**
+     * Nová revize OTEVŘENÉHO měsíce pro opravný souhrn z importu docházky.
+     *
+     * Obdoba {@see reopenMonth()} pro měsíc, který schválený nebyl: souhrny
+     * i pracovní souhrny JMHZ se vážou na revizi měsíce, takže nová revize
+     * nechá původní souhrn nedotčený a čtení aktuální revize vidí jen opravu.
+     *
+     * @param array<string,mixed> $month
+     * @return array<string,mixed>
+     */
+    private function startImportSummaryRevision(
+        array $month,
+        int $attendanceImportId,
+        int $replacedImportId,
+        ?int $userId,
+    ): array {
+        $currentVersion = PayrollTimeValue::int($month['row_version'] ?? null, 'row_version');
+        $nextVersion = $currentVersion + 1;
+        $nextRevision = PayrollTimeValue::int($month['revision_no'] ?? null, 'revision_no') + 1;
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE payroll_time_months
+                SET revision_no = ?, row_version = ?, last_changed_by = ?
+              WHERE supplier_id = ? AND id = ? AND row_version = ? AND status = 'open'"
+        );
+        $stmt->execute([
+            $nextRevision,
+            $nextVersion,
+            $userId,
+            PayrollTimeValue::int($month['supplier_id'] ?? null, 'supplier_id'),
+            PayrollTimeValue::int($month['id'] ?? null, 'id'),
+            $currentVersion,
+        ]);
+        if ($stmt->rowCount() !== 1) {
+            throw new PayrollTimeConflictException($nextVersion);
+        }
+        $month['revision_no'] = $nextRevision;
+        $month['row_version'] = $nextVersion;
+        $this->insertMonthEvent(
+            $month,
+            'changed',
+            sprintf(
+                'Opravný souhrn z dávky importu docházky č. %d nahradil souhrn z dávky č. %d.',
+                $attendanceImportId,
+                $replacedImportId,
+            ),
+            $userId,
+        );
+
         return $month;
     }
 

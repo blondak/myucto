@@ -29,6 +29,11 @@ use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning;
  * - přesčas nad odpracované hodiny a jiné nálezy náhledu souhrnu,
  * - měsíc schválený z jiného zdroje a časové záznamy jako druhý zdroj.
  *
+ * Výjimku z podkladů řeší účetní opravou v docházkovém systému a novým importem:
+ * opravná dávka nahradí souhrn otevřeného měsíce novou revizí
+ * ({@see PayrollTimeRepository::saveImportSummary()}) a čistý měsíc se schválí
+ * při jejím zápisu. Schválený měsíc opravná dávka nemění.
+ *
  * Rozdíl fondu z podkladů proti kalendáři a neuvedené odpracované dny jsou
  * jen varování: souhrn je pravdivý, jen neúplný tam, kde to hlášení dovoluje.
  *
@@ -268,8 +273,9 @@ final class PayrollTimeImportApprovalService
                 'absence_hours_without_dates',
                 sprintf(
                     'Podklady uvádějí %s jen jako součet hodin, bez dat od–do. Náhradu mzdy ani evidenční '
-                        . 'list z toho spočítat nejde; zapište nepřítomnost v Mzdy → Absence a průměry '
-                        . 'a měsíc schvalte ručně.',
+                        . 'list z toho spočítat nejde. Buď podklady opravte v docházkovém systému a importujte '
+                        . 'znovu (opravná dávka souhrn otevřeného měsíce nahradí a čistý měsíc se schválí), '
+                        . 'nebo zapište nepřítomnost v Mzdy → Absence a průměry a měsíc schvalte ručně.',
                     implode(', ', array_map(
                         static fn (string $meaning): string => self::DATED_HOURS_LABELS[$meaning] ?? $meaning,
                         $dated,
