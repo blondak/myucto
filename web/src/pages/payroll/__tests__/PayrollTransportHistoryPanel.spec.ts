@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   jmhzTransportHistory: vi.fn(),
   pollJmhzTransportAttempt: vi.fn(),
   closeJmhzTransportAttempt: vi.fn(),
+  reverifyJmhzProtocol: vi.fn(),
   cancelJmhzSubmission: vi.fn(),
   jmhzCorrectableComponents: vi.fn(),
   cancelJmhzSubmissionComponents: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('@/api/payroll', () => ({
     jmhzTransportHistory: m.jmhzTransportHistory,
     pollJmhzTransportAttempt: m.pollJmhzTransportAttempt,
     closeJmhzTransportAttempt: m.closeJmhzTransportAttempt,
+    reverifyJmhzProtocol: m.reverifyJmhzProtocol,
     cancelJmhzSubmission: m.cancelJmhzSubmission,
     jmhzCorrectableComponents: m.jmhzCorrectableComponents,
     cancelJmhzSubmissionComponents: m.cancelJmhzSubmissionComponents,
@@ -1557,5 +1559,125 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(wrapper.find('[data-test="transport-imported-11"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="transport-imported-detail-missing-11"]').text())
       .toContain('payroll.submissions.transport.imported.detail_unavailable 2')
+  })
+
+  describe('znovu ověření uloženého protokolu', () => {
+    function unverifiedAttempt() {
+      return attempt({
+        id: 8,
+        status: 'completed',
+        submission_status: 'submitted',
+        completed_at: '2026-08-11 10:00:00',
+        unverified_receipt_id: 55,
+      })
+    }
+
+    it('bez neověřeného protokolu tlačítko nenabídne', async () => {
+      const wrapper = mount(PayrollTransportHistoryPanel)
+      await flushPromises()
+
+      expect(wrapper.find('[data-test="transport-reverify-1"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="transport-unverified-note-1"]').exists()).toBe(false)
+    })
+
+    it('ověřený protokol znovu načte přehled a ukáže nový stav podání', async () => {
+      m.jmhzTransportHistory
+        .mockResolvedValueOnce({ environment: 'production', attempts: [unverifiedAttempt()] })
+        .mockResolvedValue({
+          environment: 'production',
+          attempts: [attempt({
+            id: 8,
+            status: 'completed',
+            submission_status: 'accepted',
+            unverified_receipt_id: null,
+          })],
+        })
+      m.reverifyJmhzProtocol.mockResolvedValue({
+        outcome: 'verified',
+        verified: true,
+        receipt_id: 55,
+        verified_receipt_id: 56,
+        remote_status: 'accepted',
+        submission_id: 70,
+        submission_status: 'accepted',
+        code: null,
+        message: null,
+      })
+
+      const wrapper = mount(PayrollTransportHistoryPanel)
+      await flushPromises()
+
+      expect(wrapper.get('[data-test="transport-unverified-note-8"]').text())
+        .toContain('payroll.submissions.transport.reverify.note')
+      await wrapper.get('[data-test="transport-reverify-8"]').trigger('click')
+      await flushPromises()
+
+      expect(m.reverifyJmhzProtocol).toHaveBeenCalledWith(70, 55, 'production')
+      expect(m.jmhzTransportHistory).toHaveBeenCalledTimes(2)
+      const result = wrapper.get('[data-test="transport-reverify-result-8"]')
+      expect(result.text()).toContain('payroll.submissions.transport.reverify.verified')
+      expect(result.text()).toContain('payroll.submissions.overview.status.accepted')
+      expect(wrapper.find('[data-test="transport-reverify-8"]').exists()).toBe(false)
+    })
+
+    it('neověřitelný protokol ukáže důvod a podání nechá být', async () => {
+      m.jmhzTransportHistory.mockResolvedValue({
+        environment: 'production',
+        attempts: [unverifiedAttempt()],
+      })
+      m.reverifyJmhzProtocol.mockResolvedValue({
+        outcome: 'failed',
+        verified: false,
+        receipt_id: 55,
+        verified_receipt_id: null,
+        remote_status: null,
+        submission_id: 70,
+        submission_status: 'submitted',
+        code: 'jmhz_protocol_signature_invalid',
+        message: 'Podpis protokolu nesouhlasí.',
+      })
+
+      const wrapper = mount(PayrollTransportHistoryPanel)
+      await flushPromises()
+      await wrapper.get('[data-test="transport-reverify-8"]').trigger('click')
+      await flushPromises()
+
+      expect(m.jmhzTransportHistory).toHaveBeenCalledTimes(1)
+      const result = wrapper.get('[data-test="transport-reverify-result-8"]')
+      expect(result.text()).toContain('payroll.submissions.transport.reverify.failed')
+      expect(result.text()).toContain('Podpis protokolu nesouhlasí.')
+      expect(result.text()).toContain('jmhz_protocol_signature_invalid')
+      expect(wrapper.find('[data-test="transport-reverify-8"]').exists()).toBe(true)
+    })
+
+    it('stejně jako Zjistit stav je dostupné i v režimu jen pro čtení', async () => {
+      m.canWrite.mockReturnValue(false)
+      m.jmhzTransportHistory.mockResolvedValue({
+        environment: 'production',
+        attempts: [unverifiedAttempt()],
+      })
+
+      const wrapper = mount(PayrollTransportHistoryPanel)
+      await flushPromises()
+
+      expect(wrapper.find('[data-test="transport-reverify-8"]').exists()).toBe(true)
+      expect(wrapper.find('[data-test="transport-close-8"]').exists()).toBe(false)
+    })
+
+    it('chybu požadavku ukáže jako chybu akce', async () => {
+      m.jmhzTransportHistory.mockResolvedValue({
+        environment: 'production',
+        attempts: [unverifiedAttempt()],
+      })
+      m.reverifyJmhzProtocol.mockRejectedValue({})
+
+      const wrapper = mount(PayrollTransportHistoryPanel)
+      await flushPromises()
+      await wrapper.get('[data-test="transport-reverify-8"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.find('[data-test="transport-reverify-result-8"]').exists()).toBe(false)
+      expect(wrapper.text()).toContain('payroll.submissions.transport.reverify.request_failed')
+    })
   })
 })

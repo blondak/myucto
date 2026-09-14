@@ -1784,6 +1784,80 @@ final class PayrollSubmissionRepository
         ];
     }
 
+    /**
+     * Uložený protokol jednoho podání i s tím, jestli už k témuž dokumentu
+     * existuje ověřený protokol.
+     *
+     * Protokoly jsou neměnné (trigger `trg_payroll_submission_receipt_update`),
+     * takže znovu ověřený protokol je NOVÝ řádek se stejným otiskem. Neověřený
+     * řádek zůstává v historii a „vyřízený" je právě tehdy, když vedle něj stojí
+     * ověřený se stejným `summary_hash`.
+     *
+     * @return array{
+     *   id:int,submission_id:int,artifact_id:int,artifact_channel:string,
+     *   receipt_reference:string,correlation_reference:?string,
+     *   protocol_code:string,remote_status:?string,verification_status:string,
+     *   summary_hash:string,trusted_receipt_id:?int,trusted_remote_status:?string
+     * }|null
+     */
+    public function findStoredReceipt(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT receipt.id, receipt.submission_id, receipt.artifact_id,
+                    artifact.channel AS artifact_channel,
+                    receipt.receipt_reference, receipt.correlation_reference,
+                    receipt.protocol_code, receipt.remote_status,
+                    receipt.verification_status, receipt.summary_hash,
+                    twin.id AS trusted_receipt_id,
+                    twin.remote_status AS trusted_remote_status
+               FROM payroll_submission_receipts receipt
+               JOIN payroll_submission_artifacts artifact
+                 ON artifact.supplier_id = receipt.supplier_id
+                AND artifact.environment = receipt.environment
+                AND artifact.submission_id = receipt.submission_id
+                AND artifact.id = receipt.artifact_id
+               LEFT JOIN payroll_submission_receipts twin
+                 ON twin.id = (
+                    SELECT MIN(candidate.id)
+                      FROM payroll_submission_receipts candidate
+                     WHERE candidate.supplier_id = receipt.supplier_id
+                       AND candidate.environment = receipt.environment
+                       AND candidate.submission_id = receipt.submission_id
+                       AND candidate.verification_status = "trusted"
+                       AND candidate.summary_hash = receipt.summary_hash
+                 )
+              WHERE receipt.supplier_id = ? AND receipt.environment = ?
+                AND receipt.submission_id = ? AND receipt.id = ?',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId, $receiptId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row = self::associativeRow($row, 'protokol podání');
+
+        return [
+            'id' => self::integer($row, 'id'),
+            'submission_id' => self::integer($row, 'submission_id'),
+            'artifact_id' => self::integer($row, 'artifact_id'),
+            'artifact_channel' => self::string($row, 'artifact_channel'),
+            'receipt_reference' => self::string($row, 'receipt_reference'),
+            'correlation_reference' => self::nullableString($row, 'correlation_reference'),
+            'protocol_code' => self::string($row, 'protocol_code'),
+            'remote_status' => self::nullableString($row, 'remote_status'),
+            'verification_status' => self::string($row, 'verification_status'),
+            'summary_hash' => self::hash($row, 'summary_hash'),
+            'trusted_receipt_id' => $row['trusted_receipt_id'] === null
+                ? null
+                : self::integer($row, 'trusted_receipt_id'),
+            'trusted_remote_status' => self::nullableString($row, 'trusted_remote_status'),
+        ];
+    }
+
     public function insertReceipt(
         int $supplierId,
         string $environment,

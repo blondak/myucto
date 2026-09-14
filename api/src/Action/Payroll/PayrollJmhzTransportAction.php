@@ -283,6 +283,70 @@ final class PayrollJmhzTransportAction
     }
 
     /**
+     * Znovu ověří uložený protokol, který se při dotažení neověřil.
+     *
+     * Právo je stejné jako u „Zjistit stav": obojí vede jedinou cestou
+     * k `remote_status`, tedy přes ověřený podpis ČSSZ, a obojí může podání
+     * posunout. Ověření samo nic neoslabuje — protokol, který neprojde, nechá
+     * podání tam, kde bylo, a vrátí důvod.
+     *
+     * @param array{submissionId:string} $args
+     */
+    public function reverifyProtocol(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        if ($environment === null) {
+            return $this->invalid($response, 'Prostředí musí být test nebo production.');
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $receiptId = $body['receipt_id'] ?? null;
+        if (!(is_int($receiptId) && $receiptId > 0)
+            && (!is_string($receiptId) || preg_match('/^[1-9][0-9]*$/D', $receiptId) !== 1)
+        ) {
+            return $this->invalid($response, 'Protokol musí být určený kladným celým číslem.');
+        }
+
+        try {
+            $result = $this->dispatch->reverifyStoredProtocol(
+                $this->currentSupplierId($request),
+                $environment,
+                $this->id($args, 'submissionId'),
+                (int) $receiptId,
+                $this->userId($request),
+            );
+        } catch (JmhzTransportException $exception) {
+            return $this->transportError($response, $exception);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return $this->noStore(Json::error($response, 'conflict', $exception->getMessage(), 409));
+        }
+
+        $this->logger->log(
+            'payroll_submission.protocol_reverify',
+            $this->userId($request),
+            'payroll_submission',
+            $result['submission_id'],
+            [
+                'environment' => $environment,
+                'outcome' => $result['outcome'],
+                'code' => $result['code'],
+                'receipt_id' => $result['receipt_id'],
+                'verified_receipt_id' => $result['verified_receipt_id'],
+                'remote_status' => $result['remote_status'],
+                'submission_status' => $result['submission_status'],
+            ],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+        );
+
+        return $this->noStore(Json::ok($response, $result));
+    }
+
+    /**
      * Trvale smaže pokus o odeslání z historie.
      *
      * Běžná cesta ven je ZAHOZENÍ pokusu — řádek zůstane i s odpovědí úřadu.
@@ -392,6 +456,7 @@ final class PayrollJmhzTransportAction
         // ven selhala, aniž by to vypadalo jako neplatný požadavek.
         $status = match (true) {
             $exception->errorCode === 'jmhz_dispatch_attempt_unknown' => 404,
+            $exception->errorCode === 'jmhz_protocol_reverify_not_found' => 404,
             $exception->errorCode === 'jmhz_signing_profile_missing' => 422,
             str_starts_with($exception->errorCode, 'jmhz_signing_') => 422,
             str_starts_with($exception->errorCode, 'jmhz_vrep_') => 502,

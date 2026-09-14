@@ -1533,6 +1533,35 @@ final class PayrollSubmissionService
         });
     }
 
+    /**
+     * Uložený protokol podání ve stejné firmě a prostředí, nebo `null`.
+     *
+     * @return array{
+     *   id:int,submission_id:int,artifact_id:int,artifact_channel:string,
+     *   receipt_reference:string,correlation_reference:?string,
+     *   protocol_code:string,remote_status:?string,verification_status:string,
+     *   summary_hash:string,trusted_receipt_id:?int,trusted_remote_status:?string
+     * }|null
+     */
+    public function storedReceipt(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+    ): ?array {
+        $this->assertPositive($supplierId, 'Firma protokolu');
+        $this->assertPositive($submissionId, 'Podání protokolu');
+        $this->assertPositive($receiptId, 'Protokol');
+        $this->assertAllowed($environment, self::ENVIRONMENTS, 'Prostředí protokolu');
+
+        return $this->repository->findStoredReceipt(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $receiptId,
+        );
+    }
+
     /** @return list<array<string,mixed>> */
     public function jmhzProtocolFormOutcomes(
         int $supplierId,

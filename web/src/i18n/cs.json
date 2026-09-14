@@ -5762,6 +5762,16 @@
         "close_failed": "Transakci se nepodařilo uzavřít.",
         "closed": "Transakce pokusu č. {id} byla uzavřena.",
         "close_note": "Protokol je dotažený, transakci je proto možné uzavřít. Podací protokol ČSSZ uzavření vyžaduje.",
+        "reverify": {
+          "action": "Znovu ověřit protokol",
+          "running": "Ověřuji protokol…",
+          "hint": "Ověří uložený protokol ČSSZ stejně jako čerstvě dotažený. Stav podání se změní jen tehdy, když protokol projde ověřením podpisu.",
+          "note": "Protokol ČSSZ k tomuto pokusu je uložený, ale jeho podpis se při dotažení nepodařilo ověřit. Stav podání proto zůstal beze změny. Protokol můžete ověřit znovu.",
+          "verified": "Protokol je ověřený a podání je teď ve stavu „{status}“.",
+          "already": "Protokol už je ověřený, nic se nezměnilo. Podání je ve stavu „{status}“.",
+          "failed": "Protokol se ověřit nepodařilo a podání zůstává beze změny. Důvod: {message}",
+          "request_failed": "Znovu ověření protokolu se nepodařilo spustit."
+        },
         "correlation": "CorrelationID",
         "correlation_missing": "Nepřiděleno",
         "copy": "Kopírovat",

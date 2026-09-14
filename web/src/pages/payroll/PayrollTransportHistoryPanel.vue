@@ -38,6 +38,7 @@ import {
   type PayrollJmhzImportedProtocol,
   type PayrollJmhzIsdsEnqueueResult,
   type PayrollJmhzProtocolError,
+  type PayrollJmhzProtocolReverification,
   type PayrollJmhzDispatchedSubmission,
   type PayrollJmhzReadySubmission,
   type PayrollJmhzTransportAttempt,
@@ -83,6 +84,9 @@ const success = ref('')
 
 const pollingId = ref<number | null>(null)
 const closingId = ref<number | null>(null)
+const reverifyingId = ref<number | null>(null)
+/** Výsledky znovu ověření protokolu, klíčované ID pokusu — přežijí znovunačtení. */
+const reverifications = ref<Record<number, PayrollJmhzProtocolReverification>>({})
 const copiedId = ref<number | null>(null)
 /** Pokus, u kterého schránka odmítla zápis — tlačítko o tom musí říct nahlas. */
 const copyFailedId = ref<number | null>(null)
@@ -242,6 +246,7 @@ const busy = computed(() =>
   || importing.value
   || pollingId.value !== null
   || closingId.value !== null
+  || reverifyingId.value !== null
   || cancelPendingId.value !== null
   || correctionPendingId.value !== null
   || correctionLoadingId.value !== null
@@ -496,6 +501,26 @@ function canClose(attempt: PayrollJmhzTransportAttempt): boolean {
 }
 
 /**
+ * Protokol dotažený pokusem leží v evidenci neověřený (podpis se při dotažení
+ * neověřil) a ověřený dvojník zatím neexistuje. Server ho ověří stejnou cestou
+ * jako čerstvě dotažený; stav podání se hne jen při úspěchu.
+ */
+function canReverify(attempt: PayrollJmhzTransportAttempt): boolean {
+  return (attempt.unverified_receipt_id ?? null) !== null
+}
+
+function reverifyMessage(result: PayrollJmhzProtocolReverification): string {
+  const status = t(`payroll.submissions.overview.status.${result.submission_status}`)
+  if (result.outcome === 'verified') {
+    return t('payroll.submissions.transport.reverify.verified', { status })
+  }
+  if (result.outcome === 'already_verified') {
+    return t('payroll.submissions.transport.reverify.already', { status })
+  }
+  return t('payroll.submissions.transport.reverify.failed', { message: result.message ?? '' })
+}
+
+/**
  * Stornovat lze jen hlášení, které DOLOŽITELNĚ odešlo. Podání, které nikdy
  * neopustilo aplikaci, u ČSSZ neexistuje a rušit se u něj nemá co.
  */
@@ -736,6 +761,7 @@ async function switchEnvironment(next: PayrollJmhzTransportEnvironment) {
   closeCorrection()
   environment.value = next
   polls.value = {}
+  reverifications.value = {}
   readyIsdsResults.value = {}
   readyGateways.value = {}
   // Jiné prostředí = jiné seznamy, takže stránky musí zpět na začátek.
@@ -760,6 +786,8 @@ function replaceAttempt(updated: PayrollJmhzTransportAttempt) {
         submission_status: updated.submission_status ?? attempt.submission_status,
         corrects_submission_id:
           updated.corrects_submission_id ?? attempt.corrects_submission_id,
+        unverified_receipt_id:
+          updated.unverified_receipt_id ?? attempt.unverified_receipt_id,
       }
       : attempt),
   )
@@ -1074,6 +1102,32 @@ async function close(attempt: PayrollJmhzTransportAttempt) {
     )
   } finally {
     closingId.value = null
+  }
+}
+
+async function reverify(attempt: PayrollJmhzTransportAttempt) {
+  const receiptId = attempt.unverified_receipt_id ?? null
+  if (receiptId === null || busy.value) return
+  reverifyingId.value = attempt.id
+  actionError.value = ''
+  success.value = ''
+  try {
+    const result = await payrollApi.reverifyJmhzProtocol(
+      attempt.submission_id,
+      receiptId,
+      environment.value,
+    )
+    // Po úspěchu se stav podání změnil, takže přehled musí přijít znovu.
+    // Výsledek se zapisuje až potom: `load()` hlášky čistí.
+    if (result.verified) await load()
+    reverifications.value = { ...reverifications.value, [attempt.id]: result }
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.reverify.request_failed'),
+    )
+  } finally {
+    reverifyingId.value = null
   }
 }
 
@@ -1835,6 +1889,22 @@ onMounted(loadVariableSymbols)
                       : t('payroll.submissions.transport.poll') }}
                   </button>
                   <button
+                    v-if="canReverify(attempt)"
+                    type="button"
+                    :data-test="`transport-reverify-${attempt.id}`"
+                    :class="btnOutlineSm('warning')"
+                    :disabled="busy"
+                    :title="t('payroll.submissions.transport.reverify.hint')"
+                    @click="reverify(attempt)"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.badgeCheck" />
+                    </svg>
+                    {{ reverifyingId === attempt.id
+                      ? t('payroll.submissions.transport.reverify.running')
+                      : t('payroll.submissions.transport.reverify.action') }}
+                  </button>
+                  <button
                     v-if="canWrite"
                     type="button"
                     :data-test="`transport-delete-${attempt.id}`"
@@ -1961,6 +2031,31 @@ onMounted(loadVariableSymbols)
                   {{ attempt.error_code }}
                 </p>
                 <p v-if="attempt.error_message" class="mt-1">{{ attempt.error_message }}</p>
+              </div>
+
+              <p
+                v-if="canReverify(attempt)"
+                class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-800"
+                :data-test="`transport-unverified-note-${attempt.id}`"
+              >
+                {{ t('payroll.submissions.transport.reverify.note') }}
+              </p>
+              <div
+                v-if="reverifications[attempt.id]"
+                :data-test="`transport-reverify-result-${attempt.id}`"
+                role="status"
+                class="mt-3 rounded-lg border p-3 text-sm"
+                :class="reverifications[attempt.id]!.verified
+                  ? 'border-success-500/30 bg-success-50 text-success-700'
+                  : 'border-danger-500/30 bg-danger-50 text-danger-700'"
+              >
+                <p>{{ reverifyMessage(reverifications[attempt.id]!) }}</p>
+                <p
+                  v-if="!reverifications[attempt.id]!.verified && reverifications[attempt.id]!.code"
+                  class="mt-1 font-mono text-xs font-semibold"
+                >
+                  {{ reverifications[attempt.id]!.code }}
+                </p>
               </div>
 
               <dl class="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">

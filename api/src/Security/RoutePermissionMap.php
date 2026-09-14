@@ -387,6 +387,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/submissions/jmhz-transport$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/jmhz-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/jmhz-transport/[0-9]+/close$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Znovu ověření uloženého protokolu má stejné právo jako „Zjistit
+        // stav" (GET výše): obojí vede k `remote_status` jen přes ověřený podpis.
+        ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-protocol-reverify$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-transport$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/[0-9]+/jmhz-cancel-components$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/[0-9]+/jmhz-content-correction-preparations$#', 'payroll.submissions', AccessLevel::WRITE],

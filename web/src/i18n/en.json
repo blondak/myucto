@@ -5762,6 +5762,16 @@
         "close_failed": "The transaction could not be closed.",
         "closed": "The transaction of attempt no. {id} has been closed.",
         "close_note": "The protocol has been retrieved, so the transaction can be closed. The ČSSZ submission protocol requires closing it.",
+        "reverify": {
+          "action": "Re-verify protocol",
+          "running": "Verifying protocol…",
+          "hint": "Verifies the stored ČSSZ protocol exactly like a freshly retrieved one. The submission status changes only if the protocol passes the signature check.",
+          "note": "The ČSSZ protocol for this attempt is stored, but its signature could not be verified when it was retrieved, so the submission status was left unchanged. You can verify the protocol again.",
+          "verified": "The protocol is verified and the submission is now “{status}”.",
+          "already": "The protocol is already verified; nothing changed. The submission is “{status}”.",
+          "failed": "The protocol could not be verified and the submission is unchanged. Reason: {message}",
+          "request_failed": "The protocol re-verification could not be started."
+        },
         "correlation": "CorrelationID",
         "correlation_missing": "Not assigned",
         "copy": "Copy",

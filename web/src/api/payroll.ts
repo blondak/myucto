@@ -6107,6 +6107,24 @@ export interface PayrollJmhzTransportAttempt {
   created_by: number | null
   created_at: string
   updated_at: string
+  /**
+   * Protokol dotažený tímhle pokusem, který se uložil jako neověřený a zatím
+   * nemá ověřeného dvojníka. Nese ho jen přehled; `null` = není co ověřovat.
+   */
+  unverified_receipt_id?: number | null
+}
+
+/** Výsledek znovu ověření uloženého protokolu ČSSZ. */
+export interface PayrollJmhzProtocolReverification {
+  outcome: 'verified' | 'already_verified' | 'failed'
+  verified: boolean
+  receipt_id: number
+  verified_receipt_id: number | null
+  remote_status: string | null
+  submission_id: number
+  submission_status: string
+  code: string | null
+  message: string | null
 }
 
 /** Zmrazené storno nebo opravné podání připravené k odeslání. */
@@ -8418,6 +8436,18 @@ export const payrollApi = {
     `/payroll/submissions/jmhz-transport/${attemptId}/close`,
     { environment },
     { params: { variable_symbol: variableSymbol, environment } },
+  ).then(response => response.data),
+  /**
+   * Znovu ověří uložený protokol, který se při dotažení neověřil. Stav podání
+   * se změní jen tehdy, když protokol projde celým ověřením podpisu ČSSZ.
+   */
+  reverifyJmhzProtocol: (
+    submissionId: number,
+    receiptId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<PayrollJmhzProtocolReverification>(
+    `/payroll/submissions/${submissionId}/jmhz-protocol-reverify`,
+    { environment, receipt_id: receiptId },
   ).then(response => response.data),
   /**
    * Trvale smaže pokus o odeslání z historie.

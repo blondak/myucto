@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 
 use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
+use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
@@ -486,13 +487,12 @@ readonly class JmhzDispatchService
         }
 
         try {
-            $report = $this->protocols->parse($response->body, $packageCount, $correlation);
-            if (!hash_equals($submissionClass, $report->submissionClass)) {
-                throw new JmhzTransportException(
-                    'jmhz_protocol_class_mismatch',
-                    'Protokol ČSSZ patří jinému druhu podání.',
-                );
-            }
+            $report = $this->protocolReport(
+                $response->body,
+                $packageCount,
+                $correlation,
+                $submissionClass,
+            );
         } catch (\Throwable $exception) {
             // Odpověď, která není ani potvrzením, ani čitelným protokolem,
             // NENÍ výsledek. Pokus zůstává otevřený a důvod je v ledgeru —
@@ -559,12 +559,7 @@ readonly class JmhzDispatchService
         $idempotencyKey = 'jmhz-protocol:' . (int) $attempt['id']
             . ':' . hash('sha256', $body);
         $declared = $report->status->payrollRemoteStatus();
-        $verifier = new JmhzReceiptVerifier(
-            $this->signatures ?? new JmhzProtocolSignatureVerifier(),
-            $this->protocols,
-            [],
-            $packageCount,
-        );
+        $verifier = $this->receiptVerifier($packageCount);
 
         try {
             $this->import(
@@ -572,6 +567,7 @@ readonly class JmhzDispatchService
                 $supplierId,
                 $submissionId,
                 $body,
+                $correlation,
                 $correlation,
                 $declared,
                 $idempotencyKey,
@@ -592,6 +588,7 @@ readonly class JmhzDispatchService
                 $supplierId,
                 $submissionId,
                 $body,
+                $correlation,
                 $correlation,
                 $declared,
                 $idempotencyKey,
@@ -616,17 +613,235 @@ readonly class JmhzDispatchService
         }
     }
 
+    /**
+     * Znovu ověří protokol, který se uložil jako neověřený.
+     *
+     * Protokoly dotažené před opravou ověření podpisu (b55b96a2c) zůstaly
+     * uložené jako `unverified` a podání viselo ve stavu `submitted`: pokus je
+     * uzavřený a import je idempotentní, takže se sám znovu neověří nikdy.
+     *
+     * Ověřuje se PŘESNĚ týmž kódem jako čerstvě dotažený protokol — stejný
+     * parser a kontrola `Class` ({@see protocolReport()}), stejný verifier
+     * ({@see receiptVerifier()}: podpis, kotva, CMS, CorrelationID vůči podání)
+     * a stejný `importReceipt()`, který teprve při úspěchu posune stav podání,
+     * součástí a povinnosti. Jiná cesta k `remote_status` tudy nevede.
+     *
+     * Protokoly jsou neměnné, takže úspěch založí NOVÝ ověřený řádek nad
+     * týmiž bajty; neověřený zůstává v historii. Opakování nic nemění:
+     * protokol, vedle kterého už stojí ověřený se stejným otiskem, se hlásí
+     * jako `already_verified`. Neúspěch nemění nic — celý import běží
+     * v transakci a ověření padá dřív, než se cokoli zapíše.
+     *
+     * @return array{
+     *   outcome:'verified'|'already_verified'|'failed',verified:bool,
+     *   receipt_id:int,verified_receipt_id:?int,remote_status:?string,
+     *   submission_id:int,submission_status:string,code:?string,message:?string
+     * }
+     */
+    public function reverifyStoredProtocol(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+        ?int $actorUserId = null,
+    ): array {
+        $submissions = $this->submissions;
+        if ($submissions === null) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_reverify_unavailable',
+                'Platforma podání není k dispozici, protokol nelze znovu ověřit.',
+            );
+        }
+        $receipt = $submissions->storedReceipt(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $receiptId,
+        );
+        if ($receipt === null) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_reverify_not_found',
+                'Protokol k tomuto podání nebyl nalezen.',
+                404,
+            );
+        }
+        $submission = $submissions->get($supplierId, $submissionId);
+        $result = static fn (
+            string $outcome,
+            ?int $verifiedReceiptId,
+            ?string $remoteStatus,
+            string $submissionStatus,
+            ?string $code = null,
+            ?string $message = null,
+        ): array => [
+            'outcome' => $outcome,
+            'verified' => $outcome !== 'failed',
+            'receipt_id' => $receiptId,
+            'verified_receipt_id' => $verifiedReceiptId,
+            'remote_status' => $remoteStatus,
+            'submission_id' => $submissionId,
+            'submission_status' => $submissionStatus,
+            'code' => $code,
+            'message' => $message,
+        ];
+        $failed = static fn (string $code, string $message): array => $result(
+            'failed',
+            null,
+            null,
+            (string) $submission['status'],
+            $code,
+            $message,
+        );
+
+        if ($receipt['verification_status'] === 'trusted') {
+            return $result(
+                'already_verified',
+                $receipt['id'],
+                $receipt['remote_status'],
+                (string) $submission['status'],
+            );
+        }
+        if ($receipt['trusted_receipt_id'] !== null) {
+            return $result(
+                'already_verified',
+                $receipt['trusted_receipt_id'],
+                $receipt['trusted_remote_status'],
+                (string) $submission['status'],
+            );
+        }
+        if ($submission['channel'] !== self::CHANNEL
+            || $receipt['artifact_channel'] !== self::CHANNEL
+        ) {
+            return $failed(
+                'jmhz_protocol_reverify_channel_unsupported',
+                'Znovu ověřit jde jen protokol dotažený z brány VREP.',
+            );
+        }
+        $obligation = $submissions->obligationOf($supplierId, $environment, $submissionId);
+        $submissionClass = $obligation === null
+            ? null
+            : (self::AGENDA_SUBMISSION_CLASSES[$obligation['agenda_code']] ?? null);
+        if ($submissionClass === null
+            || !hash_equals($submissionClass, $receipt['protocol_code'])
+        ) {
+            return $failed(
+                'jmhz_protocol_class_mismatch',
+                'Protokol ČSSZ patří jinému druhu podání.',
+            );
+        }
+        $correlation = $submission['correlation_reference'];
+        if ($correlation === null) {
+            return $failed(
+                'jmhz_protocol_correlation_unknown',
+                'Podání nemá uložené CorrelationID, takže k němu nelze protokol'
+                    . ' bezpečně přiřadit.',
+            );
+        }
+
+        try {
+            $bytes = $submissions->artifactBytes($supplierId, $receipt['artifact_id']);
+            if (!hash_equals($receipt['summary_hash'], hash('sha256', $bytes))) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_reverify_artifact_mismatch',
+                    'Uložený originál protokolu neodpovídá otisku protokolu.',
+                );
+            }
+            $report = $this->protocolReport($bytes, 1, $correlation, $submissionClass);
+            $imported = $this->import(
+                $submissions,
+                $supplierId,
+                $submissionId,
+                $bytes,
+                self::reverifiedReceiptReference($receipt['receipt_reference'], $receiptId),
+                $correlation,
+                $report->status->payrollRemoteStatus(),
+                'jmhz-protocol-reverify:' . $receiptId . ':' . $receipt['summary_hash'],
+                $report->submissionClass,
+                $this->receiptVerifier(1),
+                $actorUserId,
+            );
+        } catch (JmhzTransportException $exception) {
+            return $failed($exception->errorCode, $exception->getMessage());
+        } catch (\LogicException | \UnexpectedValueException | PayrollSubmissionConflictException $exception) {
+            return $failed('jmhz_protocol_untrusted', $exception->getMessage());
+        }
+        if ($imported['trusted'] !== true) {
+            // Verifier je předaný vždy, takže sem se dostat nejde. Kdyby ano,
+            // hlásit „ověřeno" by bylo přesně to, čemu tahle brána brání.
+            throw new \LogicException('Znovu ověřený protokol se neuložil jako ověřený.');
+        }
+        $stored = $submissions->storedReceipt(
+            $supplierId,
+            $environment,
+            $submissionId,
+            (int) $imported['id'],
+        );
+
+        return $result(
+            $imported['created'] ? 'verified' : 'already_verified',
+            (int) $imported['id'],
+            $stored['remote_status'] ?? null,
+            (string) $imported['submission_status'],
+        );
+    }
+
+    /**
+     * Reference znovu ověřeného protokolu. Klíč `(firma, prostředí, kód
+     * protokolu, reference)` je jedinečný, takže nový řádek nemůže převzít
+     * referenci neověřeného předchůdce.
+     */
+    private static function reverifiedReceiptReference(string $original, int $receiptId): string
+    {
+        $reference = $original . ':reverified';
+
+        return strlen($reference) <= 128 ? $reference : 'reverified:' . $receiptId;
+    }
+
+    /**
+     * Protokol ČSSZ přečtený a navázaný na druh podání. Společné pro dotaz
+     * na výsledek i pro znovu ověření uloženého protokolu.
+     */
+    private function protocolReport(
+        string $body,
+        int $packageCount,
+        string $correlation,
+        string $submissionClass,
+    ): JmhzProtocolReport {
+        $report = $this->protocols->parse($body, $packageCount, $correlation);
+        if (!hash_equals($submissionClass, $report->submissionClass)) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_class_mismatch',
+                'Protokol ČSSZ patří jinému druhu podání.',
+            );
+        }
+
+        return $report;
+    }
+
+    /** Jediný verifier protokolů VREP — pro dotažený i pro znovu ověřovaný. */
+    private function receiptVerifier(int $packageCount): JmhzReceiptVerifier
+    {
+        return new JmhzReceiptVerifier(
+            $this->signatures ?? new JmhzProtocolSignatureVerifier(),
+            $this->protocols,
+            [],
+            $packageCount,
+        );
+    }
+
     /** @return array<string,mixed> */
     private function import(
         PayrollSubmissionService $submissions,
         int $supplierId,
         int $submissionId,
         string $body,
+        string $receiptReference,
         string $correlation,
         string $declaredRemoteStatus,
         string $idempotencyKey,
         string $submissionClass,
         ?JmhzReceiptVerifier $verifier,
+        ?int $importedBy = null,
     ): array {
         $submission = $submissions->get($supplierId, $submissionId);
 
@@ -636,13 +851,13 @@ readonly class JmhzDispatchService
             (int) $submission['row_version'],
             null,
             $body,
-            $correlation,
+            $receiptReference,
             $correlation,
             $submissionClass,
             $declaredRemoteStatus,
             self::CHANNEL,
             $idempotencyKey,
-            null,
+            $importedBy,
             $verifier,
         );
     }

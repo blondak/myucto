@@ -1753,6 +1753,12 @@ final class Routes
                 '/submissions/jmhz-transport/{attemptId:[0-9]+}/close',
                 [PayrollJmhzTransportAction::class, 'close'],
             );
+            // Znovu ověření protokolu, který se uložil jako neověřený. Vede
+            // přes tentýž verifier i import jako dotažení stavu.
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-protocol-reverify',
+                [PayrollJmhzTransportAction::class, 'reverifyProtocol'],
+            );
             // Trvalé smazání pokusu z historie. Běžná cesta ven je zahození
             // (`/submissions/queue/{id}/abandon`), kde pokus zůstane i s odpovědí
             // úřadu; tohle je pro záznam, který nic nedokládá a jen mate.

@@ -543,6 +543,14 @@ prostředí lze použít k bezpečnému testu celého toku.
   protokol a případné chyby se sledují na záložce **Stav odeslání**. Převzetí
   transportem ještě není přijetí podání.
 
+Stav podání převezme aplikace jen z protokolu, jehož podpis ČSSZ ověřila.
+Protokol, který ověřením neprošel, zůstane u podání uložený jako neověřený
+a podání se nepohne. U takového pokusu ukáže **Stav odeslání** tlačítko
+**Znovu ověřit protokol**. Aplikace uložený protokol ověří úplně stejně jako
+čerstvě dotažený (podpis, certifikát ČSSZ, druh podání i CorrelationID) a teprve
+když projde, převezme z něj stav podání. Když neprojde, nezmění nic a ukáže
+důvod. Opakované kliknutí nic nezdvojí.
+
 Před každým odesláním aplikace znovu ověří, že odesílat vůbec lze: podání musí
 být ve stavu **připraveno**, musí souhlasit prostředí i kanál a **druh podání
 musí odpovídat agendě**, do které míří. Neodpovídající kombinaci odmítne ještě

@@ -240,12 +240,39 @@ final class PayrollSubmissionTransportAttemptRepository
         $countStatement->execute($params);
         $total = (int) $countStatement->fetchColumn();
 
+        // `unverified_receipt_id`: protokol dotažený tímhle pokusem (reference
+        // protokolu = CorrelationID pokusu), který se uložil neověřený a vedle
+        // kterého zatím nestojí ověřený protokol se stejným otiskem. Podle něj
+        // obrazovka nabídne „Znovu ověřit protokol".
         $statement = $this->db->pdo()->prepare(
             'SELECT ' . self::attemptColumns() . ',
                     obligation.period_start, obligation.period_end,
                     submission.submission_kind,
                     submission.status AS submission_status,
-                    submission.corrects_submission_id
+                    submission.corrects_submission_id,
+                    (SELECT MAX(receipt.id)
+                       FROM payroll_submission_receipts receipt
+                       JOIN payroll_submission_artifacts receipt_artifact
+                         ON receipt_artifact.supplier_id = receipt.supplier_id
+                        AND receipt_artifact.environment = receipt.environment
+                        AND receipt_artifact.submission_id = receipt.submission_id
+                        AND receipt_artifact.id = receipt.artifact_id
+                        AND receipt_artifact.channel = attempt.channel
+                      WHERE receipt.supplier_id = attempt.supplier_id
+                        AND receipt.environment = attempt.environment
+                        AND receipt.submission_id = attempt.submission_id
+                        AND receipt.receipt_reference = attempt.correlation_reference
+                        AND receipt.verification_status = "unverified"
+                        AND NOT EXISTS (
+                            SELECT 1
+                              FROM payroll_submission_receipts trusted
+                             WHERE trusted.supplier_id = receipt.supplier_id
+                               AND trusted.environment = receipt.environment
+                               AND trusted.submission_id = receipt.submission_id
+                               AND trusted.verification_status = "trusted"
+                               AND trusted.summary_hash = receipt.summary_hash
+                        )
+                    ) AS unverified_receipt_id
                FROM ' . self::TABLE . ' attempt' . $join . $where . '
               ORDER BY attempt.id DESC
               LIMIT ' . $limit . ' OFFSET ' . $offset,
@@ -1337,7 +1364,7 @@ final class PayrollSubmissionTransportAttemptRepository
                 $normalized[$field] = (int) $normalized[$field];
             }
         }
-        foreach (['response_http_status', 'created_by', 'corrects_submission_id'] as $field) {
+        foreach (['response_http_status', 'created_by', 'corrects_submission_id', 'unverified_receipt_id'] as $field) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = $normalized[$field] === null
                     ? null
