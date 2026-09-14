@@ -68,6 +68,48 @@ final class JmhzBlockerExplainerTest extends TestCase
         self::assertStringContainsString('Dotčeno: 1 zaměstnanec.', $message);
     }
 
+    /**
+     * E2E nad firmou s hodinovými mzdami: 18 vztahů s haléřovým příplatkem
+     * za přesčas dalo 144 nálezů a hláška tvrdila „Dotčeno: 144 …". Účetní
+     * potřebuje vědět, KOLIK lidí a KTERÁ pole, ne kolik řádků nálezů.
+     */
+    public function testWholeCrownFindingNamesFieldsAndCountsDistinctPeopleAndRelations(): void
+    {
+        $message = JmhzBlockerExplainer::describe([
+            new JmhzScenario1Blocker('jmhz_scenario1_whole_czk_required', 'employment', 101, ['10328']),
+            new JmhzScenario1Blocker('jmhz_scenario1_whole_czk_required', 'employment', 101, ['10333']),
+            new JmhzScenario1Blocker('jmhz_scenario1_whole_czk_required', 'employment', 101, ['10476']),
+            new JmhzScenario1Blocker('jmhz_scenario1_whole_czk_required', 'employment', 102, ['10333']),
+            new JmhzScenario1Blocker('jmhz_scenario1_whole_czk_required', 'person', 11, ['10286']),
+            new JmhzScenario1Blocker('jmhz_scenario1_whole_czk_required', 'person', 11, ['10344']),
+            new JmhzScenario1Blocker('jmhz_scenario1_whole_czk_required', 'person', 12, ['10286']),
+        ]);
+
+        self::assertStringContainsString('Dotčeno: 2 pracovní vztahy, 2 zaměstnanci.', $message);
+        self::assertStringContainsString('Mzda za práci zúčtovaná', $message);
+        self::assertStringContainsString('Příplatky za práci přesčas', $message);
+        self::assertStringContainsString('Zúčtovaný příjem - celkem', $message);
+        self::assertStringContainsString('Čistý příjem', $message);
+        self::assertSame(1, substr_count($message, 'Příplatky za práci přesčas'));
+        self::assertStringNotContainsString('Dotčeno: 7', $message);
+        self::assertStringNotContainsString('101', $message);
+    }
+
+    /**
+     * Podklady JMHZ haléře zaokrouhlit neříkají; zákoník práce ano, ale jen
+     * u mzdy a jen nahoru. Rada „opravte na celé koruny" bez směru svádí
+     * k tomu zaměstnanci mzdu ubrat.
+     */
+    public function testWholeCrownGuidanceSaysWhyAndThatWagesRoundUp(): void
+    {
+        $guidance = JmhzBlockerExplainer::guidance('jmhz_scenario1_whole_czk_required');
+
+        self::assertStringContainsString('nestanoví', $guidance);
+        self::assertStringContainsString('§ 142 odst. 2', $guidance);
+        self::assertStringContainsString('nahoru', $guidance);
+        self::assertStringContainsString('Mzdy → Mzdové běhy', $guidance);
+    }
+
     public function testExplainsWhyAbsenceCannotUseAutomaticEldpEvidence(): void
     {
         $message = JmhzBlockerExplainer::describe([

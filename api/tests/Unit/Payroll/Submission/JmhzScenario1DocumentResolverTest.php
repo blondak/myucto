@@ -508,6 +508,39 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    /**
+     * Příplatek za přesčas (průměr × 25 % × hodiny) běžně vyjde s haléři.
+     * XSD 1.4.3.6 i Pokyny k vyplnění 1.4.13 chtějí celé číslo, způsob
+     * zaokrouhlení haléřů ale nestanoví. Resolver proto nic nezaokrouhluje
+     * ani neořezává a nález nese číslo pole, aby ho šlo účetní pojmenovat.
+     */
+    public function testHalereInOvertimeSurchargeBlocksWithTheFieldInsteadOfRounding(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        $payload['people'][0]['employments'][0]['earnings_by_attribute_minor']['10333'] = 123_456;
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+        $halere = array_values(array_filter(
+            $resolution->blockers,
+            static fn ($blocker): bool => $blocker->code === 'jmhz_scenario1_whole_czk_required',
+        ));
+
+        self::assertSame('blocked', $resolution->status());
+        self::assertCount(1, $halere);
+        self::assertSame('employment', $halere[0]->entityType);
+        self::assertSame(101, $halere[0]->entityId);
+        self::assertSame(['10333'], $halere[0]->attributeIds);
+        self::assertArrayNotHasKey(
+            '10333',
+            $resolution->candidate?->payload['people'][0]['employments'][0]
+                ['earnings_by_attribute_czk'] ?? [],
+        );
+    }
+
     public function testFullyAppliedTaxCreditIsCarriedAsPerKindBreakdown(): void
     {
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(

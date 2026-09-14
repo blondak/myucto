@@ -2477,7 +2477,32 @@ final class JmhzScenario1DocumentResolver
         ];
     }
 
-    /** @param list<JmhzScenario1Blocker> $blockers */
+    /**
+     * Haléřová částka JMHZ je nález, ne zaokrouhlení.
+     *
+     * Podklady, ze kterých se hlášení staví, chtějí u peněžních polí celé
+     * číslo, ale neříkají, jak naložit s haléři:
+     * - XSD JMHZ 1.4.3.6: `cislo8Type`/`cislo12Type`/`cislo14Type` nad
+     *   `bt:simpleNNType`, vzor `[0-9]*` (api/xsd/jmhz/jmhz-1.4.3.6);
+     * - datový slovník 1.4.1.6: upřesnění „celé číslo"; zaokrouhlení dává
+     *   jen u pojistného a slev (10370, 10481, 10491, 10547, vždy nahoru);
+     * - katalog kontrol 1.4.2.9: totéž (kontroly 8, 10, 118, 167, 315);
+     * - MPSV, Pokyny k vyplnění měsíčního hlášení 1.4.13 (11. 5. 2026,
+     *   cssz.gov.cz): u 10286, 10328 až 10331, 10307, 10309, 10535 jen „celé
+     *   číslo", u 10297 dokonce „bez zaokrouhlení";
+     * - JMHZ srozumitelně 1.4, Struktura a pravidla podání 1.4.2, Pravidla
+     *   podání 1.4.3 (developers.mpsv.cz) a Nejčastější dotazy při podávání
+     *   JMHZ (ČSSZ, 9. 6. 2026): o haléřích nic.
+     * Zákon zaokrouhlení dává mzdě jako celku (§ 142 odst. 2 ZP, přes § 144
+     * i odměně z dohody a náhradě mzdy: „na celé koruny směrem nahoru")
+     * a vyměřovacímu základu (§ 5d ZPSZ). Kam se rozdíl promítne v rozpadu
+     * 10329 až 10336, neurčuje nic. Zaokrouhlit tady každé pole zvlášť by
+     * navíc rozbilo úhrn příplatků 10332 ≥ 10334 + 10335 + 10336
+     * (10,40 + 10,40 Kč dá úhrn 21, části 11 + 11). Náprava proto patří do
+     * mzdového běhu, viz JmhzBlockerExplainer.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     */
     private function wholeCzk(
         ?int $minor,
         string $attributeId,

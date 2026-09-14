@@ -6,6 +6,12 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 final class JmhzBlockerExplainer
 {
+    /** Nálezy, u kterých účetní potřebuje vědět, KTERÁ pole hlášení se jich týkají. */
+    private const FIELD_LISTING_CODES = ['jmhz_scenario1_whole_czk_required'];
+
+    /** @var array<string,string>|null */
+    private static ?array $attributeNames = null;
+
     /** @var array<string,string> */
     private const REASONS = [
         'effective_term_missing' => 'Chybí účinné podmínky pracovního vztahu pro vykazovaný měsíc.',
@@ -136,14 +142,16 @@ final class JmhzBlockerExplainer
             . 'důchodce se sezónní slevou na pojistném; obě současně uplatnit nelze.',
         'jmhz_xml_identity_name_incomplete' => 'Zaměstnanec se hlásí jménem, protože mu ČSSZ zatím nepřidělila OIČ ani ID PPV, a k tomu chybí příjmení, jméno, datum narození, datum nástupu nebo druh činnosti.',
         /*
-         * ČSSZ přijímá částky měsíčního hlášení jen v celých korunách. Pojistné
+         * Proč nález a ne zaokrouhlení, viz
+         * JmhzScenario1DocumentResolver::wholeCzk(): XSD i Pokyny k vyplnění
+         * chtějí celé číslo, ale způsob zaokrouhlení haléřů nedávají. Pojistné
          * zaměstnavatele (10481) se od kontroly 315 počítá samo a nález
-         * nevyvolá; zbývá výsledek běhu, který haléře nese ve vyměřovacím
-         * základu, příjmu nebo pojistném zaměstnance — typicky mzdová složka
-         * s haléřovou částkou.
+         * nevyvolá; zbývá výsledek běhu, typicky mzdová složka s haléři.
          */
         'jmhz_scenario1_whole_czk_required' => 'Částka, která se do měsíčního hlášení '
-            . 'vykazuje v celých korunách, vyšla ve výsledku mzdového běhu s haléři.',
+            . 'vykazuje v celých korunách, vyšla ve výsledku mzdového běhu s haléři. '
+            . 'Hlášení přijímá jen celá čísla a oficiální podklady ČSSZ a MPSV způsob '
+            . 'zaokrouhlení haléřů nestanoví, proto ho aplikace sama nezaokrouhlí.',
     ];
 
     /** @var array<string,string> */
@@ -230,9 +238,11 @@ final class JmhzBlockerExplainer
         'jmhz_employee_social_discount_exclusive' => 'Opravte buď potvrzení sezónní slevy v Mzdová podání → JMHZ, '
             . 'nebo slevu pracujícího důchodce v zákonné evidenci osoby (Mzdy → Zaměstnanci).',
         'jmhz_xml_identity_name_incomplete' => 'Otevřete Mzdy → Zaměstnanci a na kartě zaměstnance a jeho pracovního vztahu doplňte jméno, příjmení, datum narození, den nástupu a druh činnosti; OIČ ani ID PPV shánět nemusíte, ta přidělí ČSSZ až v protokolu o přijetí.',
-        'jmhz_scenario1_whole_czk_required' => 'Otevřete Mzdy → Mzdové běhy, u dotčených osob '
-            . 'najděte mzdovou složku s haléřovou částkou (číslo pole ukazuje technický detail) '
-            . 'a opravte ji na celé koruny; běh přepočítejte, schvalte a hlášení připravte znovu.',
+        'jmhz_scenario1_whole_czk_required' => 'Mzda, plat, odměna z dohody i náhrada mzdy se podle '
+            . '§ 142 odst. 2 a § 144 zákoníku práce zaokrouhlují na celé koruny směrem nahoru. '
+            . 'Otevřete Mzdy → Mzdové běhy, u dotčených osob upravte haléřovou částku mzdové složky '
+            . 'na celé koruny nahoru, aby zaměstnanec nedostal méně, než mu náleží; běh přepočítejte, '
+            . 'schvalte a hlášení připravte znovu.',
     ];
 
     /** @param list<JmhzScenario1Blocker> $blockers */
@@ -242,14 +252,21 @@ final class JmhzBlockerExplainer
             return 'Důvod blokace nebyl uveden. Obnovte test JMHZ a zkuste jej znovu.';
         }
 
-        /** @var array<string,array{blocker:JmhzScenario1Blocker,count:int}> $groups */
+        /*
+         * Jedna osoba nese nález za každé pole zvlášť (18 vztahů s haléřovým
+         * přesčasem = 144 nálezů), takže se počítají DOTČENÉ entity, ne řádky
+         * nálezů. Nález bez entity nejde s jiným ztotožnit a počítá se sám.
+         *
+         * @var array<string,array{blocker:JmhzScenario1Blocker,entities:array<string,array<string,true>>,attributes:array<string,true>}> $groups
+         */
         $groups = [];
-        foreach ($blockers as $blocker) {
-            if (isset($groups[$blocker->code])) {
-                ++$groups[$blocker->code]['count'];
-                continue;
+        foreach ($blockers as $index => $blocker) {
+            $groups[$blocker->code] ??= ['blocker' => $blocker, 'entities' => [], 'attributes' => []];
+            $entityKey = $blocker->entityId === null ? "#{$index}" : (string) $blocker->entityId;
+            $groups[$blocker->code]['entities'][$blocker->entityType][$entityKey] = true;
+            foreach ($blocker->attributeIds as $attributeId) {
+                $groups[$blocker->code]['attributes'][(string) $attributeId] = true;
             }
-            $groups[$blocker->code] = ['blocker' => $blocker, 'count' => 1];
         }
 
         $descriptions = [];
@@ -259,8 +276,12 @@ final class JmhzBlockerExplainer
                 ?? 'Chybí zákonný údaj potřebný pro měsíční hlášení.';
             $action = self::ACTIONS[$blocker->code]
                 ?? self::fallbackAction($blocker->entityType);
+            $fields = in_array($blocker->code, self::FIELD_LISTING_CODES, true)
+                ? self::fields(array_keys($group['attributes']))
+                : '';
             $descriptions[] = $reason . ' '
-                . self::affected($blocker->entityType, $group['count'])
+                . $fields
+                . self::affected($group['entities'])
                 . ' ' . $action;
         }
 
@@ -293,7 +314,18 @@ final class JmhzBlockerExplainer
         };
     }
 
-    private static function affected(string $entityType, int $count): string
+    /** @param array<string,array<string,true>> $entitiesByType */
+    private static function affected(array $entitiesByType): string
+    {
+        $parts = [];
+        foreach ($entitiesByType as $entityType => $entities) {
+            $parts[] = self::counted((string) $entityType, count($entities));
+        }
+
+        return 'Dotčeno: ' . implode(', ', $parts) . '.';
+    }
+
+    private static function counted(string $entityType, int $count): string
     {
         $forms = match ($entityType) {
             'component' => ['mzdová složka', 'mzdové složky', 'mzdových složek'],
@@ -305,6 +337,50 @@ final class JmhzBlockerExplainer
         };
         $form = $count === 1 ? $forms[0] : ($count < 5 ? $forms[1] : $forms[2]);
 
-        return "Dotčeno: {$count} {$form}.";
+        return "{$count} {$form}";
+    }
+
+    /**
+     * Názvy polí doslova z datového slovníku JMHZ (připnutý balík), aby je
+     * účetní poznala ve formuláři ČSSZ; číslo pole jí samo nic neřekne.
+     *
+     * @param list<int|string> $attributeIds
+     */
+    private static function fields(array $attributeIds): string
+    {
+        if ($attributeIds === []) {
+            return '';
+        }
+        $ids = array_map(static fn (int|string $id): string => (string) $id, $attributeIds);
+        sort($ids, SORT_NATURAL);
+        $names = array_values(array_unique(array_map(
+            static fn (string $id): string => self::attributeName($id) ?? "pole {$id}",
+            $ids,
+        )));
+
+        return (count($names) === 1 ? 'Týká se pole: ' : 'Týká se polí: ')
+            . implode(', ', $names) . '. ';
+    }
+
+    private static function attributeName(string $attributeId): ?string
+    {
+        if (self::$attributeNames === null) {
+            self::$attributeNames = [];
+            try {
+                $manifest = (new JmhzSpecPackageCatalog())->load(JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY);
+                $rows = $manifest['payload']['dictionary_attributes'] ?? [];
+                foreach (is_array($rows) ? $rows : [] as $row) {
+                    $id = is_array($row) ? ($row['attribute_id'] ?? null) : null;
+                    $name = is_array($row) ? ($row['name'] ?? null) : null;
+                    if (is_string($id) && is_string($name) && trim($name) !== '') {
+                        self::$attributeNames[$id] = trim($name);
+                    }
+                }
+            } catch (\Throwable) {
+                // Vysvětlení nesmí spadnout kvůli slovníku; pole se pak jmenuje číslem.
+            }
+        }
+
+        return self::$attributeNames[$attributeId] ?? null;
     }
 }
