@@ -59,9 +59,39 @@ test('login and the router guard agree on what "authenticated" means', () => {
 // Setup wizard uživatele nesmí poslat na `/`, když se session nechytila (prohlížeč
 // zahodil cookie kvůli `__Host-`/Secure na plain HTTP) — skončil by na /login bez
 // vysvětlení a instalace by vypadala jako rozbitá aplikace.
-test('setup refuses to enter the app when the session cookie did not stick', () => {
-  assert.match(setup, /await auth\.refresh\(\)\s*\n\s*if \(!auth\.isAuthenticated\) \{[\s\S]*?sessionError\.value =[\s\S]*?return\s*\n\s*\}/)
-  assert.match(setup, /if \(!auth\.isAuthenticated\)[\s\S]*?\}\s*\n\s*window\.location\.href = '\/'/)
+const setupContinuationBody = setup.match(/async function goToApp\(\) \{([\s\S]*?)\n\}/)?.[1]
+assert.ok(setupContinuationBody)
+const continueSetup = new (Object.getPrototypeOf(async function () {}).constructor)(
+  'auth', 'sessionError', 'locale', 'router', 'rememberTotpEnrollment', 'window', setupContinuationBody,
+)
+
+test('setup refuses to enter the app when the session cookie did not stick', async () => {
+  const sessionError = { value: '' }
+  const window = { location: { href: '/setup' } }
+  await continueSetup(
+    { refresh: async () => true, isAuthenticated: false }, sessionError, { value: 'cs' },
+    { push: () => assert.fail('Unauthenticated setup cannot navigate') },
+    () => assert.fail('Unauthenticated setup cannot continue'), window,
+  )
+  assert.ok(sessionError.value.includes('cookie'))
+  assert.equal(window.location.href, '/setup')
+})
+
+test('authenticated setup preserves enrollment authorization for required and optional MFA', async () => {
+  for (const mode of ['required', 'offer', 'app']) {
+    const calls = []
+    const window = { location: { href: '/setup' } }
+    await continueSetup({
+      refresh: async () => false,
+      isAuthenticated: true,
+      mustSetupMfa: mode === 'required',
+      shouldOfferMfa: mode === 'offer',
+      fetchSetupStatus: async () => calls.push('refresh-status'),
+    }, { value: '' }, { value: 'cs' },
+    { push: async (path) => calls.push(path) }, () => calls.push('clear-grant'), window)
+    assert.deepEqual(calls, mode === 'app' ? ['clear-grant'] : ['refresh-status', '/setup-mfa'])
+    assert.equal(window.location.href, mode === 'app' ? '/' : '/setup')
+  }
 })
 
 // Selhání ukázkových dat se dřív schovalo do žlutého warningu, přes který uživatel
