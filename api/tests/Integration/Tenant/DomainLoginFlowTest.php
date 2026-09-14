@@ -17,6 +17,7 @@ use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
@@ -267,7 +268,7 @@ final class DomainLoginFlowTest extends TestCase
             '/invoices/new?type=proforma',
             '/purchase-invoices/7/edit',
             '/recurring/7',
-            '/profile/password?tab=totp',
+            '/profile/password',
             '/exchange?tab=export-issued',
             '/admin/export',
             '/admin/import?tab=purchase',
@@ -286,18 +287,23 @@ final class DomainLoginFlowTest extends TestCase
         }
     }
 
-    public function testWebAuthnHandoffUsesCanonicalTargetAndSeparateValidatedCustomReturn(): void
+    #[TestWith(['/profile/password?tab=passkeys', '/profile/passkeys'])]
+    #[TestWith(['/profile/password?tab=totp', '/profile/password?tab=totp'])]
+    public function testWebAuthnHandoffUsesCanonicalTargetAndSeparateValidatedCustomReturn(
+        string $handoffPath,
+        string $legacyReturnPath,
+    ): void
     {
         $flow = $this->login->start(
             $this->customRequest(),
             self::pkceChallenge(self::opaqueToken()),
             '/invoices/7',
             '192.0.2.15',
-            '/profile/password?tab=passkeys',
+            $handoffPath,
         );
         parse_str((string) parse_url($flow['login_url'], PHP_URL_QUERY), $loginQuery);
         self::assertSame(
-            '/profile/password?tab=passkeys',
+            $handoffPath,
             $loginQuery['domain_login_handoff'] ?? null,
         );
 
@@ -317,12 +323,12 @@ final class DomainLoginFlowTest extends TestCase
         $legacy = $this->login->start(
             $this->customRequest(),
             self::pkceChallenge(self::opaqueToken()),
-            '/profile/passkeys',
+            $legacyReturnPath,
             '192.0.2.15',
         );
         parse_str((string) parse_url($legacy['login_url'], PHP_URL_QUERY), $legacyQuery);
         self::assertSame(
-            '/profile/password?tab=passkeys',
+            $handoffPath,
             $legacyQuery['domain_login_handoff'] ?? null,
         );
         $stmt->execute([hash('sha256', $legacy['request_token'])]);
@@ -332,7 +338,9 @@ final class DomainLoginFlowTest extends TestCase
     public function testWebAuthnHandoffRejectsUnmanifestedAndCrossOriginDestinations(): void
     {
         foreach ([
-            '/profile/password?tab=totp',
+            '/profile/password?tab=unknown',
+            '/profile/password?tab=totp&tab=passkeys',
+            '/profile/password?tab=passkeys&tab=totp',
             '/admin/settings',
             '//attacker.example/profile/passkeys',
             'https://attacker.example/profile/passkeys',
