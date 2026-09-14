@@ -261,6 +261,36 @@ final class EmailProfileRepositoryTest extends TestCase
         self::assertSame('smtp-secret', $internal['smtp_password'] ?? null);
     }
 
+    /**
+     * XOAUTH2 vkládá do `smtp_password` přístupový token, ne heslo. Token z Entra ID
+     * má jednotky tisíc znaků, takže musí projít validací i uložením (issue #70).
+     */
+    public function testXoauth2AccessTokenSurvivesRoundTrip(): void
+    {
+        $token = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.' . str_repeat('AbC0dEf9', 250) . '.signature';
+        self::assertGreaterThan(2000, mb_strlen($token));
+
+        $profileId = $this->profiles->createProfile($this->supplierId, [
+            'name' => 'SMTP XOAUTH2',
+            'code' => 'itest_oauth_' . bin2hex(random_bytes(4)),
+            'from_email' => 'oauth-profile@example.test',
+            'transport_type' => 'smtp',
+            'smtp_host' => 'smtp.example.test',
+            'smtp_port' => 587,
+            'smtp_encryption' => 'tls',
+            'smtp_auth_enabled' => true,
+            'smtp_auth_type' => 'XOAUTH2',
+            'smtp_username' => 'oauth-user@example.test',
+            'smtp_password' => $token,
+        ], $this->userId);
+        $this->createdEmailProfiles[] = $profileId;
+
+        $internal = $this->profiles->findProfile($this->supplierId, $profileId, false, true);
+        self::assertNotNull($internal);
+        self::assertSame('XOAUTH2', $internal['smtp_auth_type']);
+        self::assertSame($token, $internal['smtp_password'] ?? null);
+    }
+
     public function testImapSentSettingsStoreSecretOnlyForInternalUse(): void
     {
         $profileId = $this->profiles->createProfile($this->supplierId, [

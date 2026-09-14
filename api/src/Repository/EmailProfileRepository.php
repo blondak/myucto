@@ -23,6 +23,14 @@ final class EmailProfileRepository
     private const SMTP_AUTH_TYPES = ['LOGIN', 'PLAIN', 'CRAM-MD5', 'XOAUTH2'];
 
     /**
+     * Strop pro `smtp_password`. Není to jen heslo: při autentizaci XOAUTH2 se do
+     * téhož pole vkládá přístupový token, a ten má u Microsoftu 365 běžně jednotky
+     * tisíc znaků (roste s počtem rolí a skupin účtu). Původních 255 znaků token
+     * odmítlo dřív, než se vůbec dostal k odeslání (issue #70).
+     */
+    private const SMTP_SECRET_MAX_LENGTH = 8192;
+
+    /**
      * Údaje, které určují, KAM se uložené heslo pošle. Změní-li se kterýkoli
      * z nich, přestává být domergování uloženého tajemství bezpečné.
      *
@@ -593,7 +601,7 @@ final class EmailProfileRepository
             $smtpKeepalive = (bool) ($data['smtp_keepalive'] ?? false);
             if ($smtpAuthEnabled) {
                 $smtpUsername = $this->nonEmpty((string) ($data['smtp_username'] ?? ''), 'smtp_username', 190);
-                $smtpPassword = $this->nullableString($data['smtp_password'] ?? null, 'smtp_password', 255);
+                $smtpPassword = $this->nullableString($data['smtp_password'] ?? null, 'smtp_password', self::SMTP_SECRET_MAX_LENGTH);
                 if ($smtpPassword === null) {
                     throw new \InvalidArgumentException('Při zapnutém SMTP ověření je pole smtp_password povinné.');
                 }

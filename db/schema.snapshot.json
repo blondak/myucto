@@ -826,7 +826,8 @@
         "1839_payroll_component_jmhz_kind_default_mappings.sql",
         "1840_payroll_component_jmhz_legacy_package_adoption.sql",
         "1841_clear_pending_totp_secrets.sql",
-        "1842_exact_time_billing.sql"
+        "1842_exact_time_billing.sql",
+        "1843_email_profile_oauth_token_length.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -4067,7 +4068,7 @@
                 "smtp_encryption": "enum('none','tls','ssl') NOT NULL DEFAULT 'tls'",
                 "smtp_host": "varchar(190) NULL DEFAULT NULL",
                 "smtp_keepalive": "tinyint(1) NOT NULL DEFAULT 0",
-                "smtp_password_enc": "varchar(512) NULL DEFAULT NULL",
+                "smtp_password_enc": "text NULL DEFAULT NULL",
                 "smtp_port": "int(10) unsigned NULL DEFAULT NULL",
                 "smtp_timeout": "int(10) unsigned NULL DEFAULT NULL",
                 "smtp_username": "varchar(190) NULL DEFAULT NULL",
