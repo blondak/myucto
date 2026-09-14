@@ -4,6 +4,7 @@ import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vu
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PurchaseDmsDocumentsPanel from '@/components/purchase/PurchaseDmsDocumentsPanel.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
+import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
@@ -834,7 +835,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
       </div>
 
       <!-- ═══ Vendor + číslo dokladu (řádek pod headerem, paralel s vystavenou InvoiceDetail) ═══ -->
-      <div class="flex items-start justify-between gap-4">
+      <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div class="flex-1 min-w-0 space-y-1">
           <div class="text-lg font-semibold text-neutral-900">
             <RouterLink v-if="invoice.vendor_id" :to="`/purchase-invoices?vendor=${invoice.vendor_id}`"
@@ -848,7 +849,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
             {{ t('purchase_invoice.fields.vendor_invoice_number') }}: {{ invoice.vendor_invoice_number }}
           </div>
         </div>
-        <div v-if="invoice.vendor_ic || invoice.vendor_dic" class="text-xs font-mono text-neutral-500 text-right whitespace-nowrap">
+        <div v-if="invoice.vendor_ic || invoice.vendor_dic" class="text-xs font-mono text-neutral-500 sm:text-right whitespace-nowrap">
           <span v-if="invoice.vendor_ic">{{ t('common.ic') }} {{ invoice.vendor_ic }}</span>
           <span v-if="invoice.vendor_ic && invoice.vendor_dic">, </span>
           <span v-if="invoice.vendor_dic">{{ t('common.dic') }} {{ invoice.vendor_dic }}</span>
@@ -996,14 +997,14 @@ const purchaseActions = computed<ActionItem[]>(() => {
         <ul class="space-y-1.5">
           <!-- Bankovní úhrady → proklik na výpis + na zaúčtování úhrady (deník) -->
           <li v-for="pay in (invoice.bank_payments || [])" :key="`b-${pay.bank_transaction_id}`"
-            class="flex items-center justify-between gap-3">
-            <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
+            class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <span class="text-success-700/90 dark:text-success-300/85 min-w-0 sm:truncate">
               <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_bank') }}</span>
               <span class="font-mono">{{ formatDate(pay.posted_at) }}</span>
               <span class="font-mono ml-2">{{ formatMoney(pay.amount, pay.currency) }}</span>
               <span v-if="pay.counterparty" class="text-success-700/70 ml-2">{{ pay.counterparty }}</span>
             </span>
-            <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
+            <span class="flex flex-wrap items-center gap-x-3 gap-y-1 whitespace-nowrap shrink-0">
               <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
                 class="text-primary-600 hover:underline">
                 {{ t('purchase_invoice.payment_provenance.open_journal') }} →
@@ -1016,15 +1017,15 @@ const purchaseActions = computed<ActionItem[]>(() => {
           </li>
           <!-- Hotovostní úhrady → proklik na pokladnu + na zaúčtování úhrady (deník) -->
           <li v-for="pay in (invoice.cash_payments || [])" :key="`c-${pay.cash_document_id}`"
-            class="flex items-center justify-between gap-3">
-            <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
+            class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <span class="text-success-700/90 dark:text-success-300/85 min-w-0 sm:truncate">
               <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_cash') }}</span>
               <span class="font-mono">{{ formatDate(pay.date) }}</span>
               <span class="font-mono ml-2">{{ formatMoney(pay.amount, pay.currency) }}</span>
               <span v-if="pay.doc_number" class="text-success-700/70 ml-2 font-mono">{{ pay.doc_number }}</span>
               <span v-if="pay.register_name" class="text-success-700/70 ml-2">{{ pay.register_name }}</span>
             </span>
-            <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
+            <span class="flex flex-wrap items-center gap-x-3 gap-y-1 whitespace-nowrap shrink-0">
               <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
                 class="text-primary-600 hover:underline">
                 {{ t('purchase_invoice.payment_provenance.open_journal') }} →
@@ -1037,8 +1038,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
           </li>
           <!-- Úhrady zápočtem → proklik na zaúčtování zápočtu (deník) -->
           <li v-for="pay in (invoice.settlement_payments || [])" :key="`s-${pay.settlement_id}`"
-            class="flex items-center justify-between gap-3">
-            <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
+            class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <span class="text-success-700/90 dark:text-success-300/85 min-w-0 sm:truncate">
               <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_settlement') }}</span>
               <span class="font-mono">{{ formatDate(pay.date) }}</span>
               <span class="font-mono ml-2">{{ formatMoney(pay.amount) }}</span>
@@ -1046,7 +1047,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
               <span class="text-success-700/70 ml-1">{{ pay.account_name }}</span>
               <span v-if="pay.note" class="text-success-700/70 ml-2">{{ pay.note }}</span>
             </span>
-            <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
+            <span class="flex flex-wrap items-center gap-x-3 gap-y-1 whitespace-nowrap shrink-0">
               <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
                 class="text-primary-600 hover:underline">
                 {{ t('purchase_invoice.payment_provenance.open_journal') }} →
@@ -1272,6 +1273,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
       <!-- ═══ Položky ═══ -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <h3 class="text-sm font-medium text-neutral-700 px-5 py-3 border-b border-neutral-100">{{ t('purchase_invoice.items.title') }}</h3>
+        <!-- Desktop: tabulka -->
+        <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
             <tr>
@@ -1289,36 +1292,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
                 {{ it.description }}
                 <!-- Daňové zařazení položky: druh nákladu (§DM — z něj se odvozuje
                      dlouhodobý/drobný majetek), klasifikace plnění a časové rozlišení
-                     (§DČR). Všechno jde v editoru nastavit, ale v detailu to dřív
-                     nebylo vidět, takže se nedalo zkontrolovat bez otevření editoru. -->
-                <div v-if="it.expense_kind || it.vat_classification_code || it.accrual_from" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                  <span v-if="it.expense_kind" class="inline-block px-1.5 py-0.5 rounded"
-                    :class="it.expense_kind === 'fixed_asset' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">
-                    {{ t('purchase_invoice.expense_kind.' + it.expense_kind) }}
-                  </span>
-                  <span v-if="it.vat_classification_code" class="inline-block px-1.5 py-0.5 rounded bg-neutral-100 font-mono text-neutral-600"
-                    :title="t('purchase_invoice.classification.vat_classification')">
-                    {{ it.vat_classification_code }}
-                  </span>
-                  <span v-if="it.accrual_from" class="text-neutral-500" :title="t('purchase_invoice.items.accrual_hint')">
-                    {{ t('purchase_invoice.items.accrual_from') }} {{ formatDate(it.accrual_from) }}–{{ it.accrual_to ? formatDate(it.accrual_to) : '—' }}
-                  </span>
-                </div>
-                <!-- Karta drobného majetku vzniklá z téhle položky (§DM) — proklik + nabídka
-                     vyřazení prodejem, ať se karta nemusí dohledávat ručně (task #17). -->
-                <div v-if="it.small_asset" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                  <span class="inline-block px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">
-                    {{ t('accounting.small_assets.title') }}: {{ it.small_asset.name }}
-                  </span>
-                  <RouterLink v-if="it.small_asset.status === 'in_use'"
-                    :to="{ name: 'accounting-small-assets', query: { sell: String(it.small_asset.id) } }"
-                    class="text-primary-600 hover:underline">
-                    {{ t('purchase_invoice.items.small_asset_sell') }}
-                  </RouterLink>
-                  <RouterLink v-else :to="{ name: 'accounting-small-assets' }" class="text-neutral-500 hover:underline">
-                    {{ t(`accounting.small_assets.status_${it.small_asset.status}`) }}
-                  </RouterLink>
-                </div>
+                     (§DČR), plus karta drobného majetku. Sdílené s mobilní kartou. -->
+                <PurchaseItemMeta :item="it" />
               </td>
               <td class="py-2 px-2 text-right font-mono">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : it.quantity }}</td>
               <td class="py-2 px-2">{{ it.unit }}</td>
@@ -1328,6 +1303,29 @@ const purchaseActions = computed<ActionItem[]>(() => {
             </tr>
           </tbody>
         </table>
+        </div>
+
+        <!-- Mobil: stack karet (stejný vzor jako vydaná faktura) -->
+        <div class="md:hidden divide-y divide-neutral-100">
+          <div v-for="it in invoice.items" :key="`m-${it.id}`" class="p-3 space-y-1.5">
+            <div class="text-sm text-neutral-900 whitespace-pre-wrap">{{ it.description }}</div>
+            <PurchaseItemMeta :item="it" />
+            <div class="flex items-baseline justify-between text-xs text-neutral-500">
+              <span>
+                <span class="font-mono text-neutral-700">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : it.quantity }}</span>
+                <span class="ml-1">{{ it.unit }}</span>
+                <span class="text-neutral-400 mx-1.5">·</span>
+                <span class="font-mono">{{ (isTimeItem(it) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(it), invoice.currency) }}</span>
+                <span class="text-neutral-400 mx-1.5">·</span>
+                <span>{{ it.vat_rate_snapshot }}%</span>
+              </span>
+            </div>
+            <div class="flex items-baseline justify-between pt-1 text-sm">
+              <span class="text-xs text-neutral-500">{{ t('purchase_invoice.items.total_with_vat') }}</span>
+              <span class="font-mono font-semibold">{{ formatMoney(it.total_with_vat, invoice.currency) }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- ═══ Totals + VAT breakdown ═══ -->
@@ -1341,7 +1339,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
               {{ t('purchase_invoice.vat_breakdown.per_document') }}
             </span>
           </h3>
-          <table class="w-full text-sm">
+          <!-- Desktop: tabulka -->
+          <table class="w-full text-sm hidden md:table">
             <thead>
               <tr class="text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-100">
                 <th class="text-left py-1.5 font-medium">{{ t('purchase_invoice.vat_breakdown.rate') }}</th>
@@ -1359,6 +1358,17 @@ const purchaseActions = computed<ActionItem[]>(() => {
               </tr>
             </tbody>
           </table>
+
+          <!-- Mobil: karta na sazbu. Čtyři sloupce s částkami se na 390 px nevejdou
+               a rozpadaly se na dva řádky bez vazby na záhlaví. -->
+          <div class="md:hidden divide-y divide-neutral-100 -mt-1">
+            <div v-for="b in invoice.vat_breakdown" :key="`m-${b.vat_rate}`" class="py-2 space-y-1">
+              <div class="text-xs font-medium text-neutral-700">{{ t('purchase_invoice.vat_breakdown.rate') }} {{ b.vat_rate }}%</div>
+              <div class="flex justify-between text-xs"><span class="text-neutral-500">{{ t('purchase_invoice.vat_breakdown.base') }}</span><span class="font-mono">{{ formatMoney(b.without_vat, invoice.currency) }}</span></div>
+              <div class="flex justify-between text-xs"><span class="text-neutral-500">{{ t('purchase_invoice.vat_breakdown.vat') }}</span><span class="font-mono">{{ formatMoney(b.vat, invoice.currency) }}</span></div>
+              <div class="flex justify-between text-xs"><span class="text-neutral-500">{{ t('purchase_invoice.vat_breakdown.with_vat') }}</span><span class="font-mono font-semibold">{{ formatMoney(b.with_vat, invoice.currency) }}</span></div>
+            </div>
+          </div>
           <div v-if="invoice.vat_allocations?.length" class="mt-4 pt-3 border-t border-neutral-200">
             <h4 class="text-xs font-medium text-neutral-600 mb-2">{{ t('purchase_invoice.vat_allocation.enable') }}</h4>
             <div class="space-y-2">

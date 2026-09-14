@@ -1,0 +1,84 @@
+<script setup lang="ts">
+import { RouterLink } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { formatDate } from '@/composables/useFormat'
+import type { JournalEntryDetail } from '@/api/accounting'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import JournalLinesTable from './JournalLinesTable.vue'
+import JournalRelatedPanel from './JournalRelatedPanel.vue'
+import JournalEntryExtras from './JournalEntryExtras.vue'
+import WhyPanel from '@/components/automation/WhyPanel.vue'
+import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+
+/**
+ * Obsah rozbaleného zápisu deníku (rozpad na účty, Souvisí, přílohy, akce).
+ *
+ * Vytažené ze stránky deníku, protože týž detail ukazuje desktopový akordeon
+ * v buňce tabulky i mobilní karta. Dvě kopie šedesáti řádků markupu by se
+ * rozešly hned při první změně.
+ */
+defineProps<{
+  detail: JournalEntryDetail
+  /** Verze vazeb — bump překreslí panel „Souvisí" po přidání/zrušení vazby. */
+  relatedKey: number
+  canWrite: boolean
+  canDelete: boolean
+  dateFrom: string
+  dateTo: string
+}>()
+
+const emit = defineEmits<{
+  preview: [entryId: number]
+  'focus-entry': [entryId: number]
+  'description-updated': [entryId: number, description: string, rowVersion: number]
+  'links-changed': [entryId: number]
+  reverse: [entry: JournalEntryDetail]
+  remove: [entry: JournalEntryDetail]
+  'open-reversal': [entryId: number]
+}>()
+
+const { t } = useI18n()
+</script>
+
+<template>
+  <div>
+    <!-- Rozpad na účty — sdílená karta, tutéž ukazuje panel Souvisí
+         u protějšku, aby je účetní poznal jako stejnou věc. -->
+    <JournalLinesTable class="mb-3" :lines="detail.lines" :date-from="dateFrom" :date-to="dateTo" />
+    <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
+         je to první, co účetní po rozpadu na účty hledá. -->
+    <JournalRelatedPanel class="mt-3 block"
+      :key="`related-${detail.id}-${relatedKey}`"
+      :entry-id="detail.id" show-preview
+      @preview="id => emit('preview', id)" @focus-entry="id => emit('focus-entry', id)" />
+    <WhyPanel v-if="detail.automation" class="mt-3" :provenance="detail.automation" />
+    <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
+    <JournalEntryExtras :entry="detail"
+      @description-updated="(desc, rv) => emit('description-updated', detail.id, desc, rv)"
+      @links-changed="emit('links-changed', detail.id)" />
+    <LinkedDocumentsPanel class="mt-4 block" entity-type="journal_entry" :entity-id="detail.id" />
+    <div class="flex flex-wrap items-center justify-between gap-3 mt-4 pt-3 border-t border-neutral-200">
+      <div class="text-xs text-neutral-500">
+        <span v-if="detail.created_at">{{ t('accounting.journal.created_at') }}: {{ formatDate(detail.created_at) }}</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <RouterLink v-if="canWrite" :to="{ path: '/accounting/journal/new', query: { copy_from: String(detail.id) } }" :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+          <span class="whitespace-nowrap">{{ t('accounting.journal.copy_as_new') }}</span>
+        </RouterLink>
+        <button v-if="canWrite && !detail.reversed_by" @click="emit('reverse', detail)" :class="btnOutline('danger')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+          {{ t('accounting.journal.reverse') }}
+        </button>
+        <button v-if="canWrite && canDelete" @click="emit('remove', detail)" :class="btnOutline('danger')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+          {{ t('accounting.journal.delete') }}
+        </button>
+        <button v-else-if="detail.reversed_by" type="button" @click="emit('open-reversal', detail.reversed_by)"
+          class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 hover:underline">
+          {{ t('accounting.journal.reversal_entry') }} #{{ detail.reversed_by }}
+        </button>
+      </div>
+    </div>
+  </div>
+</template>

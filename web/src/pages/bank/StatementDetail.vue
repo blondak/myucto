@@ -438,7 +438,7 @@ const statementActions = computed<ActionItem[]>(() => {
 
     <!-- Měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza (nesou ho
          Creditas/Fio/RB) + součty příjmů/výdajů měsíce spočtené z transakcí. -->
-    <div v-if="isVirtual && noticeSummary" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
+    <div v-if="isVirtual && noticeSummary" class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.available_balance') }}</div>
         <div class="text-lg font-mono font-semibold">
@@ -461,7 +461,7 @@ const statementActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
-    <div v-else-if="!isVirtual" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
+    <div v-else-if="!isVirtual" class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.prev_balance') }}</div>
         <div class="text-lg font-mono">{{ (statement.prev_balance ?? statement.balance_calculation?.opening) == null ? '-' : formatMoney(statement.prev_balance ?? statement.balance_calculation?.opening, statement.currency ?? 'CZK') }}</div>
@@ -500,8 +500,10 @@ const statementActions = computed<ActionItem[]>(() => {
       @close="closeHint" @created="load" />
 
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mt-4">
-      <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between gap-3">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 flex items-center gap-2">
+      <!-- Nadpis, dva filtry a lišta akcí se na mobilu do jedné řady nevejdou —
+           `flex-wrap` je nechá zalomit místo vytlačení mimo kartu. -->
+      <header class="px-4 md:px-5 py-3 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2 md:gap-3">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 flex flex-wrap items-center gap-2">
           {{ t('bank.transactions') }}
           ({{ txTotal }}<span v-if="statusFilter || postingFilter"> / {{ statement.transaction_count }}</span>)
           <span v-if="isDoubleEntry && pendingPostingCount > 0"
@@ -509,7 +511,7 @@ const statementActions = computed<ActionItem[]>(() => {
             {{ t('bank.posting.pending_chip', { count: pendingPostingCount }) }}
           </span>
         </h2>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <select v-model="statusFilter"
             :title="t('bank.filter_status')"
             class="h-8 px-2 text-xs border border-neutral-300 rounded-md text-neutral-700 bg-surface">

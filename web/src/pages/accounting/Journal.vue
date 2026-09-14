@@ -21,14 +21,10 @@ import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/compos
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import JournalEntryExtras from '@/components/accounting/JournalEntryExtras.vue'
-import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
-import WhyPanel from '@/components/automation/WhyPanel.vue'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
-import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
-import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
+import JournalEntryDetailPanel from '@/components/accounting/JournalEntryDetailPanel.vue'
 import { journalSourceLink } from '@/utils/journalSourceLink'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -626,7 +622,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
 <template>
   <div>
     <ActivationBanner />
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('accounting.journal.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.journal.subtitle') }}</p>
@@ -815,7 +811,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       @action="resetFilters" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-      <div class="overflow-x-auto">
+      <!-- Desktop: tabulka. Na mobilu se jedenáct sloupců deníku nedá zúžit ani
+           vodorovným posunem — rozbalený detail se schová do buňky široké jako
+           obrazovka a čte se přes scrollbar. Proto stack karet. -->
+      <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
@@ -911,60 +910,85 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 <td :colspan="visibleColCount"
                   class="px-3 py-3 bg-primary-50/60 border-x-2 border-b-2 border-primary-500/60">
                   <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
-                  <div v-else-if="details[e.id]">
-                    <!-- Rozpad na účty — sdílená karta, tutéž ukazuje panel Souvisí
-                         u protějšku, aby je účetní poznal jako stejnou věc. -->
-                    <JournalLinesTable class="mb-3" :lines="details[e.id]!.lines"
-                      :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to" />
-                    <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
-                         je to první, co účetní po rozpadu na účty hledá. Dřív byl až
-                         pod přílohami, poznámkami a historií, tedy o obrazovku níž. -->
-                    <!-- `key` s verzí vazeb: panel si data tahá sám podle entry-id,
-                         takže po přidání/zrušení vazby na doklad se jinak nepřekreslí
-                         a tvrdil by starý obsah. -->
-                    <JournalRelatedPanel class="mt-3 block"
-                      :key="`related-${e.id}-${relatedVersion[e.id] ?? 0}`"
-                      :entry-id="details[e.id]!.id" show-preview
-                      @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry" />
-                    <WhyPanel v-if="details[e.id]!.automation" class="mt-3" :provenance="details[e.id]!.automation!" />
-                    <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
-                    <JournalEntryExtras :entry="details[e.id]!"
-                      @description-updated="(desc, rv) => onDescriptionUpdated(details[e.id]!.id, desc, rv)"
-                      @links-changed="onLinksChanged(details[e.id]!.id)" />
-                    <LinkedDocumentsPanel class="mt-4 block" entity-type="journal_entry" :entity-id="details[e.id]!.id" />
-                    <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-neutral-200">
-                      <div class="text-xs text-neutral-500">
-                        <span v-if="details[e.id]!.created_at">{{ t('accounting.journal.created_at') }}: {{ formatDate(details[e.id]!.created_at) }}</span>
-                      </div>
-                      <div class="flex flex-wrap items-center gap-2">
-                        <RouterLink v-if="auth.canWrite('accounting')" :to="{ path: '/accounting/journal/new', query: { copy_from: String(details[e.id]!.id) } }" :class="btnOutline('neutral')">
-                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
-                          <span class="whitespace-nowrap">{{ t('accounting.journal.copy_as_new') }}</span>
-                        </RouterLink>
-                        <button v-if="auth.canWrite('accounting') && !details[e.id]!.reversed_by" @click="reverse(details[e.id]!)" :class="btnOutline('danger')">
-                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
-                          {{ t('accounting.journal.reverse') }}
-                        </button>
-                        <button v-if="auth.canWrite('accounting') && canDeleteEntry(details[e.id]!)" @click="deleteEntry(details[e.id]!)" :class="btnOutline('danger')">
-                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-                          {{ t('accounting.journal.delete') }}
-                        </button>
-                        <button v-else-if="details[e.id]!.reversed_by" type="button" @click="openReversal(details[e.id]!.reversed_by!)"
-                          class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 hover:underline">
-                          {{ t('accounting.journal.reversal_entry') }} #{{ details[e.id]!.reversed_by }}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <JournalEntryDetailPanel v-else-if="details[e.id]"
+                    :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
+                    :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
+                    :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
+                    @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
+                    @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
+                    @reverse="reverse" @remove="deleteEntry" @open-reversal="openReversal" />
                 </td>
               </tr>
             </template>
           </tbody>
         </table>
       </div>
+
+      <!-- Mobil: stack karet. Sloupce, které si uživatel skryl přes ColumnPicker,
+           se neskrývají — picker je desktopový ovladač a na kartě jde o jiné,
+           vertikální rozvržení, kde se zápis stejně vejde celý. -->
+      <div class="md:hidden divide-y divide-neutral-100">
+        <div v-for="e in entries" :key="`m-${e.id}`"
+          :class="isExpanded(e.id) ? 'bg-primary-50/60' : ''">
+          <button type="button" class="cursor-pointer w-full text-left p-3 space-y-1.5"
+            :class="e.reversed_by ? 'opacity-60' : ''" @click="toggleExpand(e)">
+            <div class="flex items-baseline justify-between gap-2">
+              <span class="flex items-baseline gap-1.5 min-w-0">
+                <span class="text-neutral-400 shrink-0 inline-block transition-transform"
+                  :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
+                <span class="font-mono text-xs text-neutral-600">{{ e.document_no || '—' }}</span>
+              </span>
+              <span class="font-mono text-sm font-semibold whitespace-nowrap">
+                {{ formatMoney(e.amount ?? 0) }}
+                <span v-if="e.amount_side" class="ml-1 text-xs font-sans font-normal text-neutral-400">
+                  {{ t(`accounting.journal.side.${e.amount_side}`) }}
+                </span>
+              </span>
+            </div>
+            <div class="text-sm text-neutral-900">
+              {{ e.description || '—' }}
+              <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
+              <span class="font-mono">{{ formatDate(e.entry_date) }}</span>
+              <span class="text-neutral-400">·</span>
+              <span>{{ sourceLabel(e.source_type) }}<template v-if="e.source_asset_name || e.source_id"> {{ e.source_asset_name || ('#' + e.source_id) }}</template></span>
+              <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
+              <span v-if="e.has_related" :title="t('accounting.journal.related.badge_title')" class="inline-flex items-center text-neutral-400">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" />
+                </svg>
+              </span>
+              <span v-if="e.posted_at" class="text-xs px-2 py-0.5 rounded font-medium bg-success-50 text-success-600">{{ t('accounting.journal.posted') }}</span>
+              <span v-else class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-500">{{ t('accounting.journal.draft') }}</span>
+            </div>
+          </button>
+          <!-- Náhled dokladu mimo rozbalovací tlačítko: vnořené tlačítko není
+               platné HTML a klik by se protáhl do akordeonu. -->
+          <div v-if="sourceLink(e)" class="px-3 pb-3 -mt-1">
+            <button type="button" :class="btnOutlineSm('primary')" @click="openSourceDrawer(e)">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              {{ t('accounting.journal.source_drawer.open') }}
+            </button>
+          </div>
+          <div v-if="isExpanded(e.id)" class="px-3 pb-3 border-t border-primary-500/30">
+            <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
+            <JournalEntryDetailPanel v-else-if="details[e.id]" class="pt-3"
+              :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
+              :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
+              :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
+              @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
+              @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
+              @reverse="reverse" @remove="deleteEntry" @open-reversal="openReversal" />
+          </div>
+        </div>
+      </div>
     </div>
 
-    <nav v-if="!loading && total > perPage" class="mt-4 flex items-center justify-between gap-3 text-sm">
+    <nav v-if="!loading && total > perPage" class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
       <span class="text-neutral-500">{{ t('common.pagination_range', { from: rangeFrom, to: rangeTo, total }) }}</span>
       <div class="flex items-center gap-1">
         <button type="button" :disabled="page <= 1" @click="goToPage(page - 1)"

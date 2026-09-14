@@ -89,7 +89,10 @@ function movementLink(line: JournalLine) {
 
 <template>
   <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-    <table class="w-full" :class="dense ? 'text-xs' : 'text-sm'">
+    <!-- Desktop: tabulka MD/DAL. Na mobilu se čtyři sloupce (účet s názvem,
+         středisko a dvě částky) do šířky nevejdou a název účtu se zlomil na
+         čtyři řádky, takže karta odspoda ukazovala samé zbytky slov. -->
+    <table class="w-full hidden md:table" :class="dense ? 'text-xs' : 'text-sm'">
       <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide border-b border-neutral-200">
         <tr>
           <th class="text-left font-medium" :class="cell">{{ t('accounting.journal.account') }}</th>
@@ -138,5 +141,42 @@ function movementLink(line: JournalLine) {
         </tr>
       </tfoot>
     </table>
+
+    <!-- Mobil: řádek = karta. Strana zápisu je štítek u částky, ne sloupec. -->
+    <div class="md:hidden divide-y divide-neutral-100">
+      <div v-for="l in lines" :key="`m-${l.id}`" class="px-3 py-2 space-y-1">
+        <div class="flex items-baseline justify-between gap-2">
+          <RouterLink :to="movementLink(l)"
+            class="min-w-0 text-primary-600 hover:text-primary-700 hover:underline"
+            :title="t('accounting.accounts.detail.statement')">
+            <span class="font-mono font-medium text-sm">{{ l.account_code }}</span>
+            <span class="block text-xs text-neutral-600">{{ l.account_name }}</span>
+          </RouterLink>
+          <div class="text-right shrink-0">
+            <div class="text-[10px] uppercase tracking-wide font-medium"
+              :class="l.side === 'debit' ? 'text-neutral-500' : 'text-neutral-400'">
+              {{ l.side === 'debit' ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit') }}
+            </div>
+            <div class="font-mono text-sm font-medium text-neutral-900">{{ formatMoney(l.amount) }}</div>
+            <div v-if="l.amount_foreign != null && l.currency_code" class="text-xs text-neutral-400 font-mono">
+              {{ formatMoney(l.amount_foreign, l.currency_code) }}
+            </div>
+          </div>
+        </div>
+        <div v-if="l.cost_center" class="text-xs text-neutral-500">
+          {{ t('accounting.journal.cost_center') }}: {{ l.cost_center }}
+        </div>
+      </div>
+      <div v-if="showsTotal" class="px-3 py-2 bg-neutral-50 space-y-1">
+        <div class="flex justify-between text-sm font-semibold">
+          <span>{{ t('accounting.journal.total') }}</span>
+          <span class="font-mono">{{ formatMoney(total) }}</span>
+        </div>
+        <div v-for="a in twoSidedAccounts" :key="`m-net-${a.code}`" class="flex justify-between text-xs text-neutral-500">
+          <span>{{ t('accounting.journal.net_on_account', { account: a.code }) }}</span>
+          <span class="font-mono">{{ formatMoney(Math.abs(a.net)) }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

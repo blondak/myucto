@@ -255,7 +255,7 @@ onMounted(loadAttachments)
 
     <!-- ── přílohy §33a ── -->
     <div class="border-t border-neutral-200 pt-3">
-      <div class="flex items-center justify-between mb-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
         <h4 class="text-xs font-medium text-neutral-500 inline-flex items-center gap-1.5">
           <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
           {{ t('accounting.journal.attachments') }}
