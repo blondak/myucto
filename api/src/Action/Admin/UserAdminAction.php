@@ -249,6 +249,7 @@ final class UserAdminAction
             try { $this->hasher->validate((string) $body['password']); }
             catch (\InvalidArgumentException $e) { return Json::error($response, 'validation_failed', $e->getMessage(), 400); }
             $sets[] = 'password_hash = ?'; $params[] = $this->hasher->hash((string) $body['password']);
+            $sets[] = 'totp_secret = CASE WHEN totp_enabled = 0 THEN NULL ELSE totp_secret END';
         }
         if ($sets === []) return Json::ok($response, $row);
 

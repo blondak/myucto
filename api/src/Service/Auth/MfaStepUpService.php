@@ -125,6 +125,17 @@ final class MfaStepUpService
             if (!$passkeyAllowed || (!$methodAllowed && !$firstPasskeyTransition)) {
                 throw new StepUpOperationException('Tato metoda není pro operaci povolená.');
             }
+        } elseif ($operation === self::OPERATION_TOTP_ENABLE) {
+            $totpAllowed = $authMethod === 'totp'
+                ? $methodAllowed
+                : $this->policy->isMethodAllowed('totp');
+            $firstTotpTransition = !$methodAllowed
+                && $authMethod === 'passkey'
+                && $totpAllowed
+                && $this->credentials->countActiveForUser($userId) > 0;
+            if (!$totpAllowed || (!$methodAllowed && !$firstTotpTransition)) {
+                throw new StepUpOperationException('Tato metoda není pro operaci povolená.');
+            }
         } elseif (!$methodAllowed) {
             throw new StepUpOperationException('Tato metoda není pro operaci povolená.');
         }

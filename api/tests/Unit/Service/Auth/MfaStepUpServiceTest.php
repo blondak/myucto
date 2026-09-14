@@ -122,6 +122,50 @@ final class MfaStepUpServiceTest extends TestCase
         );
     }
 
+    public function testPhasedOutPasskeyCanAuthorizeTotpEnrollment(): void
+    {
+        $policy = $this->createMock(MfaPolicyService::class);
+        $policy->expects(self::exactly(2))
+            ->method('isMethodAllowed')
+            ->willReturnMap([
+                ['passkey', false],
+                ['totp', true],
+            ]);
+        $credentials = $this->createMock(PasskeyCredentialRepository::class);
+        $credentials->expects(self::once())
+            ->method('countActiveForUser')
+            ->with(17)
+            ->willReturn(1);
+        $service = new MfaStepUpService(
+            $this->createMock(MfaStepUpProofStore::class),
+            $policy,
+            $credentials,
+        );
+
+        self::assertSame(
+            MfaStepUpService::OPERATION_TOTP_ENABLE,
+            $service->assertAllowed(17, MfaStepUpService::OPERATION_TOTP_ENABLE, 'passkey'),
+        );
+    }
+
+    public function testPhasedOutPasskeyCannotAuthorizeDisallowedTotpEnrollment(): void
+    {
+        $policy = $this->createMock(MfaPolicyService::class);
+        $policy->expects(self::exactly(2))
+            ->method('isMethodAllowed')
+            ->willReturn(false);
+        $credentials = $this->createMock(PasskeyCredentialRepository::class);
+        $credentials->expects(self::never())->method('countActiveForUser');
+        $service = new MfaStepUpService(
+            $this->createMock(MfaStepUpProofStore::class),
+            $policy,
+            $credentials,
+        );
+
+        $this->expectException(StepUpOperationException::class);
+        $service->assertAllowed(17, MfaStepUpService::OPERATION_TOTP_ENABLE, 'passkey');
+    }
+
     public function testDisallowedMethodCannotAuthorizeApiTokenCreation(): void
     {
         $policy = $this->createMock(MfaPolicyService::class);
@@ -298,7 +342,10 @@ final class MfaStepUpServiceTest extends TestCase
     public function testPasskeyProofCanAuthorizeTotpEnrollment(): void
     {
         $policy = $this->createMock(MfaPolicyService::class);
-        $policy->method('isMethodAllowed')->willReturnMap([['passkey', true]]);
+        $policy->method('isMethodAllowed')->willReturnMap([
+            ['passkey', true],
+            ['totp', true],
+        ]);
         $service = new MfaStepUpService(
             $this->createMock(MfaStepUpProofStore::class),
             $policy,

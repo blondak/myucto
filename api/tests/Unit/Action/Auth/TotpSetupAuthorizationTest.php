@@ -12,14 +12,14 @@ use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\MfaProtectedOperationService;
 use MyInvoice\Service\Auth\MfaRecoveryCodeService;
-use MyInvoice\Service\Auth\MfaStepUpProof;
-use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\Auth\OneTimeTokenException;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\SessionManager;
+use MyInvoice\Service\Auth\TotpEnrollmentException;
 use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\IpMatcher;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
@@ -51,7 +51,7 @@ final class TotpSetupAuthorizationTest extends TestCase
     private SecretEncryption&MockObject $crypto;
     private PasswordHasher&MockObject $passwords;
     private BruteForceGuard&MockObject $bruteForce;
-    private MfaStepUpService&MockObject $stepUp;
+    private MfaProtectedOperationService&MockObject $protectedOperations;
     private PasskeyCredentialRepository&MockObject $credentials;
     private ActivityLogger&MockObject $logger;
     private MfaRecoveryCodeService&MockObject $recoveryCodes;
@@ -71,7 +71,7 @@ final class TotpSetupAuthorizationTest extends TestCase
         $this->passwords = $this->createMock(PasswordHasher::class);
         $this->bruteForce = $this->createMock(BruteForceGuard::class);
         $this->bruteForce->method('check')->willReturn(BruteForceGuard::STATE_OK);
-        $this->stepUp = $this->createMock(MfaStepUpService::class);
+        $this->protectedOperations = $this->createMock(MfaProtectedOperationService::class);
         $this->credentials = $this->createMock(PasskeyCredentialRepository::class);
         $this->credentials->method('countActiveForUser')->willReturn(0);
         $this->logger = $this->createMock(ActivityLogger::class);
@@ -147,7 +147,19 @@ final class TotpSetupAuthorizationTest extends TestCase
         $this->passwords->method('verify')
             ->with('Synthetic-test-password-42', self::PASSWORD_HASH)
             ->willReturn(true);
-        $this->stepUp->expects(self::never())->method('consume');
+        $this->protectedOperations->expects(self::once())
+            ->method('storePendingTotpSecret')
+            ->with(self::USER_ID, self::SESSION_TOKEN, self::PASSWORD_HASH, self::callback('is_string'), null)
+            ->willReturnCallback(function (
+                int $userId,
+                string $sessionToken,
+                string $authorizedPasswordHash,
+                string $encryptedSecret,
+            ): string {
+                $this->pdo->prepare('UPDATE users SET totp_secret = ? WHERE id = ?')
+                    ->execute([$encryptedSecret, $userId]);
+                return 'password';
+            });
         $this->logger->expects(self::once())
             ->method('log')
             ->with('auth.totp_setup', self::USER_ID, 'user', self::USER_ID, ['reauth' => 'password']);
@@ -169,9 +181,9 @@ final class TotpSetupAuthorizationTest extends TestCase
         $this->credentials = $this->createMock(PasskeyCredentialRepository::class);
         $this->credentials->method('countActiveForUser')->with(self::USER_ID)->willReturn(1);
         $this->passwords->expects(self::never())->method('verify');
-        $this->stepUp->expects(self::once())
-            ->method('consume')
-            ->with('', self::USER_ID, self::SESSION_TOKEN, MfaStepUpService::OPERATION_TOTP_ENABLE)
+        $this->protectedOperations->expects(self::once())
+            ->method('storePendingTotpSecret')
+            ->with(self::USER_ID, self::SESSION_TOKEN, self::PASSWORD_HASH, self::callback('is_string'), '')
             ->willThrowException(new OneTimeTokenException('missing'));
 
         $response = $this->action()->setup(
@@ -188,10 +200,19 @@ final class TotpSetupAuthorizationTest extends TestCase
     {
         $this->credentials = $this->createMock(PasskeyCredentialRepository::class);
         $this->credentials->method('countActiveForUser')->willReturn(1);
-        $this->stepUp->expects(self::once())
-            ->method('consume')
-            ->with('synthetic-proof', self::USER_ID, self::SESSION_TOKEN, MfaStepUpService::OPERATION_TOTP_ENABLE)
-            ->willReturn(new MfaStepUpProof(self::USER_ID, MfaStepUpService::OPERATION_TOTP_ENABLE, 'passkey', 5));
+        $this->protectedOperations->expects(self::once())
+            ->method('storePendingTotpSecret')
+            ->with(self::USER_ID, self::SESSION_TOKEN, self::PASSWORD_HASH, self::callback('is_string'), 'synthetic-proof')
+            ->willReturnCallback(function (
+                int $userId,
+                string $sessionToken,
+                string $authorizedPasswordHash,
+                string $encryptedSecret,
+            ): string {
+                $this->pdo->prepare('UPDATE users SET totp_secret = ? WHERE id = ?')
+                    ->execute([$encryptedSecret, $userId]);
+                return 'passkey';
+            });
         $this->logger->expects(self::once())
             ->method('log')
             ->with('auth.totp_setup', self::USER_ID, 'user', self::USER_ID, ['reauth' => 'passkey']);
@@ -214,6 +235,9 @@ final class TotpSetupAuthorizationTest extends TestCase
             $pdo->exec("UPDATE users SET totp_secret = 'enc:ACTIVE', totp_enabled = 1 WHERE id = 17");
             return true;
         });
+        $this->protectedOperations->expects(self::once())
+            ->method('storePendingTotpSecret')
+            ->willThrowException(new TotpEnrollmentException(TotpEnrollmentException::ALREADY_ENABLED));
 
         $response = $this->action()->setup(
             $this->request('/api/auth/totp/setup')->withParsedBody(['current_password' => 'Synthetic-test-password-42']),
@@ -223,6 +247,29 @@ final class TotpSetupAuthorizationTest extends TestCase
         self::assertSame(409, $response->getStatusCode());
         self::assertSame('already_enabled', $this->errorCode($response));
         self::assertSame('enc:ACTIVE', $this->storedSecret());
+    }
+
+    public function testPasswordResetDuringSetupCannotRestorePendingSecret(): void
+    {
+        $this->passwords->method('verify')->willReturn(true);
+        $this->crypto = $this->createMock(SecretEncryption::class);
+        $pdo = $this->pdo;
+        $this->crypto->method('encrypt')->willReturnCallback(static function (string $plain) use ($pdo): string {
+            $pdo->exec("UPDATE users SET password_hash = 'new-password-hash', totp_secret = NULL WHERE id = 17 AND totp_enabled = 0");
+            return 'enc:' . $plain;
+        });
+        $this->protectedOperations->expects(self::once())
+            ->method('storePendingTotpSecret')
+            ->willThrowException(new TotpEnrollmentException(TotpEnrollmentException::STALE_AUTHORIZATION));
+
+        $response = $this->action()->setup(
+            $this->request('/api/auth/totp/setup')->withParsedBody(['current_password' => 'Old-synthetic-password']),
+            new Response(),
+        );
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('enrollment_stale', $this->errorCode($response));
+        self::assertNull($this->storedSecret());
     }
 
     public function testEnableRefusesRepeatedActivation(): void
@@ -283,7 +330,7 @@ final class TotpSetupAuthorizationTest extends TestCase
             $this->createMock(ClockInterface::class),
             $this->passwords,
             $this->bruteForce,
-            $this->stepUp,
+            $this->protectedOperations,
             $this->credentials,
         );
     }

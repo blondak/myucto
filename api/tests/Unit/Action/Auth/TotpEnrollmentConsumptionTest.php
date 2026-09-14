@@ -12,8 +12,8 @@ use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\MfaProtectedOperationService;
 use MyInvoice\Service\Auth\MfaRecoveryCodeService;
-use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\SessionCookieFactory;
@@ -56,7 +56,7 @@ final class TotpEnrollmentConsumptionTest extends TestCase
             $this->createStub(ClockInterface::class),
             $this->createStub(PasswordHasher::class),
             $this->createStub(BruteForceGuard::class),
-            $this->createStub(MfaStepUpService::class),
+            $this->createStub(MfaProtectedOperationService::class),
             $this->createStub(PasskeyCredentialRepository::class),
         );
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/auth/totp/enable')

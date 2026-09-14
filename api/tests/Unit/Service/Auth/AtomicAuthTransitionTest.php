@@ -25,6 +25,7 @@ use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\Auth\SessionLockService;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Auth\StepUpOperationException;
+use MyInvoice\Service\Auth\TotpEnrollmentException;
 use MyInvoice\Service\Auth\WebAuthnCeremonyStore;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\Attributes\Group;
@@ -551,6 +552,180 @@ final class AtomicAuthTransitionTest extends TestCase
         );
     }
 
+    public function testTotpEnrollmentRejectsAuthorizationFromBeforePasswordChange(): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $authorizedHash = $this->passwordHash();
+        $this->db->pdo()->prepare('UPDATE users SET password_hash = ?, totp_secret = NULL WHERE id = ?')
+            ->execute([password_hash('Different-synthetic-password-42', PASSWORD_BCRYPT), $this->userId]);
+
+        try {
+            $this->protectedOperations->storePendingTotpSecret(
+                $this->userId,
+                $session['token'],
+                $authorizedHash,
+                'enc:STALE',
+                null,
+            );
+            self::fail('Autorizace starým heslem nesmí po změně hesla obnovit pending TOTP secret.');
+        } catch (TotpEnrollmentException $e) {
+            self::assertSame(TotpEnrollmentException::STALE_AUTHORIZATION, $e->reason);
+        }
+
+        self::assertNull($this->totpSecret());
+    }
+
+    public function testPasswordAuthorizedTotpEnrollmentStoresPendingSecret(): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+
+        self::assertSame('password', $this->protectedOperations->storePendingTotpSecret(
+            $this->userId,
+            $session['token'],
+            $this->passwordHash(),
+            'enc:PENDING',
+            null,
+        ));
+        self::assertSame('enc:PENDING', $this->totpSecret());
+    }
+
+    public function testPhasedOutPasskeyCanStoreTotpEnrollmentAndProofIsOneTime(): void
+    {
+        [$credentialId] = $this->createCredential(0, 'Historical transition key');
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $proof = $this->proofs->issue(
+            $this->userId,
+            $session['token'],
+            MfaStepUpService::OPERATION_TOTP_ENABLE,
+            'passkey',
+            $credentialId,
+        );
+        $config = $this->config->all();
+        $config['auth']['allowed_mfa_methods'] = ['totp'];
+        $totpOnlyPolicy = new MfaPolicyService(new Config($config));
+        $stepUp = new MfaStepUpService($this->proofs, $totpOnlyPolicy, $this->credentials);
+        $protectedOperations = new MfaProtectedOperationService(
+            $this->db,
+            $this->securityClock,
+            $stepUp,
+            $totpOnlyPolicy,
+            $this->credentials,
+            new ApiTokenService($this->db, new RedisFactory($this->config)),
+        );
+
+        self::assertSame('passkey', $protectedOperations->storePendingTotpSecret(
+            $this->userId,
+            $session['token'],
+            $this->passwordHash(),
+            'enc:TRANSITION',
+            $proof,
+        ));
+        self::assertSame('enc:TRANSITION', $this->totpSecret());
+
+        $this->expectException(OneTimeTokenException::class);
+        $protectedOperations->storePendingTotpSecret(
+            $this->userId,
+            $session['token'],
+            $this->passwordHash(),
+            'enc:REPLAY',
+            $proof,
+        );
+    }
+
+    public function testActiveTotpEnrollmentRemainsUnchanged(): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $this->db->pdo()->prepare('UPDATE users SET totp_secret = ?, totp_enabled = 1 WHERE id = ?')
+            ->execute(['enc:ACTIVE', $this->userId]);
+
+        try {
+            $this->protectedOperations->storePendingTotpSecret(
+                $this->userId,
+                $session['token'],
+                $this->passwordHash(),
+                'enc:REPLACEMENT',
+                null,
+            );
+            self::fail('Aktivní TOTP nesmí zřízení pending secretu přepsat.');
+        } catch (TotpEnrollmentException $e) {
+            self::assertSame(TotpEnrollmentException::ALREADY_ENABLED, $e->reason);
+        }
+
+        self::assertSame('enc:ACTIVE', $this->totpSecret());
+    }
+
+    public function testTotpEnrollmentRejectsRevokedSession(): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $authorizedHash = $this->passwordHash();
+        $this->sessions->destroy($session['token']);
+
+        try {
+            $this->protectedOperations->storePendingTotpSecret(
+                $this->userId,
+                $session['token'],
+                $authorizedHash,
+                'enc:REVOKED-SESSION',
+                null,
+            );
+            self::fail('Revokovaná session nesmí uložit pending TOTP secret.');
+        } catch (TotpEnrollmentException $e) {
+            self::assertSame(TotpEnrollmentException::SESSION_INVALID, $e->reason);
+        }
+
+        self::assertNull($this->totpSecret());
+    }
+
+    public function testTotpEnrollmentRejectsProofFromRevokedPasskey(): void
+    {
+        [$credentialId] = $this->createCredential(0, 'Revoked TOTP enrollment key');
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $proof = $this->proofs->issue(
+            $this->userId,
+            $session['token'],
+            MfaStepUpService::OPERATION_TOTP_ENABLE,
+            'passkey',
+            $credentialId,
+        );
+        self::assertTrue($this->credentials->revoke($this->userId, $credentialId));
+
+        try {
+            $this->protectedOperations->storePendingTotpSecret(
+                $this->userId,
+                $session['token'],
+                $this->passwordHash(),
+                'enc:REVOKED-PASSKEY',
+                $proof,
+            );
+            self::fail('Proof odvolaného passkey nesmí uložit pending TOTP secret.');
+        } catch (StepUpOperationException) {
+        }
+
+        self::assertNull($this->totpSecret());
+    }
+
+    public function testPasswordEnrollmentRejectsPasskeyAddedAfterAuthorizationChoice(): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $authorizedHash = $this->passwordHash();
+        $this->createCredential(0, 'Newly added key');
+
+        try {
+            $this->protectedOperations->storePendingTotpSecret(
+                $this->userId,
+                $session['token'],
+                $authorizedHash,
+                'enc:DOWNGRADE',
+                null,
+            );
+            self::fail('Heslová větev nesmí obejít passkey přidaný po volbě autorizace.');
+        } catch (TotpEnrollmentException $e) {
+            self::assertSame(TotpEnrollmentException::STALE_AUTHORIZATION, $e->reason);
+        }
+
+        self::assertNull($this->totpSecret());
+    }
+
     /**
      * Step-up větev je JEDINÁ cesta uživatele s passkey — a dřív do
      * `generateInTransaction()` neposílala volitelné schopnosti tokenu vůbec.
@@ -925,6 +1100,21 @@ final class AtomicAuthTransitionTest extends TestCase
             }
             proc_close($worker['process']);
         }
+    }
+
+    private function passwordHash(): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT password_hash FROM users WHERE id = ?');
+        $stmt->execute([$this->userId]);
+        return (string) $stmt->fetchColumn();
+    }
+
+    private function totpSecret(): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT totp_secret FROM users WHERE id = ?');
+        $stmt->execute([$this->userId]);
+        $value = $stmt->fetchColumn();
+        return $value === null || $value === false ? null : (string) $value;
     }
 
     /**
