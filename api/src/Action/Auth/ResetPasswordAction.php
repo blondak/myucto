@@ -71,6 +71,8 @@ final class ResetPasswordAction
         $pdo->beginTransaction();
         try {
             $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([$hash, $userId]);
+            // Nezaktivované zřízení TOTP zahodit spolu se sessions (viz ChangePasswordAction).
+            $pdo->prepare('UPDATE users SET totp_secret = NULL WHERE id = ? AND totp_enabled = 0')->execute([$userId]);
             $pdo->prepare('UPDATE password_resets SET used_at = NOW() WHERE id = ?')->execute([(int) $row['id']]);
             $pdo->prepare('DELETE FROM trusted_devices WHERE user_id = ?')->execute([$userId]);
             $pdo->prepare('DELETE FROM login_otps WHERE user_id = ?')->execute([$userId]);

@@ -430,7 +430,14 @@ export const authApi = {
 
   // TOTP / 2FA
   totpStatus: () => api.get<{ enabled: boolean }>('/auth/totp/status').then(r => r.data),
-  totpSetup:  () => api.post<TotpSetup>('/auth/totp/setup').then(r => r.data),
+  /**
+   * Vyžaduje čerstvé ověření: heslem (bez passkey), nebo step-up tokenem
+   * z passkey ceremonie pro operaci `totp.enable` (má-li uživatel už nějakou
+   * passkey). Bez toho by útočník s ukradenou session mohl tiše přidat vlastní
+   * TOTP a zamknout majitele ven.
+   */
+  totpSetup: (authorization: { current_password?: string; step_up_token?: string }) =>
+    api.post<TotpSetup>('/auth/totp/setup', authorization).then(r => r.data),
   /**
    * Zapne TOTP.
    *

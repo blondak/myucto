@@ -55,6 +55,10 @@ final class ChangePasswordAction
 
         $this->db->pdo()->prepare('UPDATE users SET password_hash = ? WHERE id = ?')
             ->execute([$newHash, $userId]);
+        // Rozpracované (nezaktivované) zřízení TOTP se váže na autorizaci, která
+        // ho spustila; po změně hesla začíná znovu. Aktivní faktor zůstává.
+        $this->db->pdo()->prepare('UPDATE users SET totp_secret = NULL WHERE id = ? AND totp_enabled = 0')
+            ->execute([$userId]);
 
         // Invaliduj všechny ostatní sessions kromě této
         $invalidated = $this->sessions->destroyAllForUser($userId, $token);

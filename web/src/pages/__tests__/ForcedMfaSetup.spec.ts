@@ -34,6 +34,8 @@ vi.mock('@/api/auth', () => ({
     totpStepUp: vi.fn(),
     passkeyRegisterOptions: vi.fn(),
     passkeyRegisterVerify: vi.fn(),
+    passkeyStepUpOptions: vi.fn(),
+    passkeyStepUpVerify: vi.fn(),
   },
 }))
 vi.mock('@/stores/auth', () => ({
@@ -49,6 +51,7 @@ vi.mock('@/stores/sessionSecurity', () => ({
 }))
 vi.mock('@/security/webauthn', () => ({
   createCredential: vi.fn(),
+  getCredential: vi.fn(),
   isWebAuthnAvailable: () => true,
   webAuthnErrorKey: () => null,
 }))
@@ -64,6 +67,7 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
+import { authApi } from '@/api/auth'
 import ForcedMfaSetup from '../ForcedMfaSetup.vue'
 
 const mountPage = () => mount(ForcedMfaSetup)
@@ -123,5 +127,34 @@ describe('ForcedMfaSetup — dobrovolná nabídka vs. vynucené MFA', () => {
 
     expect(m.replace).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('nelze')
+  })
+})
+
+/**
+ * `/api/auth/totp/setup` vyžaduje čerstvé ověření, než vrátí secret. Bez
+ * passkey (výchozí `m.store.user`) je to heslo — stejné pole, jaké už stránka
+ * sbírá pro registraci passkey, jen na jiné větvi.
+ */
+describe('ForcedMfaSetup — TOTP vyžaduje čerstvé ověření', () => {
+  it('bez hesla nezavolá totpSetup a ukáže hlášku', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+
+    expect(authApi.totpSetup).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('mfa_setup.password_required')
+  })
+
+  it('s heslem zavolá totpSetup s { current_password }', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-test="totp-current-password"]').setValue('hunter2')
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+
+    expect(authApi.totpSetup).toHaveBeenCalledWith({ current_password: 'hunter2' })
   })
 })
