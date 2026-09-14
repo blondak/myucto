@@ -71,6 +71,78 @@ final class KbPlusConnectorTest extends TestCase
         self::assertTrue($this->connector->canSubmitPaymentOrder($token));
     }
 
+    public function testBasicPlanRefusesPaymentsEvenWithBpispConsent(): void
+    {
+        $this->api->expects(self::never())->method('submitPaymentBatch');
+        $token = $this->vault->encode(['api_plan' => 'basic'] + $this->credentials('', 'adaa bpisp'));
+
+        self::assertFalse($this->connector->canSubmitPaymentOrder($token));
+        try {
+            $this->connector->submitPaymentOrder($token, 'SYNTHETIC-ABO');
+            self::fail('Varianta Basic příkazy neumí, nesmí se předat bance.');
+        } catch (BankConnectorException $e) {
+            self::assertSame('payment_submission_unavailable', $e->errorCode);
+        }
+    }
+
+    public function testBasicPlanDownloadsOnlyUpToYesterday(): void
+    {
+        $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $yesterday = (new \DateTimeImmutable('yesterday'))->format('Y-m-d');
+        $weekAgo = (new \DateTimeImmutable('-7 days'))->format('Y-m-d');
+        $periods = [];
+        $this->api->method('transactions')->willReturnCallback(
+            static function (array $credentials, string $accessToken, string $accountId, string $from, string $to) use (&$periods): array {
+                $periods[] = [$from, $to];
+                return ['transactions' => [], 'pages' => 1];
+            },
+        );
+        $token = $this->vault->encode(['api_plan' => 'basic'] + $this->credentials('', 'adaa'));
+
+        $this->connector->downloadStatement($token, $weekAgo, $today);
+        $this->connector->downloadStatement($token, $today, $today);
+
+        self::assertSame([[$weekAgo, $yesterday], [$yesterday, $yesterday]], $periods);
+    }
+
+    /** Údaje uložené před zavedením volby varianty se chovají jako Plus. */
+    public function testPlusAndLegacyCredentialsKeepRequestedPeriod(): void
+    {
+        $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $periods = [];
+        $this->api->method('transactions')->willReturnCallback(
+            static function (array $credentials, string $accessToken, string $accountId, string $from, string $to) use (&$periods): array {
+                $periods[] = [$from, $to];
+                return ['transactions' => [], 'pages' => 1];
+            },
+        );
+
+        $this->connector->downloadStatement($this->vault->encode($this->credentials('', 'adaa')), $today, $today);
+        $this->connector->downloadStatement($this->vault->encode(['api_plan' => 'plus'] + $this->credentials('', 'adaa')), $today, $today);
+
+        self::assertSame([[$today, $today], [$today, $today]], $periods);
+    }
+
+    public function testAutomaticSyncIntervalFollowsPlan(): void
+    {
+        self::assertSame(86400, $this->connector->minimumAutomaticSyncIntervalSeconds(
+            $this->vault->encode(['api_plan' => 'basic'] + $this->credentials('', 'adaa')),
+        ));
+        self::assertSame(3660, $this->connector->minimumAutomaticSyncIntervalSeconds(
+            $this->vault->encode(['api_plan' => 'plus'] + $this->credentials('', 'adaa')),
+        ));
+        self::assertSame(3660, $this->connector->minimumAutomaticSyncIntervalSeconds(
+            $this->vault->encode($this->credentials('', 'adaa')),
+        ));
+    }
+
+    public function testUnknownPlanIsRejectedByVault(): void
+    {
+        $this->expectException(BankConnectorException::class);
+
+        $this->vault->encode(['api_plan' => 'pro'] + $this->credentials('', 'adaa'));
+    }
+
     /** @return array<string,mixed> */
     private function credentials(string $batchKey, string $scope): array
     {

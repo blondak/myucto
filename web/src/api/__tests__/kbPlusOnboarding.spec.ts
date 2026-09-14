@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { kbPlusOnboardingApi } from '../kbPlusOnboarding'
 
-const m = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const m = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }))
 vi.mock('../client', () => ({ api: m }))
 beforeEach(() => { vi.clearAllMocks() })
 
@@ -20,5 +20,12 @@ describe('KB+ onboarding API', () => {
     expect(await kbPlusOnboardingApi.start(3, credentials)).toBe(response)
     expect(m.post).toHaveBeenCalledExactlyOnceWith('/settings/bank-connections/3/kb-plus/onboarding', credentials)
     expect(m.get).not.toHaveBeenCalled()
+  })
+  it('changes the API Business variant with a PUT carrying only the plan', async () => {
+    const status = { provider: 'kb_plus', status: 'connected', api_plan: 'basic' }
+    m.put.mockResolvedValue({ data: status })
+    expect(await kbPlusOnboardingApi.plan(3, 'basic')).toBe(status)
+    expect(m.put).toHaveBeenCalledExactlyOnceWith('/settings/bank-connections/3/kb-plus/plan', { api_plan: 'basic' })
+    expect(m.post).not.toHaveBeenCalled()
   })
 })

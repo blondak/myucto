@@ -9,8 +9,10 @@ namespace MyInvoice\Service\Bank\Connector;
  *
  * Automatická synchronizace (cron) spojení přeskočí, dokud od posledního
  * pokusu neuplyne vrácená doba. Ruční stažení z obrazovky se tím neomezuje.
+ * Odstup se odvozuje z uložených přístupových údajů, protože limit může
+ * záviset na variantě služby sjednané pro konkrétní účet.
  */
 interface BankConnectorSyncPacing
 {
-    public function minimumAutomaticSyncIntervalSeconds(): int;
+    public function minimumAutomaticSyncIntervalSeconds(#[\SensitiveParameter] string $credential): int;
 }

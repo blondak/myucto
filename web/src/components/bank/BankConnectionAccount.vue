@@ -134,7 +134,7 @@ async function save() {
     saved.value = true
     emit('changed')
   } catch (e) {
-    error.value = bankConnectionErrorMessage(e, t, t('bank_connection.save_failed'))
+    error.value = bankConnectionErrorMessage(e, t, t('bank_connection.save_failed'), provider.value)
   } finally {
     busy.value = false
   }
@@ -169,7 +169,7 @@ async function runSync(request: BankSyncRequest, confirmations: string[] = [], r
     clearReconciliation()
     emit('changed')
   } catch (e) {
-    error.value = bankConnectionErrorMessage(e, t, t('bank_connection.sync_failed'))
+    error.value = bankConnectionErrorMessage(e, t, t('bank_connection.sync_failed'), provider.value)
     const candidates = bankReconciliationCandidates(e)
     if (candidates.length > 0) {
       reconciliationConfirmations.value = confirmations
@@ -202,7 +202,7 @@ async function confirmReconciliation() {
         <p v-if="!account.is_active" class="text-xs text-warning-700 mt-1">{{ t('bank_connection.account_inactive') }}</p>
         <p class="text-xs text-neutral-500 mt-1">{{ connection?.has_token ? (connection.enabled ? t('bank_connection.enabled') : t('bank_connection.paused')) : t('bank_connection.disconnected') }}</p>
         <p v-if="connection?.last_sync_at" class="text-xs text-neutral-500">{{ t('bank_connection.last_sync', { date: formatDateTime(connection.last_sync_at) }) }}</p>
-        <p v-if="connection?.last_sync_error_code" class="text-xs text-warning-700">{{ t('bank_connection.last_failed') }}</p>
+        <p v-if="connection?.last_sync_error_code" class="text-xs text-warning-700">{{ t(connection.provider === 'kb_plus' ? 'bank_connection.last_failed_kb_plus' : 'bank_connection.last_failed') }}</p>
       </div>
       <button v-if="available.length || connection" type="button" :class="btnOutline('neutral')" :aria-expanded="opened" @click="opened = !opened">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>
@@ -261,7 +261,7 @@ async function confirmReconciliation() {
         <p v-if="!certificateProvider && !connection?.has_token && !token.trim()" class="text-xs text-neutral-500">{{ t('bank_connection.token_required') }}</p>
       </form>
       <form v-if="canWrite && connection?.enabled" class="border-t border-neutral-200 pt-3 space-y-2" @submit.prevent="sync">
-        <p class="text-sm text-neutral-600">{{ t(provider === 'csob' ? 'bank_connection.csob_sync_hint' : 'bank_connection.sync_hint') }}</p>
+        <p class="text-sm text-neutral-600">{{ t(provider === 'csob' ? 'bank_connection.csob_sync_hint' : provider === 'kb_plus' ? 'bank_connection.kb_plus_sync_hint' : 'bank_connection.sync_hint') }}</p>
         <div class="flex flex-wrap items-end gap-3">
           <label class="flex flex-wrap items-center gap-2 text-sm"><span class="whitespace-nowrap">{{ t('bank_connection.from') }}:</span><DateInput v-model="from" :disabled="busy" :max="to || appIsoDate()" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface" /></label>
           <label class="flex flex-wrap items-center gap-2 text-sm"><span class="whitespace-nowrap">{{ t('bank_connection.to') }}:</span><DateInput v-model="to" :disabled="busy || !from" :min="from || undefined" :max="appIsoDate()" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface" /></label>

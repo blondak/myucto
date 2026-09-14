@@ -15,6 +15,14 @@ describe('bank connection diagnostics', () => {
     expect(bankConnectionErrorMessage(error, value => value, 'fallback')).toBe(`bank_connection.error_${key}`)
   })
 
+  it('uses KB+ specific texts instead of the Fio token hint', () => {
+    const error = (code: string) => ({ response: { data: { error: { code } } } })
+    expect(bankConnectionErrorMessage(error('invalid_token'), value => value, 'fallback', 'kb_plus')).toBe('bank_connection.error_token_kb_plus')
+    expect(bankConnectionErrorMessage(error('history_gap'), value => value, 'fallback', 'kb_plus')).toBe('bank_connection.error_history_kb_plus')
+    expect(bankConnectionErrorMessage(error('invalid_token'), value => value, 'fallback', 'fio')).toBe('bank_connection.error_token')
+    expect(bankConnectionErrorMessage(error('remote_unavailable'), value => value, 'fallback', 'kb_plus')).toBe('bank_connection.error_transport')
+  })
+
   it('accepts only complete reconciliation candidates from the structured error', () => {
     const valid = {
       confirmation_key: 'a'.repeat(64), posted_at: '2026-01-12', amount: '1250.00', currency: 'CZK',

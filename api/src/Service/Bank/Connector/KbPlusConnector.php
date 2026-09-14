@@ -17,6 +17,8 @@ final class KbPlusConnector implements
      * pohybů většina běhů skončila odmítnutím.
      */
     private const MINIMUM_SYNC_INTERVAL_SECONDS = 61 * 60;
+    /** Basic: KB povoluje nejvýš 50 stažení měsíčně, cron proto stahuje jednou denně. */
+    private const BASIC_SYNC_INTERVAL_SECONDS = 24 * 60 * 60;
 
     public function __construct(
         private readonly KbPlusApiClient $api,
@@ -25,9 +27,11 @@ final class KbPlusConnector implements
         private readonly KbPlusAboBatchMapper $batchMapper,
     ) {}
 
-    public function minimumAutomaticSyncIntervalSeconds(): int
+    public function minimumAutomaticSyncIntervalSeconds(#[\SensitiveParameter] string $credential): int
     {
-        return self::MINIMUM_SYNC_INTERVAL_SECONDS;
+        return KbPlusCredentialVault::plan($this->vault->decode($credential)) === KbPlusCredentialVault::PLAN_BASIC
+            ? self::BASIC_SYNC_INTERVAL_SECONDS
+            : self::MINIMUM_SYNC_INTERVAL_SECONDS;
     }
 
     public function provider(): string
@@ -53,6 +57,11 @@ final class KbPlusConnector implements
     {
         $access = $this->vault->access($token);
         $credentials = $access['credentials'];
+        // Basic poskytuje jen data z předchozích dnů; dotaz na dnešek by banka odmítla.
+        if (KbPlusCredentialVault::plan($credentials) === KbPlusCredentialVault::PLAN_BASIC) {
+            $to = min($to, (new \DateTimeImmutable('yesterday'))->format('Y-m-d'));
+            $from = min($from, $to);
+        }
         $result = $this->api->transactions(
             $credentials,
             $access['access_token'],
@@ -116,6 +125,8 @@ final class KbPlusConnector implements
 
     public function canSubmitPaymentOrder(#[\SensitiveParameter] string $credential): bool
     {
-        return KbPlusApiClient::grantsBatchPayments((string) $this->vault->decode($credential)['scope']);
+        $credentials = $this->vault->decode($credential);
+        return KbPlusCredentialVault::plan($credentials) !== KbPlusCredentialVault::PLAN_BASIC
+            && KbPlusApiClient::grantsBatchPayments((string) $credentials['scope']);
     }
 }

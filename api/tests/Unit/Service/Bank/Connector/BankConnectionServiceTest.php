@@ -239,6 +239,7 @@ final class BankConnectionServiceTest extends TestCase
         self::assertSame(0, $connector->downloadCalls);
         self::assertSame(1, $summary['skipped']);
         self::assertSame(0, $summary['errors']);
+        self::assertSame('synthetic-token', $connector->pacingCredential);
     }
 
     public function testAutomaticSyncRunsOnceBankMinimumIntervalElapsed(): void
@@ -512,8 +513,11 @@ final class PacedSyncConnector implements BankConnector, \MyInvoice\Service\Bank
         throw new \LogicException('Payment submit nebyl v sync testu očekáván.');
     }
 
-    public function minimumAutomaticSyncIntervalSeconds(): int
+    public ?string $pacingCredential = null;
+
+    public function minimumAutomaticSyncIntervalSeconds(#[\SensitiveParameter] string $credential): int
     {
+        $this->pacingCredential = $credential;
         return $this->intervalSeconds;
     }
 }

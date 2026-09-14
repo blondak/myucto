@@ -3,10 +3,11 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import KbPlusOnboarding from '../KbPlusOnboarding.vue'
 import type { KbPlusOnboardingStatus } from '@/api/kbPlusOnboarding'
 
-const m = vi.hoisted(() => ({ status: vi.fn(), start: vi.fn(), navigate: vi.fn(), demo: vi.fn(), route: { query: {} as Record<string, string> } }))
+const m = vi.hoisted(() => ({ status: vi.fn(), start: vi.fn(), plan: vi.fn(), navigate: vi.fn(), demo: vi.fn(), route: { query: {} as Record<string, string> } }))
 vi.mock('@/api/kbPlusOnboarding', () => ({
-  kbPlusOnboardingApi: { status: m.status, start: m.start },
+  kbPlusOnboardingApi: { status: m.status, start: m.start, plan: m.plan },
   kbPlusCredentialFields: ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key', 'certificate_p12', 'certificate_password'],
+  kbPlusApiPlans: ['basic', 'plus'],
 }))
 vi.mock('@/utils/kbPlusOnboarding', async importOriginal => ({ ...await importOriginal<typeof import('@/utils/kbPlusOnboarding')>(), navigateToKbPlus: m.navigate }))
 vi.mock('@/composables/useDemoMode', () => ({ useDemoMode: () => ({ blockDemoMutation: m.demo }) }))
@@ -73,7 +74,7 @@ describe('KB+ onboarding', () => {
     expect(m.start).toHaveBeenCalledExactlyOnceWith(3, {
       client_registration_api_key: 'synthetic-client_registration_api_key', oauth_api_key: 'synthetic-oauth_api_key',
       adaa_api_key: 'synthetic-adaa_api_key', batchda_api_key: 'synthetic-batchda_api_key', certificate_p12: 'AQID', certificate_password: '',
-      payment_batches: false,
+      payment_batches: false, api_plan: 'plus',
     })
     expect(m.navigate).toHaveBeenCalledExactlyOnceWith('https://api-gateway.kb.cz/client-registration-ui/v2/saml/register?request=synthetic')
     expect(wrapper.find('input[type="password"]').exists()).toBe(false)
@@ -94,14 +95,14 @@ describe('KB+ onboarding', () => {
     expect(wrapper.find('input').exists()).toBe(false)
     expect(m.start).not.toHaveBeenCalled()
   })
-  it('uses an empty body for an already registered application', async () => {
+  it('sends only the chosen plan for an already registered application', async () => {
     const wrapper = await open({ required_fields: [] })
     expect(wrapper.text()).toContain('kb_plus.existing_client_hint')
     expect(wrapper.find('input[type="password"]').exists()).toBe(false)
     expect(wrapper.find('input[name="payment_batches"]').exists()).toBe(false)
     await wrapper.find('form').trigger('submit')
     await flushPromises()
-    expect(m.start).toHaveBeenCalledExactlyOnceWith(3, {})
+    expect(m.start).toHaveBeenCalledExactlyOnceWith(3, { api_plan: 'plus' })
   })
   it('requires confirmation before invalidating a pending registration', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
@@ -181,7 +182,7 @@ describe('KB+ onboarding', () => {
     expect(m.start).toHaveBeenCalledExactlyOnceWith(3, {
       client_registration_api_key: 'synthetic-client_registration_api_key', oauth_api_key: 'synthetic-oauth_api_key',
       adaa_api_key: 'synthetic-adaa_api_key', batchda_api_key: '', certificate_p12: 'AQID', certificate_password: '',
-      payment_batches: false,
+      payment_batches: false, api_plan: 'plus',
     })
   })
   it('requests payment batches without a separate BatchDA key', async () => {
@@ -196,7 +197,7 @@ describe('KB+ onboarding', () => {
     expect(m.start).toHaveBeenCalledExactlyOnceWith(3, {
       client_registration_api_key: 'synthetic-client_registration_api_key', oauth_api_key: 'synthetic-oauth_api_key',
       adaa_api_key: 'synthetic-adaa_api_key', batchda_api_key: '', certificate_p12: 'AQID', certificate_password: '',
-      payment_batches: true,
+      payment_batches: true, api_plan: 'plus',
     })
   })
   it('explains a read-only registration and preselects batches when keys are re-entered', async () => {
@@ -223,5 +224,51 @@ describe('KB+ onboarding', () => {
   it('hides the batch warning once the connection can submit batches', async () => {
     const wrapper = await open({ status: 'connected', required_fields: [], capabilities: { statement_import: true, payment_batch_submission: true, payment_batch_status: 'available' } })
     expect(wrapper.text()).not.toContain('kb_plus.batch_unavailable')
+  })
+  it('keeps the action buttons side by side in one wrapping row', async () => {
+    const wrapper = await open({ status: 'connected', required_fields: [] })
+    const buttons = ['kb_plus.reenter_keys', 'kb_plus.restart', 'kb_plus.refresh']
+      .map(label => wrapper.findAll('button').find(item => item.text() === label)!)
+    const row = buttons[0].element.parentElement!
+    expect(buttons.every(button => button.element.parentElement === row)).toBe(true)
+    expect(row.classList).toContain('flex-wrap')
+  })
+  it('switches a connected account to Basic without contacting KB and explains why batches are off', async () => {
+    const connected = { status: 'connected' as const, required_fields: [], api_plan: 'plus' as const }
+    m.plan.mockResolvedValue({ ...registration, ...connected, api_plan: 'basic', capabilities: { statement_import: true, payment_batch_submission: false, payment_batch_status: 'plan_basic' } })
+    const wrapper = await open(connected)
+    expect(wrapper.find('[data-plan="plus"]').attributes('aria-checked')).toBe('true')
+    await wrapper.find('[data-plan="basic"]').trigger('click')
+    await flushPromises()
+    expect(m.plan).toHaveBeenCalledExactlyOnceWith(3, 'basic')
+    expect(m.start).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-plan="basic"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.text()).toContain('kb_plus.plan_saved')
+    expect(wrapper.text()).toContain('kb_plus.batch_unavailable_plan_basic')
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+  })
+  it('restores the previous plan when saving fails', async () => {
+    m.plan.mockRejectedValue({ response: { data: { error: { code: 'kb_plus_not_connected' } } } })
+    const wrapper = await open({ status: 'connected', required_fields: [], api_plan: 'plus' })
+    await wrapper.find('[data-plan="basic"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-plan="plus"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.text()).toContain('kb_plus.error_plan')
+    expect(wrapper.text()).not.toContain('kb_plus.plan_saved')
+  })
+  it('registers a Basic account read-only and hides the payment batch choice', async () => {
+    const wrapper = await open()
+    await wrapper.find('[data-plan="basic"]').trigger('click')
+    expect(m.plan).not.toHaveBeenCalled()
+    expect(wrapper.find('input[name="payment_batches"]').exists()).toBe(false)
+    await fill(wrapper, ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key'])
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(m.start).toHaveBeenCalledExactlyOnceWith(3, expect.objectContaining({ payment_batches: false, api_plan: 'basic' }))
+  })
+  it('lets readonly users see the plan but not change it', async () => {
+    const wrapper = await open({ status: 'connected', required_fields: [], api_plan: 'basic' }, false)
+    expect(wrapper.find('[data-plan="basic"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.find('[data-plan="plus"]').attributes('disabled')).toBeDefined()
   })
 })

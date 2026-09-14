@@ -40,7 +40,8 @@ final class KbPlusOnboardingService
         $client = $this->oauth->client($supplierId);
         $flow = $this->oauth->publicStatus($supplierId, $currencyId);
         $connected = $connection !== null && $connection['provider'] === 'kb_plus' && $connection['has_token'];
-        $batch = $this->batchSubmission($supplierId, $currencyId, $client, $connected);
+        $token = $connected ? $this->connectedCredentials($supplierId, $currencyId) : null;
+        $batch = $this->batchSubmission($supplierId, $client, $connected, $token);
         $status = $connected
             ? 'connected'
             : ($flow === null ? ($client === null ? 'not_registered' : 'registered')
@@ -56,6 +57,7 @@ final class KbPlusOnboardingService
             'required_fields' => $client === null ? self::REGISTRATION_FIELDS : [],
             'registration_fields' => self::REGISTRATION_FIELDS,
             'optional_fields' => self::OPTIONAL_FIELDS,
+            'api_plan' => $token === null ? null : KbPlusCredentialVault::plan($token),
             'capabilities' => [
                 'statement_import' => true,
                 'payment_batch_submission' => $batch === 'available',
@@ -75,14 +77,16 @@ final class KbPlusOnboardingService
         }
         $this->assertServerReady();
         $account = $this->account($supplierId, $currencyId);
+        $plan = $this->planInput($input['api_plan'] ?? KbPlusCredentialVault::PLAN_PLUS, 'kb_plus_registration_input_invalid');
+        unset($input['api_plan']);
 
         return $this->calls->withConnectionLock($supplierId, $currencyId, function () use (
-            $supplierId, $currencyId, $userId, $input, $account,
+            $supplierId, $currencyId, $userId, $input, $account, $plan,
         ): array {
             $clientRow = $this->oauth->client($supplierId);
             if ($clientRow !== null && $input === []) {
                 $client = $this->decryptClient($supplierId, (string) $clientRow['credentials_ciphertext']);
-                return $this->startOAuth($supplierId, $currencyId, $userId, $client);
+                return $this->startOAuth($supplierId, $currencyId, $userId, $client, $plan);
             }
             $batches = $this->paymentBatchesRequested($input);
             unset($input['payment_batches']);
@@ -100,12 +104,13 @@ final class KbPlusOnboardingService
                     'client_name' => 'MyÚčto.cz',
                     'client_name_en' => 'MyUcto.cz',
                     'redirect_uris' => [$this->oauthCallback($supplierId)],
-                    'scopes' => $this->scopes($credentials + ['payment_batches' => $batches]),
+                    'scopes' => $this->scopes($credentials + ['payment_batches' => $batches, 'api_plan' => $plan]),
                 ], $state);
                 $secret = $this->encodeSecret([
                     'state' => $state,
                     'encryption_key' => $begin['encryption_key'],
                     'payment_batches' => $batches,
+                    'api_plan' => $plan,
                     'oauth_api_key' => $credentials['oauth_api_key'],
                     'adaa_api_key' => $credentials['adaa_api_key'],
                     'batchda_api_key' => $credentials['batchda_api_key'],
@@ -153,7 +158,7 @@ final class KbPlusOnboardingService
                     'redirect_uri' => $secret['redirect_uri'],
                 ];
                 $this->saveClient($supplierId, $userId, $client);
-                $result = $this->startOAuth($supplierId, $currencyId, $userId, $client);
+                $result = $this->startOAuth($supplierId, $currencyId, $userId, $client, KbPlusCredentialVault::plan($secret));
                 $this->oauth->finish($hash, true);
                 return $result;
             } catch (BankConnectorException $e) {
@@ -228,6 +233,7 @@ final class KbPlusOnboardingService
                     'account_iban' => strtoupper((string) $remote['iban']),
                     'account_currency' => strtoupper((string) $remote['currency']),
                     'call_guard_key' => $secret['call_guard_key'],
+                    'api_plan' => KbPlusCredentialVault::plan($secret),
                 ];
                 $serialized = $this->vault->encode($credentials);
                 $ciphertext = $this->secrets->encryptFor($serialized, KbPlusCredentialVault::context($supplierId, $connectionId));
@@ -257,11 +263,49 @@ final class KbPlusOnboardingService
             : null;
     }
 
+    /**
+     * Přepne sjednanou variantu API Business u připojeného účtu. Mění se jen
+     * chování aplikace (odstup automatického načítání, období, dávky); souhlas
+     * v KB zůstává, proto se banka nevolá.
+     */
+    public function changePlan(int $supplierId, int $currencyId, mixed $plan): array
+    {
+        $plan = $this->planInput($plan, 'kb_plus_plan_invalid');
+        $this->account($supplierId, $currencyId);
+        $this->calls->withConnectionLock($supplierId, $currencyId, function () use ($supplierId, $currencyId, $plan): void {
+            $row = $this->connections->findWithCredentialByCurrency($supplierId, $currencyId);
+            $stored = (string) ($row['token_ciphertext'] ?? '');
+            if ($row === null || ($row['provider'] ?? null) !== 'kb_plus' || !str_starts_with($stored, 'enc:v2:')) {
+                throw new BankConnectorOperationException('kb_plus_not_connected');
+            }
+            $context = KbPlusCredentialVault::context($supplierId, (int) $row['id']);
+            try {
+                $credentials = $this->vault->decode($this->secrets->decryptFor($stored, $context));
+                $credentials['api_plan'] = $plan;
+                $serialized = $this->vault->encode($credentials);
+            } catch (\Throwable) {
+                throw new BankConnectorOperationException('credential_unavailable');
+            }
+            $ciphertext = $this->secrets->encryptFor($serialized, $context);
+            if (!str_starts_with($ciphertext, 'enc:v2:')
+                || !$this->oauth->replaceConnectionCredential($supplierId, (int) $row['id'], $ciphertext)
+            ) {
+                throw new BankConnectorOperationException('encryption_failed');
+            }
+        });
+        return $this->status($supplierId, $currencyId);
+    }
+
     /** @param array<string,mixed> $client */
-    private function startOAuth(int $supplierId, int $currencyId, int $userId, #[\SensitiveParameter] array $client): array
+    private function startOAuth(int $supplierId, int $currencyId, int $userId, #[\SensitiveParameter] array $client, string $plan): array
     {
         $state = $this->state();
         $secret = $client + ['state' => $state, 'call_guard_key' => $this->state()];
+        $secret['api_plan'] = $plan;
+        // Basic dávky neumí, souhlas se proto žádá jen ke čtení i u registrace s bpisp.
+        if ($plan === KbPlusCredentialVault::PLAN_BASIC) {
+            $secret['scope'] = 'adaa';
+        }
         $url = $this->api->authorizationUrl($secret, $state);
         $this->storeSession($state, $supplierId, $currencyId, $userId, 'oauth', $this->encodeSecret($secret), self::OAUTH_TTL);
         return $this->started('authorization_pending', $url, self::OAUTH_TTL);
@@ -353,9 +397,38 @@ final class KbPlusOnboardingService
      */
     private function scopes(#[\SensitiveParameter] array $keys): array
     {
+        if (KbPlusCredentialVault::plan($keys) === KbPlusCredentialVault::PLAN_BASIC) {
+            return ['adaa'];
+        }
         return ($keys['payment_batches'] ?? false) === true || trim((string) ($keys['batchda_api_key'] ?? '')) !== ''
             ? ['adaa', 'bpisp']
             : ['adaa'];
+    }
+
+    private function planInput(mixed $plan, string $errorCode): string
+    {
+        if (!is_string($plan) || !in_array($plan, KbPlusCredentialVault::PLANS, true)) {
+            throw new BankConnectorOperationException($errorCode);
+        }
+        return $plan;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function connectedCredentials(int $supplierId, int $currencyId): ?array
+    {
+        $row = $this->connections->findWithCredentialByCurrency($supplierId, $currencyId);
+        $stored = (string) ($row['token_ciphertext'] ?? '');
+        if ($row === null || !str_starts_with($stored, 'enc:v2:')) {
+            return null;
+        }
+        try {
+            return $this->vault->decode($this->secrets->decryptFor(
+                $stored,
+                KbPlusCredentialVault::context($supplierId, (int) $row['id']),
+            ));
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function paymentBatchesRequested(array $input): bool
@@ -371,10 +444,16 @@ final class KbPlusOnboardingService
      * Rozšíření o dávky má u KB dvě cesty: registrace bez bpisp se musí zopakovat
      * (Zadat klíče znovu), registrace s bpisp potřebuje jen nový souhlas.
      *
-     * @return 'available'|'not_registered'|'registration_scope_missing'|'authorization_scope_missing'|'unknown'
+     * Varianta Basic dávky nezahrnuje vůbec, takže má přednost před chybějícím scope.
+     *
+     * @param array<string,mixed>|null $token
+     * @return 'available'|'not_registered'|'plan_basic'|'registration_scope_missing'|'authorization_scope_missing'|'unknown'
      */
-    private function batchSubmission(int $supplierId, int $currencyId, ?array $client, bool $connected): string
+    private function batchSubmission(int $supplierId, ?array $client, bool $connected, #[\SensitiveParameter] ?array $token): string
     {
+        if ($token !== null && KbPlusCredentialVault::plan($token) === KbPlusCredentialVault::PLAN_BASIC) {
+            return 'plan_basic';
+        }
         if ($client !== null) {
             try {
                 $credentials = $this->decryptClient($supplierId, (string) $client['credentials_ciphertext']);
@@ -388,20 +467,10 @@ final class KbPlusOnboardingService
         if (!$connected) {
             return $client === null ? 'not_registered' : 'available';
         }
-        $row = $this->connections->findWithCredentialByCurrency($supplierId, $currencyId);
-        $stored = (string) ($row['token_ciphertext'] ?? '');
-        if ($row === null || !str_starts_with($stored, 'enc:v2:')) {
+        if ($token === null) {
             return 'unknown';
         }
-        try {
-            $token = $this->vault->decode($this->secrets->decryptFor(
-                $stored,
-                KbPlusCredentialVault::context($supplierId, (int) $row['id']),
-            ));
-        } catch (\Throwable) {
-            return 'unknown';
-        }
-        return KbPlusApiClient::grantsBatchPayments((string) $token['scope']) ? 'available' : 'authorization_scope_missing';
+        return KbPlusApiClient::grantsBatchPayments((string) ($token['scope'] ?? '')) ? 'available' : 'authorization_scope_missing';
     }
 
     /** @return array<string,mixed> */

@@ -293,6 +293,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
         $this->vault->expects(self::once())->method('encode')->with(self::callback(static fn (array $value): bool =>
             $value['supplier_id'] === 7 && $value['connection_id'] === 19
             && $value['refresh_token'] === 'synthetic-refresh-token-0001'
+            && $value['api_plan'] === 'plus'
             && !array_key_exists('client_registration_api_key', $value)
         ))->willReturn('{"synthetic":"credential"}');
         $this->secrets->expects(self::once())->method('encryptFor')
@@ -341,6 +342,109 @@ final class KbPlusOnboardingServiceTest extends TestCase
         yield 'dávky nezvolené jen čtení' => ['', false, ['adaa']];
         yield 'dávky zvolené bez klíče BATCHDA' => ['', true, ['adaa', 'bpisp']];
         yield 'samostatný klíč BATCHDA stále zapíná dávky' => ['synthetic-batchda-key', false, ['adaa', 'bpisp']];
+    }
+
+    public function testBasicPlanRegistersReadOnlyEvenWithBatchChoiceAndKey(): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->oauth->method('client')->willReturn(null);
+        $this->registrationClient->expects(self::once())->method('createSoftwareStatement')
+            ->with(self::callback(static fn (array $credentials): bool => !array_key_exists('api_plan', $credentials)), self::anything())
+            ->willReturn('eyJhbGciOiJIUzI1NiJ9.e30.c2lnbmF0dXJl');
+        $this->registration->expects(self::once())->method('begin')
+            ->with(self::anything(), self::callback(static fn (array $application): bool => $application['scopes'] === ['adaa']), self::anything())
+            ->willReturnCallback(static fn (string $statement, array $application, string $state): array => [
+                'url' => 'https://api-gateway.kb.cz/client-registration-ui/v2/saml/register?state=' . $state,
+                'state' => $state,
+                'encryption_key' => base64_encode(str_repeat('K', 32)),
+            ]);
+        $this->secrets->expects(self::once())->method('encryptFor')
+            ->with(self::callback(static fn (string $plaintext): bool => str_contains($plaintext, '"api_plan":"basic"')), self::anything())
+            ->willReturn('enc:v2:synthetic');
+
+        $result = $this->service->start(7, 11, 5, ['api_plan' => 'basic', 'payment_batches' => true] + $this->registrationInput());
+
+        self::assertSame('registration_pending', $result['status']);
+    }
+
+    public function testExistingClientWithBasicPlanRequestsReadOnlyConsent(): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->oauth->method('client')->willReturn(['credentials_ciphertext' => 'enc:v2:client']);
+        $this->secrets->method('decryptFor')->willReturn(json_encode(
+            ['client_id' => 'synthetic-client', 'scope' => 'adaa bpisp', 'redirect_uri' => 'https://example.invalid/callback'],
+            JSON_THROW_ON_ERROR,
+        ));
+        $this->registrationClient->expects(self::never())->method('createSoftwareStatement');
+        $this->api->expects(self::once())->method('authorizationUrl')
+            ->with(self::callback(static fn (array $secret): bool => $secret['scope'] === 'adaa' && $secret['api_plan'] === 'basic'), self::anything())
+            ->willReturn('https://login.kb.cz/autfe/ssologin?state=synthetic');
+        $this->secrets->expects(self::once())->method('encryptFor')
+            ->with(self::callback(static fn (string $plaintext): bool => str_contains($plaintext, '"api_plan":"basic"')), self::anything())
+            ->willReturn('enc:v2:synthetic');
+
+        $result = $this->service->start(7, 11, 5, ['api_plan' => 'basic']);
+
+        self::assertSame('authorization_pending', $result['status']);
+    }
+
+    public function testUnknownPlanIsRejectedBeforeBank(): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->oauth->method('client')->willReturn(null);
+        $this->registrationClient->expects(self::never())->method('createSoftwareStatement');
+        $this->oauth->expects(self::never())->method('replacePending');
+
+        try {
+            $this->service->start(7, 11, 5, ['api_plan' => 'pro'] + $this->registrationInput());
+            self::fail('Neznámá varianta API Business se nesmí přijmout.');
+        } catch (BankConnectorOperationException $e) {
+            self::assertSame('kb_plus_registration_input_invalid', $e->errorCode);
+        }
+    }
+
+    public function testChangePlanRewritesConnectionCredentialWithoutCallingBank(): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->connections->expects(self::exactly(2))->method('findWithCredentialByCurrency')->with(7, 11)
+            ->willReturn(['id' => 19, 'provider' => 'kb_plus', 'token_ciphertext' => 'enc:v2:connection']);
+        $this->connections->method('findPublicByCurrency')->willReturn(['provider' => 'kb_plus', 'has_token' => true]);
+        $this->oauth->method('client')->willReturn(null);
+        $this->oauth->method('publicStatus')->willReturn(null);
+        $this->secrets->expects(self::exactly(2))->method('decryptFor')->with('enc:v2:connection', KbPlusCredentialVault::context(7, 19))
+            ->willReturn('{"synthetic":"connection"}');
+        $this->vault->method('decode')->willReturnOnConsecutiveCalls(
+            ['scope' => 'adaa bpisp'],
+            ['scope' => 'adaa bpisp', 'api_plan' => 'basic'],
+        );
+        $this->vault->expects(self::once())->method('encode')
+            ->with(['scope' => 'adaa bpisp', 'api_plan' => 'basic'])->willReturn('{"synthetic":"basic"}');
+        $this->secrets->expects(self::once())->method('encryptFor')
+            ->with('{"synthetic":"basic"}', KbPlusCredentialVault::context(7, 19))->willReturn('enc:v2:basic');
+        $this->oauth->expects(self::once())->method('replaceConnectionCredential')->with(7, 19, 'enc:v2:basic')->willReturn(true);
+        $this->api->expects(self::never())->method(self::anything());
+
+        $status = $this->service->changePlan(7, 11, 'basic');
+
+        self::assertSame('basic', $status['api_plan']);
+        self::assertFalse($status['capabilities']['payment_batch_submission']);
+        self::assertSame('plan_basic', $status['capabilities']['payment_batch_status']);
+    }
+
+    public function testChangePlanRejectsUnknownPlanAndMissingConnection(): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->connections->method('findWithCredentialByCurrency')->willReturn(null);
+        $this->oauth->expects(self::never())->method('replaceConnectionCredential');
+
+        foreach ([['pro', 'kb_plus_plan_invalid'], [null, 'kb_plus_plan_invalid'], ['basic', 'kb_plus_not_connected']] as [$plan, $code]) {
+            try {
+                $this->service->changePlan(7, 11, $plan);
+                self::fail('Změna varianty musí selhat: ' . $code);
+            } catch (BankConnectorOperationException $e) {
+                self::assertSame($code, $e->errorCode);
+            }
+        }
     }
 
     public function testNonBooleanPaymentBatchChoiceIsRejectedBeforeBank(): void

@@ -23,7 +23,12 @@ export function bankReconciliationCandidates(error: unknown): BankReconciliation
   )
 }
 
-export function bankConnectionErrorMessage(error: unknown, t: (key: string) => string, fallback: string): string {
+/** Texty, které se u konkrétní banky liší od obecné hlášky (obecná míří na Fio token). */
+const providerKeys: Record<string, Record<string, string>> = {
+  kb_plus: { token: 'token_kb_plus', history: 'history_kb_plus' },
+}
+
+export function bankConnectionErrorMessage(error: unknown, t: (key: string) => string, fallback: string, provider = ''): string {
   const keys: Record<string, string> = {
     certificate_invalid: 'certificate', certificate_required: 'certificate', certificate_runtime_unavailable: 'certificate_runtime',
     csob_files_pending: 'csob_pending', csob_file_failed: 'csob_pending', csob_download_timeout: 'csob_pending',
@@ -45,5 +50,6 @@ export function bankConnectionErrorMessage(error: unknown, t: (key: string) => s
     payment_submission_unavailable: 'payment_unavailable',
   }
   const key = keys[apiErrorCode(error)]
-  return key ? t(`bank_connection.error_${key}`) : apiErrorMessage(error, fallback)
+  if (!key) return apiErrorMessage(error, fallback)
+  return t(`bank_connection.error_${providerKeys[provider]?.[key] ?? key}`)
 }

@@ -2919,6 +2919,7 @@ final class Routes
         $app->post   ('/api/settings/bank-connections/{currencyId:[0-9]+}/csas/onboarding', [\MyInvoice\Action\Settings\CsasOnboardingAction::class, 'start']);
         $app->get    ('/api/settings/bank-connections/csas/oauth/callback', [\MyInvoice\Action\Settings\CsasOnboardingAction::class, 'callback']);
         $app->post   ('/api/settings/bank-connections/{currencyId:[0-9]+}/kb-plus/onboarding', [KbPlusOnboardingAction::class, 'start']);
+        $app->put    ('/api/settings/bank-connections/{currencyId:[0-9]+}/kb-plus/plan', [KbPlusOnboardingAction::class, 'plan']);
         $app->get    ('/api/settings/bank-connections/kb-plus/registration/callback', [KbPlusOnboardingAction::class, 'registrationCallback']);
         $app->get    ('/api/settings/bank-connections/kb-plus/oauth/callback', [KbPlusOnboardingAction::class, 'oauthCallback']);
         $app->put    ('/api/settings/bank-connections/{currencyId:[0-9]+}', [BankConnectionAction::class, 'put']);

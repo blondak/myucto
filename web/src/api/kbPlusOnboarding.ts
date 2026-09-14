@@ -5,6 +5,8 @@ export const kbPlusCredentialFields = [
 ] as const
 export type KbPlusCredentialField = typeof kbPlusCredentialFields[number]
 export type KbPlusCredentials = Record<KbPlusCredentialField, string>
+export const kbPlusApiPlans = ['basic', 'plus'] as const
+export type KbPlusApiPlan = typeof kbPlusApiPlans[number]
 
 export interface KbPlusOnboardingStatus {
   provider: 'kb_plus'
@@ -14,11 +16,12 @@ export interface KbPlusOnboardingStatus {
   required_fields: KbPlusCredentialField[]
   registration_fields?: KbPlusCredentialField[]
   optional_fields?: KbPlusCredentialField[]
+  api_plan?: KbPlusApiPlan | null
   capabilities: { statement_import: boolean; payment_batch_submission: boolean; payment_batch_status?: KbPlusPaymentBatchStatus }
   expires_at?: string | null
 }
-export type KbPlusPaymentBatchStatus = 'available' | 'not_registered' | 'registration_scope_missing' | 'authorization_scope_missing' | 'unknown'
-export type KbPlusStartRequest = Partial<KbPlusCredentials> & { payment_batches?: boolean }
+export type KbPlusPaymentBatchStatus = 'available' | 'not_registered' | 'plan_basic' | 'registration_scope_missing' | 'authorization_scope_missing' | 'unknown'
+export type KbPlusStartRequest = Partial<KbPlusCredentials> & { payment_batches?: boolean; api_plan?: KbPlusApiPlan }
 
 export const kbPlusOnboardingApi = {
   status: (currencyId: number) => api.get<KbPlusOnboardingStatus>(`/settings/bank-connections/${currencyId}/kb-plus/onboarding`).then(r => r.data),
@@ -26,4 +29,6 @@ export const kbPlusOnboardingApi = {
     api.post<{ status: 'registration_pending' | 'authorization_pending'; redirect_url: string; expires_at: string }>(
       `/settings/bank-connections/${currencyId}/kb-plus/onboarding`, credentials,
     ).then(r => r.data),
+  plan: (currencyId: number, plan: KbPlusApiPlan) =>
+    api.put<KbPlusOnboardingStatus>(`/settings/bank-connections/${currencyId}/kb-plus/plan`, { api_plan: plan }).then(r => r.data),
 }

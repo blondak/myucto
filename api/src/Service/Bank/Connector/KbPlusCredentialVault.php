@@ -9,6 +9,16 @@ use MyInvoice\Service\Auth\SecretEncryption;
 
 final class KbPlusCredentialVault
 {
+    /**
+     * Varianta Extra služby API Business sjednaná u KB. Basic dovoluje stáhnout
+     * pohyby jednou denně jen za předchozí dny a neumí dávky; Plus stahuje
+     * nejvýš jednou za 61 minut. Údaje uložené před zavedením volby variantu
+     * nenesou a chovají se jako Plus.
+     */
+    public const PLAN_BASIC = 'basic';
+    public const PLAN_PLUS = 'plus';
+    public const PLANS = [self::PLAN_BASIC, self::PLAN_PLUS];
+
     public function __construct(
         private readonly KbPlusApiClient $api,
         private readonly KbPlusOAuthRepository $repository,
@@ -58,8 +68,9 @@ final class KbPlusCredentialVault
             'client_id', 'client_secret', 'redirect_uri', 'scope', 'refresh_token', 'access_token',
             'access_expires_at', 'account_id', 'account_iban', 'account_currency', 'call_guard_key',
         ];
-        if (!is_array($data) || array_is_list($data) || array_diff(array_keys($data), $required) !== []
+        if (!is_array($data) || array_is_list($data) || array_diff(array_keys($data), [...$required, 'api_plan']) !== []
             || array_diff($required, array_keys($data)) !== [] || $data['version'] !== 1
+            || (array_key_exists('api_plan', $data) && !in_array($data['api_plan'], self::PLANS, true))
             || !is_int($data['supplier_id']) || $data['supplier_id'] < 1
             || !is_int($data['connection_id']) || $data['connection_id'] < 1
             || !is_int($data['access_expires_at']) || $data['access_expires_at'] < 1
@@ -93,6 +104,12 @@ final class KbPlusCredentialVault
         }
         $this->decode($serialized);
         return $serialized;
+    }
+
+    /** @param array<string,mixed> $credentials */
+    public static function plan(#[\SensitiveParameter] array $credentials): string
+    {
+        return ($credentials['api_plan'] ?? null) === self::PLAN_BASIC ? self::PLAN_BASIC : self::PLAN_PLUS;
     }
 
     public static function context(int $supplierId, int $connectionId): string

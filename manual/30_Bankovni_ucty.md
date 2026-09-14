@@ -197,12 +197,19 @@ KB ve svém FAQ uvádí také možnost pro nepodnikající osoby s aktivní slu�
 Premium; konkrétní dostupnost ověř u banky.
 
 Bankovní tarif Business není totéž co varianta API Business **Basic / Plus / Pro**.
-Pro pohyby i odesílání dávek potřebuješ **Plus nebo Pro**. Basic nezahrnuje
-odesílání dávek. KB uvádí u Plus interval 61 minut a u Pro 10 minut; u čtení
-se do limitů započítávají datové stránky. Cena a rozsah podléhají aktuálním
-podmínkám banky. Přehled variant a detail ADAA nejsou v popisu Basic jednotné:
-detail ADAA uvádí omezený počet čtení i pro Basic. Dostupnost samotného čtení
-v této variantě proto ověř u KB; tento návod ji neslibuje.
+Sjednanou variantu nastav v napojení KB+ v přepínači **Varianta Extra služby
+API Business**; u připojeného účtu se volba uloží hned a banku to nekontaktuje.
+
+- **Basic** je zdarma a umožňuje jen čtení pohybů za předchozí dny. KB povoluje
+  nejvýše 50 stažení měsíčně, automatické načítání proto běží jednou denně
+  a pohyby načte nejdéle do včerejška. Odesílání příkazů není dostupné.
+- **Plus** načítá i dnešní pohyby, automaticky nejvýše jednou za 61 minut,
+  a umožňuje odesílat hromadné příkazy. Zvol ji i při variantě **Pro**
+  (KB u ní povoluje interval 10 minut, aplikace drží odstup jako u Plus).
+
+U čtení se do limitů započítávají datové stránky. Cena a rozsah podléhají
+aktuálním podmínkám banky. Když KB přístup k účtu odmítne, zkontroluj nejdřív
+zvolenou variantu a souhlas v KB+.
 
 Nejprve v KB+ vyber variantu API služby a uzavři smlouvu, potom pokračuj
 v MyÚčtu. Již udělené souhlasy spravuješ přes **Nastavení → Nastavení služeb →

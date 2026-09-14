@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { apiErrorCode } from '@/api/errors'
-import { kbPlusCredentialFields, kbPlusOnboardingApi, type KbPlusCredentials, type KbPlusOnboardingStatus, type KbPlusStartRequest } from '@/api/kbPlusOnboarding'
+import { kbPlusApiPlans, kbPlusCredentialFields, kbPlusOnboardingApi, type KbPlusApiPlan, type KbPlusCredentials, type KbPlusOnboardingStatus, type KbPlusStartRequest } from '@/api/kbPlusOnboarding'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { formatDateTime } from '@/composables/useFormat'
 import { kbPlusErrorKey, navigateToKbPlus } from '@/utils/kbPlusOnboarding'
@@ -21,6 +21,8 @@ const error = ref('')
 const submitted = ref(false)
 const reenter = ref(false)
 const paymentBatches = ref(false)
+const plan = ref<KbPlusApiPlan>('plus')
+const planSaved = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const certificateName = ref('')
 const certificateReading = ref(false)
@@ -32,7 +34,10 @@ const required = computed(() => (reenter.value ? state.value?.registration_field
 const optional = computed(() => state.value?.optional_fields ?? ['certificate_password'])
 const needsCertificate = computed(() => required.value.includes('certificate_p12'))
 const pending = computed(() => ['registration_pending', 'authorization_pending'].includes(state.value?.status ?? ''))
+const connected = computed(() => state.value?.status === 'connected' && !!state.value.api_plan)
 const knownRequirements = computed(() => required.value.every(field => kbPlusCredentialFields.includes(field)))
+const showForm = computed(() => props.canWrite && state.value?.server_ready === true && state.value.blockers.length === 0
+  && knownRequirements.value && !submitted.value)
 const canStart = computed(() => props.canWrite && !loading.value && !busy.value && !submitted.value && !certificateReading.value
   && state.value?.server_ready === true && state.value.blockers.length === 0 && knownRequirements.value
   && required.value.every(field => optional.value.includes(field) || !!fields.value[field]?.trim()))
@@ -45,10 +50,12 @@ const statusKey = computed(() => {
 })
 const batchUnavailableKey = computed(() => {
   const reason = state.value?.capabilities.payment_batch_status
+  if (reason === 'plan_basic') return 'kb_plus.batch_unavailable_plan_basic'
   if (reason === 'registration_scope_missing') return 'kb_plus.batch_unavailable_registration'
   if (reason === 'authorization_scope_missing') return 'kb_plus.batch_unavailable_authorization'
   return 'kb_plus.batch_unavailable'
 })
+const planLabelId = computed(() => `kb-plus-plan-${props.currencyId}`)
 
 function emptyFields(): KbPlusCredentials {
   return { client_registration_api_key: '', oauth_api_key: '', adaa_api_key: '', batchda_api_key: '', certificate_p12: '', certificate_password: '' }
@@ -62,7 +69,11 @@ function clearCredentials() {
 }
 function startReentry() {
   reenter.value = true
-  paymentBatches.value = state.value?.capabilities.payment_batch_status === 'registration_scope_missing'
+  paymentBatches.value = plan.value !== 'basic' && state.value?.capabilities.payment_batch_status === 'registration_scope_missing'
+}
+function applyStatus(value: KbPlusOnboardingStatus) {
+  state.value = value
+  if (value.api_plan && kbPlusApiPlans.includes(value.api_plan)) plan.value = value.api_plan
 }
 async function load(notify = false) {
   const version = ++requestVersion
@@ -75,12 +86,39 @@ async function load(notify = false) {
       || !['not_registered', 'registered', 'registration_pending', 'authorization_pending', 'connected', 'expired'].includes(value.status)
       || !Array.isArray(value.required_fields) || !value.required_fields.every(field => typeof field === 'string')
       || !Array.isArray(value.blockers) || !value.blockers.every(code => typeof code === 'string')) throw new Error()
-    state.value = value
+    applyStatus(value)
     if (notify) emit('changed')
   } catch (e) {
     if (version === requestVersion) error.value = t(kbPlusErrorKey(apiErrorCode(e)))
   } finally {
     if (version === requestVersion) loading.value = false
+  }
+}
+async function changePlan(value: KbPlusApiPlan) {
+  if (!props.canWrite || busy.value || value === plan.value) return
+  planSaved.value = false
+  if (!connected.value) {
+    plan.value = value
+    if (value === 'basic') paymentBatches.value = false
+    return
+  }
+  if (blockDemoMutation()) return
+  const previous = plan.value
+  const version = ++requestVersion
+  plan.value = value
+  busy.value = true
+  error.value = ''
+  try {
+    applyStatus(await kbPlusOnboardingApi.plan(props.currencyId, value))
+    if (version !== requestVersion) return
+    planSaved.value = true
+    emit('changed')
+  } catch (e) {
+    if (version !== requestVersion) return
+    plan.value = previous
+    error.value = t(kbPlusErrorKey(apiErrorCode(e)))
+  } finally {
+    if (version === requestVersion) busy.value = false
   }
 }
 async function readCertificate(event: Event) {
@@ -115,7 +153,8 @@ async function start() {
   const version = requestVersion
   const credentials: KbPlusStartRequest = {}
   for (const field of required.value) credentials[field] = field === 'certificate_password' ? fields.value[field] : fields.value[field].trim()
-  if (required.value.length) credentials.payment_batches = paymentBatches.value
+  if (required.value.length) credentials.payment_batches = plan.value !== 'basic' && paymentBatches.value
+  credentials.api_plan = plan.value
   try {
     const result = await kbPlusOnboardingApi.start(props.currencyId, credentials)
     if (version !== requestVersion || !props.canWrite) return
@@ -138,6 +177,8 @@ watch(() => props.currencyId, () => {
   submitted.value = false
   reenter.value = false
   paymentBatches.value = false
+  plan.value = 'plus'
+  planSaved.value = false
   void load()
 }, { immediate: true })
 watch(() => props.canWrite, value => { if (!value) clearCredentials() })
@@ -168,6 +209,28 @@ onBeforeUnmount(() => { requestVersion++; clearCredentials() })
       <p v-if="state.expires_at && pending" class="text-xs text-neutral-500">{{ t('kb_plus.expires', { date: formatDateTime(state.expires_at) }) }}</p>
       <p v-if="callbackResult === 'connected' && state.status === 'connected'" class="text-sm text-success-600">{{ t('kb_plus.connected') }}</p>
       <p v-if="callbackError" class="text-sm text-danger-600" role="alert">{{ callbackError }}</p>
+      <div class="space-y-2" data-testid="kb-plus-plan">
+        <p :id="planLabelId" class="text-sm font-medium">{{ t('kb_plus.plan_title') }}</p>
+        <p class="text-xs text-neutral-600">{{ t('kb_plus.plan_intro') }}</p>
+        <div role="radiogroup" :aria-labelledby="planLabelId" class="grid sm:grid-cols-2 gap-2">
+          <button
+            v-for="option in kbPlusApiPlans"
+            :key="option"
+            type="button"
+            role="radio"
+            :aria-checked="plan === option"
+            :data-plan="option"
+            class="text-left p-3 border rounded-md transition disabled:cursor-not-allowed disabled:opacity-60"
+            :class="plan === option ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-500/20' : 'border-neutral-200 hover:border-neutral-300 hover:bg-neutral-50'"
+            :disabled="!canWrite || busy || loading"
+            @click="changePlan(option)"
+          >
+            <span class="block text-sm font-medium">{{ t(`kb_plus.plan_${option}`) }}</span>
+            <span class="block text-xs text-neutral-600 mt-1">{{ t(`kb_plus.plan_${option}_hint`) }}</span>
+          </button>
+        </div>
+        <p v-if="planSaved" class="text-sm text-success-600" role="status">{{ t('kb_plus.plan_saved') }}</p>
+      </div>
       <div v-if="!state.server_ready || state.blockers.length" class="rounded-md border border-warning-500/40 bg-warning-50 p-3 text-sm space-y-1" role="alert">
         <p class="font-medium">{{ t('kb_plus.server_not_ready') }}</p>
         <p v-for="(blocker, index) in state.blockers" :key="index">{{ t(kbPlusErrorKey(blocker)) }}</p>
@@ -175,7 +238,7 @@ onBeforeUnmount(() => { requestVersion++; clearCredentials() })
       <p v-if="!knownRequirements" class="text-sm text-danger-600" role="alert">{{ t('kb_plus.error_generic') }}</p>
       <p v-if="pending" class="text-sm text-warning-700">{{ t('kb_plus.pending_hint') }}</p>
       <p v-if="state.status !== 'not_registered' && !state.capabilities.payment_batch_submission" class="text-sm text-neutral-600">{{ t(batchUnavailableKey) }}</p>
-      <form v-if="canWrite && state.server_ready && !state.blockers.length && knownRequirements && !submitted" class="space-y-3" @submit.prevent="start">
+      <form v-if="showForm" class="space-y-3" @submit.prevent="start">
         <div v-if="required.length" class="grid sm:grid-cols-2 gap-3">
           <label v-for="field in apiKeyFields.filter(value => required.includes(value))" :key="field" class="text-sm">
             {{ t(`kb_plus.field_${field}`) }}
@@ -195,7 +258,7 @@ onBeforeUnmount(() => { requestVersion++; clearCredentials() })
           <label v-if="required.includes('certificate_password')" class="text-sm">{{ t('kb_plus.field_certificate_password') }}
             <input v-model="fields.certificate_password" name="certificate_password" type="password" autocomplete="new-password" maxlength="1024" class="w-full h-9 px-3 mt-1 border border-neutral-300 rounded-md bg-surface" :disabled="busy" />
           </label>
-          <label class="text-sm sm:col-span-2 flex items-start gap-2">
+          <label v-if="plan !== 'basic'" class="text-sm sm:col-span-2 flex items-start gap-2">
             <input v-model="paymentBatches" name="payment_batches" type="checkbox" class="mt-0.5" :disabled="busy" />
             <span>
               <span class="font-medium">{{ t('kb_plus.payment_batches') }}</span>
@@ -204,23 +267,27 @@ onBeforeUnmount(() => { requestVersion++; clearCredentials() })
           </label>
           <p class="text-xs text-neutral-500 sm:col-span-2">{{ t('kb_plus.credentials_hint') }}</p>
         </div>
-        <div v-else class="space-y-2">
-          <p class="text-sm text-neutral-600">{{ t('kb_plus.existing_client_hint') }}</p>
-          <button v-if="state.registration_fields?.length" type="button" :class="btnOutline('neutral')" :disabled="busy" @click="startReentry">
+        <p v-else class="text-sm text-neutral-600">{{ t('kb_plus.existing_client_hint') }}</p>
+        <div class="flex flex-wrap gap-2">
+          <button v-if="!required.length && state.registration_fields?.length" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="busy" @click="startReentry">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
             {{ t('kb_plus.reenter_keys') }}
           </button>
+          <button type="submit" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="!canStart">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>
+            {{ busy ? t('common.loading') : t(pending || state.status === 'connected' ? 'kb_plus.restart' : 'kb_plus.start') }}
+          </button>
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="busy || loading" @click="load(true)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
+            {{ t('kb_plus.refresh') }}
+          </button>
         </div>
-        <button type="submit" :class="btnFilled('primary')" :disabled="!canStart">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>
-          {{ busy ? t('common.loading') : t(pending || state.status === 'connected' ? 'kb_plus.restart' : 'kb_plus.start') }}
-        </button>
       </form>
     </div>
     <p v-if="submitted && !error" class="text-sm text-neutral-600" role="status">{{ t('kb_plus.redirecting') }}</p>
     <p v-if="error" class="text-sm text-danger-600" role="alert">{{ error }}</p>
-    <div class="flex flex-wrap gap-2">
-      <button type="button" :class="btnOutline('neutral')" :disabled="busy || loading" @click="load(true)">
+    <div v-if="!showForm" class="flex flex-wrap gap-2">
+      <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="busy || loading" @click="load(true)">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
         {{ t('kb_plus.refresh') }}
       </button>

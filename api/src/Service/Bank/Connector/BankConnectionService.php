@@ -329,12 +329,15 @@ final class BankConnectionService
         }
         try {
             $connector = $this->connectors->get((string) $connection['provider']);
+            if (!$connector instanceof BankConnectorSyncPacing) {
+                return false;
+            }
+            $interval = $connector->minimumAutomaticSyncIntervalSeconds($this->decryptToken($connection));
         } catch (\Throwable) {
             return false;
         }
 
-        return $connector instanceof BankConnectorSyncPacing
-            && $elapsed < $connector->minimumAutomaticSyncIntervalSeconds();
+        return $elapsed < $interval;
     }
 
     /** @return array{0:string,1:string} */

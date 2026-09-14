@@ -61,6 +61,23 @@ final class KbPlusOnboardingAction
         }
     }
 
+    public function plan(Request $request, Response $response, array $args): Response
+    {
+        if ($denied = $this->denied($request, $response, AccessLevel::WRITE)) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            return Json::ok($response, $this->service->changePlan(
+                SupplierGuard::currentId($request),
+                (int) ($args['currencyId'] ?? 0),
+                $body['api_plan'] ?? null,
+            ));
+        } catch (BankConnectorOperationException $e) {
+            return $this->operationError($response, $e);
+        }
+    }
+
     public function registrationCallback(Request $request, Response $response): Response
     {
         if ($denied = $this->denied($request, $response, AccessLevel::WRITE)) {
@@ -145,8 +162,8 @@ final class KbPlusOnboardingAction
     {
         $status = match ($e->errorCode) {
             'connection_not_found' => 404,
-            'bank_connection_busy', 'bank_rate_limited', 'kb_plus_onboarding_used_or_expired' => 409,
-            'provider_account_mismatch', 'account_inactive', 'kb_plus_registration_input_invalid',
+            'bank_connection_busy', 'bank_rate_limited', 'kb_plus_onboarding_used_or_expired', 'kb_plus_not_connected' => 409,
+            'provider_account_mismatch', 'account_inactive', 'kb_plus_registration_input_invalid', 'kb_plus_plan_invalid',
             'kb_plus_onboarding_invalid', 'kb_plus_account_not_found', 'kb_plus_account_ambiguous' => 422,
             'app_url_invalid', 'encryption_key_unavailable', 'kb_plus_contact_missing',
             'kb_plus_callback_query_redaction_required' => 503,
