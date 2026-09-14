@@ -278,6 +278,7 @@ final class SetupProvisionTokenTest extends TestCase
             $this->container->get(\MyInvoice\Repository\AccountingModeRepository::class),
             $this->container->get(\MyInvoice\Service\Accounting\AccountingPeriodProvisioner::class),
             $this->container->get(\MyInvoice\Service\Accounting\AutoPostingPolicyService::class),
+            $this->container->get(\MyInvoice\Service\Auth\MfaStepUpService::class),
         );
     }
 
@@ -319,4 +320,3 @@ final class SetupProvisionTokenTest extends TestCase
         return (int) $this->db->pdo()->query('SELECT COUNT(*) FROM users')->fetchColumn();
     }
 }
-

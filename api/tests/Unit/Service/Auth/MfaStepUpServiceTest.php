@@ -21,6 +21,33 @@ use Webauthn\TrustPath\EmptyTrustPath;
 #[AllowMockObjectsWithoutExpectations]
 final class MfaStepUpServiceTest extends TestCase
 {
+    #[\PHPUnit\Framework\Attributes\TestWith([false, true])]
+    #[\PHPUnit\Framework\Attributes\TestWith([true, false])]
+    public function testInitialSetupUsesItsValidatedPolicyInsteadOfStaleConfiguration(bool $oldAllowed, bool $newAllowed): void
+    {
+        $oldPolicy = $this->createMock(MfaPolicyService::class);
+        $oldPolicy->method('isMethodAllowed')->willReturn($oldAllowed);
+        $setupPolicy = $this->createMock(MfaPolicyService::class);
+        $setupPolicy->method('isMethodAllowed')->willReturn($newAllowed);
+        $proofs = $this->createMock(MfaStepUpProofStore::class);
+        $proofs->expects($newAllowed ? self::once() : self::never())->method('issue')
+            ->with(17, 'session', 'totp.enroll:' . hash('sha256', 'verified-hash'), 'password')
+            ->willReturn('grant');
+        $credentials = $this->createMock(PasskeyCredentialRepository::class);
+        $credentials->method('countActiveForUser')->willReturn(0);
+        $service = new MfaStepUpService($proofs, $oldPolicy, $credentials);
+        self::assertSame($newAllowed ? 'grant' : null, $service->issueTotpEnrollment(17, 'session', 'verified-hash', $setupPolicy));
+    }
+
+    public function testPasswordCannotBecomeGeneralStepUpProof(): void
+    {
+        $proofs = $this->createMock(MfaStepUpProofStore::class);
+        $proofs->expects(self::never())->method('issue');
+        $service = new MfaStepUpService($proofs, $this->createMock(MfaPolicyService::class), $this->createMock(PasskeyCredentialRepository::class));
+        $this->expectException(StepUpOperationException::class);
+        $service->issue(17, 'session', MfaStepUpService::OPERATION_TOTP_ENABLE, 'password');
+    }
+
     public function testUnknownOperationIsRejectedBeforeProofIssuance(): void
     {
         $proofs = $this->createMock(MfaStepUpProofStore::class);

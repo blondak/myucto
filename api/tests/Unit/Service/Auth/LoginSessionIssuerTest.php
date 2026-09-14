@@ -105,6 +105,7 @@ final class LoginSessionIssuerTest extends TestCase
             $this->offersStub(),
             new SessionLockPolicy($config),
             $this->roleProfileStub(),
+            $this->createMock(\MyInvoice\Service\Auth\MfaStepUpService::class),
         );
         $response = $issuer->issue(
             (new ResponseFactory())->createResponse(),
@@ -159,6 +160,47 @@ final class LoginSessionIssuerTest extends TestCase
      * MyÚčto posílá roli jako objekt z tabulky `roles`; tenhle test ověřuje
      * vydání session, ne autorizaci, takže stačí prázdný profil.
      */
+    #[\PHPUnit\Framework\Attributes\TestWith([true, false, false, 0, 'verified', true])]
+    #[\PHPUnit\Framework\Attributes\TestWith([false, true, false, 0, 'verified', true])]
+    #[\PHPUnit\Framework\Attributes\TestWith([true, false, false, 0, null, false])]
+    #[\PHPUnit\Framework\Attributes\TestWith([false, false, false, 0, 'verified', false])]
+    #[\PHPUnit\Framework\Attributes\TestWith([true, false, true, 0, 'verified', false])]
+    #[\PHPUnit\Framework\Attributes\TestWith([true, false, false, 1, 'verified', false])]
+    public function testEnrollmentGrantRequiresPasswordVerificationAndImmediateFirstFactorSetup(
+        bool $required, bool $offer, bool $totpEnabled, int $passkeys, ?string $hash, bool $expected,
+    ): void {
+        $config = new Config(['auth' => ['require_mfa' => $required, 'allowed_mfa_methods' => ['totp', 'passkey']]]);
+        $credentials = $this->createMock(PasskeyCredentialRepository::class);
+        $credentials->method('countActiveForUser')->willReturn($passkeys);
+        $offers = $this->createMock(MfaOfferService::class);
+        $offers->method('shouldOffer')->willReturn($offer);
+        $clock = $this->createMock(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-09-14 08:00:00 UTC'));
+        $stepUp = $this->createMock(\MyInvoice\Service\Auth\MfaStepUpService::class);
+        if ($expected) {
+            $stepUp->expects(self::once())->method('issueTotpEnrollment')
+                ->with(17, 'session', 'verified')->willReturn('grant');
+        } else {
+            $stepUp->expects(self::never())->method('issueTotpEnrollment');
+        }
+        $issuer = new LoginSessionIssuer(
+            $this->createMock(Connection::class), $this->createMock(SessionManager::class),
+            $this->createMock(BruteForceGuard::class), $this->createMock(ActivityLogger::class),
+            $this->createMock(TrustedDeviceService::class), $config, $clock, $credentials,
+            new MfaPolicyService($config), $offers, new SessionLockPolicy($config), $this->roleProfileStub(), $stepUp,
+        );
+        $response = $issuer->issuePrepared(
+            (new ResponseFactory())->createResponse(),
+            ['id' => 17, 'email' => 'synthetic@example.test', 'totp_enabled' => $totpEnabled],
+            '127.0.0.1', 'PHPUnit', $required ? SessionAuthContext::setup('password') : SessionAuthContext::basic('password'),
+            ['token' => 'session', 'csrf_token' => 'csrf', 'expires_at' => 2000000000],
+            verifiedPasswordHash: $hash,
+        );
+        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($expected ? 'grant' : null, $body['totp_enrollment_token']);
+        self::assertSame('no-store', $response->getHeaderLine('Cache-Control'));
+    }
+
     private function offersStub(): MfaOfferService
     {
         $offers = $this->createMock(MfaOfferService::class);

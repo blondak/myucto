@@ -74,6 +74,7 @@ final class SetupAction
         private readonly \MyInvoice\Service\Accounting\AccountingPeriodProvisioner $periodProvisioner,
         // Výchozí automatika účtování nové účetní jednotky — viz finalizeSupplierProfile().
         private readonly \MyInvoice\Service\Accounting\AutoPostingPolicyService $autoPosting,
+        private readonly \MyInvoice\Service\Auth\MfaStepUpService $stepUp,
     ) {}
 
     /**
@@ -656,7 +657,19 @@ final class SetupAction
             $payload['password_setup_expires_at'] = $passwordSetup['expires_at']->format(\DateTimeInterface::ATOM);
         }
 
-        return Json::ok($response, $payload, 201);
+        if ($session !== null && in_array('totp', $allowedMfaMethods, true)
+            && ($requireMfa || !(bool) $this->config->get('demo.enabled', false))
+        ) {
+            $payload['totp_enrollment_token'] = $this->stepUp->issueTotpEnrollment(
+                $userId, $session['token'], $passwordHash,
+                new MfaPolicyService(new Config(['auth' => [
+                    'require_mfa' => $requireMfa,
+                    'allowed_mfa_methods' => $allowedMfaMethods,
+                ]])),
+            );
+        }
+
+        return Json::ok($response, $payload, 201)->withHeader('Cache-Control', 'no-store');
     }
 
     /**

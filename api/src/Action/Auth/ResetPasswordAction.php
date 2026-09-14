@@ -76,7 +76,15 @@ final class ResetPasswordAction
                         totp_secret = CASE WHEN totp_enabled = 0 THEN NULL ELSE totp_secret END
                   WHERE id = ?'
             )->execute([$hash, $userId]);
-            $pdo->prepare('UPDATE password_resets SET used_at = NOW() WHERE id = ?')->execute([(int) $row['id']]);
+            $consume = $pdo->prepare(
+                'UPDATE password_resets SET used_at = NOW()
+                  WHERE id = ? AND used_at IS NULL AND expires_at > NOW()'
+            );
+            $consume->execute([(int) $row['id']]);
+            if ($consume->rowCount() !== 1) {
+                $pdo->rollBack();
+                return Json::error($response, 'token_already_used', 'Token už není platný.', 410);
+            }
             $pdo->prepare('DELETE FROM trusted_devices WHERE user_id = ?')->execute([$userId]);
             $pdo->prepare('DELETE FROM login_otps WHERE user_id = ?')->execute([$userId]);
             $pdo->commit();
@@ -142,6 +150,7 @@ final class ResetPasswordAction
             $ip,
             $request->getHeaderLine('User-Agent'),
             $authContext,
+            verifiedPasswordHash: $hash,
         );
     }
 }

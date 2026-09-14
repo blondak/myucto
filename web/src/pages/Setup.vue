@@ -10,6 +10,7 @@ import { useAuthStore } from '@/stores/auth'
 import { authApi, type SetupPayload, type SetupSampleResult } from '@/api/auth'
 import { diagnosticsApi, type PreflightReport } from '@/api/diagnostics'
 import { bankNameByCode, isKnownBankName } from '@/utils/czBankCodes'
+import { rememberTotpEnrollment } from '@/security/totpEnrollment'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -152,6 +153,12 @@ async function goToApp() {
         + 'or a `cookie_name` with the `__Host-` prefix. Fix the config and sign in at /login.'
     return
   }
+  if (auth.mustSetupMfa || auth.mustSetupTotp || auth.shouldOfferMfa) {
+    await auth.fetchSetupStatus()
+    await router.push('/setup-mfa')
+    return
+  }
+  rememberTotpEnrollment(null)
   window.location.href = '/'
 }
 
@@ -318,6 +325,7 @@ async function submit() {
       }
     }
     const setupResult = await authApi.setup(payload)
+    rememberTotpEnrollment(setupResult.totp_enrollment_token, setupResult.user.id)
     auth.setSessionCsrfToken(setupResult.csrf_token)
     // MFA politiku do storu ZÁMĚRNĚ nepřepisujeme z odpovědi setupu — ta nese
     // to, co wizard poslal, ne to, co je reálně v configu. Jediný zdroj pravdy

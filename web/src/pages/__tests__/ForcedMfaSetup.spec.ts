@@ -74,10 +74,12 @@ vi.mock('vue-i18n', () => ({
 
 import { authApi } from '@/api/auth'
 import ForcedMfaSetup from '../ForcedMfaSetup.vue'
+import { rememberTotpEnrollment } from '@/security/totpEnrollment'
 
 const mountPage = () => mount(ForcedMfaSetup)
 
 beforeEach(() => {
+  rememberTotpEnrollment(null)
   vi.clearAllMocks()
   m.store.user = { totp_enabled: false }
   m.store.allowedMfaMethods = ['totp']
@@ -88,6 +90,48 @@ beforeEach(() => {
 })
 
 describe('ForcedMfaSetup — dobrovolná nabídka vs. vynucené MFA', () => {
+  it.each(['required', 'offer'])('po přihlášení použije oprávnění bez opakování hesla: %s', async (mode) => {
+    m.store.user = { id: 17, totp_enabled: false }
+    m.store.mustSetupMfa = mode === 'required'
+    m.store.shouldOfferMfa = mode === 'offer'
+    rememberTotpEnrollment('one-use-grant', 17)
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-test="totp-current-password"]').exists()).toBe(false)
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+    expect(m.totpSetup).toHaveBeenCalledWith({ enrollment_token: 'one-use-grant' })
+    expect(wrapper.text()).toContain('auth.totp_setup_step1')
+    wrapper.unmount()
+  })
+
+  it('po zamítnutí oprávnění dovolí ověření heslem', async () => {
+    m.store.user = { id: 17, totp_enabled: false }
+    rememberTotpEnrollment('expired-grant', 17)
+    m.totpSetup.mockRejectedValueOnce({ response: { data: { error: { code: 'enrollment_authorization_invalid' } } } })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="totp-current-password"]').setValue('new-password')
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+    expect(m.totpSetup).toHaveBeenLastCalledWith({ current_password: 'new-password' })
+    wrapper.unmount()
+  })
+
+  it('po opuštění průvodce už oprávnění nenabízí', async () => {
+    m.store.user = { id: 17, totp_enabled: false }
+    rememberTotpEnrollment('one-use-grant', 17)
+    const first = mountPage()
+    await flushPromises()
+    first.unmount()
+    const second = mountPage()
+    await flushPromises()
+    expect(second.find('[data-test="totp-current-password"]').exists()).toBe(true)
+    second.unmount()
+  })
+
   it('u vynuceného MFA nenabídne pokračování bez ověření', async () => {
     m.store.mustSetupMfa = true
 

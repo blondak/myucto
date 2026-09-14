@@ -121,8 +121,12 @@ final class TotpAction
                 (string) $user['password_hash'],
                 $encrypted,
                 $authorization['step_up_token'],
+                $authorization['enrollment_token'] ?? null,
             );
         } catch (OneTimeTokenException|StepUpOperationException) {
+            if (($authorization['enrollment_token'] ?? null) !== null) {
+                return Json::error($response, 'enrollment_authorization_invalid', 'Zadej znovu aktuální heslo.', 403);
+            }
             $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
             $this->logger->log('auth.totp_setup_reauth_failed', (int) $user['id'], 'user', (int) $user['id'], ['reason' => 'step_up'], $ip, $request->getHeaderLine('User-Agent'));
             return Json::error($response, 'step_up_proof_invalid', 'Je vyžadováno nové ověření silným faktorem.', 403);
@@ -165,7 +169,7 @@ final class TotpAction
      * až spolu se zápisem secretu v jedné transakci.
      *
      * @param array<string,mixed> $user
-     * @return Response|array{step_up_token:?string}
+     * @return Response|array{step_up_token:?string,enrollment_token?:string}
      */
     private function authorizeSetup(Request $request, Response $response, array $user): Response|array
     {
@@ -179,6 +183,11 @@ final class TotpAction
         // tiše přepnout na slabší heslovou větev.
         if ($this->credentials->countActiveForUser($userId) > 0) {
             return ['step_up_token' => trim((string) ($body['step_up_token'] ?? ''))];
+        }
+
+        $enrollmentToken = trim((string) ($body['enrollment_token'] ?? ''));
+        if ($enrollmentToken !== '') {
+            return ['step_up_token' => null, 'enrollment_token' => $enrollmentToken];
         }
 
         // Účet bez silného faktoru: heslo, stejně jako u vydání API tokenu

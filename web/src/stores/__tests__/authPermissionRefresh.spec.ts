@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
+import { rememberTotpEnrollment, takeTotpEnrollment } from '@/security/totpEnrollment'
 
 const mocks = vi.hoisted(() => ({
   me: vi.fn(),
+  login: vi.fn(),
   domainContext: vi.fn(),
 }))
 
 vi.mock('@/api/auth', () => ({
   authApi: {
     me: mocks.me,
+    login: mocks.login,
     domainContext: mocks.domainContext,
   },
 }))
@@ -42,6 +45,7 @@ function session() {
 describe('obnova oprávnění v auth store', () => {
   beforeEach(() => {
     localStorage.clear()
+    rememberTotpEnrollment(null)
     setActivePinia(createPinia())
     mocks.me.mockReset()
     mocks.domainContext.mockReset()
@@ -82,5 +86,15 @@ describe('obnova oprávnění v auth store', () => {
 
     store.user = { ...session().user, role: { ...session().user.role, system_key: 'admin' } }
     expect(store.isAdminPlusRole).toBe(false)
+  })
+
+  it('přenese oprávnění pouze z právě dokončeného přihlášení, nikoli z /me', async () => {
+    const store = useAuthStore()
+    mocks.login.mockResolvedValue({ ...session(), totp_enrollment_token: 'login-grant' })
+    mocks.me.mockResolvedValue({ ...session(), totp_enrollment_token: 'must-not-use-me' })
+    await store.login('synthetic@example.test', 'synthetic-password')
+    expect(takeTotpEnrollment(2)?.token).toBe('login-grant')
+    await store.refresh()
+    expect(takeTotpEnrollment(2)).toBeNull()
   })
 })

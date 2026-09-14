@@ -552,6 +552,86 @@ final class AtomicAuthTransitionTest extends TestCase
         );
     }
 
+    public function testPasswordLoginEnrollmentGrantIsConsumedWithSecret(): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $hash = $this->passwordHash();
+        $grant = $this->stepUp->issueTotpEnrollment($this->userId, $session['token'], $hash);
+        self::assertIsString($grant);
+        self::assertSame('password_enrollment', $this->protectedOperations->storePendingTotpSecret(
+            $this->userId, $session['token'], $hash, 'enc:FIRST', null, $grant,
+        ));
+        self::assertSame('enc:FIRST', $this->totpSecret());
+        try {
+            $this->protectedOperations->storePendingTotpSecret(
+                $this->userId, $session['token'], $hash, 'enc:REPLAY', null, $grant,
+            );
+            self::fail('Enrollment grant musí být jednorázový.');
+        } catch (OneTimeTokenException) {
+            self::assertSame('enc:FIRST', $this->totpSecret());
+        }
+    }
+
+    #[\PHPUnit\Framework\Attributes\TestWith(['expired'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['password_changed'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['other_session'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['locked'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['revoked'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['passkey_added'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['totp_enabled'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['replaced'])]
+    public function testPasswordLoginEnrollmentGrantFailsClosed(string $change): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $grant = $this->stepUp->issueTotpEnrollment($this->userId, $session['token'], $this->passwordHash());
+        self::assertIsString($grant);
+        $pdo = $this->db->pdo();
+        if ($change === 'expired') {
+            $pdo->prepare('UPDATE mfa_step_up_proofs SET expires_at = ? WHERE token_hash = ?')
+                ->execute(['2000-01-01 00:00:00.000000', hash('sha256', $grant, true)]);
+        } elseif ($change === 'password_changed') {
+            $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+                ->execute([password_hash('Changed-synthetic-password-42', PASSWORD_BCRYPT), $this->userId]);
+        } elseif ($change === 'other_session') {
+            $session = $this->sessions->create($this->userId, '127.0.0.1', 'Other');
+        } elseif ($change === 'locked' || $change === 'revoked') {
+            $column = $change === 'locked' ? 'locked_at' : 'revoked_at';
+            $pdo->prepare('UPDATE sessions SET ' . $column . ' = UTC_TIMESTAMP(6) WHERE id = ?')
+                ->execute([$session['token']]);
+        } elseif ($change === 'passkey_added') {
+            $this->createCredential(0, 'New key');
+        } elseif ($change === 'totp_enabled') {
+            $pdo->prepare('UPDATE users SET totp_enabled = 1 WHERE id = ?')->execute([$this->userId]);
+        } elseif ($change === 'replaced') {
+            $pdo->prepare('UPDATE sessions SET replaced_at = UTC_TIMESTAMP(6) WHERE id = ?')->execute([$session['token']]);
+        }
+        try {
+            $this->protectedOperations->storePendingTotpSecret(
+                $this->userId, $session['token'], $this->passwordHash(), 'enc:INVALID', null, $grant,
+            );
+            self::fail('Neplatné oprávnění nesmí vytvořit TOTP secret.');
+        } catch (OneTimeTokenException|TotpEnrollmentException) {
+            self::assertNull($this->totpSecret());
+        }
+    }
+
+    public function testEnrollmentGrantCannotAuthorizeApiToken(): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $grant = $this->stepUp->issueTotpEnrollment($this->userId, $session['token'], $this->passwordHash());
+        self::assertIsString($grant);
+        $this->expectException(OneTimeTokenException::class);
+        $this->protectedOperations->createApiToken(
+            $this->userId, $session['token'], $grant, null, 'Forbidden', 'read', null,
+        );
+    }
+
+    public function testEnrollmentGrantIsNotIssuedWithExistingPasskey(): void
+    {
+        $this->createCredential(0, 'Existing key');
+        self::assertNull($this->stepUp->issueTotpEnrollment($this->userId, 'session', $this->passwordHash()));
+    }
+
     public function testTotpEnrollmentRejectsAuthorizationFromBeforePasswordChange(): void
     {
         $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');

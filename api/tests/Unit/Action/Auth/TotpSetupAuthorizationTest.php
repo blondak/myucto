@@ -309,6 +309,31 @@ final class TotpSetupAuthorizationTest extends TestCase
         self::assertSame(0, (int) $this->pdo->query('SELECT totp_enabled FROM users WHERE id = 17')->fetchColumn());
     }
 
+    public function testEnrollmentGrantIsVerifiedByAtomicOperationWithoutPassword(): void
+    {
+        $this->passwords->expects(self::never())->method('verify');
+        $this->bruteForce->expects(self::never())->method('check');
+        $this->protectedOperations->expects(self::once())->method('storePendingTotpSecret')
+            ->with(self::USER_ID, self::SESSION_TOKEN, self::PASSWORD_HASH, self::isString(), null, 'grant')
+            ->willReturn('password_enrollment');
+        $response = $this->action()->setup(
+            $this->request('/api/auth/totp/setup')->withParsedBody(['enrollment_token' => 'grant']), new Response(),
+        );
+        self::assertSame(200, $response->getStatusCode());
+    }
+
+    public function testInvalidEnrollmentGrantDoesNotRevealSecret(): void
+    {
+        $this->protectedOperations->method('storePendingTotpSecret')
+            ->willThrowException(new OneTimeTokenException('invalid'));
+        $response = $this->action()->setup(
+            $this->request('/api/auth/totp/setup')->withParsedBody(['enrollment_token' => 'invalid']), new Response(),
+        );
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('enrollment_authorization_invalid', $this->errorCode($response));
+        self::assertNull($this->storedSecret());
+    }
+
     private function action(): TotpAction
     {
         $db = $this->createMock(Connection::class);

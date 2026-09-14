@@ -239,6 +239,10 @@ async function finishDomainLoginIfNeeded(): Promise<boolean> {
     await router.replace(handoffPath?.startsWith('/setup-mfa') ? handoffPath : '/setup-mfa')
     return true
   }
+  if (auth.shouldOfferMfa && handoffPath === '/profile/password?tab=totp') {
+    await router.replace('/setup-mfa?method=totp')
+    return true
+  }
   if (handoffPath !== null && !handoffPath.startsWith('/setup-mfa')) {
     await router.replace(handoffPath)
     return true

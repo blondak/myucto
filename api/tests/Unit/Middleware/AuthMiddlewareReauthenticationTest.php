@@ -103,6 +103,7 @@ final class AuthMiddlewareReauthenticationTest extends TestCase
             $mfaOffers,
             new SessionLockPolicy($config),
             $this->roleProfileStub(),
+            $this->createMock(\MyInvoice\Service\Auth\MfaStepUpService::class),
         );
         $terminal = new class ($issuer, $context) implements RequestHandlerInterface {
             public function __construct(

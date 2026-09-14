@@ -390,6 +390,7 @@ final class LoginAction
             $userAgent,
             $authContext,
             $issueTrustedTd,
+            (string) $user['password_hash'],
         );
     }
 
@@ -413,14 +414,17 @@ final class LoginAction
     /**
      * @param array<string,mixed> $user
      */
-    private function rehashPasswordIfNeeded(array $user, string $password): void
+    private function rehashPasswordIfNeeded(array &$user, string $password): void
     {
         if (!$this->hasher->needsRehash((string) $user['password_hash'])) {
             return;
         }
         $newHash = $this->hasher->hash($password);
-        $this->db->pdo()->prepare('UPDATE users SET password_hash = ? WHERE id = ?')
-            ->execute([$newHash, (int) $user['id']]);
+        $stmt = $this->db->pdo()->prepare('UPDATE users SET password_hash = ? WHERE id = ? AND HEX(password_hash) = HEX(?)');
+        $stmt->execute([$newHash, (int) $user['id'], (string) $user['password_hash']]);
+        if ($stmt->rowCount() === 1) {
+            $user['password_hash'] = $newHash;
+        }
     }
 
     /** p***@example.cz — náznak adresy pro UI, bez prozrazení celého e-mailu. */

@@ -30,6 +30,7 @@ final class MfaProtectedOperationService
         string $authorizedPasswordHash,
         string $encryptedSecret,
         ?string $proofToken,
+        ?string $enrollmentToken = null,
     ): string {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -48,6 +49,13 @@ final class MfaProtectedOperationService
             if ($proofToken === null) {
                 if ($this->credentials->lockAllActiveForUser($pdo, $userId) !== []) {
                     throw new TotpEnrollmentException(TotpEnrollmentException::STALE_AUTHORIZATION);
+                }
+                if ($enrollmentToken !== null) {
+                    $this->stepUp->consumeTotpEnrollmentInTransaction(
+                        $pdo, $cutoff, $enrollmentToken, $userId, $sessionToken,
+                        (string) $user['password_hash'],
+                    );
+                    $authMethod = 'password_enrollment';
                 }
             } else {
                 $proof = $this->stepUp->consumeInTransaction(
@@ -274,6 +282,7 @@ final class MfaProtectedOperationService
                 AND expires_at > FROM_UNIXTIME(?)
                 AND replaced_at IS NULL
                 AND revoked_at IS NULL
+                AND locked_at IS NULL
               FOR UPDATE'
         );
         $stmt->execute([$sessionToken, $userId, $cutoff->epochSeconds]);

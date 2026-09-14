@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import AppShell from '@/components/layout/AppShell.vue'
 import { authApi } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { rememberTotpEnrollment } from '@/security/totpEnrollment'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -31,7 +32,10 @@ async function submit() {
   submitting.value = true
   error.value = ''
   try {
-    await authApi.reset(token.value, password.value)
+    rememberTotpEnrollment(null)
+    const result = await authApi.reset(token.value, password.value)
+    password.value = ''
+    passwordConfirm.value = ''
     success.value = true
 
     // Odkaz z prvního nastavení vrací rovnou sezení (`purpose = 'setup'`, viz
@@ -48,6 +52,7 @@ async function submit() {
       // ověření. Právě po nastavení hesla je na nabídku nejlepší chvíle — jinak
       // uživatel spadne rovnou do aplikace a o MFA se nedozví.
       const mfaScreen = auth.mustSetupMfa || auth.mustSetupTotp || auth.shouldOfferMfa
+      if (mfaScreen) rememberTotpEnrollment(result.data.totp_enrollment_token, auth.user?.id)
       router.push(mfaScreen ? '/setup-mfa' : '/')
       return
     }

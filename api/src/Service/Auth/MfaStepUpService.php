@@ -143,6 +143,46 @@ final class MfaStepUpService
         return $operation;
     }
 
+    public function issueTotpEnrollment(
+        int $userId,
+        string $sessionToken,
+        string $passwordHash,
+        ?MfaPolicyService $enrollmentPolicy = null,
+    ): ?string
+    {
+        if ($passwordHash === '' || !($enrollmentPolicy ?? $this->policy)->isMethodAllowed('totp')
+            || $this->credentials->countActiveForUser($userId) > 0
+        ) {
+            return null;
+        }
+        return $this->proofs->issue(
+            $userId,
+            $sessionToken,
+            'totp.enroll:' . hash('sha256', $passwordHash),
+            'password',
+        );
+    }
+
+    public function consumeTotpEnrollmentInTransaction(
+        PDO $pdo,
+        SecurityTime $cutoff,
+        string $token,
+        int $userId,
+        string $sessionToken,
+        string $passwordHash,
+    ): void {
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException('Spotřeba oprávnění vyžaduje aktivní transakci.');
+        }
+        $proof = $this->proofs->consumeInTransaction(
+            $pdo, $cutoff, $token, $userId, $sessionToken,
+            'totp.enroll:' . hash('sha256', $passwordHash),
+        );
+        if ($proof->authMethod !== 'password' || !$this->policy->isMethodAllowed('totp')) {
+            throw new OneTimeTokenException('Neplatné oprávnění pro zřízení TOTP.');
+        }
+    }
+
     public function issue(
         int $userId,
         string $sessionToken,

@@ -157,6 +157,7 @@ export interface SessionLockPreferenceUpdate extends SessionLockPreference {
 }
 
 export interface AuthSessionContract {
+  totp_enrollment_token?: string | null
   user: User
   csrf_token: string
   require_totp: boolean
@@ -315,6 +316,7 @@ export const authApi = {
       require_mfa: boolean
       allowed_mfa_methods: Array<'passkey' | 'totp'>
       cfg_local_written: boolean
+      totp_enrollment_token?: string | null
     }>(
       '/auth/setup',
       payload,
@@ -426,7 +428,7 @@ export const authApi = {
     }),
 
   reset: (token: string, password: string) =>
-    api.post('/auth/reset', { token, password, password_confirm: password }),
+    api.post<Partial<AuthSessionContract>>('/auth/reset', { token, password, password_confirm: password }),
 
   // TOTP / 2FA
   totpStatus: () => api.get<{ enabled: boolean }>('/auth/totp/status').then(r => r.data),
@@ -436,7 +438,7 @@ export const authApi = {
    * passkey). Bez toho by útočník s ukradenou session mohl tiše přidat vlastní
    * TOTP a zamknout majitele ven.
    */
-  totpSetup: (authorization: { current_password?: string; step_up_token?: string }) =>
+  totpSetup: (authorization: { current_password?: string; step_up_token?: string; enrollment_token?: string }) =>
     api.post<TotpSetup>('/auth/totp/setup', authorization).then(r => r.data),
   /**
    * Zapne TOTP.

@@ -28,6 +28,7 @@ final class LoginSessionIssuer
         private readonly MfaOfferService $mfaOffers,
         private readonly SessionLockPolicy $lockPolicy,
         private readonly UserRoleProfile $roleProfile,
+        private readonly MfaStepUpService $stepUp,
     ) {}
 
     /**
@@ -40,6 +41,7 @@ final class LoginSessionIssuer
         string $userAgent,
         SessionAuthContext $authContext,
         bool $issueTrustedDevice = false,
+        ?string $verifiedPasswordHash = null,
     ): Response {
         $userId = (int) ($user['id'] ?? 0);
         $email = (string) ($user['email'] ?? '');
@@ -67,6 +69,7 @@ final class LoginSessionIssuer
             $authContext,
             $session,
             $issueTrustedDevice,
+            $verifiedPasswordHash,
         );
     }
 
@@ -85,6 +88,7 @@ final class LoginSessionIssuer
         SessionAuthContext $authContext,
         array $session,
         bool $issueTrustedDevice = false,
+        ?string $verifiedPasswordHash = null,
     ): Response {
         $userId = (int) ($user['id'] ?? 0);
         $email = (string) ($user['email'] ?? '');
@@ -125,6 +129,10 @@ final class LoginSessionIssuer
         // Musí být i tady, ne jen v MeAction: přihlašovací odpověď je pro frontend
         // první podoba uživatele a chybějící pole by se četlo jako „nenabízet".
         $shouldOfferMfa = $this->mfaOffers->shouldOffer($userId, $mfaMethods !== []);
+        $enrollmentToken = $verifiedPasswordHash !== null && $mfaMethods === []
+            && ($mustSetupMfa || ($requireTotp && !$totpEnabled) || $shouldOfferMfa)
+            ? $this->stepUp->issueTotpEnrollment($userId, $session['token'], $verifiedPasswordHash)
+            : null;
         $userTimeout = ($user['session_lock_after_minutes'] ?? null) !== null
             ? (int) $user['session_lock_after_minutes']
             : null;
@@ -154,6 +162,7 @@ final class LoginSessionIssuer
                 'should_offer_mfa' => $shouldOfferMfa,
             ],
             'csrf_token' => $session['csrf_token'],
+            'totp_enrollment_token' => $enrollmentToken,
             'require_totp' => $requireTotp,
             'require_mfa' => $this->mfaPolicy->isRequired(),
             'allowed_mfa_methods' => $this->mfaPolicy->allowedMethods(),
@@ -172,6 +181,7 @@ final class LoginSessionIssuer
             ),
         );
 
+        $result = $result->withHeader('Cache-Control', 'no-store');
         if ($issueTrustedDevice) {
             $trustedToken = $this->trustedDevices->issue($userId, $ip, $userAgent);
             $result = $result->withAddedHeader(

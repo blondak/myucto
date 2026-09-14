@@ -4,6 +4,7 @@ import { authApi, type User, type SetupStatus, type SessionState, type DomainCon
 import type { LicenseSummary } from '@/api/license'
 import { setCsrfToken, setDomainSupplierLock } from '@/api/client'
 import { broadcastSessionEvent } from '@/security/sessionChannel'
+import { rememberTotpEnrollment } from '@/security/totpEnrollment'
 import { setOverdueIncludesToday } from '@/utils/invoiceOverdue'
 import { useSupplierStore } from './supplier'
 import { accessLevelValue, type AccessLevel, type PermissionKey, type PermissionValue } from '@/security/permissions'
@@ -171,6 +172,7 @@ export const useAuthStore = defineStore('auth', () => {
     totp?: string,
     opts?: { emailOtp?: string; rememberDevice?: boolean; resendOtp?: boolean; recoveryCode?: string },
   ) {
+    rememberTotpEnrollment(null)
     loading.value = true
     try {
       const data = await authApi.login({
@@ -191,6 +193,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (isDemo.value) localStorage.removeItem('myinvoice.current_supplier_id')
       // Po loginu načti suppliery (login response je nemá, /me je vrátí)
       await refresh()
+      rememberTotpEnrollment(data.totp_enrollment_token, user.value?.id)
       return data.user
     } finally {
       loading.value = false
@@ -198,6 +201,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function clearPrivateState() {
+    rememberTotpEnrollment(null)
     user.value = null
     csrfToken.value = ''
     setCsrfToken(null)

@@ -157,6 +157,12 @@ TOTP = time-based one-time password (RFC 6238).
 Na vlastní doméně klientského portálu se nastavení TOTP otevře na hlavní
 adrese aplikace, kde lze bezpečně ověřit také existující passkey.
 
+Pokud průvodce nabídne nebo vyžádá první TOTP bezprostředně po přihlášení
+heslem nebo po prvním nastavení hesla z uvítacího odkazu, heslo znovu neopisuješ.
+Totéž platí při prvotním nastavení vlastní instalace. Pokračování je jednorázové
+a platí nejvýše pět minut. Po obnovení stránky, opuštění průvodce nebo změně
+hesla je potřeba nové ověření. Existující passkey tato možnost nenahrazuje.
+
 Při přechodu politiky z passkeys na TOTP lze existující passkey použít
 výhradně k potvrzení zřízení TOTP. Nepovoluje to přihlášení ani jiné citlivé
 operace metodou, kterou správce zakázal.

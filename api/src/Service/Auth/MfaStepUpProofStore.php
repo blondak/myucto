@@ -103,7 +103,9 @@ final class MfaStepUpProofStore
         if ($sessionToken === '' || $operation === '' || strlen($operation) > 190) {
             throw new \InvalidArgumentException('Step-up proof vyžaduje session a platnou operaci.');
         }
-        if (!in_array($authMethod, self::AUTH_METHODS, true)) {
+        $isEnrollment = $authMethod === 'password'
+            && preg_match('/^totp\.enroll:[a-f0-9]{64}$/D', $operation) === 1;
+        if (!in_array($authMethod, self::AUTH_METHODS, true) && !$isEnrollment) {
             throw new \InvalidArgumentException('Nepodporovaná metoda step-up ověření.');
         }
         if (($authMethod === 'passkey') !== ($authCredentialId !== null)) {
