@@ -83,13 +83,20 @@ final readonly class CompanyBackupDerivedHash
         ) {
             throw self::invalid($registryKey, $hashColumn);
         }
-        if ($algorithm
-                === CompanyBackupDerivedHashAlgorithm::Sha256CanonicalProjection
+        if ($algorithm !== CompanyBackupDerivedHashAlgorithm::Sha256CanonicalJson
             && ($sourceColumn !== null
                 || $nullable
                 || !array_key_exists('projection', $value)
                 || array_key_exists('dependencies', $value))
         ) {
+            throw self::invalid($registryKey, $hashColumn);
+        }
+
+        if ($algorithm === CompanyBackupDerivedHashAlgorithm::Sha256SubmissionOutboxV1
+            && ($registryKey !== 'table:submission_outbox'
+                || $hashColumn !== 'idempotency_key_hash'
+                || \MyInvoice\Service\Backup\CanonicalJson::encode($value['projection'] ?? null)
+                    !== \MyInvoice\Service\Backup\CanonicalJson::encode(CompanyBackupSubmissionIdentity::projection()))) {
             throw self::invalid($registryKey, $hashColumn);
         }
 

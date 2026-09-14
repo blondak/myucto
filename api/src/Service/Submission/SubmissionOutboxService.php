@@ -117,8 +117,7 @@ final readonly class SubmissionOutboxService
         }
 
         $sha = hash('sha256', $artifact['bytes']);
-        $idempotencyKey = implode('|', [
-            'submission-outbox.v1',
+        $idempotencyKey = SubmissionOutboxIdentity::key(
             $supplierId,
             $environment,
             $channel,
@@ -126,8 +125,8 @@ final readonly class SubmissionOutboxService
             $artifactKind,
             $artifactId,
             $sha,
-            $recipientId ?? 0,
-        ]);
+            $recipientId,
+        );
 
         return $this->outbox->enqueue([
             'supplier_id' => $supplierId,

@@ -112,6 +112,39 @@ final class SubmissionOutboxServiceTest extends TestCase
         self::assertSame($first['row']['id'], $second['row']['id']);
     }
 
+    public function testRestoredIdentityIsRecognizedByNormalEnqueue(): void
+    {
+        $target = $this->enqueue()['row'];
+        $source = array_replace($target, ['supplier_id' => 700001, 'artifact_id' => 700002, 'recipient_id' => 700003]);
+        $source['idempotency_key_hash'] = hash('sha256', \MyInvoice\Service\Backup\Company\CompanyBackupSubmissionIdentity::key($source));
+        $hashes = \MyInvoice\Service\Backup\Company\CompanyBackupDerivedHashSet::fromArray([[
+            'algorithm' => 'sha256_submission_outbox_v1', 'hash_column' => 'idempotency_key_hash',
+            'nullable' => false, 'projection' => \MyInvoice\Service\Backup\Company\CompanyBackupSubmissionIdentity::projection(),
+        ]], 'table:submission_outbox', array_keys($source));
+        $restored = $hashes->transform($source, static fn (array $row): array => array_replace($row, [
+            'supplier_id' => $target['supplier_id'], 'artifact_id' => $target['artifact_id'], 'recipient_id' => $target['recipient_id'],
+        ]));
+        $binary = \MyInvoice\Service\Backup\Company\CompanyBackupColumnCodec::BinaryHex->decode(
+            $restored['idempotency_key_hash'], 'table:submission_outbox', 'idempotency_key_hash');
+        // Nahrazuje se pouze právě vytvořený syntetický řádek uvnitř rollback fixture.
+        $this->db->pdo()->prepare('DELETE FROM submission_outbox WHERE id = ?')->execute([$target['id']]);
+        $this->db->pdo()->prepare('INSERT INTO submission_outbox
+            (supplier_id, environment, channel, agenda_code, recipient_id, recipient_box_id,
+             subject, artifact_kind, artifact_id, artifact_filename, artifact_sha256,
+             idempotency_key_hash, correlation_reference, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
+                $restored['supplier_id'], $restored['environment'], $restored['channel'], $restored['agenda_code'],
+                $restored['recipient_id'], $restored['recipient_box_id'], $restored['subject'],
+                $restored['artifact_kind'], $restored['artifact_id'], $restored['artifact_filename'],
+                $restored['artifact_sha256'], $binary, $restored['correlation_reference'], $restored['created_by'],
+            ]);
+        $restoredId = (int) $this->db->pdo()->lastInsertId();
+        $again = $this->enqueue();
+        self::assertFalse($again['created']);
+        self::assertSame($restoredId, $again['row']['id']);
+        self::assertSame([], $this->transport->sentMessages);
+    }
+
     /** @return iterable<string,array{string}> */
     public static function restoreReviewCodes(): iterable
     {

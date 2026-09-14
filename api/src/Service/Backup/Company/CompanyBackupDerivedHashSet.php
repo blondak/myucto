@@ -273,7 +273,9 @@ final readonly class CompanyBackupDerivedHashSet
                 }
                 $payload[$field->key] = $value;
             }
-            return CanonicalJson::encode($payload);
+            return $derivedHash->algorithm === CompanyBackupDerivedHashAlgorithm::Sha256SubmissionOutboxV1
+                ? CompanyBackupSubmissionIdentity::key($payload)
+                : CanonicalJson::encode($payload);
         } catch (CompanyBackupDataSourceException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -298,7 +300,8 @@ final readonly class CompanyBackupDerivedHashSet
             }
             return match ($derivedHash->algorithm) {
                 CompanyBackupDerivedHashAlgorithm::Sha256CanonicalJson => $decoded,
-                CompanyBackupDerivedHashAlgorithm::Sha256CanonicalProjection =>
+                CompanyBackupDerivedHashAlgorithm::Sha256CanonicalProjection,
+                CompanyBackupDerivedHashAlgorithm::Sha256SubmissionOutboxV1 =>
                     throw new \LogicException(
                         'Řádková projekce nemá samostatný JSON zdroj.',
                     ),
