@@ -1589,21 +1589,24 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
       <!-- ═══ Originální PDF od dodavatele ═══ -->
       <div v-if="invoice.pdf_path" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-3 border-b border-neutral-100">
-          <div class="flex items-center gap-3">
+        <!-- Na mobilu se trojice tlačítek vedle názvu souboru nevejde — bez zalomení
+             se zmáčkla do úzkého sloupce a každý popisek se lámal na dva řádky.
+             Zalomí se tedy celý blok: nejdřív soubor, pod ním řada tlačítek. -->
+        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-neutral-100">
+          <div class="flex items-center gap-3 min-w-0">
             <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
               <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
               <path fill="#ffffff" opacity="0.35" d="M20 2v8h8z"/>
               <text x="16" y="26" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="8" font-weight="700" text-anchor="middle" letter-spacing="0.3">PDF</text>
             </svg>
-            <div>
-              <div class="font-medium text-sm">{{ invoice.pdf_original_name || 'invoice.pdf' }}</div>
+            <div class="min-w-0">
+              <div class="font-medium text-sm truncate">{{ invoice.pdf_original_name || 'invoice.pdf' }}</div>
               <div class="text-xs text-neutral-500">{{ Math.round((Number(invoice.pdf_size_bytes) || 0) / 1024) }} KiB · {{ invoice.pdf_uploaded_at ? formatDate(invoice.pdf_uploaded_at.slice(0,10)) : '' }}</div>
             </div>
           </div>
           <div class="flex items-center gap-2 flex-wrap">
             <button type="button" @click="pdfPreview.toggle()"
-              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5">
+              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
                 <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
@@ -1611,12 +1614,12 @@ const purchaseActions = computed<ActionItem[]>(() => {
               {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
             </button>
             <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank"
-               class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5">
+               class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
               <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               {{ t('purchase_invoice.pdf.download') }}
             </a>
             <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="deletePdf"
-              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5">
+              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
               {{ t('purchase_invoice.pdf.delete') }}
             </button>
