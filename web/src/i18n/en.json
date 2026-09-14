@@ -21586,6 +21586,7 @@
     "password_required": "Enter your password again to register the first security method.",
     "transition_totp_hint": "This account already has TOTP enabled. Confirm the secure transition to a passkey with its current code.",
     "transition_totp_required": "Enter a valid 6-digit TOTP code to register the passkey.",
+    "already_enabled_relogin": "TOTP is already active, but this sign-in does not have strong verification yet. Sign out and sign in again.",
     "no_method_available": "This installation allows no method you could activate here. Adjust auth.allowed_mfa_methods in cfg.php or contact an administrator.",
     "logout_hint": "Until MFA is completed, the account can only sign out.",
     "offer_title": "Add a second factor to your account",

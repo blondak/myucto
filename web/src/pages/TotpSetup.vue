@@ -92,12 +92,22 @@ async function activate() {
     if (result.recovery_codes?.length) {
       recoveryCodes.value = result.recovery_codes
     }
+    await auth.refresh()
     await loadStatus()
   } catch (e: any) {
     const errCode = e?.response?.data?.error?.code
     error.value = errCode === 'already_enabled'
       ? e?.response?.data?.error?.message || t('auth.totp_already_enabled')
       : e?.response?.data?.error?.message || t('auth.totp_invalid')
+    if (errCode === 'already_enabled') {
+      setup.value = null
+      code.value = ''
+      await auth.refresh()
+      await loadStatus()
+    } else if (errCode === 'enrollment_stale' || errCode === 'no_secret') {
+      setup.value = null
+      code.value = ''
+    }
   } finally {
     busy.value = false
   }

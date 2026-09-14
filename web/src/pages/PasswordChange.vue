@@ -91,6 +91,7 @@ async function submitPw() {
     current.value = ''
     next.value = ''
     confirm.value = ''
+    cancelTotpSetup()
   } catch (e: any) {
     pwError.value = apiErrorMessage(e, t('auth.change_password_failed'))
   } finally {
@@ -188,8 +189,9 @@ async function activateTotp() {
     totpCode.value = ''
     if (result.recovery_codes?.length) {
       totpRecoveryCodes.value = result.recovery_codes
-      return
     }
+    await auth.refresh()
+    if (totpRecoveryCodes.value) return
     toast.success(t('auth.totp_enabled_done'))
     await loadTotpStatus()
   } catch (e: any) {
@@ -197,6 +199,14 @@ async function activateTotp() {
     totpError.value = code === 'already_enabled'
       ? e?.response?.data?.error?.message || t('auth.totp_already_enabled')
       : e?.response?.data?.error?.message || t('auth.totp_invalid')
+    if (code === 'already_enabled') {
+      cancelTotpSetup()
+      await auth.refresh()
+      await loadTotpStatus()
+    } else if (code === 'enrollment_stale' || code === 'no_secret') {
+      totpSetup.value = null
+      totpCode.value = ''
+    }
   } finally {
     totpBusy.value = false
   }

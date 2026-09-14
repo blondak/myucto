@@ -59,6 +59,10 @@ test('WebAuthn pages use a fixed canonical handoff and a separate custom-domain 
     routes.get('profile-password')?.canonical_handoff?.to,
     '/profile/password?tab=passkeys',
   )
+  assert.equal(
+    routes.get('profile-password')?.canonical_handoff?.query_targets?.tab?.totp,
+    '/profile/password?tab=totp',
+  )
   assert.equal(routes.get('setup-mfa')?.canonical_handoff?.to, '/setup-mfa')
 
   assert.match(router, /clientDomainCanonicalHandoffPath\(to\.fullPath\)/)

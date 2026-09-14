@@ -13,7 +13,7 @@ export interface ClientDomainRouteDefinition {
   redirect_to?: string
   redirect_destinations?: string[]
   canonical_handoff?: {
-    match_query?: Record<string, string>
+    match_query?: Record<string, string | string[]>
     query_targets?: Record<string, Record<string, string>>
     to: string
   }
@@ -87,7 +87,9 @@ export function clientDomainCanonicalHandoffPath(value: unknown): string | null 
       if (!handoff || !route.pattern.test(target.pathname)) continue
       const queryMatches = Object.entries(handoff.match_query ?? {}).every(([key, expected]) => {
         const values = target.searchParams.getAll(key)
-        return values.length === 1 && values[0] === expected
+        return values.length === 1 && (Array.isArray(expected)
+          ? expected.includes(values[0])
+          : values[0] === expected)
       })
       if (!queryMatches) continue
       for (const [key, targets] of Object.entries(handoff.query_targets ?? {})) {

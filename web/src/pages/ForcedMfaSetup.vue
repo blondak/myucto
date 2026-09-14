@@ -189,6 +189,24 @@ async function completeTotp() {
     error.value = code === 'already_enabled'
       ? e?.response?.data?.error?.message || t('auth.totp_already_enabled')
       : e?.response?.data?.error?.message || t('auth.totp_invalid')
+    if (code === 'already_enabled') {
+      totpSetup.value = null
+      totpCode.value = ''
+      let refreshed = false
+      try {
+        refreshed = await auth.refresh()
+      } catch {
+        refreshed = false
+      }
+      if (refreshed && !auth.mustSetupMfa && !auth.mustSetupTotp) {
+        await continueAfterSetup()
+        return
+      }
+      error.value = t('mfa_setup.already_enabled_relogin')
+    } else if (code === 'enrollment_stale' || code === 'no_secret') {
+      totpSetup.value = null
+      totpCode.value = ''
+    }
   } finally {
     busy.value = false
   }

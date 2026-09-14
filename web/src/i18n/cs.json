@@ -21586,6 +21586,7 @@
     "password_required": "Pro registraci první bezpečnostní metody zadej znovu své heslo.",
     "transition_totp_hint": "Účet už má aktivní TOTP. Potvrď jeho aktuálním kódem bezpečný přechod na přístupový klíč.",
     "transition_totp_required": "Pro registraci přístupového klíče zadej platný 6místný TOTP kód.",
+    "already_enabled_relogin": "TOTP už bylo aktivováno, ale toto přihlášení ještě nemá silné ověření. Odhlas se a přihlas znovu.",
     "no_method_available": "Tato instalace nemá povolenou žádnou metodu, kterou bys tu mohl aktivovat. Uprav auth.allowed_mfa_methods v cfg.php nebo se obrať na správce.",
     "logout_hint": "Bez dokončení MFA lze účet pouze odhlásit.",
     "offer_title": "Zabezpeč si účet druhým faktorem",

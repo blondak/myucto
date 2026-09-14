@@ -154,6 +154,16 @@ TOTP = time-based one-time password (RFC 6238).
 4. Aplikace začne generovat 6-cifrené kódy každých 30 sekund.
 5. Zadej aktuální kód do MyÚčto → **Potvrdit aktivaci**.
 
+Na vlastní doméně klientského portálu se nastavení TOTP otevře na hlavní
+adrese aplikace, kde lze bezpečně ověřit také existující passkey.
+
+Při přechodu politiky z passkeys na TOTP lze existující passkey použít
+výhradně k potvrzení zřízení TOTP. Nepovoluje to přihlášení ani jiné citlivé
+operace metodou, kterou správce zakázal.
+
+Změna nebo reset hesla, včetně změny správcem, ruší rozpracovanou aktivaci
+TOTP. Začni znovu a načti nový QR kód. Již aktivní TOTP se změnou hesla neruší.
+
 > 💡 Při ztrátě autentikátoru použij jinou passkey nebo **záložní kód**
 > (viz [§ 101.2.4](#10124-obnova-pristupu)). Až když nemáš nic z toho, zbývá CLI
 > rescue `php api/bin/reset-mfa.php <email>`.

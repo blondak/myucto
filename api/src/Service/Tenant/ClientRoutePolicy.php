@@ -81,6 +81,12 @@ final class ClientRoutePolicy
         $parts = parse_url($path);
         if (!is_array($parts)) return null;
         $normalized = RequestPath::normalize((string) ($parts['path'] ?? ''));
+        $queryCounts = [];
+        foreach (explode('&', (string) ($parts['query'] ?? '')) as $field) {
+            if ($field === '') continue;
+            $key = urldecode(explode('=', $field, 2)[0]);
+            $queryCounts[$key] = ($queryCounts[$key] ?? 0) + 1;
+        }
         $query = [];
         parse_str((string) ($parts['query'] ?? ''), $query);
 
@@ -96,7 +102,14 @@ final class ClientRoutePolicy
                 throw new \RuntimeException('Manifest klientských rout má neplatný canonical handoff.');
             }
             foreach ($requiredQuery as $key => $value) {
-                if (($query[$key] ?? null) !== $value) continue 2;
+                $actual = $query[$key] ?? null;
+                $allowed = is_array($value) ? $value : [$value];
+                if (($queryCounts[$key] ?? 0) !== 1
+                    || !is_string($actual)
+                    || !in_array($actual, $allowed, true)
+                ) {
+                    continue 2;
+                }
             }
 
             $target = (string) ($handoff['to'] ?? '');
@@ -105,6 +118,7 @@ final class ClientRoutePolicy
                 throw new \RuntimeException('Manifest klientských rout má neplatné varianty handoffu.');
             }
             foreach ($queryTargets as $key => $targets) {
+                if (($queryCounts[$key] ?? 0) > 1) continue 2;
                 $value = $query[$key] ?? null;
                 if (is_string($value) && is_array($targets) && isset($targets[$value])) {
                     $target = (string) $targets[$value];
