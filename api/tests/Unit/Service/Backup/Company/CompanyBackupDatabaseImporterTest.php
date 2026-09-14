@@ -20,6 +20,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupImportSchemaSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportTableMetadata;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
+use MyInvoice\Service\Backup\Company\CompanyBackupIsdsGatewaySessionsProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupIsdsGatewayTokenGuard;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryResultSetAssembler;
 use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
@@ -547,6 +549,44 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         self::assertSame(0, $this->temporaryTableCount());
     }
 
+    public function testRechecksGatewayTokenImmediatelyBeforeImportInsert(): void
+    {
+        $this->database->exec('CREATE TABLE isds_gateway_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id INTEGER NOT NULL,
+            app_token TEXT NOT NULL UNIQUE
+        )');
+        [$source, $preflight, $decisions] = $this->context(gateway: true);
+        $row = ['app_token' => '00000000000000000001'];
+        CompanyBackupIsdsGatewayTokenGuard::assertAvailable(
+            $this->database,
+            CompanyBackupIsdsGatewayTokenGuard::REGISTRY_KEY,
+            $row,
+        );
+        // Relace jiné firmy na cíli vznikla až po předběžné kontrole.
+        $this->database->exec("INSERT INTO isds_gateway_sessions VALUES (12, 40, '00000000000000000001')");
+
+        $importer = new CompanyBackupDatabaseImporter(
+            $this->database,
+            new SyntheticCompanyBackupImportSchemaSource(),
+        );
+        self::assertTrue($this->database->beginTransaction());
+        try {
+            $importer->restore($source, $preflight, $decisions, $this->sensitiveData());
+            self::fail('Import musí znovu zkontrolovat token před insertem.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('isds_gateway_token_collision', $e->errorCode);
+            self::assertSame('table:isds_gateway_sessions', $e->registryKey);
+            self::assertSame('app_token', $e->column);
+            self::assertStringNotContainsString($row['app_token'], $e->getMessage());
+        }
+        self::assertTrue($this->database->inTransaction());
+        self::assertSame(1, $this->countRows('isds_gateway_sessions'));
+        self::assertTrue($this->database->rollBack());
+        self::assertSame(1, $this->countRows('isds_gateway_sessions'));
+        self::assertSame(0, $this->temporaryTableCount());
+    }
+
     public function testRejectsDatabaseFileReferenceMissingFromInventory(): void
     {
         [$source, $preflight, $decisions] = $this->context(
@@ -630,6 +670,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         bool $logicalIdentityCycle = false,
         bool $statutoryHashCycle = false,
         bool $invalidStatutorySeal = false,
+        bool $gateway = false,
     ): array
     {
         $snapshot = $this->snapshot(
@@ -637,12 +678,14 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             $withFiles,
             $logicalIdentityCycle,
             $statutoryHashCycle,
+            $gateway,
         );
         $rows = $this->sourceRows(
             $withFiles,
             $logicalIdentityCycle,
             $statutoryHashCycle,
             $invalidStatutorySeal,
+            $gateway,
         );
         $inventory = $this->inventory($snapshot, $rows);
         $fileInventory = $this->fileInventory(
@@ -740,6 +783,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         bool $withFiles = false,
         bool $logicalIdentityCycle = false,
         bool $statutoryHashCycle = false,
+        bool $gateway = false,
     ): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
@@ -1108,6 +1152,18 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 preservedIdentifiers: ['employee_id', 'employment_id'],
             );
         }
+        if ($gateway) {
+            $definitions[] = $this->definitionFor(
+                'table:isds_gateway_sessions',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'app_token'],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [
+                    $this->reference(['supplier_id'], 'table:supplier'),
+                ],
+                secretPolicies: CompanyBackupIsdsGatewaySessionsProjection::secretPolicies(),
+            );
+        }
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
             1,
             $definitions,
@@ -1121,6 +1177,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         bool $logicalIdentityCycle = false,
         bool $statutoryHashCycle = false,
         bool $invalidStatutorySeal = false,
+        bool $gateway = false,
     ): array
     {
         $firstPayload = CanonicalJson::encode([
@@ -1192,6 +1249,13 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             ...($statutoryHashCycle
                 ? $this->statutoryRows($invalidStatutorySeal)
                 : []),
+            ...($gateway ? [
+                'table:isds_gateway_sessions' => [[
+                    'id' => 71,
+                    'supplier_id' => 7,
+                    'app_token' => '00000000000000000001',
+                ]],
+            ] : []),
         ];
     }
 

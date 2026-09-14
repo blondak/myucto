@@ -13,6 +13,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflight;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportArchiveSource;
+use MyInvoice\Service\Backup\Company\CompanyBackupIsdsGatewaySessionsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupPayrollStatutoryResultSetAssembler;
 use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
@@ -75,6 +76,29 @@ final class CompanyBackupDataPreflightTest extends TestCase
             self::fail('Kontrola archivu musí odmítnout cílovou kolizi.');
         } catch (CompanyBackupPreflightException $e) {
             self::assertSame('submission_correlation_collision', $e->errorCode);
+        }
+        self::assertSame(0, $this->temporaryIndexCount());
+        self::assertSame('unchanged', $this->sentinelValue());
+    }
+
+    public function testRejectsGatewayTokenCollisionFromEncryptedArchive(): void
+    {
+        $this->database->exec('CREATE TABLE isds_gateway_sessions (
+            supplier_id INTEGER NOT NULL, app_token TEXT NOT NULL UNIQUE
+        )');
+        [$archive, $validation] = $this->archive(countryReference: 7, gateway: true);
+        $preflight = new CompanyBackupDataPreflight($this->limits());
+        self::assertSame(4, $preflight->inspect($archive, self::PASSWORD, $validation, $this->database)->rowCount);
+        $this->database->exec("INSERT INTO isds_gateway_sessions VALUES (90, '0000000001')");
+
+        try {
+            $preflight->inspect($archive, self::PASSWORD, $validation, $this->database);
+            self::fail('Kolize tokenu ze zašifrovaného archivu musí obnovu zastavit.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('isds_gateway_token_collision', $e->errorCode);
+            self::assertSame('table:isds_gateway_sessions', $e->registryKey);
+            self::assertSame('app_token', $e->column);
+            self::assertStringNotContainsString('0000000001', $e->getMessage());
         }
         self::assertSame(0, $this->temporaryIndexCount());
         self::assertSame('unchanged', $this->sentinelValue());
@@ -304,9 +328,10 @@ final class CompanyBackupDataPreflightTest extends TestCase
         bool $statutoryAggregate = false,
         bool $breakStatutoryAggregate = true,
         bool $submission = false,
+        bool $gateway = false,
     ): array
     {
-        $registry = $this->registry($statutoryAggregate, $submission);
+        $registry = $this->registry($statutoryAggregate, $submission, $gateway);
         $snapshot = TenantDataRegistrySnapshot::fromRegistry(
             $registry,
             TenantDataRegistry::COMPANY_BACKUP_PROFILE,
@@ -333,6 +358,11 @@ final class CompanyBackupDataPreflightTest extends TestCase
         if ($submission) {
             $payloads['table:submission_outbox'] = self::jsonl([[
                 'id' => 61, 'supplier_id' => 42, 'correlation_reference' => 'SYNTHETIC-ISDS-001',
+            ]]);
+        }
+        if ($gateway) {
+            $payloads['table:isds_gateway_sessions'] = self::jsonl([[
+                'id' => 71, 'supplier_id' => 42, 'app_token' => '0000000001',
             ]]);
         }
         if ($statutoryAggregate) {
@@ -440,7 +470,11 @@ final class CompanyBackupDataPreflightTest extends TestCase
         ];
     }
 
-    private function registry(bool $statutoryAggregate = false, bool $submission = false): TenantDataRegistry
+    private function registry(
+        bool $statutoryAggregate = false,
+        bool $submission = false,
+        bool $gateway = false,
+    ): TenantDataRegistry
     {
         $definitions = [
             $this->tableDefinition(
@@ -558,6 +592,11 @@ final class CompanyBackupDataPreflightTest extends TestCase
             $definitions[] = $this->tableDefinition('submission_outbox', TenantDataPolicy::TenantOwned,
                 ['id', 'supplier_id', 'correlation_reference'], preservedIdentifiers: ['supplier_id']);
         }
+        if ($gateway) {
+            $definitions[] = $this->tableDefinition('isds_gateway_sessions', TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'app_token'], preservedIdentifiers: ['supplier_id'],
+                secrets: CompanyBackupIsdsGatewaySessionsProjection::secretPolicies());
+        }
         return new TenantDataRegistry(
             1,
             $definitions,
@@ -623,6 +662,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
      * @param list<array<string,mixed>> $references
      * @param list<array<string,mixed>> $embeddedReferences
      * @param list<string> $preservedIdentifiers
+     * @param array<string,array{policy:string,reason:string}> $secrets
      */
     private function tableDefinition(
         string $table,
@@ -632,6 +672,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
         array $references = [],
         array $embeddedReferences = [],
         array $preservedIdentifiers = [],
+        array $secrets = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             'table:' . $table,
@@ -642,7 +683,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
                 'primary_key' => ['id'],
                 ...($naturalKey === null ? [] : ['natural_key' => $naturalKey]),
                 'ownership' => ['strategy' => 'synthetic'],
-                'secrets' => [],
+                'secrets' => $secrets,
                 'company_backup' => [
                     'data_columns' => $dataColumns,
                     'embedded_references' => $embeddedReferences,

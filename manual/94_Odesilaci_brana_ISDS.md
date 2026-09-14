@@ -70,6 +70,11 @@ se zastaví: značka propojuje podání se skutečnou zprávou ISDS a nesmí se
 přegenerovat. Použijte cíl bez této kolize; existující podání kvůli obnově
 nemažte. Nejde o neblokující varování jako při shodě bankovního účtu.
 
+Chyba `isds_gateway_token_collision` znamená, že na cílové instanci již
+existuje relace brány se stejným historickým callback tokenem (`app_token`).
+Obnova se zastaví i tehdy, když relace patří jiné firmě. Token se nepřegeneruje;
+použijte cíl bez kolize a existující historii kvůli obnově nemažte.
+
 - **Brána není nabízena:** zkontrolujte prostředí, aktivaci registrace a platnost certifikátu.
 - **ISDS odmítne certifikát:** ověřte, že PFX/P12 obsahuje soukromý klíč a patří ke stejné registraci aplikace.
 - **Návrat skončí chybou:** zkontrolujte přesnou HTTPS callback adresu v ISDS a platnost krátkodobé relace.

@@ -69,6 +69,7 @@ final readonly class CompanyBackupDataPreflight
                     ): void {
                         $index->add($context['identity']->identityForRow($row));
                         CompanyBackupSubmissionCorrelationGuard::assertAvailable($database, $object->registryKey, $row);
+                        CompanyBackupIsdsGatewayTokenGuard::assertAvailable($database, $object->registryKey, $row);
                         if (!$bankAccountCollision && $object->registryKey === 'table:currencies') {
                             $account = $row['account_number'] ?? null;
                             $iban = $row['iban'] ?? null;
