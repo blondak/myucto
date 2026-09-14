@@ -412,6 +412,23 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
         $this->assertProductionProjectionMatchesSchema('submission_recipients', ['id', 'supplier_id', 'code']);
     }
 
+    public function testTaxSubmissionContractMatchesCompleteLiveSchemaBeforeActivation(): void
+    {
+        $registry = TenantDataRegistryFactory::draftV1();
+        self::assertNull($registry->definition('table:tax_submissions'));
+        $definition = \MyInvoice\Service\Backup\Registry\CompanyBackupTaxSubmissionsDefinition::definition();
+        $projection = CompanyBackupTableProjection::fromDefinition($definition);
+        $reader = new CompanyBackupTableSchemaReader();
+        $schema = $reader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns, $schema->generatedColumns, $schema->primaryKey, $schema->binaryColumns,
+        );
+        $projection->references->assertRuntimeSchema(
+            $reader->readReferences($this->db->pdo(), $projection),
+        );
+        self::assertSame(20, count($schema->columns));
+    }
+
     public function testDraftSubmissionOutboxMatchesCompleteLiveSchema(): void
     {
         $projection = CompanyBackupTableProjection::fromDefinition(

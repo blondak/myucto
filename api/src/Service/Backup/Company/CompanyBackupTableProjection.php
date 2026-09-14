@@ -539,6 +539,15 @@ final readonly class CompanyBackupTableProjection
         if ($this->registryKey === 'table:supplier') {
             CompanyBackupSupplierProjection::assertSourceRow($row);
         }
+        if ($this->registryKey === CompanyBackupTaxSubmissionXmlEvidence::REGISTRY_KEY) {
+            try {
+                CompanyBackupTaxSubmissionXmlEvidence::assertRow($row);
+            } catch (CompanyBackupPreflightException $e) {
+                throw new CompanyBackupDataSourceException(
+                    $e->errorCode, $this->registryKey, $e->column, $e,
+                );
+            }
+        }
         if ($this->registryKey === 'table:bank_posting_rules') {
             try {
                 CompanyBackupBankRuleHistory::assertRow($row);

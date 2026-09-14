@@ -110,6 +110,18 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             );
         }
 
+        if ($registryKey === 'table:tax_submissions') {
+            $expected = CompanyBackupEmbeddedReference::fromArray(
+                CompanyBackupTaxSubmissionSummaryContract::embeddedReferences()[0],
+                $registryKey,
+            );
+            if (count($references) !== 1 || $references[0] != $expected) {
+                throw new CompanyBackupDataSourceException(
+                    'data_embedded_reference_metadata_invalid', $registryKey, 'summary_json',
+                );
+            }
+        }
+
         return new self($registryKey, $references);
     }
 
@@ -139,7 +151,8 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 CompanyBackupReferenceMapping::Actor,
                 CompanyBackupReferenceMapping::CredentialDecision =>
                     $reference->targetColumns === $primaryKey,
-                CompanyBackupReferenceMapping::TenantReferenceKey => false,
+                CompanyBackupReferenceMapping::TenantReferenceKey,
+                CompanyBackupReferenceMapping::TenantOrSystemId => false,
             };
             $validPolicy = match ($reference->mapping) {
                 CompanyBackupReferenceMapping::TenantId,
@@ -158,7 +171,8 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 CompanyBackupReferenceMapping::GlobalNaturalKey =>
                     $target->policy === TenantDataPolicy::GlobalReference,
                 CompanyBackupReferenceMapping::CredentialDecision,
-                CompanyBackupReferenceMapping::TenantReferenceKey => false,
+                CompanyBackupReferenceMapping::TenantReferenceKey,
+                CompanyBackupReferenceMapping::TenantOrSystemId => false,
             };
             if (!$targetsExpectedKey || !$validPolicy) {
                 throw $this->targetError($reference);
@@ -196,6 +210,21 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 throw $this->valueError($column);
             }
             $raw = $row[$column];
+            $taxSummary = $this->registryKey === 'table:tax_submissions';
+            if ($taxSummary) {
+                CompanyBackupTaxSubmissionSummaryContract::assertRow($row);
+                if (!is_string($raw)) {
+                    throw $this->valueError($column);
+                }
+                try {
+                    CompanyBackupLosslessJson::rewriteIntegerTokens(
+                        $raw,
+                        static fn (array $_path, string $_token): null => null,
+                    );
+                } catch (\Throwable $e) {
+                    throw $this->valueError($column, $e);
+                }
+            }
             if ($raw === null) {
                 continue;
             }
@@ -228,6 +257,10 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 );
             }
             if ($encoded) {
+                if ($taxSummary) {
+                    $row[$column] = CompanyBackupTaxSubmissionSummaryRemapper::rewrite($raw, $value);
+                    continue;
+                }
                 try {
                     $row[$column] = CanonicalJson::encode($value);
                 } catch (\Throwable $e) {

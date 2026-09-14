@@ -538,7 +538,193 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
             . $pdo->quote($code))->fetchColumn());
     }
 
-    private function registry(bool $withRecipients = false): TenantDataRegistrySnapshot
+    public function testTaxSummarySelfReferenceRestoresWithLosslessXmlAndJson(): void
+    {
+        self::assertInstanceOf(Connection::class, $this->connection);
+        $pdo = $this->connection->pdo();
+        [$registry, $supplier, $country, $vat, $actor, $sourceIds, $xml] = $this->taxShFixture($pdo);
+        $source = $pdo->prepare('SELECT * FROM tax_submissions WHERE id IN (?, ?) ORDER BY id');
+        $source->execute($sourceIds);
+        $before = $source->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(2, $before);
+
+        $archive = $this->archive($pdo, $registry, $supplier);
+        $inspection = (new Backup\CompanyBackupArchiveInspector(
+            new Backup\CompanyBackupFormat([Backup\CompanyBackupSecretEnvelopeDescriptor::CAPABILITY]),
+            BackupUpcasterRegistry::empty(),
+        ))->inspect($archive, self::PASSWORD, self::APP_VERSION,
+            Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
+        $validation = new Backup\CompanyBackupTechnicalValidation($inspection, $registry,
+            self::APP_VERSION, Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
+        $taxObject = $inspection->dataInventory->object('table:tax_submissions');
+        self::assertNotNull($taxObject);
+        self::assertSame(2, $taxObject->rows);
+        $preflight = (new Backup\CompanyBackupDataPreflight())->inspect(
+            $archive, self::PASSWORD, $validation, $pdo,
+        );
+        $choices = [];
+        foreach ($preflight->externalReferences->requirements as $requirement) {
+            self::assertSame(Backup\CompanyBackupReferenceMapping::GlobalNaturalKey, $requirement->mapping);
+            self::assertContains($requirement->targetRegistryKey, ['table:countries', 'table:vat_rates']);
+            $choices[] = [
+                'requirement_id' => $requirement->id,
+                'mapping' => $requirement->mapping->value,
+                'target_registry_key' => $requirement->targetRegistryKey,
+                'action' => 'map_existing',
+                'target_primary_key' => ['id' => $requirement->targetRegistryKey === 'table:countries'
+                    ? $country : $vat],
+            ];
+        }
+        $decisions = Backup\CompanyBackupReferenceDecisionPlan::fromArray([
+            'format' => Backup\CompanyBackupReferenceDecisionPlan::FORMAT,
+            'version' => Backup\CompanyBackupReferenceDecisionPlan::VERSION,
+            'data_preflight_binding_sha256' => $preflight->bindingSha256,
+            'decisions' => $choices,
+        ], $preflight, $registry, self::INSTANCE_ID, $actor);
+        $config = new Config(['app' => [
+            'secret_encryption_key' => base64_encode(str_repeat('s', 32)),
+            'payroll_hash_key' => base64_encode(str_repeat('h', 32)),
+        ]]);
+        $importSource = new Backup\CompanyBackupImportArchiveSource($archive, self::PASSWORD, $validation);
+        try {
+            $result = (new Backup\CompanyBackupDatabaseImporter($pdo))->restore(
+                $importSource, $preflight, $decisions,
+                new PayrollSensitiveData(new SecretEncryption($config), $config),
+            );
+            $post = (new Backup\CompanyBackupRegistryPostImportValidator())->validate(
+                $pdo, $importSource, $preflight, $result,
+            );
+            self::assertSame($result->insertedRows, $post->checkedTenantRows);
+        } finally {
+            $importSource->close();
+        }
+
+        $source->execute($sourceIds);
+        self::assertSame($before, $source->fetchAll(PDO::FETCH_ASSOC));
+        $target = $pdo->prepare('SELECT * FROM tax_submissions WHERE supplier_id = ? ORDER BY id');
+        $target->execute([$result->supplierId]);
+        $after = $target->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(2, $after);
+        self::assertNotSame($sourceIds, array_map(static fn (array $row): int => (int) $row['id'], $after));
+        foreach ($after as $index => $row) {
+            self::assertSame($result->supplierId, (int) $row['supplier_id']);
+            self::assertSame($xml[$index], $row['xml_content']);
+            self::assertSame(strlen($xml[$index]), (int) $row['xml_size_bytes']);
+            self::assertSame(hash('sha256', $xml[$index]), $row['xml_sha256']);
+        }
+        self::assertSame(null, json_decode((string) $after[0]['summary_json'], true)['reference_submission_id']);
+        self::assertSame((int) $after[0]['id'],
+            json_decode((string) $after[1]['summary_json'], true)['reference_submission_id']);
+        $sourceSummary = (string) $before[1]['summary_json'];
+        $expectedSummary = str_replace('"reference_submission_id":' . $sourceIds[0],
+            '"reference_submission_id":' . $after[0]['id'], $sourceSummary);
+        self::assertSame($expectedSummary, $after[1]['summary_json']);
+        self::assertStringContainsString('1.2300', (string) $after[1]['summary_json']);
+        self::assertStringContainsString('1e+03', (string) $after[1]['summary_json']);
+        $pdo->rollBack();
+        $target->execute([$result->supplierId]);
+        self::assertSame([], $target->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** @return iterable<string,array{string,string}> */
+    public static function invalidTaxShSources(): iterable
+    {
+        yield 'changed XML hash' => ['hash', 'tax_submission_xml_sha256_mismatch'];
+        yield 'unknown JSON key' => ['unknown_key', 'data_tax_submission_summary_invalid'];
+    }
+
+    #[DataProvider('invalidTaxShSources')]
+    public function testTaxShExportRejectsChangedEvidenceOrUnknownSummary(
+        string $mutation, string $expectedError,
+    ): void {
+        self::assertInstanceOf(Connection::class, $this->connection);
+        $pdo = $this->connection->pdo();
+        [$registry, $supplier, , , , $sourceIds] = $this->taxShFixture($pdo);
+        if ($mutation === 'hash') {
+            $pdo->prepare('UPDATE tax_submissions SET xml_sha256 = ? WHERE id = ?')
+                ->execute([str_repeat('a', 64), $sourceIds[1]]);
+        } else {
+            $pdo->prepare('UPDATE tax_submissions SET summary_json = JSON_SET(summary_json, ?, ?) WHERE id = ?')
+                ->execute(['$.unknown_id', 123, $sourceIds[1]]);
+        }
+        $query = $pdo->prepare('SELECT * FROM tax_submissions WHERE id IN (?, ?) ORDER BY id');
+        $query->execute($sourceIds);
+        $before = $query->fetchAll(PDO::FETCH_ASSOC);
+        try {
+            $this->archive($pdo, $registry, $supplier);
+            self::fail('Poškozený důkaz nebo neznámý souhrn nesmí být exportován.');
+        } catch (Backup\CompanyBackupDataWriteException $e) {
+            self::assertSame('data_source_failed', $e->errorCode);
+            self::assertSame('table:tax_submissions', $e->registryKey);
+            $sourceError = $e->getPrevious();
+            self::assertInstanceOf(Backup\CompanyBackupDataSourceException::class, $sourceError);
+            self::assertSame($expectedError, $sourceError->errorCode);
+            self::assertSame('table:tax_submissions', $sourceError->registryKey);
+        }
+        self::assertTrue($pdo->inTransaction());
+        $query->execute($sourceIds);
+        self::assertSame($before, $query->fetchAll(PDO::FETCH_ASSOC));
+        $pdo->rollBack();
+        $query->execute($sourceIds);
+        self::assertSame([], $query->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** @return array{TenantDataRegistrySnapshot,int,int,int,int,list<int>,list<string>} */
+    private function taxShFixture(PDO $pdo): array
+    {
+        $registry = $this->registry(withTaxSubmissions: true);
+        $query = static function (string $sql) use ($pdo): PDOStatement {
+            $statement = $pdo->query($sql);
+            self::assertInstanceOf(PDOStatement::class, $statement);
+            return $statement;
+        };
+        $country = (int) $query("SELECT id FROM countries WHERE iso2 = 'CZ'")->fetchColumn();
+        $vat = (int) $query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
+        $currency = (int) $query('SELECT id FROM currencies ORDER BY id LIMIT 1')->fetchColumn();
+        $actor = (int) $query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+        self::assertGreaterThan(0, min($country, $vat, $currency, $actor));
+        $pdo->prepare('INSERT INTO supplier (company_name, street, city, zip, email,
+            country_id, default_vat_rate_id, default_currency_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)')->execute([
+                'Synthetic tax SH source', 'Testovací 3', 'Praha', '11000',
+                'tax-sh-source@example.test', $country, $vat, $currency,
+            ]);
+        $supplier = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en)
+            VALUES (?, ?, ?, ?, ?, ?)')->execute([
+                $supplier, 'CZK', 'Synthetic tax currency', 'Kč', 'Syntetická', 'Synthetic',
+            ]);
+        $ownCurrency = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')
+            ->execute([$ownCurrency, $supplier]);
+
+        $xml = ["<?xml version=\"1.0\"?>\r\n<sh>řádné</sh>\n",
+            "<?xml version=\"1.0\"?>\r\n<sh>následné</sh>\n"];
+        $summary = static fn (?int $reference): string => '{"d_zjist":null,"is_follow_up":'
+            . ($reference === null ? 'false' : 'true')
+            . ',"period":"2026-01","reference_submission_id":'
+            . ($reference === null ? 'null' : (string) $reference)
+            . ',"rows":[{"amount":1.2300,"count":1,"counterparty_name":"Syntetická",'
+            . '"country_iso2":"DE","k_stat":"DE","sh_type":"0","vat_id":"DE000000000"}],'
+            . '"rows_count":1,"shvies_forma":"' . ($reference === null ? 'R' : 'N')
+            . '","storno_rows":0,"submission_deadline":"2026-02-25","total_amount":1e+03,'
+            . '"variant":"' . ($reference === null ? 'radne' : 'nasledne') . '"}';
+        $insert = $pdo->prepare('INSERT INTO tax_submissions
+            (supplier_id, form_code, period_year, period_month, form_variant,
+             xml_content, xml_size_bytes, xml_sha256, validation_status, status,
+             summary_json, generated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $insert->execute([$supplier, 'dphshv', 2026, 1, 'R', $xml[0], strlen($xml[0]),
+            hash('sha256', $xml[0]), 'skipped', 'submitted', $summary(null), null]);
+        $first = (int) $pdo->lastInsertId();
+        $insert->execute([$supplier, 'dphshv', 2026, 1, 'N', $xml[1], strlen($xml[1]),
+            hash('sha256', $xml[1]), 'skipped', 'downloaded', $summary($first), null]);
+        $second = (int) $pdo->lastInsertId();
+        return [$registry, $supplier, $country, $vat, $actor, [$first, $second], $xml];
+    }
+
+    private function registry(bool $withRecipients = false,
+        bool $withTaxSubmissions = false): TenantDataRegistrySnapshot
     {
         $draft = TenantDataRegistryFactory::draftV1();
         $definitions = [];
@@ -555,6 +741,9 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         array_push($definitions, ...\MyInvoice\Service\Backup\Registry\CompanyBackupTaxProfileDefinitions::definitions());
         if ($withRecipients) {
             $definitions[] = \MyInvoice\Service\Backup\Registry\CompanyBackupSubmissionRecipientsDefinition::definition();
+        }
+        if ($withTaxSubmissions) {
+            $definitions[] = \MyInvoice\Service\Backup\Registry\CompanyBackupTaxSubmissionsDefinition::definition();
         }
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(1, $definitions,
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE]), TenantDataRegistry::COMPANY_BACKUP_PROFILE);
