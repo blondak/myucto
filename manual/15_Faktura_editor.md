@@ -424,6 +424,11 @@ V detailu faktury se objeví:
 > schvalováním, může operace schválení nejprve čekat a potom vrátit chybu.
 > V takovém případě akci opakuj, až konflikt doběhne. Přitom běžné úpravy jiných
 > faktur zůstávají tímto mechanismem globálně neblokované.
+>
+> Upozornění při obnově firmy: nedokončené schvalovací požadavky zůstávají ve
+> stavu „Čeká na schválení", ale starý aktivní odkaz se už neobnoví. Pro
+> dokončení procesu musíš žádost ručně znovu odeslat. Samotná obnova žádný
+> schvalovací e-mail automaticky neposílá.
 
 ### 15.7.2 Test schválení
 

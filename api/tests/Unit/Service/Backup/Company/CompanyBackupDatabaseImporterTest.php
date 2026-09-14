@@ -91,6 +91,12 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 . ' node_hash TEXT NOT NULL)',
         );
         $this->database->exec(
+            'CREATE TABLE invoices ('
+                . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                . 'supplier_id INTEGER NOT NULL, approval_status TEXT NOT NULL,'
+                . 'approval_token TEXT NULL, approval_receipt_hash TEXT NULL)',
+        );
+        $this->database->exec(
             'CREATE TABLE synthetic_secrets ('
                 . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
                 . 'supplier_id INTEGER NOT NULL, label TEXT NOT NULL,'
@@ -340,6 +346,33 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         self::assertSame(1, $this->countRows('synthetic_events'));
         self::assertSame(1, $this->countRows('synthetic_secrets'));
         self::assertSame(0, $this->temporaryTableCount());
+    }
+
+    public function testRestoresPendingApprovalStateWithoutActiveTokenAndPreservesFinishedReceipts(): void
+    {
+        [$source, $preflight, $decisions] = $this->context(approvalInvoices: true);
+        self::assertSame(1, $preflight->pendingApprovalRequestCount);
+        $importer = new CompanyBackupDatabaseImporter(
+            $this->database,
+            new SyntheticCompanyBackupImportSchemaSource(),
+        );
+        self::assertTrue($this->database->beginTransaction());
+
+        $result = $importer->restore($source, $preflight, $decisions, $this->sensitiveData());
+
+        self::assertSame(8, $result->insertedRows);
+        $rows = $this->rows(
+            'SELECT approval_status, approval_token, approval_receipt_hash'
+                . ' FROM invoices WHERE supplier_id = 41 ORDER BY id',
+        );
+        self::assertSame([
+            ['approval_status' => 'requested', 'approval_token' => null, 'approval_receipt_hash' => null],
+            ['approval_status' => 'approved', 'approval_token' => null,
+                'approval_receipt_hash' => str_repeat('a', 64)],
+            ['approval_status' => 'rejected', 'approval_token' => null,
+                'approval_receipt_hash' => str_repeat('b', 64)],
+        ], $rows);
+        self::assertTrue($this->database->rollBack());
     }
 
     public function testFailureKeepsTransactionOpenForCompleteCallerRollback(): void
@@ -671,6 +704,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         bool $statutoryHashCycle = false,
         bool $invalidStatutorySeal = false,
         bool $gateway = false,
+        bool $approvalInvoices = false,
     ): array
     {
         $snapshot = $this->snapshot(
@@ -679,6 +713,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             $logicalIdentityCycle,
             $statutoryHashCycle,
             $gateway,
+            $approvalInvoices,
         );
         $rows = $this->sourceRows(
             $withFiles,
@@ -686,6 +721,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             $statutoryHashCycle,
             $invalidStatutorySeal,
             $gateway,
+            $approvalInvoices,
         );
         $inventory = $this->inventory($snapshot, $rows);
         $fileInventory = $this->fileInventory(
@@ -740,6 +776,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
             $statutoryHashCycle ? 16 : ($logicalIdentityCycle ? 12 : 9),
             $snapshot->fingerprint,
             self::TECHNICAL_BINDING,
+            pendingApprovalRequestCount: $approvalInvoices ? 1 : 0,
         );
         $requirement = $externalInventory->requirements[0];
         $decisions = CompanyBackupReferenceDecisionPlan::fromArray([
@@ -784,6 +821,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         bool $logicalIdentityCycle = false,
         bool $statutoryHashCycle = false,
         bool $gateway = false,
+        bool $approvalInvoices = false,
     ): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
@@ -1164,6 +1202,18 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                 secretPolicies: CompanyBackupIsdsGatewaySessionsProjection::secretPolicies(),
             );
         }
+        if ($approvalInvoices) {
+            $definitions[] = $this->definitionFor(
+                'table:invoices',
+                TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'approval_status', 'approval_receipt_hash'],
+                ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                references: [$this->reference(['supplier_id'], 'table:supplier')],
+                secretPolicies: [
+                    'approval_token' => ['policy' => TenantSecretPolicy::OmitAndReconfigure->value],
+                ],
+            );
+        }
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
             1,
             $definitions,
@@ -1178,6 +1228,7 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
         bool $statutoryHashCycle = false,
         bool $invalidStatutorySeal = false,
         bool $gateway = false,
+        bool $approvalInvoices = false,
     ): array
     {
         $firstPayload = CanonicalJson::encode([
@@ -1254,6 +1305,18 @@ final class CompanyBackupDatabaseImporterTest extends TestCase
                     'id' => 71,
                     'supplier_id' => 7,
                     'app_token' => '00000000000000000001',
+                ]],
+            ] : []),
+            ...($approvalInvoices ? [
+                'table:invoices' => [[
+                    'id' => 71, 'supplier_id' => 7, 'approval_status' => 'requested',
+                    'approval_receipt_hash' => null,
+                ], [
+                    'id' => 72, 'supplier_id' => 7, 'approval_status' => 'approved',
+                    'approval_receipt_hash' => str_repeat('a', 64),
+                ], [
+                    'id' => 73, 'supplier_id' => 7, 'approval_status' => 'rejected',
+                    'approval_receipt_hash' => str_repeat('b', 64),
                 ]],
             ] : []),
         ];

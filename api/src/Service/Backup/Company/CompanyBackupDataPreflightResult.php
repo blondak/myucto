@@ -25,12 +25,15 @@ final readonly class CompanyBackupDataPreflightResult
         public string $technicalValidationBindingSha256,
         public bool $bankAccountCollision = false,
         public CompanyBackupSkippedInvoiceCounters $skippedInvoiceCounters = new CompanyBackupSkippedInvoiceCounters(),
+        public int $pendingApprovalRequestCount = 0,
     ) {
         if ($rowCount < 0
             || $identityCount !== $rowCount
             || $sourceKeyCount < $identityCount
             || $sourceIndexBytes < 0
             || $skippedInvoiceCounters->count() > $rowCount
+            || $pendingApprovalRequestCount < 0
+            || $pendingApprovalRequestCount > $rowCount
             || $referenceOccurrenceCount < $externalReferences->occurrenceCount
             || preg_match(
                 '/^sha256:[0-9a-f]{64}$/D',
@@ -59,6 +62,7 @@ final readonly class CompanyBackupDataPreflightResult
             'reference_occurrence_count' => $referenceOccurrenceCount,
             ...($bankAccountCollision ? ['bank_account_collision' => true] : []),
             ...($skippedInvoiceCounters->count() > 0 ? ['skipped_invoice_counters' => $skippedInvoiceCounters->toArray()] : []),
+            ...($pendingApprovalRequestCount > 0 ? ['pending_approval_request_count' => $pendingApprovalRequestCount] : []),
         ]);
     }
 
@@ -79,7 +83,10 @@ final readonly class CompanyBackupDataPreflightResult
             'reference_occurrence_count' => $this->referenceOccurrenceCount,
             'binding_sha256' => $this->bindingSha256,
             'warnings' => [...($this->bankAccountCollision ? [CompanyBackupBankWarning::collision()] : []),
-                ...$this->skippedInvoiceCounters->warnings()],
+                ...$this->skippedInvoiceCounters->warnings(),
+                ...($this->pendingApprovalRequestCount > 0
+                    ? [CompanyBackupApprovalRequestWarning::pending($this->pendingApprovalRequestCount)]
+                    : [])],
         ];
     }
 }

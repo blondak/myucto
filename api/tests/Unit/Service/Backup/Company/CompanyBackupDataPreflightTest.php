@@ -10,6 +10,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveWriter;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflight;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflightResult;
+use MyInvoice\Service\Backup\Company\CompanyBackupExternalReferenceInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupFormat;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportArchiveSource;
@@ -19,6 +21,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
+use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidation;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -169,6 +172,73 @@ final class CompanyBackupDataPreflightTest extends TestCase
             $this->temporaryIndexCount(),
             implode(', ', $this->temporaryIndexNames()),
         );
+    }
+
+    public function testWarnsAboutRequestedInvoiceWithoutChangingArchivedStateOrExposingToken(): void
+    {
+        $token = str_repeat('a', 48);
+        $rows = [
+            ['id' => 71, 'supplier_id' => 42, 'approval_status' => 'requested',
+                'approval_receipt_hash' => null],
+            ['id' => 72, 'supplier_id' => 42, 'approval_status' => 'approved',
+                'approval_receipt_hash' => hash('sha256', $token)],
+            ['id' => 73, 'supplier_id' => 42, 'approval_status' => 'rejected',
+                'approval_receipt_hash' => null],
+        ];
+        [$archive, $validation] = $this->archive(countryReference: 7, invoices: $rows);
+        $result = (new CompanyBackupDataPreflight($this->limits()))->inspect(
+            $archive, self::PASSWORD, $validation, $this->database,
+        );
+
+        self::assertSame(6, $result->rowCount);
+        self::assertSame(1, $result->pendingApprovalRequestCount);
+        self::assertSame('approval_requests_need_resend_after_restore', $result->toArray()['warnings'][0]['code']);
+        self::assertSame(1, $result->toArray()['warnings'][0]['count']);
+        self::assertStringNotContainsString($token, CanonicalJson::encode($result->toArray()));
+        self::assertStringNotContainsString($rows[1]['approval_receipt_hash'], CanonicalJson::encode($result->toArray()));
+
+        $source = new CompanyBackupImportArchiveSource($archive, self::PASSWORD, $validation, $this->limits());
+        $archivedRows = [];
+        $source->consumeRows('table:invoices', static function (array $row) use (&$archivedRows): void {
+            $archivedRows[] = $row;
+        });
+        $source->close();
+        self::assertSame($rows, $archivedRows);
+        self::assertArrayNotHasKey('approval_token', $archivedRows[0]);
+        self::assertSame('unchanged', $this->sentinelValue());
+    }
+
+    public function testPendingApprovalCountIsBoundAndZeroKeepsLegacyBinding(): void
+    {
+        $references = new CompanyBackupExternalReferenceInventory([]);
+        $make = static fn (int $count): CompanyBackupDataPreflightResult =>
+            new CompanyBackupDataPreflightResult($references, 2, 2, 2, 50, 0,
+                'sha256:' . str_repeat('a', 64), str_repeat('b', 64),
+                pendingApprovalRequestCount: $count);
+        $zero = $make(0);
+        $one = $make(1);
+        self::assertSame([], $zero->toArray()['warnings']);
+        self::assertNotSame($zero->bindingSha256, $one->bindingSha256);
+        self::assertSame(CanonicalJson::sha256([
+            'format' => CompanyBackupDataPreflightResult::FORMAT,
+            'version' => CompanyBackupDataPreflightResult::VERSION,
+            'technical_validation_binding_sha256' => str_repeat('b', 64),
+            'target_registry_fingerprint' => 'sha256:' . str_repeat('a', 64),
+            'external_references_sha256' => $references->sha256(),
+            'row_count' => 2,
+            'identity_count' => 2,
+            'source_key_count' => 2,
+            'source_index_bytes' => 50,
+            'reference_occurrence_count' => 0,
+        ]), $zero->bindingSha256);
+        foreach ([-1, 3] as $invalid) {
+            try {
+                $make($invalid);
+                self::fail('Počet čekajících žádostí mimo rozsah je neplatný.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame('Výsledek datového preflightu není platný.', $e->getMessage());
+            }
+        }
     }
 
     public function testVerifiedArchiveSourceReplaysCanonicalRows(): void
@@ -353,7 +423,10 @@ final class CompanyBackupDataPreflightTest extends TestCase
         self::assertSame(0, $this->temporaryIndexCount());
     }
 
-    /** @return array{string,CompanyBackupTechnicalValidation} */
+    /**
+     * @param list<array<string,mixed>> $invoices
+     * @return array{string,CompanyBackupTechnicalValidation}
+     */
     private function archive(
         int $countryReference,
         bool $statutoryAggregate = false,
@@ -361,13 +434,18 @@ final class CompanyBackupDataPreflightTest extends TestCase
         bool $submission = false,
         bool $gateway = false,
         bool $recipients = false,
+        array $invoices = [],
     ): array
     {
-        $registry = $this->registry($statutoryAggregate, $submission, $gateway, $recipients);
+        $registry = $this->registry($statutoryAggregate, $submission, $gateway, $recipients, $invoices !== []);
         $snapshot = TenantDataRegistrySnapshot::fromRegistry(
             $registry,
             TenantDataRegistry::COMPANY_BACKUP_PROFILE,
         );
+        $secretCounts = [];
+        foreach (CompanyBackupSecretInventory::requiredDeclarations($snapshot) as $declaration) {
+            $secretCounts[$declaration->signature()] = $invoices === [] ? 0 : 1;
+        }
         $payloads = [
             'table:countries' => self::jsonl([[
                 'id' => 7,
@@ -391,6 +469,9 @@ final class CompanyBackupDataPreflightTest extends TestCase
             $payloads['table:submission_outbox'] = self::jsonl([[
                 'id' => 61, 'supplier_id' => 42, 'correlation_reference' => 'SYNTHETIC-ISDS-001',
             ]]);
+        }
+        if ($invoices !== []) {
+            $payloads['table:invoices'] = self::jsonl($invoices);
         }
         if ($gateway) {
             $payloads['table:isds_gateway_sessions'] = self::jsonl([[
@@ -436,7 +517,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
                 'registry_key' => $registryKey,
                 'path' => 'data/' . str_replace(':', '-', $registryKey) . '.jsonl',
                 'order' => count($objects) + 1,
-                'rows' => 1,
+                'rows' => substr_count($payload, "\n"),
                 'bytes' => strlen($payload),
                 'sha256' => hash('sha256', $payload),
             ];
@@ -474,7 +555,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
             'secrets' => [
                 'format' => CompanyBackupSecretInventory::FORMAT,
                 'version' => CompanyBackupSecretInventory::VERSION,
-                'omissions' => [],
+                'omissions' => CompanyBackupSecretInventory::fromCounts($secretCounts, $snapshot)->toArray()['omissions'],
             ],
         ]));
         $writer = new CompanyBackupArchiveWriter(
@@ -517,6 +598,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
         bool $submission = false,
         bool $gateway = false,
         bool $recipients = false,
+        bool $invoices = false,
     ): TenantDataRegistry
     {
         $definitions = [
@@ -643,6 +725,14 @@ final class CompanyBackupDataPreflightTest extends TestCase
         if ($recipients) {
             $definitions[] = CompanyBackupSubmissionRecipientsDefinition::definition();
         }
+        if ($invoices) {
+            $definitions[] = $this->tableDefinition(
+                'invoices', TenantDataPolicy::TenantOwned,
+                ['id', 'supplier_id', 'approval_status', 'approval_receipt_hash'],
+                preservedIdentifiers: ['supplier_id'],
+                secrets: ['approval_token' => ['policy' => TenantSecretPolicy::OmitAndReconfigure->value]],
+            );
+        }
         return new TenantDataRegistry(
             1,
             $definitions,
@@ -708,7 +798,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
      * @param list<array<string,mixed>> $references
      * @param list<array<string,mixed>> $embeddedReferences
      * @param list<string> $preservedIdentifiers
-     * @param array<string,array{policy:string,reason:string}> $secrets
+     * @param array<string,array{policy:string,reason?:string}> $secrets
      */
     private function tableDefinition(
         string $table,

@@ -54,6 +54,7 @@ final readonly class CompanyBackupDataPreflight
             $aggregateRootCount = 0;
             $rowCount = 0;
             $bankAccountCollision = false;
+            $pendingApprovalRequestCount = 0;
             foreach ($validation->inspection->dataInventory->objects as $object) {
                 $context = $contexts[$object->registryKey];
                 $source->consumeRows(
@@ -66,6 +67,7 @@ final readonly class CompanyBackupDataPreflight
                         &$aggregateRootCount,
                         &$rowCount,
                         &$bankAccountCollision,
+                        &$pendingApprovalRequestCount,
                         $database,
                     ): void {
                         $index->add($context['identity']->identityForRow($row));
@@ -86,6 +88,9 @@ final readonly class CompanyBackupDataPreflight
                                 $database, 0, is_string($account) ? $account : null,
                                 is_string($iban) ? $iban : null,
                             );
+                        }
+                        if (CompanyBackupApprovalRequestWarning::isPendingInvoice($object->registryKey, $row)) {
+                            $pendingApprovalRequestCount++;
                         }
                         if ($aggregateIndex !== null) {
                             if ($object->registryKey === self::STATUTORY_PERSON) {
@@ -217,6 +222,7 @@ final readonly class CompanyBackupDataPreflight
                 $validation->bindingSha256,
                 $bankAccountCollision,
                 new CompanyBackupSkippedInvoiceCounters($skippedCounters),
+                $pendingApprovalRequestCount,
             );
         } catch (\Throwable $e) {
             $failure = $e;
