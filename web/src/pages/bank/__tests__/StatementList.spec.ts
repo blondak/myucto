@@ -174,18 +174,19 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
   })
 
   it.each([
-    ['calculated', 1250, undefined, '/export-gpc/42'],
-    ['confirmed', 0, 81, '/download/81'],
-    ['missing_anchor', null, undefined, undefined],
-    ['mismatch', 1250, undefined, undefined],
-    ['unavailable', null, undefined, undefined],
-  ] as const)('bank_api: %s zobrazí zůstatek a odpovídající GPC akci v tabulce i kartě', async (status, closing, bankStatementId, href) => {
+    ['calculated', 1000, 1250, undefined, '/export-gpc/42'],
+    ['calculated', null, 1250, undefined, undefined],
+    ['confirmed', null, 0, 81, '/download/81'],
+    ['missing_anchor', null, null, undefined, undefined],
+    ['mismatch', 1000, 1250, undefined, undefined],
+    ['unavailable', null, null, undefined, undefined],
+  ] as const)('bank_api: %s zobrazí zůstatek a odpovídající GPC akci v tabulce i kartě', async (status, opening, closing, bankStatementId, href) => {
     m.list.mockResolvedValue({ ...emptyPage(), total: 1, items: [{
       id: 42, source: 'bank_api', file_name: 'API-2026-03',
       account_number: '1000000005', bank_code: '0100', currency: 'CZK',
       statement_date: '2026-03-31', curr_balance: null, prev_balance: null,
       transaction_count: 1, matched_count: 0, unposted_count: 0, has_file: false, has_pdf: false,
-      balance_calculation: { status, closing: status === 'confirmed' ? 999 : closing, confirmed_closing: status === 'confirmed' ? closing : null, bank_statement_id: bankStatementId },
+      balance_calculation: { status, opening, closing: status === 'confirmed' ? 999 : closing, confirmed_closing: status === 'confirmed' ? closing : null, bank_statement_id: bankStatementId },
     }] })
     const wrapper = mount(StatementList, { global: { stubs } })
     await flushPromises()
@@ -241,7 +242,7 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
       account_number: '1000000005', bank_code: '0100', currency: 'CZK',
       statement_date: '2026-03-31', curr_balance: 1250, prev_balance: 1000,
       transaction_count: 1, matched_count: 0, unposted_count: 0, has_file: false, has_pdf: false,
-      balance_calculation: { status: 'confirmed', closing: 1250, confirmed_closing: 1250, bank_statement_id: undefined },
+      balance_calculation: { status: 'confirmed', opening: 1000, closing: 1250, confirmed_closing: 1250, bank_statement_id: undefined },
     }] })
     const wrapper = mount(StatementList, { global: { stubs } })
     await flushPromises()
