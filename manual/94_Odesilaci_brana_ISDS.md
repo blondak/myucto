@@ -75,6 +75,12 @@ existuje relace brány se stejným historickým callback tokenem (`app_token`).
 Obnova se zastaví i tehdy, když relace patří jiné firmě. Token se nepřegeneruje;
 použijte cíl bez kolize a existující historii kvůli obnově nemažte.
 
+Při obnově zálohy se systémový příjemce podání naváže jen na právě jeden
+existující systémový záznam cíle se shodným kódem, druhem, identifikátorem
+schránky ISDS a IČ. Chybějící nebo odlišný záznam nebo více systémových
+záznamů se stejným kódem obnovu zastaví. Cílový katalog se nevytváří ani
+nepřepisuje; vlastní příjemci firmy se obnoví jako její vlastní záznamy.
+
 - **Brána není nabízena:** zkontrolujte prostředí, aktivaci registrace a platnost certifikátu.
 - **ISDS odmítne certifikát:** ověřte, že PFX/P12 obsahuje soukromý klíč a patří ke stejné registraci aplikace.
 - **Návrat skončí chybou:** zkontrolujte přesnou HTTPS callback adresu v ISDS a platnost krátkodobé relace.

@@ -11,6 +11,7 @@ enum CompanyBackupReferenceMapping: string
     case TenantIdOrZero = 'tenant_id_or_zero';
     case TenantReferenceKey = 'tenant_reference_key';
     case TenantNaturalKey = 'tenant_natural_key';
+    case TenantOrSystemId = 'tenant_or_system_id';
     case GlobalNaturalKey = 'global_natural_key';
     case Actor = 'actor';
     case CredentialDecision = 'credential_decision';

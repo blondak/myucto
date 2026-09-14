@@ -154,6 +154,17 @@ final readonly class CompanyBackupReference
         ) {
             throw self::invalid($registryKey);
         }
+        if ($mapping === CompanyBackupReferenceMapping::TenantOrSystemId
+            && ($registryKey !== 'table:submission_outbox'
+                || $columns !== ['recipient_id']
+                || $target !== CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY
+                || $targetColumns !== ['id']
+                || $constraint !== CompanyBackupReferenceConstraint::Required
+                || $nullableColumns !== ['recipient_id']
+                || $fallbacks !== [])
+        ) {
+            throw self::invalid($registryKey);
+        }
         if ($mapping === CompanyBackupReferenceMapping::TenantReferenceKey
             && (count($columns) < 2
                 || $columns[0] !== 'supplier_id'

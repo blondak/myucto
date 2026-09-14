@@ -142,6 +142,10 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $resolutions,
                 $identities,
             );
+            $mappedSystemRecipientRows = $this->mapSystemRecipients(
+                $source, $inventory, $targetRegistry, $identities,
+            );
+            $mappedGlobalRows += $mappedSystemRecipientRows;
             $preallocatedRows = $this->preallocateIdentities(
                 $source,
                 $inventory,
@@ -150,6 +154,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $resolutions,
                 $identities,
                 $skips,
+                $mappedSystemRecipientRows,
             );
             if ($identities->identityCount() + $manualRows + $skippedRows !== $preflight->identityCount
                 || $identities->entryCount() + $manualKeys + $skippedRows !== $preflight->sourceKeyCount
@@ -183,6 +188,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $filePaths,
                 $statutoryResults,
                 $skips,
+                $mappedSystemRecipientRows,
             );
             if ($insertedRows !== $preallocatedRows
                 || $mappedGlobalRows + $insertedRows + $manualRows + $skippedRows !== $preflight->rowCount
@@ -203,6 +209,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $hashReferenceMapper,
                 $filePaths,
                 $skips,
+                $mappedSystemRecipientRows,
             );
             $filePaths->finish();
             foreach ($plan->dependencies() as $dependency) {
@@ -416,6 +423,27 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         return $mapped;
     }
 
+    private function mapSystemRecipients(
+        CompanyBackupImportSource $source,
+        CompanyBackupDataInventory $inventory,
+        TenantDataRegistrySnapshot $registry,
+        CompanyBackupTargetIdentityMap $identities,
+    ): int {
+        $registryKey = CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY;
+        $object = $inventory->object($registryKey);
+        if ($object === null) {
+            return 0;
+        }
+        $definition = $registry->registry->definition($registryKey);
+        if (!$definition instanceof TenantDataDefinition) {
+            throw self::error('import_registry_object_missing', $registryKey);
+        }
+        return CompanyBackupSubmissionRecipientImportRouter::mapSystemRows(
+            $this->database, $source, $object, $definition, $identities,
+            $this->limits,
+        );
+    }
+
     /**
      * @param array<string,array{
      *   definition:TenantDataDefinition,
@@ -431,6 +459,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         CompanyBackupReferenceResolutionPlan $resolutions,
         CompanyBackupTargetIdentityMap $identities,
         CompanyBackupSkippedInvoiceCounters $skips,
+        int $mappedSystemRecipientRows,
     ): int {
         $preallocated = 0;
         foreach ($plan->identityBatches() as $batch) {
@@ -457,7 +486,8 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                         $this->database,
                         $projection,
                         $metadata->autoIncrement,
-                        $object->rows,
+                        $object->rows - ($registryKey === CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY
+                            ? $mappedSystemRecipientRows : 0),
                         $this->limits,
                     );
                 $preallocator = new CompanyBackupImportIdentityPreallocator(
@@ -473,8 +503,12 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                     $registryKey,
                     static function (array $row) use (
                         $preallocator,
+                        $registryKey,
                         &$preallocated,
                     ): void {
+                        if (CompanyBackupSubmissionRecipientImportRouter::isSystemRow($registryKey, $row)) {
+                            return;
+                        }
                         $preallocator->preallocate($row);
                         $preallocated++;
                     },
@@ -558,6 +592,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         CompanyBackupSqlFilePathMap $filePaths,
         ?CompanyBackupPayrollStatutoryResultSetImportPreparer $statutoryResults,
         CompanyBackupSkippedInvoiceCounters $skips,
+        int $mappedSystemRecipientRows,
     ): array {
         $insertedRows = 0;
         $supplierId = null;
@@ -595,12 +630,15 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                     $this->database,
                     $definition,
                     $schema,
-                    $object->rows - $skips->count($registryKey),
+                    $object->rows - $skips->count($registryKey)
+                        - ($registryKey === CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY
+                            ? $mappedSystemRecipientRows : 0),
                     $this->limits,
                 );
                 $consumed = $skips->consumeRows($source,
                     $registryKey,
                     function (array $row) use (
+                        $registryKey,
                         $definition,
                         $projection,
                         $preparer,
@@ -614,6 +652,9 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                         &$insertedRows,
                         &$supplierId,
                     ): void {
+                        if (CompanyBackupSubmissionRecipientImportRouter::isSystemRow($registryKey, $row)) {
+                            return;
+                        }
                         $prepared = $preparer->prepare(
                             $row,
                             $hashMapper,
@@ -705,6 +746,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         callable $hashReferenceMapper,
         CompanyBackupSqlFilePathMap $filePaths,
         CompanyBackupSkippedInvoiceCounters $skips,
+        int $mappedSystemRecipientRows,
     ): array {
         $processed = 0;
         $updated = 0;
@@ -741,17 +783,23 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                     $definition,
                     $schema,
                     $plan,
-                    $object->rows - $skips->count($registryKey),
+                    $object->rows - $skips->count($registryKey)
+                        - ($registryKey === CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY
+                            ? $mappedSystemRecipientRows : 0),
                     $this->limits,
                 );
                 $consumed = $skips->consumeRows($source,
                     $registryKey,
                     static function (array $row) use (
+                        $registryKey,
                         $preparer,
                         $writer,
                         $hashMapper,
                         $hashReferenceMapper,
                     ): void {
+                        if (CompanyBackupSubmissionRecipientImportRouter::isSystemRow($registryKey, $row)) {
+                            return;
+                        }
                         $writer->update($preparer->prepare(
                             $row,
                             $hashMapper,

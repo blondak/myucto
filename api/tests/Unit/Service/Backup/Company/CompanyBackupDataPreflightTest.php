@@ -22,6 +22,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidation;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\CompanyBackupSubmissionRecipientsDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
@@ -100,6 +101,36 @@ final class CompanyBackupDataPreflightTest extends TestCase
             self::assertSame('app_token', $e->column);
             self::assertStringNotContainsString('0000000001', $e->getMessage());
         }
+        self::assertSame(0, $this->temporaryIndexCount());
+        self::assertSame('unchanged', $this->sentinelValue());
+    }
+
+    public function testMatchesSystemRecipientFromEncryptedArchiveAndRejectsChangedTarget(): void
+    {
+        $this->database->exec('CREATE TABLE submission_recipients (
+            id INTEGER PRIMARY KEY, supplier_id INTEGER, code TEXT, kind TEXT,
+            isds_box_id TEXT, business_id TEXT
+        )');
+        $this->database->exec("INSERT INTO submission_recipients VALUES
+            (901, NULL, 'synthetic_office', 'other', 'abc1234', NULL)");
+        [$archive, $validation] = $this->archive(countryReference: 7, recipients: true);
+        $preflight = new CompanyBackupDataPreflight($this->limits());
+        $result = $preflight->inspect($archive, self::PASSWORD, $validation, $this->database);
+        self::assertSame(4, $result->rowCount);
+        self::assertNull($result->externalReferences->find(
+            CompanyBackupReferenceMapping::Actor, 'table:users', ['id' => 77],
+        ));
+        $this->database->exec("UPDATE submission_recipients SET isds_box_id = 'xyz9876'");
+        try {
+            $preflight->inspect($archive, self::PASSWORD, $validation, $this->database);
+            self::fail('Odlišný systémový příjemce musí obnovu zastavit už při kontrole archivu.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('system_recipient_target_mismatch', $e->errorCode);
+            self::assertSame('isds_box_id', $e->column);
+        }
+        $statement = $this->database->query('SELECT isds_box_id FROM submission_recipients');
+        self::assertInstanceOf(\PDOStatement::class, $statement);
+        self::assertSame('xyz9876', $statement->fetchColumn());
         self::assertSame(0, $this->temporaryIndexCount());
         self::assertSame('unchanged', $this->sentinelValue());
     }
@@ -329,9 +360,10 @@ final class CompanyBackupDataPreflightTest extends TestCase
         bool $breakStatutoryAggregate = true,
         bool $submission = false,
         bool $gateway = false,
+        bool $recipients = false,
     ): array
     {
-        $registry = $this->registry($statutoryAggregate, $submission, $gateway);
+        $registry = $this->registry($statutoryAggregate, $submission, $gateway, $recipients);
         $snapshot = TenantDataRegistrySnapshot::fromRegistry(
             $registry,
             TenantDataRegistry::COMPANY_BACKUP_PROFILE,
@@ -363,6 +395,16 @@ final class CompanyBackupDataPreflightTest extends TestCase
         if ($gateway) {
             $payloads['table:isds_gateway_sessions'] = self::jsonl([[
                 'id' => 71, 'supplier_id' => 42, 'app_token' => '0000000001',
+            ]]);
+        }
+        if ($recipients) {
+            $payloads['table:submission_recipients'] = self::jsonl([[
+                'id' => 81, 'supplier_id' => null, 'code' => 'synthetic_office',
+                'name' => 'Synthetic office', 'business_id' => null, 'address' => null,
+                'kind' => 'other', 'isds_box_id' => 'abc1234', 'source_url' => null,
+                'source_note' => null, 'is_active' => 1, 'verified_in_isds_at' => null,
+                'created_by' => 77, 'created_at' => '2026-01-01 00:00:00',
+                'updated_at' => '2026-01-01 00:00:00',
             ]]);
         }
         if ($statutoryAggregate) {
@@ -474,6 +516,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
         bool $statutoryAggregate = false,
         bool $submission = false,
         bool $gateway = false,
+        bool $recipients = false,
     ): TenantDataRegistry
     {
         $definitions = [
@@ -596,6 +639,9 @@ final class CompanyBackupDataPreflightTest extends TestCase
             $definitions[] = $this->tableDefinition('isds_gateway_sessions', TenantDataPolicy::TenantOwned,
                 ['id', 'supplier_id', 'app_token'], preservedIdentifiers: ['supplier_id'],
                 secrets: CompanyBackupIsdsGatewaySessionsProjection::secretPolicies());
+        }
+        if ($recipients) {
+            $definitions[] = CompanyBackupSubmissionRecipientsDefinition::definition();
         }
         return new TenantDataRegistry(
             1,

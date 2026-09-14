@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use PDO;
 
 /**
@@ -70,6 +71,14 @@ final readonly class CompanyBackupDataPreflight
                         $index->add($context['identity']->identityForRow($row));
                         CompanyBackupSubmissionCorrelationGuard::assertAvailable($database, $object->registryKey, $row);
                         CompanyBackupIsdsGatewayTokenGuard::assertAvailable($database, $object->registryKey, $row);
+                        if ($object->registryKey === CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY) {
+                            CompanyBackupSubmissionRecipientsProjection::assertDefinition($context['definition']);
+                            if (CompanyBackupSubmissionRecipientsProjection::rowPolicy($row, $object->registryKey)
+                                === TenantDataPolicy::GlobalReference
+                            ) {
+                                CompanyBackupSystemRecipientMatcher::match($database, $row);
+                            }
+                        }
                         if (!$bankAccountCollision && $object->registryKey === 'table:currencies') {
                             $account = $row['account_number'] ?? null;
                             $iban = $row['iban'] ?? null;
@@ -104,6 +113,33 @@ final readonly class CompanyBackupDataPreflight
             $referenceOccurrenceCount = 0;
             $skippedCounters = [];
             foreach ($validation->inspection->dataInventory->objects as $object) {
+                if ($object->registryKey === CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY) {
+                    $definition = $contexts[$object->registryKey]['definition'];
+                    CompanyBackupSubmissionRecipientsProjection::assertDefinition($definition);
+                    $projection = CompanyBackupTableProjection::fromDefinition($definition);
+                    $source->consumeRows($object->registryKey, function (array $row) use (
+                        $object, $projection, $collector, $integrity, &$referenceOccurrenceCount,
+                    ): void {
+                        // Systémový katalog se nepřepisuje: jeho archivní autor se nemapuje.
+                        if (CompanyBackupSubmissionRecipientsProjection::rowPolicy($row, $object->registryKey)
+                            === TenantDataPolicy::GlobalReference
+                        ) {
+                            return;
+                        }
+                        $projection->visitSourceReferences($row, function (CompanyBackupReferenceOccurrence $occurrence) use (
+                            $collector, $integrity, &$referenceOccurrenceCount,
+                        ): void {
+                            if (++$referenceOccurrenceCount > $this->limits->maxReferenceOccurrences) {
+                                throw new CompanyBackupPreflightException(
+                                    'source_reference_occurrence_limit_exceeded',
+                                    $occurrence->sourceRegistryKey, $occurrence->sourceColumn,
+                                );
+                            }
+                            $collector->accept($integrity->normalize($occurrence));
+                        });
+                    });
+                    continue;
+                }
                 if ($object->registryKey === CompanyBackupInvoiceCounterKey::REGISTRY_KEY) {
                     $definition = $validation->inspection->sourceRegistry->registry->definition($object->registryKey);
                     if ($definition === null) {

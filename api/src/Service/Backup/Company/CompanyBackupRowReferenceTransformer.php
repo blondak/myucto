@@ -201,6 +201,16 @@ final readonly class CompanyBackupRowReferenceTransformer
         if ($match === null) {
             throw $this->error('row_reference_unresolved', $occurrence);
         }
+        if ($occurrence->mapping === CompanyBackupReferenceMapping::TenantOrSystemId
+            && ($occurrence->sourceRegistryKey !== 'table:submission_outbox'
+                || $occurrence->sourceColumn !== 'recipient_id'
+                || $occurrence->targetRegistryKey
+                    !== CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY
+                || array_keys($occurrence->sourceKey) !== ['id']
+                || $match->mappedKey->columns !== ['id'])
+        ) {
+            throw $this->error('row_reference_lookup_failed', $occurrence);
+        }
         if ($occurrence->mapping
             === CompanyBackupReferenceMapping::GlobalNaturalKey
         ) {
@@ -217,6 +227,7 @@ final readonly class CompanyBackupRowReferenceTransformer
             CompanyBackupReferenceMapping::TenantIdOrZero,
             CompanyBackupReferenceMapping::TenantReferenceKey,
             CompanyBackupReferenceMapping::TenantNaturalKey,
+            CompanyBackupReferenceMapping::TenantOrSystemId,
         ], true);
     }
 

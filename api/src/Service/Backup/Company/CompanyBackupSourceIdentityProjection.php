@@ -36,6 +36,7 @@ final readonly class CompanyBackupSourceIdentityProjection
         ?array $naturalKeyColumns,
         array $referenceKeyColumns,
         private int $maxSourceKeyBytes,
+        private bool $submissionRecipientScope,
     ) {
         $this->primaryKeyColumns = $primaryKeyColumns;
         $this->tenantScopedPrimaryKeyColumns = $tenantScopedPrimaryKeyColumns;
@@ -70,6 +71,17 @@ final readonly class CompanyBackupSourceIdentityProjection
             $definition->key,
             $exported,
         );
+        $submissionRecipientScope = $definition->key
+            === CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY;
+        if ($submissionRecipientScope) {
+            try {
+                CompanyBackupSubmissionRecipientsProjection::assertDefinition($definition);
+            } catch (CompanyBackupDataSourceException $e) {
+                throw new CompanyBackupPreflightException(
+                    $e->errorCode, $e->registryKey, $e->column, $e,
+                );
+            }
+        }
         if ($definition->policy === TenantDataPolicy::GlobalReference
             && $naturalKey === null
         ) {
@@ -114,12 +126,45 @@ final readonly class CompanyBackupSourceIdentityProjection
             $naturalKey,
             $referenceKeys,
             $limits->maxSourceKeyBytes,
+            $submissionRecipientScope,
         );
     }
 
     /** @param array<string,mixed> $row */
     public function identityForRow(array $row): CompanyBackupSourceIdentity
     {
+        if ($this->submissionRecipientScope) {
+            try {
+                $policy = CompanyBackupSubmissionRecipientsProjection::rowPolicy(
+                    $row, $this->registryKey,
+                );
+            } catch (CompanyBackupDataSourceException $e) {
+                throw new CompanyBackupPreflightException(
+                    $e->errorCode, $e->registryKey, $e->column, $e,
+                );
+            }
+            $primaryKey = CompanyBackupSourceKey::fromRow(
+                $this->registryKey, $this->primaryKeyColumns, $row,
+                $this->maxSourceKeyBytes,
+            );
+            $tenantKey = $policy === TenantDataPolicy::TenantOwned
+                ? CompanyBackupSourceKey::fromRow(
+                    $this->registryKey,
+                    $this->tenantScopedPrimaryKeyColumns ?? [],
+                    $row,
+                    $this->maxSourceKeyBytes,
+                ) : null;
+            $naturalKey = $policy === TenantDataPolicy::GlobalReference
+                ? CompanyBackupSourceKey::fromRow(
+                    $this->registryKey,
+                    $this->naturalKeyColumns ?? [],
+                    $row,
+                    $this->maxSourceKeyBytes,
+                ) : null;
+            return new CompanyBackupSourceIdentity(
+                $policy, $primaryKey, $tenantKey, $naturalKey, [],
+            );
+        }
         $primaryKey = CompanyBackupSourceKey::fromRow(
             $this->registryKey,
             $this->primaryKeyColumns,

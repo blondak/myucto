@@ -382,6 +382,7 @@ final readonly class CompanyBackupImportDependencyPlan
             CompanyBackupReferenceMapping::TenantIdOrZero,
             CompanyBackupReferenceMapping::TenantReferenceKey,
             CompanyBackupReferenceMapping::TenantNaturalKey,
+            CompanyBackupReferenceMapping::TenantOrSystemId,
         ], true);
     }
 

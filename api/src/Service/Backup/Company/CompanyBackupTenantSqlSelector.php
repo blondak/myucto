@@ -25,6 +25,26 @@ final class CompanyBackupTenantSqlSelector
         if (!is_string($strategy)) {
             throw $this->error($table, 'data_ownership_invalid');
         }
+        if ($table->registryKey === CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY) {
+            $this->assertOwnershipKeys($table, ['strategy']);
+            if ($strategy !== 'submission_recipient_scope'
+                || $table->name !== 'submission_recipients'
+                || $table->policy !== TenantDataPolicy::TenantOwned
+                || $table->primaryKey !== ['id']
+                || $table->dataColumns !== CompanyBackupSubmissionRecipientsProjection::dataColumns()
+            ) {
+                throw $this->error($table, 'data_ownership_invalid');
+            }
+            return new CompanyBackupSqlSelection(
+                '(' . self::column(self::SOURCE_ALIAS, 'supplier_id') . ' = ? OR ('
+                . self::column(self::SOURCE_ALIAS, 'supplier_id') . ' IS NULL AND EXISTS'
+                . ' (SELECT 1 FROM `submission_outbox` AS `_recipient_outbox`'
+                . ' WHERE `_recipient_outbox`.`supplier_id` = ?'
+                . ' AND `_recipient_outbox`.`recipient_id` = '
+                . self::column(self::SOURCE_ALIAS, 'id') . ')))',
+                [$supplierId, $supplierId],
+            );
+        }
         if ($strategy === 'bank_statement_owner') {
             $this->assertOwnershipKeys($table, ['strategy']);
             if ($table->name === 'bank_statements' && $table->policy === TenantDataPolicy::TenantOwned) {

@@ -300,6 +300,12 @@ final readonly class CompanyBackupReferenceSet
             }
         }
         foreach ($dataColumns as $column) {
+            if ($this->registryKey === 'table:submission_outbox'
+                && $column === 'receipt_matched_by'
+            ) {
+                // ENUM uvádí původ spárování doručenky, nikoli uživatele.
+                continue;
+            }
             if ($column !== 'id'
                 && (str_ends_with($column, '_id') || str_ends_with($column, '_by'))
                 && !isset($classified[$column])
@@ -342,6 +348,8 @@ final readonly class CompanyBackupReferenceSet
                 CompanyBackupReferenceMapping::GlobalNaturalKey =>
                     $reference->targetColumns === $primaryKey
                     || ($naturalKey !== null && $reference->targetColumns === $naturalKey),
+                CompanyBackupReferenceMapping::TenantOrSystemId =>
+                    $reference->targetColumns === $primaryKey,
                 CompanyBackupReferenceMapping::TenantIdOrZero,
                 CompanyBackupReferenceMapping::Actor,
                 CompanyBackupReferenceMapping::CredentialDecision =>
@@ -374,12 +382,25 @@ final readonly class CompanyBackupReferenceSet
                 CompanyBackupReferenceMapping::GlobalNaturalKey =>
                     $target->policy === TenantDataPolicy::GlobalReference
                     && $naturalKey !== null,
+                CompanyBackupReferenceMapping::TenantOrSystemId =>
+                    $target->key === CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY
+                    && self::isSubmissionRecipientsDefinition($target),
                 CompanyBackupReferenceMapping::CredentialDecision =>
                     $target->policy === TenantDataPolicy::PersonalSecretAttachment,
             };
             if (!$valid) {
                 throw $this->targetError($reference);
             }
+        }
+    }
+
+    private static function isSubmissionRecipientsDefinition(TenantDataDefinition $target): bool
+    {
+        try {
+            CompanyBackupSubmissionRecipientsProjection::assertDefinition($target);
+            return true;
+        } catch (CompanyBackupDataSourceException) {
+            return false;
         }
     }
 

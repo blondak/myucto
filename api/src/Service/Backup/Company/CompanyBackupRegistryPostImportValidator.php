@@ -148,6 +148,15 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
 
             $isManual = $definition->policy === TenantDataPolicy::ManualConfiguration;
             $expectedRows = $isManual ? 0 : $object->rows;
+            $isMixedRecipients = $object->registryKey
+                === CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY;
+            if ($isMixedRecipients) {
+                $mappedSystemRows = CompanyBackupSubmissionRecipientImportRouter::countSystemRows(
+                    $source, $object, $definition,
+                );
+                $expectedRows -= $mappedSystemRows;
+                $mappedGlobalRows += $mappedSystemRows;
+            }
             $skipped = $preflight->skippedInvoiceCounters->count($object->registryKey);
             if ($skipped > 0) {
                 CompanyBackupSkippedInvoiceCounters::assertDefinition($definition);
@@ -165,6 +174,19 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
                     $result->supplierId,
                     $definition,
                 ) as $_row) {
+                    if ($isMixedRecipients) {
+                        $policy = CompanyBackupSubmissionRecipientsProjection::rowPolicy(
+                            $_row, $object->registryKey,
+                        );
+                        if ($policy === TenantDataPolicy::GlobalReference) {
+                            continue;
+                        }
+                        if ($_row['supplier_id'] !== $result->supplierId) {
+                            throw self::error(
+                                'post_import_row_validation_failed', $object->registryKey,
+                            );
+                        }
+                    }
                     $actualRows++;
                     if ($actualRows > $expectedRows) {
                         throw self::error(

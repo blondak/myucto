@@ -12,6 +12,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupCredentialSecretBundle;
 use MyInvoice\Service\Backup\Company\CompanyBackupCredentialTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSupplierCurrencyCycle;
+use MyInvoice\Service\Backup\Company\CompanyBackupSubmissionOutboxProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupForeignKey;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableReferenceSchema;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
@@ -27,6 +28,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSqlFileReferenceSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlRowSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableSchemaReader;
+use MyInvoice\Service\Backup\Registry\CompanyBackupSubmissionOutboxDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
@@ -403,6 +405,34 @@ final class CompanyBackupSqlRowSourceTest extends TestCase
             ...\MyInvoice\Service\Backup\Registry\CompanyBackupTaxProfileDefinitions::definitions()] as $definition) {
             $this->assertProductionProjectionMatchesSchema($definition->name(), $definition->details['primary_key']);
         }
+    }
+
+    public function testActivatedSubmissionRecipientsMatchCompleteLiveSchema(): void
+    {
+        $this->assertProductionProjectionMatchesSchema('submission_recipients', ['id', 'supplier_id', 'code']);
+    }
+
+    public function testDraftSubmissionOutboxMatchesCompleteLiveSchema(): void
+    {
+        $projection = CompanyBackupTableProjection::fromDefinition(
+            CompanyBackupSubmissionOutboxDefinition::definition(),
+        );
+        $reader = new CompanyBackupTableSchemaReader();
+        $schema = $reader->read($this->db->pdo(), $projection);
+        $projection->assertRuntimeSchema(
+            $schema->columns,
+            $schema->generatedColumns,
+            $schema->primaryKey,
+            $schema->binaryColumns,
+        );
+        $projection->references->assertRuntimeSchema(
+            $reader->readReferences($this->db->pdo(), $projection),
+        );
+
+        self::assertCount(41, $schema->columns);
+        self::assertContains('idempotency_key_hash', $schema->binaryColumns);
+        self::assertContains('recipient_id', $schema->columns);
+        self::assertSame(CompanyBackupSubmissionOutboxProjection::REGISTRY_KEY, $projection->registryKey);
     }
 
     public function testPurchaseCountersPreserveEmptyAndHistoricPeriodsWithoutForeignRows(): void

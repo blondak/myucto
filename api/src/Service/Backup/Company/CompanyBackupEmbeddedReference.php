@@ -111,6 +111,7 @@ final readonly class CompanyBackupEmbeddedReference
                 [
                     CompanyBackupReferenceMapping::CredentialDecision,
                     CompanyBackupReferenceMapping::TenantReferenceKey,
+                    CompanyBackupReferenceMapping::TenantOrSystemId,
                 ],
                 true,
             )

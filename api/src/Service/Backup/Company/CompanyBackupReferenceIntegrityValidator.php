@@ -34,9 +34,23 @@ final readonly class CompanyBackupReferenceIntegrityValidator
             throw $this->error('source_reference_unresolved', $occurrence);
         }
 
+        if ($occurrence->mapping === CompanyBackupReferenceMapping::TenantOrSystemId
+            && ($occurrence->sourceRegistryKey !== 'table:submission_outbox'
+                || $occurrence->sourceColumn !== 'recipient_id'
+                || $occurrence->targetRegistryKey
+                    !== CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY)
+        ) {
+            throw $this->error('source_reference_policy_mismatch', $occurrence);
+        }
+
         $validPolicy = match ($occurrence->mapping) {
             CompanyBackupReferenceMapping::GlobalNaturalKey =>
                 $identity->policy === TenantDataPolicy::GlobalReference,
+            CompanyBackupReferenceMapping::TenantOrSystemId => in_array(
+                $identity->policy,
+                [TenantDataPolicy::TenantOwned, TenantDataPolicy::GlobalReference],
+                true,
+            ),
             default => in_array($identity->policy, [
                 TenantDataPolicy::TenantRoot,
                 TenantDataPolicy::TenantOwned,
@@ -58,6 +72,8 @@ final readonly class CompanyBackupReferenceIntegrityValidator
                 $identity->hasReferenceKey($key),
             CompanyBackupReferenceMapping::TenantNaturalKey =>
                 $identity->hasNaturalKey($key),
+            CompanyBackupReferenceMapping::TenantOrSystemId =>
+                $identity->hasPrimaryKey($key),
             default =>
                 $identity->hasPrimaryKey($key) || $identity->hasNaturalKey($key),
         };

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflightResult;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataSourceException;
 use MyInvoice\Service\Backup\Company\CompanyBackupExternalReferenceCollector;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionAction;
@@ -14,13 +15,19 @@ use MyInvoice\Service\Backup\Company\CompanyBackupReferenceOccurrence;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceResolution;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceResolutionPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceSet;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceIntegrityValidator;
+use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
 use MyInvoice\Service\Backup\Company\CompanyBackupRowReferenceTransformer;
 use MyInvoice\Service\Backup\Company\CompanyBackupRowTransformException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSourceIdentity;
 use MyInvoice\Service\Backup\Company\CompanyBackupSourceKey;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlTargetIdentityMap;
+use MyInvoice\Service\Backup\Company\CompanyBackupSqlSourceIdentityIndex;
+use MyInvoice\Service\Backup\Company\CompanyBackupSourceIdentityProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupSubmissionRecipientsProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\CompanyBackupSubmissionRecipientsDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
@@ -45,6 +52,164 @@ final class CompanyBackupRowReferenceTransformerTest extends TestCase
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_STRINGIFY_FETCHES => false,
         ]);
+    }
+
+    public function testRecipientReferenceMapsOwnAndSystemIdsThroughOneInternalMapping(): void
+    {
+        $definition = CompanyBackupSubmissionRecipientsDefinition::definition();
+        $identity = CompanyBackupSourceIdentityProjection::fromDefinition($definition);
+        $own = $identity->identityForRow(['id' => 31, 'supplier_id' => 7, 'code' => 'my_office']);
+        $system = $identity->identityForRow(['id' => 32, 'supplier_id' => null, 'code' => 'cssz']);
+        $ownTarget = $identity->identityForRow(['id' => 131, 'supplier_id' => 71, 'code' => 'my_office']);
+        $systemTarget = $identity->identityForRow(['id' => 232, 'supplier_id' => null, 'code' => 'cssz']);
+
+        $sourceIndex = new CompanyBackupSqlSourceIdentityIndex($this->database);
+        $sourceIndex->add($own);
+        $sourceIndex->add($system);
+        $sourceIndex->seal();
+        $reference = CompanyBackupReferenceSet::fromArray([[
+            'columns' => ['recipient_id'],
+            'target' => CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY,
+            'target_columns' => ['id'],
+            'mapping' => CompanyBackupReferenceMapping::TenantOrSystemId->value,
+            'constraint' => 'required', 'nullable_columns' => ['recipient_id'], 'fallbacks' => [],
+        ]], 'table:submission_outbox');
+        $reference->assertRegistryTargets(new TenantDataRegistry(1, [$definition], [TenantDataRegistry::COMPANY_BACKUP_PROFILE]));
+        $integrity = new CompanyBackupReferenceIntegrityValidator($sourceIndex);
+        foreach ([31, 32] as $sourceId) {
+            $occurrence = CompanyBackupReferenceOccurrence::column(
+                'table:submission_outbox', $reference->references[0], [$sourceId],
+            );
+            self::assertSame($occurrence->sourceKey, $integrity->normalize($occurrence)->sourceKey);
+        }
+        foreach ([
+            [999, CompanyBackupReferenceMapping::TenantOrSystemId, 'source_reference_unresolved'],
+            [32, CompanyBackupReferenceMapping::TenantId, 'source_reference_policy_mismatch'],
+            [31, CompanyBackupReferenceMapping::GlobalNaturalKey, 'source_reference_policy_mismatch'],
+        ] as [$sourceId, $mapping, $errorCode]) {
+            $candidate = CompanyBackupReferenceSet::fromArray([[
+                'columns' => ['recipient_id'],
+                'target' => CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY,
+                'target_columns' => ['id'], 'mapping' => $mapping->value,
+                'constraint' => 'required',
+                'nullable_columns' => $mapping === CompanyBackupReferenceMapping::TenantOrSystemId
+                    ? ['recipient_id'] : [],
+                'fallbacks' => [],
+            ]], 'table:submission_outbox')->references[0];
+            try {
+                $integrity->normalize(CompanyBackupReferenceOccurrence::column(
+                    'table:submission_outbox', $candidate, [$sourceId],
+                ));
+                self::fail('Neplatná reference nesmí projít zdrojovým preflightem.');
+            } catch (CompanyBackupPreflightException $e) {
+                self::assertSame($errorCode, $e->errorCode);
+            }
+        }
+        $sourceIndex->close();
+
+        $map = new CompanyBackupSqlTargetIdentityMap($this->database);
+        $map->add(
+            $this->identity('table:supplier', TenantDataPolicy::TenantRoot, 7),
+            $this->identity('table:supplier', TenantDataPolicy::TenantRoot, 71),
+        );
+        $map->add($own, $ownTarget);
+        $map->add($system, $systemTarget);
+        $map->seal();
+        $transformer = new CompanyBackupRowReferenceTransformer($map, $this->resolutionPlan());
+        $projection = CompanyBackupTableProjection::fromDefinition(new TenantDataDefinition(
+            'table:submission_outbox', TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            [
+                'primary_key' => ['id'], 'ownership' => ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                'secrets' => [], 'company_backup' => [
+                    'data_columns' => ['id', 'recipient_id', 'supplier_id'],
+                    'generated_columns' => [], 'omit_columns' => [],
+                    'embedded_references' => [], 'restore_overrides' => [],
+                    'references' => [
+                        [
+                            'columns' => ['recipient_id'],
+                            'target' => CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY,
+                            'target_columns' => ['id'],
+                            'mapping' => CompanyBackupReferenceMapping::TenantOrSystemId->value,
+                            'constraint' => 'required', 'nullable_columns' => ['recipient_id'], 'fallbacks' => [],
+                        ],
+                        [
+                            'columns' => ['supplier_id'], 'target' => 'table:supplier',
+                            'target_columns' => ['id'], 'mapping' => 'tenant_id',
+                            'constraint' => 'required', 'nullable_columns' => [], 'fallbacks' => [],
+                        ],
+                    ],
+                ],
+            ],
+        ));
+        self::assertSame(131, $transformer->transform($projection, [
+            'id' => 51, 'recipient_id' => 31, 'supplier_id' => 7,
+        ])['recipient_id']);
+        self::assertSame(232, $transformer->transform($projection, [
+            'id' => 52, 'recipient_id' => 32, 'supplier_id' => 7,
+        ])['recipient_id']);
+        self::assertSame(71, $transformer->transform($projection, [
+            'id' => 52, 'recipient_id' => 32, 'supplier_id' => 7,
+        ])['supplier_id']);
+        self::assertNull($transformer->transform($projection, [
+            'id' => 53, 'recipient_id' => null, 'supplier_id' => 7,
+        ])['recipient_id']);
+        $map->close();
+    }
+
+    public function testMixedRecipientMappingCannotTargetAlteredOrUnrelatedDefinition(): void
+    {
+        try {
+            CompanyBackupReferenceSet::fromArray([[
+                'columns' => ['recipient_id'],
+                'target' => CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY,
+                'target_columns' => ['id'],
+                'mapping' => CompanyBackupReferenceMapping::TenantOrSystemId->value,
+                'constraint' => 'optional', 'nullable_columns' => ['recipient_id'], 'fallbacks' => [],
+            ]], 'table:submission_outbox');
+            self::fail('Fyzický FK příjemce nesmí být označen jako volitelný.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_metadata_invalid', $e->errorCode);
+        }
+
+        $definition = CompanyBackupSubmissionRecipientsDefinition::definition();
+        $details = $definition->details;
+        $details['natural_key'] = ['kind'];
+        $altered = new TenantDataDefinition(
+            $definition->key, $definition->kind, $definition->policy,
+            $definition->profiles, $details,
+        );
+        $reference = CompanyBackupReferenceSet::fromArray([[
+            'columns' => ['recipient_id'],
+            'target' => CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY,
+            'target_columns' => ['id'],
+            'mapping' => CompanyBackupReferenceMapping::TenantOrSystemId->value,
+            'constraint' => 'required', 'nullable_columns' => ['recipient_id'], 'fallbacks' => [],
+        ]], 'table:submission_outbox');
+        try {
+            $reference->assertRegistryTargets(new TenantDataRegistry(1, [$altered], [TenantDataRegistry::COMPANY_BACKUP_PROFILE]));
+            self::fail('Změněný cílový kontrakt nesmí získat smíšené mapování.');
+        } catch (CompanyBackupDataSourceException $e) {
+            self::assertSame('data_reference_target_invalid', $e->errorCode);
+        }
+
+        foreach (['table:other_outbox', 'table:submission_outbox'] as $source) {
+            try {
+                CompanyBackupReferenceSet::fromArray([[
+                    'columns' => ['recipient_id'],
+                    'target' => $source === 'table:other_outbox'
+                        ? CompanyBackupSubmissionRecipientsProjection::REGISTRY_KEY
+                        : 'table:other_recipients',
+                    'target_columns' => ['id'],
+                    'mapping' => CompanyBackupReferenceMapping::TenantOrSystemId->value,
+                    'constraint' => 'required', 'nullable_columns' => ['recipient_id'], 'fallbacks' => [],
+                ]], $source);
+                self::fail('Mapování nesmí být použito mimo přesnou referenci outboxu.');
+            } catch (CompanyBackupDataSourceException $e) {
+                self::assertSame('data_reference_metadata_invalid', $e->errorCode);
+            }
+        }
     }
 
     public function testMapsCompositeGlobalAndActorReferencesAndAppliesOverride(): void

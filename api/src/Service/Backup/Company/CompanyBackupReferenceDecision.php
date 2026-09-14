@@ -60,6 +60,7 @@ final readonly class CompanyBackupReferenceDecision
         if (!is_string($requirementId)
             || !is_string($targetRegistryKey)
             || $mapping === null
+            || $mapping === CompanyBackupReferenceMapping::TenantOrSystemId
             || $action === null
         ) {
             throw self::error('reference_decision_invalid', $requirement);

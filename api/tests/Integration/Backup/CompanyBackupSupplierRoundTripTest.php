@@ -15,6 +15,7 @@ use MyInvoice\Service\Backup\Registry\TenantDataRegistryFactory;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use PDO;
+use PDOStatement;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -329,7 +330,215 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         yield 'no key yet' => [false];
     }
 
-    private function registry(): TenantDataRegistrySnapshot
+    public function testMixedSubmissionRecipientsMapSystemAndRestoreOwnShadow(): void
+    {
+        $this->assertSubmissionRecipientsRestore(withOwnRecipient: true);
+    }
+
+    public function testSystemOnlySubmissionRecipientNeedsNoTenantReservationOrInsert(): void
+    {
+        $this->assertSubmissionRecipientsRestore(withOwnRecipient: false);
+    }
+
+    /** @return iterable<string,array{string,string}> */
+    public static function systemRecipientCatalogDrifts(): iterable
+    {
+        yield 'missing' => ['missing', 'system_recipient_target_missing'];
+        yield 'different box' => ['mismatch', 'system_recipient_target_mismatch'];
+        yield 'duplicate global code' => ['ambiguous', 'system_recipient_target_ambiguous'];
+    }
+
+    #[DataProvider('systemRecipientCatalogDrifts')]
+    public function testImporterRechecksSystemRecipientCatalogAfterPreflight(
+        string $drift,
+        string $expectedError,
+    ): void {
+        $this->assertSubmissionRecipientsRestore(true, $drift, $expectedError);
+    }
+
+    private function assertSubmissionRecipientsRestore(bool $withOwnRecipient,
+        ?string $drift = null, ?string $expectedError = null): void
+    {
+        self::assertInstanceOf(Connection::class, $this->connection);
+        $pdo = $this->connection->pdo();
+        $query = static function (string $sql) use ($pdo): PDOStatement {
+            $statement = $pdo->query($sql);
+            self::assertInstanceOf(PDOStatement::class, $statement);
+            return $statement;
+        };
+        $registry = $this->registry(withRecipients: true);
+        $country = (int) $query("SELECT id FROM countries WHERE iso2 = 'CZ'")->fetchColumn();
+        $vat = (int) $query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
+        $currency = (int) $query('SELECT id FROM currencies ORDER BY id LIMIT 1')->fetchColumn();
+        $actor = (int) $query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+        self::assertGreaterThan(0, min($country, $vat, $currency, $actor));
+        $pdo->prepare('INSERT INTO supplier (company_name, street, city, zip, email,
+            country_id, default_vat_rate_id, default_currency_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)')->execute([
+                'Synthetic recipient source', 'Testovací 2', 'Praha', '11000',
+                'recipient-supplier@example.test', $country, $vat, $currency,
+            ]);
+        $supplier = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en)
+            VALUES (?, ?, ?, ?, ?, ?)')->execute([
+                $supplier, 'CZK', 'Synthetic currency', 'Kč', 'Syntetická', 'Synthetic',
+            ]);
+        $ownCurrency = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')
+            ->execute([$ownCurrency, $supplier]);
+        $code = 'zp_test_' . bin2hex(random_bytes(5));
+        $box = 'abc1234';
+        $insert = $pdo->prepare('INSERT INTO submission_recipients
+            (supplier_id, code, name, business_id, address, kind, isds_box_id,
+             source_url, source_note, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $insert->execute([null, $code, 'Cílová instituce', '12345678',
+            'Cílová adresa', 'health_insurer', $box, 'https://example.test/source',
+            'Cílový zdroj', 0]);
+        $globalId = (int) $pdo->lastInsertId();
+        $ownId = null;
+        if ($withOwnRecipient) {
+            $insert->execute([$supplier, $code, 'Vlastní pracoviště', null,
+                'Vlastní adresa', 'other', 'xyz5678', 'https://example.test/own',
+                'Vlastní zdroj', 1]);
+            $ownId = (int) $pdo->lastInsertId();
+        }
+        $this->insertSyntheticOutbox($pdo, $supplier, $globalId, $box);
+        $globalBefore = $query('SELECT * FROM submission_recipients WHERE id = '
+            . $globalId)->fetch(PDO::FETCH_ASSOC);
+        $ownBefore = $ownId === null ? null : $query(
+            'SELECT * FROM submission_recipients WHERE id = ' . $ownId,
+        )->fetch(PDO::FETCH_ASSOC);
+        $globalCountBefore = (int) $query('SELECT COUNT(*) FROM submission_recipients WHERE supplier_id IS NULL')->fetchColumn();
+
+        $archive = $this->archive($pdo, $registry, $supplier, remapSystemRecipientId: true);
+        $inspection = (new Backup\CompanyBackupArchiveInspector(
+            new Backup\CompanyBackupFormat([Backup\CompanyBackupSecretEnvelopeDescriptor::CAPABILITY]),
+            BackupUpcasterRegistry::empty(),
+        ))->inspect($archive, self::PASSWORD, self::APP_VERSION,
+            Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
+        $validation = new Backup\CompanyBackupTechnicalValidation($inspection, $registry,
+            self::APP_VERSION, Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
+        $recipientInventory = $inspection->dataInventory->object('table:submission_recipients');
+        self::assertNotNull($recipientInventory);
+        self::assertSame($withOwnRecipient ? 2 : 1, $recipientInventory->rows);
+        $preflight = (new Backup\CompanyBackupDataPreflight())->inspect(
+            $archive, self::PASSWORD, $validation, $pdo,
+        );
+        $choices = [];
+        foreach ($preflight->externalReferences->requirements as $requirement) {
+            self::assertSame(Backup\CompanyBackupReferenceMapping::GlobalNaturalKey, $requirement->mapping);
+            self::assertContains($requirement->targetRegistryKey, ['table:countries', 'table:vat_rates']);
+            $choices[] = [
+                'requirement_id' => $requirement->id, 'mapping' => $requirement->mapping->value,
+                'target_registry_key' => $requirement->targetRegistryKey, 'action' => 'map_existing',
+                'target_primary_key' => ['id' => $requirement->targetRegistryKey === 'table:countries'
+                    ? $country : $vat],
+            ];
+        }
+        $decisions = Backup\CompanyBackupReferenceDecisionPlan::fromArray([
+            'format' => Backup\CompanyBackupReferenceDecisionPlan::FORMAT,
+            'version' => Backup\CompanyBackupReferenceDecisionPlan::VERSION,
+            'data_preflight_binding_sha256' => $preflight->bindingSha256,
+            'decisions' => $choices,
+        ], $preflight, $registry, self::INSTANCE_ID, $actor);
+        $config = new Config(['app' => [
+            'secret_encryption_key' => base64_encode(str_repeat('s', 32)),
+            'payroll_hash_key' => base64_encode(str_repeat('h', 32)),
+        ]]);
+        if ($drift === 'missing') {
+            $pdo->prepare('UPDATE submission_recipients SET code = ? WHERE id = ?')
+                ->execute([$code . '_changed', $globalId]);
+        } elseif ($drift === 'mismatch') {
+            $pdo->prepare('UPDATE submission_recipients SET isds_box_id = ? WHERE id = ?')
+                ->execute(['def5678', $globalId]);
+        } elseif ($drift === 'ambiguous') {
+            $insert->execute([null, $code, 'Druhý systémový záznam', '12345678',
+                'Jiná adresa', 'health_insurer', $box, 'https://example.test/duplicate',
+                'Jiný zdroj', 1]);
+        }
+        $source = new Backup\CompanyBackupImportArchiveSource($archive, self::PASSWORD, $validation);
+        try {
+            try {
+                $result = (new Backup\CompanyBackupDatabaseImporter($pdo))->restore(
+                    $source, $preflight, $decisions,
+                    new PayrollSensitiveData(new SecretEncryption($config), $config),
+                );
+            } catch (Backup\CompanyBackupPreflightException $e) {
+                if ($expectedError === null) {
+                    throw $e;
+                }
+                self::assertSame($expectedError, $e->errorCode);
+                self::assertTrue($pdo->inTransaction());
+                self::assertSame(0, (int) $query(
+                    'SELECT COUNT(*) FROM supplier WHERE company_name = '
+                    . $pdo->quote('Synthetic recipient source') . ' AND id <> ' . $supplier,
+                )->fetchColumn());
+                $pdo->rollBack();
+                self::assertSame(0, (int) $query('SELECT COUNT(*) FROM submission_recipients WHERE code = '
+                    . $pdo->quote($code))->fetchColumn());
+                return;
+            }
+            if ($expectedError !== null) {
+                self::fail('Změna systémového katalogu po preflightu musí import zastavit.');
+            }
+            // Cílový SQL selector nyní vrací i použitý globální řádek. Post-
+            // import kontrola smí započítat jen obnovené vlastní příjemce.
+            $this->insertSyntheticOutbox($pdo, $result->supplierId, $globalId, $box);
+            $post = (new Backup\CompanyBackupRegistryPostImportValidator())->validate(
+                $pdo, $source, $preflight, $result,
+            );
+            $foreignRows = new class($supplier) implements Backup\CompanyBackupDataRowSource {
+                public function __construct(private int $foreignSupplierId) {}
+
+                public function rows(PDO $snapshot, int $supplierId,
+                    \MyInvoice\Service\Backup\Registry\TenantDataDefinition $definition): iterable
+                {
+                    yield from (new Backup\CompanyBackupSqlRowSource())->rows(
+                        $snapshot, $supplierId, $definition,
+                    );
+                    if ($definition->key === 'table:submission_recipients') {
+                        yield ['supplier_id' => $this->foreignSupplierId];
+                    }
+                }
+            };
+            try {
+                (new Backup\CompanyBackupRegistryPostImportValidator($foreignRows))->validate(
+                    $pdo, $source, $preflight, $result,
+                );
+                self::fail('Kontrola nesmí započítat příjemce jiné firmy.');
+            } catch (Backup\CompanyBackupPostImportException $e) {
+                self::assertSame('post_import_row_validation_failed', $e->errorCode);
+                self::assertSame('table:submission_recipients', $e->registryKey);
+            }
+        } finally {
+            $source->close();
+        }
+
+        self::assertSame($globalCountBefore, (int) $query(
+            'SELECT COUNT(*) FROM submission_recipients WHERE supplier_id IS NULL')->fetchColumn());
+        self::assertSame($globalBefore, $query(
+            'SELECT * FROM submission_recipients WHERE id = ' . $globalId)->fetch(PDO::FETCH_ASSOC));
+        if ($ownId !== null) {
+            self::assertSame($ownBefore, $query(
+                'SELECT * FROM submission_recipients WHERE id = ' . $ownId)->fetch(PDO::FETCH_ASSOC));
+        }
+        self::assertSame($result->insertedRows, $post->checkedTenantRows);
+        self::assertSame(1, $result->mappedGlobalRows - count($choices));
+        self::assertSame($result->mappedGlobalRows, $post->mappedGlobalRows);
+        $restored = $pdo->prepare('SELECT code, name, kind, isds_box_id FROM submission_recipients WHERE supplier_id = ?');
+        $restored->execute([$result->supplierId]);
+        $expectedOwn = $withOwnRecipient ? [[
+            'code' => $code, 'name' => 'Vlastní pracoviště',
+            'kind' => 'other', 'isds_box_id' => 'xyz5678',
+        ]] : [];
+        self::assertSame($expectedOwn, $restored->fetchAll(PDO::FETCH_ASSOC));
+        $pdo->rollBack();
+        self::assertSame(0, (int) $query('SELECT COUNT(*) FROM submission_recipients WHERE code = '
+            . $pdo->quote($code))->fetchColumn());
+    }
+
+    private function registry(bool $withRecipients = false): TenantDataRegistrySnapshot
     {
         $draft = TenantDataRegistryFactory::draftV1();
         $definitions = [];
@@ -344,11 +553,15 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
             $definitions[] = $definition;
         }
         array_push($definitions, ...\MyInvoice\Service\Backup\Registry\CompanyBackupTaxProfileDefinitions::definitions());
+        if ($withRecipients) {
+            $definitions[] = \MyInvoice\Service\Backup\Registry\CompanyBackupSubmissionRecipientsDefinition::definition();
+        }
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(1, $definitions,
             [TenantDataRegistry::COMPANY_BACKUP_PROFILE]), TenantDataRegistry::COMPANY_BACKUP_PROFILE);
     }
 
-    private function archive(PDO $pdo, TenantDataRegistrySnapshot $registry, int $supplier): string
+    private function archive(PDO $pdo, TenantDataRegistrySnapshot $registry, int $supplier,
+        bool $remapSystemRecipientId = false): string
     {
         $objects = [];
         $files = [];
@@ -356,7 +569,18 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $writer = new Backup\CompanyBackupJsonlWriter();
         foreach (Backup\CompanyBackupDataInventory::payloadDefinitions($registry) as $index => $definition) {
             $path = $this->directory . DIRECTORY_SEPARATOR . 'data-' . $index . '.jsonl';
-            $object = $writer->write($definition, $index + 1, $source->rows($pdo, $supplier, $definition), $path);
+            $rows = $source->rows($pdo, $supplier, $definition);
+            if ($remapSystemRecipientId && $definition->key === 'table:submission_recipients') {
+                $rows = (static function () use ($rows): \Generator {
+                    foreach ($rows as $row) {
+                        if ($row['supplier_id'] === null) {
+                            $row['id'] = 1000000001;
+                        }
+                        yield $row;
+                    }
+                })();
+            }
+            $object = $writer->write($definition, $index + 1, $rows, $path);
             $objects[] = $object;
             $files[$object->path] = $path;
         }
@@ -382,6 +606,19 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         (new Backup\CompanyBackupMachineArchiveWriter())->write($snapshot, $archive, self::PASSWORD,
             self::APP_VERSION, 'Syntetický test kořene firmy.');
         return $archive;
+    }
+
+    private function insertSyntheticOutbox(PDO $pdo, int $supplier, int $recipient, string $box): void
+    {
+        $pdo->prepare("INSERT INTO submission_outbox
+            (supplier_id, environment, channel, agenda_code, recipient_id,
+             recipient_box_id, subject, artifact_kind, artifact_id,
+             artifact_filename, artifact_sha256, idempotency_key_hash,
+             correlation_reference)
+            VALUES (?, 'test', 'isds', 'SYNTH', ?, ?, 'Syntetický test',
+                    'document', 1, 'synthetic.xml', ?, ?, ?)")
+            ->execute([$supplier, $recipient, $box, str_repeat('a', 64),
+                random_bytes(32), 'synthetic:' . bin2hex(random_bytes(12))]);
     }
 
     /** @return array<string,mixed> */
