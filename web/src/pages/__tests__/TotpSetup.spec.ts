@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { getCredential } from '@/security/webauthn'
 
 /**
  * `/api/auth/totp/setup` teď vyžaduje čerstvé ověření, než vrátí secret:
@@ -98,6 +99,7 @@ describe('TotpSetup — re-authentication before secret generation', () => {
     m.passkeyStepUpOptions.mockResolvedValue({ flow_token: 'ft', public_key: {} })
     m.passkeyStepUpVerify.mockResolvedValue('step-up-token')
     m.totpSetup.mockResolvedValue({ secret: 'S', uri: 'otpauth://x', qr_data_uri: 'data:,' })
+    vi.mocked(getCredential).mockResolvedValue({ id: 'cred' } as any)
 
     const wrapper = mountPage()
     await flushPromises()
@@ -107,7 +109,7 @@ describe('TotpSetup — re-authentication before secret generation', () => {
     await flushPromises()
 
     expect(m.passkeyStepUpOptions).toHaveBeenCalledWith('totp.enable')
-    expect(m.passkeyStepUpVerify).toHaveBeenCalledWith('ft', 'totp.enable', expect.anything())
+    expect(m.passkeyStepUpVerify).toHaveBeenCalledWith('ft', 'totp.enable', { id: 'cred' })
     expect(m.totpSetup).toHaveBeenCalledWith({ step_up_token: 'step-up-token' })
   })
 })
