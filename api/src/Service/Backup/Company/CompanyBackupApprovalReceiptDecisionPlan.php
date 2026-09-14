@@ -193,7 +193,7 @@ final readonly class CompanyBackupApprovalReceiptDecisionPlan
         int $restoreActorId,
     ): void {
         if (preg_match('/\A[0-9a-f]{64}\z/D', $dataPreflightBindingSha256) !== 1
-            || preg_match('/\A[0-9a-f]{64}\z/D', $targetRegistryFingerprint) !== 1
+            || preg_match('/\Asha256:[0-9a-f]{64}\z/D', $targetRegistryFingerprint) !== 1
             || !CompanyBackupManifestHeader::isCanonicalBackupId($targetInstanceId)
             || $restoreActorId < 1
         ) {

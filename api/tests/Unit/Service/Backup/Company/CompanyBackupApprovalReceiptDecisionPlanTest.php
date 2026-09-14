@@ -6,13 +6,20 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupApprovalReceiptDecisionPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupApprovalReceiptInventory;
+use MyInvoice\Service\Backup\Company\CompanyBackupDataPreflightResult;
+use MyInvoice\Service\Backup\Company\CompanyBackupExternalReferenceInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
+use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
+use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
+use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
+use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupApprovalReceiptDecisionPlanTest extends TestCase
 {
     private const PREFLIGHT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-    private const REGISTRY = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    private const REGISTRY = 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     private const INSTANCE = '123e4567-e89b-42d3-a456-426614174000';
     private const HASH_A = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     private const HASH_B = 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
@@ -92,7 +99,7 @@ final class CompanyBackupApprovalReceiptDecisionPlanTest extends TestCase
         foreach ([
             [$this->inventory(reordered: true), self::PREFLIGHT, self::REGISTRY, self::INSTANCE, 91],
             [$inventory, str_repeat('f', 64), self::REGISTRY, self::INSTANCE, 91],
-            [$inventory, self::PREFLIGHT, str_repeat('f', 64), self::INSTANCE, 91],
+            [$inventory, self::PREFLIGHT, 'sha256:' . str_repeat('f', 64), self::INSTANCE, 91],
             [$inventory, self::PREFLIGHT, self::REGISTRY, '223e4567-e89b-42d3-a456-426614174000', 91],
             [$inventory, self::PREFLIGHT, self::REGISTRY, self::INSTANCE, 92],
         ] as $context) {
@@ -100,6 +107,30 @@ final class CompanyBackupApprovalReceiptDecisionPlanTest extends TestCase
                 static fn () => $plan->assertContext(...$context));
         }
         $plan->assertContext($inventory, self::PREFLIGHT, self::REGISTRY, self::INSTANCE, 91);
+    }
+
+    public function testRejectsUnprefixedRegistryFingerprint(): void
+    {
+        $inventory = $this->inventory();
+        $decisions = [
+            ['source_invoice_id' => 2, 'action' => 'invalidate'],
+            ['source_invoice_id' => 4, 'action' => 'invalidate'],
+        ];
+        $this->assertSafeError('approval_receipt_decision_context_mismatch',
+            static fn () => CompanyBackupApprovalReceiptDecisionPlan::fromArray([
+                'data_preflight_binding_sha256' => self::PREFLIGHT,
+                'decisions' => $decisions,
+            ], $inventory, self::PREFLIGHT, str_repeat('b', 64), self::INSTANCE, 91));
+
+        $plan = $this->plan($inventory, $decisions);
+        $this->assertSafeError('approval_receipt_decision_context_mismatch',
+            static fn () => $plan->assertContext(
+                $inventory,
+                self::PREFLIGHT,
+                str_repeat('b', 64),
+                self::INSTANCE,
+                91,
+            ));
     }
 
     public function testResolveRejectsRedMutationOrNewAndDisappearedCollision(): void
@@ -118,6 +149,43 @@ final class CompanyBackupApprovalReceiptDecisionPlanTest extends TestCase
             $this->assertSafeError('approval_receipt_decision_stale',
                 static fn () => $plan->resolve($id, $hash, $collision));
         }
+    }
+
+    public function testAcceptsRealRegistryFingerprintCarriedByPreflight(): void
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        $registry = TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
+            1,
+            [new TenantDataDefinition(
+                'table:invoices',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantOwned,
+                [$profile],
+                ['primary_key' => ['id'], 'ownership' => ['strategy' => 'supplier_id']],
+            )],
+            [$profile],
+        ), $profile);
+        $preflight = new CompanyBackupDataPreflightResult(
+            new CompanyBackupExternalReferenceInventory([]),
+            0,
+            0,
+            0,
+            0,
+            0,
+            $registry->fingerprint,
+            str_repeat('a', 64),
+        );
+        $inventory = $this->inventory();
+        $plan = CompanyBackupApprovalReceiptDecisionPlan::fromArray([
+            'data_preflight_binding_sha256' => $preflight->bindingSha256,
+            'decisions' => [
+                ['source_invoice_id' => 2, 'action' => 'invalidate'],
+                ['source_invoice_id' => 4, 'action' => 'invalidate'],
+            ],
+        ], $inventory, $preflight->bindingSha256, $preflight->targetRegistryFingerprint, self::INSTANCE, 91);
+
+        self::assertSame($registry->fingerprint, $plan->targetRegistryFingerprint);
+        $plan->assertContext($inventory, $preflight->bindingSha256, $registry->fingerprint, self::INSTANCE, 91);
     }
 
     private function inventory(bool $reordered = false): CompanyBackupApprovalReceiptInventory
