@@ -130,6 +130,17 @@ final class JmhzReportReaderTest extends TestCase
         $this->reader->read($xml);
     }
 
+    /** Useknutý soubor se pozná podle úvodní značky nezávisle na verzi libxml2. */
+    public function testTruncatedReportRootIsRecognisedByItsStartTag(): void
+    {
+        self::assertTrue(JmhzReportReader::isJmhz(
+            "<?xml version=\"1.0\"?>\n<j:jmhz xmlns:j=\"http://schemas.cssz.cz/JMHZ/podani/1.0\"><j:hlavicka>",
+        ));
+        self::assertFalse(JmhzReportReader::isJmhz('<jmhz xmlns="urn:example:other"><hlavicka>'));
+        self::assertFalse(JmhzReportReader::isJmhz('<j:jmhz xmlns="http://schemas.cssz.cz/JMHZ/podani/1.0"><x>'));
+        self::assertFalse(JmhzReportReader::isJmhz('<REGZEC xmlns="http://schemas.cssz.cz/JMHZ/podani/1.0"><x>'));
+    }
+
     public function testCancellationFormsCarryNoBody(): void
     {
         $file = $this->reader->read(JmhzReportFixtures::componentCancellation(2026, 2, 1, 101, '2026-03-20T08:00:00Z'));

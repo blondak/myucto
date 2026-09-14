@@ -91,7 +91,7 @@ final class JmhzReportReader
         $previous = libxml_use_internal_errors(true);
         try {
             if (!$reader->XML($content, null, LIBXML_NONET)) {
-                return false;
+                return self::rootStartTagIsJmhz($content);
             }
             while ($reader->read()) {
                 if ($reader->nodeType === \XMLReader::ELEMENT) {
@@ -100,14 +100,39 @@ final class JmhzReportReader
                 }
             }
 
-            return false;
+            return self::rootStartTagIsJmhz($content);
         } catch (\Throwable) {
-            return false;
+            return self::rootStartTagIsJmhz($content);
         } finally {
             $reader->close();
             libxml_clear_errors();
             libxml_use_internal_errors($previous);
         }
+    }
+
+    /**
+     * Novější libxml2 (Linux) u useknutého dokumentu ohlásí chybu dřív, než
+     * XMLReader vydá první prvek; starší (Windows) kořen vydá. Rozbitý soubor
+     * s kořenem hlášení ale patří tomuhle čtení, aby ho {@see read()} odmítl
+     * jako neplatné XML — proto se kořen pozná i podle úvodní značky: `jmhz`
+     * (s prefixem i bez) s deklarovaným jmenným prostorem podání.
+     */
+    private static function rootStartTagIsJmhz(string $content): bool
+    {
+        if (preg_match(
+            '/^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--.*?-->\s*)*<(?:([A-Za-z_][\w.\-]*):)?jmhz((?:\s[^>]*)?)\/?>/s',
+            $content,
+            $match,
+        ) !== 1) {
+            return false;
+        }
+        $declaration = ($match[1] ?? '') === '' ? 'xmlns' : 'xmlns:' . $match[1];
+
+        return preg_match(
+            '/\s' . preg_quote($declaration, '/') . '\s*=\s*(["\'])'
+                . preg_quote(JmhzSchemaCatalog::NS_PODANI, '/') . '\1/',
+            $match[2] ?? '',
+        ) === 1;
     }
 
     /** @throws RegistrationImportFileException */
