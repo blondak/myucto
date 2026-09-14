@@ -18,6 +18,7 @@ import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import Passkeys from '@/pages/Passkeys.vue'
 import KeyboardShortcuts from '@/pages/KeyboardShortcuts.vue'
 import { getCredential, webAuthnErrorKey } from '@/security/webauthn'
+import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import {
   authorizePendingDomainLogin,
   hasPendingCanonicalDomainLogin,
@@ -101,6 +102,9 @@ async function submitPw() {
 const totpStatus = ref<{ enabled: boolean } | null>(null)
 const totpSetup = ref<TotpSetup | null>(null)
 const totpCode = ref('')
+// První sada záložních kódů přijde jen jednou, v odpovědi enable — musí se
+// ukázat a potvrdit dřív, než záložka přepne na „aktivní“ (jako ForcedMfaSetup).
+const totpRecoveryCodes = ref<string[] | null>(null)
 const totpCurrentPassword = ref('')
 const totpBusy = ref(false)
 const totpError = ref('')
@@ -179,10 +183,14 @@ async function activateTotp() {
   totpBusy.value = true
   totpError.value = ''
   try {
-    await authApi.totpEnable(totpCode.value)
-    toast.success(t('auth.totp_enabled_done'))
+    const result = await authApi.totpEnable(totpCode.value)
     totpSetup.value = null
     totpCode.value = ''
+    if (result.recovery_codes?.length) {
+      totpRecoveryCodes.value = result.recovery_codes
+      return
+    }
+    toast.success(t('auth.totp_enabled_done'))
     await loadTotpStatus()
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
@@ -192,6 +200,12 @@ async function activateTotp() {
   } finally {
     totpBusy.value = false
   }
+}
+
+async function confirmTotpRecoveryCodes() {
+  totpRecoveryCodes.value = null
+  toast.success(t('auth.totp_enabled_done'))
+  await loadTotpStatus()
 }
 
 function cancelTotpSetup() {
@@ -424,6 +438,15 @@ onMounted(() => {
 
     <!-- ── 2FA / TOTP ── -->
     <div v-else-if="tab === 'totp'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm space-y-4">
+      <!-- Záložní kódy překryjí zbytek záložky: zobrazí se jen jednou a bez
+           potvrzení uložení se stav nepřepne na „aktivní“. -->
+      <RecoveryCodesOnce
+        v-if="totpRecoveryCodes"
+        :codes="totpRecoveryCodes"
+        :busy="totpBusy"
+        @confirm="confirmTotpRecoveryCodes"
+      />
+      <template v-else>
       <div v-if="totpStatus">
         <div v-if="totpStatus.enabled" class="flex items-center gap-2 text-success-600">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
@@ -480,6 +503,7 @@ onMounted(() => {
           <p class="text-sm text-neutral-700 mb-2">{{ t('auth.totp_setup_step2') }}</p>
           <input v-model="totpCode" type="text" inputmode="numeric" maxlength="6"
                  pattern="\d{6}" placeholder="000000" @keydown.enter="activateTotp"
+                 data-test="totp-code"
                  class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-lg tracking-widest text-center" />
         </div>
 
@@ -492,12 +516,13 @@ onMounted(() => {
                   class="cursor-pointer h-10 px-4 border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">
             {{ t('common.cancel') }}
           </button>
-          <button @click="activateTotp" :disabled="totpBusy || totpCode.length !== 6"
+          <button @click="activateTotp" :disabled="totpBusy || totpCode.length !== 6" data-test="totp-activate"
                   class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
             {{ totpBusy ? '…' : t('auth.totp_enable_btn') }}
           </button>
         </div>
       </div>
+      </template>
     </div>
 
     <!-- ── Passkeys ── -->
