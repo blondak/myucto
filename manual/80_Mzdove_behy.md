@@ -171,6 +171,24 @@ běhu: u konceptu **Spočítat mzdy**, u spočítaného běhu **Zrušit** (potom
 otevřete novou revizi a spočítejte mzdy), u zrušeného nebo opravného běhu
 otevření nové revize a u schváleného běhu **Vyžádat opravu**.
 
+### 80.8.2 Hromadné doplnění místa výkonu práce pro JMHZ
+
+Měsíční hlášení ČSSZ vyžaduje u každého vztahu místo výkonu práce jako kód
+obce a státu z číselníku ČSSZ. Chybí-li u vztahů (typicky po importu), hlásí
+test JMHZ nález **Chybí ověřené číselníkové údaje pracoviště**. Místo výkonu
+práce je sjednané v pracovní smlouvě, aplikace ho proto neodhaduje — zvolíte ho
+vy. Akce **Doplnit pracoviště** je na seznamu **Mzdy → Zaměstnanci** a přímo
+u tohoto nálezu v testu JMHZ. Náhled za zvolený měsíc ukáže, kolik vztahů
+pracoviště nemá, kolik ho má ověřené a kolik vyplněné, ale neověřitelné (to se
+nepřepisuje, opravte ho na kartě vztahu), a nabídne pracoviště, která už ve
+firmě ověřeně jsou, nejčastější první. Jinou obec vyhledáte v číselníku.
+
+Obec a stát se ověří proti číselníku ČSSZ platnému po celý vykazovaný měsíc
+a zapíší se jako oprava platné verze podmínek, stejně jako na kartě vztahu —
+včetně záznamu v historii změn. Vyplněné pracoviště se nikdy nepřepíše.
+Do běhu se doplněné údaje dostanou až novou revizí: schválený běh vraťte
+k opravě, otevřete novou revizi, spočítejte, schvalte a hlášení připravte znovu.
+
 Výpočet odděluje hotovost zahrnutou do exekučního základu od částek, které se
 nesrážejí, například správně klasifikovaných cestovních náhrad. Vypočtená
 srážka sníží částku k výplatě, ale neměnný výsledek a ledger

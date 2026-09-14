@@ -792,6 +792,50 @@ export interface PayrollStatutoryBulkResult {
   failed: Array<{ employee_id: number, message: string }>
 }
 
+export interface PayrollWorkplaceBulkPreviewItem {
+  employment_id: number
+  employee_id: number
+  full_name: string
+  employment_code: string
+  state: 'missing' | 'verified' | 'invalid' | 'excluded'
+  reason: string | null
+  municipality_code: string | null
+  municipality_name: string | null
+  country_code: string | null
+}
+
+export interface PayrollWorkplaceBulkSuggestion {
+  municipality_code: string
+  municipality_name: string
+  country_code: string
+  employments: number
+}
+
+export interface PayrollWorkplaceBulkPreview {
+  period_start: string
+  summary: {
+    employments: number
+    missing: number
+    verified: number
+    invalid: number
+    excluded: number
+  }
+  suggestions: PayrollWorkplaceBulkSuggestion[]
+  missing_employment_ids: number[]
+  items: PayrollWorkplaceBulkPreviewItem[]
+}
+
+export interface PayrollWorkplaceBulkResult {
+  period_start: string
+  municipality_code: string
+  municipality_name: string
+  country_code: string
+  counts: { applied: number, skipped: number, failed: number }
+  applied: Array<{ employment_id: number }>
+  skipped: Array<{ employment_id: number, reason: string }>
+  failed: Array<{ employment_id: number, message: string }>
+}
+
 export type PayrollForeignPermitKind = 'residence' | 'work'
 export type PayrollForeignPermitStatus = 'future' | 'valid' | 'expiring' | 'expired' | 'superseded'
 
@@ -6451,6 +6495,22 @@ export const payrollApi = {
   statutoryBulkDefaultsApply: (payload: PayrollStatutoryBulkApplyPayload) =>
     api.post<{ result: PayrollStatutoryBulkResult }>(
       '/payroll/statutory-evidence/bulk-defaults/apply',
+      payload,
+    ).then(response => response.data.result),
+  /** Náhled hromadného doplnění místa výkonu práce pro JMHZ; `employment_ids: null` = všechny vztahy. */
+  workplaceBulkPreview: (payload: { period_start: string, employment_ids?: number[] | null }) =>
+    api.post<{ preview: PayrollWorkplaceBulkPreview }>(
+      '/payroll/employments/workplace-bulk/preview',
+      payload,
+    ).then(response => response.data.preview),
+  workplaceBulkApply: (payload: {
+    period_start: string
+    municipality_code: string
+    country_code: string
+    employment_ids: number[]
+  }) =>
+    api.post<{ result: PayrollWorkplaceBulkResult }>(
+      '/payroll/employments/workplace-bulk/apply',
       payload,
     ).then(response => response.data.result),
   foreignPermits: (employeeId: number, asOf?: string) =>

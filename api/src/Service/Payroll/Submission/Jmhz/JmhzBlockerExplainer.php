@@ -135,6 +135,15 @@ final class JmhzBlockerExplainer
         'jmhz_employee_social_discount_exclusive' => 'U jednoho pracovního vztahu se sbíhá sleva pracujícího '
             . 'důchodce se sezónní slevou na pojistném; obě současně uplatnit nelze.',
         'jmhz_xml_identity_name_incomplete' => 'Zaměstnanec se hlásí jménem, protože mu ČSSZ zatím nepřidělila OIČ ani ID PPV, a k tomu chybí příjmení, jméno, datum narození, datum nástupu nebo druh činnosti.',
+        /*
+         * ČSSZ přijímá částky měsíčního hlášení jen v celých korunách. Pojistné
+         * zaměstnavatele (10481) se od kontroly 315 počítá samo a nález
+         * nevyvolá; zbývá výsledek běhu, který haléře nese ve vyměřovacím
+         * základu, příjmu nebo pojistném zaměstnance — typicky mzdová složka
+         * s haléřovou částkou.
+         */
+        'jmhz_scenario1_whole_czk_required' => 'Částka, která se do měsíčního hlášení '
+            . 'vykazuje v celých korunách, vyšla ve výsledku mzdového běhu s haléři.',
     ];
 
     /** @var array<string,string> */
@@ -221,6 +230,9 @@ final class JmhzBlockerExplainer
         'jmhz_employee_social_discount_exclusive' => 'Opravte buď potvrzení sezónní slevy v Mzdová podání → JMHZ, '
             . 'nebo slevu pracujícího důchodce v zákonné evidenci osoby (Mzdy → Zaměstnanci).',
         'jmhz_xml_identity_name_incomplete' => 'Otevřete Mzdy → Zaměstnanci a na kartě zaměstnance a jeho pracovního vztahu doplňte jméno, příjmení, datum narození, den nástupu a druh činnosti; OIČ ani ID PPV shánět nemusíte, ta přidělí ČSSZ až v protokolu o přijetí.',
+        'jmhz_scenario1_whole_czk_required' => 'Otevřete Mzdy → Mzdové běhy, u dotčených osob '
+            . 'najděte mzdovou složku s haléřovou částkou (číslo pole ukazuje technický detail) '
+            . 'a opravte ji na celé koruny; běh přepočítejte, schvalte a hlášení připravte znovu.',
     ];
 
     /** @param list<JmhzScenario1Blocker> $blockers */

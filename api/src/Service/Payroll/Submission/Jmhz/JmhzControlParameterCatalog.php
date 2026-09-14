@@ -19,6 +19,23 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
  */
 final class JmhzControlParameterCatalog
 {
+    /**
+     * Sazba pojistného zaměstnavatele podle písmene § 5a odst. 1 ZPSZ.
+     *
+     * Jsou to tytéž parametry, které katalog ČSSZ přiřazuje kontrole 315
+     * (10481 = 10478 × řádek 3 + 10479 × řádek 4 + 10480 × řádek 5) a v témže
+     * pořadí je používá {@see JmhzScenario1ControlEvaluator}. Písmeno a) je
+     * běžná sazba, b) zdravotnická záchranná služba a hasičský záchranný sbor
+     * podniku, c) rizikové zaměstnání.
+     *
+     * @var array<string,string>
+     */
+    public const EMPLOYER_SOCIAL_RATE_BY_PARAGRAPH5_LETTER = [
+        'a' => 'source_row_3',
+        'b' => 'source_row_4',
+        'c' => 'source_row_5',
+    ];
+
     /** @var array<string, list<array{effective_from:string,canonical_value:string}>> */
     private array $values = [];
 
@@ -120,6 +137,25 @@ final class JmhzControlParameterCatalog
         }
 
         return intdiv($product + $divisor - 1, $divisor);
+    }
+
+    /**
+     * Pojistné zaměstnavatele za jednu součást hlášení (10481) přesně podle
+     * kontroly 315: vyměřovací základ v celých korunách krát sazba písmene
+     * § 5a odst. 1 ZPSZ, zaokrouhleno nahoru na celé koruny.
+     *
+     * Firemní pojistné se podle § 7 ZPSZ zaokrouhluje až z úhrnu základů, takže
+     * podíl připadající na osobu (výplatní páska) haléře mít smí. Do hlášení ale
+     * patří jen tahle částka — ČSSZ podání s jinou odmítne kontrolou 315.
+     */
+    public function employerSocialInsuranceCzk(int $baseCzk, string $paragraph5Letter, string $onDate): int
+    {
+        $parameterKey = self::EMPLOYER_SOCIAL_RATE_BY_PARAGRAPH5_LETTER[$paragraph5Letter]
+            ?? throw new \InvalidArgumentException(
+                "Písmeno § 5a odst. 1 ZPSZ „{$paragraph5Letter}“ nemá sazbu pojistného zaměstnavatele.",
+            );
+
+        return $this->multiplyCeil($baseCzk, $parameterKey, $onDate);
     }
 
     /**

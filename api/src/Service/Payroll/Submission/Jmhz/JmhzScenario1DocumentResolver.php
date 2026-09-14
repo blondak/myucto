@@ -60,6 +60,8 @@ final class JmhzScenario1DocumentResolver
         '10417', '10418', '10292', '10293', '10294', '10295', '10296',
     ];
 
+    private ?JmhzControlParameterCatalog $controlParameters = null;
+
     private const NEGATIVE_INCOME_REPORTED_AS_ZERO = [
         '10286',
         '10328',
@@ -589,10 +591,11 @@ final class JmhzScenario1DocumentResolver
                         $employeeId,
                         $blockers,
                     ),
-                    'employer_social_czk' => $this->wholeCzk(
-                        $this->employerSocialMinor($social, $payslip),
-                        '10481',
-                        'person',
+                    'employer_social_czk' => $this->employerSocialCzk(
+                        $social,
+                        $payslip,
+                        $normalizedEmployments,
+                        $preparation->periodStart,
                         $employeeId,
                         $blockers,
                     ),
@@ -2523,6 +2526,71 @@ final class JmhzScenario1DocumentResolver
     private function object(mixed $value): array
     {
         return is_array($value) && !array_is_list($value) ? $value : [];
+    }
+
+    /**
+     * Pojistné zaměstnavatele za osobu (10481) tak, jak ho počítá kontrola 315.
+     *
+     * Firemní pojistné se zaokrouhluje až z úhrnu vyměřovacích základů (§ 7
+     * ZPSZ), takže podíl připadající na osobu ve výplatní pásce běžně nese
+     * haléře. Opsat ho do hlášení nejde dvakrát: XSD bere jen celé koruny
+     * a kontrola 315 chce na formuláři přesně základ 10477 (resp. jeho rozpad
+     * podle § 5a) krát sazbu, zaokrouhleno nahoru. Dřív tu proto padal nález
+     * `jmhz_scenario1_whole_czk_required` u každého, jehož podíl nevyšel na
+     * celé koruny — u běžné firmy u většiny lidí.
+     *
+     * Počítá se ze základu vztahu, který pojistné osoby nese (viz
+     * socialContributionEmployment()), sazbou jeho písmene. Kde základ nebo
+     * písmeno chybí, zůstává původní cesta: ta buď vrátí celé koruny, nebo
+     * nález — a neznámé písmeno už blokuje `jmhz_employer_rate_category_unverified`.
+     *
+     * @param array<string,mixed> $social
+     * @param array<string,mixed> $payslip
+     * @param list<array<string,mixed>> $employments
+     * @param list<JmhzScenario1Blocker> $blockers
+     */
+    private function employerSocialCzk(
+        array $social,
+        array $payslip,
+        array $employments,
+        string $periodStart,
+        int $employeeId,
+        array &$blockers,
+    ): ?int {
+        foreach ($employments as $employment) {
+            if (($employment['reports_social_contributions'] ?? false) !== true) {
+                continue;
+            }
+            $socialBase = $this->object($employment['social_base'] ?? null);
+            $base = $socialBase['assessment_base_czk'] ?? null;
+            $letter = $socialBase['paragraph5_letter'] ?? null;
+            if ($base === 0) {
+                return 0;
+            }
+            if (is_int($base) && $base > 0 && is_string($letter)
+                && isset(JmhzControlParameterCatalog::EMPLOYER_SOCIAL_RATE_BY_PARAGRAPH5_LETTER[$letter])
+            ) {
+                return $this->controlParameters()->employerSocialInsuranceCzk(
+                    $base,
+                    $letter,
+                    $periodStart,
+                );
+            }
+            break;
+        }
+
+        return $this->wholeCzk(
+            $this->employerSocialMinor($social, $payslip),
+            '10481',
+            'person',
+            $employeeId,
+            $blockers,
+        );
+    }
+
+    private function controlParameters(): JmhzControlParameterCatalog
+    {
+        return $this->controlParameters ??= JmhzControlSourceCatalog::load()->parameters();
     }
 
     /**

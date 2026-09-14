@@ -219,6 +219,8 @@ export const ICONS = {
   calendar:         'M8 7V3m8 4V3M4 11h16M5 21h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z',
   // Kniha jízd: stav tachometru.
   gauge:            'M5.64 18.36a9 9 0 1 1 12.72 0M12 14l4-4M12 14h.01',
+  // Místo výkonu práce / lokalita.
+  pin:              'M17.657 16.657L13.414 20.9a2 2 0 0 1-2.828 0l-4.243-4.243a8 8 0 1 1 11.314 0z M15 11a3 3 0 1 1-6 0 3 3 0 0 1 6 0z',
 } as const
 
 export type ActionIcon = keyof typeof ICONS

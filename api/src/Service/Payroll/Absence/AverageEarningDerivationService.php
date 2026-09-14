@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Absence;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Calculation\RoundingMode;
+use MyInvoice\Service\Payroll\Document\AverageEarningsMonthlyMath;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
@@ -84,6 +86,27 @@ use PDO;
  *    `probable`; když zadané není, vrátí se blokátor
  *    `probable_earning_not_recorded`, který účetní pošle na kartu vztahu.
  *
+ *    Doslovné znění § 355 odst. 2 (zákon č. 262/2006 Sb., znění účinné od
+ *    29. 8. 2026): „Pravděpodobný výdělek zjistí zaměstnavatel z hrubé mzdy
+ *    nebo platu, které zaměstnanec dosáhl od počátku rozhodného období,
+ *    popřípadě z hrubé mzdy nebo platu, které by zřejmě dosáhl; přitom se
+ *    přihlédne zejména k obvyklé výši jednotlivých složek mzdy nebo platu
+ *    zaměstnance …". Bez zadané hodnoty proto aplikace NAVRHNE číslo
+ *    z evidence, kterou už má, v tomhle pořadí:
+ *
+ *      1. hodnota zadaná v podmínkách vztahu (rozhodnutí účetní má přednost),
+ *      2. hrubá mzda dosažená od počátku rozhodného období — započitatelná
+ *         mzda a odpracovaná doba z uzavřených běhů od vzniku zaměstnání,
+ *         tedy i z měsíců čtvrtletí, pro které se průměr zjišťuje (věta
+ *         první: „od počátku", ne „v" rozhodném období),
+ *      3. sjednaná měsíční mzda z podmínek vztahu přepočtená na hodinu
+ *         koeficientem § 356 odst. 2 (věta druhá: obvyklá výše složek mzdy).
+ *
+ *    Odvozuje se JEN u nového vztahu: každý měsíc rozhodného období bez běhu
+ *    musí celý ležet před vznikem zaměstnání. Chybějící běh uprostřed trvání
+ *    vztahu je vadná evidence a číslo odjinud by ji zakrylo. Návrh zůstává
+ *    návrhem — průměr z něj vznikne až potvrzením účetní.
+ *
  *    Substituce platí JEN pro důvody, na které § 355 míří — chybějící běh,
  *    málo odpracovaných dnů, nulová odpracovaná doba
  *    ({@see PROBABLE_ELIGIBLE_BLOCKERS}). Vadná evidence (dva běhy za měsíc,
@@ -139,6 +162,11 @@ final class AverageEarningDerivationService
         'worked_time_missing',
     ];
 
+    /** Odkud pravděpodobný výdělek pochází — viz docblock třídy, § 355 ZP. */
+    public const PROBABLE_SOURCE_TERMS = 'terms';
+    public const PROBABLE_SOURCE_ACHIEVED_WAGE = 'achieved_wage';
+    public const PROBABLE_SOURCE_AGREED_MONTHLY_GROSS = 'agreed_monthly_gross';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollRulesetProvider $rulesets,
@@ -169,7 +197,7 @@ final class AverageEarningDerivationService
         if ($quarter < 1 || $quarter > 4) {
             throw new \InvalidArgumentException('Čtvrtletí průměru musí být 1–4.');
         }
-        $this->assertEmployment($supplierId, $employmentId);
+        $employmentStart = $this->employmentStart($supplierId, $employmentId);
 
         $applicationStart = new \DateTimeImmutable(sprintf(
             '%04d-%02d-01',
@@ -186,6 +214,26 @@ final class AverageEarningDerivationService
                 $periodStart,
             );
         }
+        $minimumWorkedDays = AbsenceRuleset::forDate($this->rulesets, $applicationStart->format('Y-m-d'))
+            ->averageEarningMinimumWorkedDays();
+
+        $terms = $this->terms($supplierId, $employmentId);
+        $probable = self::probableFromTerms($terms, $applicationStart->format('Y-m-d'));
+        if ($probable !== null) {
+            $probable['source'] = self::PROBABLE_SOURCE_TERMS;
+        } elseif (self::needsProbable(self::combine($months, $minimumWorkedDays, false))
+            && self::derivedProbableAllowed($months, $employmentStart)
+        ) {
+            $probable = self::probableFromAchievedWage([
+                ...self::monthsSinceStart($months, (string) $employmentStart),
+                ...$this->applicationMonths(
+                    $supplierId,
+                    $employmentId,
+                    $applicationStart,
+                    (string) $employmentStart,
+                ),
+            ]) ?? self::probableFromAgreedGross($terms, $applicationStart->format('Y-m-d'));
+        }
 
         return [
             'employment_id' => $employmentId,
@@ -195,14 +243,222 @@ final class AverageEarningDerivationService
             'decisive_to' => $applicationStart->modify('-1 day')->format('Y-m-d'),
         ] + self::combine(
             $months,
-            AbsenceRuleset::forDate($this->rulesets, $applicationStart->format('Y-m-d'))
-                ->averageEarningMinimumWorkedDays(),
+            $minimumWorkedDays,
             $this->existingSnapshot($supplierId, $employmentId, $year, $quarter) !== null,
-            self::probableFromTerms(
-                $this->terms($supplierId, $employmentId),
-                $applicationStart->format('Y-m-d'),
-            ),
+            $probable,
         );
+    }
+
+    /**
+     * Chybí skutečný průměr z důvodu, na který dopadá § 355 ZP?
+     *
+     * @param array<string,mixed> $combined výstup {@see combine()} bez
+     *        pravděpodobného výdělku
+     */
+    public static function needsProbable(array $combined): bool
+    {
+        $actualBlockers = (array) ($combined['actual_blockers'] ?? []);
+
+        return $actualBlockers !== []
+            && array_diff($actualBlockers, self::PROBABLE_ELIGIBLE_BLOCKERS) === [];
+    }
+
+    /**
+     * Smí se pravděpodobný výdělek odvodit z evidence?
+     *
+     * Jen u nového vztahu: měsíc rozhodného období bez běhu musí celý ležet
+     * před vznikem zaměstnání. Chybějící běh v měsíci, kdy vztah už trval,
+     * je vadná evidence — číslo odjinud by ji jen zakrylo.
+     *
+     * @param list<array<string,mixed>> $months výstupy {@see monthFromRow()}
+     *        doplněné o `period_start`
+     */
+    public static function derivedProbableAllowed(array $months, ?string $employmentStart): bool
+    {
+        if ($employmentStart === null) {
+            return false;
+        }
+        foreach ($months as $month) {
+            $blockers = array_values((array) ($month['blockers'] ?? []));
+            if ($blockers === []) {
+                continue;
+            }
+            if ($blockers !== ['run_missing']
+                || self::monthEnd((string) $month['period_start']) >= $employmentStart
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Pravděpodobný výdělek z hrubé mzdy dosažené od počátku rozhodného
+     * období (§ 355 odst. 2 věta první ZP): započitatelná mzda a odpracovaná
+     * doba uzavřených běhů od vzniku zaměstnání, tedy tatáž čísla, ze kterých
+     * vzniká skutečný průměr.
+     *
+     * Blokovaný měsíc (neschválený běh, vadný souhrn docházky) návrh zruší
+     * celý — částečný součet by vypadal jako hotové číslo.
+     *
+     * @param list<array<string,mixed>> $months výstupy {@see monthFromRow()}
+     *        doplněné o `period_start`, jen měsíce od vzniku zaměstnání
+     * @return array<string,mixed>|null
+     */
+    public static function probableFromAchievedWage(array $months): ?array
+    {
+        $grossMinor = 0;
+        $workedMinutes = 0;
+        $used = [];
+        foreach ($months as $month) {
+            if ((array) ($month['blockers'] ?? []) !== []
+                || !is_int($month['gross_earnings_minor'] ?? null)
+                || !is_int($month['worked_minutes'] ?? null)
+            ) {
+                return null;
+            }
+            $grossMinor += $month['gross_earnings_minor'];
+            $workedMinutes += $month['worked_minutes'];
+            $used[] = [
+                'period_start' => $month['period_start'] ?? null,
+                'revision_id' => $month['revision_id'] ?? null,
+                'result_hash' => $month['result_hash'] ?? null,
+                'work_summary_sha256' => $month['work_summary_sha256'] ?? null,
+            ];
+        }
+        if ($used === [] || $grossMinor <= 0 || $workedMinutes <= 0) {
+            return null;
+        }
+        if ($grossMinor > intdiv(PHP_INT_MAX, 60)) {
+            return null;
+        }
+
+        return [
+            // Stejná aritmetika jako skutečný průměr v AverageEarningCalculator.
+            'hourly_minor' => RoundingMode::HalfUp->roundFraction($grossMinor * 60, $workedMinutes),
+            'rationale' => sprintf(
+                'Pravděpodobný výdělek podle § 355 odst. 2 zákoníku práce z hrubé mzdy dosažené'
+                    . ' od počátku rozhodného období: započitatelná mzda %s Kč za %s odpracovaných'
+                    . ' hodin (uzavřené mzdové běhy za %s).',
+                self::czk($grossMinor),
+                self::hours($workedMinutes),
+                implode(', ', array_map(
+                    static fn (array $month): string => self::monthLabel((string) $month['period_start']),
+                    $used,
+                )),
+            ),
+            'term_id' => null,
+            'effective_from' => null,
+            'source' => self::PROBABLE_SOURCE_ACHIEVED_WAGE,
+            'months' => $used,
+        ];
+    }
+
+    /**
+     * Pravděpodobný výdělek ze sjednané měsíční mzdy (§ 355 odst. 2 věta druhá
+     * ZP — obvyklá výše složek mzdy) přepočtené na hodinu koeficientem
+     * § 356 odst. 2. Bere se z téže revize podmínek jako zadaný pravděpodobný
+     * výdělek ({@see termForApplication()}).
+     *
+     * @param list<array<string,mixed>> $terms
+     * @return array<string,mixed>|null
+     */
+    public static function probableFromAgreedGross(array $terms, string $applicationStart): ?array
+    {
+        $chosen = self::termForApplication($terms, $applicationStart);
+        if ($chosen === null) {
+            return null;
+        }
+        $monthlyGross = self::nullableInt($chosen['monthly_gross_minor'] ?? null);
+        $weeklyHours = $chosen['weekly_hours'] ?? null;
+        $weeklyMilli = is_string($weeklyHours) || is_int($weeklyHours)
+            ? AverageEarningsMonthlyMath::weeklyHoursMilli((string) $weeklyHours)
+            : null;
+        if ($monthlyGross === null || $monthlyGross <= 0 || $weeklyMilli === null) {
+            return null;
+        }
+
+        return [
+            'hourly_minor' => AverageEarningsMonthlyMath::hourlyMinorUnitsFromMonthly(
+                $monthlyGross,
+                $weeklyMilli,
+            ),
+            'rationale' => sprintf(
+                'Pravděpodobný výdělek podle § 355 odst. 2 zákoníku práce ze sjednané měsíční mzdy'
+                    . ' %s Kč při týdenní pracovní době %s h, přepočteno na hodinu koeficientem 4,348'
+                    . ' (§ 356 odst. 2 zákoníku práce).',
+                self::czk($monthlyGross),
+                str_replace('.', ',', rtrim(rtrim(number_format($weeklyMilli / 1000, 3, '.', ''), '0'), '.')),
+            ),
+            'term_id' => self::nullableInt($chosen['id'] ?? null),
+            'effective_from' => (string) $chosen['effective_from'],
+            'source' => self::PROBABLE_SOURCE_AGREED_MONTHLY_GROSS,
+        ];
+    }
+
+    /**
+     * Měsíce rozhodného období, ve kterých už zaměstnání trvalo.
+     *
+     * @param list<array<string,mixed>> $months
+     * @return list<array<string,mixed>>
+     */
+    private static function monthsSinceStart(array $months, string $employmentStart): array
+    {
+        return array_values(array_filter(
+            $months,
+            static fn (array $month): bool =>
+                self::monthEnd((string) $month['period_start']) >= $employmentStart,
+        ));
+    }
+
+    /**
+     * Uzavřené měsíce čtvrtletí, pro které se průměr zjišťuje, od vzniku
+     * zaměstnání. Končí na prvním měsíci bez běhu — pozdější měsíc bez
+     * předchozího by byl díra v evidenci, ne „mzda dosažená od počátku".
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function applicationMonths(
+        int $supplierId,
+        int $employmentId,
+        \DateTimeImmutable $applicationStart,
+        string $employmentStart,
+    ): array {
+        $months = [];
+        foreach ([0, 1, 2] as $offset) {
+            $periodStart = $applicationStart->modify("+{$offset} months")->format('Y-m-d');
+            if (self::monthEnd($periodStart) < $employmentStart) {
+                continue;
+            }
+            $row = $this->latestRunResult($supplierId, $employmentId, $periodStart);
+            if ($row === null) {
+                break;
+            }
+            $months[] = ['period_start' => $periodStart] + self::monthFromRow($row, $periodStart);
+        }
+
+        return $months;
+    }
+
+    private static function monthEnd(string $periodStart): string
+    {
+        return (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+    }
+
+    private static function monthLabel(string $periodStart): string
+    {
+        return (int) substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4);
+    }
+
+    private static function czk(int $minor): string
+    {
+        return number_format($minor / 100, 2, ',', ' ');
+    }
+
+    private static function hours(int $minutes): string
+    {
+        return number_format($minutes / 60, 2, ',', ' ');
     }
 
     /**
@@ -219,6 +475,37 @@ final class AverageEarningDerivationService
      * @return array{hourly_minor:int,rationale:string,term_id:?int,effective_from:?string}|null
      */
     public static function probableFromTerms(array $terms, string $applicationStart): ?array
+    {
+        $chosen = self::termForApplication($terms, $applicationStart);
+        if ($chosen === null) {
+            return null;
+        }
+
+        $hourly = self::nullableInt($chosen['probable_hourly_earning_minor'] ?? null);
+        $rationale = is_string($chosen['probable_earning_rationale'] ?? null)
+            ? trim($chosen['probable_earning_rationale'])
+            : '';
+        if ($hourly === null || $hourly <= 0 || $rationale === '') {
+            return null;
+        }
+
+        return [
+            'hourly_minor' => $hourly,
+            'rationale' => $rationale,
+            'term_id' => self::nullableInt($chosen['id'] ?? null),
+            'effective_from' => (string) $chosen['effective_from'],
+        ];
+    }
+
+    /**
+     * Revize podmínek, ze které se pro použité období bere pravděpodobný
+     * výdělek i sjednaná mzda: poslední účinná k prvnímu dni čtvrtletí, jinak
+     * nejstarší (vztah vznikl uprostřed čtvrtletí) — viz {@see probableFromTerms()}.
+     *
+     * @param list<array<string,mixed>> $terms revize seřazené libovolně
+     * @return array<string,mixed>|null
+     */
+    public static function termForApplication(array $terms, string $applicationStart): ?array
     {
         $rows = array_values(array_filter(
             $terms,
@@ -241,20 +528,7 @@ final class AverageEarningDerivationService
             }
         }
 
-        $hourly = self::nullableInt($chosen['probable_hourly_earning_minor'] ?? null);
-        $rationale = is_string($chosen['probable_earning_rationale'] ?? null)
-            ? trim($chosen['probable_earning_rationale'])
-            : '';
-        if ($hourly === null || $hourly <= 0 || $rationale === '') {
-            return null;
-        }
-
-        return [
-            'hourly_minor' => $hourly,
-            'rationale' => $rationale,
-            'term_id' => self::nullableInt($chosen['id'] ?? null),
-            'effective_from' => (string) $chosen['effective_from'],
-        ];
+        return $chosen;
     }
 
     /**
@@ -368,6 +642,11 @@ final class AverageEarningDerivationService
                 : null,
             'probable_term_id' => $sourceKind === 'probable' && $probable !== null
                 ? $probable['term_id']
+                : null,
+            // Odkud se pravděpodobný výdělek vzal (viz docblock třídy). Návrh
+            // z evidence má jiné odůvodnění než hodnota zadaná účetní.
+            'probable_source' => $sourceKind === 'probable' && $probable !== null
+                ? ($probable['source'] ?? self::PROBABLE_SOURCE_TERMS)
                 : null,
             'gross_earnings_minor' => $actual ? $grossMinor : null,
             // § 358 ZP se z evidence odvodit nedá — viz docblock třídy.
@@ -644,7 +923,8 @@ final class AverageEarningDerivationService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, effective_from,
-                    probable_hourly_earning_minor, probable_earning_rationale
+                    probable_hourly_earning_minor, probable_earning_rationale,
+                    monthly_gross_minor, weekly_hours
                FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?',
         );
@@ -675,15 +955,22 @@ final class AverageEarningDerivationService
         return is_array($decoded) && !array_is_list($decoded) ? $decoded : null;
     }
 
-    private function assertEmployment(int $supplierId, int $employmentId): void
+    /** Den vzniku zaměstnání (skutečný nástup má přednost před sjednaným). */
+    private function employmentStart(int $supplierId, int $employmentId): ?string
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id FROM payroll_employments WHERE supplier_id = ? AND id = ?',
+            'SELECT id, COALESCE(actual_start_date, start_date) AS start_on
+               FROM payroll_employments WHERE supplier_id = ? AND id = ?',
         );
         $stmt->execute([$supplierId, $employmentId]);
-        if ($stmt->fetchColumn() === false) {
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
             throw new \InvalidArgumentException('Pracovní vztah nebyl nalezen.');
         }
+
+        return is_string($row['start_on'] ?? null) && $row['start_on'] !== ''
+            ? (string) $row['start_on']
+            : null;
     }
 
     /**

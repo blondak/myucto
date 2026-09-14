@@ -2020,6 +2020,43 @@
         "after_frozen_period": "od měsíce po schváleném období"
       }
     },
+    "workplace_bulk": {
+      "title": "Hromadně doplnit místo výkonu práce",
+      "intro": "Místo výkonu práce je sjednané v pracovní smlouvě, aplikace ho neodhaduje — zvolte obec, kde zaměstnanci skutečně pracují. Vyplněné pracoviště se nepřepisuje.",
+      "notice": "Místo výkonu práce je sjednané v pracovní smlouvě, aplikace ho neodhaduje — zvolte obec, kde zaměstnanci skutečně pracují. Vyplněné pracoviště se nepřepisuje.",
+      "load_failed": "Náhled doplnění pracoviště se nepodařilo načíst.",
+      "apply_failed": "Doplnění pracoviště se nepodařilo uložit.",
+      "retry": "Zkusit znovu",
+      "municipality": "Obec pracoviště",
+      "search_municipality": "Vyhledat obec",
+      "country": "Stát",
+      "nothing_to_apply": "Žádnému vztahu není co doplnit.",
+      "municipality_required": "Zvolte obec pracoviště.",
+      "summary": {
+        "employments": "Pracovních vztahů celkem",
+        "missing": "Doplní se",
+        "verified": "Už má ověřené",
+        "excluded": "Vyřazeno"
+      },
+      "exclusion_reason": {
+        "terms_missing": "chybí účinné smluvní podmínky",
+        "later_terms": "novější podmínky vztahu už pracoviště mění",
+        "employment_closed": "pracovní vztah je ukončený",
+        "period_settled": "období je už vyúčtované",
+        "workplace_not_verified": "existující pracoviště není ověřené"
+      },
+      "excluded_title": "Vyřazeno ({count})",
+      "apply": "Doplnit pracoviště {count} vztahům",
+      "applied_toast": "Pracoviště bylo doplněno u {count} pracovních vztahů.",
+      "result_title": "Výsledek doplnění",
+      "result": {
+        "applied": "Doplněno",
+        "skipped": "Přeskočeno",
+        "failed": "Selhalo"
+      },
+      "failed_title": "Nepovedlo se doplnit ({count})",
+      "recalculate_notice": "Mzdový běh, u kterého jste pracoviště doplnili, je nutné znovu přepočítat a schválit novou revizi, aby se nová hodnota promítla do hlášení."
+    },
     "runs": {
       "person_picker": {
         "placeholder": "Vyhledat zaměstnance",
@@ -3802,6 +3839,7 @@
       "filter": "Zobrazení",
       "quick_inputs": "Měsíční zadání mezd",
       "statutory_bulk_action": "Doplnit výchozí zákonné údaje",
+      "workplace_bulk_action": "Doplnit místo výkonu práce",
       "no_results_title": "Žádný zaměstnanec neodpovídá filtru",
       "no_results_description": "Upravte hledaný text nebo zvolte jiné zobrazení.",
       "filters": {
@@ -6028,7 +6066,9 @@
           "jmhz_average_hourly_earning_missing": "Doplnit průměrný výdělek",
           "jmhz_work_month_not_approved": "Schválit pracovní dobu",
           "jmhz_scenario1_earnings_vector_incomplete": "Nastavit mzdové složky",
-          "jmhz_primary_employment_unresolved": "Určit hlavní vztah"
+          "jmhz_primary_employment_unresolved": "Určit hlavní vztah",
+          "jmhz_scenario1_whole_czk_required": "Zkontrolovat mzdový běh",
+          "jmhz_workplace_codebooks_unverified": "Hromadně doplnit pracoviště"
         },
         "jmhz_dry_run_show_xml": "Zobrazit XML",
         "jmhz_dry_run_hide_xml": "Skrýt XML",
@@ -6085,6 +6125,7 @@
           "component_jmhz_manual_review": "Zařazení mzdové složky do JMHZ vyžaduje ruční kontrolu.",
           "component_jmhz_treatment_invalid": "Mzdová složka má neplatné nastavení pro JMHZ.",
           "jmhz_average_hourly_earning_missing": "Chybí ověřený průměrný hodinový výdělek.",
+          "jmhz_scenario1_whole_czk_required": "Částka, která se do měsíčního hlášení vykazuje v celých korunách, vyšla ve výsledku mzdového běhu s haléři. Otevřete Mzdy → Mzdové běhy, u dotčených osob najděte mzdovou složku s haléřovou částkou (číslo pole je v technickém detailu), opravte ji na celé koruny a běh přepočítejte.",
           "jmhz_identity_incomplete": "Pracovní vztah nemá uložené „OIČ / IK MPSV osoby\" ani „ID PPV pracovního vztahu\". Obě čísla přiděluje ČSSZ při registraci zaměstnance — aplikace je vymyslet nemůže. Když zaměstnanec u ČSSZ registrovaný ještě není, podejte nejdřív přihlášku (PREZEC/REGZEC A1); čísla přijdou v protokolu. Když registrovaný je, opište je z protokolu ČSSZ nebo z ePortálu. Vyplňují se na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\".",
           "jmhz_identity_oic_missing": "Chybí „OIČ / IK MPSV osoby\" — osobní identifikační číslo, které zaměstnanci přiděluje ČSSZ při registraci. Opište ho z protokolu o přijetí přihlášky nebo z ePortálu ČSSZ; vyplňuje se na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\". Když zaměstnanec u ČSSZ registrovaný ještě není, podejte nejdřív přihlášku (PREZEC/REGZEC A1) a číslo se doplní z protokolu.",
           "jmhz_scenario_activity_code_missing": "Chybí kód druhu činnosti pro JMHZ.",
@@ -22878,6 +22919,22 @@
       "source_worked_days": "Odvozeno ze směn, ze kterých vznikly potvrzené hodiny.",
       "source_probable": "Převzato z podmínek pracovního vztahu; měnit se má tam, kde je i odůvodnění.",
       "suggestion_probable": "Skutečný průměr z uzavřených běhů odvodit nelze, proto se použil pravděpodobný výdělek zadaný v podmínkách pracovního vztahu (§ 355 zákoníku práce).",
+      "bulk_title": "Hromadné vypočtení průměrů za čtvrtletí",
+      "bulk_hint": "Založí a rovnou schválí průměrný výdělek u vybraných pracovních vztahů za zvolené čtvrtletí.",
+      "bulk_create": "Založit a schválit vybrané ({count})",
+      "bulk_created": "Průměrný výdělek byl založen a schválen u {count} pracovních vztahů.",
+      "bulk_load_failed": "Kandidáty na hromadný výpočet průměru se nepodařilo načíst.",
+      "bulk_inputs_changed": "Podklady se od načtení seznamu změnily. Seznam byl znovu načten, zkontrolujte výběr a odešlete znovu.",
+      "bulk_empty": "Pro toto čtvrtletí nejsou žádné pracovní vztahy.",
+      "bulk_existing": "Existující průměr: {amount} · {status}",
+      "bulk_actual_summary": "Skutečný průměr · mzda {gross}, odpracováno {hours}, {days} dnů",
+      "bulk_probable_summary": "Pravděpodobný výdělek {amount} · {source}",
+      "bulk_longer_period_note": "Hromadně založený skutečný průměr nezohledňuje poměrnou část mzdy za období delší než čtvrtletí (§ 358 zákoníku práce). U osob s roční odměnou založte průměr ručně na kartě osoby.",
+      "probable_source": {
+        "terms": "zadaný v podmínkách vztahu",
+        "achieved_wage": "z mzdy dosažené od nástupu (§ 355 odst. 2 ZP)",
+        "agreed_monthly_gross": "ze sjednané měsíční mzdy (§ 355 odst. 2 ZP)"
+      },
       "blockers": {
         "run_missing": "Za některý měsíc rozhodného období není mzdový běh; u nově nastoupivšího se průměr stanovuje jako pravděpodobný výdělek (§ 355 ZP)",
         "run_not_approved": "Mzdový běh rozhodného období není uzavřený nebo se opravuje",
@@ -22891,7 +22948,9 @@
         "work_summary_source_corrupt": "Zdrojová evidence pracovního souhrnu není čitelná",
         "work_summary_hours_mismatch": "Hodiny ze směn neodpovídají potvrzeným hodinám pracovního souhrnu",
         "worked_time_not_derivable": "Evidované směny nelze sečíst bez posouzení (překryv, interval přes hranici měsíce nebo záporná doba)",
+        "worked_time_not_whole_minutes": "Odpracovaná doba nevyšla v celých minutách; je nutné ruční posouzení",
         "worked_time_missing": "Rozhodné období nemá kladnou započitatelnou mzdu a odpracovanou dobu",
+        "worked_days_not_provided": "Počet odpracovaných dnů se nepodařilo zjistit",
         "probable_earning_required": "V rozhodném období nebyl odpracován zákonný minimální počet dnů; průměr se stanovuje jako pravděpodobný výdělek (§ 355 ZP)",
         "average_already_exists": "Průměr pro toto čtvrtletí už existuje; návrh jej nepřepíše",
         "probable_earning_not_recorded": "Skutečný průměr z uzavřených běhů odvodit nelze a u pracovního vztahu není zadaný pravděpodobný výdělek (§ 355 zákoníku práce). Otevřete Mzdy → Zaměstnanci, na kartě vztahu vyplňte pravděpodobný hodinový výdělek a jeho odůvodnění a uložte."

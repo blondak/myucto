@@ -68,6 +68,22 @@ final class AverageEarningsMonthlyMath
         return intdiv(2 * $numerator + $denominator, 2 * $denominator);
     }
 
+    /**
+     * Opačný směr téhož vztahu: hodinový výdělek z měsíční částky a týdenní
+     * pracovní doby (měsíc / (týdenní doba × 4,348)), zaokrouhleno matematicky
+     * na haléře. Slouží pravděpodobnému výdělku ze sjednané měsíční mzdy
+     * (§ 355 odst. 2 ZP), aby se koeficient nevedl na dvou místech.
+     */
+    public static function hourlyMinorUnitsFromMonthly(
+        int $monthlyMinorUnits,
+        int $weeklyHoursMilli,
+    ): int {
+        $numerator = $monthlyMinorUnits * 1000 * self::MONTH_COEFFICIENT_DENOMINATOR;
+        $denominator = $weeklyHoursMilli * self::MONTH_COEFFICIENT_NUMERATOR;
+
+        return intdiv(2 * $numerator + $denominator, 2 * $denominator);
+    }
+
     /** Potvrzení pro Úřad práce uvádí celé koruny. */
     public static function roundHalfUpToWholeCzk(int $minorUnits): int
     {

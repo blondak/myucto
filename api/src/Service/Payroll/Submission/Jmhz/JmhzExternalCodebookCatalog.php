@@ -222,6 +222,62 @@ final class JmhzExternalCodebookCatalog
         return $this->provenanceFromManifest($this->packageForDate($validOn)['manifest']);
     }
 
+    /**
+     * Ověření pracoviště (obec 10229, stát 10230 a název obce) proti číselníku
+     * účinnému pro CELÉ vykazované období. `null` = neověřeno.
+     *
+     * Jediné místo, kde se tahle otázka rozhoduje — ptá se na ni mzdový běh
+     * při zmrazení podmínek do revize (a podle toho příprava JMHZ hlásí
+     * `jmhz_workplace_codebooks_unverified`) i hromadné doplnění pracoviště.
+     * Kdyby si pravidlo každý opsal, mohl by náhled slibovat „ověřeno" tam,
+     * kde příprava podání zastaví.
+     *
+     * Uložená provenience u podmínek je doklad navíc: když je, musí být
+     * načtitelná (a úplná — půl provenience není provenience). Když není,
+     * rozhoduje jen platnost obce a státu v číselníku pro začátek i konec
+     * období; vztah starší než číselníky ČSSZ ji mít nemůže.
+     *
+     * @return array{overlay_key:string,manifest_sha256:string,snapshot_date:string,effective_from:string,effective_to:?string,verified_through:string,base_spec_manifest_sha256:string}|null
+     */
+    public function workplaceProvenanceForPeriod(
+        ?string $municipalityCode,
+        ?string $municipalityName,
+        ?string $countryCode,
+        ?string $overlayKey,
+        ?string $manifestSha256,
+        string $periodStart,
+        string $periodEnd,
+    ): ?array {
+        if ($municipalityCode === null || $countryCode === null || $municipalityName === null) {
+            return null;
+        }
+        if (($overlayKey === null) !== ($manifestSha256 === null)) {
+            return null;
+        }
+        if ($overlayKey !== null && $manifestSha256 !== null
+            && !$this->hasLoadableIdentity($overlayKey, $manifestSha256)
+        ) {
+            return null;
+        }
+        try {
+            $startProvenance = $this->provenanceForDate($periodStart);
+            $endProvenance = $this->provenanceForDate($periodEnd);
+            if ($startProvenance['overlay_key'] !== $endProvenance['overlay_key']
+                || $startProvenance['manifest_sha256'] !== $endProvenance['manifest_sha256']
+            ) {
+                return null;
+            }
+            $this->requireMunicipality($municipalityCode, $municipalityName, $periodStart);
+            $this->requireCountry($countryCode, $periodStart);
+            $this->requireMunicipality($municipalityCode, $municipalityName, $periodEnd);
+            $this->requireCountry($countryCode, $periodEnd);
+
+            return $endProvenance;
+        } catch (JmhzCodebookUnavailableException|JmhzCodebookValueException) {
+            return null;
+        }
+    }
+
     /** @param array{manifest_sha256:string,payload:array<string,mixed>} $manifest */
     public static function validateManifest(array $manifest, bool $requirePinnedHash = false): void
     {

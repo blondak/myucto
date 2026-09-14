@@ -145,6 +145,79 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         self::assertContains('run_not_approved', $suggestion['blockers']);
     }
 
+    /**
+     * Nový vztah bez rozhodného období a bez zadaného pravděpodobného výdělku:
+     * § 355 odst. 2 ZP — hrubá mzda dosažená od počátku rozhodného období,
+     * tedy červnová mzda uzavřeného běhu.
+     */
+    public function testNewEmploymentGetsProbableEarningFromWageAchievedSinceStart(): void
+    {
+        $this->startEmploymentOn('2026-06-01');
+        $this->insertClosedRun('2026-06-01');
+
+        $suggestion = $this->suggest(2026, 2);
+
+        self::assertTrue($suggestion['ready']);
+        self::assertSame([], $suggestion['blockers']);
+        self::assertSame('probable', $suggestion['source_kind']);
+        self::assertSame('achieved_wage', $suggestion['probable_source']);
+        // 45 000 Kč za 60 odpracovaných hodin = 750 Kč/h.
+        self::assertSame(75_000, $suggestion['probable_hourly_minor']);
+        self::assertStringContainsString('§ 355 odst. 2', (string) $suggestion['probable_rationale']);
+    }
+
+    public function testBulkCreatesAndApprovesTheProposedAverage(): void
+    {
+        $this->startEmploymentOn('2026-06-01');
+        $this->insertClosedRun('2026-06-01');
+
+        $page = $this->call('averageCandidates', 'GET', ['year' => 2026, 'quarter' => 2]);
+        self::assertSame(200, $page['status']);
+        $items = array_values(array_filter(
+            $page['body']['items'],
+            fn (array $item): bool => $item['employment_id'] === $this->employmentId,
+        ));
+        self::assertCount(1, $items);
+        self::assertTrue($items[0]['ready']);
+        self::assertNull($items[0]['existing']);
+
+        $request = [
+            'year' => 2026,
+            'quarter' => 2,
+            'items' => [[
+                'employment_id' => $this->employmentId,
+                'input_version' => $items[0]['input_version'],
+            ]],
+        ];
+        $created = $this->call('createAutomaticAverages', 'POST', $request);
+        self::assertSame(201, $created['status']);
+        $snapshot = $created['body']['averages'][0];
+        self::assertSame('approved', $snapshot['status']);
+        self::assertSame('supported', $snapshot['support_status']);
+        self::assertSame('probable', $snapshot['source_kind']);
+        self::assertSame(75_000, (int) $snapshot['average_hourly_minor']);
+
+        // Založený průměr se nepřepisuje: druhé potvrzení téhož návrhu projít nesmí.
+        self::assertSame(422, $this->call('createAutomaticAverages', 'POST', $request)['status']);
+    }
+
+    public function testBulkRefusesInputsChangedSinceThePreview(): void
+    {
+        $this->startEmploymentOn('2026-06-01');
+        $this->insertClosedRun('2026-06-01');
+
+        $response = $this->call('createAutomaticAverages', 'POST', [
+            'year' => 2026,
+            'quarter' => 2,
+            'items' => [[
+                'employment_id' => $this->employmentId,
+                'input_version' => str_repeat('0', 64),
+            ]],
+        ]);
+
+        self::assertSame(409, $response['status']);
+    }
+
     public function testUnknownEmploymentIsRejected(): void
     {
         $response = $this->action->averageSuggestion(
@@ -282,6 +355,30 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
             $resultRowJson,
             hash('sha256', $resultRowJson),
         ]);
+    }
+
+    private function startEmploymentOn(string $startDate): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET start_date = ? WHERE supplier_id = ? AND id = ?',
+        )->execute([$startDate, $this->supplierId, $this->employmentId]);
+    }
+
+    /**
+     * @param array<string,mixed> $params
+     * @return array{status:int,body:array<string,mixed>}
+     */
+    private function call(string $method, string $httpMethod, array $params): array
+    {
+        $request = $this->request()->withMethod($httpMethod);
+        $request = $httpMethod === 'GET'
+            ? $request->withQueryParams($params)
+            : $request->withParsedBody($params);
+        $response = $this->action->{$method}($request, new Response());
+        $response->getBody()->rewind();
+        $decoded = json_decode((string) $response->getBody(), true);
+
+        return ['status' => $response->getStatusCode(), 'body' => is_array($decoded) ? $decoded : []];
     }
 
     private function request(): \Psr\Http\Message\ServerRequestInterface

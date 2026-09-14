@@ -21,6 +21,9 @@ import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { averageEarningsTarget } from './payrollRemediation'
+import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
+
+const workplaceBulkDialogRun = ref<PayrollRun | null>(null)
 
 const props = defineProps<{ runs: PayrollRun[] }>()
 
@@ -295,12 +298,21 @@ function blockerTarget(
   }
   if (blocker.code === 'jmhz_average_hourly_earning_missing') {
     if (entityId !== null && payrollRun) return averageEarningsTarget(entityId, Number(payrollRun.period_start.slice(0, 4)), Math.ceil(Number(payrollRun.period_start.slice(5, 7)) / 3))
-    return entityId === null
-      ? { name: 'payroll-absences', query: { tab: 'averages' } }
-      : {
-          name: 'payroll-absences',
-          query: { employment: String(entityId), tab: 'averages' },
-        }
+    if (entityId === null) {
+      // Přes 10 vztahů = agendový doskok bez konkrétní osoby; rovnou na
+      // hromadnou sekci pro dané čtvrtletí, ne na jednotlivý formulář.
+      const quarterQuery = payrollRun
+        ? {
+            year: payrollRun.period_start.slice(0, 4),
+            quarter: String(Math.ceil(Number(payrollRun.period_start.slice(5, 7)) / 3)),
+          }
+        : {}
+      return { name: 'payroll-absences', query: { tab: 'averages', ...quarterQuery } }
+    }
+    return {
+      name: 'payroll-absences',
+      query: { employment: String(entityId), tab: 'averages' },
+    }
   }
   if (blocker.code === 'jmhz_work_month_not_approved') {
     return entityId === null
@@ -309,6 +321,11 @@ function blockerTarget(
   }
   if (blocker.code === 'jmhz_scenario1_earnings_vector_incomplete') {
     return { name: 'payroll-components' }
+  }
+  if (blocker.code === 'jmhz_scenario1_whole_czk_required') {
+    // Haléřová částka vzniká ve výsledku běhu, ne v identitě osoby — proklik
+    // musí mířit na Mzdové běhy, ne na kartu zaměstnance.
+    return { name: 'payroll-runs', query: periodQuery }
   }
   switch (blocker.entity_type) {
     case 'employment':
@@ -761,8 +778,20 @@ async function copyXml(payrollRun: PayrollRun) {
                       }) }}
                     </p>
                   </div>
+                  <button
+                    v-if="group.blocker.code === 'jmhz_workplace_codebooks_unverified'"
+                    type="button"
+                    :class="btnOutline('warning')"
+                    data-test="jmhz-dry-run-workplace-bulk"
+                    @click="workplaceBulkDialogRun = payrollRun"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.pin" />
+                    </svg>
+                    {{ blockerActionLabel(group.blocker) }}
+                  </button>
                   <RouterLink
-                    v-if="blockerGroupTarget(group, payrollRun)
+                    v-else-if="blockerGroupTarget(group, payrollRun)
                       && (group.entityIds.length <= 1
                         || blockerUsesAgendaTarget(group))"
                     :to="blockerGroupTarget(group, payrollRun)!"
@@ -776,7 +805,8 @@ async function copyXml(payrollRun: PayrollRun) {
                   </RouterLink>
                 </div>
                 <details
-                  v-if="blockerTarget(group.blocker) && group.entityIds.length > 1
+                  v-if="group.blocker.code !== 'jmhz_workplace_codebooks_unverified'
+                    && blockerTarget(group.blocker) && group.entityIds.length > 1
                     && group.entityIds.length <= 10
                     && !blockerUsesAgendaTarget(group)"
                   class="mt-2"
@@ -847,4 +877,17 @@ async function copyXml(payrollRun: PayrollRun) {
       </article>
     </div>
   </section>
+
+  <PayrollWorkplaceBulkFillDialog
+    v-if="workplaceBulkDialogRun"
+    :period-start="workplaceBulkDialogRun.period_start"
+    :employment-ids="null"
+    @close="workplaceBulkDialogRun = null"
+  >
+    <template #after-apply>
+      <p class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-xs text-warning-800">
+        {{ t('payroll.workplace_bulk.recalculate_notice') }}
+      </p>
+    </template>
+  </PayrollWorkplaceBulkFillDialog>
 </template>

@@ -23,6 +23,8 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Absence\AbsenceHolidayTreatment;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementConflictException;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
+use MyInvoice\Service\Payroll\Absence\AverageEarningBatchConflictException;
+use MyInvoice\Service\Payroll\Absence\AverageEarningBatchService;
 use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
 use MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
@@ -62,6 +64,7 @@ final class PayrollAbsenceAction
         private readonly PayrollLeaveLedgerDeletionRepository $ledgerDeletion,
         private readonly PayrollLeaveEntitlementDeletionRepository $entitlementDeletion,
         private readonly IpMatcher $ipMatcher,
+        private readonly AverageEarningBatchService $averageBatch,
     ) {}
 
     public function context(Request $request, Response $response): Response
@@ -673,6 +676,70 @@ final class PayrollAbsenceAction
         }
 
         return Json::ok($response, ['entitlements' => $entitlements], 201);
+    }
+
+    /**
+     * Návrhy průměrů za čtvrtletí pro všechny vztahy firmy (stránkovaně).
+     *
+     * Jen ČTE — stejně jako návrh pro jeden vztah. Založení a schválení je
+     * {@see createAutomaticAverages()}.
+     */
+    public function averageCandidates(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+        try {
+            $query = $request->getQueryParams();
+            $page = $this->averageBatch->page(
+                $this->currentSupplierId($request),
+                $this->requiredPositiveInt($query['year'] ?? null, 'year'),
+                $this->requiredPositiveInt($query['quarter'] ?? null, 'quarter'),
+                max(1, min(
+                    AverageEarningBatchService::MAX_LIMIT,
+                    (int) ($query['limit'] ?? AverageEarningBatchService::DEFAULT_LIMIT),
+                )),
+                max(0, (int) ($query['offset'] ?? 0)),
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        return Json::ok($response, $page);
+    }
+
+    /** Založí a schválí vybrané návrhy průměrů ({@see AverageEarningBatchService}). */
+    public function createAutomaticAverages(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $items = $body['items'] ?? null;
+            if (!is_array($items) || !array_is_list($items)) {
+                throw new \InvalidArgumentException('Výběr pracovních vztahů není platný.');
+            }
+            $averages = $this->averageBatch->createBatch(
+                $this->currentSupplierId($request),
+                $this->requiredPositiveInt($body['year'] ?? null, 'year'),
+                $this->requiredPositiveInt($body['quarter'] ?? null, 'quarter'),
+                $items,
+                $this->userId($request),
+            );
+        } catch (AverageEarningBatchConflictException $exception) {
+            return Json::error(
+                $response,
+                'average_inputs_changed',
+                $exception->getMessage(),
+                409,
+                ['employment_id' => $exception->employmentId],
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        return Json::ok($response, ['averages' => $averages], 201);
     }
 
     /**

@@ -799,41 +799,22 @@ final class PayrollRunSnapshotBuilder
         string $periodEnd,
     ): ?array
     {
-        $code = $row['jmhz_workplace_municipality_code'];
-        $country = $row['jmhz_workplace_country_code'];
-        $name = $row['work_place'];
-        $overlayKey = $row['jmhz_external_codebook_overlay_key'];
-        $manifestHash = $row['jmhz_external_codebook_manifest_sha256'];
-        if (!is_string($code) || !is_string($country) || !is_string($name)
-            || $this->jmhzExternalCodebooks === null
-        ) {
+        if ($this->jmhzExternalCodebooks === null) {
             return null;
         }
-        if (is_string($overlayKey) !== is_string($manifestHash)) {
-            // Půl proveninence není proveninence.
-            return null;
-        }
-        if (is_string($overlayKey) && is_string($manifestHash)
-            && !$this->jmhzExternalCodebooks->hasLoadableIdentity($overlayKey, $manifestHash)
-        ) {
-            return null;
-        }
-        try {
-            $startProvenance = $this->jmhzExternalCodebooks->provenanceForDate($periodStart);
-            $endProvenance = $this->jmhzExternalCodebooks->provenanceForDate($periodEnd);
-            if ($startProvenance['overlay_key'] !== $endProvenance['overlay_key']
-                || $startProvenance['manifest_sha256'] !== $endProvenance['manifest_sha256']
-            ) {
-                return null;
-            }
-            $this->jmhzExternalCodebooks->requireMunicipality($code, $name, $periodStart);
-            $this->jmhzExternalCodebooks->requireCountry($country, $periodStart);
-            $this->jmhzExternalCodebooks->requireMunicipality($code, $name, $periodEnd);
-            $this->jmhzExternalCodebooks->requireCountry($country, $periodEnd);
-            return $endProvenance;
-        } catch (JmhzCodebookUnavailableException|JmhzCodebookValueException) {
-            return null;
-        }
+        $text = static fn (mixed $value): ?string => is_string($value) ? $value : null;
+
+        // Pravidlo je jedno pro běh i hromadné doplnění pracoviště — viz
+        // JmhzExternalCodebookCatalog::workplaceProvenanceForPeriod().
+        return $this->jmhzExternalCodebooks->workplaceProvenanceForPeriod(
+            $text($row['jmhz_workplace_municipality_code']),
+            $text($row['work_place']),
+            $text($row['jmhz_workplace_country_code']),
+            $text($row['jmhz_external_codebook_overlay_key']),
+            $text($row['jmhz_external_codebook_manifest_sha256']),
+            $periodStart,
+            $periodEnd,
+        );
     }
 
     /**

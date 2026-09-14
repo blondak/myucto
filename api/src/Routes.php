@@ -1360,6 +1360,15 @@ final class Routes
                 '/statutory-evidence/bulk-defaults/apply',
                 [PayrollStatutoryEvidenceBulkDefaultsAction::class, 'apply'],
             );
+            // Hromadné doplnění místa výkonu práce (obec a stát pro JMHZ).
+            $g->post(
+                '/employments/workplace-bulk/preview',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentWorkplaceBulkFillAction::class, 'preview'],
+            );
+            $g->post(
+                '/employments/workplace-bulk/apply',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentWorkplaceBulkFillAction::class, 'apply'],
+            );
             $g->get(
                 '/people/{id:[0-9]+}/foreign-permits',
                 [PayrollForeignPermitAction::class, 'show'],
@@ -1963,6 +1972,10 @@ final class Routes
             // `suggestion` spadlo do parametru. Je to čtení: návrh vstupů
             // průměru z uzavřených běhů, který účetní teprve potvrzuje.
             $g->get('/time/averages/suggestion', [PayrollAbsenceAction::class, 'averageSuggestion']);
+            // Návrhy za čtvrtletí pro celou firmu a jejich hromadné založení
+            // se schválením (AverageEarningBatchService).
+            $g->get('/time/average-candidates', [PayrollAbsenceAction::class, 'averageCandidates']);
+            $g->post('/time/averages/bulk', [PayrollAbsenceAction::class, 'createAutomaticAverages']);
             $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
             $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
             $g->delete('/time/averages/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteAverage']);

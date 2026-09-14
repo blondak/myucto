@@ -55,6 +55,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import DateInput from '@/components/ui/DateInput.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
+import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 
 const { t } = useI18n()
@@ -113,6 +114,8 @@ const canCreatePerson = computed(() => auth.canWrite('payroll.person.write'))
  */
 const statutoryBulkOpen = ref(false)
 const statutoryBulkEffectiveOn = `${payrollWorkingPeriod()}-01`
+const workplaceBulkOpen = ref(false)
+const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
   && auth.canWrite('payroll.employment.write'),
@@ -1508,6 +1511,17 @@ onMounted(async () => {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
             {{ t('payroll.people.statutory_bulk_action') }}
           </button>
+          <button
+            v-if="canWriteEmployment"
+            type="button"
+            class="whitespace-nowrap"
+            :class="btnOutline('warning')"
+            data-test="workplace-bulk-open"
+            @click="workplaceBulkOpen = true"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.pin" /></svg>
+            {{ t('payroll.people.workplace_bulk_action') }}
+          </button>
           <RouterLink
             :to="{ name: 'payroll-quick-inputs' }"
             class="whitespace-nowrap"
@@ -1527,6 +1541,14 @@ onMounted(async () => {
       :employee-ids="null"
       period-editable
       @close="statutoryBulkOpen = false"
+      @applied="load"
+    />
+
+    <PayrollWorkplaceBulkFillDialog
+      v-if="workplaceBulkOpen"
+      :period-start="statutoryBulkEffectiveOn"
+      :employment-ids="null"
+      @close="workplaceBulkOpen = false"
       @applied="load"
     />
 

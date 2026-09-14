@@ -52,6 +52,22 @@ final class JmhzBlockerExplainerTest extends TestCase
         );
     }
 
+    /**
+     * Haléřová částka v hlášení dřív končila obecnou větou „chybí zákonný
+     * údaj", ze které účetní nepoznala, co opravit.
+     */
+    public function testWholeCrownFindingSaysWhatToFixInsteadOfFallback(): void
+    {
+        $message = JmhzBlockerExplainer::describe([
+            new JmhzScenario1Blocker('jmhz_scenario1_whole_czk_required', 'person', 11, ['10477']),
+        ]);
+
+        self::assertStringNotContainsString('Chybí zákonný údaj', $message);
+        self::assertStringContainsString('celých korunách', $message);
+        self::assertStringContainsString('Mzdy → Mzdové běhy', $message);
+        self::assertStringContainsString('Dotčeno: 1 zaměstnanec.', $message);
+    }
+
     public function testExplainsWhyAbsenceCannotUseAutomaticEldpEvidence(): void
     {
         $message = JmhzBlockerExplainer::describe([

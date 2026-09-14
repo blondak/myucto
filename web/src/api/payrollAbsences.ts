@@ -142,6 +142,42 @@ export interface AverageEarningSuggestion {
   input_version: string
 }
 
+/**
+ * Kandidát na hromadné založení průměrného výdělku za čtvrtletí. Na rozdíl od
+ * `AverageEarningSuggestion` (jeden vztah, formulář) je tu vždy `ready` nebo
+ * `blockers` — hromadná akce nemá kam ukázat rozpad po měsících.
+ */
+export interface AverageEarningCandidate {
+  employment_id: number
+  employee_name: string
+  employment_code: string
+  decisive_from: string
+  decisive_to: string
+  ready: boolean
+  blockers: string[]
+  source_kind: 'actual' | 'probable' | null
+  probable_source: 'terms' | 'achieved_wage' | 'agreed_monthly_gross' | null
+  probable_hourly_minor: number | null
+  probable_rationale: string | null
+  gross_earnings_minor: number | null
+  worked_minutes: number | null
+  worked_days: number | null
+  input_version: string
+  existing: {
+    id: number
+    status: 'manual_review' | 'approved'
+    source_kind: 'actual' | 'probable'
+    average_hourly_minor: number
+  } | null
+}
+
+export interface AverageEarningCandidatesPage {
+  items: AverageEarningCandidate[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface LeaveEntitlementCandidate {
   employment_id: number
   employee_name: string
@@ -268,4 +304,17 @@ export const payrollAbsenceApi = {
     items: Array<{ employment_id: number, input_version: string }>
   }) => api.post<{ entitlements: unknown[] }>('/payroll/time/leave-entitlements/bulk', payload)
     .then(response => response.data.entitlements),
+  averageCandidates: (
+    year: number,
+    quarter: number,
+    page: { limit: number, offset: number },
+  ) => api.get<AverageEarningCandidatesPage>('/payroll/time/average-candidates', {
+    params: { year, quarter, ...page },
+  }).then(response => response.data),
+  createAveragesBulk: (payload: {
+    year: number
+    quarter: number
+    items: Array<{ employment_id: number, input_version: string }>
+  }) => api.post<{ averages: AverageSnapshot[] }>('/payroll/time/averages/bulk', payload)
+    .then(response => response.data.averages),
 }

@@ -59,10 +59,32 @@ pak sám nabídne a označí, že průměr stojí na pravděpodobném výdělku,
 uzavřených bězích. U běžného vztahu pole nevyplňuj — průměr se spočítá
 z uzavřených mzdových běhů sám a pole se ani nenabízí.
 
-Není-li pravděpodobný výdělek zadaný a skutečný průměr vzniknout nemůže, návrh
-i měsíční hlášení ČSSZ řeknou, že chybí právě on, a odkážou na kartu vztahu.
+Není-li pravděpodobný výdělek zadaný u **nového** vztahu (všechny měsíce
+rozhodného období bez mzdového běhu leží celé před nástupem), aplikace ho
+navrhne sama podle § 355 odst. 2 zákoníku práce, a to v tomto pořadí:
+
+1. z hrubé mzdy dosažené od počátku rozhodného období — započitatelná mzda
+   a odpracované hodiny z uzavřených mzdových běhů od nástupu, tedy typicky
+   z prvního uzavřeného měsíce;
+2. ze sjednané měsíční mzdy v podmínkách vztahu přepočtené na hodinu
+   koeficientem 4,348 (týdenní pracovní doba × 4,348, § 356 odst. 2).
+
+Odůvodnění návrhu uvádí zdroj i čísla, ze kterých vznikl. Chybí-li běh
+v měsíci, kdy vztah už trval, návrh nevznikne — je potřeba doplnit evidenci.
+Není-li z čeho vycházet, návrh i měsíční hlášení ČSSZ řeknou, že chybí
+pravděpodobný výdělek, a odkážou na kartu vztahu.
 Snapshot musí projít ruční kontrolou a schválením; teprve potom jej lze připojit
 k absenci s náhradou.
+
+**Hromadně za celou firmu.** Bez vybrané osoby ukazuje záložka průměrů přehled
+návrhů za zvolené čtvrtletí pro všechny pracovní vztahy: připravené návrhy
+(skutečný průměr nebo pravděpodobný výdělek i se zdrojem), už založené průměry
+a důvody, proč u zbytku návrh nevznikl. Tlačítkem *Vybrat připravené* a *Založit
+a schválit vybrané* vzniknou a zároveň se schválí průměry vybraných vztahů.
+Změní-li se mezitím podklady, neuloží se nic a přehled se načte znovu.
+Hromadně založený skutečný průměr nezohledňuje poměrnou část mzdy za delší
+období než čtvrtletí (§ 358 zákoníku práce) — u zaměstnanců s roční nebo
+pololetní odměnou založte průměr ručně u konkrétní osoby.
 
 Průměrný výdělek má zákonnou spodní hranici. Je-li vypočtený průměr nižší než
 minimální mzda, použije se podle § 357 odst. 1 zákoníku práce **minimální mzda**;

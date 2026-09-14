@@ -325,6 +325,64 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    /**
+     * Podíl firemního pojistného na osobu nese haléře (firma zaokrouhluje až
+     * úhrn), kontrola 315 ČSSZ ale chce na formuláři základ krát sazba nahoru
+     * na celé koruny. Haléřový podíl nesmí podání zablokovat.
+     */
+    public function testEmployerSocialContributionFollowsControl315InsteadOfHalereAllocation(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        unset(
+            $payload['people'][0]['person_summary']['statutory']['social_insurance']
+                ['employer_contribution_minor_units'],
+        );
+        $payload['people'][0]['person_summary']['statutory']['social_insurance']
+            ['capped_assessment_base_minor_units'] = 100_100;
+        $payload['people'][0]['employments'][0]['insurance']['assessment_base_minor_units'] = 100_100;
+        $payload['people'][0]['employments'][0]['insurance']['capped_assessment_base_minor_units'] = 100_100;
+        $payload['people'][0]['person_summary']['payslip_document'] = [
+            'employer_social_minor_units' => 24_823,
+        ];
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+
+        // 1 001 Kč × 0,248 = 248,248 Kč → nahoru 249 Kč.
+        self::assertSame(249, $resolution->candidate?->payload['people'][0]
+            ['summary']['employer_social_czk']);
+        self::assertNotContains(
+            'jmhz_scenario1_whole_czk_required',
+            array_column(
+                array_map(
+                    static fn ($blocker): array => $blocker->toArray(),
+                    $resolution->blockers,
+                ),
+                'code',
+            ),
+        );
+    }
+
+    /** Písmeno c) § 5a je jiná sazba — podíl ve výplatní pásce ji nenahrazuje. */
+    public function testEmployerSocialContributionUsesTheRateOfTheParagraph5Letter(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        $payload['people'][0]['employments'][0]['insurance']['employer_rate_category'] = 'risk_employment';
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+
+        // 1 000 Kč × 0,278 (řádek 5 parametrů kontroly 315) = 278 Kč.
+        self::assertSame(278, $resolution->candidate?->payload['people'][0]
+            ['summary']['employer_social_czk']);
+    }
+
     public function testHistoricalPreparationIsVerifiedButNotNormalized(): void
     {
         $preparation = $this->preparation();

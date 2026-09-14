@@ -8,6 +8,16 @@ const m = vi.hoisted(() => ({
   context: vi.fn(),
   components: vi.fn(() => Promise.resolve([])),
   canWrite: vi.fn(() => true),
+  workplaceBulkPreview: vi.fn(() => Promise.resolve({
+    period_start: '2026-08-01',
+    summary: { employments: 1, missing: 1, verified: 0, invalid: 0, excluded: 0 },
+    suggestions: [],
+    missing_employment_ids: [12],
+    items: [],
+  })),
+  workplaceBulkApply: vi.fn(),
+  employmentJmhzEvidenceOptions: vi.fn(() => Promise.resolve({ countries: [] })),
+  searchJmhzMunicipalities: vi.fn(() => Promise.resolve([])),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -16,6 +26,10 @@ vi.mock('@/api/payroll', () => ({
     jmhzXmlDryRun: m.dryRun,
     jmhzPvpojOffices: m.offices,
     components: m.components,
+    workplaceBulkPreview: m.workplaceBulkPreview,
+    workplaceBulkApply: m.workplaceBulkApply,
+    employmentJmhzEvidenceOptions: m.employmentJmhzEvidenceOptions,
+    searchJmhzMunicipalities: m.searchJmhzMunicipalities,
   },
 }))
 
@@ -55,7 +69,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
   it('vede z kontroly do správného měsíce docházky a platné záložky účtáren', async () => {
     m.dryRun.mockResolvedValue({ status: 'blocked', preparation_id: 77, official_submission: { supported: false, reason: 'Lokální test.' }, blockers: [
       { code: 'jmhz_work_month_not_approved', entity_type: 'employment', entity_id: 12, attribute_ids: [] },
-      { code: 'jmhz_workplace_codebooks_unverified', entity_type: 'office', entity_id: 4, attribute_ids: [] },
+      { code: 'social_security_variable_symbol_missing', entity_type: 'office', entity_id: 4, attribute_ids: [] },
     ] })
     const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
       props: { runs: [run] as never[] },
@@ -66,6 +80,50 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     const targets = wrapper.findAll('a[data-to]').map(link => JSON.parse(link.attributes('data-to')!))
     expect(targets).toContainEqual({ name: 'payroll-time', query: { employment: '12', period: '2026-08' } })
     expect(targets).toContainEqual({ name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' })
+  })
+
+  /*
+   * Haléřová částka ve výsledku běhu je věc mzdového běhu, ne identity osoby —
+   * dřív chyběl i18n klíč, takže nález padal na `/admin/support`.
+   */
+  it('nález o haléřích v hlášení pošle do Mzdových běhů, ne na podporu', async () => {
+    m.dryRun.mockResolvedValue({ status: 'blocked', preparation_id: 77, official_submission: { supported: false, reason: 'Lokální test.' }, blockers: [
+      { code: 'jmhz_scenario1_whole_czk_required', entity_type: 'person', entity_id: 5, attribute_ids: [10228] },
+    ] })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [run] as never[] },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+    const targets = wrapper.findAll('a[data-to]').map(link => JSON.parse(link.attributes('data-to')!))
+    expect(targets).toContainEqual({ name: 'payroll-runs', query: { period: '2026-08' } })
+    expect(targets.some(target => target === '/admin/support')).toBe(false)
+  })
+
+  /*
+   * Hromadné doplnění pracoviště se otevírá dialogem, ne odkazem — jinak by
+   * účetní musela projít vztah po vztahu.
+   */
+  it('nález o neověřeném pracovišti otevře hromadný dialog místo odkazu', async () => {
+    m.dryRun.mockResolvedValue({ status: 'blocked', preparation_id: 77, official_submission: { supported: false, reason: 'Lokální test.' }, blockers: [
+      { code: 'jmhz_workplace_codebooks_unverified', entity_type: 'employment', entity_id: 12, attribute_ids: ['10229'] },
+    ] })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [run] as never[] },
+      global: { stubs: {
+        RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+        teleport: true,
+      } },
+    })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="workplace-bulk-dialog"]').exists()).toBe(false)
+    await wrapper.get('[data-test="jmhz-dry-run-workplace-bulk"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="workplace-bulk-dialog"]').exists()).toBe(true)
   })
   beforeEach(() => {
     vi.clearAllMocks()

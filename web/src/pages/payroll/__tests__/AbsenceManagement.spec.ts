@@ -16,6 +16,8 @@ const m = vi.hoisted(() => ({
   createLeaveEntry: vi.fn(),
   leaveEntitlementCandidates: vi.fn(),
   createAutomaticEntitlements: vi.fn(),
+  averageCandidates: vi.fn(),
+  createAveragesBulk: vi.fn(),
   recordChildbirth: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -42,6 +44,8 @@ vi.mock('@/api/payrollAbsences', () => ({
     createEntitlement: m.createEntitlement,
     leaveEntitlementCandidates: m.leaveEntitlementCandidates,
     createAutomaticEntitlements: m.createAutomaticEntitlements,
+    averageCandidates: m.averageCandidates,
+    createAveragesBulk: m.createAveragesBulk,
     recordChildbirth: m.recordChildbirth,
   },
 }))
@@ -191,6 +195,10 @@ describe('AbsenceManagement', () => {
       items: [], total: 0, limit: 25, offset: 0,
     })
     m.createAutomaticEntitlements.mockResolvedValue([])
+    m.averageCandidates.mockResolvedValue({
+      items: [], total: 0, limit: 25, offset: 0,
+    })
+    m.createAveragesBulk.mockResolvedValue([])
   })
 
   it('explains itself instead of pulsing forever when the company has no employee', async () => {
@@ -1102,12 +1110,13 @@ describe('AbsenceManagement', () => {
       wrapper.unmount()
     })
 
-    it('průměry i kniha dovolené si řeknou o osobu, místo aby vypadaly prázdně', async () => {
+    it('kniha dovolené si řekne o osobu, ale průměry nabídnou hromadný výpočet', async () => {
       const wrapper = await mountAllEmployees()
 
       await wrapper.get('[data-test="tab-averages"]').trigger('click')
-      expect(wrapper.find('[data-test="averages-person-required"]').exists()).toBe(true)
-      expect(wrapper.text()).toContain('payroll_absence.person_required.averages')
+      await flushPromises()
+      expect(wrapper.find('[data-test="averages-person-required"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="bulk-average-earnings"]').exists()).toBe(true)
 
       await wrapper.get('[data-test="tab-leave"]').trigger('click')
       expect(wrapper.find('[data-test="leave-person-required"]').exists()).toBe(true)
@@ -1212,6 +1221,101 @@ describe('AbsenceManagement', () => {
       expect(rows[0].text()).toContain('Čerpání 960 minut přesahuje zůstatek dovolené 480 minut.')
       // Druhá žádost prošla — dávka se na první chybě nezastavuje.
       expect(m.decide).toHaveBeenCalledTimes(2)
+      wrapper.unmount()
+    })
+
+    function averageCandidate(overrides: Record<string, unknown> = {}) {
+      return {
+        employment_id: 12,
+        employee_name: 'Syntetická osoba',
+        employment_code: 'SYNTH-HPP',
+        decisive_from: '2026-01-01',
+        decisive_to: '2026-03-31',
+        ready: true,
+        blockers: [],
+        source_kind: 'actual',
+        probable_source: null,
+        probable_hourly_minor: null,
+        probable_rationale: null,
+        gross_earnings_minor: 300_000,
+        worked_minutes: 24_000,
+        worked_days: 60,
+        input_version: 'a'.repeat(64),
+        existing: null,
+        ...overrides,
+      }
+    }
+
+    it('načte kandidáty hromadného průměru a odešle jen připravené', async () => {
+      m.averageCandidates.mockResolvedValue({
+        items: [
+          averageCandidate({ employment_id: 12 }),
+          averageCandidate({
+            employment_id: 13,
+            employee_name: 'Druhá syntetická osoba',
+            employment_code: 'SYNTH-DPC',
+            ready: false,
+            blockers: ['run_missing'],
+            source_kind: null,
+            gross_earnings_minor: null,
+            worked_minutes: null,
+            worked_days: null,
+          }),
+        ],
+        total: 2,
+        limit: 25,
+        offset: 0,
+      })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+
+      expect(m.averageCandidates).toHaveBeenCalled()
+      const section = wrapper.get('[data-test="bulk-average-earnings"]')
+      expect(section.text()).toContain('Syntetická osoba')
+      expect(section.text()).toContain('Druhá syntetická osoba')
+
+      const selectReady = wrapper.findAll('button')
+        .find(button => button.text() === 'payroll_absence.leave.select_ready')
+      await selectReady!.trigger('click')
+
+      const createButton = wrapper.get('[data-test="bulk-average-create"]')
+      expect(createButton.attributes('disabled')).toBeUndefined()
+      await createButton.trigger('click')
+      await flushPromises()
+
+      expect(m.createAveragesBulk).toHaveBeenCalledWith({
+        year: expect.any(Number),
+        quarter: expect.any(Number),
+        items: [{ employment_id: 12, input_version: 'a'.repeat(64) }],
+      })
+      wrapper.unmount()
+    })
+
+    it('po 409 average_inputs_changed znovu načte kandidáty a ukáže hlášku', async () => {
+      m.averageCandidates.mockResolvedValue({
+        items: [averageCandidate()],
+        total: 1,
+        limit: 25,
+        offset: 0,
+      })
+      m.createAveragesBulk.mockRejectedValueOnce({
+        response: { data: { error: { code: 'average_inputs_changed', message: 'changed' } } },
+      })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+
+      const selectReady = wrapper.findAll('button')
+        .find(button => button.text() === 'payroll_absence.leave.select_ready')
+      await selectReady!.trigger('click')
+      await wrapper.get('[data-test="bulk-average-create"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('payroll_absence.averages.bulk_inputs_changed')
+      expect(m.averageCandidates).toHaveBeenCalledTimes(2)
       wrapper.unmount()
     })
   })

@@ -13,13 +13,14 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
 import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import {
   payrollAbsenceApi,
   type AbsencePayload,
   type AbsenceType,
+  type AverageEarningCandidate,
   type AverageEarningSuggestion,
   type AverageSnapshot,
   type LeaveEntry,
@@ -98,6 +99,13 @@ const leaveCandidatePageSize = 25
 const leaveCandidateLoading = ref(false)
 const leaveCandidateError = ref('')
 const selectedLeaveCandidates = ref<number[]>([])
+const averageCandidates = ref<AverageEarningCandidate[]>([])
+const averageCandidateTotal = ref(0)
+const averageCandidateOffset = ref(0)
+const averageCandidatePageSize = 25
+const averageCandidateLoading = ref(false)
+const averageCandidateError = ref('')
+const selectedAverageCandidates = ref<number[]>([])
 const selectedAbsenceIds = ref<number[]>([])
 const selectedEmployeeId = ref<number | null>(null)
 const selectedEmploymentId = ref<number | null>(null)
@@ -115,6 +123,11 @@ const leaveThrough = computed(() => leaveYear.value === year
   : `${leaveYear.value}-12-31`)
 const selectedReadyCandidates = computed(() => leaveCandidates.value.filter(candidate =>
   candidate.ready && selectedLeaveCandidates.value.includes(candidate.employment_id)))
+const averageCandidatePage = computed(() => Math.floor(
+  averageCandidateOffset.value / averageCandidatePageSize,
+) + 1)
+const selectedReadyAverageCandidates = computed(() => averageCandidates.value.filter(candidate =>
+  candidate.ready && selectedAverageCandidates.value.includes(candidate.employment_id)))
 const fieldClass = 'mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20'
 const textareaClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20'
 const absenceTypes: AbsenceType[] = [
@@ -157,6 +170,12 @@ const averageForm = reactive({
  * podle něj se pozná, které pole už člověk ručně změnil, a poznámka „odvozeno
  * z běhů" u něj přestane platit.
  */
+/*
+ * Rok a čtvrtletí hromadného výpočtu za celou firmu — nezávislé na
+ * `averageForm`, ten patří jednomu vybranému vztahu.
+ */
+const bulkAverageYear = ref(periodYear)
+const bulkAverageQuarter = ref(applicationQuarter)
 const averageSuggestion = ref<AverageEarningSuggestion | null>(null)
 const averageSuggestionLoading = ref(false)
 const averageSuggestionError = ref('')
@@ -432,6 +451,8 @@ function applyQuerySelection() {
       && Number.isInteger(selectedQuarter) && selectedQuarter >= 1 && selectedQuarter <= 4) {
       averageForm.applicable_year = selectedYear
       averageForm.applicable_quarter = selectedQuarter
+      bulkAverageYear.value = selectedYear
+      bulkAverageQuarter.value = selectedQuarter
     }
   }
   const requestedPeriod = queryParam('period')
@@ -948,6 +969,74 @@ async function createAutomaticEntitlements() {
   }
 }
 
+async function loadAverageCandidates() {
+  if (!Number.isInteger(bulkAverageYear.value)
+    || !Number.isInteger(bulkAverageQuarter.value)
+    || bulkAverageQuarter.value < 1 || bulkAverageQuarter.value > 4
+  ) return
+  averageCandidateLoading.value = true
+  averageCandidateError.value = ''
+  try {
+    const page = await payrollAbsenceApi.averageCandidates(
+      bulkAverageYear.value,
+      bulkAverageQuarter.value,
+      { limit: averageCandidatePageSize, offset: averageCandidateOffset.value },
+    )
+    averageCandidates.value = page.items
+    averageCandidateTotal.value = page.total
+    selectedAverageCandidates.value = selectedAverageCandidates.value.filter(id =>
+      page.items.some(candidate => candidate.ready && candidate.employment_id === id))
+  } catch (error: any) {
+    averageCandidateError.value = exactError(error, 'payroll_absence.averages.bulk_load_failed')
+  } finally {
+    averageCandidateLoading.value = false
+  }
+}
+
+function goToAverageCandidatePage(nextPage: number) {
+  averageCandidateOffset.value = Math.max(0, (nextPage - 1) * averageCandidatePageSize)
+  selectedAverageCandidates.value = []
+  void loadAverageCandidates()
+}
+
+function selectAllReadyAverageCandidates() {
+  selectedAverageCandidates.value = averageCandidates.value
+    .filter(candidate => candidate.ready)
+    .map(candidate => candidate.employment_id)
+}
+
+async function createAveragesBulk() {
+  if (selectedReadyAverageCandidates.value.length === 0) return
+  saving.value = true
+  averageCandidateError.value = ''
+  try {
+    const created = await payrollAbsenceApi.createAveragesBulk({
+      year: bulkAverageYear.value,
+      quarter: bulkAverageQuarter.value,
+      items: selectedReadyAverageCandidates.value.map(candidate => ({
+        employment_id: candidate.employment_id,
+        input_version: candidate.input_version,
+      })),
+    })
+    toast.success(t('payroll_absence.averages.bulk_created', { count: created.length }))
+    selectedAverageCandidates.value = []
+    await loadAverageCandidates()
+  } catch (error: any) {
+    // Podklady se mezitím změnily (nový/opravený běh) — návrh už neplatí,
+    // znovunačtení ukáže aktuální stav místo tichého založení na starých číslech.
+    // Zpráva se nastaví AŽ PO reloadu — `loadAverageCandidates` si chybu na
+    // začátku maže, takže dřívější pořadí by ji hned smazalo.
+    if (apiErrorCode(error) === 'average_inputs_changed') {
+      await loadAverageCandidates()
+      averageCandidateError.value = t('payroll_absence.averages.bulk_inputs_changed')
+    } else {
+      averageCandidateError.value = exactError(error, 'payroll_absence.messages.save_failed')
+    }
+  } finally {
+    saving.value = false
+  }
+}
+
 async function createEntry() {
   entryError.value = ''
   saving.value = true
@@ -1036,10 +1125,15 @@ watch(
 watch(() => averageForm.employment_id, () => {
   void loadAverageSuggestion()
 })
+watch([bulkAverageYear, bulkAverageQuarter], () => {
+  averageCandidateOffset.value = 0
+  selectedAverageCandidates.value = []
+  void loadAverageCandidates()
+})
 onMounted(async () => {
   try {
     await loadContext()
-    await Promise.all([loadData(), loadLeaveCandidates()])
+    await Promise.all([loadData(), loadLeaveCandidates(), loadAverageCandidates()])
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.load_failed'))
     loading.value = false
@@ -1504,14 +1598,110 @@ onMounted(async () => {
       odpověď je „vyberte osobu".
     -->
     <template v-else-if="tab === 'averages' && allEmployees">
-      <EmptyState
-        boxed
-        icon="user"
-        accent="accent"
-        data-test="averages-person-required"
-        :title="t('payroll_absence.person_required.title')"
-        :message="t('payroll_absence.person_required.averages')"
-      />
+      <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6" data-test="bulk-average-earnings">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="font-semibold text-neutral-900">{{ t('payroll_absence.averages.bulk_title') }}</h2>
+            <p class="mt-1 text-sm text-neutral-500">{{ t('payroll_absence.averages.bulk_hint') }}</p>
+          </div>
+          <div class="flex flex-wrap items-end gap-2">
+            <label>
+              <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.averages.year') }}</span>
+              <input
+                v-model.number="bulkAverageYear"
+                data-test="bulk-average-year"
+                :min="minimumFormYear"
+                :max="maximumFormYear"
+                type="number"
+                :class="[fieldClass, 'w-28']"
+              >
+            </label>
+            <label>
+              <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.averages.quarter') }}</span>
+              <select v-model.number="bulkAverageQuarter" data-test="bulk-average-quarter" :class="[fieldClass, 'w-24']">
+                <option v-for="quarterOption in [1, 2, 3, 4]" :key="quarterOption" :value="quarterOption">Q{{ quarterOption }}</option>
+              </select>
+            </label>
+            <div v-if="canWrite" class="flex flex-wrap gap-2">
+              <button type="button" :class="btnOutline('neutral')" :disabled="averageCandidateLoading" @click="selectAllReadyAverageCandidates">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+                {{ t('payroll_absence.leave.select_ready') }}
+              </button>
+              <button
+                type="button"
+                :class="btnFilled('success')"
+                :disabled="saving || selectedReadyAverageCandidates.length === 0"
+                data-test="bulk-average-create"
+                @click="createAveragesBulk"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+                {{ t('payroll_absence.averages.bulk_create', { count: selectedReadyAverageCandidates.length }) }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-if="averageCandidateError" class="mt-3 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700" role="alert">{{ averageCandidateError }}</p>
+        <p v-if="averageCandidateLoading" class="mt-4 text-sm text-neutral-500">{{ t('common.loading') }}</p>
+        <div v-else class="mt-4 divide-y divide-neutral-200 rounded-lg border border-neutral-200">
+          <label
+            v-for="candidate in averageCandidates"
+            :key="candidate.employment_id"
+            class="flex items-start gap-3 p-3"
+            :class="candidate.ready ? 'cursor-pointer' : 'bg-neutral-50'"
+          >
+            <input
+              v-if="canWrite"
+              v-model="selectedAverageCandidates"
+              type="checkbox"
+              :value="candidate.employment_id"
+              :disabled="!candidate.ready"
+              class="mt-1 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500"
+            >
+            <span class="min-w-0 flex-1">
+              <span class="block font-medium text-neutral-900">
+                {{ candidate.employee_name }}<template v-if="personalNumberLabel(t, candidate.employment_code)"> · {{ personalNumberLabel(t, candidate.employment_code) }}</template>
+              </span>
+              <span v-if="candidate.existing" class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll_absence.averages.bulk_existing', {
+                  amount: money(candidate.existing.average_hourly_minor),
+                  status: t(`payroll_absence.average_status.${candidate.existing.status}`),
+                }) }}
+              </span>
+              <span v-else-if="candidate.ready && candidate.source_kind === 'actual'" class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll_absence.averages.bulk_actual_summary', {
+                  gross: money(candidate.gross_earnings_minor ?? 0),
+                  hours: minutes(candidate.worked_minutes ?? 0),
+                  days: candidate.worked_days ?? 0,
+                }) }}
+              </span>
+              <span v-else-if="candidate.ready && candidate.source_kind === 'probable'" class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll_absence.averages.bulk_probable_summary', {
+                  amount: money(candidate.probable_hourly_minor ?? 0),
+                  source: t(`payroll_absence.averages.probable_source.${candidate.probable_source}`),
+                }) }}
+              </span>
+              <span v-else class="mt-1 block text-xs text-warning-700">
+                {{ candidate.blockers.map(blocker => t(`payroll_absence.averages.blockers.${blocker}`)).join(' · ') }}
+              </span>
+            </span>
+            <span
+              class="rounded-full px-2 py-1 text-xs font-medium"
+              :class="candidate.ready ? 'bg-success-50 text-success-700' : 'bg-warning-50 text-warning-700'"
+            >
+              {{ t(candidate.ready ? 'payroll_absence.leave.ready' : 'payroll_absence.leave.needs_attention') }}
+            </span>
+          </label>
+          <p v-if="averageCandidates.length === 0" class="p-6 text-center text-sm text-neutral-500">{{ t('payroll_absence.averages.bulk_empty') }}</p>
+        </div>
+        <PaginationBar
+          class="mt-4"
+          :page="averageCandidatePage"
+          :per-page="averageCandidatePageSize"
+          :total="averageCandidateTotal"
+          @update:page="goToAverageCandidatePage"
+        />
+        <p class="mt-4 text-xs text-neutral-500">{{ t('payroll_absence.averages.bulk_longer_period_note') }}</p>
+      </section>
     </template>
 
     <template v-else-if="tab === 'leave' && allEmployees">

@@ -2020,6 +2020,43 @@
         "after_frozen_period": "from the month after the approved period"
       }
     },
+    "workplace_bulk": {
+      "title": "Bulk-fill place of work",
+      "intro": "The place of work is agreed in the employment contract, the application does not estimate it — choose the municipality where the employees actually work. An already filled-in workplace is never overwritten.",
+      "notice": "The place of work is agreed in the employment contract, the application does not estimate it — choose the municipality where the employees actually work. An already filled-in workplace is never overwritten.",
+      "load_failed": "Could not load the workplace fill preview.",
+      "apply_failed": "Could not save the workplace fill.",
+      "retry": "Try again",
+      "municipality": "Workplace municipality",
+      "search_municipality": "Search for a municipality",
+      "country": "Country",
+      "nothing_to_apply": "There is nothing to fill in for any employment.",
+      "municipality_required": "Choose the workplace municipality.",
+      "summary": {
+        "employments": "Employments total",
+        "missing": "Will be filled in",
+        "verified": "Already verified",
+        "excluded": "Excluded"
+      },
+      "exclusion_reason": {
+        "terms_missing": "no effective employment terms",
+        "later_terms": "later employment terms already change the workplace",
+        "employment_closed": "the employment has ended",
+        "period_settled": "the period is already settled",
+        "workplace_not_verified": "the existing workplace is not verified"
+      },
+      "excluded_title": "Excluded ({count})",
+      "apply": "Fill in workplace for {count} employments",
+      "applied_toast": "The workplace was filled in for {count} employments.",
+      "result_title": "Fill-in result",
+      "result": {
+        "applied": "Filled in",
+        "skipped": "Skipped",
+        "failed": "Failed"
+      },
+      "failed_title": "Could not be filled in ({count})",
+      "recalculate_notice": "The payroll run for which you filled in the workplace needs to be recalculated and approved as a new revision for the new value to be reflected in the report."
+    },
     "runs": {
       "person_picker": {
         "placeholder": "Search for an employee",
@@ -3802,6 +3839,7 @@
       "filter": "View",
       "quick_inputs": "Monthly payroll entry",
       "statutory_bulk_action": "Fill in default statutory data",
+      "workplace_bulk_action": "Fill in place of work",
       "no_results_title": "No employee matches the filter",
       "no_results_description": "Change the search text or choose another view.",
       "filters": {
@@ -6028,7 +6066,9 @@
           "jmhz_average_hourly_earning_missing": "Complete average earnings",
           "jmhz_work_month_not_approved": "Approve working time",
           "jmhz_scenario1_earnings_vector_incomplete": "Configure payroll components",
-          "jmhz_primary_employment_unresolved": "Choose the main relationship"
+          "jmhz_primary_employment_unresolved": "Choose the main relationship",
+          "jmhz_scenario1_whole_czk_required": "Check the payroll run",
+          "jmhz_workplace_codebooks_unverified": "Bulk-fill place of work"
         },
         "jmhz_dry_run_show_xml": "Show XML",
         "jmhz_dry_run_hide_xml": "Hide XML",
@@ -6085,6 +6125,7 @@
           "component_jmhz_manual_review": "A payroll component's JMHZ classification requires manual review.",
           "component_jmhz_treatment_invalid": "A payroll component has an invalid JMHZ setting.",
           "jmhz_average_hourly_earning_missing": "The verified average hourly earnings are missing.",
+          "jmhz_scenario1_whole_czk_required": "The amount reported in the monthly report as whole crowns came out with hallers in the payroll run result. Open Payroll → Payroll runs, find the payroll component with the haller amount for the affected people (the field number is in the technical detail), correct it to whole crowns and recalculate the run.",
           "jmhz_identity_incomplete": "The employment has no stored personal identifier (OIC / IK MPSV) or employment identifier (ID PPV). Both numbers are assigned by the social security administration when the employee is registered. If the employee is not registered yet, file the registration first (PREZEC/REGZEC A1); the numbers arrive in the receipt. Otherwise copy them from the receipt or the social security portal. They are filled in on the employment card, section \"Identifiers assigned by the social security administration\".",
           "jmhz_identity_oic_missing": "The personal identifier (OIC / IK MPSV) is missing. It is assigned by the social security administration when the employee is registered — copy it from the registration receipt or the portal. It is filled in on the employment card, section \"Identifiers assigned by the social security administration\".",
           "jmhz_scenario_activity_code_missing": "The JMHZ activity type code is missing.",
@@ -22878,6 +22919,22 @@
       "source_worked_days": "Derived from the shifts the confirmed hours were built from.",
       "source_probable": "Taken from the employment terms; change it there, where its justification lives.",
       "suggestion_probable": "The actual average cannot be derived from closed runs, so the probable earning recorded in the employment terms was used (§ 355 of the Labour Code).",
+      "bulk_title": "Bulk average earnings calculation for the quarter",
+      "bulk_hint": "Creates and immediately approves the average earning for the selected employments in the chosen quarter.",
+      "bulk_create": "Create and approve selected ({count})",
+      "bulk_created": "The average earning was created and approved for {count} employments.",
+      "bulk_load_failed": "Could not load candidates for the bulk average calculation.",
+      "bulk_inputs_changed": "The underlying data changed since the list was loaded. The list has been reloaded, please check your selection and submit again.",
+      "bulk_empty": "There are no employments for this quarter.",
+      "bulk_existing": "Existing average: {amount} · {status}",
+      "bulk_actual_summary": "Actual average · earnings {gross}, worked {hours}, {days} days",
+      "bulk_probable_summary": "Probable earning {amount} · {source}",
+      "bulk_longer_period_note": "A bulk-created actual average does not account for a proportional share of wages for a period longer than one quarter (§ 358 of the Labour Code). For people with an annual bonus, create the average manually on their employment card.",
+      "probable_source": {
+        "terms": "set in the employment terms",
+        "achieved_wage": "from wages achieved since joining (§ 355(2) of the Labour Code)",
+        "agreed_monthly_gross": "from the agreed monthly wage (§ 355(2) of the Labour Code)"
+      },
       "blockers": {
         "run_missing": "One month of the decisive period has no payroll run; for a new starter the average is set as probable earnings (§ 355 of the Labour Code)",
         "run_not_approved": "The payroll run for the decisive period is not closed or is being corrected",
@@ -22891,7 +22948,9 @@
         "work_summary_source_corrupt": "The source records of the work summary are unreadable",
         "work_summary_hours_mismatch": "Hours from the shifts do not match the confirmed work summary hours",
         "worked_time_not_derivable": "Recorded shifts cannot be summed without review (overlap, interval crossing a month boundary or negative duration)",
+        "worked_time_not_whole_minutes": "The worked time did not come out in whole minutes; manual review is required",
         "worked_time_missing": "The decisive period has no positive qualifying earnings and time worked",
+        "worked_days_not_provided": "The number of days worked could not be determined",
         "probable_earning_required": "The statutory minimum number of days was not worked in the decisive period; the average is set as probable earnings (§ 355 of the Labour Code)",
         "average_already_exists": "An average for this quarter already exists; the suggestion will not overwrite it",
         "probable_earning_not_recorded": "The actual average cannot be derived from closed runs and no probable earning is recorded for the employment (§ 355 of the Labour Code). Open Payroll → People, fill in the probable hourly earning and its justification on the employment card and save."
