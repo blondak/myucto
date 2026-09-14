@@ -28,11 +28,10 @@ final class PayrollHealthInsuranceIsdsQualificationGateTest extends TestCase
         // odstraňuje `final` jen při načtení třídy. V plné sadě ji stihne načíst
         // dřívější test, takže `allowPaths()` tady přijde pozdě a zdvojení skončí
         // na ClassIsFinalException — což se při běhu s `--filter` neprojeví.
-        // Neuvolněný produkt zamítne ostrý provoz sám, na to je `releasedOverride`.
-        $gate = new PayrollProductionGate(
-            $this->createStub(PayrollModuleStateRepository::class),
-            releasedOverride: false,
-        );
+        // Firma s nedokončeným nastavením zamítne ostrý provoz sama.
+        $states = $this->createStub(PayrollModuleStateRepository::class);
+        $states->method('get')->willReturn(['status' => 'setup']);
+        $gate = new PayrollProductionGate($states);
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/payroll/submissions/42/health-isds/111')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 11)

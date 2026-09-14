@@ -163,9 +163,6 @@ describe('PayrollDashboard monthly workspace', () => {
         assessed_from: '2026-01-01',
         blockers: [],
       },
-      production_release: {
-        released: false,
-      },
     })
 
     const wrapper = mountDashboard()
@@ -343,42 +340,6 @@ describe('PayrollDashboard monthly workspace', () => {
 
     expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="setup-blockers"]').exists()).toBe(false)
-  })
-
-  it('explains the internal test operation without asking the customer for qualification', async () => {
-    m.capabilities.mockResolvedValue({
-      state: {
-        supplier_id: 1,
-        status: 'active',
-        start_period: '2026-01',
-        row_version: 2,
-        activated_at: null,
-        suspended_at: null,
-        created_at: null,
-        updated_at: null,
-      },
-      support_matrix: {
-        version: '2026-08',
-        supported_years: [2026],
-        employment_types: [],
-        features: [],
-      },
-      company_capability: {
-        production_ready: true,
-        assessed_from: '2026-01-01',
-        blockers: [],
-      },
-      production_release: {
-        released: false,
-      },
-    })
-
-    const wrapper = mountDashboard()
-    await flushPromises()
-
-    expect(wrapper.find('[data-test="production-release-notice"]').exists()).toBe(true)
-    expect(wrapper.text()).not.toContain('payroll.activation.qualification.title')
-    expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
   })
 
   it('staví hlídač zákonných termínů nad provozní přehled i nad dlaždice měsíce', async () => {

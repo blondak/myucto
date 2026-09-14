@@ -57,7 +57,7 @@ final class PayrollDocumentAccessServiceTest extends TestCase
                 'max_code_attempts' => 3,
                 'code_ttl_seconds' => 600,
             ]]]),
-            new PayrollProductionGate($states, true),
+            new PayrollProductionGate($states),
             $employerPolicies,
         );
 

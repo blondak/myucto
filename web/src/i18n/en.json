@@ -7162,9 +7162,6 @@
       "disabled": "Payroll setup has been cancelled.",
       "failed": "The payroll activation could not be saved.",
       "conflict": "Another user changed the settings. The current state has been reloaded.",
-      "production_release_title": "Payroll is currently in test operation",
-      "production_release_description": "Calculations and test-environment filings remain available. Production filings and payroll payment orders stay safely blocked until MyÚčto completes its internal product verification.",
-      "production_release_customer_action": "You do not need to run parallel payroll, create a correction run or provide a qualification protocol.",
       "no_permission": "Only a user with payroll settings permission can turn payroll on. Please ask your company administrator."
     },
     "dashboard": {

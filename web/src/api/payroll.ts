@@ -70,9 +70,6 @@ export interface PayrollCapabilitiesResponse {
   state: PayrollModuleState
   support_matrix: PayrollSupportMatrix
   company_capability: PayrollCompanyCapabilityAssessment
-  production_release: {
-    released: boolean
-  }
   /**
    * Stav rozjezdu mezd pro průvodce prvním nastavením. `has_settled_payroll`
    * = existuje aspoň jeden schválený (a dál zaúčtovaný/vyplacený) mzdový běh,
@@ -6478,7 +6475,6 @@ export const payrollApi = {
     api.get<{
       state: PayrollModuleState
       company_capability: PayrollCompanyCapabilityAssessment
-      production_release: { released: boolean }
     }>('/payroll/settings/activation')
       .then(response => response.data),
   setActivation: (payload: { enabled: boolean; start_period: string | null; row_version: number }) =>

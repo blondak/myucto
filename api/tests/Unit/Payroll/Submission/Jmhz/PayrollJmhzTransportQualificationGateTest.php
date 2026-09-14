@@ -35,12 +35,11 @@ final class PayrollJmhzTransportQualificationGateTest extends TestCase
         // odstraňuje `final` jen při načtení třídy. V plné sadě ji stihne načíst
         // dřívější test, takže `allowPaths()` tady přijde pozdě a zdvojení skončí
         // na ClassIsFinalException — což se při běhu s `--filter` neprojeví.
-        // Nepotřebujeme ho: brána má `releasedOverride` právě pro tenhle případ
-        // a neuvolněný produkt zamítne produkční prostředí sám.
-        $gate = new PayrollProductionGate(
-            $this->createStub(PayrollModuleStateRepository::class),
-            releasedOverride: false,
-        );
+        // Nepotřebujeme ho: firma s nedokončeným nastavením zamítne produkční
+        // prostředí sama.
+        $states = $this->createStub(PayrollModuleStateRepository::class);
+        $states->method('get')->willReturn(['status' => 'setup']);
+        $gate = new PayrollProductionGate($states);
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/payroll/submissions/42/transport/send')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 11)

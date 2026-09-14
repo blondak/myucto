@@ -7162,9 +7162,6 @@
       "disabled": "Zahájení nastavení mezd bylo zrušeno.",
       "failed": "Aktivaci mzdového modulu se nepodařilo uložit.",
       "conflict": "Nastavení mezitím změnil jiný uživatel. Načetl se aktuální stav.",
-      "production_release_title": "Mzdy jsou zatím v testovacím provozu",
-      "production_release_description": "Výpočty a podání do testovacího prostředí můžete používat. Ostrá podání a mzdové platební příkazy zůstanou bezpečně zablokované, dokud MyÚčto nedokončí interní ověření produktu.",
-      "production_release_customer_action": "Na vaší straně není potřeba paralelní provoz, opravný běh ani kvalifikační protokol.",
       "no_permission": "Mzdy může zapnout jen uživatel s právem na nastavení mezd. Požádejte prosím správce firmy."
     },
     "dashboard": {

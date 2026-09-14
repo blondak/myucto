@@ -6,10 +6,10 @@ namespace MyInvoice\Service\Payroll;
 
 final class PayrollProductionGateException extends \DomainException
 {
-    public const ERROR_CODE = 'payroll_production_release_pending';
+    public const ERROR_CODE = 'payroll_setup_incomplete';
 
     public function __construct(
-        string $message = 'Ostrý mzdový provoz zatím nebyl interně uvolněn v této verzi produktu.',
+        string $message = 'Před ostrým mzdovým provozem dokončete základní nastavení firmy.',
     )
     {
         parent::__construct($message);

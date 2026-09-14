@@ -282,12 +282,9 @@ sekci **Účetnictví → Retence**.
 
 Produkční kvalifikaci, syntetické paralelní běhy a recovery drill provádí
 výhradně tým MyÚčta v izolovaném interním prostředí. Zákazník tyto důkazy
-nevytváří, nenahrává kvalifikační protokol a neodemyká ostrý provoz své firmy.
-
-Dokud interní ověření není dokončené, aplikace globálně blokuje ostrá mzdová
-podání a mzdové platební příkazy. Výpočty, dokumenty, zaúčtování a podání do
-testovacích prostředí zůstávají dostupné. Uvolnění produkčního provozu přijde
-v aktualizaci aplikace a nemůže ho obejít nastavení jednotlivé firmy.
+nevytváří a nenahrává kvalifikační protokol. Ostrá mzdová podání a mzdové
+platební příkazy jsou dostupné každé firmě, která dokončila základní nastavení
+mezd.
 
 ## 73.7 Retence a právní zadržení na backendu
 

@@ -150,12 +150,6 @@ Testovací podání můžete použít dobrovolně k ověření vlastního certif
 identifikátorů. Testovací a produkční prostředí mají oddělené podání,
 certifikáty i stav.
 
-Dokud je na přehledu upozornění **Mzdy jsou zatím v testovacím provozu**, jsou
-ostrá podání a mzdové platební příkazy globálně zablokované interní release
-branou MyÚčta. Na straně firmy není potřeba nic dokládat ani odblokovávat. Po
-interním ověření produktu bude brána uvolněna aktualizací aplikace; běžné
-kontroly úplnosti nastavení a jednotlivých podání zůstanou zachované.
-
 ## 75.3 Doporučený měsíční postup
 
 Celý mzdový měsíc má **tři fáze**: nejdřív se zapíšou vstupy, pak se z nich

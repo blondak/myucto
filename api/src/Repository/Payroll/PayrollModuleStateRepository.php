@@ -186,8 +186,7 @@ final class PayrollModuleStateRepository implements PayrollRegistrationSweepTarg
 
     /**
      * Jednosměrné překlopení `setup` → `active` po dokončení běžného nastavení
-     * nebo po prvním schváleném běhu. Globální interní release gate produktu
-     * je oddělená a tento zákaznický stav ji nemůže obejít.
+     * nebo po prvním schváleném běhu.
      *
      * @return array{
      *   supplier_id:int,status:string,start_period:?string,row_version:int,

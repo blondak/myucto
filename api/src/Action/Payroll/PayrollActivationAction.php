@@ -15,7 +15,6 @@ use MyInvoice\Service\Payroll\PayrollCompanyCapabilityService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionQualificationException;
 use MyInvoice\Service\Payroll\PayrollProductionQualificationService;
-use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\SupportMatrix;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -32,7 +31,6 @@ final class PayrollActivationAction
         private readonly PayrollModuleAccess $access,
         private readonly PayrollProductionQualificationService $qualification,
         private readonly PayrollCompanyCapabilityService $companyCapability,
-        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -53,7 +51,6 @@ final class PayrollActivationAction
                 $supplierId,
                 $state['start_period'],
             ),
-            'production_release' => $this->productionGate->status(),
         ]);
     }
 

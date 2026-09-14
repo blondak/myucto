@@ -30,7 +30,7 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         $response = (new PayrollRegistrationTransportAction(
             $transport,
             $access,
-            $this->openGate(),
+            $this->gate('active'),
         ))->send(
             $request,
             new Response(),
@@ -51,7 +51,7 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         $response = (new PayrollRegistrationTransportAction(
             $transport,
             $access,
-            $this->openGate(),
+            $this->gate('active'),
         ))->send(
             $this->request('session'),
             new Response(),
@@ -85,14 +85,10 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         // SKUTEČNÁ brána, ne mock: `PayrollProductionGate` je final a BypassFinals
         // odstraňuje `final` jen při načtení třídy — v plné sadě ji stihne načíst
         // dřívější test a zdvojení skončí na ClassIsFinalException.
-        $gate = new PayrollProductionGate(
-            $this->createStub(PayrollModuleStateRepository::class),
-            releasedOverride: false,
-        );
         $response = (new PayrollRegistrationTransportAction(
             $transport,
             $access,
-            $gate,
+            $this->gate('setup'),
         ))->send(
             $request,
             new Response(),
@@ -124,7 +120,7 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         $response = (new PayrollRegistrationTransportAction(
             $transport,
             $access,
-            $this->openGate(),
+            $this->gate('active'),
         ))->status(
             $request,
             new Response(),
@@ -142,13 +138,6 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         $transport->expects(self::never())->method('send');
         $access = $this->createStub(PayrollModuleAccess::class);
         $access->method('isEnabled')->willReturn(true);
-        // SKUTEČNÁ brána, ne mock: `PayrollProductionGate` je final a BypassFinals
-        // odstraňuje `final` jen při načtení třídy — v plné sadě ji stihne načíst
-        // dřívější test a zdvojení skončí na ClassIsFinalException.
-        $gate = new PayrollProductionGate(
-            $this->createStub(PayrollModuleStateRepository::class),
-            releasedOverride: false,
-        );
         $request = $this->request('session')
             ->withHeader('Idempotency-Key', 'production-must-not-run')
             ->withParsedBody(['environment' => 'production']);
@@ -156,7 +145,7 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         $response = (new PayrollRegistrationTransportAction(
             $transport,
             $access,
-            $gate,
+            $this->gate('setup'),
         ))->send($request, new Response(), ['submissionId' => '42']);
 
         self::assertSame(409, $response->getStatusCode());
@@ -185,18 +174,18 @@ final class PayrollRegistrationTransportActionTest extends TestCase
     }
 
     /**
-     * Brána, která nic neblokuje — tyhle testy ověřují jiné pojistky
-     * (bearer token, idempotenční klíč), ne uvolnění produktu.
+     * Brána nad firmou v daném stavu mzdového modulu. `active` nic neblokuje,
+     * `setup` zamítne ostré prostředí.
      *
      * Skutečná instance, ne stub: `PayrollProductionGate` je final a
      * BypassFinals odstraňuje `final` jen při načtení třídy, takže
      * v plné sadě zdvojení selže podle pořadí testů.
      */
-    private function openGate(): PayrollProductionGate
+    private function gate(string $status): PayrollProductionGate
     {
-        return new PayrollProductionGate(
-            $this->createStub(PayrollModuleStateRepository::class),
-            releasedOverride: true,
-        );
+        $states = $this->createStub(PayrollModuleStateRepository::class);
+        $states->method('get')->willReturn(['status' => $status]);
+
+        return new PayrollProductionGate($states);
     }
 }

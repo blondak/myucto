@@ -47,9 +47,6 @@ const guide = ref<InstanceType<typeof PayrollGuide> | null>(null)
 const state = computed(() => capabilities.value?.state ?? null)
 const canConfigure = computed(() => auth.canWrite('payroll.settings'))
 const isEnabled = computed(() => state.value?.status !== 'disabled')
-const productionReleasePending = computed(() =>
-  capabilities.value !== null && capabilities.value.production_release?.released !== true,
-)
 const availableFeatures = computed(() =>
   capabilities.value?.support_matrix.features.filter(feature => feature.available) ?? [],
 )
@@ -400,16 +397,6 @@ onMounted(load)
       </section>
 
       <div v-else class="space-y-6">
-        <section
-          v-if="productionReleasePending"
-          class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-6"
-          data-test="production-release-notice"
-        >
-          <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.activation.production_release_title') }}</h2>
-          <p class="mt-1 max-w-4xl text-sm text-neutral-700">{{ t('payroll.activation.production_release_description') }}</p>
-          <p class="mt-2 max-w-4xl text-xs text-neutral-600">{{ t('payroll.activation.production_release_customer_action') }}</p>
-        </section>
-
         <section
           v-if="setupBlockers.length > 0"
           class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-6"

@@ -23,12 +23,8 @@ Rozpracované nastavení lze uložit, ale navazující krok může být bloková
 
 Po dokončení základního nastavení se mzdový modul automaticky označí jako
 aktivní. Zákazník nedokládá paralelní měsíce, opravný běh, obnovu ze zálohy ani
-kvalifikační protokol.
-
-Dokud MyÚčto nedokončí interní ověření produktu, zůstávají ostrá podání a
-mzdové platební příkazy globálně blokované. Výpočty a testovací podání fungují
-a na přehledu mezd se zobrazuje informační upozornění. Na straně firmy není
-potřeba tuto interní bránu odemykat. Podrobný popis je v
+kvalifikační protokol. Od aktivace jsou dostupná ostrá podání i mzdové platební
+příkazy. Podrobný popis je v
 [úvodní kapitole mezd](75_Uplne_mzdy.md#7527-7-dokoncete-nastaveni-firmy).
 
 ## 90.5 Kontroly a bezpečnost

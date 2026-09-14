@@ -11,7 +11,6 @@ use MyInvoice\Service\Payroll\PayrollCompanyCapabilityService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollOnboardingStatusService;
-use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\SupportMatrix;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -26,7 +25,6 @@ final class PayrollCapabilitiesAction
         private readonly PayrollModuleAccess $access,
         private readonly PayrollModuleActivationService $activation,
         private readonly PayrollCompanyCapabilityService $companyCapability,
-        private readonly PayrollProductionGate $productionGate,
         private readonly PayrollOnboardingStatusService $onboarding,
     ) {}
 
@@ -40,8 +38,7 @@ final class PayrollCapabilitiesAction
         }
         $supplierId = $this->currentSupplierId($request);
         // Badge modulu se čte právě odsud, takže tady se taky vyhodnotí běžné
-        // dokončení nastavení firmy. Interní uvolnění produktu je samostatný
-        // globální stav a zákazník ho tímto přechodem nemůže změnit.
+        // dokončení nastavení firmy.
         $this->activation->activateWhenSetupComplete(
             $supplierId,
             $this->userId($request),
@@ -56,7 +53,6 @@ final class PayrollCapabilitiesAction
                 $supplierId,
                 $state['start_period'],
             ),
-            'production_release' => $this->productionGate->status(),
             // Průvodce prvním nastavením mezd se ukazuje jen do prvního
             // schváleného běhu. Odpověď o modulu se na přehledu načítá tak jako
             // tak, takže příznak jede s ní a nestojí další request.

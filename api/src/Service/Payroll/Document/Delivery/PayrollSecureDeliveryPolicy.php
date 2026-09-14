@@ -19,8 +19,7 @@ use MyInvoice\Service\Payroll\PayrollProductionGate;
  *   1. `payroll.secure_delivery.enabled` v konfiguraci instance (default FALSE).
  *      Vývojová instance běží nad ostrými daty, takže bez explicitního zapnutí
  *      se neodešle nic ani omylem.
- *   2. {@see PayrollProductionGate::assertActive()} — interní release brána
- *      (`PRODUCT_RELEASED = false`) plus dokončené nastavení firmy.
+ *   2. {@see PayrollProductionGate::assertActive()} — dokončené nastavení firmy.
  *   3. Zaměstnavatelská politika `delivery_channel = 'employee_portal'` a
  *      potvrzené `delivery_verified_on`. Tenhle sloupec existuje od migrace 1276
  *      a znamená „zaměstnavatel si kanál ověřil a stojí si za ním".

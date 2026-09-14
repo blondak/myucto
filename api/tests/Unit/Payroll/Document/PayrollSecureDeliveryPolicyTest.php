@@ -30,7 +30,7 @@ final class PayrollSecureDeliveryPolicyTest extends TestCase
     {
         // Právě tohle drží vývojovou instanci nad ostrými daty v bezpečí:
         // dokud přepínač chybí, brána spadne dřív, než se dotkne čehokoli dalšího.
-        $policy = $this->policy(channelEnabled: false, released: true);
+        $policy = $this->policy(channelEnabled: false, setupComplete: true);
 
         self::assertFalse($policy->isChannelEnabled());
         $this->expectException(PayrollSecureDeliveryBlockedException::class);
@@ -50,9 +50,9 @@ final class PayrollSecureDeliveryPolicyTest extends TestCase
         self::assertFalse($policy->isChannelEnabled());
     }
 
-    public function testUnreleasedProductionGateBlocksDispatch(): void
+    public function testIncompletePayrollSetupBlocksDispatch(): void
     {
-        $policy = $this->policy(channelEnabled: true, released: false);
+        $policy = $this->policy(channelEnabled: true, setupComplete: false);
 
         $this->expectException(PayrollProductionGateException::class);
         $policy->assertDispatchAllowed(1, self::PERIOD);
@@ -60,7 +60,7 @@ final class PayrollSecureDeliveryPolicyTest extends TestCase
 
     public function testMissingEmployerPolicyBlocksDispatch(): void
     {
-        $policy = $this->policy(channelEnabled: true, released: true, employerPolicy: null);
+        $policy = $this->policy(channelEnabled: true, setupComplete: true, employerPolicy: null);
 
         try {
             $policy->assertDispatchAllowed(1, self::PERIOD);
@@ -74,7 +74,7 @@ final class PayrollSecureDeliveryPolicyTest extends TestCase
     {
         $policy = $this->policy(
             channelEnabled: true,
-            released: true,
+            setupComplete: true,
             employerPolicy: ['delivery_channel' => 'manual_handover', 'delivery_verified_on' => '2026-01-01'],
         );
 
@@ -90,7 +90,7 @@ final class PayrollSecureDeliveryPolicyTest extends TestCase
     {
         $policy = $this->policy(
             channelEnabled: true,
-            released: true,
+            setupComplete: true,
             employerPolicy: ['delivery_channel' => 'employee_portal', 'delivery_verified_on' => null],
         );
 
@@ -104,7 +104,7 @@ final class PayrollSecureDeliveryPolicyTest extends TestCase
 
     public function testFullyOpenGatePasses(): void
     {
-        $policy = $this->policy(channelEnabled: true, released: true);
+        $policy = $this->policy(channelEnabled: true, setupComplete: true);
 
         $policy->assertDispatchAllowed(1, self::PERIOD);
         $policy->assertEmployeeOptedIn('portal');
@@ -113,7 +113,7 @@ final class PayrollSecureDeliveryPolicyTest extends TestCase
 
     public function testEmployeeChoosingPaperIsNeverOverridden(): void
     {
-        $policy = $this->policy(channelEnabled: true, released: true);
+        $policy = $this->policy(channelEnabled: true, setupComplete: true);
 
         foreach ([null, 'paper', '', 'portal_maybe'] as $channel) {
             try {
@@ -151,12 +151,12 @@ final class PayrollSecureDeliveryPolicyTest extends TestCase
     /** @param array<string,mixed>|null $employerPolicy */
     private function policy(
         bool $channelEnabled,
-        bool $released,
+        bool $setupComplete,
         ?array $employerPolicy = null,
     ): PayrollSecureDeliveryPolicy {
         return new PayrollSecureDeliveryPolicy(
             new Config(['payroll' => ['secure_delivery' => ['enabled' => $channelEnabled]]]),
-            $this->gate($released),
+            $this->gate($setupComplete),
             $this->employerPolicies(
                 func_num_args() >= 3 ? $employerPolicy : $this->activePolicy(),
             ),
@@ -172,12 +172,12 @@ final class PayrollSecureDeliveryPolicyTest extends TestCase
         ];
     }
 
-    private function gate(bool $released): PayrollProductionGate
+    private function gate(bool $setupComplete): PayrollProductionGate
     {
         $states = $this->createStub(PayrollModuleStateRepository::class);
-        $states->method('get')->willReturn(['status' => 'active']);
+        $states->method('get')->willReturn(['status' => $setupComplete ? 'active' : 'setup']);
 
-        return new PayrollProductionGate($states, $released);
+        return new PayrollProductionGate($states);
     }
 
     /** @param array<string,mixed>|null $policy */

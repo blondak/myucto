@@ -56,7 +56,7 @@ final class PayrollProductionGateCoverageTest extends TestCase
     }
 
     #[DataProvider('productionEntrypoints')]
-    public function testEveryProductionEntrypointUsesInternalReleaseGate(
+    public function testEveryProductionEntrypointUsesProductionGate(
         string $relativePath,
         string $assertion,
     ): void {
@@ -67,7 +67,7 @@ final class PayrollProductionGateCoverageTest extends TestCase
         self::assertStringContainsString(
             '$this->productionGate->' . $assertion . '(',
             $source,
-            "Produkční cesta {$relativePath} obchází interní release bránu.",
+            "Produkční cesta {$relativePath} obchází kontrolu dokončeného nastavení mezd.",
         );
     }
 
