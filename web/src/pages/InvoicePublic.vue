@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { publicInvoiceApi, type PublicInvoiceData, type PublicInvoiceItem, type PublicInvoiceParty } from '@/api/publicInvoice'
 import { appIsoDate } from '@/utils/date'
+import { formatDuration, isPreciseTimeItem, isTimeItem, itemQuantity } from '@/utils/timeBilling'
 
 const route = useRoute()
 const token = computed(() => String(route.params.token || ''))
@@ -81,9 +82,20 @@ function fmtDate(d: string | null): string {
 
 /** V režimu „ceny s DPH" nese unit_price_without_vat brutto — netto dopočítáme z řádkového základu (vzor PDF šablony). */
 function unitPrice(it: PublicInvoiceItem): number {
+  if (inv.value?.prices_include_vat && isPreciseTimeItem(it) && itemQuantity(it) !== 0) {
+    return Math.round(it.total_without_vat / itemQuantity(it) * 1e6) / 1e6
+  }
   return inv.value?.prices_include_vat && it.quantity !== 0
     ? it.total_without_vat / it.quantity
     : it.unit_price_without_vat
+}
+
+function fmtUnitPrice(it: PublicInvoiceItem): string {
+  const price = unitPrice(it)
+  const precision = isPreciseTimeItem(it)
+    ? Math.max(2, (price.toFixed(6).replace(/0+$/, '').split('.')[1] ?? '').length)
+    : 2
+  return fmtMoney(price, precision)
 }
 
 function partyLines(p?: PublicInvoiceParty | null): string[] {
@@ -329,9 +341,9 @@ onMounted(async () => {
                       <td></td><td></td><td></td>
                     </template>
                     <template v-else>
-                      <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtQty(it.quantity) }}</td>
+                      <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : fmtQty(it.quantity) }}</td>
                       <td class="px-3 py-2 text-neutral-600">{{ it.unit }}</td>
-                      <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(unitPrice(it), 2) }}</td>
+                      <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtUnitPrice(it) }}</td>
                     </template>
                     <td v-if="isVatPayer" class="px-3 py-2 text-center whitespace-nowrap text-neutral-600">{{ fmtRate(it.vat_rate_snapshot) }}</td>
                     <td v-if="isVatPayer" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.total_without_vat, 2) }}</td>

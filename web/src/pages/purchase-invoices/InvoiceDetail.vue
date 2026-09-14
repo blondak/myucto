@@ -9,7 +9,8 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse } from '@/api/purchaseInvoices'
-import { formatMoney, formatDate } from '@/composables/useFormat'
+import { formatMoney, formatHourlyRate, formatDate } from '@/composables/useFormat'
+import { formatDuration, isTimeItem, itemQuantity } from '@/utils/timeBilling'
 import { useToast } from '@/composables/useToast'
 import { accountingApi } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
@@ -53,8 +54,11 @@ let loadGeneration = 0
 // výpočtu DPH koeficientem). Pro zobrazení proto ukazujeme skutečné NETTO dopočtené
 // z uloženého řádkového základu (total_without_vat / množství). V běžném režimu je
 // unit_price_without_vat už netto → vracíme ho beze změny.
-function displayUnitPriceNet(it: { quantity: number; unit_price_without_vat: number; total_without_vat?: number }): number {
+function displayUnitPriceNet(it: { quantity: number; unit_price_without_vat: number; total_without_vat?: number; unit?: string; duration_minutes?: number | null; stock_item_id?: number | null }): number {
   if (invoice.value?.prices_include_vat && Number(it.quantity)) {
+    if (isTimeItem(it) && (it.duration_minutes != null || it.unit_price_without_vat !== Math.round(it.unit_price_without_vat * 100) / 100)) {
+      return Math.round(((it.total_without_vat ?? 0) / itemQuantity(it)) * 1e6) / 1e6
+    }
     return Math.round(((it.total_without_vat ?? 0) / Number(it.quantity)) * 100) / 100
   }
   return it.unit_price_without_vat
@@ -1316,9 +1320,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
                   </RouterLink>
                 </div>
               </td>
-              <td class="py-2 px-2 text-right font-mono">{{ it.quantity }}</td>
+              <td class="py-2 px-2 text-right font-mono">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : it.quantity }}</td>
               <td class="py-2 px-2">{{ it.unit }}</td>
-              <td class="py-2 px-2 text-right font-mono">{{ formatMoney(displayUnitPriceNet(it), invoice.currency) }}</td>
+              <td class="py-2 px-2 text-right font-mono">{{ (isTimeItem(it) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(it), invoice.currency) }}</td>
               <td class="py-2 px-2 text-right">{{ it.vat_rate_snapshot }}%</td>
               <td class="py-2 px-5 text-right font-mono">{{ formatMoney(it.total_with_vat, invoice.currency) }}</td>
             </tr>

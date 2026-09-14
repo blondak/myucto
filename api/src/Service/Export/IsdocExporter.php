@@ -221,19 +221,41 @@ final class IsdocExporter
         $this->el($dom, $root, 'RefCurrRate', '1');
 
         $internalDocumentNumber = trim((string) ($invoice['internal_document_number'] ?? ''));
-        if ($internalDocumentNumber !== '') {
+        $timeBillingLines = [];
+        foreach ((array) ($invoice['items'] ?? []) as $index => $item) {
+            $durationMinutes = TimeBillingExport::durationMinutes((array) $item);
+            if ($durationMinutes !== null) {
+                $timeBillingLines[] = [
+                    'id' => (string) ($index + 1),
+                    'duration_minutes' => $durationMinutes,
+                ];
+            }
+        }
+        if ($internalDocumentNumber !== '' || $timeBillingLines !== []) {
             $root->setAttributeNS(
                 'http://www.w3.org/2000/xmlns/',
                 'xmlns:myi',
                 self::MYINVOICE_EXTENSION_NS,
             );
             $extensions = $dom->createElementNS(self::NS, 'Extensions');
-            $internalNumber = $dom->createElementNS(
-                self::MYINVOICE_EXTENSION_NS,
-                'myi:InternalDocumentNumber',
-            );
-            $internalNumber->appendChild($dom->createTextNode($internalDocumentNumber));
-            $extensions->appendChild($internalNumber);
+            if ($internalDocumentNumber !== '') {
+                $internalNumber = $dom->createElementNS(
+                    self::MYINVOICE_EXTENSION_NS,
+                    'myi:InternalDocumentNumber',
+                );
+                $internalNumber->appendChild($dom->createTextNode($internalDocumentNumber));
+                $extensions->appendChild($internalNumber);
+            }
+            if ($timeBillingLines !== []) {
+                $timeBilling = $dom->createElementNS(self::MYINVOICE_EXTENSION_NS, 'myi:TimeBilling');
+                foreach ($timeBillingLines as $timeBillingLine) {
+                    $line = $dom->createElementNS(self::MYINVOICE_EXTENSION_NS, 'myi:Line');
+                    $line->setAttribute('id', $timeBillingLine['id']);
+                    $line->setAttribute('durationMinutes', (string) $timeBillingLine['duration_minutes']);
+                    $timeBilling->appendChild($line);
+                }
+                $extensions->appendChild($timeBilling);
+            }
             $root->appendChild($extensions);
         }
 
@@ -278,7 +300,13 @@ final class IsdocExporter
         foreach ($items as $i => $item) {
             $line = $dom->createElementNS(self::NS, 'InvoiceLine');
             $this->el($dom, $line, 'ID', (string) ($i + 1));
-            $qty = $this->el($dom, $line, 'InvoicedQuantity', $this->fmt($item['quantity']));
+            $qtyValue = TimeBillingExport::quantity($item);
+            $qty = $this->el(
+                $dom,
+                $line,
+                'InvoicedQuantity',
+                TimeBillingExport::formatQuantity($item, $this->fmt((float) $item['quantity'])),
+            );
             $qty->setAttribute('unitCode', (string) ($item['unit'] ?? 'ks'));
             $base = (float) ($item['total_without_vat'] ?? 0);
             $vat  = (float) ($item['total_vat'] ?? 0);
@@ -288,10 +316,11 @@ final class IsdocExporter
             // nemají — dle standardu jsou vždy v lokální měně.
             // UnitPrice je BEZ DPH. V režimu „ceny s DPH" nese unit_price_without_vat brutto,
             // proto jednotkové ceny dopočítáme z řádkových totálů (netto z base, s DPH z tot).
-            $qtyItem = (float) $item['quantity'];
+            $qtyItem = $qtyValue;
             $pricesInclVat = !empty($invoice['prices_include_vat']);
+            $preciseTimeRate = TimeBillingExport::usesPreciseHourlyRate($item);
             $unitPrice = ($pricesInclVat && $qtyItem != 0.0)
-                ? round($base / $qtyItem, 2)
+                ? round($base / $qtyItem, $preciseTimeRate ? 6 : 2)
                 : (float) $item['unit_price_without_vat'];
             // Jednotkovou cenu s DPH odvozujeme z řádkového total_with_vat (ne dopočtem
             // nominální sazbou). Řádkový total už zohledňuje reverse charge i osvobození
@@ -299,13 +328,13 @@ final class IsdocExporter
             // Dopočet unitPrice*(1+sazba/100) by u RC dal falešné brutto (sazba 21 %, ale
             // daň se nepřenáší → 0) a řádek by si protiřečil.
             $unitPriceInclVat = $qtyItem != 0.0
-                ? round($tot / $qtyItem, 2)
+                ? round($tot / $qtyItem, $preciseTimeRate ? 6 : 2)
                 : $unitPrice;
             $this->elAmountCurr($dom, $line, 'LineExtensionAmount', $base, true);
             $this->elAmountCurr($dom, $line, 'LineExtensionAmountTaxInclusive', $tot, true);
             $this->elAmount($dom, $line, 'LineExtensionTaxAmount', $vat);
-            $this->elAmount($dom, $line, 'UnitPrice', $unitPrice);
-            $this->elAmount($dom, $line, 'UnitPriceTaxInclusive', $unitPriceInclVat);
+            $this->elUnitPrice($dom, $line, 'UnitPrice', $unitPrice, $item);
+            $this->elUnitPrice($dom, $line, 'UnitPriceTaxInclusive', $unitPriceInclVat, $item);
 
             // Na úrovni řádky je správný název <ClassifiedTaxCategory>
             // (na úrovni TaxSubTotal se používá <TaxCategory> — pozor na rozdíl).
@@ -545,6 +574,16 @@ final class IsdocExporter
     private function elAmount(\DOMDocument $dom, \DOMElement $parent, string $name, float $value): void
     {
         $this->el($dom, $parent, $name, $this->fmt($value * $this->exportRate));
+    }
+
+    /** @param array<string,mixed> $item */
+    private function elUnitPrice(\DOMDocument $dom, \DOMElement $parent, string $name, float $value, array $item): void
+    {
+        $localValue = $value * $this->exportRate;
+        $formatted = TimeBillingExport::usesPreciseHourlyRate($item)
+            ? TimeBillingExport::formatRate($localValue)
+            : $this->fmt($localValue);
+        $this->el($dom, $parent, $name, $formatted);
     }
 
     /**

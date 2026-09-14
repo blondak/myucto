@@ -99,6 +99,7 @@ export interface InvoiceItem {
   description: string
   quantity: number
   unit: string
+  duration_minutes?: number | null
   unit_price_without_vat: number
   vat_rate_id: number
   vat_rate_snapshot?: number
@@ -507,6 +508,7 @@ export interface InvoicePayload {
     description: string
     quantity: number
     unit: string
+    duration_minutes?: number | null
     unit_price_without_vat: number
     vat_rate_id: number
     order_index: number
@@ -1033,6 +1035,7 @@ export interface WorkReportItem {
   id?: number
   description: string
   work_date?: string | null
+  duration_minutes?: number | null
   hours: number
   rate: number
   total_amount?: number
@@ -1073,6 +1076,7 @@ export interface WorkReportPayload {
   items: Array<{
     description: string
     work_date?: string | null
+    duration_minutes?: number | null
     hours: number
     rate: number
     order_index: number

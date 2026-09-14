@@ -551,7 +551,7 @@ const clientActions = computed<ActionItem[]>(() => {
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('client.language_label') }}</dt><dd class="font-mono">{{ client.language.toUpperCase() }}</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('common.currency') }}</dt><dd class="font-mono">{{ client.currency_default }}</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('client.due_label') }}</dt><dd>{{ formatPaymentDue(client) }}</dd></div>
-          <div v-if="client.hourly_rate > 0" class="flex justify-between"><dt class="text-neutral-500">{{ t('client.hourly_rate') }}</dt><dd class="font-mono">{{ client.hourly_rate.toLocaleString('cs') }} {{ client.currency_default }}/h</dd></div>
+          <div v-if="client.hourly_rate > 0" class="flex justify-between"><dt class="text-neutral-500">{{ t('client.hourly_rate') }}</dt><dd class="font-mono">{{ client.hourly_rate.toLocaleString('cs', { maximumFractionDigits: 6 }) }} {{ client.currency_default }}/h</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('client.rc_label') }}</dt><dd>{{ client.reverse_charge ? t('client.yes_short') : t('client.no_short') }}</dd></div>
           <div v-if="supplierStore.currentSupplier?.stock_enabled === true" data-test="client-price-level" class="flex justify-between">
             <dt class="text-neutral-500">{{ t('client.price_level') }}</dt>
@@ -761,7 +761,7 @@ const clientActions = computed<ActionItem[]>(() => {
                   'bg-neutral-100 text-neutral-600': p.status === 'closed',
                 }">{{ p.status }}</span>
             </td>
-            <td class="px-4 py-3 text-right font-mono">{{ p.hourly_rate.toLocaleString('cs') }} {{ p.currency }}/h</td>
+            <td class="px-4 py-3 text-right font-mono">{{ p.hourly_rate.toLocaleString('cs', { maximumFractionDigits: 6 }) }} {{ p.currency }}/h</td>
             <td class="px-4 py-3 text-center">{{ t('client.due_days_n', { n: p.payment_due_days }) }}</td>
             <td class="px-4 py-3 font-mono text-xs text-neutral-500">{{ p.project_number || '—' }}</td>
             <td class="px-4 py-3 text-right whitespace-nowrap">
@@ -797,7 +797,7 @@ const clientActions = computed<ActionItem[]>(() => {
           <div class="flex items-baseline justify-between gap-2 mt-1 text-xs text-neutral-500">
             <span class="font-mono">{{ p.project_number || '—' }}</span>
             <span>
-              <span class="font-mono">{{ p.hourly_rate.toLocaleString('cs') }} {{ p.currency }}/h</span>
+              <span class="font-mono">{{ p.hourly_rate.toLocaleString('cs', { maximumFractionDigits: 6 }) }} {{ p.currency }}/h</span>
               <span class="text-neutral-400 mx-1.5">·</span>
               <span>{{ t('client.due_days_n', { n: p.payment_due_days }) }}</span>
             </span>

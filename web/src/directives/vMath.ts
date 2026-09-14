@@ -17,7 +17,7 @@ import type { Directive } from 'vue'
  *   "abc"       → null
  *   "1/0"       → null (zero div)
  */
-export function evalMath(input: string): number | null {
+export function evalMath(input: string, decimals = 2): number | null {
   if (input === '' || input === null || input === undefined) return null
   const s = String(input).replace(/\s/g, '').replace(',', '.')
   if (s === '') return null
@@ -36,7 +36,8 @@ export function evalMath(input: string): number | null {
     const r = evalRpn(rpn)
     if (r === null || !isFinite(r)) return null
     // Zaokrouhlení na 2 desetinná místa — user preference (částky v Kč/EUR)
-    return Math.round(r * 100) / 100
+    const scale = 10 ** decimals
+    return Math.round(r * scale) / scale
   } catch {
     return null
   }
@@ -146,9 +147,10 @@ function evalRpn(rpn: Token[]): number | null {
 }
 
 export const vMath: Directive<HTMLInputElement> = {
-  mounted(el) {
+  mounted(el, binding) {
+    ;(el as any).__mathDecimals = binding.value === 6 ? 6 : 2
     const evaluate = () => {
-      const r = evalMath(el.value)
+      const r = evalMath(el.value, (el as any).__mathDecimals)
       if (r === null) return
       const formatted = String(r)
       if (el.value === formatted) return
@@ -175,6 +177,9 @@ export const vMath: Directive<HTMLInputElement> = {
     })
 
     ;(el as any).__mathHandler = evaluate
+  },
+  updated(el, binding) {
+    ;(el as any).__mathDecimals = binding.value === 6 ? 6 : 2
   },
   beforeUnmount(el) {
     const h = (el as any).__mathHandler

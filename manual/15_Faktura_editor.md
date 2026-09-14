@@ -354,12 +354,27 @@ Zobrazí se modal/sekce:
 |---|---|
 | Datum | Den práce |
 | Popis | Co bylo děláno |
-| Hodiny | Desetinné číslo (1.5, 0.25, …) |
-| Sazba | Default ze zakázky, lze přepsat |
-| Celkem | Auto: `hodiny × sazba` |
+| Hodiny | Hodiny a minuty (`1:20`) nebo desetinné hodiny (`1,5`) |
+| Sazba | Hodinová sazba až na 6 desetinných míst; předvyplní se ze zakázky, lze přepsat |
+| Celkem | Z přesných minut: `minuty × hodinová sazba / 60`, částka zaokrouhlená na haléře |
 
-Přidej řádky → tlačítko **Uložit výkaz**. Suma hodin × sazba se přenese do
-hlavní položky faktury (pole „Množství" + „Cena/jed.").
+Přidej řádky a ulož výkaz. Součet práce se přenáší jako jedna položka
+`1 ks × celková cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
+
+Čas lze zadat také přímo do množství fakturační položky s hodinovou jednotkou
+(`h`, `hod`, `hod.`). Například `0:01` při sazbě 1 000 Kč/h znamená 16,67 Kč.
+Sazba `333,33333 Kč/h` při 60 hodinách dává 20 000 Kč. Stejný způsob zadávání
+podporují přijaté faktury a šablony pravidelné fakturace.
+
+Šestimístnou sazbu lze zadat u ručních hodinových položek a ve výkazu práce.
+Položky navázané na ceník používají cenu z ceníku na dvě desetinná místa.
+
+Uložené desetinné hodiny se při otevření ani uložení bez změny času nepřevádějí
+na celé minuty. Například `0,33 h` zůstává `0,33 h`, nikoli 20 minut.
+Desetinné zadání, které neodpovídá celým minutám, zachovává původní přesnost:
+dvě desetinná místa ve výkazu a tři u množství fakturační položky.
+Pro přesné minutové účtování použij zápis `H:MM`.
+Skladové řádky zachovávají běžné množství a cenu na dvě desetinná místa.
 
 ### 15.6.2 PDF výstup
 

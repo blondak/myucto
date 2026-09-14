@@ -216,7 +216,12 @@ final class OssDocumentContradictionActionsTest extends TestCase
      */
     public function testCreditNoteInheritsTheManualReviewFlag(): void
     {
-        $sourceId = (int) $this->post($this->payload([$this->ossItem(), $this->domesticItem()]))['body']['id'];
+        $timeItem = $this->domesticItem();
+        $timeItem['quantity'] = 0.5;
+        $timeItem['duration_minutes'] = 30;
+        $timeItem['unit'] = 'h';
+        $timeItem['unit_price_without_vat'] = 1000.123456;
+        $sourceId = (int) $this->post($this->payload([$this->ossItem(), $timeItem]))['body']['id'];
         self::assertSame([1, 1], $this->storedFlags($sourceId), 'Předpoklad testu: zdroj je označený.');
         $this->markIssued($sourceId);
 
@@ -230,6 +235,11 @@ final class OssDocumentContradictionActionsTest extends TestCase
         self::assertSame(201, $decoded['status'], json_encode($decoded['body'], JSON_UNESCAPED_UNICODE));
         self::assertSame([1, 1], $this->storedFlags((int) $decoded['body']['credit_note_id']),
             'Na opravném dokladu příznak zhasl — v náhledu podání zůstane označená jen kladná polovina opravy.');
+
+        $item = $this->storedItem((int) $decoded['body']['credit_note_id'], 1);
+        self::assertSame(-30, (int) $item['duration_minutes']);
+        self::assertSame(-0.5, (float) $item['quantity']);
+        self::assertSame(1000.123456, (float) $item['unit_price_without_vat']);
     }
 
     // ── payload ──────────────────────────────────────────────────────────────
@@ -353,6 +363,18 @@ final class OssDocumentContradictionActionsTest extends TestCase
         self::assertNotEmpty($rows, 'Doklad nemá ani jednu položku — pak netvrdí nic ani zbytek testu.');
 
         return array_map(intval(...), $rows);
+    }
+
+    /** @return array<string,mixed> */
+    private function storedItem(int $invoiceId, int $orderIndex): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT quantity, duration_minutes, unit_price_without_vat FROM invoice_items
+              WHERE invoice_id = ? AND order_index = ? LIMIT 1'
+        );
+        $stmt->execute([$invoiceId, $orderIndex]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
     }
 
     /** Dobropis lze vystavit jen k VYSTAVENÉ faktuře — číslo musí být unikátní v řadě. */

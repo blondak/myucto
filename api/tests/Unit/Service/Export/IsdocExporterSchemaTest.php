@@ -49,6 +49,97 @@ final class IsdocExporterSchemaTest extends TestCase
         $this->assertValidIsdoc($this->exporter->buildXml($this->invoice()));
     }
 
+    public function testMinuteDurationKeepsHourlyUnitRateAndAuthoritativeLineTotal(): void
+    {
+        $xml = $this->exporter->buildXml($this->invoice([
+            'items' => [$this->item([
+                'description' => 'Jedna minuta konzultace',
+                'duration_minutes' => 1,
+                'quantity' => 0.017,
+                'unit' => 'h',
+                'unit_price_without_vat' => 1000.123456,
+                'total_without_vat' => 16.67,
+                'total_vat' => 3.50,
+                'total_with_vat' => 20.17,
+            ])],
+            'vat_breakdown' => [['rate' => 21.0, 'base' => 16.67, 'vat' => 3.50]],
+            'totals' => ['without_vat' => 16.67, 'with_vat' => 20.17, 'rounding' => 0.0],
+            'amount_to_pay' => 20.17,
+        ]));
+
+        $this->assertValidIsdoc($xml);
+        self::assertSame('0.016666666667', $this->xpathOne($xml, '//i:InvoiceLine/i:InvoicedQuantity'));
+        self::assertSame('h', $this->xpathAttribute($xml, '//i:InvoiceLine/i:InvoicedQuantity', 'unitCode'));
+        self::assertSame('1000.123456', $this->xpathOne($xml, '//i:InvoiceLine/i:UnitPrice'));
+        self::assertSame('16.67', $this->xpathOne($xml, '//i:InvoiceLine/i:LineExtensionAmount'));
+    }
+
+    public function testHalfCentMinuteBoundaryKeepsAuthoritativeRoundedTotal(): void
+    {
+        $xml = $this->exporter->buildXml($this->invoice([
+            'items' => [$this->item([
+                'duration_minutes' => 2,
+                'quantity' => 0.033,
+                'unit' => 'h',
+                'unit_price_without_vat' => 0.15,
+                'vat_rate_snapshot' => 0.0,
+                'total_without_vat' => 0.01,
+                'total_vat' => 0.0,
+                'total_with_vat' => 0.01,
+            ])],
+            'vat_breakdown' => [['rate' => 0.0, 'base' => 0.01, 'vat' => 0.0]],
+            'totals' => ['without_vat' => 0.01, 'with_vat' => 0.01, 'rounding' => 0.0],
+            'amount_to_pay' => 0.01,
+        ]));
+
+        $this->assertValidIsdoc($xml);
+        self::assertSame('0.033333333333', $this->xpathOne($xml, '//i:InvoiceLine/i:InvoicedQuantity'));
+        self::assertSame('0.15', $this->xpathOne($xml, '//i:InvoiceLine/i:UnitPrice'));
+        self::assertSame('0.01', $this->xpathOne($xml, '//i:InvoiceLine/i:LineExtensionAmount'));
+    }
+
+    public function testTerminatingMinuteQuantitiesRoundTripWithExactDuration(): void
+    {
+        $parser = new IsdocParser();
+
+        foreach ([60 => 0.70, 30 => 0.35, 15 => 0.18, 1 => 0.01, -15 => -0.18] as $minutes => $lineTotal) {
+            $xml = $this->exporter->buildXml($this->invoice([
+                'invoice_type' => $minutes < 0 ? 'credit_note' : 'invoice',
+                'items' => [$this->item([
+                    'duration_minutes' => $minutes,
+                    'quantity' => $minutes / 60,
+                    'unit' => 'hod',
+                    'unit_price_without_vat' => 0.70,
+                    'vat_rate_snapshot' => 0.0,
+                    'total_without_vat' => $lineTotal,
+                    'total_vat' => 0.0,
+                    'total_with_vat' => $lineTotal,
+                ])],
+                'vat_breakdown' => [['rate' => 0.0, 'base' => $lineTotal, 'vat' => 0.0]],
+                'totals' => ['without_vat' => $lineTotal, 'with_vat' => $lineTotal, 'rounding' => 0.0],
+                'amount_to_pay' => $lineTotal,
+            ]));
+
+            $this->assertValidIsdoc($xml);
+            self::assertStringContainsString(
+                sprintf('id="1" durationMinutes="%d"', $minutes),
+                $xml,
+            );
+            $item = $parser->parse($xml)['invoices'][0]['items'][0];
+            self::assertSame($minutes, $item['duration_minutes']);
+            self::assertSame(0.70, $item['unit_price_without_vat']);
+        }
+    }
+
+    public function testLegacyInvoiceDoesNotGainTimeBillingExtension(): void
+    {
+        $xml = $this->exporter->buildXml($this->invoice());
+
+        $this->assertValidIsdoc($xml);
+        self::assertStringNotContainsString('TimeBilling', $xml);
+        self::assertStringNotContainsString('DurationMinutes', $xml);
+    }
+
     public function testExportFilenamesCannotEscapeArchiveDirectory(): void
     {
         $repo = $this->createStub(InvoiceRepository::class);
@@ -81,6 +172,21 @@ final class IsdocExporterSchemaTest extends TestCase
             'exchange_rate' => 24.36,
         ]));
         $this->assertValidIsdoc($xml);
+    }
+
+    public function testLegacyHourlyForeignRateKeepsTwoDecimalCurrencyFormatting(): void
+    {
+        $xml = $this->exporter->buildXml($this->invoice([
+            'currency' => 'EUR',
+            'exchange_rate' => 24.36456,
+            'items' => [$this->item([
+                'duration_minutes' => null,
+                'unit' => 'h',
+                'unit_price_without_vat' => 121.0,
+            ])],
+        ]));
+
+        self::assertSame('2948.11', $this->xpathOne($xml, '//i:InvoiceLine/i:UnitPrice'));
     }
 
     public function testCreditNoteIsSchemaValid(): void
@@ -304,6 +410,16 @@ final class IsdocExporterSchemaTest extends TestCase
         $xp = new \DOMXPath($dom);
         $xp->registerNamespace('i', 'http://isdoc.cz/namespace/2013');
         return $xp->query($expr)->length;
+    }
+
+    private function xpathAttribute(string $xml, string $expr, string $attribute): ?string
+    {
+        $dom = new \DOMDocument();
+        $dom->loadXML($xml);
+        $xp = new \DOMXPath($dom);
+        $xp->registerNamespace('i', 'http://isdoc.cz/namespace/2013');
+        $node = $xp->query($expr)->item(0);
+        return $node instanceof \DOMElement ? $node->getAttribute($attribute) : null;
     }
 
     /**

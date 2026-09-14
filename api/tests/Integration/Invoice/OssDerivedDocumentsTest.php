@@ -164,6 +164,11 @@ final class OssDerivedDocumentsTest extends TestCase
     public function testFinalInvoiceCopiesTheOssProfileAndTheManualReviewFlag(): void
     {
         $proformaId = $this->seedMixedProforma();
+        $this->db->pdo()->prepare(
+            "UPDATE invoice_items
+                SET quantity = 0.5, duration_minutes = 30, unit = 'h', unit_price_without_vat = 2000.000000
+              WHERE invoice_id = ? AND order_index = 0"
+        )->execute([$proformaId]);
         $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ?")
             ->execute([self::PAYMENT_DATE, $proformaId]);
 
@@ -177,6 +182,9 @@ final class OssDerivedDocumentsTest extends TestCase
         self::assertSame('PL', $oss['oss_consumer_country']);
         self::assertSame('standard', $oss['oss_rate_type']);
         self::assertSame('goods', $oss['oss_supply_type']);
+        self::assertSame(30, (int) $oss['duration_minutes']);
+        self::assertSame(0.5, (float) $oss['quantity']);
+        self::assertSame(2000.0, (float) $oss['unit_price_without_vat']);
 
         if ($this->db->hasColumn('invoice_items', 'oss_needs_manual_review')) {
             $domestic = $this->onlyDomesticRow($items);

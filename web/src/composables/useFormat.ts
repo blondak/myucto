@@ -20,6 +20,12 @@ function activeLocale(): string {
   return i18n.global.locale.value === 'en' ? 'en-US' : 'cs-CZ'
 }
 
+export function formatHourlyRate(value: number, currency = 'CZK'): string {
+  if (value === Math.round(value * 100) / 100) return formatMoney(value, currency)
+  const decimals = Math.max(defaultDecimals(currency), Math.min(6, (value.toFixed(6).replace(/0+$/, '').split('.')[1] ?? '').length))
+  return formatMoney(value, currency, decimals)
+}
+
 export function formatMoney(value: number | null | undefined, currency: string = 'CZK', decimals?: number): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
   const dec = decimals ?? defaultDecimals(currency)

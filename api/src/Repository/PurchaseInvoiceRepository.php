@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Service\Invoice\OverduePolicy;
+use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Support\ExchangeRateSources;
 use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PublicAuthorityFeeText;
@@ -482,7 +483,7 @@ final class PurchaseInvoiceRepository
     public function itemsFor(int $purchaseInvoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.id, pii.purchase_invoice_id, pii.description, pii.quantity, pii.unit,
+             'SELECT pii.id, pii.purchase_invoice_id, pii.description, pii.quantity, pii.duration_minutes, pii.unit,
                     pii.unit_price_without_vat, pii.vat_rate_id, pii.vat_rate_snapshot,
                     pii.total_without_vat, pii.total_vat, pii.total_with_vat,
                     pii.order_index, pii.vat_classification_code, pii.is_fixed_asset,
@@ -1842,17 +1843,21 @@ final class PurchaseInvoiceRepository
     public function replaceItems(int $purchaseInvoiceId, array $items): void
     {
         $pdo = $this->db->pdo();
+        $items = array_map(
+            static fn (array $item): array => TimeBilling::normalizeInvoiceItem($item),
+            array_values($items),
+        );
         $pdo->prepare('DELETE FROM purchase_invoice_items WHERE purchase_invoice_id = ?')
             ->execute([$purchaseInvoiceId]);
 
         $stmt = $pdo->prepare(
             'INSERT INTO purchase_invoice_items
-                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat,
+                (purchase_invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index,
                  vat_classification_code, is_fixed_asset, expense_kind, expense_account_code,
                  accrual_from, accrual_to, stock_item_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         $vatRates = $this->vatRateMap();
@@ -1951,6 +1956,7 @@ final class PurchaseInvoiceRepository
                 $purchaseInvoiceId,
                 (string) ($item['description'] ?? ''),
                 (float) ($item['quantity'] ?? 1),
+                $item['duration_minutes'],
                 (string) ($item['unit'] ?? 'ks'),
                 (float) ($item['unit_price_without_vat'] ?? 0),
                 $vatRateId,
@@ -3355,6 +3361,7 @@ final class PurchaseInvoiceRepository
         foreach (['id', 'purchase_invoice_id', 'vat_rate_id', 'order_index', 'stock_item_id'] as $f) {
             if (isset($row[$f])) $row[$f] = (int) $row[$f];
         }
+        $row['duration_minutes'] = $row['duration_minutes'] !== null ? (int) $row['duration_minutes'] : null;
         foreach ([
             'quantity', 'unit_price_without_vat', 'vat_rate_snapshot',
             'total_without_vat', 'total_vat', 'total_with_vat',

@@ -234,4 +234,36 @@ final class InvoiceAmountPolicyTest extends TestCase
         self::assertArrayHasKey('items.3.quantity', $err);
         self::assertArrayHasKey('items.3.unit_price_without_vat', $err);
     }
+
+    public function testValidateItemStillRejectsMissingOrNonnumericPriceWithDuration(): void
+    {
+        $base = [
+            'description' => 'Práce',
+            'quantity' => 1 / 60,
+            'duration_minutes' => 1,
+            'unit' => 'h',
+            'vat_rate_id' => 1,
+        ];
+
+        $missing = InvoiceAmountPolicy::validateItem($base, 0);
+        self::assertArrayHasKey('items.0.unit_price_without_vat', $missing);
+
+        $nonnumeric = InvoiceAmountPolicy::validateItem($base + ['unit_price_without_vat' => 'abc'], 1);
+        self::assertArrayHasKey('items.1.unit_price_without_vat', $nonnumeric);
+    }
+
+    public function testValidateItemUsesDurationSignForBothNegativeGuard(): void
+    {
+        $err = InvoiceAmountPolicy::validateItem([
+            'description' => 'Vrácená práce',
+            'quantity' => 0.5,
+            'duration_minutes' => -30,
+            'unit' => 'h',
+            'unit_price_without_vat' => -100,
+            'vat_rate_id' => 1,
+        ], 2);
+
+        self::assertArrayHasKey('items.2.quantity', $err);
+        self::assertArrayHasKey('items.2.unit_price_without_vat', $err);
+    }
 }

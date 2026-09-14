@@ -92,6 +92,162 @@ XML;
         self::assertSame(21.0, $inv['items'][0]['vat_rate']);
     }
 
+    public function testLegacyLineKeepsEffectiveUnitPriceTolerance(): void
+    {
+        $xml = str_replace(
+            [
+                '<InvoicedQuantity unitCode="hod">10</InvoicedQuantity>',
+                '<UnitPrice>1500</UnitPrice>',
+            ],
+            [
+                '<InvoicedQuantity unitCode="hod">100</InvoicedQuantity>',
+                "<LineExtensionAmount>999.80</LineExtensionAmount>\n      <UnitPrice>10</UnitPrice>",
+            ],
+            $this->minimalIsdoc(),
+        );
+
+        $item = $this->parser->parse($xml)['invoices'][0]['items'][0];
+        self::assertNull($item['duration_minutes']);
+        self::assertSame(10.0, $item['unit_price_without_vat']);
+    }
+
+    public function testPreciseHourlyRateUsesRoundedLineAmountWithoutBeingTreatedAsDiscount(): void
+    {
+        $xml = str_replace(
+            [
+                '<InvoicedQuantity unitCode="hod">10</InvoicedQuantity>',
+                '<UnitPrice>1500</UnitPrice>',
+            ],
+            [
+                '<InvoicedQuantity unitCode="hod">0.01</InvoicedQuantity>',
+                "<LineExtensionAmount>10.00</LineExtensionAmount>\n      <UnitPrice>1000.123456</UnitPrice>",
+            ],
+            $this->minimalIsdoc(),
+        );
+
+        $item = $this->parser->parse($xml)['invoices'][0]['items'][0];
+        self::assertNull($item['duration_minutes']);
+        self::assertSame(1000.123456, $item['unit_price_without_vat']);
+    }
+
+    public function testExactMinuteExportRoundTripsWithoutChangingHourlyRate(): void
+    {
+        $xml = str_replace(
+            [
+                '<InvoicedQuantity unitCode="hod">10</InvoicedQuantity>',
+                '<UnitPrice>1500</UnitPrice>',
+            ],
+            [
+                '<InvoicedQuantity unitCode="hod">0.033333333333</InvoicedQuantity>',
+                "<LineExtensionAmount>0.01</LineExtensionAmount>\n      <UnitPrice>0.15</UnitPrice>",
+            ],
+            $this->minimalIsdoc(),
+        );
+
+        $item = $this->parser->parse($xml)['invoices'][0]['items'][0];
+        self::assertSame(2, $item['duration_minutes']);
+        self::assertSame(0.15, $item['unit_price_without_vat']);
+
+        $legacy = str_replace(
+            '<InvoicedQuantity unitCode="hod">10</InvoicedQuantity>',
+            '<InvoicedQuantity unitCode="hod">0.33</InvoicedQuantity>',
+            $this->minimalIsdoc(),
+        );
+        self::assertNull($this->parser->parse($legacy)['invoices'][0]['items'][0]['duration_minutes']);
+    }
+
+    public function testInferredSixtyMinutesAtHalfCentKeepsHourlyRate(): void
+    {
+        $xml = str_replace(
+            [
+                '<InvoicedQuantity unitCode="hod">10</InvoicedQuantity>',
+                '<UnitPrice>1500</UnitPrice>',
+            ],
+            [
+                '<InvoicedQuantity unitCode="hod">1.000000001</InvoicedQuantity>',
+                "<LineExtensionAmount>0.02</LineExtensionAmount>\n      <UnitPrice>0.015</UnitPrice>",
+            ],
+            $this->minimalIsdoc(),
+        );
+
+        $item = $this->parser->parse($xml)['invoices'][0]['items'][0];
+        self::assertSame(60, $item['duration_minutes']);
+        self::assertSame(0.015, $item['unit_price_without_vat']);
+    }
+
+    public function testInvalidTimeBillingExtensionIsIgnored(): void
+    {
+        $extensionNamespace = 'https://myinvoice.cz/isdoc/extensions/2026';
+        $cases = [
+            '<myi:Line id="1" durationMinutes="60"/>',
+            '<myi:Line id="1" durationMinutes="600000000"/>',
+            '<myi:Line id="1" durationMinutes=""/>',
+            '<myi:Line id="1" durationMinutes="600"/><myi:Line id="1" durationMinutes="600"/>',
+        ];
+
+        foreach ($cases as $metadata) {
+            $xml = str_replace(
+                ['<AccountingSupplierParty>', '<InvoiceLine>'],
+                [
+                    "<Extensions xmlns:myi=\"{$extensionNamespace}\"><myi:TimeBilling>{$metadata}</myi:TimeBilling></Extensions>\n  <AccountingSupplierParty>",
+                    "<InvoiceLine>\n      <ID>1</ID>",
+                ],
+                $this->minimalIsdoc(),
+            );
+
+            $item = $this->parser->parse($xml)['invoices'][0]['items'][0];
+            self::assertNull($item['duration_minutes']);
+        }
+
+        $nonHourly = str_replace(
+            [
+                '<AccountingSupplierParty>',
+                '<InvoiceLine>',
+                '<InvoicedQuantity unitCode="hod">10</InvoicedQuantity>',
+            ],
+            [
+                "<Extensions xmlns:myi=\"{$extensionNamespace}\"><myi:TimeBilling><myi:Line id=\"1\" durationMinutes=\"60\"/></myi:TimeBilling></Extensions>\n  <AccountingSupplierParty>",
+                "<InvoiceLine>\n      <ID>1</ID>",
+                '<InvoicedQuantity unitCode="ks">1</InvoicedQuantity>',
+            ],
+            $this->minimalIsdoc(),
+        );
+        self::assertNull($this->parser->parse($nonHourly)['invoices'][0]['items'][0]['duration_minutes']);
+    }
+
+    public function testForeignCurrencyExactMinuteExportReconstructsHourlyRate(): void
+    {
+        $ns = self::NS;
+        $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="$ns">
+  <DocumentType>1</DocumentType>
+  <ID>2026-0010</ID>
+  <IssueDate>2026-05-04</IssueDate>
+  <LocalCurrencyCode>CZK</LocalCurrencyCode>
+  <ForeignCurrencyCode>EUR</ForeignCurrencyCode>
+  <CurrRate>24.36</CurrRate>
+  <RefCurrRate>1</RefCurrRate>
+  <AccountingSupplierParty><Party><PartyIdentification><ID>01698401</ID></PartyIdentification></Party></AccountingSupplierParty>
+  <AccountingCustomerParty><Party><PartyIdentification><ID>27140130</ID></PartyIdentification></Party></AccountingCustomerParty>
+  <InvoiceLines>
+    <InvoiceLine>
+      <InvoicedQuantity unitCode="hod">0.033333333333</InvoicedQuantity>
+      <LineExtensionAmountCurr>0.01</LineExtensionAmountCurr>
+      <LineExtensionAmount>0.24</LineExtensionAmount>
+      <UnitPrice>3.654</UnitPrice>
+      <ClassifiedTaxCategory><Percent>21</Percent></ClassifiedTaxCategory>
+      <Item><Description>Konzultace</Description></Item>
+    </InvoiceLine>
+  </InvoiceLines>
+</Invoice>
+XML;
+
+        $item = $this->parser->parse($xml)['invoices'][0]['items'][0];
+        self::assertSame(2, $item['duration_minutes']);
+        self::assertEqualsWithDelta(0.15, $item['unit_price_without_vat'], 0.000000001);
+    }
+
     public function testParsesLegacyIsdoc52Namespace(): void
     {
         // ISDOC 5.2 nese starší namespace .../invoice místo 6.x .../2013; struktura

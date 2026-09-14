@@ -58,6 +58,8 @@ import { useSupplierStore } from '@/stores/supplier'
 import { appIsoDate } from '@/utils/date'
 import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
 import DateInput from '@/components/ui/DateInput.vue'
+import DurationInput from '@/components/ui/DurationInput.vue'
+import { isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
 
 const route = useRoute()
 const router = useRouter()
@@ -137,6 +139,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
   const it = form.value.items[rowIndex]
   if (!it) return
   it.stock_item_id = itemId
+  onItemUnitChange(it)
   if (itemId === null) return
   const si = stockItemsCache.get(itemId)
   if (si) {
@@ -146,6 +149,10 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
     it.description = si.name
     if (si.unit) it.unit = si.unit
   }
+}
+
+function onItemUnitChange(item: PurchaseInvoiceItem): void {
+  if (!isTimeItem(item)) item.duration_minutes = null
 }
 
 /** Edit mode: naplní label (SKU — název) z joined polí načtené faktury (stock_sku/stock_name). */
@@ -882,6 +889,7 @@ function addItem(hideDropzone = true) {
   form.value.items.push({
     description: '',
     quantity: 1,
+    duration_minutes: null,
     unit: units.value.find(u => u.is_default)?.code || 'ks',
     unit_price_without_vat: 0,
     vat_rate_id: vatRates.value.find(v => v.is_default)?.id || vatRates.value[0]?.id || 1,
@@ -905,8 +913,9 @@ function removeItem(idx: number) {
 
 // Per-item live calc preview (read-only, server přepočte při save)
 function itemTotal(it: PurchaseInvoiceItem) {
-  const amt = Number(it.quantity || 0) * Number(it.unit_price_without_vat || 0)
+  const amt = itemAmount(it)
   const rate = form.value.reverse_charge ? 0 : (vatRates.value.find(v => v.id === it.vat_rate_id)?.rate_percent || 0)
+  if (isPreciseTimeItem(it)) return timeItemTotals(it, rate, form.value.prices_include_vat)
   // Režim "ceny s DPH": unit_price_without_vat nese cenu S DPH (gross) → DPH shora.
   if (form.value.prices_include_vat) {
     const vat = round2(amt * rate / (100 + rate))
@@ -916,6 +925,7 @@ function itemTotal(it: PurchaseInvoiceItem) {
   return { base: round2(amt), vat: round2(vat), with: round2(amt + vat) }
 }
 function round2(n: number) { return Math.round(n * 100) / 100 }
+function round6(n: number) { return Math.round(n * 1_000_000) / 1_000_000 }
 
 // Zadání částky s DPH na řádku „Celkem s DPH" → dopočet jednotkové ceny.
 // Přepínač „ceny s DPH" záměrně NEpřepínáme — respektujeme aktuální režim faktury:
@@ -925,17 +935,17 @@ function round2(n: number) { return Math.round(n * 100) / 100 }
 function setItemGross(it: PurchaseInvoiceItem, raw: string): void {
   const gross = evalMath(raw)
   if (gross === null) return
-  const qty = Number(it.quantity) || 0
+  const qty = itemQuantity(it)
   if (qty === 0) return
   if (form.value.prices_include_vat) {
     // unit_price_without_vat nese cenu S DPH → ulož gross jako jednotkovou cenu.
-    it.unit_price_without_vat = round2(gross / qty)
+    it.unit_price_without_vat = isTimeItem(it) ? round6(gross / qty) : round2(gross / qty)
     return
   }
   // Běžný režim: dopočti netto odečtením DPH shora (u reverse-charge je sazba 0).
   const rate = form.value.reverse_charge ? 0 : (vatRates.value.find(v => v.id === it.vat_rate_id)?.rate_percent || 0)
   const net = gross / (1 + rate / 100)
-  it.unit_price_without_vat = round2(net / qty)
+  it.unit_price_without_vat = isTimeItem(it) ? round6(net / qty) : round2(net / qty)
 }
 
 // Záhlaví sloupce jednotkové ceny — v režimu „ceny s DPH" je to cena včetně DPH.
@@ -1249,6 +1259,7 @@ async function onReplacePdf() {
 async function submit() {
   if (blockDemoMutation()) return
   if (submitting.value) return
+  if (!validateDurationInputs(paneDom.root())) return
   if (submissionId.value && !submission.value) {
     error.value = t('purchase_submissions.editor_origin_unavailable')
     return
@@ -1328,7 +1339,8 @@ async function submit() {
       vat_allocations: vatAllocations.value.map((a, i) => ({ ...a, order_index: i })),
       items: form.value.items.map((it, i) => ({
         description: it.description,
-        quantity: Number(it.quantity || 0),
+        quantity: itemQuantity(it),
+        duration_minutes: isTimeItem(it) ? (it.duration_minutes ?? null) : null,
         unit: it.unit,
         unit_price_without_vat: Number(it.unit_price_without_vat || 0),
         vat_rate_id: it.vat_rate_id,
@@ -1904,15 +1916,16 @@ function fieldErr(key: string): string | null {
                 <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
               </td>
               <td class="py-2 px-1">
-                <input v-model="it.quantity" v-math type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
+                <DurationInput v-if="isTimeItem(it)" v-model="it.quantity" v-model:duration-minutes="it.duration_minutes" :allow-negative="true" />
+                <input v-else v-model="it.quantity" v-math="2" type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
               </td>
               <td class="py-2 px-1">
-                <select v-model="it.unit" class="w-full h-9 px-1 border border-neutral-300 rounded bg-surface text-sm">
+                <select v-model="it.unit" data-item-unit @change="onItemUnitChange(it)" class="w-full h-9 px-1 border border-neutral-300 rounded bg-surface text-sm">
                   <option v-for="u in units" :key="u.code" :value="u.code">{{ u.code }}</option>
                 </select>
               </td>
               <td class="py-2 px-1">
-                <input v-model="it.unit_price_without_vat" v-math type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
+                <input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
               </td>
               <td class="py-2 px-1">
                 <select v-model.number="it.vat_rate_id" class="w-full h-9 px-1 border border-neutral-300 rounded bg-surface text-sm">
@@ -1994,11 +2007,12 @@ function fieldErr(key: string): string | null {
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('purchase_invoice.items.quantity') }}</label>
-                <input v-model="it.quantity" v-math type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm text-right font-mono" />
+                <DurationInput v-if="isTimeItem(it)" v-model="it.quantity" v-model:duration-minutes="it.duration_minutes" :allow-negative="true" />
+                <input v-else v-model="it.quantity" v-math="2" type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm text-right font-mono" />
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('purchase_invoice.items.unit') }}</label>
-                <select v-model="it.unit" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm">
+                <select v-model="it.unit" data-item-unit @change="onItemUnitChange(it)" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm">
                   <option v-for="u in units" :key="u.code" :value="u.code">{{ u.code }}</option>
                 </select>
               </div>
@@ -2006,7 +2020,7 @@ function fieldErr(key: string): string | null {
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="it.unit_price_without_vat" v-math type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm text-right font-mono" />
+                <input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm text-right font-mono" />
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('purchase_invoice.items.vat_rate') }}</label>

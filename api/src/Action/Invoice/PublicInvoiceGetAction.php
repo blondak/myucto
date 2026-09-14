@@ -120,7 +120,7 @@ final class PublicInvoiceGetAction
         ]);
         $publicInvoice['items'] = array_map(
             static fn (array $it): array => $pick($it, [
-                'description', 'quantity', 'unit', 'unit_price_without_vat',
+                'description', 'quantity', 'duration_minutes', 'unit', 'unit_price_without_vat',
                 'vat_rate_snapshot', 'total_without_vat', 'total_with_vat', 'item_kind',
             ]),
             (array) ($invoice['items'] ?? []),

@@ -1,4 +1,11 @@
 {
+  "time_billing": {
+    "duration": "Work duration",
+    "hint": "Enter hours and minutes (1:20) or decimal hours (1.5).",
+    "invalid": "Enter H:MM or decimal hours. Minutes must be between 00 and 59.",
+    "rate_hint": "The hourly rate supports up to 6 decimal places.",
+    "hours_minutes": "H:MM"
+  },
   "payroll_bank": {
     "title": "Send payroll payment order to bank",
     "hint": "The saved KPC batch will be handed to the bank for authorization. Review and authorize it in online banking. Sending does not mark payroll liabilities as paid.",

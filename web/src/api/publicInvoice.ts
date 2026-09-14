@@ -17,6 +17,7 @@ const publicApi = axios.create({
 export interface PublicInvoiceItem {
   description: string
   quantity: number
+  duration_minutes?: number | null
   unit: string | null
   unit_price_without_vat: number
   vat_rate_snapshot: number

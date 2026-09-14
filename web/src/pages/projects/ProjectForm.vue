@@ -253,7 +253,7 @@ async function submit() {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('project.hourly_rate') }}</label>
-            <input autocomplete="off" v-model.number="form.hourly_rate" type="number" step="0.01" min="0"
+            <input autocomplete="off" v-model.number="form.hourly_rate" type="number" step="0.000001" min="0"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
           </div>
           <div>

@@ -101,7 +101,11 @@ final class PurchaseInvoiceExportService
             $vatRate = (float) ($it['vat_rate_snapshot'] ?? $it['vat_rate'] ?? 0);
             return [
                 'description'            => $it['description'] ?? '',
+                'stock_item_id'          => isset($it['stock_item_id']) ? (int) $it['stock_item_id'] : null,
                 'quantity'               => (float) ($it['quantity'] ?? 1),
+                'duration_minutes'       => array_key_exists('duration_minutes', $it) && $it['duration_minutes'] !== null
+                    ? (int) $it['duration_minutes']
+                    : null,
                 'unit'                   => $it['unit'] ?? 'ks',
                 'unit_price_without_vat' => (float) ($it['unit_price_without_vat'] ?? 0),
                 'vat_rate'               => $vatRate,

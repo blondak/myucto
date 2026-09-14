@@ -35,7 +35,7 @@ namespace MyInvoice\Service\Invoice;
 final class InvoiceMath
 {
     /**
-     * @param list<array{quantity: float|int, unit_price_without_vat: float|int, vat_rate_snapshot: float|int}> $items
+     * @param list<array{quantity: float|int, duration_minutes?: int|null, unit_price_without_vat: float|int, vat_rate_snapshot: float|int}> $items
      *        V režimu shora je `unit_price_without_vat` chápán jako cena S DPH (gross).
      * @param list<array{rate: float|int, base?: float|int|null, vat?: float|int|null}> $vatOverrides
      *        Ruční rekapitulace DPH per sazba (přijaté faktury). Prázdné = bez overridu.
@@ -66,12 +66,10 @@ final class InvoiceMath
     {
         $perItem = [];
         foreach ($items as $item) {
-            $qty   = (float) $item['quantity'];
-            $price = (float) $item['unit_price_without_vat'];
             // Nominální sazba zůstává (zobrazení + breakdown bucket); u RC se nuluje jen DAŇ.
             $rate  = (float) $item['vat_rate_snapshot'];
 
-            $base = round($qty * $price, 2);
+            $base = TimeBilling::invoiceAmount($item);
             // Dělit až nakonec (base*rate/100), ne base*(rate/100) — viz issue #82.
             $vat  = $reverseCharge ? 0.0 : round($base * $rate / 100.0, 2);
             $with = round($base + $vat, 2);
@@ -84,7 +82,7 @@ final class InvoiceMath
     /**
      * Režim SHORA — ceny položek jsou včetně DPH (gross). Viz docblock třídy.
      *
-     * @param list<array{quantity: float|int, unit_price_without_vat: float|int, vat_rate_snapshot: float|int}> $items
+     * @param list<array{quantity: float|int, duration_minutes?: int|null, unit_price_without_vat: float|int, vat_rate_snapshot: float|int}> $items
      * @return list<array{base: float, vat: float, with: float, rate: float}>
      */
     private static function linesTopDown(array $items, bool $reverseCharge): array
@@ -93,11 +91,9 @@ final class InvoiceMath
         $lines = [];      // i => ['gross','rate','vat','base']
         $rateGroups = []; // rateKey => ['rate','grossSum','idx'[],'maxIdx','maxGross']
         foreach ($items as $i => $item) {
-            $qty   = (float) $item['quantity'];
-            $price = (float) $item['unit_price_without_vat']; // v tomto režimu = cena S DPH
             $rate  = (float) $item['vat_rate_snapshot'];
 
-            $gross = round($qty * $price, 2);
+            $gross = TimeBilling::invoiceAmount($item);
             // Koeficient rate/(100+rate); u rate=0 i RC vychází daň 0.
             $vat   = ($reverseCharge || $rate <= 0.0) ? 0.0 : round($gross * $rate / (100.0 + $rate), 2);
             $base  = round($gross - $vat, 2);

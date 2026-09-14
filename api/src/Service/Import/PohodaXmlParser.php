@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Import;
 
+use MyInvoice\Service\Invoice\TimeBilling;
+
 /**
  * Parser Pohoda XML data package — extrahuje faktury do normalizovaného array.
  *
@@ -740,7 +742,7 @@ final class PohodaXmlParser
             // v {@see IsdocParser::recapConflicts()}. Per-řádkové `abs()` dělalo ze
             // slevového kupónu přírůstek a hlásilo rozpor, který v souboru není.
             $itemBases[$key] = ($itemBases[$key] ?? 0.0)
-                + (float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0);
+                + TimeBilling::invoiceAmountInput($item);
         }
         $itemBases = array_map('abs', $itemBases);
         if ($itemBases === []) {
@@ -1122,6 +1124,8 @@ final class PohodaXmlParser
         $blockName = $foreign ? 'inv:foreignCurrency' : 'inv:homeCurrency';
 
         $quantity = (float) ($this->text($xpath, 'inv:quantity', $itemEl) ?: '1');
+        $unit = $this->text($xpath, 'inv:unit', $itemEl) ?: 'ks';
+        $durationMinutes = TimeBilling::inferDurationMinutes($quantity, $unit);
 
         $rateEl = $xpath->query('inv:rateVAT', $itemEl)->item(0);
         $enum = $rateEl instanceof \DOMElement ? trim($rateEl->textContent) : null;
@@ -1154,7 +1158,8 @@ final class PohodaXmlParser
         return [
             'description'            => $this->text($xpath, 'inv:text', $itemEl),
             'quantity'               => $quantity,
-            'unit'                   => $this->text($xpath, 'inv:unit', $itemEl) ?: 'ks',
+            'duration_minutes'       => $durationMinutes,
+            'unit'                   => $unit,
             'unit_price_without_vat' => $unitPrice,
             // Brutto k PŘESNÉMU přepočtu; `null` = netto cena je konečná (viz docblock třídy).
             'unit_price_with_vat'    => $pendingGross,

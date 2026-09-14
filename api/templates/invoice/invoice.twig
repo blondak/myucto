@@ -236,13 +236,13 @@
       {% if item.item_kind == 'discount' %}
       <td></td><td></td><td></td>
       {% else %}
-      <td class="num nowrap">{{ item.quantity|number_format(item.quantity == item.quantity|round(0) ? 0 : (item.quantity == item.quantity|round(1) ? 1 : (item.quantity == item.quantity|round(2) ? 2 : 3)), decimal_sep, thousand_sep) }}</td>
+      <td class="num nowrap">{% if item.duration_display is defined and item.duration_display is not null %}{{ item.duration_display }}{% else %}{{ item.quantity|number_format(item.quantity == item.quantity|round(0) ? 0 : (item.quantity == item.quantity|round(1) ? 1 : (item.quantity == item.quantity|round(2) ? 2 : 3)), decimal_sep, thousand_sep) }}{% endif %}</td>
       {# Balení (issue #17): řádek v kartonech dostane rozpis na základní jednotky
          karty, pokud ho firma nemá v nastavení vypnutý (InvoicePdfRenderer::withBaseQuantity). #}
       <td>{{ item.unit }}{% if item.base_qty is defined and item.base_qty is not null %}<br><span style="font-size:85%;color:#666666;white-space:nowrap">({{ t('celkem', 'total') }} {{ item.base_qty|number_format(item.base_qty == item.base_qty|round(0) ? 0 : (item.base_qty == item.base_qty|round(1) ? 1 : (item.base_qty == item.base_qty|round(2) ? 2 : 3)), decimal_sep, thousand_sep) }}&nbsp;{{ item.base_unit }})</span>{% endif %}</td>
       {# V režimu „ceny s DPH" nese unit_price_without_vat brutto; pro zobrazení dopočítáme
          skutečné netto z řádkového základu (total_without_vat / množství). #}
-      <td class="num nowrap">{{ (invoice.prices_include_vat and item.quantity != 0 ? item.total_without_vat / item.quantity : item.unit_price_without_vat)|number_format(2, decimal_sep, thousand_sep) }}</td>
+      <td class="num nowrap">{{ item.pdf_unit_price|default(invoice.prices_include_vat and item.quantity != 0 ? item.total_without_vat / item.quantity : item.unit_price_without_vat)|number_format(item.unit_price_decimals|default(2), decimal_sep, thousand_sep) }}</td>
       {% endif %}
       {% if supplier.is_vat_payer %}
       <td class="center nowrap vat">{{ item.vat_rate_snapshot|number_format(item.vat_rate_snapshot == item.vat_rate_snapshot|round(0) ? 0 : 2, decimal_sep, thousand_sep) }}&nbsp;%</td>
@@ -623,14 +623,14 @@
     <tr>
       <td>{{ it.description|nl2br }}</td>
       {% if wr_has_dates %}<td class="nowrap">{% if it.work_date %}{{ it.work_date|date(date_format) }}{% endif %}</td>{% endif %}
-      <td class="num nowrap">{{ it.hours|number_format(hours_dec, decimal_sep, thousand_sep) }}</td>
-      <td class="num nowrap">{{ it.rate|number_format(rate_dec, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
+      <td class="num nowrap">{% if it.duration_display is defined and it.duration_display is not null %}{{ it.duration_display }}{% else %}{{ it.hours|number_format(hours_dec, decimal_sep, thousand_sep) }}{% endif %}</td>
+      <td class="num nowrap">{{ it.rate|number_format(it.rate_decimals|default(rate_dec), decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
       <td class="num nowrap">{{ it.total_amount|number_format(total_dec, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
     </tr>
     {% endfor %}
     <tr style="background:#F4F2F8;font-weight:bold;">
       <td style="text-align:right;" {% if wr_has_dates %}colspan="2"{% endif %}>{{ t('Celkem', 'Total') }}</td>
-      <td class="num nowrap">{{ work_report.total_hours|number_format(hours_dec, decimal_sep, thousand_sep) }} h</td>
+      <td class="num nowrap">{% if work_report.total_duration_display is defined and work_report.total_duration_display is not null %}{{ work_report.total_duration_display }}{% else %}{{ work_report.total_hours|number_format(hours_dec, decimal_sep, thousand_sep) }}{% endif %} h</td>
       <td></td>
       <td class="num nowrap">{{ work_report.total_amount|number_format(total_dec, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
     </tr>

@@ -225,12 +225,12 @@ final class FinalFromProformaCreator
             $ossColumns = $this->ossCarry->columns();
             $itemStmt = $pdo->prepare(
                 'INSERT INTO invoice_items
-                   (invoice_id, description, quantity, unit, unit_price_without_vat,
+                   (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind,
                     stock_item_id, warehouse_id, small_asset_id, asset_id'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?'
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?'
                 . $this->ossCarry->placeholders()
                 . ')'
             );
@@ -240,6 +240,7 @@ final class FinalFromProformaCreator
                     $finalId,
                     $item['description'],
                     $item['quantity'],
+                    $item['duration_minutes'] ?? null,
                     $item['unit'],
                     $item['unit_price_without_vat'],
                     $item['vat_rate_id'],
@@ -299,6 +300,7 @@ final class FinalFromProformaCreator
                     $finalId,
                     $desc,
                     1,
+                    null,
                     '',
                     $unitPrice,
                     (int) $r['vat_rate_id'],
@@ -399,6 +401,7 @@ final class FinalFromProformaCreator
             $finalId,
             $isEn ? 'Remaining scope of the contract' : 'Doplatek zakázky',
             1,
+            null,
             $isEn ? 'pcs' : 'ks',
             $remainder,
             $dominant['vat_rate_id'],

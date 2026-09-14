@@ -179,4 +179,35 @@ final class WorkReportMaterialsRepositoryTest extends TestCase
         self::assertCount(0, $wr['materials']);
         self::assertSame('Materiál v2', $wr['material_title']);
     }
+
+    public function testExactMinuteHeaderSumsRoundedRowsWithoutChangingLegacyAggregation(): void
+    {
+        $inv = $this->draftInvoice();
+
+        $this->repo->save($inv, null, 'Přesné minuty', [
+            ['description' => 'Minuta A', 'hours' => 1 / 60, 'duration_minutes' => 1, 'rate' => 0.9],
+            ['description' => 'Minuta B', 'hours' => 1 / 60, 'duration_minutes' => 1, 'rate' => 0.9],
+        ]);
+
+        $exact = $this->repo->findByInvoice($inv);
+        self::assertSame(0.04, $exact['total_amount']);
+        self::assertSame([0.02, 0.02], array_column($exact['items'], 'total_amount'));
+
+        $this->repo->save($inv, null, 'Legacy hodiny', [
+            ['description' => 'Legacy A', 'hours' => 0.5, 'duration_minutes' => null, 'rate' => 0.03],
+            ['description' => 'Legacy B', 'hours' => 0.5, 'duration_minutes' => null, 'rate' => 0.03],
+        ]);
+
+        $legacy = $this->repo->findByInvoice($inv);
+        self::assertSame(0.03, $legacy['total_amount']);
+        self::assertSame([0.02, 0.02], array_column($legacy['items'], 'total_amount'));
+
+        $this->repo->save($inv, null, 'Smíšené řádky', [
+            ['description' => 'Přesná minuta', 'hours' => 1 / 60, 'duration_minutes' => 1, 'rate' => 0.9],
+            ['description' => 'Legacy půlhodina', 'hours' => 0.5, 'duration_minutes' => null, 'rate' => 0.03],
+        ]);
+
+        $mixed = $this->repo->findByInvoice($inv);
+        self::assertSame(0.04, $mixed['total_amount']);
+    }
 }

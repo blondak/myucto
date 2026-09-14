@@ -58,6 +58,43 @@ final class PurchaseInvoiceIsdocPaymentTest extends TestCase
             $xml, '//i:PaymentMeans/i:Payment/i:Details/i:VariableSymbol'));
     }
 
+    public function testMinuteDurationSurvivesPurchaseInvoiceShapeMapping(): void
+    {
+        $xml = $this->export([
+            'items' => [[
+                'description' => 'Konzultace po minutách',
+                'duration_minutes' => 1,
+                'quantity' => 0.017,
+                'unit' => 'h',
+                'unit_price_without_vat' => 1000.123456,
+                'vat_rate_snapshot' => 21.0,
+                'total_without_vat' => 16.67,
+                'total_vat' => 3.50,
+                'total_with_vat' => 20.17,
+            ]],
+            'vat_breakdown' => [[
+                'vat_rate' => 21.0,
+                'without_vat' => 16.67,
+                'vat' => 3.50,
+                'with_vat' => 20.17,
+            ]],
+            'totals' => [
+                'without_vat' => 16.67,
+                'vat' => 3.50,
+                'with_vat' => 20.17,
+                'rounding' => 0.0,
+                'advance_paid_amount' => 0.0,
+                'amount_to_pay' => 20.17,
+            ],
+            'amount_to_pay' => 20.17,
+        ]);
+
+        $this->assertValidIsdoc($xml);
+        self::assertSame('0.016666666667', $this->xpathOne($xml, '//i:InvoiceLine/i:InvoicedQuantity'));
+        self::assertSame('1000.123456', $this->xpathOne($xml, '//i:InvoiceLine/i:UnitPrice'));
+        self::assertSame('16.67', $this->xpathOne($xml, '//i:InvoiceLine/i:LineExtensionAmount'));
+    }
+
     /**
      * @param array<string,mixed> $overrides
      */

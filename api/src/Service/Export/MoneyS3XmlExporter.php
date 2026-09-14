@@ -182,7 +182,12 @@ final class MoneyS3XmlExporter
 
         $polozky = $node->appendChild($xml->createElement('SeznamPolozek'));
         foreach ($items as $index => $item) {
-            $polozky->appendChild($this->itemNode($xml, $item, $index + 1));
+            $polozky->appendChild($this->itemNode(
+                $xml,
+                $item,
+                $index + 1,
+                !empty($invoice['prices_include_vat']),
+            ));
         }
 
         $node->appendChild($this->supplierNode($xml, $invoice));
@@ -231,22 +236,39 @@ final class MoneyS3XmlExporter
     /**
      * @param array<string,mixed> $item
      */
-    private function itemNode(DOMDocument $xml, array $item, int $order): DOMElement
+    private function itemNode(DOMDocument $xml, array $item, int $order, bool $pricesIncludeVat): DOMElement
     {
         $node = $xml->createElement('Polozka');
 
-        $quantity = (float) ($item['quantity'] ?? 1);
+        $quantity = TimeBillingExport::quantity($item);
         $base = (float) ($item['total_without_vat'] ?? 0);
         $vat = (float) ($item['total_vat'] ?? 0);
 
         $this->el($xml, $node, 'Popis', (string) ($item['description'] ?? ''));
-        $this->el($xml, $node, 'PocetMJ', $this->fmt($quantity));
+        $this->el(
+            $xml,
+            $node,
+            'PocetMJ',
+            TimeBillingExport::formatQuantity($item, $this->fmt($quantity)),
+        );
         $this->el($xml, $node, 'SazbaDPH', $this->fmt((float) ($item['vat_rate_snapshot'] ?? 0)));
         $this->el($xml, $node, 'Cena', $this->fmt($base));
 
         $souhrn = $node->appendChild($xml->createElement('SouhrnDPH'));
-        $this->el($xml, $souhrn, 'Zaklad_MJ', $this->fmt($quantity != 0.0 ? $base / $quantity : $base));
-        $this->el($xml, $souhrn, 'DPH_MJ', $this->fmt($quantity != 0.0 ? $vat / $quantity : $vat));
+        $unitBase = $quantity != 0.0 ? $base / $quantity : $base;
+        $rawUnitBase = (float) ($item['unit_price_without_vat'] ?? $unitBase);
+        if (!$pricesIncludeVat && TimeBillingExport::usesPreciseHourlyRate($item)) {
+            $unitBase = $rawUnitBase;
+        }
+        $unitBaseFormatted = TimeBillingExport::usesPreciseHourlyRate($item)
+            ? TimeBillingExport::formatRate($unitBase)
+            : $this->fmt($unitBase);
+        $unitVat = $quantity != 0.0 ? $vat / $quantity : $vat;
+        $unitVatFormatted = TimeBillingExport::durationMinutes($item) !== null
+            ? TimeBillingExport::formatRate($unitVat)
+            : $this->fmt($unitVat);
+        $this->el($xml, $souhrn, 'Zaklad_MJ', $unitBaseFormatted);
+        $this->el($xml, $souhrn, 'DPH_MJ', $unitVatFormatted);
         $this->el($xml, $souhrn, 'Zaklad', $this->fmt($base));
         $this->el($xml, $souhrn, 'DPH', $this->fmt($vat));
 

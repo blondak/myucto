@@ -200,7 +200,7 @@ const projectActions = computed<ActionItem[]>(() => {
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('project.rates_due_section') }}</h3>
         <dl class="space-y-2 text-sm">
-          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('project.hourly_rate') }}</dt><dd class="font-mono">{{ project.hourly_rate.toLocaleString('cs') }} {{ project.currency }}</dd></div>
+          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('project.hourly_rate') }}</dt><dd class="font-mono">{{ project.hourly_rate.toLocaleString('cs', { maximumFractionDigits: 6 }) }} {{ project.currency }}</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('project.due_short') }}</dt><dd>{{ dueLabel }}</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('common.currency') }}</dt><dd class="font-mono">{{ project.currency }}</dd></div>
         </dl>

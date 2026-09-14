@@ -216,16 +216,29 @@ final class StereoXmlExporter
             $vatRates[$rate]['vat'] += $lineVat;
             $vatRates[$rate]['total'] += $lineTotal;
 
-            $quantity = (float) ($item['quantity'] ?? 1);
+            $quantity = TimeBillingExport::quantity($item);
+            $preciseTimeRate = TimeBillingExport::usesPreciseHourlyRate($item);
             $unitPrice = (!empty($invoice['prices_include_vat']) && $quantity != 0.0)
-                ? round($lineBase / $quantity, 2)
+                ? round($lineBase / $quantity, $preciseTimeRate ? 6 : 2)
                 : (float) ($item['unit_price_without_vat'] ?? 0);
 
             $row = $rows->appendChild($xml->createElement('Row'));
             $this->el($xml, $row, 'LineText', (string) ($item['description'] ?? ''));
-            $this->el($xml, $row, 'Quantity', $this->fmt($quantity));
+            $this->el(
+                $xml,
+                $row,
+                'Quantity',
+                TimeBillingExport::formatQuantity($item, $this->fmt($quantity)),
+            );
             $this->el($xml, $row, 'UnitOfMeasure', (string) ($item['unit'] ?? 'ks'));
-            $this->el($xml, $row, 'UnitPrice', $this->fmt($unitPrice));
+            $this->el(
+                $xml,
+                $row,
+                'UnitPrice',
+                TimeBillingExport::usesPreciseHourlyRate($item)
+                    ? TimeBillingExport::formatRate($unitPrice)
+                    : $this->fmt($unitPrice),
+            );
             $this->el($xml, $row, 'LineNet', $this->fmt($lineBase));
             $this->el($xml, $row, 'LineVATRate', $this->fmt((float) ($item['vat_rate_snapshot'] ?? 0)));
             $this->el($xml, $row, 'LineVAT', $this->fmt($lineVat));

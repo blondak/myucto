@@ -43,7 +43,7 @@ final class InvoiceCalculator
 
         // Načti položky
         $stmt = $pdo->prepare(
-            'SELECT id, quantity, unit_price_without_vat, vat_rate_snapshot
+            'SELECT id, quantity, duration_minutes, unit_price_without_vat, vat_rate_snapshot
                FROM invoice_items WHERE invoice_id = ? ORDER BY order_index, id'
         );
         $stmt->execute([$invoiceId]);

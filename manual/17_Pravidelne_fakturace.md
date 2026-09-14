@@ -40,6 +40,10 @@ v detailu existující faktury tlačítko **Vytvořit šablonu z této faktury**
 
 ### 17.2.2 Sekce „Faktura"
 
+Hodinové položky podporují dobu ve formátu `H:MM` a sazbu až na šest
+desetinných míst. Doba i sazba se přenášejí do každé vytvořené faktury.
+Podrobnosti zadávání času jsou v [editoru faktury](15_Faktura_editor.md#156-vykaz-vicepraci-work-report).
+
 Tady nastavíš metadata, která se zkopírují na každou vygenerovanou fakturu:
 
 - **Typ dokladu** — Faktura nebo Zálohová faktura (proforma)

@@ -340,7 +340,14 @@ final class PohodaXmlExporter
                 // Pohoda invoice.xsd omezuje text položky na 90 znaků (facet maxLength) —
                 // delší popisy ořízneme, jinak XSD validace spadne (mb_substr kvůli diakritice).
                 $this->el($dom, $row, self::NS_INV, 'inv:text', mb_substr((string) ($item['description'] ?? ''), 0, 90));
-                $this->el($dom, $row, self::NS_INV, 'inv:quantity', $this->fmt((float) $item['quantity']));
+                $qtyItem = TimeBillingExport::quantity($item);
+                $this->el(
+                    $dom,
+                    $row,
+                    self::NS_INV,
+                    'inv:quantity',
+                    TimeBillingExport::formatQuantity($item, $this->fmt((float) $item['quantity'])),
+                );
                 $this->el($dom, $row, self::NS_INV, 'inv:unit', mb_substr((string) ($item['unit'] ?? 'ks'), 0, self::ITEM_UNIT_LIMIT));
                 // CoefficientOfRefundables (1 = celé)
                 $this->el($dom, $row, self::NS_INV, 'inv:coefficient', '1.0');
@@ -364,11 +371,14 @@ final class PohodaXmlExporter
                 $block = $dom->createElementNS(self::NS_INV, $blockName);
                 // payVAT=false → unitPrice musí být BEZ DPH. V režimu „ceny s DPH" nese
                 // unit_price_without_vat brutto, proto dopočítáme netto z řádkového základu.
-                $qtyItem = (float) $item['quantity'];
+                $preciseTimeRate = TimeBillingExport::usesPreciseHourlyRate($item);
                 $unitPriceNet = (!empty($invoice['prices_include_vat']) && $qtyItem != 0.0)
-                    ? round(((float) ($item['total_without_vat'] ?? 0)) / $qtyItem, 2)
+                    ? round(((float) ($item['total_without_vat'] ?? 0)) / $qtyItem, $preciseTimeRate ? 6 : 2)
                     : (float) $item['unit_price_without_vat'];
-                $this->el($dom, $block, self::NS_TYP, 'typ:unitPrice', $this->fmt($unitPriceNet));
+                $unitPrice = TimeBillingExport::usesPreciseHourlyRate($item)
+                    ? TimeBillingExport::formatRate($unitPriceNet)
+                    : $this->fmt($unitPriceNet);
+                $this->el($dom, $block, self::NS_TYP, 'typ:unitPrice', $unitPrice);
                 $this->el($dom, $block, self::NS_TYP, 'typ:price',     $this->fmt((float) ($item['total_without_vat'] ?? 0)));
                 $this->el($dom, $block, self::NS_TYP, 'typ:priceVAT',  $this->fmt((float) ($item['total_vat'] ?? 0)));
                 $this->el($dom, $block, self::NS_TYP, 'typ:priceSum',  $this->fmt((float) ($item['total_with_vat'] ?? 0)));

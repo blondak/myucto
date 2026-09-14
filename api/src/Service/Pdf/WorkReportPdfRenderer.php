@@ -50,6 +50,7 @@ final class WorkReportPdfRenderer
         if ($workReport === null) {
             throw new \RuntimeException("Výkaz pro fakturu #{$invoiceId} neexistuje");
         }
+        $workReport = TimeBillingPdfPresenter::workReport($workReport);
 
         $supplier = $this->resolveSupplier($invoice);
         // Logo + branding sdílené s fakturou (3 varianty hlavičky + accent barvy).

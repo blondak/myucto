@@ -24,6 +24,7 @@ publicApi.interceptors.request.use((config) => {
 export interface WrPreviewItem {
   description: string
   work_date: string | null
+  duration_minutes?: number | null
   hours: number
   rate: number
   total_amount: number

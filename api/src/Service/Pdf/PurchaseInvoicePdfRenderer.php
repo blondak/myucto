@@ -63,25 +63,7 @@ final class PurchaseInvoicePdfRenderer
         // (cena/j bez DPH + sazba + celkem s DPH) a odráží, že jde o doklad s cenami vč. DPH.
         $pricesIncludeVat = !empty($invoice['prices_include_vat']);
 
-        // Map items na shape co Twig očekává
-        $itemsNorm = array_map(function ($it) use ($pricesIncludeVat) {
-            $qty   = (float) ($it['quantity'] ?? 1);
-            $base  = (float) ($it['total_without_vat'] ?? 0);
-            $gross = (float) ($it['total_with_vat'] ?? 0);
-            $rawUnit = (float) ($it['unit_price_without_vat'] ?? 0); // v režimu s DPH = brutto/ks
-            $unitNet = ($pricesIncludeVat && $qty != 0.0) ? round($base / $qty, 2) : $rawUnit;
-            return [
-                'description'            => $it['description'] ?? '',
-                'quantity'               => $qty,
-                'unit'                   => $it['unit'] ?? 'ks',
-                'unit_price_without_vat' => $unitNet, // vždy netto
-                'vat_rate'               => (float) ($it['vat_rate_snapshot'] ?? $it['vat_rate'] ?? 0),
-                'total_without_vat'      => $base,
-                'total_with_vat'         => $gross,
-                // Řádkový součet zobrazovaný na dokladu (s DPH → brutto, jinak netto).
-                'line_total'             => $pricesIncludeVat ? $gross : $base,
-            ];
-        }, $items);
+        $itemsNorm = TimeBillingPdfPresenter::purchaseInvoiceItems($items, $pricesIncludeVat);
 
         $locale = $invoice['language'] ?? 'cs';
         $docTypeLabel = $this->docTypeLabel($invoice['document_kind'] ?? 'invoice', $locale);

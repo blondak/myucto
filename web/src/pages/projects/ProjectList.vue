@@ -170,7 +170,7 @@ watch([status, clientId, sort], () => load(true))
               <span v-if="p.last_invoice_date">{{ formatDate(p.last_invoice_date) }}</span>
               <span v-else class="text-neutral-300">—</span>
             </td>
-            <td class="px-4 py-3 text-right font-mono whitespace-nowrap">{{ p.hourly_rate.toLocaleString('cs') }} {{ p.currency }}/h</td>
+            <td class="px-4 py-3 text-right font-mono whitespace-nowrap">{{ p.hourly_rate.toLocaleString('cs', { maximumFractionDigits: 6 }) }} {{ p.currency }}/h</td>
           </tr>
         </tbody>
       </table></div>
@@ -202,7 +202,7 @@ watch([status, clientId, sort], () => load(true))
             </span>
             <div class="flex items-center gap-2 text-neutral-600">
               <span v-if="p.last_invoice_date">{{ formatDate(p.last_invoice_date) }}</span>
-              <span class="font-mono whitespace-nowrap">{{ p.hourly_rate.toLocaleString('cs') }} {{ p.currency }}/h</span>
+              <span class="font-mono whitespace-nowrap">{{ p.hourly_rate.toLocaleString('cs', { maximumFractionDigits: 6 }) }} {{ p.currency }}/h</span>
             </div>
           </div>
         </div>

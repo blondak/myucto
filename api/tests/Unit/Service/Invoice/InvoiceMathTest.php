@@ -111,6 +111,74 @@ final class InvoiceMathTest extends TestCase
         self::assertSame(2722.50, $r['totals']['with_vat']);
     }
 
+    public function testExactMinuteDurationOverridesLossyQuantityProjection(): void
+    {
+        $r = InvoiceMath::compute([
+            [
+                'quantity' => 0.017,
+                'duration_minutes' => 1,
+                'unit_price_without_vat' => 1000.00,
+                'vat_rate_snapshot' => 0,
+            ],
+        ]);
+
+        self::assertSame(16.67, $r['totals']['without_vat']);
+        self::assertSame(16.67, $r['totals']['with_vat']);
+    }
+
+    public function testLegacyDecimalHoursRemainUnchangedWithoutDuration(): void
+    {
+        $r = InvoiceMath::compute([
+            [
+                'quantity' => 0.33,
+                'duration_minutes' => null,
+                'unit_price_without_vat' => 1000.00,
+                'vat_rate_snapshot' => 0,
+            ],
+        ]);
+
+        self::assertSame(330.00, $r['totals']['without_vat']);
+    }
+
+    public function testExactMinuteDurationSupportsCreditNoteSign(): void
+    {
+        $r = InvoiceMath::compute([
+            [
+                'quantity' => -0.017,
+                'duration_minutes' => -1,
+                'unit_price_without_vat' => 1000.00,
+                'vat_rate_snapshot' => 21,
+            ],
+        ]);
+
+        self::assertSame(-16.67, $r['totals']['without_vat']);
+        self::assertSame(-3.50, $r['totals']['vat']);
+        self::assertSame(-20.17, $r['totals']['with_vat']);
+    }
+
+    public function testExactMinuteAmountsRoundHalfUpForNetGrossAndCreditNotes(): void
+    {
+        foreach ([false, true] as $pricesIncludeVat) {
+            foreach ([
+                [60, 0.015, 0.02],
+                [1, 0.9, 0.02],
+                [20, 0.045, 0.02],
+                [-60, 0.015, -0.02],
+                [-1, 0.9, -0.02],
+            ] as [$durationMinutes, $rate, $expected]) {
+                $r = InvoiceMath::compute([[
+                    'quantity' => $durationMinutes / 60,
+                    'duration_minutes' => $durationMinutes,
+                    'unit_price_without_vat' => $rate,
+                    'vat_rate_snapshot' => 0,
+                ]], pricesIncludeVat: $pricesIncludeVat);
+
+                self::assertSame($expected, $r['totals']['with_vat']);
+                self::assertSame($expected, $r['items'][0]['with']);
+            }
+        }
+    }
+
     public function testPerItemTotalsReturned(): void
     {
         $r = InvoiceMath::compute([

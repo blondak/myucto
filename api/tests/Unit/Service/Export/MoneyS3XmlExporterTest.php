@@ -217,6 +217,28 @@ final class MoneyS3XmlExporterTest extends TestCase
         self::assertSame('6830.46', $this->xpathOne($xml, '//SeznamPolozek/Polozka/SouhrnDPH/DPH'));
     }
 
+    public function testMinuteDurationUsesExactHoursAndPreciseHourlyAmounts(): void
+    {
+        $xml = $this->exporter->buildXml([$this->invoice([
+            'items' => [$this->item([
+                'duration_minutes' => 1,
+                'quantity' => 0.017,
+                'unit' => 'h',
+                'unit_price_without_vat' => 1000.123456,
+                'total_without_vat' => 16.67,
+                'total_vat' => 3.50,
+                'total_with_vat' => 20.17,
+            ])],
+            'total_with_vat' => 20.17,
+            'amount_to_pay' => 20.17,
+        ])]);
+
+        self::assertSame('0.016666666667', $this->xpathOne($xml, '//SeznamPolozek/Polozka/PocetMJ'));
+        self::assertSame('1000.123456', $this->xpathOne($xml, '//SeznamPolozek/Polozka/SouhrnDPH/Zaklad_MJ'));
+        self::assertSame('210.00', $this->xpathOne($xml, '//SeznamPolozek/Polozka/SouhrnDPH/DPH_MJ'));
+        self::assertSame('16.67', $this->xpathOne($xml, '//SeznamPolozek/Polozka/SouhrnDPH/Zaklad'));
+    }
+
     private function xpathOne(string $xml, string $expr): ?string
     {
         $dom = new \DOMDocument();

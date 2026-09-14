@@ -15,6 +15,7 @@ use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
+use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Oss\OssItemPlanner;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use Psr\Log\LoggerInterface;
@@ -495,6 +496,10 @@ final class IdokladImportService
             $lines[] = [
                 'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
                 'quantity'               => (float) ($line['Amount'] ?? 1),
+                'duration_minutes'       => TimeBilling::inferDurationMinutes(
+                    $line['Amount'] ?? 1,
+                    $line['Unit'] ?? 'ks',
+                ),
                 'unit'                   => (string) ($line['Unit'] ?? 'ks'),
                 'unit_price_without_vat' => self::idokladNetUnitPrice($line, $rate),
                 'vat_rate'               => $rate,
@@ -666,9 +671,11 @@ final class IdokladImportService
             $vatRateId = $this->requireVatRateId($supplierId, $rate, $taxDate, (int) $idx);
             $qty = (float) ($line['Amount'] ?? 1);
             $unitPrice = self::idokladNetUnitPrice($line, $rate);
+            $durationMinutes = TimeBilling::inferDurationMinutes($qty, $line['Unit'] ?? 'ks');
             $items[] = [
                 'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
                 'quantity'               => $qty,
+                'duration_minutes'       => $durationMinutes,
                 'unit'                   => (string) ($line['Unit'] ?? 'ks'),
                 'unit_price_without_vat' => $unitPrice,
                 'vat_rate_id'            => $vatRateId,
@@ -678,7 +685,11 @@ final class IdokladImportService
                 if (!isset($discountBaseByRate[$vatRateId])) {
                     $discountBaseByRate[$vatRateId] = ['rate_id' => $vatRateId, 'base' => 0.0];
                 }
-                $discountBaseByRate[$vatRateId]['base'] += round($qty * $unitPrice, 2);
+                $discountBaseByRate[$vatRateId]['base'] += TimeBilling::invoiceAmount([
+                    'quantity' => $qty,
+                    'duration_minutes' => $durationMinutes,
+                    'unit_price_without_vat' => $unitPrice,
+                ]);
             }
         }
 
@@ -896,6 +907,10 @@ final class IdokladImportService
             $items[] = [
                 'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
                 'quantity'               => (float) ($line['Amount'] ?? 1),
+                'duration_minutes'       => TimeBilling::inferDurationMinutes(
+                    $line['Amount'] ?? 1,
+                    $line['Unit'] ?? 'ks',
+                ),
                 'unit'                   => (string) ($line['Unit'] ?? 'ks'),
                 'unit_price_without_vat' => self::idokladNetUnitPrice($line, $rate),
                 'vat_rate_id'            => $vatRateId,
@@ -1419,6 +1434,10 @@ final class IdokladImportService
                     $lines[] = [
                         'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
                         'quantity'               => (float) ($line['Amount'] ?? 1),
+                        'duration_minutes'       => TimeBilling::inferDurationMinutes(
+                            $line['Amount'] ?? 1,
+                            $line['Unit'] ?? 'ks',
+                        ),
                         'unit'                   => (string) ($line['Unit'] ?? 'ks'),
                         'unit_price_without_vat' => self::idokladNetUnitPrice($line, $rate),
                         'vat_rate'               => $rate,

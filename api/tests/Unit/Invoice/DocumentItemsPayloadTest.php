@@ -62,6 +62,30 @@ final class DocumentItemsPayloadTest extends TestCase
         self::assertFalse(DocumentItemsPayload::changed([], []));
     }
 
+    public function testExactDurationUsesMinutesInsteadOfLossyQuantityProjection(): void
+    {
+        $stored = [[
+            'description' => 'Konzultace',
+            'quantity' => 0.017,
+            'duration_minutes' => 1,
+            'unit' => 'h',
+            'unit_price_without_vat' => 1000,
+            'vat_rate_id' => 3,
+        ]];
+        $sameFromEditor = $stored;
+        $sameFromEditor[0]['quantity'] = 1 / 60;
+
+        self::assertFalse(DocumentItemsPayload::changed($stored, $sameFromEditor));
+
+        $legacy = $stored;
+        $legacy[0]['duration_minutes'] = null;
+        self::assertTrue(DocumentItemsPayload::changed($stored, $legacy));
+
+        $twoMinutes = $stored;
+        $twoMinutes[0]['duration_minutes'] = 2;
+        self::assertTrue(DocumentItemsPayload::changed($stored, $twoMinutes));
+    }
+
     /**
      * Uložený OSS řádek tak, jak ho vrací `InvoiceRepository::find()` — čísla jako float,
      * příznaky jako bool.

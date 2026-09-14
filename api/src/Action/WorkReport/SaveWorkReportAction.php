@@ -15,13 +15,14 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * PUT /api/invoices/{id}/work-report
- * body: { project_id: int, title: string, items: [{description, hours, rate, order_index?}] }
+ * body: { project_id: int, title: string, items: [{description, hours, duration_minutes?, rate, order_index?}] }
  */
 final class SaveWorkReportAction
 {
@@ -94,6 +95,15 @@ final class SaveWorkReportAction
                 return Json::error($response, 'validation_failed',
                     'Zakázka nepatří k odběrateli této faktury.', 400);
             }
+        }
+
+        try {
+            $items = array_map(
+                static fn (array $item): array => TimeBilling::normalizeWorkReportItem($item),
+                array_values($items),
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
 
         // Validace — popisujeme řádky 1-based (uživatelsky srozumitelné). Frontend

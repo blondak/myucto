@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Import;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
+use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Oss\OssItemPlanner;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -322,6 +323,8 @@ final class AiIssuedInvoiceExtractor
             $items[] = [
                 'description'            => (string) ($line['description'] ?? ''),
                 'quantity'               => (float) ($line['quantity'] ?? 1),
+                'duration_minutes'       => $line['duration_minutes']
+                    ?? TimeBilling::inferDurationMinutes($line['quantity'] ?? 1, $line['unit'] ?? 'ks'),
                 'unit'                   => (string) ($line['unit'] ?? 'ks'),
                 'unit_price_without_vat' => (float) ($line['unit_price_without_vat'] ?? 0),
                 'vat_rate'               => (float) ($line['vat_rate'] ?? 0),

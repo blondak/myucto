@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Import;
 
+use MyInvoice\Service\Export\IsdocExporter;
+use MyInvoice\Service\Invoice\TimeBilling;
+
 /**
  * Parser ISDOC 5.x a 6.x — extrahuje fakturu do normalizovaného array.
  *
@@ -98,6 +101,7 @@ final class IsdocParser
 
         $xpath = new \DOMXPath($dom);
         $xpath->registerNamespace('i', $ns);
+        $xpath->registerNamespace('myi', IsdocExporter::MYINVOICE_EXTENSION_NS);
 
         try {
             $parsed = $this->parseInvoice($root, $xpath);
@@ -204,10 +208,22 @@ final class IsdocParser
 
         // Items
         $hasForeignCurrency = $currency !== $localCur;
+        $durationMinutesByLineId = $this->timeBillingDurations($xpath, $root);
         $items = [];
         foreach ($xpath->query('i:InvoiceLines/i:InvoiceLine', $root) ?: [] as $lineEl) {
             if (!$lineEl instanceof \DOMElement) continue;
-            $items[] = $this->parseLine($xpath, $lineEl, $hasForeignCurrency, $isTaxDocument);
+            $lineId = $this->text($xpath, 'i:ID', $lineEl);
+            $explicitDurationMinutes = $lineId !== '' && array_key_exists($lineId, $durationMinutesByLineId)
+                ? $durationMinutesByLineId[$lineId]
+                : null;
+            $items[] = $this->parseLine(
+                $xpath,
+                $lineEl,
+                $hasForeignCurrency,
+                $isTaxDocument,
+                $rate,
+                $explicitDurationMinutes,
+            );
         }
         // Nedaňový doklad (VATApplicable=false) DPH nepřiznává → prázdná rekapitulace.
         $recap = $isTaxDocument ? $this->parseTaxRecap($xpath, $root) : [];
@@ -331,7 +347,7 @@ final class IsdocParser
             // je z `parseTaxRecap()` kladná i u dobropisu, proto se srovnává až `abs()`
             // celého součtu — jinak by falešný poplach jen přeskočil na opravné doklady.
             $itemBases[$key] = ($itemBases[$key] ?? 0.0)
-                + (float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0);
+                + TimeBilling::invoiceAmountInput($item);
         }
         $itemBases = array_map('abs', $itemBases);
         if ($itemBases === []) {
@@ -487,13 +503,25 @@ final class IsdocParser
     /**
      * @return array<string,mixed>
      */
-    private function parseLine(\DOMXPath $xpath, \DOMElement $line, bool $hasForeignCurrency = false, bool $isTaxDocument = true): array
+    private function parseLine(
+        \DOMXPath $xpath,
+        \DOMElement $line,
+        bool $hasForeignCurrency = false,
+        bool $isTaxDocument = true,
+        ?float $exchangeRate = null,
+        ?int $explicitDurationMinutes = null,
+    ): array
     {
         $qtyEl = $xpath->query('i:InvoicedQuantity', $line)->item(0);
         $quantity = $qtyEl instanceof \DOMElement ? (float) $qtyEl->textContent : 1.0;
         $unit = $qtyEl instanceof \DOMElement ? ($qtyEl->getAttribute('unitCode') ?: 'ks') : 'ks';
+        $durationMinutes = $this->validExplicitDurationMinutes($explicitDurationMinutes, $quantity, $unit)
+            ?? TimeBilling::inferDurationMinutes($quantity, $unit);
 
-        $unitPriceLocal = (float) ($this->text($xpath, 'i:UnitPrice', $line) ?: '0');
+        $unitPriceLocalRaw = $this->text($xpath, 'i:UnitPrice', $line) ?: '0';
+        $unitPriceLocal = (float) $unitPriceLocalRaw;
+        $preciseTimeRate = $durationMinutes !== null
+            || (TimeBilling::isHourUnit($unit) && self::hasSubcentPrecision($unitPriceLocalRaw));
 
         // <LineExtensionAmount> = celková částka řádku bez DPH PO slevě. ISDOC 6.0.x
         // nemá na řádce dedikovaný discount element — sleva se promítá jen tím, že
@@ -505,24 +533,47 @@ final class IsdocParser
         // (issue #48: import z iDokladu přes PDF s embedded ISDOC ignoroval slevu).
         if ($hasForeignCurrency) {
             // <UnitPrice> je dle ISDOC vždy v lokální měně (CZK), ne v měně faktury.
-            // Cizoměnovou jednotkovou cenu (už po slevě) odvodíme z
-            // <LineExtensionAmountCurr> / qty. Náš IsdocExporter Curr pole generuje
-            // (od fixu cizí měny); fallback na <UnitPrice> drží pro non-konformní
-            // exporty cizích systémů, které *Curr vynechají a cizí hodnotu (chybně)
-            // zapíšou rovnou do <UnitPrice>.
+            // Legacy cizoměnovou jednotkovou cenu po slevě odvodíme z
+            // <LineExtensionAmountCurr> / qty. Přesný časový řádek může mít Curr total
+            // zaokrouhlený na haléře, proto u něj obnovíme sazbu z lokální UnitPrice
+            // a kurzu, ale jen pokud z ní vyjde stejný řádkový total bez slevy.
+            // Fallback na <UnitPrice> drží pro nekonformní exporty cizích systémů,
+            // které *Curr vynechají a cizí hodnotu zapíšou rovnou do <UnitPrice>.
             $lineAmountCurr = $this->text($xpath, 'i:LineExtensionAmountCurr', $line);
             $unitPrice = ($lineAmountCurr !== '' && $quantity > 0.0)
                 ? (float) $lineAmountCurr / $quantity
                 : $unitPriceLocal;
+            if ($preciseTimeRate && $lineAmountCurr !== '' && $quantity != 0.0
+                && $exchangeRate !== null && $exchangeRate > 0.0
+            ) {
+                $rateFromLocalUnitPrice = round($unitPriceLocal / $exchangeRate, 6);
+                $expectedLineAmount = TimeBilling::invoiceAmount([
+                    'quantity' => $quantity,
+                    'duration_minutes' => $durationMinutes,
+                    'unit_price_without_vat' => $rateFromLocalUnitPrice,
+                ]);
+                if (abs((float) $lineAmountCurr - $expectedLineAmount) <= 0.005) {
+                    $unitPrice = $rateFromLocalUnitPrice;
+                }
+            }
         } else {
             $unitPrice = $unitPriceLocal;
             $lineAmount = $this->text($xpath, 'i:LineExtensionAmount', $line);
             if ($lineAmount !== '' && $quantity > 0.0) {
                 $effective = (float) $lineAmount / $quantity;
-                // Přepsat jen při reálném rozdílu (= je tam sleva); u nediskontovaných
-                // řádků ponecháme původní <UnitPrice>, ať dělením nezanášíme
-                // zaokrouhlovací drift.
-                if (abs($effective - $unitPriceLocal) > 0.005) {
+                // Legacy toleranci porovnání jednotkových cen držíme beze změny.
+                // Jen přesný časový řádek smí místo ní porovnat zaokrouhlený total,
+                // protože dělení haléřové částky krátkým časem zničí hodinovou sazbu.
+                $isDiscounted = abs($effective - $unitPriceLocal) > 0.005;
+                if ($preciseTimeRate) {
+                    $expectedLineAmount = TimeBilling::invoiceAmount([
+                        'quantity' => $quantity,
+                        'duration_minutes' => $durationMinutes,
+                        'unit_price_without_vat' => $unitPriceLocal,
+                    ]);
+                    $isDiscounted = abs((float) $lineAmount - $expectedLineAmount) > 0.005;
+                }
+                if ($isDiscounted) {
                     $unitPrice = $effective;
                 }
             }
@@ -550,11 +601,69 @@ final class IsdocParser
         return [
             'description'            => $this->text($xpath, 'i:Item/i:Description', $line),
             'quantity'               => $quantity,
+            'duration_minutes'       => $durationMinutes,
             'unit'                   => $unit,
             'unit_price_without_vat' => $unitPrice,
             'vat_rate'               => $vatRate,
             'vat_rate_source'        => $rateSource,
         ];
+    }
+
+    /** @return array<string,int> */
+    private function timeBillingDurations(\DOMXPath $xpath, \DOMElement $root): array
+    {
+        $durations = [];
+        $duplicates = [];
+        foreach ($xpath->query('i:Extensions/myi:TimeBilling/myi:Line', $root) ?: [] as $line) {
+            if (!$line instanceof \DOMElement) {
+                continue;
+            }
+            $id = trim($line->getAttribute('id'));
+            $rawMinutes = trim($line->getAttribute('durationMinutes'));
+            if ($id === '' || isset($duplicates[$id])) {
+                continue;
+            }
+            try {
+                $normalized = TimeBilling::normalizeInvoiceItem([
+                    'quantity' => 0,
+                    'duration_minutes' => $rawMinutes,
+                    'unit' => 'h',
+                    'unit_price_without_vat' => 0,
+                ]);
+                $minutes = $normalized['duration_minutes'];
+            } catch (\InvalidArgumentException) {
+                continue;
+            }
+            if ($minutes === null) {
+                continue;
+            }
+            if (array_key_exists($id, $durations)) {
+                unset($durations[$id]);
+                $duplicates[$id] = true;
+                continue;
+            }
+            $durations[$id] = $minutes;
+        }
+
+        return $durations;
+    }
+
+    private function validExplicitDurationMinutes(?int $minutes, float $quantity, string $unit): ?int
+    {
+        if ($minutes === null || !TimeBilling::isHourUnit($unit)) {
+            return null;
+        }
+
+        return abs($quantity - $minutes / 60) <= 0.000000001 ? $minutes : null;
+    }
+
+    private static function hasSubcentPrecision(string $value): bool
+    {
+        if (!is_numeric($value)) {
+            return false;
+        }
+        $number = (float) $value;
+        return is_finite($number) && abs($number - round($number, 2)) > 0.000000001;
     }
 
     /**

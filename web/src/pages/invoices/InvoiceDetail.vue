@@ -16,7 +16,8 @@ import {
 import { adminApi, type InvoiceSmtpLog } from '@/api/admin'
 import { apiErrorMessage } from '@/api/errors'
 import { stockApi, type StockDocument } from '@/api/stock'
-import { formatMoney, formatDate, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
+import { formatMoney, formatHourlyRate, formatDate, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
+import { durationTotal, formatDuration, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useHotkey } from '@/composables/useHotkey'
@@ -73,8 +74,11 @@ let loadGeneration = 0
 // výpočtu DPH koeficientem). Pro zobrazení proto ukazujeme skutečné NETTO dopočtené
 // z uloženého řádkového základu (total_without_vat / množství). V běžném režimu je
 // unit_price_without_vat už netto → vracíme ho beze změny.
-function displayUnitPriceNet(item: { quantity: number; unit_price_without_vat: number; total_without_vat?: number }): number {
+function displayUnitPriceNet(item: { quantity: number; unit_price_without_vat: number; total_without_vat?: number; unit?: string; duration_minutes?: number | null; stock_item_id?: number | null }): number {
   if (invoice.value?.prices_include_vat && Number(item.quantity)) {
+    if (isTimeItem(item) && (item.duration_minutes != null || item.unit_price_without_vat !== Math.round(item.unit_price_without_vat * 100) / 100)) {
+      return Math.round(((item.total_without_vat ?? 0) / itemQuantity(item)) * 1e6) / 1e6
+    }
     return Math.round(((item.total_without_vat ?? 0) / Number(item.quantity)) * 100) / 100
   }
   return item.unit_price_without_vat
@@ -2175,9 +2179,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
                   {{ t('invoice.oss.needs_review') }}
                 </span>
               </td>
-              <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : item.quantity }}</td>
+              <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : (isTimeItem(item) && item.duration_minutes != null ? formatDuration(item.duration_minutes) : item.quantity) }}</td>
               <td class="px-4 py-2.5 text-neutral-600">{{ item.item_kind === 'discount' ? '' : item.unit }}</td>
-              <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : formatMoney(displayUnitPriceNet(item), invoice.currency) }}</td>
+              <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : (isTimeItem(item) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(item), invoice.currency) }}</td>
               <td v-if="supplierIsVatPayer" class="px-4 py-2.5 text-center text-xs">{{ formatPercent(item.vat_rate_snapshot ?? 0) }}</td>
               <td v-if="supplierIsVatPayer" class="px-4 py-2.5 text-right font-mono">{{ formatMoney(item.total_without_vat ?? 0, invoice.currency) }}</td>
               <td class="px-4 py-2.5 text-right font-mono font-medium">{{ formatMoney(supplierIsVatPayer ? (item.total_with_vat ?? 0) : (item.total_without_vat ?? 0), invoice.currency) }}</td>
@@ -2203,10 +2207,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
             </div>
             <div v-if="item.item_kind !== 'discount'" class="flex items-baseline justify-between text-xs text-neutral-500">
               <span>
-                <span class="font-mono text-neutral-700">{{ item.quantity }}</span>
+                <span class="font-mono text-neutral-700">{{ isTimeItem(item) && item.duration_minutes != null ? formatDuration(item.duration_minutes) : item.quantity }}</span>
                 <span class="ml-1">{{ item.unit }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono">{{ formatMoney(displayUnitPriceNet(item), invoice.currency) }}</span>
+                <span class="font-mono">{{ (isTimeItem(item) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(item), invoice.currency) }}</span>
                 <template v-if="supplierIsVatPayer">
                   <span class="text-neutral-400 mx-1.5">·</span>
                   <span>{{ formatPercent(item.vat_rate_snapshot ?? 0) }}</span>
@@ -2643,13 +2647,13 @@ const invoiceActions = computed<ActionItem[]>(() => {
             <tr v-for="(it, i) in workReport.items" :key="i">
               <td class="px-5 py-2 text-neutral-800 whitespace-pre-wrap">{{ it.description }}</td>
               <td v-if="wrHasDates" class="px-4 py-2 text-neutral-600 whitespace-nowrap">{{ formatDate(it.work_date) }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ formatMoney(it.rate, invoice.currency) }}</td>
-              <td class="px-5 py-2 text-right font-mono">{{ formatMoney(Number(it.hours) * Number(it.rate), invoice.currency) }}</td>
+              <td class="px-4 py-2 text-right font-mono">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }}</td>
+              <td class="px-4 py-2 text-right font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</td>
+              <td class="px-5 py-2 text-right font-mono">{{ formatMoney(workRowTotal(it), invoice.currency) }}</td>
             </tr>
             <tr class="bg-neutral-50 font-semibold">
               <td class="px-5 py-2 text-right" :colspan="wrHasDates ? 2 : 1">{{ t('invoice.totals.total') }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</td>
+              <td class="px-4 py-2 text-right font-mono">{{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</td>
               <td></td>
               <td class="px-5 py-2 text-right font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</td>
             </tr>
@@ -2665,16 +2669,16 @@ const invoiceActions = computed<ActionItem[]>(() => {
               <span v-if="wrHasDates" class="font-mono">{{ formatDate(it.work_date) }}</span>
               <span v-else></span>
               <span>
-                <span class="font-mono text-neutral-700">{{ Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
+                <span class="font-mono text-neutral-700">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }} h</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono">{{ formatMoney(it.rate, invoice.currency) }}</span>
+                <span class="font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono font-semibold text-neutral-900">{{ formatMoney(Number(it.hours) * Number(it.rate), invoice.currency) }}</span>
+                <span class="font-mono font-semibold text-neutral-900">{{ formatMoney(workRowTotal(it), invoice.currency) }}</span>
               </span>
             </div>
           </div>
           <div class="bg-neutral-50 p-3 flex items-center justify-between font-semibold">
-            <span class="font-mono">Σ {{ workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
+            <span class="font-mono">Σ {{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
             <span class="font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</span>
           </div>
         </div>

@@ -14,6 +14,7 @@ use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
+use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Oss\OssItemPlanner;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use Psr\Log\LoggerInterface;
@@ -308,6 +309,10 @@ final class FakturoidImportService
             $lines[] = [
                 'description'            => (string) ($line['name'] ?? ''),
                 'quantity'               => (float) ($line['quantity'] ?? 1),
+                'duration_minutes'       => TimeBilling::inferDurationMinutes(
+                    $line['quantity'] ?? 1,
+                    $line['unit_name'] ?? 'ks',
+                ),
                 'unit'                   => (string) ($line['unit_name'] ?? 'ks'),
                 'unit_price_without_vat' => (float) ($line['unit_price'] ?? 0),
                 'vat_rate'               => (float) ($line['vat_rate'] ?? 0),
@@ -500,6 +505,10 @@ final class FakturoidImportService
             $items[] = [
                 'description'            => (string) ($line['name'] ?? ''),
                 'quantity'               => (float) ($line['quantity'] ?? 1),
+                'duration_minutes'       => TimeBilling::inferDurationMinutes(
+                    $line['quantity'] ?? 1,
+                    $line['unit_name'] ?? 'ks',
+                ),
                 'unit'                   => (string) ($line['unit_name'] ?? 'ks'),
                 'unit_price_without_vat' => (float) ($line['unit_price'] ?? 0),
                 'vat_rate_id'            => $match->id,

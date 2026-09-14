@@ -81,6 +81,30 @@ final class StereoXmlExporterTest extends TestCase
         self::assertSame('false', $this->xpathOne($xml, '//DocumentTotals/ReverseCharge'));
     }
 
+    public function testMinuteDurationKeepsHourlyUnitRateAndLineTotal(): void
+    {
+        $xml = $this->exporter->buildXml([$this->invoice([
+            'items' => [$this->item([
+                'duration_minutes' => 1,
+                'quantity' => 0.017,
+                'unit' => 'h',
+                'unit_price_without_vat' => 1000.123456,
+                'total_without_vat' => 16.67,
+                'total_vat' => 3.50,
+                'total_with_vat' => 20.17,
+            ])],
+            'total_without_vat' => 16.67,
+            'total_vat' => 3.50,
+            'total_with_vat' => 20.17,
+            'amount_to_pay' => 20.17,
+        ])]);
+
+        self::assertSame('0.016666666667', $this->xpathOne($xml, '//Rows/Row/Quantity'));
+        self::assertSame('h', $this->xpathOne($xml, '//Rows/Row/UnitOfMeasure'));
+        self::assertSame('1000.123456', $this->xpathOne($xml, '//Rows/Row/UnitPrice'));
+        self::assertSame('16.67', $this->xpathOne($xml, '//Rows/Row/LineNet'));
+    }
+
     public function testNonCzkCurrencyCodeUsesIsoAndMissingConstantSymbolIsEmpty(): void
     {
         $xml = $this->exporter->buildXml([$this->invoice(['currency' => 'EUR'])]);

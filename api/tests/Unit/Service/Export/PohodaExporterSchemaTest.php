@@ -104,6 +104,30 @@ final class PohodaExporterSchemaTest extends TestCase
         self::assertNull($this->xpathOne($xml, '//inv:foreignCurrency/typ:priceHigh'), 'foreignCurrency nesmí nést buckety');
     }
 
+    public function testMinuteDurationKeepsHourlyUnitAndPreciseRate(): void
+    {
+        $invoice = $this->issuedInvoice([
+            'items' => [$this->item([
+                'duration_minutes' => 1,
+                'quantity' => 0.017,
+                'unit' => 'h',
+                'unit_price_without_vat' => 1000.123456,
+                'total_without_vat' => 16.67,
+                'total_vat' => 3.50,
+                'total_with_vat' => 20.17,
+            ])],
+            'vat_breakdown' => [['rate' => 21.0, 'base' => 16.67, 'vat' => 3.50]],
+            'totals' => ['without_vat' => 16.67, 'with_vat' => 20.17, 'rounding' => 0.0],
+        ]);
+        $xml = $this->exporter->buildXml([$invoice], $this->issuedCfg());
+
+        $this->assertValidPohoda($xml);
+        self::assertSame('0.016666666667', $this->xpathOne($xml, '//inv:invoiceItem/inv:quantity'));
+        self::assertSame('h', $this->xpathOne($xml, '//inv:invoiceItem/inv:unit'));
+        self::assertSame('1000.123456', $this->xpathOne($xml, '//inv:invoiceItem/inv:homeCurrency/typ:unitPrice'));
+        self::assertSame('16.67', $this->xpathOne($xml, '//inv:invoiceItem/inv:homeCurrency/typ:price'));
+    }
+
     public function testRoundingEmitsTypeRoundChoiceNotBareValue(): void
     {
         // homeCurrency nemá priceSum; round je typ:typeRound (choice) → musí obalit priceRound.

@@ -50,7 +50,7 @@ final class PurchaseInvoiceCalculator
         }
 
         $stmt = $pdo->prepare(
-            'SELECT id, quantity, unit_price_without_vat, vat_rate_snapshot
+            'SELECT id, quantity, duration_minutes, unit_price_without_vat, vat_rate_snapshot
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?
               ORDER BY order_index, id'

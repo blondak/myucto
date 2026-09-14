@@ -167,6 +167,11 @@ Ikona v poli otevře kalendář.
 
 ### 23.2.3 Položky
 
+U hodinových služeb lze zadat dobu jako `H:MM` a hodinovou sazbu až na šest
+desetinných míst, stejně jako u [vystavené faktury](15_Faktura_editor.md#156-vykaz-vicepraci-work-report).
+Čas a sazbu přepiš podle dodavatelova dokladu; součty a rekapitulace DPH zůstávají
+v peněžních částkách. Skladové ceny mají nadále dvě desetinná místa.
+
 Tlačítkem **+ Přidat položku** přidej řádek. Per řádek:
 
 - Popis

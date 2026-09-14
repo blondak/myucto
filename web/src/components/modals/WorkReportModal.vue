@@ -31,6 +31,8 @@ import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import DurationInput from '@/components/ui/DurationInput.vue'
+import { durationTotal, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -48,6 +50,7 @@ const emit = defineEmits<{
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
+const modalContent = ref<HTMLElement | null>(null)
 
 // ── Výkaz práce ──
 const wrOpen = ref(false)
@@ -98,11 +101,11 @@ const unitPriceHeaderLabel = computed(() => pricesInclVat.value
 
 // ── Práce: výpočty ──
 const workItemsValid = computed(() =>
-  wrItems.value.filter(i => (i.description || '').trim() !== '' && Number(i.hours) > 0)
+  wrItems.value.filter(i => (i.description || '').trim() !== '' && workHours(i) > 0)
 )
-const totalHours = computed(() => workItemsValid.value.reduce((s, i) => s + Number(i.hours || 0), 0))
+const totalHours = computed(() => workItemsValid.value.reduce((s, i) => s + workHours(i), 0))
 const totalAmount = computed(() =>
-  workItemsValid.value.reduce((s, i) => s + Number(i.hours || 0) * Number(i.rate || 0), 0)
+  workItemsValid.value.reduce((s, i) => s + workRowTotal(i), 0)
 )
 
 // ── Materiál: výpočty ──
@@ -179,6 +182,7 @@ function addItem() {
     description: '',
     work_date: null,
     hours: 1,
+    duration_minutes: 60,
     rate: defaultRate.value,
     order_index: wrItems.value.length,
   })
@@ -238,14 +242,17 @@ function syncRow(
   const unit = defaultUnit.value
   const desc = newTitle.trim()
   const match = (origTitle || '').trim() || desc
-  let idx = match !== '' ? items.findIndex(it => (it.description || '').trim() === match) : -1
-  if (idx < 0 && desc !== '') idx = items.findIndex(it => (it.description || '').trim() === desc)
+  const canRepurpose = (item: any) => ![item.stock_item_id, item.small_asset_id, item.asset_id]
+    .some(id => Number(id) > 0)
+  let idx = match !== '' ? items.findIndex(it => canRepurpose(it) && (it.description || '').trim() === match) : -1
+  if (idx < 0 && desc !== '') idx = items.findIndex(it => canRepurpose(it) && (it.description || '').trim() === desc)
 
   if (present) {
-    if (idx < 0 && allowEmptyReuse) idx = items.findIndex(it => (it.description || '').trim() === '')
+    if (idx < 0 && allowEmptyReuse) idx = items.findIndex(it => canRepurpose(it) && (it.description || '').trim() === '')
     if (idx >= 0) {
       items[idx].description = desc
       items[idx].quantity = 1
+      items[idx].duration_minutes = null
       items[idx].unit = unit
       items[idx].unit_price_without_vat = total
       items[idx].vat_rate_id = vatRateId ?? items[idx].vat_rate_id ?? defaultVatRateId.value ?? null
@@ -265,6 +272,7 @@ function syncRow(
 }
 
 async function save() {
+  if (modalContent.value && !validateDurationInputs(modalContent.value)) return
   if (!canSave.value) return
   saving.value = true
   error.value = ''
@@ -287,6 +295,7 @@ async function save() {
           description: it.description,
           work_date: it.work_date || null,
           hours: Number(it.hours),
+          duration_minutes: it.duration_minutes ?? null,
           rate: Number(it.rate),
           order_index: idx,
         })),
@@ -334,6 +343,7 @@ async function save() {
       note_below_items: inv.note_below_items,
       discount_percent: inv.discount_percent ?? 0,
       items: (inv.items as any[]).map((it, idx) => ({
+        ...it,
         description: it.description,
         quantity: it.quantity,
         unit: it.unit,
@@ -366,7 +376,7 @@ onMounted(() => {
   <Modal v-if="modelValue" :title="t('invoice.wr_btn')" width-class="max-w-4xl" @close="close">
       <div v-if="loading" class="p-8 text-center text-neutral-500">{{ t('common.loading') }}</div>
 
-      <div v-else class="space-y-6">
+      <div v-else ref="modalContent" class="space-y-6">
         <!-- ════════ Sekce: Výkaz práce ════════ -->
         <section class="space-y-4">
           <div class="flex items-center justify-between gap-3 border-b border-neutral-200 pb-1">
@@ -430,15 +440,15 @@ onMounted(() => {
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm" />
                   </td>
                   <td class="px-3 py-1.5">
-                    <input v-model.number="it.hours" type="number" step="0.25" min="0"
+                    <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </td>
                   <td class="px-3 py-1.5">
-                    <input v-model.number="it.rate" type="number" step="1" min="0"
+                    <input v-model.number="it.rate" type="number" step="0.000001" min="0"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </td>
                   <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
-                    {{ ((Number(it.hours)||0) * (Number(it.rate)||0)).toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+                    {{ workRowTotal(it).toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
                   </td>
                   <td class="px-2 py-1.5 text-center">
                     <button type="button" @click="removeItem(i)" :title="t('common.delete')"
@@ -456,7 +466,7 @@ onMounted(() => {
                     </button>
                   </td>
                   <td v-if="wrItems.length > 0" class="px-3 py-2 text-right font-mono">
-                    <span class="text-neutral-400 font-normal mr-2">Σ</span>{{ totalHours.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h
+                    <span class="text-neutral-400 font-normal mr-2">Σ</span>{{ durationTotal(workItemsValid) ?? totalHours.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h
                   </td>
                   <td v-else></td>
                   <td></td>
@@ -494,19 +504,19 @@ onMounted(() => {
                   </div>
                   <div>
                     <label class="block text-[11px] text-neutral-500 mb-0.5">{{ t('invoice.wr_hours') }}</label>
-                    <input v-model.number="it.hours" type="number" step="0.25" min="0" inputmode="decimal"
+                    <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </div>
                   <div>
                     <label class="block text-[11px] text-neutral-500 mb-0.5">{{ t('invoice.wr_rate') }}</label>
-                    <input v-model.number="it.rate" type="number" step="1" min="0" inputmode="decimal"
+                    <input v-model.number="it.rate" type="number" step="0.000001" min="0" inputmode="decimal"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </div>
                 </div>
                 <div class="flex items-baseline justify-between text-sm">
                   <span class="text-xs text-neutral-500">{{ t('invoice.totals.total') }}</span>
                   <span class="font-mono font-medium">
-                    {{ ((Number(it.hours)||0) * (Number(it.rate)||0)).toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} {{ currency }}
+                    {{ workRowTotal(it).toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} {{ currency }}
                   </span>
                 </div>
               </div>
@@ -518,7 +528,7 @@ onMounted(() => {
                 {{ t('invoice.wr_add_item') }}
               </button>
               <div v-if="wrItems.length > 0" class="flex items-baseline justify-between text-sm font-semibold">
-                <span class="font-mono"><span class="text-neutral-400 font-normal mr-1">Σ</span>{{ totalHours.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
+                <span class="font-mono"><span class="text-neutral-400 font-normal mr-1">Σ</span>{{ durationTotal(workItemsValid) ?? totalHours.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
                 <span class="font-mono">{{ totalAmount.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} {{ currency }}</span>
               </div>
             </div>

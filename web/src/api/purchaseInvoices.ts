@@ -117,6 +117,7 @@ export interface PurchaseInvoiceItem {
   description: string
   quantity: number
   unit: string
+  duration_minutes?: number | null
   unit_price_without_vat: number
   vat_rate_id: number
   vat_rate_snapshot?: number
@@ -606,6 +607,7 @@ export interface PurchaseInvoicePayload {
     description: string
     quantity: number
     unit: string
+    duration_minutes?: number | null
     unit_price_without_vat: number
     vat_rate_id: number
     order_index: number

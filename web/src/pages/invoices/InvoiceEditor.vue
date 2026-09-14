@@ -45,6 +45,8 @@ import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { cashApi, type CashRegister } from '@/api/cash'
 import { appIsoDate, addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import DurationInput from '@/components/ui/DurationInput.vue'
+import { durationTotal, isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey } from './invoiceStockAvailability'
 import {
   availabilityQuantity,
@@ -371,6 +373,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
   const item = form.value.items[rowIndex]
   if (!item) return
   item.stock_item_id = itemId
+  onItemUnitChange(item)
   if (itemId === null) {
     stockQuoteStates.delete(item)
     return
@@ -428,6 +431,10 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
   }
   if (item.warehouse_id == null) item.warehouse_id = defaultWarehouseId.value
   refreshAvailability()
+}
+
+function onItemUnitChange(item: InvoiceItem): void {
+  if (!isTimeItem(item)) item.duration_minutes = null
 }
 
 /**
@@ -976,6 +983,7 @@ function blankItem(): InvoiceItem {
   return {
     description: '',
     quantity: qty,
+    duration_minutes: null,
     unit: defaultItemUnit(),
     unit_price_without_vat: rate,
     vat_rate_id: defaultVatRateId(),
@@ -1063,14 +1071,10 @@ watch(
 // Při přepnutí typu na credit_note převrať množství všech existujících položek na záporná.
 watch(() => form.value.invoice_type, (newType, oldType) => {
   if (newType === 'credit_note' && oldType !== 'credit_note') {
-    for (const it of form.value.items) {
-      if (it.quantity > 0) it.quantity = -it.quantity
-    }
+    for (const it of form.value.items) syncCreditNoteItemSign(it, true)
   }
   if (oldType === 'credit_note' && newType !== 'credit_note') {
-    for (const it of form.value.items) {
-      if (it.quantity < 0) it.quantity = -it.quantity
-    }
+    for (const it of form.value.items) syncCreditNoteItemSign(it, false)
   }
 })
 
@@ -1283,6 +1287,7 @@ async function applyClientDefaults(clientId: number) {
     if (form.value.items.length === 1 && (form.value.items[0].description || '').trim() === '') {
       form.value.items[0].unit_price_without_vat = c.hourly_rate
       form.value.items[0].unit = defaultItemUnit()
+      onItemUnitChange(form.value.items[0])
     }
     if (wrItems.value.length === 1 && (wrItems.value[0].description || '').trim() === '') {
       wrItems.value[0].rate = c.hourly_rate
@@ -1336,6 +1341,7 @@ async function applyProjectDefaults(projectId: number) {
   if (form.value.items.length === 1 && (form.value.items[0].description || '').trim() === '') {
     form.value.items[0].unit_price_without_vat = p.hourly_rate
     form.value.items[0].unit = defaultItemUnit()
+    onItemUnitChange(form.value.items[0])
   }
   if (wrItems.value.length === 1 && (wrItems.value[0].description || '').trim() === '') {
     wrItems.value[0].rate = p.hourly_rate
@@ -1371,6 +1377,7 @@ async function addPriceListItem() {
     Object.assign(target, {
       description: resolved.description,
       quantity: form.value.invoice_type === 'credit_note' ? -1 : 1,
+      duration_minutes: null,
       unit: resolved.unit,
       unit_price_without_vat: resolved.unit_price_without_vat,
       vat_rate_id: resolved.vat_rate_id,
@@ -1415,10 +1422,14 @@ const computed_totals = computed(() => {
       ? 0
       : vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0
     // amount = cena bez DPH (zdola) / cena s DPH (shora, „ceny položek včetně DPH")
-    const amount = round2(item.quantity * item.unit_price_without_vat)
+    const amount = round2(itemAmount(item))
     let base: number
     let vat: number
-    if (pricesIncl) {
+    if (isPreciseTimeItem(item)) {
+      const totals = timeItemTotals(item, vatRate, pricesIncl)
+      base = totals.base
+      vat = totals.vat
+    } else if (pricesIncl) {
       vat = round2(amount * vatRate / (100 + vatRate))
       base = round2(amount - vat)
     } else {
@@ -1605,12 +1616,21 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+function round6(n: number): number {
+  return Math.round(n * 1_000_000) / 1_000_000
+}
+
 /**
  * Řádkové „Celkem" — u plátce DPH včetně DPH (aby bylo vidět, že sazba DPH má efekt;
  * net základ + DPH je v souhrnu níže). U neplátce / reverse-charge je sazba 0 → = základ.
  */
 function itemTotal(item: InvoiceItem): number {
-  const amount = round2(Number(item.quantity) * Number(item.unit_price_without_vat))
+  if (isPreciseTimeItem(item)) {
+    const rate = (form.value.reverse_charge || !supplierIsVatPayer.value)
+      ? 0 : (vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0)
+    return timeItemTotals(item, rate, !!form.value.prices_include_vat && supplierIsVatPayer.value).with
+  }
+  const amount = round2(itemAmount(item))
   // Režim „ceny s DPH": unit_price_without_vat nese cenu S DPH → řádkové „Celkem s DPH" = amount.
   if (form.value.prices_include_vat && supplierIsVatPayer.value) return amount
   const vatRate = (form.value.reverse_charge || !supplierIsVatPayer.value)
@@ -1630,11 +1650,11 @@ function itemTotal(item: InvoiceItem): number {
 function setItemGross(item: InvoiceItem, raw: string): void {
   const gross = evalMath(raw)
   if (gross === null) return
-  const qty = Number(item.quantity) || 0
+  const qty = itemQuantity(item)
   if (qty === 0) return
   if (form.value.prices_include_vat && supplierIsVatPayer.value) {
     // unit_price_without_vat nese cenu S DPH → ulož gross jako jednotkovou cenu.
-    item.unit_price_without_vat = round2(gross / qty)
+    item.unit_price_without_vat = isTimeItem(item) ? round6(gross / qty) : round2(gross / qty)
     return
   }
   // Běžný režim: dopočti netto odečtením DPH shora (u neplátce / RC je sazba 0).
@@ -1642,7 +1662,7 @@ function setItemGross(item: InvoiceItem, raw: string): void {
     ? 0
     : (vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0)
   const net = gross / (1 + vatRate / 100)
-  item.unit_price_without_vat = round2(net / qty)
+  item.unit_price_without_vat = isTimeItem(item) ? round6(net / qty) : round2(net / qty)
 }
 
 // Přepínač „ceny s DPH" má smysl jen pro plátce DPH (u neplátce/RC je sazba 0 → gross = net).
@@ -1695,8 +1715,9 @@ async function loadWorkReport() {
 // typicky nevyplní (přidal Přidat řádek a zapomněl), automaticky je ignorujeme,
 // aby totals v položce faktury seděly s tím, co se opravdu uloží.
 const wrItemsValid = computed(() => wrItems.value.filter(i => (i.description || '').trim() !== ''))
-const wrTotalHours = computed(() => wrItemsValid.value.reduce((s, i) => s + (Number(i.hours) || 0), 0))
-const wrTotalAmount = computed(() => wrItemsValid.value.reduce((s, i) => s + (Number(i.hours) || 0) * (Number(i.rate) || 0), 0))
+const wrTotalHours = computed(() => wrItemsValid.value.reduce((s, i) => s + workHours(i), 0))
+const wrTotalAmount = computed(() => wrItemsValid.value.reduce((s, i) => s + workRowTotal(i), 0))
+const wrDurationTotal = computed(() => durationTotal(wrItemsValid.value))
 
 function addWrItem() {
   // 1. project hourly rate, 2. client hourly rate, 3. existing WR row rate, 4. default 1500
@@ -1707,7 +1728,7 @@ function addWrItem() {
     : (clientRate && clientRate > 0) ? clientRate
     : (previousRate && previousRate > 0) ? previousRate
     : 1500
-  wrItems.value.push({ description: '', hours: 1, rate: defaultRate, order_index: wrItems.value.length })
+  wrItems.value.push({ description: '', hours: 1, duration_minutes: 60, rate: defaultRate, order_index: wrItems.value.length })
   focusLastRow('[data-row-input="inv-wr"]', paneDom.root())
 }
 function removeWrItem(idx: number) {
@@ -1757,6 +1778,7 @@ function pushWrToInvoiceItem() {
   if (target) {
     target.description = description
     target.quantity = 1
+    target.duration_minutes = null
     target.unit = unit
     target.unit_price_without_vat = totalAmount
     // Sazba DPH práce dle volby výkazu (uživatel ji explicitně nastavuje selectorem).
@@ -1765,6 +1787,7 @@ function pushWrToInvoiceItem() {
     form.value.items.push({
       description,
       quantity: 1,
+      duration_minutes: null,
       unit,
       unit_price_without_vat: totalAmount,
       vat_rate_id: wrVatRateId.value ?? defaultVatId,
@@ -1816,16 +1839,14 @@ function checkWorkReportSync(): string | null {
     })
   }
 
-  const itemQty = Number(item.quantity) || 0
-  const itemRate = Number(item.unit_price_without_vat) || 0
-  const itemAmount = Math.round(itemQty * itemRate * 100) / 100
-  const amountDiff = Math.abs(itemAmount - totalAmount) > 0.01
+  const invoiceItemAmount = Math.round(itemAmount(item) * 100) / 100
+  const amountDiff = Math.abs(invoiceItemAmount - totalAmount) > 0.01
 
   if (amountDiff) {
     return t('invoice.wr_diff_confirm', {
       hours: totalHours,
       amount: totalAmount.toLocaleString(loc),
-      itemAmount: itemAmount.toLocaleString(loc),
+      itemAmount: invoiceItemAmount.toLocaleString(loc),
       ccy,
     })
   }
@@ -1858,11 +1879,11 @@ function checkMaterialReportSync(): string | null {
     })
   }
 
-  const itemAmount = Math.round((Number(item.quantity) || 0) * (Number(item.unit_price_without_vat) || 0) * 100) / 100
-  if (Math.abs(itemAmount - total) > 0.01) {
+  const invoiceItemAmount = Math.round(itemAmount(item) * 100) / 100
+  if (Math.abs(invoiceItemAmount - total) > 0.01) {
     return t('invoice.wr_material_diff_confirm', {
       amount: total.toLocaleString(loc),
-      itemAmount: itemAmount.toLocaleString(loc),
+      itemAmount: invoiceItemAmount.toLocaleString(loc),
       ccy,
     })
   }
@@ -1905,6 +1926,7 @@ function pushMatToInvoiceItem() {
   if (target) {
     target.description = description
     target.quantity = 1
+    target.duration_minutes = null
     target.unit = unit
     target.unit_price_without_vat = total
     if (matVatRateId.value != null) target.vat_rate_id = matVatRateId.value
@@ -1912,6 +1934,7 @@ function pushMatToInvoiceItem() {
     form.value.items.push({
       description,
       quantity: 1,
+      duration_minutes: null,
       unit,
       unit_price_without_vat: total,
       vat_rate_id: matVatRateId.value ?? defaultVatRateId(),
@@ -2036,6 +2059,7 @@ async function submit() {
   // submit event vyvolá i tak — bez této pojistky by druhý stisk během
   // rozběhnutého requestu založil doklad dvakrát (stejně jako v editoru přijatých).
   if (submitting.value) return
+  if (!validateDurationInputs(paneDom.root())) return
   // Tiše vyhoď prázdné řádky (bez popisu i bez ceny) — uživatel přidal řádek a nezapsal ho.
   // Zároveň smaž z form.value.items, ať checkWorkReportSync vidí stejnou množinu jako payload.
   form.value.items = form.value.items.filter(it =>
@@ -2100,7 +2124,8 @@ async function submit() {
       revenue_category_id: form.value.revenue_category_id,
       items: form.value.items.map((it, i) => ({
         description: it.description,
-        quantity: it.quantity,
+        quantity: itemQuantity(it),
+        duration_minutes: isTimeItem(it) ? (it.duration_minutes ?? null) : null,
         unit: it.unit,
         unit_price_without_vat: it.unit_price_without_vat,
         vat_rate_id: it.vat_rate_id,
@@ -2191,7 +2216,8 @@ async function submit() {
           items: wrItemsValid.value.map((it, i) => ({
             description: it.description,
             work_date: it.work_date || null,
-            hours: Number(it.hours) || 0,
+            hours: workHours(it),
+            duration_minutes: it.duration_minutes ?? null,
             rate: Number(it.rate) || 0,
             order_index: i,
           })),
@@ -2643,7 +2669,8 @@ async function deleteDraft() {
                 </div>
               </td>
               <td class="px-3 py-2">
-                <input v-model="item.quantity" v-math type="text" inputmode="decimal"
+                <DurationInput v-if="isTimeItem(item)" v-model="item.quantity" v-model:duration-minutes="item.duration_minutes" :allow-negative="true" />
+                <input v-else v-model="item.quantity" v-math="2" type="text" inputmode="decimal"
                   :class="['w-full h-9 px-2 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
               </td>
               <td class="px-3 py-2">
@@ -2651,13 +2678,13 @@ async function deleteDraft() {
                   class="w-full h-9 px-1 border border-neutral-300 rounded text-sm bg-surface">
                   <option v-for="code in rowUnitChoices(item) ?? []" :key="code" :value="code">{{ code }}</option>
                 </select>
-                <select v-else v-model="item.unit" class="w-full h-9 px-1 border border-neutral-300 rounded text-sm bg-surface">
+                <select v-else v-model="item.unit" @change="onItemUnitChange(item)" class="w-full h-9 px-1 border border-neutral-300 rounded text-sm bg-surface">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
                   <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ item.unit }}</option>
                 </select>
               </td>
               <td class="px-3 py-2">
-                <input v-model="item.unit_price_without_vat" v-math type="text" inputmode="decimal"
+                <input v-model="item.unit_price_without_vat" v-math="isTimeItem(item) ? 6 : 2" type="text" inputmode="decimal"
                   :class="['w-full h-9 px-2 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
               </td>
               <td v-if="supplierIsVatPayer" class="px-3 py-2">
@@ -2892,7 +2919,8 @@ async function deleteDraft() {
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.qty') }}</label>
-                <input v-model="item.quantity" v-math type="text" inputmode="decimal"
+                <DurationInput v-if="isTimeItem(item)" v-model="item.quantity" v-model:duration-minutes="item.duration_minutes" :allow-negative="true" />
+                <input v-else v-model="item.quantity" v-math="2" type="text" inputmode="decimal"
                   :class="['w-full h-10 px-3 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
               </div>
               <div>
@@ -2901,7 +2929,7 @@ async function deleteDraft() {
                   class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
                   <option v-for="code in rowUnitChoices(item) ?? []" :key="code" :value="code">{{ code }}</option>
                 </select>
-                <select v-else v-model="item.unit" class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
+                <select v-else v-model="item.unit" @change="onItemUnitChange(item)" class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
                   <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ item.unit }}</option>
                 </select>
@@ -2910,7 +2938,7 @@ async function deleteDraft() {
             <div :class="supplierIsVatPayer ? 'grid grid-cols-2 gap-2' : ''">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="item.unit_price_without_vat" v-math type="text" inputmode="decimal"
+                <input v-model="item.unit_price_without_vat" v-math="isTimeItem(item) ? 6 : 2" type="text" inputmode="decimal"
                   :class="['w-full h-10 px-3 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
               </div>
               <div v-if="supplierIsVatPayer">
@@ -3172,13 +3200,13 @@ async function deleteDraft() {
                   <DateInput v-model="it.work_date" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm font-mono" />
                 </td>
                 <td class="px-2 py-1.5">
-                  <input v-model.number="it.hours" type="number" step="0.25" min="0" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
+                  <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes" />
                 </td>
                 <td class="px-2 py-1.5">
-                  <input v-model.number="it.rate" type="number" step="1" min="0" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
+                  <input v-model.number="it.rate" v-math="6" type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
-                  {{ formatMoney((Number(it.hours) || 0) * (Number(it.rate) || 0), form.currency) }}
+                  {{ formatMoney(workRowTotal(it), form.currency) }}
                 </td>
                 <td class="px-2 py-1.5 text-center">
                   <button type="button" @click="removeWrItem(i)" :title="t('common.delete')"
@@ -3196,7 +3224,7 @@ async function deleteDraft() {
                   </button>
                 </td>
                 <td v-if="wrItems.length > 0" class="px-3 py-2 text-right font-mono">
-                  <span class="text-neutral-400 font-normal mr-2">Σ</span>{{ wrTotalHours.toFixed(2) }} h
+                  <span class="text-neutral-400 font-normal mr-2">Σ</span>{{ wrDurationTotal ?? `${wrTotalHours.toFixed(2)} h` }}
                 </td>
                 <td v-else></td>
                 <td></td>
@@ -3240,18 +3268,18 @@ async function deleteDraft() {
                 </div>
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.wr_hours') }}</label>
-                  <input v-model.number="it.hours" type="number" inputmode="decimal" step="0.25" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
+                  <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes" />
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2 items-end">
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.wr_rate') }}</label>
-                  <input v-model.number="it.rate" type="number" inputmode="decimal" step="1" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
+                  <input v-model.number="it.rate" v-math="6" type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
                 </div>
                 <div class="text-right pb-2">
                   <div class="text-xs font-medium text-neutral-500 uppercase tracking-wide">{{ t('invoice.wr_total') }}</div>
                   <div class="font-mono text-sm font-semibold">
-                    {{ formatMoney((Number(it.hours) || 0) * (Number(it.rate) || 0), form.currency) }}
+                    {{ formatMoney(workRowTotal(it), form.currency) }}
                   </div>
                 </div>
               </div>
@@ -3262,7 +3290,7 @@ async function deleteDraft() {
               {{ t('invoice.wr_add_row') }}
             </button>
             <div v-if="wrItems.length > 0" class="bg-neutral-50 rounded-md px-3 py-2 flex items-center justify-between font-semibold text-sm">
-              <span class="font-mono">Σ {{ wrTotalHours.toFixed(2) }} h</span>
+              <span class="font-mono">Σ {{ wrDurationTotal ?? `${wrTotalHours.toFixed(2)} h` }}</span>
               <span class="font-mono">{{ formatMoney(wrTotalAmount, form.currency) }}</span>
             </div>
           </div>

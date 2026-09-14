@@ -10,6 +10,7 @@ use MyInvoice\Repository\ProjectRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
+use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use MyInvoice\Service\Stats\StatsRecomputer;
@@ -1820,7 +1821,11 @@ final class InvoiceImportService
             // Netto cena z parseru je PROVIZORNÍ všude, kde byl doklad v cenách s DPH
             // a sazba se určila až tady — koeficient, kterým parser dělil, byl jen odhad.
             $unitPrice = self::netUnitPrice($item, $rate);
-            $signSum += $quantity * $unitPrice;
+            $signSum += TimeBilling::invoiceAmountInput([
+                'quantity' => $quantity,
+                'duration_minutes' => $item['duration_minutes'] ?? null,
+                'unit_price_without_vat' => $unitPrice,
+            ]);
             if (($item['vat_rate'] ?? null) === null) {
                 // Dosazená sazba do reportu patří: soubor procento neuvedl, takže je to
                 // jediné číslo na dokladu, které nepochází ze zdrojového systému.
@@ -1921,6 +1926,8 @@ final class InvoiceImportService
             $plan['rows'][] = [
                 'description'             => (string) ($item['description'] ?? ''),
                 'quantity'                => $quantity,
+                'duration_minutes'        => $item['duration_minutes']
+                    ?? TimeBilling::inferDurationMinutes($quantity, $unit),
                 'unit'                    => $unit,
                 'unit_price_without_vat'  => $unitPrice,
                 'vat_rate_id'             => (int) $match->id,
@@ -2186,6 +2193,10 @@ final class InvoiceImportService
 
             $row['unit_price_without_vat'] = abs($unitPrice);
             $row['quantity'] = $lineTotal > 0 ? -abs($quantity) : abs($quantity);
+            if (($row['duration_minutes'] ?? null) !== null) {
+                $duration = (int) $row['duration_minutes'];
+                $row['duration_minutes'] = $lineTotal > 0 ? -abs($duration) : abs($duration);
+            }
         }
         unset($row);
 
@@ -2264,20 +2275,22 @@ final class InvoiceImportService
 
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO invoice_items
-                (invoice_id, description, quantity, unit, unit_price_without_vat,
+                (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code'
             . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-            . ') VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?'
+            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?'
             . str_repeat(', ?', count($ossColumns))
             . ')'
         );
 
         foreach (array_values($rows) as $i => $row) {
+            $row = TimeBilling::normalizeInvoiceItem($row);
             $params = [
                 $invoiceId,
                 $row['description'],
                 $row['quantity'],
+                $row['duration_minutes'],
                 $row['unit'],
                 $row['unit_price_without_vat'],
                 $row['vat_rate_id'],

@@ -135,8 +135,8 @@
     <tr>
       <td class="num">{{ loop.index }}.</td>
       <td>{{ item.description }}</td>
-      <td class="num">{{ item.quantity|number_format(2, ',', ' ') }} {{ item.unit|default('ks') }}</td>
-      <td class="num">{{ item.unit_price_without_vat|number_format(2, ',', ' ') }} {{ currency }}</td>
+      <td class="num">{% if item.duration_display is defined and item.duration_display is not null %}{{ item.duration_display }}{% else %}{{ item.quantity|number_format(2, ',', ' ') }}{% endif %} {{ item.unit|default('ks') }}</td>
+      <td class="num">{{ item.pdf_unit_price|default(item.unit_price_without_vat)|number_format(item.unit_price_decimals|default(2), ',', ' ') }} {{ currency }}</td>
       <td class="num">{{ item.vat_rate|number_format(0) }}%</td>
       <td class="num">{{ item.line_total|number_format(2, ',', ' ') }} {{ currency }}</td>
     </tr>

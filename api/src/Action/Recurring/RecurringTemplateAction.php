@@ -132,6 +132,7 @@ final class RecurringTemplateAction
                 );
                 $mathItems = array_map(static fn (array $item): array => [
                     'quantity' => (float) $item['quantity'],
+                    'duration_minutes' => $item['duration_minutes'] ?? null,
                     'unit_price_without_vat' => (float) $item['unit_price_without_vat'],
                     'vat_rate_snapshot' => (float) ($vatRates[(int) $item['vat_rate_id']] ?? 0),
                 ], $effective);

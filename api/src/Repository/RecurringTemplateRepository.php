@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\PeriodicityCalculator;
+use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Oss\OssTemplateItemPolicy;
 use PDO;
 
@@ -113,7 +114,7 @@ final class RecurringTemplateRepository
                     i.description_source, i.catalog_price_source,
                     i.catalog_source_currency_code, i.catalog_source_unit_price,
                     i.catalog_exchange_rate, i.catalog_exchange_rate_date,
-                    i.description, i.quantity, i.unit,
+                    i.description, i.quantity, i.duration_minutes, i.unit,
                     i.unit_price_without_vat, i.vat_rate_id, i.vat_classification_code,
                     i.order_index, i.stock_item_id, i.warehouse_id,
                     vr.code AS vat_code, vr.rate_percent AS vat_rate_percent,
@@ -333,9 +334,13 @@ final class RecurringTemplateRepository
      */
     private const TEMPLATE_TOTAL_SQL =
         "((SELECT COALESCE(SUM(
-                    ROUND(ri.quantity * ri.unit_price_without_vat, 2)
+                    ROUND(CASE WHEN ri.duration_minutes IS NOT NULL
+                               THEN ri.duration_minutes * ri.unit_price_without_vat / 60
+                               ELSE ri.quantity * ri.unit_price_without_vat END, 2)
                   + CASE WHEN t.prices_include_vat = 1 OR t.reverse_charge = 1 THEN 0
-                         ELSE ROUND(ROUND(ri.quantity * ri.unit_price_without_vat, 2) * vr.rate_percent / 100, 2) END
+                         ELSE ROUND(ROUND(CASE WHEN ri.duration_minutes IS NOT NULL
+                                              THEN ri.duration_minutes * ri.unit_price_without_vat / 60
+                                              ELSE ri.quantity * ri.unit_price_without_vat END, 2) * vr.rate_percent / 100, 2) END
                  ), 0)
             FROM recurring_invoice_template_items ri
             JOIN vat_rates vr ON vr.id = ri.vat_rate_id
@@ -469,7 +474,7 @@ final class RecurringTemplateRepository
 
         // Položky všech šablon jedním dotazem, seskupené po template_id.
         $itemsStmt = $this->db->pdo()->prepare(
-            'SELECT i.id, i.template_id, i.description, i.quantity, i.unit,
+             'SELECT i.id, i.template_id, i.description, i.quantity, i.duration_minutes, i.unit,
                     i.unit_price_without_vat, i.vat_rate_id, i.vat_classification_code,
                     i.order_index, i.stock_item_id, i.warehouse_id,
                     vr.code AS vat_code, vr.rate_percent AS vat_rate_percent'
@@ -725,6 +730,10 @@ final class RecurringTemplateRepository
     public function replaceItems(int $templateId, array $items): void
     {
         $pdo = $this->db->pdo();
+        $items = array_map(
+            static fn (array $item): array => TimeBilling::normalizeInvoiceItem($item),
+            array_values($items),
+        );
         $owner = $pdo->prepare('SELECT supplier_id FROM recurring_invoice_templates WHERE id = ?');
         $owner->execute([$templateId]);
         $bad = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->itemViolations(
@@ -745,10 +754,10 @@ final class RecurringTemplateRepository
                 (template_id, price_list_item_id, catalog_policy, description_source,
                  catalog_price_source, catalog_source_currency_code,
                  catalog_source_unit_price, catalog_exchange_rate,
-                 catalog_exchange_rate_date, description, quantity, unit,
+                  catalog_exchange_rate_date, description, quantity, duration_minutes, unit,
                  unit_price_without_vat, vat_rate_id, vat_classification_code,
                  order_index' . $ossColumns . ')
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $ossPlaceholders . ')'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $ossPlaceholders . ')'
         );
         foreach (array_values($items) as $i => $item) {
             $params = [
@@ -763,6 +772,7 @@ final class RecurringTemplateRepository
                 $item['catalog_exchange_rate_date'] ?? null,
                 (string) ($item['description'] ?? ''),
                 (float) ($item['quantity'] ?? 1),
+                $item['duration_minutes'],
                 (string) ($item['unit'] ?? 'ks'),
                 (float) ($item['unit_price_without_vat'] ?? 0),
                 (int) ($item['vat_rate_id'] ?? 0),
@@ -915,6 +925,7 @@ final class RecurringTemplateRepository
         $row['vat_rate_id']            = (int) $row['vat_rate_id'];
         $row['order_index']            = (int) $row['order_index'];
         $row['quantity']               = (float) $row['quantity'];
+        $row['duration_minutes']       = $row['duration_minutes'] !== null ? (int) $row['duration_minutes'] : null;
         $row['unit_price_without_vat'] = (float) $row['unit_price_without_vat'];
         if (isset($row['vat_rate_percent'])) {
             $row['vat_rate_percent'] = (float) $row['vat_rate_percent'];

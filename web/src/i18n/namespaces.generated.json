@@ -115,6 +115,7 @@
     "taxReturn",
     "tax_evidence",
     "template_tools",
+    "time_billing",
     "users",
     "validation",
     "vat_classifications",
@@ -209,6 +210,7 @@
       "taxReturn",
       "tax_evidence",
       "template_tools",
+      "time_billing",
       "users",
       "vat_classifications",
       "vendor",
@@ -252,7 +254,8 @@
       "bank",
       "dashboard",
       "errors",
-      "taxReturn"
+      "taxReturn",
+      "time_billing"
     ],
     "portal": [
       "portal",
@@ -312,7 +315,8 @@
       "lock",
       "oss_rates",
       "payment_method",
-      "project"
+      "project",
+      "time_billing"
     ],
     "invoice-ai-import": [
       "aiGateway",
@@ -327,7 +331,8 @@
       "price_list",
       "project",
       "purchase_invoice",
-      "stock"
+      "stock",
+      "time_billing"
     ],
     "invoice-detail": [
       "activation",
@@ -342,7 +347,8 @@
       "recurring",
       "settings",
       "smtp_logs",
-      "stock"
+      "stock",
+      "time_billing"
     ],
     "invoice-edit": [
       "cash",
@@ -353,7 +359,8 @@
       "price_list",
       "project",
       "purchase_invoice",
-      "stock"
+      "stock",
+      "time_billing"
     ],
     "invoices-export": [
       "export",
@@ -406,6 +413,7 @@
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
+      "time_billing",
       "vendor"
     ],
     "purchase-invoice-detail": [
@@ -432,6 +440,7 @@
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
+      "time_billing",
       "vendor"
     ],
     "documents": [
@@ -963,7 +972,8 @@
       "payment_method",
       "project",
       "purchase_invoice",
-      "recurring"
+      "recurring",
+      "time_billing"
     ],
     "recurring-detail": [
       "payment_method",
@@ -974,7 +984,8 @@
       "payment_method",
       "project",
       "purchase_invoice",
-      "recurring"
+      "recurring",
+      "time_billing"
     ],
     "admin-diagnostics": [
       "diagnostics"

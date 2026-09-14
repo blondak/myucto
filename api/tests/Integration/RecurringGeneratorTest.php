@@ -290,7 +290,8 @@ final class RecurringGeneratorTest extends TestCase
             ],
             [
                 'description' => 'Support paušál',
-                'quantity' => 2.0,
+                'quantity' => 1 / 60,
+                'duration_minutes' => 1,
                 'unit' => 'h',
                 'unit_price_without_vat' => 1500.00,
                 'vat_rate_id' => $this->vatRateId,
@@ -322,17 +323,20 @@ final class RecurringGeneratorTest extends TestCase
         $this->assertSame($this->clientId, (int) $row['client_id']);
         $this->assertSame($this->currencyId, (int) $row['currency_id']);
         $this->assertSame('bank_transfer', $row['payment_method']);
-        // 1×500 + 2×1500 = 3500 base + DPH (default rate je >0)
-        $this->assertGreaterThanOrEqual(3500.00, (float) $row['total_with_vat']);
+        // 1×500 + 1 minuta × 1500/60 = 525 base + DPH (default rate je >0)
+        $this->assertGreaterThanOrEqual(525.00, (float) $row['total_with_vat']);
 
         // Položky se zkopírovaly
         $items = $this->db->pdo()->prepare(
-            "SELECT description, quantity, unit_price_without_vat FROM invoice_items
+            "SELECT description, quantity, duration_minutes, unit_price_without_vat, total_without_vat FROM invoice_items
               WHERE invoice_id = ? ORDER BY order_index"
         );
         $items->execute([$result['invoice_id']]);
         $itemRows = $items->fetchAll(PDO::FETCH_ASSOC);
         $this->assertCount(2, $itemRows);
+        $this->assertSame(1, (int) $itemRows[1]['duration_minutes']);
+        $this->assertSame(0.017, (float) $itemRows[1]['quantity']);
+        $this->assertSame(25.0, (float) $itemRows[1]['total_without_vat']);
 
         // Description sync — M/YYYY se synchronizuje k tax_date (= issue_date při default
         // tax_date_mode='same_as_issue'). Popis šablony "Hosting 5/2026" generuje

@@ -347,6 +347,7 @@ final class WorkReportLinkService
                     'description'  => (string) $it['description'],
                     'work_date'    => $it['work_date'],
                     'hours'        => (float) $it['hours'],
+                    'duration_minutes' => $it['duration_minutes'] !== null ? (int) $it['duration_minutes'] : null,
                     'rate'         => (float) $it['rate'],
                     'total_amount' => (float) $it['total_amount'],
                 ], $wr['items']),

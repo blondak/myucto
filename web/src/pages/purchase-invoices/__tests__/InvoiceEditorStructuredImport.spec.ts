@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   importStructured: vi.fn(),
   uploadSubmission: vi.fn(),
   createInvoice: vi.fn(),
+  updateInvoice: vi.fn(),
   get: vi.fn(),
   getSubmission: vi.fn(),
   expenseSuggestions: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/api/purchaseInvoices', () => ({
   purchaseInvoicesApi: {
     importStructured: m.importStructured,
     create: m.createInvoice,
+    update: m.updateInvoice,
     get: m.get,
     expenseSuggestions: m.expenseSuggestions,
     pdfUrl: () => '',
@@ -46,7 +48,10 @@ vi.mock('@/api/codebooks', () => ({
   codebooksApi: {
     vatRates: vi.fn().mockResolvedValue([{ id: 1, rate_percent: 21, is_default: true }]),
     currencies: vi.fn().mockResolvedValue([{ id: 1, code: 'CZK', is_default: true }]),
-    units: vi.fn().mockResolvedValue([{ id: 1, code: 'ks', is_default: true }]),
+    units: vi.fn().mockResolvedValue([
+      { id: 1, code: 'ks', is_default: true },
+      { id: 2, code: 'h', is_default: false },
+    ]),
   },
 }))
 vi.mock('@/api/stock', () => ({ stockApi: { searchItems: vi.fn() } }))
@@ -139,7 +144,7 @@ function importedInvoice() {
   }
 }
 
-async function createEditorRouter() {
+async function createEditorRouter(path = '/purchase-invoices/new') {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -148,7 +153,7 @@ async function createEditorRouter() {
       { path: '/portal/purchase-invoice-submissions', component: { render: () => null } },
     ],
   })
-  await router.push('/purchase-invoices/new')
+  await router.push(path)
   await router.isReady()
   return router
 }
@@ -168,6 +173,7 @@ describe('InvoiceEditor — strukturovaný import', () => {
       errors: [],
     })
     m.createInvoice.mockReset()
+    m.updateInvoice.mockReset().mockImplementation(async (_id, payload) => ({ ...importedInvoice(), ...payload }))
     m.get.mockReset().mockResolvedValue(importedInvoice())
     m.getSubmission.mockReset()
     m.expenseSuggestions.mockReset().mockResolvedValue({ items: {} })
@@ -245,5 +251,91 @@ describe('InvoiceEditor — strukturovaný import', () => {
 
     expect(wrapper.find('[data-testid="handoff-pending-document"]').exists()).toBe(false)
     expect(m.uploadSubmission).not.toHaveBeenCalled()
+  })
+
+  it('zaokrouhlí nový časový základ před výpočtem DPH', async () => {
+    const item = { ...importedInvoice().items[0], unit: 'h', quantity: 0.05, duration_minutes: 3, unit_price_without_vat: 0.9 }
+    m.get.mockResolvedValueOnce({ ...importedInvoice(), items: [item] })
+    const router = await createEditorRouter('/purchase-invoices/42/edit')
+    const wrapper = shallowMount(InvoiceEditor, {
+      global: { plugins: [router], directives: { math: {} } },
+    })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { itemTotal: (row: typeof item) => { base: number; vat: number; with: number } }
+    expect(vm.itemTotal(item)).toEqual({ base: 0.05, vat: 0.01, with: 0.06 })
+  })
+
+  it('zachová přesné minuty časové položky v editoru a payloadu', async () => {
+    m.get.mockResolvedValueOnce({
+      ...importedInvoice(),
+      items: [{
+        ...importedInvoice().items[0],
+        quantity: 1 / 3,
+        duration_minutes: 20,
+        unit: 'h',
+        unit_price_without_vat: 333.333333,
+      }],
+    })
+    const router = await createEditorRouter('/purchase-invoices/42/edit')
+    const wrapper = shallowMount(InvoiceEditor, {
+      global: {
+        plugins: [router],
+        directives: { math: {} },
+      },
+    })
+    await flushPromises()
+
+    const duration = wrapper.findComponent({ name: 'DurationInput' })
+    expect(duration.exists()).toBe(true)
+    expect(duration.props('durationMinutes')).toBe(20)
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const payload = m.updateInvoice.mock.calls[0][1]
+    expect(payload.items[0]).toMatchObject({
+      quantity: 1 / 3,
+      duration_minutes: 20,
+      unit_price_without_vat: 333.333333,
+    })
+  })
+
+  it('zahodí přesné minuty při změně jednotky nebo navázání skladu', async () => {
+    const item = {
+      ...importedInvoice().items[0],
+      quantity: 1 / 3,
+      duration_minutes: 20,
+      unit: 'h',
+    }
+    m.get.mockResolvedValueOnce({ ...importedInvoice(), items: [item] })
+    const router = await createEditorRouter('/purchase-invoices/42/edit')
+    const wrapper = shallowMount(InvoiceEditor, {
+      global: { plugins: [router], directives: { math: {} } },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { form: { items: typeof item[] }; onStockSelect: (index: number, stockItemId: number | null) => void }
+    const row = vm.form.items[0]
+    const unit = wrapper.find('select[data-item-unit]')
+    await unit.setValue('ks')
+    expect(row.duration_minutes).toBeNull()
+
+    row.quantity = 2
+    await unit.setValue('h')
+    expect(row.quantity).toBe(2)
+    expect(row.duration_minutes).toBeNull()
+
+    row.duration_minutes = 20
+    vm.onStockSelect(0, 77)
+    expect(row.duration_minutes).toBeNull()
+    vm.onStockSelect(0, null)
+    expect(row.duration_minutes).toBeNull()
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.updateInvoice.mock.calls[0][1].items[0]).toMatchObject({
+      quantity: 2,
+      duration_minutes: null,
+      stock_item_id: null,
+    })
   })
 })

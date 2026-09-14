@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Invoice\CzkRecap;
 use MyInvoice\Service\Invoice\OverduePolicy;
+use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
@@ -567,7 +568,7 @@ final class InvoiceRepository
             $ossSelect .= ', ii.oss_needs_manual_review';
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ii.id, ii.invoice_id, ii.description, ii.quantity, ii.unit,
+             'SELECT ii.id, ii.invoice_id, ii.description, ii.quantity, ii.duration_minutes, ii.unit,
                     ii.unit_price_without_vat, ii.vat_rate_id, ii.vat_rate_snapshot,
                     ii.total_without_vat, ii.total_vat, ii.total_with_vat,
                     ii.order_index, ii.item_kind, ii.linked_work_report_id,
@@ -1440,6 +1441,11 @@ final class InvoiceRepository
     {
         $pdo = $this->db->pdo();
 
+        $items = array_map(
+            static fn (array $item): array => TimeBilling::normalizeInvoiceItem($item),
+            array_values($items),
+        );
+
         // Vazby na karty majetku (1177) se ověřují PŘED smazáním starých řádků — chybná vazba
         // tak nechá fakturu netknutou, místo aby ji nechala bez položek.
         $this->assertItemAssetLinks($invoiceId, $items);
@@ -1474,12 +1480,12 @@ final class InvoiceRepository
 
         $stmt = $pdo->prepare(
             'INSERT INTO invoice_items
-                (invoice_id, description, quantity, unit, unit_price_without_vat,
+                (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
                  stock_item_id, warehouse_id, small_asset_id, asset_id'
             . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-            . ') VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?'
+            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?'
             . str_repeat(', ?', count($ossColumns))
             . ')'
         );
@@ -1558,6 +1564,7 @@ final class InvoiceRepository
                 $invoiceId,
                 (string) ($item['description'] ?? ''),
                 (float) ($item['quantity'] ?? 1),
+                $item['duration_minutes'],
                 (string) ($item['unit'] ?? 'ks'),
                 (float) ($item['unit_price_without_vat'] ?? 0),
                 $vatRateId,
@@ -1579,7 +1586,7 @@ final class InvoiceRepository
 
             $maxOrder = max($maxOrder, $orderIndex);
             if ($discountPercent > 0) {
-                $base = round((float) ($item['quantity'] ?? 1) * (float) ($item['unit_price_without_vat'] ?? 0), 2);
+                $base = TimeBilling::invoiceAmount($item);
                 $oss = $supportsOss ? self::ossItemParams($item, $supportsManualReview) : [];
                 $key = $vatRateId . '|' . ($code ?? '');
                 if ($supportsOss) {
@@ -1651,6 +1658,7 @@ final class InvoiceRepository
                 $invoiceId,
                 $label,
                 1.0,
+                null,
                 '',
                 -$disc,
                 $g['vat_rate_id'],
@@ -2440,6 +2448,7 @@ final class InvoiceRepository
         $row['vat_rate_id']            = (int) $row['vat_rate_id'];
         $row['order_index']            = (int) $row['order_index'];
         $row['quantity']               = (float) $row['quantity'];
+        $row['duration_minutes']       = $row['duration_minutes'] !== null ? (int) $row['duration_minutes'] : null;
         $row['unit_price_without_vat'] = (float) $row['unit_price_without_vat'];
         $row['vat_rate_snapshot']      = (float) $row['vat_rate_snapshot'];
         foreach (['total_without_vat', 'total_vat', 'total_with_vat'] as $f) {

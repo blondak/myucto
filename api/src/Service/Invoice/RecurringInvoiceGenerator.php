@@ -556,6 +556,7 @@ final class RecurringInvoiceGenerator
                 $items[] = [
                     'description'            => $description,
                     'quantity'               => (float) $item['quantity'],
+                    'duration_minutes'       => $item['duration_minutes'] ?? null,
                     'unit'                   => (string) $item['unit'],
                     'unit_price_without_vat' => (float) $item['unit_price_without_vat'],
                     'vat_rate_id'            => (int) $item['vat_rate_id'],

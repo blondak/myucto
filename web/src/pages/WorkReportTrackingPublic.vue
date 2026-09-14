@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { publicWorkReportApi, type WrPublicState, type WrPreview } from '@/api/workReportTracking'
 import { useTurnstile } from '@/composables/useTurnstile'
+import { durationTotal, formatDuration } from '@/utils/timeBilling'
 
 const route = useRoute()
 const token = computed(() => String(route.params.token || ''))
@@ -34,10 +35,11 @@ const lang = computed(() => preview.value?.language || state.value?.language || 
 // Logo dodavatele (data: URI) místo MyInvoice loga — k dispozici v náhledu i na
 // ověřovací obrazovce. Prázdné → fallback na MyInvoice branding v hlavičce.
 
-function fmtMoney(n: number, currency: string): string {
+function fmtMoney(n: number, currency: string, maxDecimals?: number): string {
   const decimals = currency === 'JPY' ? 0 : 2
   const loc = lang.value === 'en' ? 'en-US' : 'cs-CZ'
-  return n.toLocaleString(loc, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + ' ' + currency
+  const precision = maxDecimals && n !== Math.round(n * 100) / 100 ? maxDecimals : decimals
+  return n.toLocaleString(loc, { minimumFractionDigits: decimals, maximumFractionDigits: precision }) + ' ' + currency
 }
 function fmtHours(n: number): string {
   const loc = lang.value === 'en' ? 'en-US' : 'cs-CZ'
@@ -301,13 +303,13 @@ async function verify() {
                   <tr v-for="(it, idx) in rep.items" :key="idx">
                     <td class="px-4 py-2 whitespace-pre-wrap break-words text-neutral-800">{{ it.description }}</td>
                     <td v-if="reportHasDates(rep.items)" class="px-3 py-2 whitespace-nowrap text-neutral-600">{{ fmtDate(it.work_date) }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(it.hours) }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, rep.currency) }}</td>
+                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ it.duration_minutes != null ? formatDuration(it.duration_minutes) : fmtHours(it.hours) }}</td>
+                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, rep.currency, 6) }}</td>
                     <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.total_amount, rep.currency) }}</td>
                   </tr>
                   <tr class="bg-neutral-50 border-t border-neutral-200 font-semibold">
                     <td class="px-4 py-2 text-right" :colspan="reportHasDates(rep.items) ? 2 : 1">{{ t('workReportTracking.public.report') }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(rep.total_hours) }} h</td>
+                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ durationTotal(rep.items) ?? fmtHours(rep.total_hours) }} h</td>
                     <td></td>
                     <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(rep.total_amount, rep.currency) }}</td>
                   </tr>
@@ -352,7 +354,7 @@ async function verify() {
             <div class="flex items-baseline justify-between gap-3 flex-wrap">
               <span class="text-xs font-semibold uppercase tracking-wide text-neutral-500">{{ t('workReportTracking.public.total_open') }}</span>
               <div class="text-right">
-                <div class="text-xl font-bold font-mono text-neutral-900">{{ fmtHours(preview.total_hours) }} h</div>
+                <div class="text-xl font-bold font-mono text-neutral-900">{{ durationTotal(preview.reports.flatMap(report => report.items)) ?? fmtHours(preview.total_hours) }} h</div>
                 <div v-for="tc in preview.totals_by_currency" :key="tc.currency" class="text-xl font-bold font-mono text-neutral-900">
                   {{ fmtMoney(tc.total_amount, tc.currency) }}
                 </div>

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\TimeBilling;
 use PDO;
 
 final class WorkReportRepository
@@ -110,7 +111,7 @@ final class WorkReportRepository
         $wp = implode(',', array_fill(0, count($wrIds), '?'));
         $itemsBy = [];
         $istmt = $pdo->prepare(
-            "SELECT id, work_report_id, description, work_date, hours, rate, total_amount, order_index
+            "SELECT id, work_report_id, description, work_date, hours, duration_minutes, rate, total_amount, order_index
                FROM work_report_items
               WHERE work_report_id IN ($wp)
            ORDER BY work_report_id, order_index, id"
@@ -120,6 +121,7 @@ final class WorkReportRepository
             $wrid = (int) $r['work_report_id'];
             unset($r['work_report_id']);
             $r['hours']        = (float) $r['hours'];
+            $r['duration_minutes'] = $r['duration_minutes'] !== null ? (int) $r['duration_minutes'] : null;
             $r['rate']         = (float) $r['rate'];
             $r['total_amount'] = (float) $r['total_amount'];
             $r['order_index']  = (int) $r['order_index'];
@@ -181,7 +183,7 @@ final class WorkReportRepository
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            'SELECT id, description, work_date, hours, rate, total_amount, order_index
+            'SELECT id, description, work_date, hours, duration_minutes, rate, total_amount, order_index
                FROM work_report_items
               WHERE work_report_id = ?
            ORDER BY order_index, id'
@@ -190,6 +192,7 @@ final class WorkReportRepository
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as &$r) {
             $r['hours']        = (float) $r['hours'];
+            $r['duration_minutes'] = $r['duration_minutes'] !== null ? (int) $r['duration_minutes'] : null;
             $r['rate']         = (float) $r['rate'];
             $r['total_amount'] = (float) $r['total_amount'];
             $r['order_index']  = (int) $r['order_index'];
@@ -232,11 +235,18 @@ final class WorkReportRepository
         $pdo = $this->db->pdo();
         $existing = $this->findByInvoice($invoiceId);
 
+        $items = array_map(
+            static fn (array $item): array => TimeBilling::normalizeWorkReportItem($item),
+            array_values($items),
+        );
+
         $totalHours  = 0.0;
         $totalAmount = 0.0;
         foreach ($items as $it) {
             $totalHours  += (float) ($it['hours'] ?? 0);
-            $totalAmount += (float) ($it['hours'] ?? 0) * (float) ($it['rate'] ?? 0);
+            $totalAmount += $it['duration_minutes'] !== null
+                ? TimeBilling::workAmount($it)
+                : TimeBilling::workAmountInput($it);
         }
 
         // project_id je nullable — faktura nemusí mít zakázku.
@@ -258,8 +268,8 @@ final class WorkReportRepository
         // Nahradit items
         $pdo->prepare('DELETE FROM work_report_items WHERE work_report_id = ?')->execute([$id]);
         $insert = $pdo->prepare(
-            'INSERT INTO work_report_items (work_report_id, description, work_date, hours, rate, total_amount, order_index)
-             VALUES (?,?,?,?,?,?,?)'
+            'INSERT INTO work_report_items (work_report_id, description, work_date, hours, duration_minutes, rate, total_amount, order_index)
+             VALUES (?,?,?,?,?,?,?,?)'
         );
         foreach ($items as $idx => $it) {
             $hours = (float) ($it['hours'] ?? 0);
@@ -270,8 +280,9 @@ final class WorkReportRepository
                 (string) ($it['description'] ?? ''),
                 $workDate !== '' ? $workDate : null,
                 $hours,
+                $it['duration_minutes'],
                 $rate,
-                round($hours * $rate, 2),
+                TimeBilling::workAmount($it),
                 (int) ($it['order_index'] ?? $idx),
             ]);
         }

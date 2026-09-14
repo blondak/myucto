@@ -825,7 +825,8 @@
         "1838_payroll_work_summary_import_source.sql",
         "1839_payroll_component_jmhz_kind_default_mappings.sql",
         "1840_payroll_component_jmhz_legacy_package_adoption.sql",
-        "1841_clear_pending_totp_secrets.sql"
+        "1841_clear_pending_totp_secrets.sql",
+        "1842_exact_time_billing.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -3265,7 +3266,7 @@
                 "dic": "varchar(20) NULL DEFAULT NULL",
                 "fakturoid_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "first_name": "varchar(60) NULL DEFAULT NULL",
-                "hourly_rate": "decimal(10,2) NOT NULL DEFAULT 0.00",
+                "hourly_rate": "decimal(14,6) NOT NULL DEFAULT 0.000000",
                 "ic": "varchar(20) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idoklad_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -5266,6 +5267,7 @@
             "columns": {
                 "asset_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "description": "text NOT NULL",
+                "duration_minutes": "int(11) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "invoice_id": "bigint(20) unsigned NOT NULL",
                 "item_kind": "enum('standard','discount') NOT NULL DEFAULT 'standard'",
@@ -5288,7 +5290,7 @@
                 "total_with_vat": "decimal(12,2) NOT NULL",
                 "total_without_vat": "decimal(12,2) NOT NULL",
                 "unit": "varchar(20) NOT NULL DEFAULT 'ks'",
-                "unit_price_without_vat": "decimal(12,2) NOT NULL",
+                "unit_price_without_vat": "decimal(16,6) NOT NULL",
                 "vat_classification_code": "varchar(8) NULL DEFAULT NULL",
                 "vat_rate_id": "int(10) unsigned NOT NULL",
                 "vat_rate_snapshot": "decimal(5,2) NOT NULL",
@@ -15689,7 +15691,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "currency_id": "int(10) unsigned NOT NULL",
                 "default_revenue_category_id": "int(10) unsigned NULL DEFAULT NULL",
-                "hourly_rate": "decimal(10,2) NOT NULL DEFAULT 1500.00",
+                "hourly_rate": "decimal(14,6) NOT NULL DEFAULT 1500.000000",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "name": "varchar(190) NOT NULL",
                 "note": "text NULL DEFAULT NULL",
@@ -15761,6 +15763,7 @@
                 "accrual_from": "date NULL DEFAULT NULL",
                 "accrual_to": "date NULL DEFAULT NULL",
                 "description": "text NOT NULL",
+                "duration_minutes": "int(11) NULL DEFAULT NULL",
                 "expense_account_code": "varchar(10) NULL DEFAULT NULL",
                 "expense_category_id": "int(10) unsigned NULL DEFAULT NULL",
                 "expense_classification_source": "enum('rule','catalog','keyword','threshold','ai') NULL DEFAULT NULL",
@@ -15777,7 +15780,7 @@
                 "total_with_vat": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "total_without_vat": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "unit": "varchar(20) NOT NULL DEFAULT 'ks'",
-                "unit_price_without_vat": "decimal(12,2) NOT NULL",
+                "unit_price_without_vat": "decimal(16,6) NOT NULL",
                 "vat_classification_code": "varchar(10) NULL DEFAULT NULL",
                 "vat_rate_id": "int(10) unsigned NOT NULL",
                 "vat_rate_snapshot": "decimal(5,2) NOT NULL"
@@ -16170,6 +16173,7 @@
                 "catalog_source_unit_price": "decimal(12,2) NULL DEFAULT NULL",
                 "description": "varchar(500) NOT NULL",
                 "description_source": "varchar(16) NOT NULL DEFAULT 'template'",
+                "duration_minutes": "int(11) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "order_index": "int(11) NOT NULL DEFAULT 0",
                 "oss_applicable": "tinyint(1) NOT NULL DEFAULT 0",
@@ -16181,7 +16185,7 @@
                 "stock_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "template_id": "bigint(20) unsigned NOT NULL",
                 "unit": "varchar(20) NOT NULL DEFAULT 'ks'",
-                "unit_price_without_vat": "decimal(12,2) NOT NULL",
+                "unit_price_without_vat": "decimal(16,6) NOT NULL",
                 "vat_classification_code": "varchar(8) NULL DEFAULT NULL",
                 "vat_rate_id": "int(10) unsigned NOT NULL",
                 "warehouse_id": "bigint(20) unsigned NULL DEFAULT NULL"
@@ -19097,7 +19101,7 @@
                 "data_box_type": "varchar(8) NULL DEFAULT NULL",
                 "default_branding_profile_id": "int(10) unsigned NULL DEFAULT NULL",
                 "default_currency_id": "int(10) unsigned NOT NULL",
-                "default_hourly_rate": "decimal(10,2) NOT NULL DEFAULT 1500.00",
+                "default_hourly_rate": "decimal(14,6) NOT NULL DEFAULT 1500.000000",
                 "default_payment_due_days": "int(10) unsigned NOT NULL DEFAULT 7",
                 "default_payment_due_unit": "enum('days','month') NOT NULL DEFAULT 'days'",
                 "default_prices_include_vat": "tinyint(1) NOT NULL DEFAULT 0",
@@ -20704,10 +20708,11 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "description": "text NOT NULL",
+                "duration_minutes": "int(11) NULL DEFAULT NULL",
                 "hours": "decimal(6,2) NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "order_index": "int(11) NOT NULL DEFAULT 0",
-                "rate": "decimal(10,2) NOT NULL",
+                "rate": "decimal(14,6) NOT NULL",
                 "total_amount": "decimal(12,2) NOT NULL",
                 "work_date": "date NULL DEFAULT NULL",
                 "work_report_id": "bigint(20) unsigned NOT NULL"

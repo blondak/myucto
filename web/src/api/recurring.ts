@@ -34,6 +34,7 @@ export interface RecurringTemplateItem extends RecurringTemplateItemOss {
   description: string
   quantity: number
   unit: string
+  duration_minutes?: number | null
   unit_price_without_vat: number
   vat_rate_id: number
   vat_rate_percent?: number
@@ -146,6 +147,7 @@ export interface RecurringTemplatePayload {
     description: string
     quantity: number
     unit: string
+    duration_minutes?: number | null
     unit_price_without_vat: number
     vat_rate_id: number
     vat_classification_code?: string | null

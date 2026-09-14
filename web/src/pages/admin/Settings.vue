@@ -1007,7 +1007,7 @@ async function confirmTaxRepDelete() {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.default_hourly_rate') }} ({{ supplier.default_currency }})</label>
-            <input v-model.number="supplier.default_hourly_rate" type="number" step="0.01" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            <input v-model.number="supplier.default_hourly_rate" type="number" step="0.000001" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
           </div>
           <div class="md:col-span-2">
             <label class="flex items-center gap-2 text-sm">

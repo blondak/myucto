@@ -107,16 +107,26 @@ final class DocumentItemsPayload
     private static function fingerprint(array $items): array
     {
         return array_map(
-            static fn (mixed $item): array => is_array($item)
-                ? [
+            static function (mixed $item): array {
+                if (!is_array($item)) {
+                    return [];
+                }
+                try {
+                    $duration = TimeBilling::durationMinutes($item);
+                    $durationKey = $duration !== null ? ['minutes', $duration] : null;
+                } catch (\InvalidArgumentException) {
+                    $durationKey = ['invalid_minutes', (string) ($item['duration_minutes'] ?? '')];
+                }
+
+                return [
                     trim((string) ($item['description'] ?? '')),
-                    round((float) ($item['quantity'] ?? 0), 6),
+                    $durationKey ?? ['quantity', round((float) ($item['quantity'] ?? 0), 6)],
                     trim((string) ($item['unit'] ?? '')),
                     round((float) ($item['unit_price_without_vat'] ?? 0), 6),
                     (int) ($item['vat_rate_id'] ?? 0),
                     ...self::ossFingerprint($item),
-                ]
-                : [],
+                ];
+            },
             array_values($items),
         );
     }

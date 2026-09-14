@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Validation;
 
 use MyInvoice\Service\Invoice\InvoiceMath;
+use MyInvoice\Service\Invoice\TimeBilling;
 
 final class InvoiceAmountPolicy
 {
@@ -68,9 +69,16 @@ final class InvoiceAmountPolicy
                 continue;
             }
 
+            try {
+                $durationMinutes = TimeBilling::durationMinutes($item);
+            } catch (\InvalidArgumentException) {
+                $durationMinutes = null;
+            }
+
             $vatRateId = (int) $item['vat_rate_id'];
             $mathItems[] = [
                 'quantity' => (float) $item['quantity'],
+                'duration_minutes' => $durationMinutes,
                 'unit_price_without_vat' => (float) $item['unit_price_without_vat'],
                 'vat_rate_snapshot' => $vatRates[$vatRateId] ?? 0.0,
             ];
@@ -147,6 +155,13 @@ final class InvoiceAmountPolicy
     {
         $err = [];
 
+        $normalizedItem = null;
+        try {
+            $normalizedItem = TimeBilling::normalizeInvoiceItem($item);
+        } catch (\InvalidArgumentException $e) {
+            $err["items.{$index}.duration_minutes"][] = $e->getMessage();
+        }
+
         if (empty($item['description']) || trim((string) $item['description']) === '') {
             $err["items.{$index}.description"][] = 'Popis je povinný';
         }
@@ -164,7 +179,10 @@ final class InvoiceAmountPolicy
             $err["items.{$index}.unit_price_without_vat"][] = 'Jednotková cena je povinná';
         } else {
             $price = (float) $item['unit_price_without_vat'];
-            if ($qty < 0 && $price < 0) {
+            $signedQty = $normalizedItem !== null && $normalizedItem['duration_minutes'] !== null
+                ? (float) $normalizedItem['quantity']
+                : $qty;
+            if ($signedQty < 0 && $price < 0) {
                 $err["items.{$index}.quantity"][] = self::ITEM_BOTH_NEGATIVE_MESSAGE;
                 $err["items.{$index}.unit_price_without_vat"][] = self::ITEM_BOTH_NEGATIVE_MESSAGE;
             }

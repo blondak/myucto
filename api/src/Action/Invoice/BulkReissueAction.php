@@ -254,12 +254,12 @@ final class BulkReissueAction
             }
             $itemStmt = $pdo->prepare(
                 'INSERT INTO invoice_items
-                   (invoice_id, description, quantity, unit, unit_price_without_vat,
+                   (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
                     stock_item_id, warehouse_id'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?'
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?'
                 . str_repeat(', ?', count($ossColumns))
                 . ')'
             );
@@ -282,6 +282,7 @@ final class BulkReissueAction
                     $newId,
                     $description,
                     $item['quantity'],
+                    $item['duration_minutes'] ?? null,
                     $item['unit'],
                     $item['unit_price_without_vat'],
                     $item['vat_rate_id'],

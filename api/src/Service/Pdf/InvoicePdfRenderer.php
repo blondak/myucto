@@ -88,6 +88,7 @@ final class InvoicePdfRenderer
         $tplMtime = max(
             @filemtime(Bootstrap::rootDir() . '/styles/invoice.css') ?: 0,
             @filemtime(Bootstrap::rootDir() . '/api/templates/invoice/invoice.twig') ?: 0,
+            @filemtime(__DIR__ . '/TimeBillingPdfPresenter.php') ?: 0,
             @filemtime(__FILE__) ?: 0,
         );
         $isFresh = static fn (string $p): bool =>
@@ -360,7 +361,16 @@ final class InvoicePdfRenderer
             }
         }
 
-        $invoice['items'] = $this->withBaseQuantity($invoice);
+        $invoice['items'] = TimeBillingPdfPresenter::invoiceItems(
+            $this->withBaseQuantity($invoice),
+            !empty($invoice['prices_include_vat']),
+        );
+        $workReport = $includeWorkReport
+            ? $this->workReports->findByInvoice((int) $invoice['id'])
+            : null;
+        if ($workReport !== null) {
+            $workReport = TimeBillingPdfPresenter::workReport($workReport);
+        }
 
         $vars = [
             'invoice'           => $invoice,
@@ -378,9 +388,7 @@ final class InvoicePdfRenderer
             'doc_type_label'    => $this->docTypeLabel($invoice, $locale, $supplierData),
             'doc_title'         => $this->docTitle($invoice),
             'parent_varsymbol'  => $this->parentVarsymbol($invoice),
-            'work_report'       => $includeWorkReport
-                ? $this->workReports->findByInvoice((int) $invoice['id'])
-                : null,
+            'work_report'       => $workReport,
             'date_format'       => $locale === 'en' ? 'M j, Y' : 'j. n. Y',
             'decimal_sep'       => $locale === 'en' ? '.' : ',',
             // Nezlomitelná mezera (NBSP, U+00A0) jako oddělovač tisíců — mPDF v úzkých

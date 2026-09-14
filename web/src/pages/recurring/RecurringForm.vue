@@ -23,6 +23,8 @@ import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import DurationInput from '@/components/ui/DurationInput.vue'
+import { isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
@@ -130,6 +132,7 @@ function defaultItemUnit(): string {
 type FormItem = {
   description: string
   quantity: number
+  duration_minutes: number | null
   unit: string
   unit_price_without_vat: number
   vat_rate_id: number
@@ -300,6 +303,7 @@ function blankItem(): FormItem {
   return {
     description: '',
     quantity: 1,
+    duration_minutes: null,
     unit: defaultItemUnit(),
     unit_price_without_vat: 0,
     vat_rate_id: defaultVatRateId(),
@@ -320,6 +324,10 @@ function blankItem(): FormItem {
     oss_rate_type: null,
     oss_supply_type: null,
   }
+}
+
+function onItemUnitChange(item: FormItem): void {
+  if (!isTimeItem(item)) item.duration_minutes = null
 }
 
 async function applyCatalogItem(item: FormItem, index: number, preservePolicy = false) {
@@ -366,6 +374,7 @@ async function applyCatalogItem(item: FormItem, index: number, preservePolicy = 
       accept_catalog_changes: true,
       catalog_current: null,
     })
+    onItemUnitChange(item)
   } catch (e) {
     error.value = apiErrorMessage(e)
   } finally {
@@ -416,10 +425,14 @@ function vatBuckets(): Map<number, { rate: number; base: number; vat: number }> 
     const vatRate = (form.value.reverse_charge || !supplierIsVatPayer.value)
       ? 0
       : vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0
-    const amount = round2((Number(item.quantity) || 0) * (Number(item.unit_price_without_vat) || 0))
+    const amount = round2(itemAmount(item))
     let base: number
     let vat: number
-    if (pricesIncl) {
+    if (isPreciseTimeItem(item)) {
+      const totals = timeItemTotals(item, vatRate, pricesIncl)
+      base = totals.base
+      vat = totals.vat
+    } else if (pricesIncl) {
       vat = round2(amount * vatRate / (100 + vatRate))
       base = round2(amount - vat)
     } else {
@@ -716,6 +729,7 @@ onMounted(async () => {
         form.value.items = inv.items.filter(it => it.item_kind !== 'discount').map((it, i) => ({
           description: it.description,
           quantity: it.quantity,
+          duration_minutes: it.duration_minutes ?? null,
           unit: it.unit,
           unit_price_without_vat: it.unit_price_without_vat,
           vat_rate_id: it.vat_rate_id,
@@ -780,6 +794,7 @@ onMounted(async () => {
         items: (tpl.items ?? []).map(it => ({
           description: it.description,
           quantity: it.quantity,
+          duration_minutes: it.duration_minutes ?? null,
           unit: it.unit,
           unit_price_without_vat: it.unit_price_without_vat,
           vat_rate_id: it.vat_rate_id,
@@ -826,6 +841,7 @@ onMounted(async () => {
 
 async function submit() {
   error.value = ''
+  if (!validateDurationInputs(paneDom.root())) return
   if (!form.value.client_id) { error.value = 'Klient je povinný'; return }
   if (!form.value.name.trim()) { error.value = t('recurring.name_required'); return }
   if (form.value.items.length === 0) { error.value = t('recurring.items_required'); return }
@@ -887,7 +903,8 @@ async function submit() {
       auto_send_email: form.value.auto_send_email,
       items: form.value.items.map((it, i) => ({
         description: it.description,
-        quantity: it.quantity,
+        quantity: itemQuantity(it),
+        duration_minutes: isTimeItem(it) ? it.duration_minutes : null,
         unit: it.unit,
         unit_price_without_vat: it.unit_price_without_vat,
         vat_rate_id: it.vat_rate_id,
@@ -1241,14 +1258,17 @@ async function submit() {
                   {{ catalogCurrentLabel(it) }}
                 </p>
               </td>
-              <td class="py-1.5 pr-2"><input v-model="it.quantity" v-math type="text" inputmode="decimal" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
               <td class="py-1.5 pr-2">
-                <select v-model="it.unit" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
+                <DurationInput v-if="isTimeItem(it)" v-model="it.quantity" v-model:duration-minutes="it.duration_minutes" :allow-negative="true" />
+                <input v-else v-model="it.quantity" v-math="2" type="text" inputmode="decimal" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" />
+              </td>
+              <td class="py-1.5 pr-2">
+                <select v-model="it.unit" @change="onItemUnitChange(it)" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
                   <option v-if="it.unit && !units.some(u => u.code === it.unit)" :value="it.unit">{{ it.unit }}</option>
                 </select>
               </td>
-              <td class="py-1.5 pr-2"><input v-model="it.unit_price_without_vat" v-math type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
+              <td class="py-1.5 pr-2"><input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
               <td v-if="supplierIsVatPayer" class="py-1.5 pr-2">
                 <select v-model.number="it.vat_rate_id" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-8 px-2 border border-neutral-300 rounded bg-surface disabled:bg-neutral-100">
                   <option v-for="r in vatRatesForItem(it)" :key="r.id" :value="r.id">{{ vatRateLabel(r) }}</option>
@@ -1357,11 +1377,12 @@ async function submit() {
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.qty') }}</label>
-                <input v-model="it.quantity" v-math type="text" inputmode="decimal" :class="['w-full h-10 px-3 border rounded bg-surface text-right font-mono text-sm', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" />
+                <DurationInput v-if="isTimeItem(it)" v-model="it.quantity" v-model:duration-minutes="it.duration_minutes" :allow-negative="true" />
+                <input v-else v-model="it.quantity" v-math="2" type="text" inputmode="decimal" :class="['w-full h-10 px-3 border rounded bg-surface text-right font-mono text-sm', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" />
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.unit') }}</label>
-                <select v-model="it.unit" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
+                <select v-model="it.unit" @change="onItemUnitChange(it)" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
                   <option v-if="it.unit && !units.some(u => u.code === it.unit)" :value="it.unit">{{ it.unit }}</option>
                 </select>
@@ -1370,7 +1391,7 @@ async function submit() {
             <div :class="supplierIsVatPayer ? 'grid grid-cols-2 gap-2' : ''">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="it.unit_price_without_vat" v-math type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-10 px-3 border rounded bg-surface text-right font-mono text-sm disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" />
+                <input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-10 px-3 border rounded bg-surface text-right font-mono text-sm disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" />
               </div>
               <div v-if="supplierIsVatPayer">
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.vat') ?? 'DPH' }}</label>

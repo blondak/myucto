@@ -1,4 +1,11 @@
 {
+  "time_billing": {
+    "duration": "Doba práce",
+    "hint": "Zadejte hodiny a minuty (1:20) nebo desetinné hodiny (1,5).",
+    "invalid": "Zadejte čas ve formátu H:MM nebo desetinné hodiny. Minuty musí být od 00 do 59.",
+    "rate_hint": "Hodinová sazba může mít až 6 desetinných míst.",
+    "hours_minutes": "H:MM"
+  },
   "payroll_bank": {
     "title": "Odeslání mzdového příkazu do banky",
     "hint": "Do banky se předá uložená dávka KPC k autorizaci. Překontrolujte a potvrďte ji v bankovnictví. Odeslání neoznačí mzdové závazky jako zaplacené.",
