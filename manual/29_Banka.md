@@ -352,6 +352,12 @@ téhož klienta**, jejichž **součet odpovídá částce platby**, ve výchozí
 **±7 dní** kolem data platby. Klient se jménem podobným protistraně se nabízí
 první.
 
+Stejný dialog funguje i pro **odchozí platbu na více přijatých faktur**.
+Nabídne kombinace přijatých dokladů a dovolí vybrat jednu fakturu jako výchozí
+nebo rozšířit období hledání. Faktury mohou být od různých dodavatelů, například
+z jedné objednávky na internetovém tržišti. U každé faktury je vidět její dodavatel,
+částka a měna. Po spárování najdeš všechny faktury také přímo u bankovního pohybu.
+
 1. Klik **Spárovat** → v sekci **Sloučená úhrada** se zobrazí návrhy kombinací
    (klient, jednotlivé faktury s částkami a datem, celkový součet).
 2. U správné kombinace klik **Spárovat (N faktur)**.
@@ -365,11 +371,20 @@ Pomůcky:
 - **Vyber fakturu a dohledej zbytek** — pokud víš o jedné faktuře, která do platby
   patří, vyber ji v našeptávači; návrhy se omezí na kombinace, které ji obsahují.
 
-Omezení (záměrná, kvůli správnosti): kombinace jdou jen v rámci **jednoho klienta**
+U vystavených faktur jdou kombinace jen v rámci **jednoho klienta**
 a součet musí **odpovídat částce platby** (sloučená úhrada = uhradit všechny vybrané
 faktury celé; není to rozpouštění jedné platby na částečné úhrady). Zrušení
 spárování (§ 29.5) smaže **všechny** platby té transakce a vrátí všechny faktury
 zpět mezi pohledávky. Activity log: `bank.tx_manual_match_split`.
+
+U přijatých faktur se vyrovnávají **zbývající částky**, takže předchozí částečné
+bankovní úhrady ve stejné měně se nezapočítají znovu. Pokud nelze bezpečně určit
+měnu předchozího vyrovnání, kombinace se nenabídne. Návrh ukazuje případný rozdíl proti částce pohybu.
+U platby CZK kartou za EUR faktury uvidíš i jejich CZK protihodnoty. Skutečně
+odepsaná částka se rozdělí mezi faktury poměrně; při zaúčtování se závazky
+vyrovnají v hodnotě jejich účetního předpisu a kurzový rozdíl se zachytí zvlášť.
+Korunová platba více cizoměnových faktur podporuje doklady bez předchozí částečné
+úhrady či zápočtu. Automatické zaúčtování vyžaduje zaúčtované předpisy a otevřené účetní období.
 
 Tlačítko s ikonou oka otevře detail pohybu včetně protistrany, účtů, platebních
 symbolů, stavu, spárovaných faktur a nezkráceného popisu i poznámky. Je dostupné

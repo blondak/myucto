@@ -14,6 +14,7 @@ import {
   type MatchPostingResult,
 } from '@/api/bank'
 import { invoicesApi } from '@/api/invoices'
+import { purchaseInvoicesApi } from '@/api/purchaseInvoices'
 import { documentRequestsApi } from '@/api/documentRequests'
 import { gopayApi, type GoPayPayoutCandidate } from '@/api/gopay'
 import type { Client } from '@/api/clients'
@@ -142,18 +143,23 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const candidatesFallback = ref(false)
   const splitSuggestions = ref<SplitSuggestion[]>([])
   const loadingSplit = ref(false)
+  let splitLoadVersion = 0
   const splitWindow = ref(7)
   const anchorInvoiceId = ref<number | null>(null)
   const anchorOptions = ref<AnchorOption[]>([])
   const anchorSelected = ref<AnchorOption | null>(null)
   const anchorLoading = ref(false)
   let anchorSearchTimer: ReturnType<typeof setTimeout> | null = null
+  let anchorSearchVersion = 0
 
   const currentSuggestion = computed(() => matchingTx.value !== null
     ? suggestionFor(matchingTx.value)
     : undefined)
 
   function startMatch(tx: BankTransaction) {
+    if (anchorSearchTimer) clearTimeout(anchorSearchTimer)
+    anchorSearchVersion++
+    anchorLoading.value = false
     matchingTx.value = tx.id
     matchCtx.value = tx
     matchVarsymbol.value = tx.variable_symbol || ''
@@ -186,20 +192,27 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     anchorInvoiceId.value = null
     anchorOptions.value = []
     anchorSelected.value = null
-    if (tx.amount > 0) loadSplitSuggestions(tx, 7)
+    if (tx.amount !== 0) loadSplitSuggestions(tx, 7)
   }
 
   function loadSplitSuggestions(tx: BankTransaction, window: number, anchorId?: number | null) {
+    const version = ++splitLoadVersion
     loadingSplit.value = true
-    bankApi.splitSuggestions(tx.id, { window, invoiceId: anchorId ?? undefined })
+    bankApi.splitSuggestions(tx.id, {
+      window,
+      invoiceId: tx.amount > 0 ? anchorId ?? undefined : undefined,
+      purchaseInvoiceId: tx.amount < 0 ? anchorId ?? undefined : undefined,
+    })
       .then(r => {
-        if (matchingTx.value === tx.id) {
+        if (matchingTx.value === tx.id && version === splitLoadVersion) {
           splitSuggestions.value = r.suggestions
           splitWindow.value = r.window
         }
       })
-      .catch(() => {})
-      .finally(() => { loadingSplit.value = false })
+      .catch(e => {
+        if (matchingTx.value === tx.id && version === splitLoadVersion) matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+      })
+      .finally(() => { if (version === splitLoadVersion) loadingSplit.value = false })
   }
 
   /**
@@ -215,13 +228,26 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
 
   function onAnchorSearch(q: string) {
     if (anchorSearchTimer) clearTimeout(anchorSearchTimer)
+    const version = ++anchorSearchVersion
+    const tx = matchCtx.value
     const query = q.trim()
-    if (query.length < 2) { anchorOptions.value = []; return }
+    if (query.length < 2 || !tx) { anchorOptions.value = []; anchorLoading.value = false; return }
     anchorLoading.value = true
-    anchorSearchTimer = setTimeout(() => {
-      invoicesApi.searchMatchable(query, 20)
-        .then(list => {
-          anchorOptions.value = list.map(i => {
+    anchorSearchTimer = setTimeout(async () => {
+      try {
+        let options: AnchorOption[]
+        if (tx.amount < 0) {
+          const result = await purchaseInvoicesApi.listGrouped({
+            q: query, status: ['received', 'booked', 'paid'], document_kind: ['invoice', 'advance'], per_page: 20,
+          })
+          options = result.data.flatMap(group => group.invoices).map(i => ({
+            value: i.id,
+            label: `${i.vendor_invoice_number || i.varsymbol || '#' + i.id} - ${i.vendor_company_name}`,
+            secondary: `${formatMoney(i.amount_to_pay, i.currency)} · ${formatDate(i.due_date || i.issue_date)}`,
+          }))
+        } else {
+          const list = await invoicesApi.searchMatchable(query, 20)
+          options = list.map(i => {
             const owed = i.amount_to_pay - (i.paid_total ?? 0)
             const shown = owed > 0 ? owed : i.amount_to_pay
             return {
@@ -230,9 +256,13 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
               secondary: `${formatMoney(shown, i.currency)} · ${formatDate(i.due_date || i.issue_date)}`,
             }
           })
-        })
-        .catch(() => { anchorOptions.value = [] })
-        .finally(() => { anchorLoading.value = false })
+        }
+        if (version === anchorSearchVersion && matchingTx.value === tx.id) anchorOptions.value = options
+      } catch {
+        if (version === anchorSearchVersion) anchorOptions.value = []
+      } finally {
+        if (version === anchorSearchVersion) anchorLoading.value = false
+      }
     }, 220)
   }
 
@@ -269,7 +299,10 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     if (!matchingTx.value) return
     matchError.value = ''
     try {
-      const r = await bankApi.matchMultiple(matchingTx.value, s.invoices.map(i => i.id))
+      const ids = s.invoices.map(i => i.id)
+      const r = await (matchCtx.value && matchCtx.value.amount < 0
+        ? bankApi.matchMultiplePurchases(matchingTx.value, ids)
+        : bankApi.matchMultiple(matchingTx.value, ids))
       matchingTx.value = null
       toastPosting(r.posting)
       await opts.reload()

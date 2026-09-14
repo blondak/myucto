@@ -140,6 +140,51 @@ final class CardClearingPostingTest extends BankPostingTestCase
         self::assertEqualsWithDelta(0.00, $this->balance($code), 0.001);
     }
 
+    public function testExistingCzkCardPostingGetsSettlementForTwoForeignDocuments(): void
+    {
+        $card = $this->card('4321');
+        $eur = $this->currencyRow($this->supplierId, 'EUR');
+        $pi1 = $this->postedPurchase(500.00, $eur, 25.00, 20.00);
+        $pi2 = $this->postedPurchase(720.00, $eur, 24.00, 30.00);
+        $tx = $this->cardTx(-1240.00, '4321');
+
+        $initial = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('posted', $initial['action'], json_encode($initial));
+        $bankEntryId = (int) $initial['entry_id'];
+
+        $this->paymentMatch($tx, $pi1, 508.20);
+        $this->paymentMatch($tx, $pi2, 731.80);
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET match_status = 'manual' WHERE id = ?")
+            ->execute([$tx]);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id IN (?, ?)")
+            ->execute([self::DAY, $pi1, $pi2]);
+
+        $matched = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $matched['action'], json_encode($matched));
+        self::assertSame($bankEntryId, (int) $matched['entry_id'], 'Existující 378/221 zápis se nepřepisuje ani neduplikuje.');
+        self::assertSame(1, $this->entryCountForTx($tx));
+        $code = $this->cardCode($card);
+        $settlementId = $this->liveSettlement($tx);
+        self::assertNotNull($settlementId, 'K existujícímu bankovnímu zápisu musí přibýt vypořádání obou dokladů.');
+        $sl = $this->linesByAccountCode($settlementId);
+        self::assertEqualsWithDelta(1220.00, $sl['321']['debit'], 0.001);
+        self::assertEqualsWithDelta(1240.00, $sl[$code]['credit'], 0.001);
+        self::assertEqualsWithDelta(20.00, $sl['563']['debit'], 0.001);
+
+        $entry = $this->journal->find($settlementId, $this->supplierId);
+        $payableLines = array_values(array_filter(
+            $entry['lines'],
+            fn (array $line): bool => $this->accountCode((int) $line['account_id']) === '321',
+        ));
+        self::assertCount(2, $payableLines, 'Každý dodavatel musí mít samostatnou saldokontní nohu.');
+        self::assertEqualsCanonicalizing(['20.00', '30.00'], array_map(
+            static fn (array $line): string => number_format((float) $line['amount_foreign'], 2, '.', ''),
+            $payableLines,
+        ));
+        self::assertEqualsWithDelta(0.00, $this->balance($code), 0.001);
+    }
+
     public function testRoundingDifferenceGoesTo548(): void
     {
         $card = $this->card('4321');

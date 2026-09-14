@@ -261,6 +261,14 @@ function candidateReject() {
           </RouterLink>
           <div v-if="tx.matched_invoices?.[0]?.client_name" class="text-neutral-500 text-xs">{{ tx.matched_invoices[0].client_name }}</div>
         </template>
+        <template v-else-if="(tx.matched_purchase_invoices?.length ?? 0) > 1">
+          <div v-for="invoice in tx.matched_purchase_invoices" :key="invoice.purchase_invoice_id">
+            <RouterLink :to="`/purchase-invoices/${invoice.purchase_invoice_id}`" class="text-primary-600 hover:underline">
+              {{ invoice.ref || `#${invoice.purchase_invoice_id}` }}
+            </RouterLink>
+            <div v-if="invoice.vendor_name" class="text-neutral-500 text-xs">{{ invoice.vendor_name }}</div>
+          </div>
+        </template>
         <template v-else>
           <RouterLink v-if="tx.matched_invoice_id" :to="`/invoices/${tx.matched_invoice_id}`"
             class="text-primary-600 hover:underline">
@@ -395,6 +403,14 @@ function candidateReject() {
         {{ mi.varsymbol || `#${mi.invoice_id}` }}
       </RouterLink>
       <span v-if="tx.matched_invoices?.[0]?.client_name" class="text-neutral-500">{{ tx.matched_invoices[0].client_name }}</span>
+    </div>
+    <div v-else-if="(tx.matched_purchase_invoices?.length ?? 0) > 1" class="text-xs">
+      <div v-for="invoice in tx.matched_purchase_invoices" :key="invoice.purchase_invoice_id">
+        <RouterLink :to="`/purchase-invoices/${invoice.purchase_invoice_id}`" class="text-primary-600 hover:underline">
+          {{ invoice.ref || `#${invoice.purchase_invoice_id}` }}
+        </RouterLink>
+        <span v-if="invoice.vendor_name" class="text-neutral-500"> · {{ invoice.vendor_name }}</span>
+      </div>
     </div>
     <div v-else-if="tx.matched_invoice_id" class="text-xs">
       <RouterLink :to="`/invoices/${tx.matched_invoice_id}`"

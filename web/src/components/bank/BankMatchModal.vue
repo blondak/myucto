@@ -118,7 +118,7 @@ const {
       </div>
 
       <!-- Sloučená úhrada: kombinace faktur jednoho klienta sečtené na částku platby -->
-      <div v-if="matchCtx && matchCtx.amount > 0" class="mb-4">
+      <div v-if="matchCtx && matchCtx.amount !== 0" class="mb-4">
         <div class="flex items-center justify-between gap-2 mb-1">
           <div class="text-sm font-medium text-neutral-700">{{ t('bank.split_title') }}</div>
           <button v-if="splitWindow > 0" type="button" @click="widenSplitWindow"
@@ -129,7 +129,9 @@ const {
           </button>
         </div>
         <p class="text-xs text-neutral-400 mb-1.5">
-          {{ splitWindow > 0 ? t('bank.split_hint', { days: splitWindow }) : t('bank.split_hint_all') }}
+          {{ splitWindow > 0
+            ? t(matchCtx.amount < 0 ? 'bank.split_purchase_hint' : 'bank.split_hint', { days: splitWindow })
+            : t(matchCtx.amount < 0 ? 'bank.split_purchase_hint_all' : 'bank.split_hint_all') }}
         </p>
 
         <!-- Kotva: vyber jednu fakturu, dohledá se zbytek téhož klienta -->
@@ -149,11 +151,11 @@ const {
         </div>
 
         <div v-if="loadingSplit" class="text-xs text-neutral-500 py-2">{{ t('common.loading') }}</div>
-        <div v-else-if="splitSuggestions.length === 0" class="text-xs text-neutral-400 py-2">{{ t('bank.split_none') }}</div>
+        <div v-else-if="splitSuggestions.length === 0" class="text-xs text-neutral-400 py-2">{{ t(matchCtx.amount < 0 ? 'bank.split_purchase_none' : 'bank.split_none') }}</div>
         <ul v-else class="space-y-2">
           <li v-for="(s, idx) in splitSuggestions" :key="idx" class="border border-neutral-200 rounded-md p-2.5">
             <div class="flex items-center justify-between gap-2 mb-1.5">
-              <span class="text-sm font-medium truncate">{{ s.client_name || t('bank.split_unknown_client') }}</span>
+              <span class="text-sm font-medium truncate">{{ s.client_name || t(matchCtx.amount < 0 ? 'bank.split_purchase_group' : 'bank.split_unknown_client') }}</span>
               <span class="font-mono text-sm"
                 :class="matchCtx && Math.abs(s.total - Math.abs(matchCtx.amount)) < 1 ? 'text-success-600' : 'text-neutral-600'">
                 {{ formatMoney(s.total, s.currency) }}
@@ -163,6 +165,7 @@ const {
               <li v-for="inv in s.invoices" :key="inv.id" class="flex items-center justify-between gap-2">
                 <span class="font-mono truncate">
                   {{ inv.ref || `#${inv.id}` }}
+                  <span v-if="inv.vendor_name" class="font-sans text-neutral-400 ml-1">{{ inv.vendor_name }}</span>
                   <span v-if="inv.is_paid"
                     class="font-sans text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-neutral-200 text-neutral-600 ml-1"
                     :title="t('bank.split_reconcile_hint')">{{ t('bank.candidate_paid') }}</span>
@@ -174,6 +177,12 @@ const {
                 </span>
               </li>
             </ul>
+            <p v-if="Math.abs(Math.abs(matchCtx.amount) - s.total) >= 0.005" class="mb-2 text-xs text-warning-700" data-testid="split-difference">
+              {{ t('bank.split_difference', { amount: formatMoney(Math.abs(matchCtx.amount) - s.total, s.currency) }) }}
+            </p>
+            <p v-if="matchCtx.amount < 0 && s.invoices.some(invoice => invoice.currency !== s.currency)" class="mb-2 text-xs text-neutral-500">
+              {{ t('bank.split_fx_hint') }}
+            </p>
             <button type="button" @click="confirmSuggestion(s)"
               class="cursor-pointer w-full h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md">
               {{ t('bank.split_match', { count: s.count }) }}

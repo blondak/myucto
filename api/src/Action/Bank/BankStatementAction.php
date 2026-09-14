@@ -18,6 +18,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
 use MyInvoice\Service\Bank\StatementReconciliationConfirmation;
 use MyInvoice\Service\Bank\StatementReconciliationException;
 use MyInvoice\Service\Bank\StatementImporter;
@@ -35,6 +36,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use MyInvoice\Support\Pagination;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -1638,6 +1640,7 @@ final class BankStatementAction
         // u běžného 1:1 párování je v něm jeden prvek, u splitu víc. Zdroj pravdy pro
         // zobrazení, kdo všechno byl touto platbou uhrazen.
         $matchedByTx = [];
+        $matchedPurchasesByTx = [];
         $txIds = array_map(static fn ($t) => (int) $t['id'], $transactions);
         if ($txIds !== []) {
             $ph = implode(',', array_fill(0, count($txIds), '?'));
@@ -1660,6 +1663,8 @@ final class BankStatementAction
                     'client_name'  => $r['client_name'] !== null ? (string) $r['client_name'] : null,
                 ];
             }
+
+            $matchedPurchasesByTx = PurchasePaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
         }
 
         // Automatizace: stav zaúčtování per transakce (jen double_entry, §3.7 #6).
@@ -1677,6 +1682,7 @@ final class BankStatementAction
             $t['matched_purchase_ref'] = isset($t['matched_purchase_ref']) && $t['matched_purchase_ref'] !== null ? (string) $t['matched_purchase_ref'] : null;
             $t['matched_vendor_name'] = isset($t['matched_vendor_name']) && $t['matched_vendor_name'] !== null ? (string) $t['matched_vendor_name'] : null;
             $t['matched_invoices'] = $matchedByTx[$t['id']] ?? [];
+            $t['matched_purchase_invoices'] = $matchedPurchasesByTx[$t['id']] ?? [];
             $t['posting'] = $postingByTx[$t['id']] ?? null;
         }
         unset($t);
@@ -2266,10 +2272,10 @@ final class BankStatementAction
         $maxInv = (int) ($q['max'] ?? self::SPLIT_MAX_INVOICES);
         $maxInv = max(2, min(self::SPLIT_MAX_INVOICES, $maxInv));
         $anchorId = (int) ($q['invoice_id'] ?? 0);
+        $purchaseAnchorId = (int) ($q['purchase_invoice_id'] ?? 0);
 
-        // Efektivní měna transakce + částka (jen příchozí — split je sloučená úhrada NÁM).
         $stmt = $pdo->prepare(
-            "SELECT bt.amount, bt.posted_at, bt.counterparty_name,
+            "SELECT bt.amount, bt.posted_at, bt.counterparty_name, bt.match_status,
                     UPPER(COALESCE(NULLIF(bt.currency,''), NULLIF(bs.currency,''), 'CZK')) AS ccy
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
@@ -2278,8 +2284,24 @@ final class BankStatementAction
         $stmt->execute([$txId]);
         $tx = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
         $txAmount = round((float) ($tx['amount'] ?? 0), 2);
-        if ($txAmount <= 0.0) {
-            // Sloučená úhrada dává smysl jen u příchozí platby (klient platí nám).
+        if ($txAmount < 0.0) {
+            return Json::ok($response, [
+                'suggestions' => $this->purchaseSplitSuggestions(
+                    $sid,
+                    abs($txAmount),
+                    $posted = (string) ($tx['posted_at'] ?? date('Y-m-d')),
+                    $txCcy = (string) ($tx['ccy'] ?? 'CZK'),
+                    (string) ($tx['counterparty_name'] ?? ''),
+                    $window,
+                    $maxInv,
+                    $purchaseAnchorId,
+                    in_array((string) ($tx['match_status'] ?? ''), ['auto_partial', 'auto_exact'], true) ? $txId : 0,
+                ),
+                'window' => $window,
+                'max' => $maxInv,
+            ]);
+        }
+        if ($txAmount === 0.0) {
             return Json::ok($response, ['suggestions' => [], 'window' => $window, 'max' => $maxInv]);
         }
         $posted = (string) ($tx['posted_at'] ?? date('Y-m-d'));
@@ -2448,6 +2470,220 @@ final class BankStatementAction
         return Json::ok($response, ['suggestions' => $suggestions, 'window' => $window, 'max' => $maxInv]);
     }
 
+    /** @return list<array<string,mixed>> */
+    private function purchaseSplitSuggestions(
+        int $supplierId,
+        float $txAmount,
+        string $posted,
+        string $txCcy,
+        string $counterpartyName,
+        int $window,
+        int $maxInv,
+        int $anchorId,
+        int $excludeTxId,
+    ): array {
+        $pdo = $this->db->pdo();
+        $txCcy = strtoupper($txCcy);
+        $anchorRefDate = null;
+        if ($anchorId > 0) {
+            $anchor = $pdo->prepare(
+                "SELECT COALESCE(due_date, issue_date) AS ref_date
+                   FROM purchase_invoices
+                  WHERE id = ? AND supplier_id = ?
+                    AND status IN ('received','booked','paid')
+                    AND document_kind IN ('invoice','advance')"
+            );
+            $anchor->execute([$anchorId, $supplierId]);
+            $anchorRefDate = $anchor->fetchColumn();
+            if ($anchorRefDate === false) {
+                return [];
+            }
+        }
+
+        $settled = PurchaseSettledExpr::settled('p', excludeBankTransactionId: $excludeTxId);
+        $sql = "SELECT p.id, p.vendor_id,
+                       COALESCE(NULLIF(p.vendor_invoice_number,''), p.varsymbol) AS ref,
+                       p.amount_to_pay, p.status, p.document_kind, p.exchange_rate,
+                       p.issue_date, p.due_date, cur.code AS currency,
+                       c.company_name AS vendor_name,
+                       ($settled) AS settled,
+                       (SELECT COUNT(*) FROM payment_matches pm
+                         WHERE pm.supplier_id = p.supplier_id AND pm.purchase_invoice_id = p.id
+                           AND ($excludeTxId = 0 OR pm.bank_transaction_id <> $excludeTxId)) AS payment_count,
+                       (SELECT COUNT(*) FROM cash_documents cd
+                         WHERE cd.supplier_id = p.supplier_id AND cd.purchase_invoice_id = p.id
+                           AND cd.status = 'posted') AS cash_count,
+                       (SELECT COUNT(*) FROM payment_matches pm
+                         JOIN bank_transactions pbt ON pbt.id = pm.bank_transaction_id
+                         JOIN bank_statements pbs ON pbs.id = pbt.statement_id
+                        WHERE pm.supplier_id = p.supplier_id AND pm.purchase_invoice_id = p.id
+                          AND ($excludeTxId = 0 OR pm.bank_transaction_id <> $excludeTxId)
+                          AND UPPER(COALESCE(NULLIF(pbt.currency,''), NULLIF(pbs.currency,''), 'CZK')) <> UPPER(cur.code)) AS cross_bank_count,
+                       (SELECT COUNT(*) FROM offset_agreement_items oi
+                         JOIN offset_agreements oa ON oa.id = oi.agreement_id AND oa.status = 'confirmed'
+                        WHERE oi.supplier_id = p.supplier_id AND oi.doc_type = 'purchase_invoice' AND oi.doc_id = p.id)
+                       + (SELECT COUNT(*) FROM invoice_settlements s
+                           WHERE s.supplier_id = p.supplier_id AND s.doc_type = 'purchase_invoice'
+                             AND s.doc_id = p.id AND s.status = 'confirmed') AS offset_count
+                  FROM purchase_invoices p
+                  JOIN currencies cur ON cur.id = p.currency_id
+             LEFT JOIN clients c ON c.id = p.vendor_id
+                 WHERE p.supplier_id = ?
+                   AND p.status IN ('received','booked','paid')
+                   AND p.document_kind IN ('invoice','advance')";
+        $params = [$supplierId];
+        if ($window > 0 && $anchorId === 0) {
+            $sql .= ' AND (ABS(DATEDIFF(p.due_date, ?)) <= ? OR ABS(DATEDIFF(p.issue_date, ?)) <= ?)';
+            array_push($params, $posted, $window, $posted, $window);
+        }
+        $sql .= ' ORDER BY ABS(DATEDIFF(COALESCE(p.due_date, p.issue_date), ?)) ASC, p.id DESC LIMIT 600';
+        $params[] = $anchorRefDate !== null ? (string) $anchorRefDate : $posted;
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        $items = [];
+        $anchorItem = null;
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $invoiceCurrency = strtoupper((string) $row['currency']);
+            $paymentCount = (int) $row['payment_count'];
+            $cashCount = (int) $row['cash_count'];
+            $offsetCount = (int) $row['offset_count'];
+            $settledAmount = round((float) $row['settled'], 2);
+            $isPaid = (string) $row['status'] === 'paid';
+
+            if ($invoiceCurrency !== $txCcy) {
+                if ($txCcy !== FxPaymentSettlement::LOCAL_CURRENCY
+                    || (float) $row['exchange_rate'] <= 0
+                    || (string) $row['document_kind'] !== 'invoice'
+                    || $paymentCount > 0
+                    || $offsetCount > 0
+                    || $cashCount > 0
+                ) {
+                    continue;
+                }
+                $effective = round((float) $row['amount_to_pay'], 2);
+            } else {
+                if ($cashCount > 0) {
+                    continue;
+                }
+                if ((int) $row['cross_bank_count'] > 0
+                    || ($invoiceCurrency !== FxPaymentSettlement::LOCAL_CURRENCY && $offsetCount > 0)
+                ) {
+                    continue;
+                }
+                if ($isPaid) {
+                    if ($paymentCount > 0 || $offsetCount > 0) {
+                        continue;
+                    }
+                    $effective = round((float) $row['amount_to_pay'], 2);
+                } else {
+                    $effective = round((float) $row['amount_to_pay'] - $settledAmount, 2);
+                }
+            }
+            if ($effective <= 0) {
+                continue;
+            }
+            $converted = $this->remainingInTxCurrency(
+                $effective,
+                $invoiceCurrency,
+                (float) ($row['exchange_rate'] ?: 0),
+                $txCcy,
+            );
+            if ($converted === null) {
+                continue;
+            }
+            $item = [
+                'id' => (int) $row['id'],
+                'ref' => ($row['ref'] ?? '') !== '' ? (string) $row['ref'] : null,
+                'amount' => $effective,
+                'currency' => $invoiceCurrency,
+                'converted' => round($converted, 2),
+                'is_fx' => $invoiceCurrency !== $txCcy,
+                'is_paid' => $isPaid,
+                'issue_date' => $row['issue_date'],
+                'due_date' => $row['due_date'],
+                'party' => $row['vendor_name'] !== null ? (string) $row['vendor_name'] : null,
+            ];
+            $items[] = $item;
+            if ($anchorId > 0 && $item['id'] === $anchorId) {
+                $anchorItem = $item;
+            }
+        }
+        if ($anchorId > 0 && $anchorItem === null) {
+            return [];
+        }
+        $groups = $anchorItem !== null
+            ? [array_values(array_filter($items, static fn (array $item): bool => $item['is_fx'] === $anchorItem['is_fx']))]
+            : [
+                array_values(array_filter($items, static fn (array $item): bool => !$item['is_fx'])),
+                array_values(array_filter($items, static fn (array $item): bool => $item['is_fx'])),
+            ];
+        $combos = [];
+        foreach ($groups as $group) {
+            if (count($group) > self::SPLIT_POOL_PER_CLIENT) {
+                if ($anchorItem !== null) {
+                    $group = array_values(array_filter($group, static fn (array $item): bool => $item['id'] !== $anchorId));
+                    $group = array_slice($group, 0, self::SPLIT_POOL_PER_CLIENT - 1);
+                    $group[] = $anchorItem;
+                } else {
+                    $group = array_slice($group, 0, self::SPLIT_POOL_PER_CLIENT);
+                }
+            }
+            if (count($group) < 2) {
+                continue;
+            }
+            $hasFx = (bool) $group[0]['is_fx'];
+            $tolerance = $hasFx
+                ? FxPaymentSettlement::matchTolerance($txAmount, self::CANDIDATE_AMOUNT_TOLERANCE) * 1.05
+                : self::CANDIDATE_AMOUNT_TOLERANCE;
+            if ($anchorItem !== null) {
+                $rest = array_values(array_filter($group, static fn (array $item): bool => $item['id'] !== $anchorId));
+                $found = $this->findSubsetsSummingTo(
+                    $rest,
+                    $txAmount - (float) $anchorItem['converted'],
+                    $tolerance,
+                    1,
+                    $maxInv - 1,
+                );
+                foreach ($found as &$combo) {
+                    array_unshift($combo, $anchorItem);
+                }
+                unset($combo);
+                array_push($combos, ...$found);
+            } else {
+                array_push($combos, ...$this->findSubsetsSummingTo($group, $txAmount, $tolerance, 2, $maxInv));
+            }
+        }
+
+        $suggestions = [];
+        foreach ($combos as $combo) {
+            $comboTotal = array_sum(array_map(static fn (array $item): float => (float) $item['converted'], $combo));
+            $comboHasFx = count(array_filter($combo, static fn (array $item): bool => $item['is_fx'])) > 0;
+            $comboTolerance = $comboHasFx
+                ? FxPaymentSettlement::matchTolerance($comboTotal, self::CANDIDATE_AMOUNT_TOLERANCE)
+                : self::CANDIDATE_AMOUNT_TOLERANCE;
+            if (abs(round($comboTotal, 2) - $txAmount) > $comboTolerance) {
+                continue;
+            }
+            $suggestion = $this->buildSuggestion(0, $combo, $txCcy, $counterpartyName, null, $txAmount, $posted);
+            $suggestion['document_type'] = 'purchase_invoice';
+            $suggestion['client_id'] = null;
+            foreach ($suggestion['invoices'] as $index => &$invoice) {
+                $invoice['vendor_name'] = $combo[$index]['party'];
+            }
+            unset($invoice);
+            $suggestions[] = $suggestion;
+        }
+        usort($suggestions, static fn (array $a, array $b): int =>
+            ($a['count'] <=> $b['count']) ?: ($a['_date_dist'] <=> $b['_date_dist']) ?: ($a['_diff'] <=> $b['_diff']));
+        $suggestions = array_slice($suggestions, 0, self::SPLIT_MAX_SUGGESTIONS);
+        foreach ($suggestions as &$suggestion) {
+            unset($suggestion['_name_sim'], $suggestion['_diff'], $suggestion['_date_dist']);
+        }
+        unset($suggestion);
+        return $suggestions;
+    }
+
     /**
      * Sestaví návrh kombinace pro odpověď (+ pomocná pole pro řazení).
      * @param list<array<string,mixed>> $combo
@@ -2479,6 +2715,7 @@ final class BankStatementAction
             ];
         }
         return [
+            'document_type' => 'invoice',
             'client_id'   => $clientId,
             'client_name' => $party,
             'currency'    => $txCcy,
@@ -2610,6 +2847,19 @@ final class BankStatementAction
         $invoiceId = (int) ($body['invoice_id'] ?? 0);
         $purchaseInvoiceId = (int) ($body['purchase_invoice_id'] ?? 0);
         $varsymbol = trim((string) ($body['varsymbol'] ?? ''));
+
+        if (isset($body['purchase_invoice_ids']) && is_array($body['purchase_invoice_ids'])) {
+            $ids = array_values(array_unique(array_filter(
+                array_map('intval', $body['purchase_invoice_ids']),
+                static fn (int $value): bool => $value > 0,
+            )));
+            if (count($ids) >= 2) {
+                return $this->manualMatchPurchaseSplit($request, $response, $txId, $ids);
+            }
+            if (count($ids) === 1) {
+                $purchaseInvoiceId = $ids[0];
+            }
+        }
 
         // Sloučená úhrada (split): jedna příchozí platba → více vystavených faktur.
         if (isset($body['invoice_ids']) && is_array($body['invoice_ids'])) {
@@ -3183,6 +3433,300 @@ final class BankStatementAction
             $result['tax_document_ids'] = array_values($taxDocumentIds);
         }
         return Json::ok($response, $result);
+    }
+
+    /**
+     * @param list<int> $purchaseInvoiceIds
+     */
+    private function manualMatchPurchaseSplit(
+        Request $request,
+        Response $response,
+        int $txId,
+        array $purchaseInvoiceIds,
+    ): Response {
+        if (count($purchaseInvoiceIds) > self::SPLIT_MAX_INVOICES) {
+            return Json::error($response, 'too_many_invoices', 'Najednou lze spárovat nejvýše 6 přijatých faktur.', 422);
+        }
+
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
+        $pdo = $this->db->pdo();
+        $savepoint = 'bank_tx_purchase_split';
+        $own = self::beginAtomic($pdo, $savepoint);
+        $postedAt = date('Y-m-d');
+        $statementId = 0;
+        $allocations = [];
+
+        try {
+            $txStmt = $pdo->prepare(
+                "SELECT bt.amount, bt.posted_at, bt.statement_id, bt.match_status,
+                        UPPER(COALESCE(NULLIF(bt.currency,''), NULLIF(bs.currency,''), 'CZK')) AS currency
+                   FROM bank_transactions bt
+                   JOIN bank_statements bs ON bs.id = bt.statement_id
+                  WHERE bt.id = ? FOR UPDATE"
+            );
+            $txStmt->execute([$txId]);
+            $tx = $txStmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$tx) {
+                self::rollbackAtomic($pdo, $own, $savepoint);
+                return Json::error($response, 'not_found', 'Transakce nenalezena.', 404);
+            }
+            $txAmount = round(abs((float) $tx['amount']), 2);
+            if ((float) $tx['amount'] >= 0 || $txAmount <= 0) {
+                self::rollbackAtomic($pdo, $own, $savepoint);
+                return Json::error($response, 'invalid_direction', 'Přijaté faktury lze párovat jen s odchozí platbou.', 409);
+            }
+            $txCurrency = strtoupper((string) $tx['currency']);
+            $postedAt = (string) $tx['posted_at'];
+            $statementId = (int) $tx['statement_id'];
+
+            $issued = $pdo->prepare('SELECT COUNT(*) FROM invoice_payments WHERE bank_transaction_id = ?');
+            $issued->execute([$txId]);
+            if ((int) $issued->fetchColumn() > 0) {
+                self::rollbackAtomic($pdo, $own, $savepoint);
+                return Json::error($response, 'tx_already_paired', 'Transakce už eviduje jinou platbu. Nejdřív zruš stávající spárování.', 409);
+            }
+
+            $existingStmt = $pdo->prepare(
+                'SELECT purchase_invoice_id, match_type FROM payment_matches
+                  WHERE supplier_id = ? AND bank_transaction_id = ? ORDER BY purchase_invoice_id'
+            );
+            $existingStmt->execute([$supplierId, $txId]);
+            $existingRows = $existingStmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+            $existingIds = array_values(array_unique(array_map(
+                static fn (array $row): int => (int) $row['purchase_invoice_id'],
+                $existingRows,
+            )));
+            $requestedIds = $purchaseInvoiceIds;
+            sort($existingIds);
+            sort($requestedIds);
+            if ($existingIds !== []) {
+                foreach ($existingIds as $existingId) {
+                    if (!in_array($existingId, $requestedIds, true)) {
+                        self::rollbackAtomic($pdo, $own, $savepoint);
+                        return Json::error($response, 'tx_already_paired', 'Transakce už eviduje jiné přijaté faktury. Nejdřív zruš stávající spárování.', 409);
+                    }
+                }
+                $allManual = count(array_filter(
+                    $existingRows,
+                    static fn (array $row): bool => (string) $row['match_type'] === 'manual',
+                )) === count($existingRows);
+                if ($existingIds === $requestedIds && $allManual && (string) $tx['match_status'] === 'manual') {
+                    $paidStmt = $pdo->prepare(
+                        "SELECT COUNT(*) FROM purchase_invoices
+                          WHERE id IN (" . implode(',', array_fill(0, count($requestedIds), '?')) . ")
+                            AND supplier_id = ? AND status = 'paid'"
+                    );
+                    $paidStmt->execute(array_merge($requestedIds, [$supplierId]));
+                    if ((int) $paidStmt->fetchColumn() === count($requestedIds)) {
+                        self::commitAtomic($pdo, $own, $savepoint);
+                        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+                        return Json::ok($response, [
+                            'matched' => true,
+                            'split' => true,
+                            'purchase_invoice_ids' => $purchaseInvoiceIds,
+                            'paid_at' => $postedAt,
+                            'posting' => $posting,
+                        ]);
+                    }
+                }
+                if ($allManual || count(array_filter(
+                    $existingRows,
+                    static fn (array $row): bool => (string) $row['match_type'] === 'manual',
+                )) > 0) {
+                    self::rollbackAtomic($pdo, $own, $savepoint);
+                    return Json::error($response, 'tx_already_paired', 'Ruční alokaci transakce nelze rozšířit bez předchozího zrušení párování.', 409);
+                }
+            }
+
+            $placeholders = implode(',', array_fill(0, count($purchaseInvoiceIds), '?'));
+            $invoiceStmt = $pdo->prepare(
+                "SELECT p.id, p.supplier_id, p.status, p.document_kind, p.amount_to_pay,
+                        p.exchange_rate, cur.code AS currency,
+                        COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
+                                   WHERE pm.supplier_id = p.supplier_id AND pm.purchase_invoice_id = p.id
+                                     AND pm.bank_transaction_id <> ?), 0) AS bank_paid,
+                        COALESCE((SELECT SUM(oi.amount) FROM offset_agreement_items oi
+                                   JOIN offset_agreements oa ON oa.id = oi.agreement_id AND oa.status = 'confirmed'
+                                  WHERE oi.supplier_id = p.supplier_id AND oi.doc_type = 'purchase_invoice' AND oi.doc_id = p.id), 0)
+                        + COALESCE((SELECT SUM(s.amount) FROM invoice_settlements s
+                                    WHERE s.supplier_id = p.supplier_id AND s.doc_type = 'purchase_invoice'
+                                      AND s.doc_id = p.id AND s.status = 'confirmed'), 0) AS offset_paid,
+                        (SELECT COUNT(*) FROM cash_documents cd
+                          WHERE cd.supplier_id = p.supplier_id AND cd.purchase_invoice_id = p.id
+                            AND cd.status = 'posted') AS cash_count,
+                        (SELECT COUNT(*) FROM payment_matches pm
+                          JOIN bank_transactions pbt ON pbt.id = pm.bank_transaction_id
+                          JOIN bank_statements pbs ON pbs.id = pbt.statement_id
+                         WHERE pm.supplier_id = p.supplier_id AND pm.purchase_invoice_id = p.id
+                           AND pm.bank_transaction_id <> ?
+                           AND UPPER(COALESCE(NULLIF(pbt.currency,''), NULLIF(pbs.currency,''), 'CZK')) <> UPPER(cur.code)) AS cross_bank_count
+                   FROM purchase_invoices p
+                   JOIN currencies cur ON cur.id = p.currency_id
+                  WHERE p.id IN ($placeholders) AND p.supplier_id = ?
+                  FOR UPDATE"
+            );
+            $invoiceStmt->execute(array_merge([$txId, $txId], $purchaseInvoiceIds, [$supplierId]));
+            $rows = $invoiceStmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+            $byId = [];
+            foreach ($rows as $row) {
+                $byId[(int) $row['id']] = $row;
+            }
+
+            $mode = null;
+            $expectedById = [];
+            $sumExpected = 0.0;
+            foreach ($purchaseInvoiceIds as $purchaseInvoiceId) {
+                $invoice = $byId[$purchaseInvoiceId] ?? null;
+                if ($invoice === null || (int) $invoice['supplier_id'] !== $supplierId) {
+                    self::rollbackAtomic($pdo, $own, $savepoint);
+                    return Json::error($response, 'purchase_not_found', "Přijatá faktura #$purchaseInvoiceId nenalezena.", 404);
+                }
+                if (!in_array((string) $invoice['status'], ['received', 'booked', 'paid'], true)) {
+                    self::rollbackAtomic($pdo, $own, $savepoint);
+                    return Json::error($response, 'invalid_status', "Přijatou fakturu #$purchaseInvoiceId v jejím stavu nelze spárovat.", 409);
+                }
+                if (!in_array((string) $invoice['document_kind'], ['invoice', 'advance'], true)) {
+                    self::rollbackAtomic($pdo, $own, $savepoint);
+                    return Json::error($response, 'invalid_type', "Doklad #$purchaseInvoiceId není faktura ani zálohová faktura.", 409);
+                }
+
+                $invoiceCurrency = strtoupper((string) $invoice['currency']);
+                $invoiceMode = $invoiceCurrency === $txCurrency ? 'same' : 'cross';
+                if ($mode === null) {
+                    $mode = $invoiceMode;
+                } elseif ($mode !== $invoiceMode) {
+                    self::rollbackAtomic($pdo, $own, $savepoint);
+                    return Json::error($response, 'currency_mismatch', 'V jedné platbě nelze míchat doklady v měně účtu a v jiné měně.', 409);
+                }
+
+                $bankPaid = round((float) $invoice['bank_paid'], 2);
+                $offsetPaid = round((float) $invoice['offset_paid'], 2);
+                $cashCount = (int) $invoice['cash_count'];
+                if ($invoiceMode === 'cross') {
+                    if ($txCurrency !== FxPaymentSettlement::LOCAL_CURRENCY
+                        || (float) $invoice['exchange_rate'] <= 0
+                        || (string) $invoice['document_kind'] !== 'invoice'
+                    ) {
+                        self::rollbackAtomic($pdo, $own, $savepoint);
+                        return Json::error($response, 'currency_mismatch', "Přijatou fakturu #$purchaseInvoiceId nelze převést do měny platby.", 409);
+                    }
+                    if ($bankPaid != 0.0 || $offsetPaid != 0.0 || $cashCount > 0) {
+                        self::rollbackAtomic($pdo, $own, $savepoint);
+                        return Json::error($response, 'cross_currency_partial_unsupported', 'Částečně uhrazenou cizoměnovou fakturu nelze párovat s korunovou platbou.', 409);
+                    }
+                    $expected = FxPaymentSettlement::expectedLocalAmount(
+                        (float) $invoice['amount_to_pay'],
+                        (float) $invoice['exchange_rate'],
+                    );
+                } else {
+                    if ($cashCount > 0) {
+                        self::rollbackAtomic($pdo, $own, $savepoint);
+                        return Json::error($response, 'cannot_reconcile', "Přijatá faktura #$purchaseInvoiceId už eviduje hotovostní úhradu.", 409);
+                    }
+                    if ((int) $invoice['cross_bank_count'] > 0
+                        || ($invoiceCurrency !== FxPaymentSettlement::LOCAL_CURRENCY && $offsetPaid != 0.0)
+                    ) {
+                        self::rollbackAtomic($pdo, $own, $savepoint);
+                        return Json::error($response, 'cross_currency_partial_unsupported', 'Měnu předchozí částečné úhrady nelze bezpečně doložit.', 409);
+                    }
+                    $settled = $bankPaid + $offsetPaid;
+                    if ((string) $invoice['status'] === 'paid') {
+                        if ($settled != 0.0) {
+                            self::rollbackAtomic($pdo, $own, $savepoint);
+                            return Json::error($response, 'cannot_reconcile', "Přijatá faktura #$purchaseInvoiceId už eviduje úhradu.", 409);
+                        }
+                        $expected = round((float) $invoice['amount_to_pay'], 2);
+                    } else {
+                        $expected = round((float) $invoice['amount_to_pay'] - $settled, 2);
+                    }
+                }
+                if ($expected <= 0) {
+                    self::rollbackAtomic($pdo, $own, $savepoint);
+                    return Json::error($response, 'nothing_to_pay', "Přijatá faktura #$purchaseInvoiceId nemá co uhradit.", 409);
+                }
+                $expectedById[$purchaseInvoiceId] = round($expected, 2);
+                $sumExpected += $expected;
+            }
+
+            $tolerance = $mode === 'cross'
+                ? FxPaymentSettlement::matchTolerance($sumExpected, self::CANDIDATE_AMOUNT_TOLERANCE)
+                : self::CANDIDATE_AMOUNT_TOLERANCE;
+            if (abs(round($sumExpected, 2) - $txAmount) > $tolerance) {
+                self::rollbackAtomic($pdo, $own, $savepoint);
+                return Json::error($response, 'sum_mismatch', 'Součet přijatých faktur neodpovídá částce platby.', 409);
+            }
+
+            if ($mode === 'cross') {
+                $remainingCents = (int) round($txAmount * 100);
+                $expectedCentsTotal = (int) round($sumExpected * 100);
+                foreach ($purchaseInvoiceIds as $index => $purchaseInvoiceId) {
+                    if ($index === array_key_last($purchaseInvoiceIds)) {
+                        $cents = $remainingCents;
+                    } else {
+                        $cents = (int) floor(
+                            ((int) round($expectedById[$purchaseInvoiceId] * 100))
+                            * ((int) round($txAmount * 100))
+                            / $expectedCentsTotal
+                        );
+                        $remainingCents -= $cents;
+                    }
+                    $allocations[$purchaseInvoiceId] = $cents / 100;
+                }
+            } else {
+                $allocations = $expectedById;
+            }
+
+            foreach ($purchaseInvoiceIds as $purchaseInvoiceId) {
+                \MyInvoice\Service\Bank\PurchasePaymentMatchWriter::record(
+                    $pdo,
+                    $supplierId,
+                    $txId,
+                    $purchaseInvoiceId,
+                    $allocations[$purchaseInvoiceId],
+                    'manual',
+                    null,
+                    $userId ?: null,
+                );
+                $pdo->prepare(
+                    "UPDATE purchase_invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?) WHERE id = ? AND supplier_id = ?"
+                )->execute([$postedAt, $purchaseInvoiceId, $supplierId]);
+            }
+
+            $pdo->prepare(
+                "UPDATE bank_transactions
+                    SET matched_invoice_id = NULL, match_status = 'manual', matched_at = NOW(), matched_by = ?
+                  WHERE id = ?"
+            )->execute([$userId ?: null, $txId]);
+            if ($statementId > 0) {
+                $pdo->prepare(
+                    "UPDATE bank_statements SET matched_count = (
+                        SELECT COUNT(*) FROM bank_transactions
+                         WHERE statement_id = ? AND match_status IN ('auto_exact', 'auto_partial', 'manual')
+                    ) WHERE id = ?"
+                )->execute([$statementId, $statementId]);
+            }
+            self::commitAtomic($pdo, $own, $savepoint);
+        } catch (\Throwable $e) {
+            self::rollbackAtomic($pdo, $own, $savepoint);
+            return Json::error($response, 'match_failed', 'Sloučené párování přijatých faktur selhalo: ' . $e->getMessage(), 500);
+        }
+
+        $this->recordManualMatchV2($txId, $supplierId, $userId);
+        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $this->logger->log('bank.tx_manual_match_purchase_split', $userId ?: null, 'bank_transaction', $txId, [
+            'purchase_invoice_ids' => $purchaseInvoiceIds,
+            'paid_at' => $postedAt,
+        ], $ip, $request->getHeaderLine('User-Agent'), $supplierId);
+
+        return Json::ok($response, [
+            'matched' => true,
+            'split' => true,
+            'purchase_invoice_ids' => $purchaseInvoiceIds,
+            'paid_at' => $postedAt,
+            'posting' => $posting,
+        ]);
     }
 
     /**

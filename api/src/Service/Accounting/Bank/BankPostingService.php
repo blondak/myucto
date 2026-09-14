@@ -759,10 +759,21 @@ final class BankPostingService
         $absAmount = round(abs((float) $tx['amount']), 2);
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT invoice_id, purchase_invoice_id, amount FROM payment_matches
-              WHERE bank_transaction_id = ?'
+            'SELECT pm.invoice_id, pm.purchase_invoice_id, pm.amount,
+                    pi.document_kind AS purchase_document_kind,
+                    pi.status AS purchase_status,
+                    pi.exchange_rate AS purchase_exchange_rate,
+                    pi.amount_to_pay AS purchase_amount_to_pay,
+                    cur.code AS purchase_currency
+               FROM payment_matches pm
+          LEFT JOIN purchase_invoices pi
+                 ON pi.id = pm.purchase_invoice_id AND pi.supplier_id = pm.supplier_id
+          LEFT JOIN currencies cur ON cur.id = pi.currency_id
+              WHERE pm.bank_transaction_id = ? AND pm.supplier_id = ?
+           ORDER BY pm.id
+              FOR UPDATE'
         );
-        $stmt->execute([$txId]);
+        $stmt->execute([$txId, $supplierId]);
         $allocations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         if ($allocations === []) {
             throw new PostingException('document_not_posted', 'Spárovaná odchozí platba nemá alokaci na přijatou fakturu.');
@@ -771,6 +782,22 @@ final class BankPostingService
         $rule = $this->postingRules->resolve($supplierId, 'payment.payable.bank');
         $payable = $rule['debit_account_code'] ?? '321';
         $bankAcc = $cashAccount ?? ($rule['credit_account_code'] ?? '221');
+
+        if (count($allocations) > 1 && array_all(
+            $allocations,
+            static fn (array $allocation): bool => $allocation['invoice_id'] === null
+                && $allocation['purchase_invoice_id'] !== null
+                && strtoupper((string) ($allocation['purchase_currency'] ?? '')) !== ''
+                && strtoupper((string) $allocation['purchase_currency']) !== FxPaymentSettlement::LOCAL_CURRENCY,
+        )) {
+            return $this->buildOutgoingCzkMultiFx(
+                $supplierId,
+                $tx,
+                $allocations,
+                (string) $payable,
+                (string) $bankAcc,
+            );
+        }
 
         // Karetní platba z CZK účtu za cizoměnovou službu: payment_matches.amount je
         // částka transakce v CZK, zatímco závazek se musí odúčtovat v CZK hodnotě
@@ -803,6 +830,64 @@ final class BankPostingService
 
         // diff = ΣMD − ΣD = allocSum − absAmount; záporné → 548 (odchozí náklad).
         $this->appendRounding($lines, round($allocSum, 2) - $absAmount);
+        return ['lines' => $lines];
+    }
+
+    /**
+     * CZK úhrada více cizoměnových přijatých faktur. Alokace v payment_matches nesou
+     * rozpad skutečné CZK částky pohybu; nominál saldokonta se pro každý doklad bere
+     * z jeho celého zbytku a kurzu zaúčtovaného předpisu.
+     *
+     * @param array<string,mixed> $tx
+     * @param list<array<string,mixed>> $allocations
+     * @return array{lines:list<array<string,mixed>>}
+     */
+    private function buildOutgoingCzkMultiFx(
+        int $supplierId,
+        array $tx,
+        array $allocations,
+        string $payable,
+        string $bankAcc,
+    ): array {
+        $bankCzk = round(abs((float) $tx['amount']), 2);
+        $allocatedCzk = round(array_sum(array_map(
+            static fn (array $allocation): float => round((float) $allocation['amount'], 2),
+            $allocations,
+        )), 2);
+        if (abs($allocatedCzk - $bankCzk) >= 0.005) {
+            throw new PostingException('allocation_mismatch', 'Rozpad korunové platby neodpovídá částce bankovní transakce.');
+        }
+
+        $lines = [];
+        foreach ($allocations as $allocation) {
+            $purchaseId = (int) $allocation['purchase_invoice_id'];
+            $foreign = round((float) ($allocation['purchase_amount_to_pay'] ?? 0.0), 2);
+            $currency = strtoupper((string) ($allocation['purchase_currency'] ?? ''));
+            if ((string) ($allocation['purchase_document_kind'] ?? '') !== 'invoice'
+                || !in_array((string) ($allocation['purchase_status'] ?? ''), ['booked', 'paid'], true)
+                || $currency === ''
+                || $currency === FxPaymentSettlement::LOCAL_CURRENCY
+                || $foreign <= 0.0
+            ) {
+                throw new PostingException('fx_not_supported', 'Křížovou měnu přijaté faktury #' . $purchaseId . ' nelze automaticky zaúčtovat.');
+            }
+
+            $entry = $this->journal->findBySource($supplierId, 'purchase_invoice', $purchaseId);
+            if ($entry === null || ($entry['posted_at'] ?? null) === null || ($entry['reversed_by'] ?? null) !== null) {
+                throw new PostingException('document_not_posted', 'Přijatá faktura #' . $purchaseId . ' nemá zaúčtovaný předpis.');
+            }
+            $rate = $this->predpisFxRate($supplierId, (int) $entry['id'], [
+                'exchange_rate' => $allocation['purchase_exchange_rate'] ?? null,
+            ]);
+            $lines[] = $this->withFxTrace(
+                $this->line($payable, 'debit', FxPaymentSettlement::expectedLocalAmount($foreign, $rate)),
+                $currency,
+                $rate,
+                $foreign,
+            );
+        }
+        $lines[] = $this->line($bankAcc, 'credit', $bankCzk);
+        $this->appendFxDifference($lines, $supplierId, 0.0, false);
         return ['lines' => $lines];
     }
 

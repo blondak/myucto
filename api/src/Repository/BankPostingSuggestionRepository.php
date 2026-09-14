@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
 use PDO;
 use PDOException;
 
@@ -839,7 +840,8 @@ final class BankPostingSuggestionRepository
             }
         }
 
-        $items = array_map(static function (array $row) use ($matchedByTx): array {
+        $matchedPurchasesByTx = PurchasePaymentMatchReader::byTransactions($pdo, $supplierId, $txIds);
+        $items = array_map(static function (array $row) use ($matchedByTx, $matchedPurchasesByTx): array {
             return [
                 'id' => (int) $row['id'],
                 'source' => (string) $row['transaction_source'],
@@ -863,6 +865,7 @@ final class BankPostingSuggestionRepository
                 'matched_purchase_ref' => $row['matched_purchase_ref'] === null ? null : (string) $row['matched_purchase_ref'],
                 'matched_vendor_name' => $row['matched_vendor_name'] === null ? null : (string) $row['matched_vendor_name'],
                 'matched_invoices' => $matchedByTx[(int) $row['id']] ?? [],
+                'matched_purchase_invoices' => $matchedPurchasesByTx[(int) $row['id']] ?? [],
                 'match_status' => (string) $row['match_status'],
                 'ignore_note' => $row['ignore_note'] === null ? null : (string) $row['ignore_note'],
                 'matched_at' => $row['matched_at'] === null ? null : (string) $row['matched_at'],

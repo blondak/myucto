@@ -41,13 +41,14 @@ final class PurchaseSettledExpr
      * @param int    $excludeAgreementId  ID dohody o zápočtu, kterou vynechat (0 = žádnou)
      * @param int    $excludeSettlementId ID zápočtu proti účtu, který vynechat (0 = žádný)
      */
-    public static function settled(string $alias = 'pi', int $excludeAgreementId = 0, int $excludeSettlementId = 0): string
+    public static function settled(string $alias = 'pi', int $excludeAgreementId = 0, int $excludeSettlementId = 0, int $excludeBankTransactionId = 0): string
     {
         $a = $alias === '' ? '' : $alias . '.';
 
         return sprintf(
             'COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                        WHERE pm.supplier_id = %1$ssupplier_id AND pm.purchase_invoice_id = %1$sid), 0)
+                        WHERE pm.supplier_id = %1$ssupplier_id AND pm.purchase_invoice_id = %1$sid
+                          AND (%6$d = 0 OR pm.bank_transaction_id IS NULL OR pm.bank_transaction_id <> %6$d)), 0)
            + COALESCE((SELECT SUM(oi.amount) FROM offset_agreement_items oi
                         JOIN offset_agreements oa ON oa.id = oi.agreement_id AND oa.status = %2$s
                        WHERE oi.supplier_id = %1$ssupplier_id AND oi.doc_type = %3$s
@@ -60,6 +61,7 @@ final class PurchaseSettledExpr
             "'purchase_invoice'",
             $excludeAgreementId,
             $excludeSettlementId,
+            $excludeBankTransactionId,
         );
     }
 

@@ -3192,8 +3192,10 @@ paths:
         celému zbytku se v platbě uloží celý zbytek v měně faktury; přesná CZK
         částka zůstává na bankovní transakci.
 
-        Doklad se vybírá právě jedním ze čtyř způsobů (v tomto pořadí priority):
+        Doklad se vybírá právě jedním z pěti způsobů (v tomto pořadí priority):
 
+        - `purchase_invoice_ids` (2 a více): sloučená odchozí úhrada více přijatých
+          faktur, i od různých dodavatelů. Jediné ID degraduje na 1:1 párování.
         - `invoice_ids` (2 a více) — sloučená úhrada: jedna příchozí platba proti
           více vystavaným fakturám. Součet musí sedět na částku transakce.
           Jediné ID v poli degraduje na běžné 1:1 párování.
@@ -3212,7 +3214,7 @@ paths:
           application/json:
             schema:
               type: object
-              description: "Vyplň právě jedno z: `invoice_ids`, `purchase_invoice_id`, `invoice_id`, `varsymbol`."
+              description: "Vyplň právě jedno z: `invoice_ids`, `purchase_invoice_ids`, `purchase_invoice_id`, `invoice_id`, `varsymbol`."
               properties:
                 invoice_id:
                   type: integer
@@ -3222,6 +3224,13 @@ paths:
                   type: integer
                   format: int64
                   description: Přijatá faktura — odchozí platba dodavateli (N:N přes `payment_matches`).
+                purchase_invoice_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 6
+                  uniqueItems: true
+                  items: { type: integer, format: int64 }
+                  description: Přijaté faktury pro jednu sloučenou odchozí úhradu.
                 invoice_ids:
                   type: array
                   description: Sloučená úhrada jedné platby proti více vystaveným fakturám (2 a více ID).
@@ -17861,11 +17870,11 @@ paths:
         schema: { type: integer, format: int64 }
     get:
       tags: [Bank]
-      summary: Navrhne sloučenou úhradu — jedna platba pokrývající více vystavených faktur
+      summary: Navrhne sloučenou úhradu jedné platby přes více faktur
       description: |
-        Použije se, když klient zaplatil 2+ faktur jednou platbou a VS nesedí (jen
-        příchozí platby). Kombinace se hledají výhradně v rámci jednoho klienta;
-        default okno ± 7 dní kolem data platby (rozšiřitelné parametrem `window`).
+        Pro příchozí platbu hledá kombinace vystavených faktur v rámci jednoho klienta.
+        Pro odchozí platbu hledá přijaté faktury i od různých dodavatelů. Default okno
+        je ± 7 dní kolem data platby (rozšiřitelné parametrem `window`).
         Volitelná kotva `invoice_id` — uživatel už jednu fakturu vybral a částka
         nesedí, dohledají se další faktury téhož klienta.
       parameters:
@@ -17873,6 +17882,10 @@ paths:
           name: invoice_id
           schema: { type: integer }
           description: Kotva — omezí návrh na klienta této již vybrané faktury.
+        - in: query
+          name: purchase_invoice_id
+          schema: { type: integer }
+          description: Kotva přijaté faktury; návrh vždy obsahuje tento doklad.
         - in: query
           name: window
           schema: { type: integer, default: 7, minimum: 1, maximum: 60 }
@@ -17894,7 +17907,8 @@ paths:
                     items:
                       type: object
                       properties:
-                        client_id: { type: integer }
+                        document_type: { type: string, enum: [invoice, purchase_invoice] }
+                        client_id: { type: [integer, "null"] }
                         client_name: { type: [string, "null"] }
                         total: { type: number }
                         currency: { type: string }
@@ -26387,6 +26401,18 @@ components:
         match_reason: { type: [string, "null"], maxLength: 40, example: no_invoice_with_vs, description: "Kód důvodu posledního neúspěšného automatického párování (např. no_vs, no_invoice_with_vs, amount_mismatch, no_amount_date_match). Po spárování null; význam má jen u match_status = unmatched." }
         matched_invoice_id: { type: [integer, "null"], format: int64, description: "Spárovaná VYDANÁ faktura" }
         matched_purchase_invoice_id: { type: [integer, "null"], format: int64, description: "Spárovaná PŘIJATÁ faktura (z payment_matches)" }
+        matched_purchase_invoices:
+          type: array
+          description: Všechny přijaté faktury spárované s pohybem přes `payment_matches`.
+          items:
+            type: object
+            required: [purchase_invoice_id, amount, currency]
+            properties:
+              purchase_invoice_id: { type: integer, format: int64 }
+              ref: { type: [string, "null"] }
+              vendor_name: { type: [string, "null"] }
+              amount: { type: number, format: float, description: Částka alokace v měně bankovní transakce. }
+              currency: { type: string, description: Měna bankovní transakce. }
         matched_varsymbol: { type: [string, "null"] }
         matched_invoice_amount: { type: [number, "null"], format: float }
         client_id: { type: [integer, "null"] }

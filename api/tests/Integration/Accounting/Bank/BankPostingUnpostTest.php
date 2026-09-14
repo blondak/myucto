@@ -152,8 +152,11 @@ final class BankPostingUnpostTest extends BankPostingTestCase
 
         $vendor = $this->client('Dodavatel matched s.r.o.');
         $pi = $this->purchaseInvoice('PF-MATCH1', $vendor, 300.00);
-        $outgoing = $this->transaction($stmt, -300.00, ['match_status' => 'manual']);
+        $otherVendor = $this->client('Druhý dodavatel matched s.r.o.');
+        $otherPurchase = $this->purchaseInvoice('PF-MATCH2', $otherVendor, 200.00);
+        $outgoing = $this->transaction($stmt, -500.00, ['match_status' => 'manual']);
         $this->paymentMatch($outgoing, $pi, 300.00);
+        $this->paymentMatch($outgoing, $otherPurchase, 200.00);
 
         $result = $this->suggestionRepo->paginateUnposted($this->supplierId, 100, 0, ['scope' => 'all']);
         $byId = [];
@@ -170,6 +173,13 @@ final class BankPostingUnpostTest extends BankPostingTestCase
         self::assertSame($pi, $byId[$outgoing]['matched_purchase_invoice_id']);
         self::assertSame('PF-MATCH1', $byId[$outgoing]['matched_purchase_ref']);
         self::assertSame('Dodavatel matched s.r.o.', $byId[$outgoing]['matched_vendor_name']);
+        $purchases = $byId[$outgoing]['matched_purchase_invoices'] ?? [];
+        self::assertCount(2, $purchases);
+        self::assertSame([$pi, $otherPurchase], array_column($purchases, 'purchase_invoice_id'));
+        self::assertSame(['PF-MATCH1', 'PF-MATCH2'], array_column($purchases, 'ref'));
+        self::assertSame(['Dodavatel matched s.r.o.', 'Druhý dodavatel matched s.r.o.'], array_column($purchases, 'vendor_name'));
+        self::assertSame([300.00, 200.00], array_column($purchases, 'amount'));
+        self::assertSame(['CZK', 'CZK'], array_column($purchases, 'currency'));
     }
 
     public function testUnpostInSoftLockedPeriodFailsAndKeepsEntry(): void

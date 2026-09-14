@@ -49,7 +49,7 @@ const transactionDetailFields = computed(() => {
         </div>
       </dl>
       <dl class="space-y-4 text-sm">
-        <div v-if="textDetail.matched_invoices?.length || textDetail.matched_invoice_id || textDetail.matched_purchase_invoice_id">
+        <div v-if="textDetail.matched_invoices?.length || textDetail.matched_purchase_invoices?.length || textDetail.matched_invoice_id || textDetail.matched_purchase_invoice_id">
           <dt class="font-medium mb-1">{{ t('bank.invoice') }}</dt>
           <dd class="space-y-1 break-words">
             <template v-if="textDetail.matched_invoices?.length">
@@ -66,7 +66,15 @@ const transactionDetailFields = computed(() => {
               </RouterLink>
               <span v-if="textDetail.matched_client_name" class="text-neutral-500"> · {{ textDetail.matched_client_name }}</span>
             </div>
-            <div v-if="textDetail.matched_purchase_invoice_id">
+            <template v-if="textDetail.matched_purchase_invoices?.length">
+              <div v-for="invoice in textDetail.matched_purchase_invoices" :key="invoice.purchase_invoice_id">
+                <RouterLink :to="`/purchase-invoices/${invoice.purchase_invoice_id}`" class="text-primary-600 hover:underline">
+                  {{ invoice.ref || `#${invoice.purchase_invoice_id}` }}
+                </RouterLink>
+                <span v-if="invoice.vendor_name" class="text-neutral-500"> · {{ invoice.vendor_name }}</span>
+              </div>
+            </template>
+            <div v-else-if="textDetail.matched_purchase_invoice_id">
               <RouterLink :to="`/purchase-invoices/${textDetail.matched_purchase_invoice_id}`" class="text-primary-600 hover:underline">
                 {{ textDetail.matched_purchase_ref || `#${textDetail.matched_purchase_invoice_id}` }}
               </RouterLink>

@@ -130,6 +130,109 @@ final class FxPaymentTest extends BankPostingTestCase
         $this->assertBalanced($this->entryIdForBankTx($tx));
     }
 
+    public function testOutgoingForeignPaymentCanSettleTwoPurchaseInvoices(): void
+    {
+        $pf1 = $this->fxPurchaseInvoice('PF-EUR-SPLIT-1', $this->client('EUR Dodavatel 1'), 20.00, 25.00);
+        $pf2 = $this->fxPurchaseInvoice('PF-EUR-SPLIT-2', $this->client('EUR Dodavatel 2'), 30.00, 24.00);
+        $this->seedRate('EUR', self::YEAR . '-06-15', 26.00);
+
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -50.00, ['match_status' => 'manual', 'currency' => 'EUR']);
+        $this->paymentMatch($tx, $pf1, 20.00);
+        $this->paymentMatch($tx, $pf2, 30.00);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res));
+        $entryId = $this->entryIdForBankTx($tx);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(1220.00, $byAcc['321']['debit'], 0.001);
+        self::assertEqualsWithDelta(1300.00, $byAcc['221']['credit'], 0.001);
+        self::assertEqualsWithDelta(80.00, $byAcc['563']['debit'], 0.001);
+        self::assertCount(2, array_filter(
+            $this->entryLines($entryId),
+            static fn (array $line): bool => $line['account_code'] === '321',
+        ), 'Každý závazek musí mít vlastní 321 nohu a vlastní FX stopu.');
+        $this->assertBalanced($entryId);
+    }
+
+    public function testOutgoingCzkPaymentCanSettleTwoForeignPurchaseInvoices(): void
+    {
+        $pf1 = $this->fxPurchaseInvoice('PF-CZK-SPLIT-1', $this->client('CZK Dodavatel EUR 1'), 20.00, 25.00);
+        $pf2 = $this->fxPurchaseInvoice('PF-CZK-SPLIT-2', $this->client('CZK Dodavatel EUR 2'), 30.00, 24.00);
+
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -1240.00, ['match_status' => 'manual', 'currency' => 'CZK']);
+        $this->paymentMatch($tx, $pf1, 508.20);
+        $this->paymentMatch($tx, $pf2, 731.80);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id IN (?, ?)")
+            ->execute([self::YEAR . '-06-15', $pf1, $pf2]);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res));
+        $entryId = $this->entryIdForBankTx($tx);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(1220.00, $byAcc['321']['debit'], 0.001);
+        self::assertEqualsWithDelta(1240.00, $byAcc['221']['credit'], 0.001);
+        self::assertEqualsWithDelta(20.00, $byAcc['563']['debit'], 0.001);
+        self::assertCount(2, array_filter(
+            $this->entryLines($entryId),
+            static fn (array $line): bool => $line['account_code'] === '321',
+        ));
+        $this->assertBalanced($entryId);
+    }
+
+    public function testOutgoingCzkPaymentForTwoForeignPurchasesBooksExchangeGain(): void
+    {
+        $pf1 = $this->fxPurchaseInvoice('PF-CZK-GAIN-1', $this->client('CZK Gain Dodavatel 1'), 20.00, 25.00);
+        $pf2 = $this->fxPurchaseInvoice('PF-CZK-GAIN-2', $this->client('CZK Gain Dodavatel 2'), 30.00, 24.00);
+
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -1200.00, ['match_status' => 'manual', 'currency' => 'CZK']);
+        $this->paymentMatch($tx, $pf1, 491.80);
+        $this->paymentMatch($tx, $pf2, 708.20);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id IN (?, ?)")
+            ->execute([self::YEAR . '-06-15', $pf1, $pf2]);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res));
+        $entryId = $this->entryIdForBankTx($tx);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(1220.00, $byAcc['321']['debit'], 0.001);
+        self::assertEqualsWithDelta(1200.00, $byAcc['221']['credit'], 0.001);
+        self::assertEqualsWithDelta(20.00, $byAcc['663']['credit'], 0.001, 'Nižší CZK úhrada než hodnota předpisů je kurzový zisk.');
+        self::assertArrayNotHasKey('563', $byAcc);
+        $this->assertBalanced($entryId);
+        self::assertEqualsWithDelta(0.00, $this->purchaseLiabilityBalance([$pf1, $pf2], $tx), 0.001);
+    }
+
+    public function testOutgoingForeignSplitKeepsSmallUnallocatedDifferenceOutOfLiabilities(): void
+    {
+        $pf1 = $this->fxPurchaseInvoice('PF-EUR-REM-1', $this->client('EUR Remainder Dodavatel 1'), 20.00, 25.00);
+        $pf2 = $this->fxPurchaseInvoice('PF-EUR-REM-2', $this->client('EUR Remainder Dodavatel 2'), 30.00, 24.00);
+        $this->seedRate('EUR', self::YEAR . '-06-15', 26.00);
+
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -50.50, ['match_status' => 'manual', 'currency' => 'EUR']);
+        $this->paymentMatch($tx, $pf1, 20.00);
+        $this->paymentMatch($tx, $pf2, 30.00);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res));
+        $entryId = $this->entryIdForBankTx($tx);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(1220.00, $byAcc['321']['debit'], 0.001);
+        self::assertEqualsWithDelta(1313.00, $byAcc['221']['credit'], 0.001);
+        self::assertEqualsWithDelta(80.00, $byAcc['563']['debit'], 0.001, 'Kurzový rozdíl se počítá jen z alokovaných 50 EUR.');
+        self::assertEqualsWithDelta(13.00, $byAcc['548']['debit'], 0.001, 'Zbývajících 0,50 EUR se oddělí od saldokonta.');
+        self::assertArrayNotHasKey('663', $byAcc);
+        $this->assertBalanced($entryId);
+        self::assertEqualsWithDelta(0.00, $this->purchaseLiabilityBalance([$pf1, $pf2], $tx), 0.001);
+    }
+
     // (e) — kurz úhrady == kurz předpisu → žádný řádek 563/663.
     public function testNoDifferenceWhenBankRateEqualsPredpisRate(): void
     {
@@ -706,6 +809,23 @@ final class FxPaymentTest extends BankPostingTestCase
             "SELECT id FROM journal_entries WHERE supplier_id={$this->supplierId}
               AND source_type='bank' AND source_id={$txId} AND reversed_by IS NULL LIMIT 1"
         )->fetchColumn();
+    }
+
+    /** @param list<int> $purchaseIds */
+    private function purchaseLiabilityBalance(array $purchaseIds, int $txId): float
+    {
+        $placeholders = implode(',', array_fill(0, count($purchaseIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+              WHERE e.supplier_id = ? AND e.reversed_by IS NULL AND a.account_code = '321'
+                AND ((e.source_type = 'purchase_invoice' AND e.source_id IN ({$placeholders}))
+                     OR (e.source_type = 'bank' AND e.source_id = ?))"
+        );
+        $stmt->execute([$this->supplierId, ...$purchaseIds, $txId]);
+        return round((float) $stmt->fetchColumn(), 2);
     }
 
     private function assertBalanced(int $entryId): void

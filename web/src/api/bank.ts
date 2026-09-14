@@ -84,6 +84,7 @@ export interface BankTransaction {
   matched_vendor_name?: string | null
   /** Seznam vystavených faktur uhrazených touto transakcí (sloučená úhrada → víc než 1). */
   matched_invoices?: MatchedInvoice[]
+  matched_purchase_invoices?: MatchedPurchaseInvoice[]
   ignore_note?: string | null
   match_status: MatchStatus
   /** Kód důvodu posledního neúspěšného automatického párování (#46), např. `no_invoice_with_vs`. */
@@ -130,6 +131,14 @@ export interface MatchedInvoice {
   client_name: string | null
 }
 
+export interface MatchedPurchaseInvoice {
+  purchase_invoice_id: number
+  ref: string | null
+  vendor_name: string | null
+  amount: number
+  currency: string
+}
+
 /** Kandidát na spárování dle částky + data (±14 dní, fallback ±90 dní) — vystavená i přijatá faktura. */
 export interface MatchCandidate {
   type: 'invoice' | 'purchase_invoice'
@@ -162,11 +171,13 @@ export interface SplitSuggestionInvoice {
   is_paid?: boolean
   issue_date: string
   due_date: string | null
+  vendor_name?: string | null
 }
 
 /** Návrh kombinace faktur jednoho klienta, jejíž součet odpovídá příchozí platbě. */
 export interface SplitSuggestion {
-  client_id: number
+  document_type?: 'invoice' | 'purchase_invoice'
+  client_id: number | null
   client_name: string | null
   currency: string
   total: number
@@ -433,12 +444,17 @@ export const bankApi = {
     api.post<{ matched: true; split: true; paid_at?: string; invoice_ids: number[]; final_draft_ids?: number[]; posting?: MatchPostingResult | null }>(
       `/bank-transactions/${txId}/match`, { invoice_ids: invoiceIds },
     ).then(r => r.data),
+  matchMultiplePurchases: (txId: number, purchaseInvoiceIds: number[]) =>
+    api.post<{ matched: true; split: true; purchase_invoice_ids: number[]; posting?: MatchPostingResult | null }>(
+      `/bank-transactions/${txId}/match`, { purchase_invoice_ids: purchaseInvoiceIds },
+    ).then(r => r.data),
   /** Návrhy sloučené úhrady (kombinace faktur jednoho klienta dle částky + okna dní). */
-  splitSuggestions: (txId: number, opts: { invoiceId?: number; window?: number; max?: number } = {}) =>
+  splitSuggestions: (txId: number, opts: { invoiceId?: number; purchaseInvoiceId?: number; window?: number; max?: number } = {}) =>
     api.get<{ suggestions: SplitSuggestion[]; window: number; max: number }>(
       `/bank-transactions/${txId}/split-suggestions`,
       { params: {
         ...(opts.invoiceId ? { invoice_id: opts.invoiceId } : {}),
+        ...(opts.purchaseInvoiceId ? { purchase_invoice_id: opts.purchaseInvoiceId } : {}),
         // `window: 0` = bez datového omezení, takže se testuje na undefined, ne na falsy.
         ...(opts.window !== undefined ? { window: opts.window } : {}),
         ...(opts.max ? { max: opts.max } : {}),
