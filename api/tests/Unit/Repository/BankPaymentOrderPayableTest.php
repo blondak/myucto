@@ -18,7 +18,7 @@ final class BankPaymentOrderPayableTest extends TestCase
         $pdo->exec('CREATE TABLE currencies (id INTEGER, supplier_id INTEGER, code TEXT)');
         $pdo->exec('CREATE TABLE purchase_invoices (id INTEGER, supplier_id INTEGER, currency_id INTEGER, status TEXT, document_kind TEXT, payment_method TEXT, amount_to_pay NUMERIC, rounding NUMERIC)');
         $pdo->exec('CREATE TABLE payment_order_items (payment_order_id INTEGER, purchase_invoice_id INTEGER, amount NUMERIC)');
-        $pdo->exec('CREATE TABLE payment_matches (supplier_id INTEGER, purchase_invoice_id INTEGER, amount NUMERIC)');
+        $pdo->exec('CREATE TABLE payment_matches (supplier_id INTEGER, purchase_invoice_id INTEGER, amount NUMERIC, bank_transaction_id INTEGER)');
         $pdo->exec('CREATE TABLE offset_agreements (id INTEGER, status TEXT)');
         $pdo->exec('CREATE TABLE offset_agreement_items (agreement_id INTEGER, supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, amount NUMERIC)');
         $pdo->exec('CREATE TABLE invoice_settlements (id INTEGER, supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, status TEXT, amount NUMERIC)');
@@ -37,7 +37,7 @@ final class BankPaymentOrderPayableTest extends TestCase
         $pdo->exec('UPDATE payment_order_items SET amount = 100');
         self::assertFalse($repository->allItemsStillPayable(501, 2, 'CZK'));
         self::assertFalse($repository->allItemsStillPayable(501, 1, 'EUR'));
-        $pdo->exec('INSERT INTO payment_matches VALUES (1, 101, 20)');
+        $pdo->exec('INSERT INTO payment_matches VALUES (1, 101, 20, 901)');
         self::assertFalse($repository->allItemsStillPayable(501, 1, 'CZK'));
         $pdo->exec('UPDATE payment_order_items SET amount = 80');
         self::assertTrue($repository->allItemsStillPayable(501, 1, 'CZK'));
