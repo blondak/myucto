@@ -18,8 +18,8 @@
   "scripts": {
     "start": "node src/index.mjs",
     "build": "node build.mjs",
-    "test": "node --test test/*.test.mjs",
-    "check": "node --check src/index.mjs && node --check src/client.mjs && node --check src/tools.mjs && node --test test/*.test.mjs"
+    "test": "node --test",
+    "check": "node --check src/index.mjs && node --check src/client.mjs && node --check src/tools.mjs && node --check src/update.mjs && node --check src/version.mjs && node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0"

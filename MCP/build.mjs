@@ -17,8 +17,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const version = readFileSync(join(root, '..', 'VERSION'), 'utf8').trim();
 const outfile = join(root, 'dist', 'myucto-mcp.mjs');
+
+if (!/^\d+\.\d+\.\d+$/.test(version)) {
+  throw new Error(`Kořenový VERSION nemá platný formát: "${version}".`);
+}
 
 mkdirSync(join(root, 'dist'), { recursive: true });
 
@@ -29,6 +33,9 @@ const result = await build({
   platform: 'node',
   format: 'esm',
   target: 'node20',
+  define: {
+    __MYUCTO_MCP_VERSION__: JSON.stringify(version),
+  },
   // Bez minifikace schválně: soubor si někdo stáhne z instance a má mít možnost
   // se podívat, co spouští. Úspora pár set kB tady nestojí za neprůhlednost.
   minify: false,
@@ -36,7 +43,7 @@ const result = await build({
   banner: {
     // Bez shebangu — esbuild ho vytáhne ze vstupního souboru na první řádek sám;
     // vlastní by se zdvojil a druhý výskyt je syntaktická chyba.
-    js: `// MyÚčto MCP server v${pkg.version} — jednosouborový build (vyžaduje Node 20+).\n`
+    js: `// MyÚčto MCP server v${version} — jednosouborový build (vyžaduje Node 20+).\n`
       + '// Konfigurace přes proměnné prostředí MYUCTO_API_URL a MYUCTO_API_TOKEN.\n'
       + '// Zdrojové kódy: složka MCP/src tohoto projektu.',
   },

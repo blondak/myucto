@@ -93,6 +93,14 @@ zkopírovat kamkoliv, třeba na jiný počítač. V konfiguraci asistenta pak je
 nastavíš jeho úplnou cestu. V artefaktech vydání je navíc ke stažení také jako
 samostatný soubor MCP serveru.
 
+Server při startu na pozadí ověří poslední stabilní vydání na GitHubu a případnou
+novější verzi oznámí v diagnostickém výstupu asistenta. Kontrolu lze vyvolat také
+nástrojem `check_update`, například dotazem „Je dostupná aktualizace MCP serveru?“.
+Výsledek obsahuje běžící a nejnovější verzi, odkaz na poznámky k vydání a přímo na
+soubor `myucto-mcp-<verze>.mjs`. Staženým souborem nahraď původní MCP server při
+zachování cesty v konfiguraci a restartuj asistenta. Aktualizace se neinstaluje sama.
+Pokud je GitHub nedostupný, server dál normálně funguje.
+
 **B) Vývoj ze zdrojáků.** Hodí se, když si chceš nástroje upravovat:
 
 ```bash

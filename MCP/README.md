@@ -188,6 +188,17 @@ Každý požadavek nese `X-MyUcto-Client: mcp`, `X-MyUcto-Client-Version` a
 `api_request_log` a aplikace je zobrazuje v **Nastavení firmy → MCP server →
 Log volání** — je tedy vidět, který nástroj co volal, včetně zamítnutých pokusů.
 
+## Verze a aktualizace
+
+Verze MCP serveru odpovídá verzi instalace v kořenovém souboru `VERSION` a
+zobrazí se při jeho spuštění. Jednosouborový build ji má vloženou přímo v sobě,
+takže po zkopírování mimo instalaci žádný další soubor nepotřebuje.
+
+Nástroj `check_update` porovná běžící verzi s posledním stabilním vydáním na
+GitHubu. Pokud je při startu dostupná novější verze, server vypíše na stderr
+odkaz na asset `myucto-mcp-<verze>.mjs`; síťová chyba spuštění neblokuje. Ruční
+volání nástroje případnou nedostupnost GitHubu oznámí jako chybu.
+
 ## Bezpečnost
 
 - Token se ukládá jen jako SHA-256 hash; plaintext se zobrazí jednou při vydání.

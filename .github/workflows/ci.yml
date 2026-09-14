@@ -35,6 +35,27 @@ jobs:
           node-version: '24'
       - run: node --test tools/release-guard.test.mjs
 
+  mcp:
+    name: MCP tests and build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: MCP
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm run build
+      - run: node --check dist/myucto-mcp.mjs
+
   backend:
     name: Backend (PHP 8.5 + PHPUnit)
     runs-on: ubuntu-latest

@@ -29,8 +29,8 @@ import {
 
 import { ApiError, MyUctoClient, ReadOnlyError } from './client.mjs';
 import { TOOLS, TOOLS_BY_NAME } from './tools.mjs';
-
-const VERSION = '1.0.0';
+import { UPDATE_TOOL, checkUpdate } from './update.mjs';
+import { VERSION } from './version.mjs';
 
 function readConfig(env) {
   const apiUrl = (env.MYUCTO_API_URL ?? '').trim();
@@ -192,7 +192,9 @@ async function main() {
 
   // V režimu jen pro čtení zápisové nástroje vůbec nenabízíme — model si tak
   // nenaplánuje postup, který stejně nedokáže dokončit.
-  const exposed = config.readOnly ? TOOLS.filter((t) => !t.write) : TOOLS;
+  const allTools = [...TOOLS, UPDATE_TOOL];
+  const toolsByName = new Map([...TOOLS_BY_NAME, [UPDATE_TOOL.name, UPDATE_TOOL]]);
+  const exposed = config.readOnly ? allTools.filter((t) => !t.write) : allTools;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: exposed.map((t) => ({
@@ -220,7 +222,7 @@ async function main() {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const tool = TOOLS_BY_NAME.get(name);
+    const tool = toolsByName.get(name);
 
     if (!tool) {
       return toolError(`Neznámý nástroj "${name}".`);
@@ -245,6 +247,16 @@ async function main() {
     `MyÚčto MCP v${VERSION} připojen — ${exposed.length} nástrojů, API ${config.baseUrl}`
     + `${config.readOnly ? ' (jen pro čtení)' : ''}; TLS: ${caStatus}\n`,
   );
+  void checkUpdate()
+    .then((update) => {
+      if (update.updateAvailable) {
+        process.stderr.write(
+          `Je dostupná aktualizace MyÚčto MCP v${update.current} -> v${update.latest}. `
+          + `Stáhněte ${update.downloadUrl} a restartujte MCP server.\n`,
+        );
+      }
+    })
+    .catch(() => {});
 }
 
 main().catch((e) => {
