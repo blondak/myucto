@@ -953,17 +953,21 @@ final class Routes
             // z docházkového systému. Obojí je náhled → použití nad týmiž soubory.
             $g->post('/imports/registrations/preview', [\MyInvoice\Action\Payroll\PayrollRegistrationImportAction::class, 'preview']);
             $g->post('/imports/registrations/apply', [\MyInvoice\Action\Payroll\PayrollRegistrationImportAction::class, 'apply']);
+            $g->post('/imports/pohoda-oic/preview', [\MyInvoice\Action\Payroll\PayrollPohodaOicImportAction::class, 'preview']);
+            $g->post('/imports/pohoda-oic/apply', [\MyInvoice\Action\Payroll\PayrollPohodaOicImportAction::class, 'apply']);
             $g->post('/imports/attendance/preview', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'preview']);
             $g->post('/imports/attendance/apply', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'apply']);
             $g->post('/imports/attendance/persons', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'persons']);
             $g->get('/imports/attendance/batches', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'batches']);
             $g->get('/imports/attendance/batches/{id:[0-9]+}', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'batch']);
+            $g->get('/imports/attendance/batches/{id:[0-9]+}/comparison', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'comparison']);
             $g->get('/imports/attendance/profiles', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'profiles']);
             $g->post('/imports/attendance/profiles', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'saveProfile']);
             $g->delete('/imports/attendance/profiles/{id:[0-9]+}', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'deleteProfile']);
             $g->post('/imports/attendance/profiles/{id:[0-9]+}/copy', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'copyProfile']);
             $g->get('/imports/attendance/profiles/{id:[0-9]+}/export', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'exportProfile']);
             $g->post('/imports/attendance/profiles/import', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'importProfile']);
+            $g->post('/imports/attendance/profiles/sample', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'restoreSampleProfile']);
             // Dodatečné hromadné schválení pracovních měsíců z použité dávky docházky.
             $g->post('/time/imports/attendance/{id:[0-9]+}/apply', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'approveTimeMonths']);
             $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);

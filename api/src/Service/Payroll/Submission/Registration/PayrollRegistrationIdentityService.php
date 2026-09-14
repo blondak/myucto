@@ -2495,7 +2495,14 @@ final readonly class PayrollRegistrationIdentityService
                 : '');
     }
 
-    private static function oic(string $value): string
+    /**
+     * Normalizované OIČ / IK MPSV: přesně 10 číslic, poslední je zbytek
+     * prvních devíti po dělení 11. Veřejné, aby stejné pravidlo mohl zavolat
+     * i náhled importu, který nic nezapisuje.
+     *
+     * @throws \InvalidArgumentException s větou pro účetní
+     */
+    public static function oic(string $value): string
     {
         $normalized = preg_replace('/\s+/u', '', trim($value));
         if (!is_string($normalized)

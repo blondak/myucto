@@ -24,6 +24,9 @@ final class AttendancePersonAggregator
         'relation_label', 'department', 'cost_center', 'position', 'weekly_hours', 'start_end_note', 'monthly_wage',
     ];
 
+    /** Slova, která odlišují otce a syna — jméno lišící se jen jimi je jiná osoba. */
+    private const GENERATION_WORDS = ['ml', 'st', 'mladsi', 'starsi', 'jr', 'sr'];
+
     public function __construct(private readonly AttendanceColumnMapper $mapper)
     {
     }
@@ -50,9 +53,11 @@ final class AttendancePersonAggregator
         foreach ($observations as $observation) {
             $groups[$observation['name_key']][] = $observation;
         }
+        [$groups, $mergeWarnings] = self::mergeNameVariants($groups);
 
         $persons = [];
         foreach ($groups as $nameKey => $group) {
+            $merged = $mergeWarnings[$nameKey] ?? [];
             $numbers = [];
             foreach ($group as $observation) {
                 if ($observation['personal_number'] !== null) {
@@ -60,7 +65,7 @@ final class AttendancePersonAggregator
                 }
             }
             if (count($numbers) <= 1) {
-                $persons[] = $this->person((string) $nameKey, (string) $nameKey, $group, []);
+                $persons[] = $this->person((string) $nameKey, (string) $nameKey, $group, $merged);
                 continue;
             }
             $bySplit = [];
@@ -75,11 +80,12 @@ final class AttendancePersonAggregator
             $warning = 'Jméno „' . $group[0]['name'] . '“ je v podkladech s více osobními čísly ('
                 . implode(', ', array_values($numbers)) . '). Osoby se nesloučily; zkontrolujte, zda jde o různé lidi.';
             foreach ($bySplit as $number => $subgroup) {
-                $persons[] = $this->person((string) $nameKey . '#' . $number, (string) $nameKey, $subgroup, [$warning]);
+                $persons[] = $this->person((string) $nameKey . '#' . $number, (string) $nameKey, $subgroup, [$warning, ...$merged]);
             }
             if ($unassigned !== []) {
                 $persons[] = $this->person((string) $nameKey, (string) $nameKey, $unassigned, [
                     $warning . ' Řádky bez osobního čísla nejde přiřadit ani k jedné z nich.',
+                    ...$merged,
                 ]);
             }
         }
@@ -100,6 +106,7 @@ final class AttendancePersonAggregator
         $identity = [];
         $values = [];
         foreach ($columns as $column => $binding) {
+            $binding = self::applyCondition($sheet, $binding, $row);
             $meaning = (string) $binding['meaning'];
             if ($meaning === AttendanceMeaning::IGNORE || $meaning === AttendanceMeaning::PERSON_NAME) {
                 continue;
@@ -195,9 +202,11 @@ final class AttendancePersonAggregator
 
         $metrics = [];
         $components = [];
+        $deductions = [];
         $reference = ['gross_minor' => null, 'net_minor' => null, 'hours' => null];
         $internalMetrics = [];
         $internalComponents = [];
+        $internalDeductions = [];
         $grouped = [];
         foreach ($candidates as $candidate) {
             $groupKey = $candidate['meaning'] === AttendanceMeaning::COMPONENT
@@ -261,6 +270,27 @@ final class AttendancePersonAggregator
                 $internalComponents[$code] = ['amount_minor' => $primary['value'], 'source' => $primary['source']];
                 continue;
             }
+            if (AttendanceMeaning::isDeduction($meaning)) {
+                if ($primary['value'] < 0) {
+                    $warnings[] = "Srážka „{$primary['header']}“ ({$primary['source']}) je záporná; nepoužila se.";
+                }
+                if ($primary['value'] <= 0) {
+                    continue;
+                }
+                $deductions[] = [
+                    'meaning' => $meaning,
+                    'amount' => AttendanceDecimal::formatMinor($primary['value']),
+                    'amount_minor' => $primary['value'],
+                    'source' => $primary['source'],
+                    'conflicts' => array_map(static fn (array $c): array => [
+                        'amount' => AttendanceDecimal::formatMinor($c['value']),
+                        'amount_minor' => $c['value'],
+                        'source' => $c['source'],
+                    ], $conflicts),
+                ];
+                $internalDeductions[$meaning] = ['amount_minor' => $primary['value'], 'source' => $primary['source']];
+                continue;
+            }
             if ($meaning === 'reference_gross' || $meaning === 'reference_net') {
                 $reference[$meaning === 'reference_gross' ? 'gross_minor' : 'net_minor'] = $primary['value'];
                 $internalMetrics[$meaning] = ['amount_minor' => $primary['value'], 'source' => $primary['source']];
@@ -298,20 +328,126 @@ final class AttendancePersonAggregator
         foreach (self::TEXT_FIELDS as $field) {
             $person[$field] = $identity[$field] ?? null;
         }
+        $person += AttendanceText::noteDates((string) ($identity['start_end_note'] ?? ''));
 
         return $person + [
             'sources' => $sources,
             'match' => null,
             'metrics' => $metrics,
             'components' => $components,
+            'deductions' => $deductions,
             'reference' => $reference,
             'warnings' => array_values(array_unique($warnings)),
             '_name_key' => $nameKey,
             '_birth_number' => $birthNumber,
             '_metrics' => $internalMetrics,
             '_components' => $internalComponents,
+            '_deductions' => $internalDeductions,
             '_sort' => AttendanceText::normalize((string) $group[0]['name']) . "\0" . $key,
         ];
+    }
+
+    /**
+     * Pravidlo s podmínkou: platí první, jehož podmínka v tomto řádku sedí;
+     * jinak zůstává bezpodmínečné pravidlo sloupce.
+     *
+     * @param array<string,mixed> $binding
+     * @return array<string,mixed>
+     */
+    private static function applyCondition(AttendanceSheet $sheet, array $binding, int $row): array
+    {
+        foreach ($binding['conditions'] ?? [] as $condition) {
+            if ($condition['when_column'] === null) {
+                continue;
+            }
+            $cell = $sheet->cell($row, (int) $condition['when_column']);
+            if ($cell->isEmpty()
+                || !AttendanceRules::like((string) $condition['when_value'], AttendanceText::normalize($cell->textValue()))) {
+                continue;
+            }
+
+            return [
+                'meaning' => $condition['meaning'],
+                'unit' => $condition['unit'],
+                'component_code' => $condition['component_code'],
+                'rule_index' => $condition['rule_index'],
+            ] + $binding;
+        }
+
+        return $binding;
+    }
+
+    /**
+     * Totéž jméno zapsané s dalším jménem navíc („Nováková Jana Marie" proti
+     * „Nováková Jana") je v podkladech jedna osoba. Spojí se jen řádky bez
+     * osobního i rodného čísla, a jen s jedinou jinou osobou, se kterou sdílí
+     * aspoň dvě slova a liší se jen slovy navíc; spojení se vždy ohlásí.
+     * Řetězení variant se za uživatele nerozhoduje.
+     *
+     * @param array<string,list<array<string,mixed>>> $groups
+     * @return array{0:array<string,list<array<string,mixed>>>,1:array<string,list<string>>}
+     */
+    private static function mergeNameVariants(array $groups): array
+    {
+        $words = [];
+        foreach (array_keys($groups) as $key) {
+            $words[(string) $key] = explode(' ', (string) $key);
+        }
+        $targets = [];
+        foreach ($words as $key => $set) {
+            if (count($set) < 2 || self::identified($groups[$key])) {
+                continue;
+            }
+            $candidates = [];
+            foreach ($words as $other => $otherSet) {
+                if ($other === $key || count(array_intersect($set, $otherSet)) < 2) {
+                    continue;
+                }
+                $missing = array_diff($set, $otherSet);
+                $extra = array_diff($otherSet, $set);
+                if (($missing !== [] && $extra !== [])
+                    || array_intersect([...$missing, ...$extra], self::GENERATION_WORDS) !== []) {
+                    continue;
+                }
+                $candidates[] = (string) $other;
+            }
+            if (count($candidates) === 1) {
+                $targets[$key] = $candidates[0];
+            }
+        }
+
+        $warnings = [];
+        foreach ($targets as $source => $target) {
+            if (!isset($groups[$source], $groups[$target])) {
+                continue;
+            }
+            $back = $targets[$target] ?? null;
+            // Dvě neoznačené varianty mířící na sebe: kratší jméno se spojí do delšího.
+            if ($back === $source && count($words[$source]) > count($words[$target])) {
+                continue;
+            }
+            if ($back !== null && $back !== $source) {
+                continue;
+            }
+            $warnings[$target][] = 'Jméno „' . $groups[$source][0]['name'] . '“ je v podkladech i jako „'
+                . $groups[$target][0]['name'] . '“. Řádky se spojily do jedné osoby; jde-li o dva lidi, upravte jméno v souboru.';
+            $groups[$target] = [...$groups[$target], ...$groups[$source]];
+            unset($groups[$source]);
+        }
+
+        return [$groups, $warnings];
+    }
+
+    /** @param list<array<string,mixed>> $group */
+    private static function identified(array $group): bool
+    {
+        foreach ($group as $observation) {
+            if ($observation['personal_number'] !== null || isset($observation['identity']['birth_number'])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function identityText(AttendanceCell $cell, string $meaning): string

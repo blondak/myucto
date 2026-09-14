@@ -15,6 +15,7 @@ import {
   formatHours,
   personHasConflicts,
   summaryComponents,
+  summaryDeductions,
   summaryMeanings,
   type ManualLinks,
 } from './importHelpers'
@@ -30,6 +31,7 @@ const onlyIssues = ref(false)
 
 const meanings = computed(() => summaryMeanings(props.preview.persons))
 const components = computed(() => summaryComponents(props.preview.persons))
+const deductionMeanings = computed(() => summaryDeductions(props.preview.persons))
 const optionById = computed(() => new Map(props.preview.employment_options.map(option => [option.employment_id, option])))
 const hasReference = computed(() => props.preview.persons.some(person =>
   person.reference.gross_minor !== null || person.reference.net_minor !== null || person.reference.hours !== null))
@@ -79,6 +81,10 @@ function metric(person: AttendancePerson, meaning: string) {
 
 function component(person: AttendancePerson, code: string) {
   return person.components.find(item => item.component_code === code) ?? null
+}
+
+function deduction(person: AttendancePerson, meaning: string) {
+  return (person.deductions ?? []).find(item => item.meaning === meaning) ?? null
 }
 
 function conflictTitle(source: string, conflicts: AttendanceConflict[]): string {
@@ -186,6 +192,7 @@ function checkClass(check: AttendanceComponentCheck): string {
               <th class="sticky left-0 top-0 z-20 min-w-52 border-b border-neutral-200 bg-surface px-3 py-2">{{ t('payroll_imports.attendance.summary.person') }}</th>
               <th v-for="meaning in meanings" :key="meaning" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case" :title="meaning">{{ meaningLabel(meaning) }}</th>
               <th v-for="code in components" :key="`c-${code}`" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right font-mono normal-case">{{ code }}</th>
+              <th v-for="meaning in deductionMeanings" :key="`d-${meaning}`" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case">{{ meaningLabel(meaning) }}</th>
               <template v-if="hasReference">
                 <th class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case">{{ t('payroll_imports.attendance.summary.reference_gross') }}</th>
                 <th class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case">{{ t('payroll_imports.attendance.summary.reference_net') }}</th>
@@ -215,6 +222,12 @@ function checkClass(check: AttendanceComponentCheck): string {
                 {{ component(person, code) ? formatMoneyMinor(component(person, code)!.amount_minor) : '' }}
                 <span v-if="component(person, code)?.conflicts.length" aria-hidden="true">⚠</span>
               </td>
+              <td v-for="meaning in deductionMeanings" :key="`d-${meaning}`" class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums"
+                :class="deduction(person, meaning)?.conflicts.length ? 'bg-warning-50 font-medium text-warning-700' : 'text-neutral-800'"
+                :title="deduction(person, meaning) ? conflictTitle(deduction(person, meaning)!.source, deduction(person, meaning)!.conflicts) : undefined">
+                {{ deduction(person, meaning) ? `−${formatMoneyMinor(deduction(person, meaning)!.amount_minor)}` : '' }}
+                <span v-if="deduction(person, meaning)?.conflicts.length" aria-hidden="true">⚠</span>
+              </td>
               <template v-if="hasReference">
                 <td class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums text-neutral-500">{{ person.reference.gross_minor !== null ? formatMoneyMinor(person.reference.gross_minor) : '' }}</td>
                 <td class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums text-neutral-500">{{ person.reference.net_minor !== null ? formatMoneyMinor(person.reference.net_minor) : '' }}</td>
@@ -238,6 +251,10 @@ function checkClass(check: AttendanceComponentCheck): string {
             <template v-for="item in person.components" :key="`c-${item.component_code}`">
               <dt class="font-mono text-neutral-500">{{ item.component_code }}</dt>
               <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span></dd>
+            </template>
+            <template v-for="item in person.deductions ?? []" :key="`d-${item.meaning}`">
+              <dt class="text-neutral-500">{{ meaningLabel(item.meaning) }}</dt>
+              <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">−{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span></dd>
             </template>
           </dl>
           <ul v-if="person.warnings.length" class="mt-2 space-y-0.5 text-xs text-warning-700">

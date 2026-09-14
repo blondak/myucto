@@ -14,7 +14,9 @@ namespace MyInvoice\Service\Payroll\Import\Attendance;
  *  - list `výpočet*` = měsíční souhrn v desetinných hodinách a peněžní složky.
  *    Známé sloupce mají vlastní složky, ostatní sloupce s částkami dostanou
  *    složku podle hlavičky; součty a kontrolní sloupce se nikdy nepřenášejí;
- *  - list `mzdy*` = seznam osob se zařazením a měsíčními příplatky;
+ *  - list `mzdy*` = seznam osob se zařazením, měsíčními příplatky a odměnami.
+ *    Ve výrobě je ve sloupci odměn úkolová mzda (pravidlo s podmínkou na
+ *    oddělení). Obědy placené zaměstnancem a srážky jdou z čisté mzdy;
  *  - CSV exportu mezd = osobní a rodné číslo a referenční hrubá a čistá mzda.
  *
  * Každé pravidlo míří na konkrétní druh listu a na konci je „vše ostatní
@@ -30,19 +32,36 @@ namespace MyInvoice\Service\Payroll\Import\Attendance;
 final class AttendanceSampleProfile
 {
     public const NAME = 'Vzor GIRITON';
-    public const VERSION = 2;
+    public const VERSION = 3;
 
     private const CALCULATION = 'výpočet*';
     private const EXPORT = 'data*';
     private const MAIN = 'mzdy*';
     private const CSV = 'csv';
 
-    /** @return list<array{sheet:?string,header:string,meaning:string,unit:?string,component_code:?string}> */
+    /** @return list<array{sheet:?string,header:string,meaning:string,unit:?string,component_code:?string,when_header?:string,when_value?:string,rate_percent?:int}> */
     public static function rules(): array
     {
         $rules = [];
-        $add = static function (?string $sheet, string $header, string $meaning, ?string $unit = null, ?string $component = null) use (&$rules): void {
-            $rules[] = ['sheet' => $sheet, 'header' => $header, 'meaning' => $meaning, 'unit' => $unit, 'component_code' => $component];
+        $add = static function (
+            ?string $sheet,
+            string $header,
+            string $meaning,
+            ?string $unit = null,
+            ?string $component = null,
+            ?string $whenHeader = null,
+            ?string $whenValue = null,
+            ?int $ratePercent = null,
+        ) use (&$rules): void {
+            $rule = ['sheet' => $sheet, 'header' => $header, 'meaning' => $meaning, 'unit' => $unit, 'component_code' => $component];
+            if ($whenHeader !== null && $whenValue !== null) {
+                $rule['when_header'] = $whenHeader;
+                $rule['when_value'] = $whenValue;
+            }
+            if ($ratePercent !== null) {
+                $rule['rate_percent'] = $ratePercent;
+            }
+            $rules[] = $rule;
         };
 
         // Výpočetní list: osoba, hodiny, peníze.
@@ -67,7 +86,8 @@ final class AttendanceSampleProfile
             'práce noční*' => 'night_hours',
             'práce o víkendu*' => 'weekend_hours',
         ] as $header => $meaning) {
-            $add(self::CALCULATION, $header, $meaning, AttendanceMeaning::UNIT_HOURS);
+            // „Doma za 80 %" = prostoj, náhrada 80 % průměru; firma ji v profilu může upravit.
+            $add(self::CALCULATION, $header, $meaning, AttendanceMeaning::UNIT_HOURS, ratePercent: $meaning === AttendanceRules::RATE_MEANING ? 80 : null);
         }
         foreach ([
             'mzda úkol' => 'MZDA_UKOLOVA',
@@ -111,7 +131,11 @@ final class AttendanceSampleProfile
         $add(self::MAIN, 'měsíční mzda*', 'monthly_wage');
         $add(self::MAIN, 'nový nástup*', 'start_end_note');
         $add(self::MAIN, 'příplatek bozp', 'component', AttendanceMeaning::UNIT_AMOUNT, 'PRIPLATEK_BOZP');
+        // Ve výrobě nese sloupec odměn úkolovou mzdu, jinde odměnu.
+        $add(self::MAIN, 'odměny*', 'component', AttendanceMeaning::UNIT_AMOUNT, 'MZDA_UKOLOVA', 'oddělení', 'výroba');
         $add(self::MAIN, 'odměny*', 'component', AttendanceMeaning::UNIT_AMOUNT, 'ODMENA');
+        $add(self::MAIN, '*dotovaná cena*', 'net_meal_deduction', AttendanceMeaning::UNIT_AMOUNT);
+        $add(self::MAIN, 'srážky*', 'net_other_deduction', AttendanceMeaning::UNIT_AMOUNT);
         $add(self::MAIN, '*', 'ignore');
 
         // CSV exportu mezd.

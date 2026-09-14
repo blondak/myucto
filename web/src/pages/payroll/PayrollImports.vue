@@ -8,10 +8,11 @@ import { payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import RegistrationImportPanel from '@/components/payroll/imports/RegistrationImportPanel.vue'
 import AttendanceImportPanel from '@/components/payroll/imports/AttendanceImportPanel.vue'
 import AttendanceMappingPanel from '@/components/payroll/imports/AttendanceMappingPanel.vue'
+import PohodaOicImportPanel from '@/components/payroll/imports/PohodaOicImportPanel.vue'
 import { createAttendanceWorkspace, provideAttendanceWorkspace } from '@/components/payroll/imports/attendanceWorkspace'
 
-type Tab = 'registration' | 'attendance' | 'mapping'
-const TABS: readonly Tab[] = ['registration', 'attendance', 'mapping']
+type Tab = 'registration' | 'attendance' | 'mapping' | 'pohoda_oic'
+const TABS: readonly Tab[] = ['registration', 'attendance', 'mapping', 'pohoda_oic']
 
 const { t } = useI18n()
 const route = useRoute()
@@ -31,6 +32,8 @@ const canWriteInputs = computed(() => auth.canWrite('payroll.inputs.write'))
 const canWritePersons = computed(() => auth.canWrite('payroll.person.write'))
 const canManageProfiles = computed(() => auth.canWrite('payroll.settings'))
 const canApproveTime = computed(() => auth.canWrite('payroll.approve'))
+// OIČ zapisuje stejná cesta jako karta vztahu, proto obě práva jako tam.
+const canWriteIdentity = computed(() => auth.canWrite('payroll.person.write') && auth.canWrite('payroll.employment.write'))
 
 // Mapování se nastavuje jednou, import běží měsíčně — obě záložky ale pracují
 // se stejnými soubory a profily, proto sdílený stav místo dvojího nahrávání.
@@ -93,5 +96,6 @@ onMounted(() => { void workspace.loadProfiles() })
       :can-manage="canManageProfiles"
       :can-preview="canWriteInputs"
     />
+    <PohodaOicImportPanel v-show="activeTab === 'pohoda_oic'" :can-write="canWriteIdentity" />
   </div>
 </template>

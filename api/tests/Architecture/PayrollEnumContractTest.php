@@ -121,6 +121,10 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::MATCH_STATUSES',
         'payrollImports.ts::AttendanceProfileComponentKind'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents::KINDS',
+        'payrollImports.ts::PohodaOicRowStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Pohoda\PohodaPersonnelOicImportService::STATUSES',
+        'payrollImports.ts::PohodaOicResultStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Pohoda\PohodaPersonnelOicImportService::RESULT_STATUSES',
         'payroll.ts::PayrollRegistrationChangeDuty'
             => 'const:MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService::DUTY_KINDS',
         'payroll.ts::PayrollDeadlineSource'
@@ -601,6 +605,13 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::LIMIT_BASES',
 
         'payroll.documents.kind' => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+
+        // Import OIČ z POHODY skládá štítek stavu dynamicky; `oic_owned_by_other`
+        // bez věty by se ukázal jako kód právě u řádku, který import blokuje.
+        'payroll_imports.pohoda_oic.status'
+            => 'const:MyInvoice\Service\Payroll\Import\Pohoda\PohodaPersonnelOicImportService::STATUSES',
+        'payroll_imports.pohoda_oic.result_status'
+            => 'const:MyInvoice\Service\Payroll\Import\Pohoda\PohodaPersonnelOicImportService::RESULT_STATUSES',
 
         'payroll.submissions.statutory.capability'
             => 'const:MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog::CAPABILITIES',

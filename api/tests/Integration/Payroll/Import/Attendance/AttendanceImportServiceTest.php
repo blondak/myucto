@@ -250,6 +250,111 @@ final class AttendanceImportServiceTest extends TestCase
         self::assertSame(1, $detail['updated_count']);
     }
 
+    /**
+     * Srážky z podkladů = dohoda o srážce na importovaný měsíc. Opakování ji
+     * nezdvojí, jiná částka ji opraví, dokud z ní schválená mzda nic nestrhla.
+     */
+    public function testDeductionsBecomeMonthlyDeductionAgreements(): void
+    {
+        if (!$this->db->hasTable('payroll_deduction_agreements')) {
+            self::markTestSkipped('Chybí tabulka payroll_deduction_agreements.');
+        }
+        $files = AttendanceFixture::scenario();
+        $rules = $this->rules($files);
+        // Pravidlo navíc s jiným listem = jiný otisk, tedy nové použití téhož souboru.
+        $apply = fn (string $marker): array => $this->service->apply(
+            $this->supplierId,
+            self::PERIOD,
+            $files,
+            [
+                ['sheet' => 'Přehled', 'header' => 'Srážky', 'meaning' => 'net_other_deduction', 'unit' => 'amount', 'component_code' => null],
+                ...$rules,
+                ['sheet' => $marker, 'header' => 'nic', 'meaning' => 'ignore', 'unit' => null, 'component_code' => null],
+            ],
+            [],
+            false,
+            false,
+            $this->userId,
+            createDeductions: true,
+        );
+
+        $first = $apply('a');
+        self::assertSame(['created' => 1, 'updated' => 0, 'unchanged' => 0, 'conflicts' => []], $first['deductions']);
+        $reference = 'attendance:' . self::PERIOD . ":{$this->petr['employee_id']}:other";
+        $agreement = $this->agreement($reference);
+        self::assertSame('other', $agreement['deduction_kind']);
+        self::assertSame('active', $agreement['status']);
+        self::assertSame(30000, (int) $agreement['requested_minor']);
+        self::assertSame(30000, (int) $agreement['total_limit_minor']);
+        self::assertSame('2026-06-01', (string) $agreement['valid_from']);
+        self::assertSame('2026-06-30', (string) $agreement['valid_to']);
+
+        self::assertSame(1, $apply('b')['deductions']['unchanged']);
+        self::assertSame(1, $this->countRows(
+            'SELECT COUNT(*) FROM payroll_deduction_agreements WHERE supplier_id = ?',
+            [$this->supplierId],
+        ));
+
+        $this->db->pdo()->prepare('UPDATE payroll_deduction_agreements SET requested_minor = 100 WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+        self::assertSame(1, $apply('c')['deductions']['updated']);
+        self::assertSame(30000, (int) $this->agreement($reference)['requested_minor']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_deduction_agreements SET requested_minor = 100, withheld_total_minor = 100 WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+        $blocked = $apply('d')['deductions'];
+        self::assertSame(0, $blocked['updated']);
+        self::assertCount(1, $blocked['conflicts']);
+        self::assertStringContainsString('schválené mzdě', $blocked['conflicts'][0]['reason']);
+    }
+
+    public function testComparisonWithoutCalculatedRunListsReferencesAsMissing(): void
+    {
+        $files = AttendanceFixture::scenario();
+        $result = $this->service->apply($this->supplierId, self::PERIOD, $files, $this->rules($files), [], false, false, $this->userId);
+
+        $comparison = $this->service->comparison($this->supplierId, (int) $result['batch']['id']);
+        self::assertNotNull($comparison);
+        self::assertNull($comparison['run']);
+        self::assertSame(['match' => 0, 'diff' => 0, 'missing' => 2], $comparison['summary']);
+        $jana = array_column($comparison['rows'], null, 'employment_id')[$this->jana['employment_id']];
+        self::assertSame(7_187_500, $jana['reference_gross_minor']);
+        self::assertSame(5_512_050, $jana['reference_net_minor']);
+        self::assertNull($jana['computed_gross_minor']);
+        self::assertNull($this->service->comparison($this->supplierId, 999_999_999));
+    }
+
+    /**
+     * Dotaz na výsledky běhu nad skutečnými daty testovací DB: firma s vypočtenou
+     * revizí vrátí hrubou mzdu po vztazích a čistou po zaměstnancích.
+     */
+    public function testRunResultsQueryReadsCalculatedRevisions(): void
+    {
+        $row = $this->db->pdo()->query(
+            'SELECT run.supplier_id, run.period_start
+               FROM payroll_runs run
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id AND revision.run_id = run.id
+                AND revision.revision_no = run.current_revision_no
+              WHERE revision.status IN ("calculated", "reviewed", "approved") AND run.status <> "cancelled"
+              LIMIT 1',
+        )?->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            self::markTestSkipped('Testovací DB nemá vypočtený mzdový běh.');
+        }
+        $results = $this->container
+            ->get(\MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository::class)
+            ->runResultsForPeriod((int) $row['supplier_id'], (string) $row['period_start']);
+
+        self::assertNotNull($results['run']);
+        self::assertNotSame([], $results['gross']);
+        foreach ($results['employee_of'] as $employmentId => $employeeId) {
+            self::assertArrayHasKey($employmentId, $results['gross']);
+            self::assertGreaterThanOrEqual(1, $results['employment_count'][$employeeId]);
+        }
+    }
+
     public function testSavedLinksMatchTheNextImport(): void
     {
         $files = AttendanceFixture::scenario();
@@ -435,6 +540,28 @@ final class AttendanceImportServiceTest extends TestCase
         self::assertTrue($this->service->deleteProfile($this->supplierId, $profile['id']));
         self::assertFalse($this->service->deleteProfile($this->supplierId, $profile['id']));
         self::assertSame([], $this->service->profiles($this->supplierId));
+    }
+
+    public function testSampleProfileCanBeRestoredAfterDeletion(): void
+    {
+        $sample = \MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfile::class;
+        $first = $this->service->restoreSampleProfile($this->supplierId, $this->userId);
+        self::assertTrue($first['restored']);
+        self::assertSame($sample::NAME, $first['profile']['name']);
+        self::assertTrue($first['profile']['is_sample']);
+        self::assertSame($sample::VERSION, $first['profile']['sample_version']);
+        self::assertSame($sample::rules(), $first['profile']['rules']);
+        self::assertFalse($this->service->restoreSampleProfile($this->supplierId, $this->userId)['restored']);
+
+        self::assertTrue($this->service->deleteProfile($this->supplierId, $first['profile']['id']));
+        // Název vzoru mezitím obsadil vlastní profil: vzor se vrátí s příponou.
+        $this->service->saveProfile($this->supplierId, null, $sample::NAME, [
+            ['sheet' => 'výpočet', 'header' => 'Dovolená', 'meaning' => 'vacation_hours', 'unit' => 'hours', 'component_code' => null],
+        ], $this->userId);
+        $again = $this->service->restoreSampleProfile($this->supplierId, $this->userId);
+        self::assertTrue($again['restored']);
+        self::assertSame($sample::NAME . ' (2)', $again['profile']['name']);
+        self::assertTrue($again['profile']['is_sample']);
     }
 
     public function testActionDecodesFilesAndAnswersWithoutRawBirthNumber(): void
@@ -683,6 +810,19 @@ final class AttendanceImportServiceTest extends TestCase
         self::assertCount(1, $rows, 'Odměna z docházky má existovat právě jednou.');
 
         return (int) $rows[0];
+    }
+
+    /** @return array<string,mixed> */
+    private function agreement(string $reference): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_deduction_agreements WHERE supplier_id = ? AND agreement_reference = ?',
+        );
+        $stmt->execute([$this->supplierId, $reference]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($row, "Dohoda {$reference} neexistuje.");
+
+        return $row;
     }
 
     /** @param list<mixed> $params */

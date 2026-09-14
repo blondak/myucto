@@ -14,7 +14,8 @@ use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
  * @phpstan-import-type AttendanceRule from AttendanceRules
  * @phpstan-type AttendanceBinding array{
  *   column:int,letter:string,header:string,meaning:string,unit:?string,component_code:?string,
- *   rule_source:string,rule_index:?int,samples:list<string>
+ *   rule_source:string,rule_index:?int,samples:list<string>,
+ *   conditions:list<array{rule_index:int,when_header:string,when_column:?int,when_value:string,meaning:string,unit:?string,component_code:?string}>
  * }
  * @phpstan-type AttendanceMappedSheet array{
  *   sheet:AttendanceSheet,layout:AttendanceSheetLayout,columns:array<int,AttendanceBinding>,
@@ -67,18 +68,27 @@ final class AttendanceColumnMapper
                         'rule_source' => 'profile',
                         'rule_index' => null,
                         'samples' => $this->samples($sheet, $layout, $column, AttendanceMeaning::IGNORE),
+                        'conditions' => [],
                     ];
                     continue;
                 }
                 $ruleIndex = null;
+                $conditional = [];
                 foreach ($rules as $index => $rule) {
-                    if (AttendanceRules::matches($rule, $sheetKey, $normalizedHeader)) {
-                        $ruleIndex = $index;
-                        break;
+                    if (!AttendanceRules::matches($rule, $sheetKey, $normalizedHeader)) {
+                        continue;
                     }
+                    // Pravidlo s podmínkou platí jen pro některé řádky; ostatní
+                    // řádky sloupce dostanou první bezpodmínečné pravidlo.
+                    if (AttendanceRules::hasCondition($rule)) {
+                        $conditional[] = $index;
+                        continue;
+                    }
+                    $ruleIndex = $index;
+                    break;
                 }
                 $source = 'profile';
-                if ($ruleIndex === null) {
+                if ($ruleIndex === null && $conditional === []) {
                     $key = $sheetKey . "\0" . $normalizedHeader;
                     if (isset($suggestedIndex[$key])) {
                         $ruleIndex = $suggestedIndex[$key];
@@ -124,8 +134,9 @@ final class AttendanceColumnMapper
                     'rule_source' => $source,
                     'rule_index' => $ruleIndex,
                     'samples' => $this->samples($sheet, $layout, $column, $meaning),
+                    'conditions' => $this->conditions($sheet, $layout, $column, $rules, $conditional),
                 ];
-                if ($meaning !== AttendanceMeaning::IGNORE) {
+                if ($meaning !== AttendanceMeaning::IGNORE || $conditional !== []) {
                     $boundHeaders[$normalizedHeader] = true;
                 }
             }
@@ -146,6 +157,49 @@ final class AttendanceColumnMapper
         }
 
         return ['sheets' => $mapped, 'rules' => $effective, 'auto_components' => $autoComponents];
+    }
+
+    /**
+     * Pravidla s podmínkou pro sloupec, s dohledaným sloupcem podmínky
+     * v témž listu. Chybí-li sloupec podmínky, podmínka nikdy neplatí.
+     *
+     * @param list<AttendanceRule> $rules
+     * @param list<int> $indexes
+     * @return list<array{rule_index:int,when_header:string,when_column:?int,when_value:string,meaning:string,unit:?string,component_code:?string}>
+     */
+    private function conditions(
+        AttendanceSheet $sheet,
+        AttendanceSheetLayout $layout,
+        int $column,
+        array $rules,
+        array $indexes,
+    ): array {
+        $result = [];
+        foreach ($indexes as $index) {
+            $rule = $rules[$index];
+            $whenHeader = (string) ($rule['when_header'] ?? '');
+            $whenColumn = null;
+            foreach ($layout->headers as $candidate => $header) {
+                if (AttendanceRules::like($whenHeader, AttendanceText::normalize($header))) {
+                    $whenColumn = $candidate;
+                    break;
+                }
+            }
+            $meaning = $rule['meaning'];
+            $result[] = [
+                'rule_index' => $index,
+                'when_header' => $whenHeader,
+                'when_column' => $whenColumn,
+                'when_value' => (string) ($rule['when_value'] ?? ''),
+                'meaning' => $meaning,
+                'unit' => $meaning === AttendanceMeaning::IGNORE
+                    ? null
+                    : ($rule['unit'] ?? $this->columnUnit($sheet, $layout, $column, $meaning)),
+                'component_code' => $meaning === AttendanceMeaning::COMPONENT ? $rule['component_code'] : null,
+            ];
+        }
+
+        return $result;
     }
 
     /**

@@ -24882,7 +24882,8 @@
       "label": "Import type",
       "registration": "JMHZ",
       "attendance": "Attendance",
-      "mapping": "Column mapping"
+      "mapping": "Column mapping",
+      "pohoda_oic": "OIČ from POHODA"
     },
     "common": {
       "working": "Working…",
@@ -24913,6 +24914,73 @@
       "selected": "Files selected: {count} ({size})",
       "clear": "Remove all",
       "remove": "Remove file {name}"
+    },
+    "pohoda_oic": {
+      "title": "OIČ from POHODA",
+      "hint": "Upload the Personnel agenda table export from POHODA with the columns Surname, First name, Birth number, Personal number and OIC. The app finds people by birth number and offers to fill in the ČSSZ person identifier where it is still missing. A stored OIČ is never overwritten.",
+      "no_permission": "You are not allowed to edit people and employments in payroll, so the OIČ import cannot be run.",
+      "environment_hint": "The OIČ is stored for the environment ČSSZ assigned it for. Usually this is the production environment.",
+      "drop_hint": "Drag the POHODA Personnel export (XLSX or CSV) here, or choose it",
+      "preview": "Load preview",
+      "refresh_preview": "Reload preview",
+      "preview_failed": "The OIČ import preview could not be loaded.",
+      "apply_failed": "The OIČ could not be saved.",
+      "applied": "OIČ saved: {applied}, skipped {skipped}.",
+      "applied_with_errors": "OIČ saved: {applied}, {failed} failed and {skipped} skipped. See the result below the table for details.",
+      "row_count": "rows: {count}",
+      "company_ico": "Company ID {ico}",
+      "summary": {
+        "total": "Rows with OIČ",
+        "ready": "To save",
+        "already_stored": "Already stored",
+        "conflict": "Different OIČ on record",
+        "blocked": "Cannot be saved"
+      },
+      "without_oic": "Rows without an OIČ: {count}. The import skips them.",
+      "rows_title": "People in the export",
+      "selected_count": "Selected {count} of {total}",
+      "select_all": "Select all to save",
+      "select_none": "Clear selection",
+      "select_row": "Select {name}",
+      "no_rows": "The export contains no row with an OIČ.",
+      "columns": {
+        "person": "Person",
+        "personal_number": "Personal number",
+        "oic": "OIČ",
+        "status": "Status"
+      },
+      "source_row": "row {row} in the file",
+      "employment": "Employment {code}",
+      "valid_from": "valid from {date}",
+      "status": {
+        "ready": "Ready",
+        "already_stored": "Already stored",
+        "conflict": "Different OIČ on record",
+        "oic_owned_by_other": "OIČ belongs to another person",
+        "not_found": "Person not found",
+        "ambiguous": "Ambiguous person",
+        "no_employment": "No employment",
+        "duplicate": "Duplicate row",
+        "invalid_birth_number": "Invalid birth number",
+        "invalid_oic": "Invalid OIČ",
+        "no_oic": "No OIČ"
+      },
+      "confirm": "I have verified the OIČ against the ČSSZ ePortal or the registrations. POHODA is not a ČSSZ receipt.",
+      "confirm_hint": "The OIČ is stored as a verified manual transcript, the same as when entered on the employment card. Monthly reports are matched to the person by it.",
+      "apply": "Save OIČ ({count})",
+      "reason": {
+        "no_files": "Upload the Personnel export first.",
+        "no_preview": "Load the preview first.",
+        "no_selection": "Select at least one row to save.",
+        "no_confirmation": "Confirm that you have verified the OIČ against the ČSSZ ePortal or the registrations."
+      },
+      "result_title": "Save result",
+      "result_summary": "Saved {applied}, failed {failed}, skipped {skipped}.",
+      "result_status": {
+        "applied": "Saved",
+        "failed": "Failed",
+        "skipped": "Skipped"
+      }
     },
     "registration": {
       "title": "JMHZ",
@@ -25134,6 +25202,8 @@
       "home_office_hours": "Home office",
       "compensatory_time_off_hours": "Compensatory time off",
       "component": "Payroll component (CZK)",
+      "net_meal_deduction": "Meals – deduction from pay",
+      "net_other_deduction": "Deduction from pay",
       "reference_gross": "Gross pay (check)",
       "reference_net": "Net pay (check)",
       "reference_hours": "Hours (check)"
@@ -25342,6 +25412,9 @@
         "edit_in_persons_step": "Edit in the People step",
         "auto_create_persons": "Create missing people automatically ({count})",
         "auto_create_persons_hint": "Creates the name, personal number, birth number and monthly wage from the source data, the employment type estimated from the data (employment otherwise), weekly hours from the data or 40 h, start on the first day of the imported period, employment active right away. Details can be filled in later on the employee's card.",
+        "auto_create_manual_only": "{count} unmatched people have neither a personal nor a birth number, so the import will not create them — they may be an existing person written differently (e.g. after a surname change). Assign or create them in the People step.",
+        "create_deductions": "Create deductions from pay ({count})",
+        "create_deductions_hint": "Meals and deductions from the source data are created as deduction agreements valid only for the imported month and are deducted from net pay. Importing again corrects the amount until the deduction has been used in an approved payroll. Assumes a signed wage deduction agreement with the employee.",
         "auto_create_failed_title": "Could not be created ({count})",
         "auto_create_notes_title": "Created with a note ({count})",
         "phase_creating": "Creating people…",
@@ -25360,6 +25433,8 @@
         "personal_numbers_adopted": "Personal numbers adopted: {count}",
         "personal_number_conflicts_title": "Personal numbers not adopted ({count})",
         "monthly_wages_adopted": "Monthly wages adopted: {count}",
+        "deductions": "Deductions from pay: created {created}, updated {updated}, unchanged {unchanged}",
+        "deduction_conflicts_title": "Deductions not written ({count})",
         "wage_conflicts_title": "Monthly wages not adopted ({count})",
         "runs_refresh_title": "Payroll runs to recalculate",
         "runs_refresh_hint": "A changed wage reaches the run only with a new snapshot of inputs. Open the run and proceed according to its state.",
@@ -25388,6 +25463,25 @@
           "meaning": "Meaning",
           "value": "Value",
           "source": "Source"
+        },
+        "compare": "Compare with payroll calculation",
+        "compare_hint": "Gross and net pay from the payroll run calculation against the payroll export in the source files.",
+        "compare_failed": "The comparison could not be loaded.",
+        "compare_no_run": "There is no calculated payroll run for the period yet. Calculate it and compare again.",
+        "compare_no_reference": "The batch contains no gross or net pay from a payroll export.",
+        "compare_summary": "Match {match}, difference {diff}, not calculated {missing}. A difference up to CZK 1 counts as rounding.",
+        "compare_net_shared": "several employments, net pay is per person only",
+        "compare_columns": {
+          "reference_gross": "Gross (source)",
+          "computed_gross": "Gross (calculated)",
+          "reference_net": "Net (source)",
+          "computed_net": "Net (calculated)",
+          "diff": "Difference"
+        },
+        "compare_status": {
+          "match": "Match",
+          "diff": "Difference",
+          "missing": "Not calculated"
         }
       }
     },
@@ -25398,7 +25492,10 @@
         "approve_clean": "Approve clean months right away",
         "approve_clean_hint": "Only months whose summary claims nothing without a source are approved. The others are listed in the result by person, with the reason and a link to fix it.",
         "approve_needs_summary": "Approval builds on the written summary. Turn on writing the summary into work months first.",
-        "approve_no_permission": "Bulk approval requires the permission to approve payroll."
+        "approve_no_permission": "Bulk approval requires the permission to approve payroll.",
+        "compensations": "Calculate wage compensation from vacation, doctor and obstacle hours",
+        "compensations_hint": "The summary hours become draft wage compensation inputs: vacation and doctor visits at the average earnings, employer-side obstacles (at home) at the rate set in the mapping profile rule, otherwise 80 % of the average. Requires approved average earnings for the quarter. Sick pay is not calculated from monthly totals.",
+        "compensations_needs_summary": "Compensation is calculated from the written summary. Turn on writing the summary into work months first."
       },
       "approve": "Approve clean months",
       "approve_hint": "Writes the batch summaries into work months and approves the clean ones. Months with an exception stay open and are listed with the reason.",
@@ -25419,7 +25516,12 @@
         "group": "{title} ({count})",
         "unknown_person": "Employment no. {id}",
         "inputs_updated": "Input drafts updated: {count}",
-        "inputs_overridden": "Manually overridden values the import left unchanged: {count}"
+        "inputs_overridden": "Manually overridden values the import left unchanged: {count}",
+        "compensations_title": "Wage compensation from absence hours",
+        "compensations_counts": "New drafts: {created}, updated: {updated}, unchanged: {unchanged}, cancelled: {cancelled}",
+        "compensations_drafts_hint": "Compensation is created as draft payroll inputs. Approve them in Payroll inputs after review.",
+        "compensations_skipped_title": "No compensation calculated ({count})",
+        "compensations_warnings_title": "To review ({count})"
       },
       "codes": {
         "absence_hours_without_dates": "Absence without from–to dates",
@@ -25484,6 +25586,11 @@
       "deleted": "Profile “{name}” was deleted.",
       "delete_failed": "The profile could not be deleted.",
       "duplicated": "A copy of the profile was created. Adjust its name and save it.",
+      "restore_sample": "Restore GIRITON sample",
+      "restore_sample_hint": "Creates the GIRITON sample profile again in the current version, e.g. after it was deleted by mistake.",
+      "sample_restored": "Sample “{name}” was restored.",
+      "sample_exists": "Sample “{name}” already exists in the company.",
+      "sample_restore_failed": "The sample could not be restored.",
       "export_failed": "The profile could not be exported.",
       "imported": "Profile “{name}” was uploaded.",
       "import_failed": "The profile could not be uploaded.",
@@ -25505,6 +25612,10 @@
         "no_rules": "Add at least one rule.",
         "rule_header_missing": "Rule {row}: fill in the column header.",
         "rule_component_missing": "Rule {row}: fill in the payroll component code, or * for a code from the header.",
+        "rule_condition_incomplete": "Rule {row}: fill in both the condition column and value, or clear both.",
+        "rule_condition_auto": "Rule {row}: a rule with a condition needs a concrete component code, not *.",
+        "rule_rate_invalid": "Rule {row}: the compensation rate must be a whole percentage from 60 to 100.",
+        "rule_rate_mixed": "The employer-side obstacle has different compensation rates in the profile. Values from several columns are never added up, so use the same rate for all its rules.",
         "component_code_missing": "Payroll component {row}: fill in the code.",
         "component_code_duplicate": "Payroll component {row}: code {code} is listed more than once.",
         "component_code_auto": "Payroll component {row}: the asterisk belongs only in rules, a component needs a real code.",
@@ -25512,7 +25623,7 @@
       },
       "rules": {
         "title": "Rules",
-        "hint": "Rules are evaluated from top to bottom and the first one matching a column wins. An empty sheet means all sheets. The asterisk * stands for any text (e.g. “Bonus*”). Component code * means the component named by the column header.",
+        "hint": "Rules are evaluated from top to bottom and the first one matching a column wins. An empty sheet means all sheets. The asterisk * stands for any text (e.g. “Bonus*”). Component code * means the component named by the column header. A condition limits the rule to rows where another column has the given value (e.g. department = production); other rows use the next rule. For an employer-side obstacle, enter the wage compensation rate instead of a component code (80 % of the average when empty).",
         "add": "Add rule",
         "empty": "The profile has no rule yet.",
         "row": "Rule {row}",
@@ -25522,8 +25633,16 @@
           "meaning": "Meaning",
           "unit": "Unit",
           "component": "Component code",
+          "condition": "Condition",
           "actions": "Actions"
         },
+        "condition_header_placeholder": "column, e.g. department",
+        "condition_value_placeholder": "value, e.g. production",
+        "condition_header_for": "Condition column of rule {row}",
+        "condition_value_for": "Condition value of rule {row}",
+        "rate_for": "Compensation rate of rule {row}",
+        "rate_suffix": "% of average",
+        "rate_low_hint": "Below 80 % only for bad weather (§ 207 b) or partial unemployment (§ 209), and only under an agreement with the trade union or an internal regulation.",
         "sheet_placeholder": "all sheets",
         "header_placeholder": "e.g. Vacation*",
         "component_placeholder": "ODMENA or *",

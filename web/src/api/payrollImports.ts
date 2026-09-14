@@ -250,7 +250,8 @@ export type AttendanceMeaning =
   | 'vacation_hours' | 'holiday_hours' | 'sick_hours' | 'doctor_hours' | 'care_hours'
   | 'paternity_hours' | 'unpaid_leave_hours' | 'unexcused_hours' | 'obstacle_employee_hours'
   | 'obstacle_employer_hours' | 'business_trip_hours' | 'home_office_hours' | 'compensatory_time_off_hours'
-  | 'component' | 'reference_gross' | 'reference_net' | 'reference_hours'
+  | 'component' | 'net_meal_deduction' | 'net_other_deduction'
+  | 'reference_gross' | 'reference_net' | 'reference_hours'
 
 export interface AttendanceRule {
   sheet: string | null
@@ -259,6 +260,11 @@ export interface AttendanceRule {
   unit: AttendanceUnit | null
   /** `'*'` = kód složky se odvodí z hlavičky sloupce. */
   component_code: string | null
+  /** Podmínka: pravidlo platí jen pro řádky, kde má sloupec `when_header` hodnotu `when_value`. */
+  when_header?: string
+  when_value?: string
+  /** Jen překážka na straně zaměstnavatele: sazba náhrady mzdy v % průměru (60–100, výchozí 80). */
+  rate_percent?: number
 }
 
 export type AttendanceProfileComponentKind =
@@ -292,6 +298,15 @@ export interface AttendanceColumn {
   component_code: string | null
   rule_source: 'profile' | 'suggested' | 'none' | string
   samples: string[]
+  /** Pravidla s podmínkou, která mají v řádcích přednost před `meaning`. */
+  conditions?: AttendanceColumnCondition[]
+}
+
+export interface AttendanceColumnCondition {
+  when_header: string
+  when_value: string
+  meaning: AttendanceMeaning
+  component_code: string | null
 }
 
 export interface AttendanceSheet {
@@ -336,6 +351,15 @@ export interface AttendanceComponentValue {
   conflicts: AttendanceConflict[]
 }
 
+/** Srážka z čisté mzdy (obědy, srážky) — import z ní založí dohodu o srážce na měsíc. */
+export interface AttendanceDeductionValue {
+  meaning: AttendanceMeaning
+  amount: string
+  amount_minor: number
+  source: string
+  conflicts: AttendanceConflict[]
+}
+
 export interface AttendancePerson {
   key: string
   display_name: string
@@ -348,6 +372,9 @@ export interface AttendancePerson {
   weekly_hours: string | null
   start_end_note: string | null
   monthly_wage: string | null
+  /** Nástup a ukončení přečtené z poznámky (`YYYY-MM-DD`). */
+  start_on?: string | null
+  end_on?: string | null
   sources: { sheet_id: string; row: number }[]
   match: {
     status: AttendanceMatchStatus
@@ -360,6 +387,7 @@ export interface AttendancePerson {
   }
   metrics: AttendanceMetric[]
   components: AttendanceComponentValue[]
+  deductions?: AttendanceDeductionValue[]
   reference: { gross_minor: number | null; net_minor: number | null; hours: string | null }
   warnings: string[]
 }
@@ -440,6 +468,8 @@ export interface AttendancePreview {
     metrics: number
     components: number
     amount_minor_total: number
+    deductions?: number
+    deduction_minor_total?: number
   }
 }
 
@@ -466,8 +496,18 @@ export interface AttendanceApplyPayload {
   create_components: boolean
   adopt_personal_numbers: boolean
   adopt_monthly_wage: boolean
+  /** Založit srážky z podkladů jako dohody o srážce na importovaný měsíc. */
+  create_deductions?: boolean
   components?: AttendanceProfileComponent[] | null
   profile_id?: number | null
+}
+
+/** Výsledek zápisu srážek z podkladů (dohody o srážce na měsíc). */
+export interface AttendanceDeductionReport {
+  created: number
+  updated: number
+  unchanged: number
+  conflicts: { key: string; display_name: string; reason: string }[]
 }
 
 export interface AttendancePersonalNumberConflict {
@@ -504,6 +544,30 @@ export interface AttendanceApplyResult {
   monthly_wages_adopted: number
   wage_conflicts: { key: string; display_name: string; reason: string }[]
   runs_needing_refresh: AttendanceRunNeedingRefresh[]
+  deductions?: AttendanceDeductionReport | null
+}
+
+/** Hrubá a čistá mzda z mzdového exportu v dávce proti výpočtu mzdového běhu období. */
+export interface AttendanceBatchComparisonRow {
+  employment_id: number
+  employee_name: string
+  employment_code: string
+  reference_gross_minor: number | null
+  reference_net_minor: number | null
+  computed_gross_minor: number | null
+  gross_diff_minor: number | null
+  computed_net_minor: number | null
+  net_diff_minor: number | null
+  /** Osoba má víc vztahů — čistá mzda je ve výpočtu jen za osobu, neporovnává se. */
+  net_shared: boolean
+  status: 'match' | 'diff' | 'missing'
+}
+
+export interface AttendanceBatchComparison {
+  batch: AttendanceBatch
+  run: { status: string; revision_status: string | null } | null
+  rows: AttendanceBatchComparisonRow[]
+  summary: { match: number; diff: number; missing: number }
 }
 
 export interface AttendancePersonCreate {
@@ -570,6 +634,89 @@ export interface AttendanceProfileExport {
   components: AttendanceProfileComponent[]
 }
 
+// ─── OIČ z POHODY ─────────────────────────────────────────────────────────────
+
+export type PohodaOicRowStatus =
+  | 'ready'
+  | 'already_stored'
+  | 'conflict'
+  | 'oic_owned_by_other'
+  | 'not_found'
+  | 'ambiguous'
+  | 'no_employment'
+  | 'duplicate'
+  | 'invalid_birth_number'
+  | 'invalid_oic'
+  | 'no_oic'
+export type PohodaOicResultStatus = 'applied' | 'failed' | 'skipped'
+
+export interface PohodaOicFileInfo {
+  name: string
+  sha256: string
+  sheet: string | null
+  row_count: number
+  /** IČ firmy z bloku nad hlavičkou exportu. */
+  company_ico: string | null
+  error: string | null
+  warnings: string[]
+}
+
+export interface PohodaOicRow {
+  key: string
+  file: string
+  sheet: string
+  row: number
+  name: string
+  personal_number: string | null
+  birth_number_masked: string | null
+  oic_masked: string | null
+  status: PohodaOicRowStatus
+  message: string
+  selectable: boolean
+  employee_id: number | null
+  employee_name: string | null
+  employment_id: number | null
+  employment_code: string | null
+  valid_from: string | null
+}
+
+export interface PohodaOicPreview {
+  environment: RegistrationEnvironment
+  files: PohodaOicFileInfo[]
+  rows: PohodaOicRow[]
+  summary: {
+    total: number
+    ready: number
+    already_stored: number
+    conflict: number
+    blocked: number
+    without_oic: number
+  }
+}
+
+export interface PohodaOicPreviewPayload {
+  environment: RegistrationEnvironment
+  files: ImportFilePayload[]
+}
+
+export interface PohodaOicApplyPayload extends PohodaOicPreviewPayload {
+  keys: string[]
+  evidence_confirmed: boolean
+}
+
+export interface PohodaOicApplyResult {
+  environment: RegistrationEnvironment
+  results: {
+    key: string
+    status: PohodaOicResultStatus
+    message: string
+    name: string
+    employee_id: number | null
+    employment_id: number | null
+  }[]
+  summary: { applied: number; failed: number; skipped: number }
+}
+
 export const payrollImportsApi = {
   previewRegistrations: (payload: RegistrationPreviewPayload) =>
     api.post<RegistrationPreview>('/payroll/imports/registrations/preview', payload)
@@ -599,6 +746,9 @@ export const payrollImportsApi = {
   attendanceBatch: (id: number) =>
     api.get<{ batch: AttendanceBatch; rows: AttendanceBatchRow[] }>(`/payroll/imports/attendance/batches/${id}`)
       .then(response => response.data),
+  attendanceBatchComparison: (id: number) =>
+    api.get<AttendanceBatchComparison>(`/payroll/imports/attendance/batches/${id}/comparison`)
+      .then(response => response.data),
   attendanceProfiles: () =>
     api.get<{ profiles: AttendanceProfile[] }>('/payroll/imports/attendance/profiles')
       .then(response => response.data.profiles),
@@ -607,6 +757,10 @@ export const payrollImportsApi = {
       .then(response => response.data.profile),
   deleteAttendanceProfile: (id: number) =>
     api.delete<{ deleted: true }>(`/payroll/imports/attendance/profiles/${id}`)
+      .then(response => response.data),
+  /** Obnoví vzorový profil GIRITON; `restored: false` = vzor ve firmě už je. */
+  restoreAttendanceSampleProfile: () =>
+    api.post<{ profile: AttendanceProfile; restored: boolean }>('/payroll/imports/attendance/profiles/sample')
       .then(response => response.data),
   copyAttendanceProfile: (id: number, targetSupplierId: number) =>
     api.post<{ profile: AttendanceProfile }>(`/payroll/imports/attendance/profiles/${id}/copy`, {
@@ -619,4 +773,11 @@ export const payrollImportsApi = {
       profile,
       ...(name !== undefined ? { name } : {}),
     }).then(response => response.data.profile),
+
+  previewPohodaOic: (payload: PohodaOicPreviewPayload) =>
+    api.post<PohodaOicPreview>('/payroll/imports/pohoda-oic/preview', payload)
+      .then(response => response.data),
+  applyPohodaOic: (payload: PohodaOicApplyPayload) =>
+    api.post<PohodaOicApplyResult>('/payroll/imports/pohoda-oic/apply', payload)
+      .then(response => response.data),
 }

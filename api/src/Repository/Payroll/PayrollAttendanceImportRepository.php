@@ -454,4 +454,78 @@ final class PayrollAttendanceImportRepository
 
         return $result;
     }
+
+    /**
+     * Výsledky aktuálních revizí mzdových běhů období: hrubá mzda po vztazích
+     * a čistá mzda po zaměstnancích. Běh bez vypočtené revize dá prázdné mapy.
+     *
+     * @return array{run:?array{status:string,revision_status:?string},gross:array<int,int>,net:array<int,int>,employee_of:array<int,int>,employment_count:array<int,int>}
+     */
+    public function runResultsForPeriod(int $supplierId, string $periodStart): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT run.status AS run_status, revision.id AS revision_id, revision.status AS revision_status
+               FROM payroll_runs run
+          LEFT JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+                AND revision.revision_no = run.current_revision_no
+              WHERE run.supplier_id = ? AND run.period_start = ? AND run.status <> "cancelled"
+              ORDER BY run.id'
+        );
+        $stmt->execute([$supplierId, $periodStart]);
+        $run = null;
+        $revisionIds = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $calculated = $row['revision_id'] !== null
+                && in_array($row['revision_status'], ['calculated', 'reviewed', 'approved'], true);
+            if ($run === null || $calculated) {
+                $run = [
+                    'status' => (string) $row['run_status'],
+                    'revision_status' => $row['revision_status'] === null ? null : (string) $row['revision_status'],
+                ];
+            }
+            if ($calculated) {
+                $revisionIds[] = (int) $row['revision_id'];
+            }
+        }
+        $results = ['run' => $run, 'gross' => [], 'net' => [], 'employee_of' => [], 'employment_count' => []];
+        if ($revisionIds === []) {
+            return $results;
+        }
+        $in = implode(', ', array_fill(0, count($revisionIds), '?'));
+        $employments = $this->db->pdo()->prepare(
+            "SELECT employment_id, employee_id,
+                    JSON_VALUE(result_json, '$.totals.source_amount_minor') AS gross_minor
+               FROM payroll_run_employments
+              WHERE supplier_id = ? AND revision_id IN ({$in}) AND status = 'calculated'"
+        );
+        $employments->execute([$supplierId, ...$revisionIds]);
+        foreach ($employments->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employmentId = (int) $row['employment_id'];
+            $employeeId = (int) $row['employee_id'];
+            $results['gross'][$employmentId] = ($results['gross'][$employmentId] ?? 0) + (int) $row['gross_minor'];
+            if (!isset($results['employee_of'][$employmentId])) {
+                $results['employee_of'][$employmentId] = $employeeId;
+                $results['employment_count'][$employeeId] = ($results['employment_count'][$employeeId] ?? 0) + 1;
+            }
+        }
+        // Čistá mzda (před exekucemi) je ve výsledku osoby z výpočtu zákonných odvodů.
+        $net = $this->db->pdo()->prepare(
+            "SELECT employee_id,
+                    JSON_VALUE(result_json, '$.statutory.net_payable_minor_units') AS net_minor
+               FROM payroll_run_persons
+              WHERE supplier_id = ? AND revision_id IN ({$in}) AND status = 'calculated'"
+        );
+        $net->execute([$supplierId, ...$revisionIds]);
+        foreach ($net->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ($row['net_minor'] === null) {
+                continue;
+            }
+            $employeeId = (int) $row['employee_id'];
+            $results['net'][$employeeId] = ($results['net'][$employeeId] ?? 0) + (int) $row['net_minor'];
+        }
+
+        return $results;
+    }
 }

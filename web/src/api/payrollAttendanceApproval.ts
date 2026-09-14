@@ -37,9 +37,21 @@ export interface AttendanceTimeSummaryResult {
   warnings: { employment_id: number; code: string; message: string }[]
 }
 
+/** Výsledek `PayrollImportAbsenceCompensationMaterializer` — koncepty náhrad mzdy z hodin souhrnu. */
+export interface AttendanceAbsenceCompensationResult {
+  created: number
+  updated: number
+  unchanged: number
+  cancelled: number
+  rates: Record<string, number>
+  skipped: { employment_id: number; meaning: string | null; reason: string }[]
+  warnings: { employment_id: number; meaning: string; message: string }[]
+}
+
 export interface AttendanceApplyWithTimePayload extends AttendanceApplyPayload {
   write_time_summary: boolean
   approve_clean_time_months: boolean
+  materialize_absence_compensations: boolean
 }
 
 export type AttendanceApplyWithTimeResult = Omit<AttendanceApplyResult, 'inputs'> & {
@@ -51,6 +63,7 @@ export type AttendanceApplyWithTimeResult = Omit<AttendanceApplyResult, 'inputs'
   }
   time_summary?: AttendanceTimeSummaryResult | null
   time_approval?: AttendanceTimeApproval | null
+  absence_compensation?: AttendanceAbsenceCompensationResult | null
 }
 
 export const payrollAttendanceApprovalApi = {

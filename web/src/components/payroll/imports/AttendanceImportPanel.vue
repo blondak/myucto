@@ -26,6 +26,7 @@ import AttendanceRecognitionStrip from './AttendanceRecognitionStrip.vue'
 import AttendanceTimeApprovalResult from './AttendanceTimeApprovalResult.vue'
 import { useAttendanceWorkspace } from './attendanceWorkspace'
 import {
+  autoCreatablePersons,
   autoPersonCreateDefaults,
   buildAttendanceLinks,
   buildPersonsPayload,
@@ -67,9 +68,12 @@ const createInputs = ref(true)
 const createComponents = ref(true)
 const adoptPersonalNumbers = ref(true)
 const adoptMonthlyWage = ref(false)
+const createDeductions = ref(true)
 // Výchozí stav drží backend: bez volby se souhrn nezapisuje ani neschvaluje.
 const writeTimeSummary = ref(false)
 const approveCleanTimeMonths = ref(false)
+const materializeAbsenceCompensations = ref(false)
+watch(writeTimeSummary, value => { if (!value) materializeAbsenceCompensations.value = false })
 watch(writeTimeSummary, value => { if (!value) approveCleanTimeMonths.value = false })
 const approveTimeBlockedReason = computed(() => {
   if (!props.canApproveTime) return t('payroll_imports.attendance_time.options.approve_no_permission')
@@ -132,7 +136,12 @@ const applyBlockedReason = computed(() => {
   return ''
 })
 const creatableMissingPersons = computed(() =>
-  preview.value ? preview.value.persons.filter(person => personCanBeCreated(person, manualLinks.value)) : [])
+  preview.value ? autoCreatablePersons(preview.value.persons, manualLinks.value) : [])
+// Nenalezené osoby bez čísel, které import sám nezaloží — rozhodne o nich účetní.
+const manualOnlyPersonsCount = computed(() => preview.value
+  ? preview.value.persons.filter(person => personCanBeCreated(person, manualLinks.value)).length - creatableMissingPersons.value.length
+  : 0)
+const deductionCount = computed(() => preview.value?.summary.deductions ?? 0)
 const missingEmploymentCount = computed(() =>
   preview.value ? personsWithoutEmploymentCount(preview.value.persons, manualLinks.value) : 0)
 const showAutoCreateOption = computed(() => props.canCreatePersons && creatableMissingPersons.value.length > 0)
@@ -323,8 +332,10 @@ async function apply() {
       create_components: willCreate.value.length > 0 && createComponents.value,
       adopt_personal_numbers: adoptPersonalNumbers.value,
       adopt_monthly_wage: adoptMonthlyWage.value && adoptableWages.value.length > 0,
+      create_deductions: createDeductions.value && deductionCount.value > 0,
       write_time_summary: writeTimeSummary.value,
       approve_clean_time_months: writeTimeSummary.value && approveCleanTimeMonths.value && props.canApproveTime === true,
+      materialize_absence_compensations: writeTimeSummary.value && materializeAbsenceCompensations.value,
     })
     result.value = response
     if (response.replayed) toast.warning(t('payroll_imports.attendance.summary.replayed_toast', { id: response.batch.id }))
@@ -508,6 +519,10 @@ async function approveTimeMonths() {
               <input v-model="autoCreateMissingPersons" type="checkbox" data-testid="attendance-auto-create-persons" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.auto_create_persons', { count: creatableMissingPersons.length }) }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.auto_create_persons_hint') }}</span></span>
             </label>
+            <p v-if="manualOnlyPersonsCount > 0" class="text-xs text-warning-700" data-testid="attendance-manual-only-persons">
+              {{ t('payroll_imports.attendance.summary.auto_create_manual_only', { count: manualOnlyPersonsCount }) }}
+              <button type="button" class="ml-1 font-medium text-payroll-600 hover:underline" @click="goTo(2)">{{ t('payroll_imports.attendance.summary.edit_in_persons_step') }}</button>
+            </p>
             <label v-if="willCreate.length" class="flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="createComponents" type="checkbox" data-testid="attendance-create-components-toggle" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.create_components') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.create_components_hint') }}</span></span>
@@ -528,6 +543,10 @@ async function approveTimeMonths() {
               <input v-model="createInputs" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.create_inputs') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.create_inputs_hint') }}</span></span>
             </label>
+            <label v-if="deductionCount > 0" class="flex items-start gap-2 text-sm text-neutral-800">
+              <input v-model="createDeductions" type="checkbox" data-testid="attendance-create-deductions" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
+              <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.create_deductions', { count: deductionCount }) }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.create_deductions_hint') }}</span></span>
+            </label>
             <label class="flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="writeTimeSummary" type="checkbox" data-testid="attendance-write-time-summary" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance_time.options.write_summary') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance_time.options.write_summary_hint') }}</span></span>
@@ -540,6 +559,15 @@ async function approveTimeMonths() {
                 <span class="font-medium">{{ t('payroll_imports.attendance_time.options.approve_clean') }}</span>
                 <span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance_time.options.approve_clean_hint') }}</span>
                 <span v-if="approveTimeBlockedReason && canWrite" class="mt-0.5 block" :class="BTN_DISABLED_NOTE" data-testid="attendance-approve-blocked">{{ approveTimeBlockedReason }}</span>
+              </span>
+            </label>
+            <label class="ml-6 flex items-start gap-2 text-sm text-neutral-800">
+              <input v-model="materializeAbsenceCompensations" type="checkbox" data-testid="attendance-materialize-absence-compensations" class="mt-0.5 rounded border-neutral-300 text-payroll-600"
+                :disabled="!canWrite || busy !== null || !writeTimeSummary"
+                :title="disabledTitle(!writeTimeSummary, t('payroll_imports.attendance_time.options.compensations_needs_summary'))">
+              <span>
+                <span class="font-medium">{{ t('payroll_imports.attendance_time.options.compensations') }}</span>
+                <span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance_time.options.compensations_hint') }}</span>
               </span>
             </label>
           </div>
@@ -590,7 +618,14 @@ async function approveTimeMonths() {
             <li>{{ t('payroll_imports.attendance.result.links_saved', { count: result.links_saved }) }}</li>
             <li v-if="result.personal_numbers_adopted" data-testid="attendance-personal-numbers-adopted">{{ t('payroll_imports.attendance.result.personal_numbers_adopted', { count: result.personal_numbers_adopted }) }}</li>
             <li v-if="result.monthly_wages_adopted" data-testid="attendance-monthly-wages-adopted">{{ t('payroll_imports.attendance.result.monthly_wages_adopted', { count: result.monthly_wages_adopted }) }}</li>
+            <li v-if="result.deductions" data-testid="attendance-deductions-result">{{ t('payroll_imports.attendance.result.deductions', { created: result.deductions.created, updated: result.deductions.updated, unchanged: result.deductions.unchanged }) }}</li>
           </ul>
+          <div v-if="result.deductions?.conflicts.length" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3" data-testid="attendance-deduction-conflicts">
+            <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.result.deduction_conflicts_title', { count: result.deductions.conflicts.length }) }}</p>
+            <ul class="mt-1 space-y-0.5 text-xs text-warning-700">
+              <li v-for="item in result.deductions.conflicts" :key="`${item.key}-${item.reason}`">{{ item.display_name }}: {{ item.reason }}</li>
+            </ul>
+          </div>
           <div v-if="result.wage_conflicts?.length" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3" data-testid="attendance-wage-conflicts">
             <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.result.wage_conflicts_title', { count: result.wage_conflicts.length }) }}</p>
             <ul class="mt-1 space-y-0.5 text-xs text-warning-700">
@@ -626,6 +661,27 @@ async function approveTimeMonths() {
             :period="result.batch.period"
             :labels="employmentLabels"
           />
+          <div v-if="result.absence_compensation" class="mt-3 rounded-lg border border-neutral-200 bg-surface p-3" data-testid="attendance-absence-compensation">
+            <p class="font-medium text-neutral-900">{{ t('payroll_imports.attendance_time.result.compensations_title') }}</p>
+            <p class="mt-0.5 text-neutral-700" data-testid="attendance-absence-compensation-counts">{{ t('payroll_imports.attendance_time.result.compensations_counts', { created: result.absence_compensation.created, updated: result.absence_compensation.updated, unchanged: result.absence_compensation.unchanged, cancelled: result.absence_compensation.cancelled }) }}</p>
+            <p class="mt-0.5 text-xs text-neutral-600">{{ t('payroll_imports.attendance_time.result.compensations_drafts_hint') }}</p>
+            <template v-if="result.absence_compensation.skipped.length">
+              <p class="mt-2 font-medium text-warning-700">{{ t('payroll_imports.attendance_time.result.compensations_skipped_title', { count: result.absence_compensation.skipped.length }) }}</p>
+              <ul class="mt-1 space-y-0.5 text-xs text-warning-700" data-testid="attendance-absence-compensation-skipped">
+                <li v-for="(item, index) in result.absence_compensation.skipped" :key="`${item.employment_id}-${item.meaning ?? ''}-${index}`">
+                  <span class="font-medium">{{ employmentLabels.get(item.employment_id)?.name ?? t('payroll_imports.attendance_time.result.unknown_person', { id: item.employment_id }) }}:</span> {{ item.reason }}
+                </li>
+              </ul>
+            </template>
+            <template v-if="result.absence_compensation.warnings.length">
+              <p class="mt-2 font-medium text-neutral-800">{{ t('payroll_imports.attendance_time.result.compensations_warnings_title', { count: result.absence_compensation.warnings.length }) }}</p>
+              <ul class="mt-1 space-y-0.5 text-xs text-neutral-700" data-testid="attendance-absence-compensation-warnings">
+                <li v-for="(item, index) in result.absence_compensation.warnings" :key="`${item.employment_id}-${item.meaning}-${index}`">
+                  <span class="font-medium">{{ employmentLabels.get(item.employment_id)?.name ?? t('payroll_imports.attendance_time.result.unknown_person', { id: item.employment_id }) }}:</span> {{ item.message }}
+                </li>
+              </ul>
+            </template>
+          </div>
           <div v-if="result.skipped_persons.length" class="mt-3">
             <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.result.skipped_title', { count: result.skipped_persons.length }) }}</p>
             <ul class="mt-1 space-y-0.5 text-xs text-warning-700">

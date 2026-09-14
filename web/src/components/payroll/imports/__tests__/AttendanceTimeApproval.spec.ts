@@ -410,3 +410,65 @@ describe('AttendanceImportPanel — souhrn a schválení pracovních měsíců',
     expect(wrapper.findComponent(HistoryStub).props('canApprove')).toBe(true)
   })
 })
+
+describe('AttendanceImportPanel — náhrady mzdy z hodin nepřítomnosti', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.preview.mockResolvedValue(preview)
+    m.apply.mockResolvedValue(applyResult())
+  })
+
+  it('volba jde zapnout jen se zápisem souhrnu a bez něj se neposílá', async () => {
+    const wrapper = mountPanel(true)
+    await loadToSummary(wrapper)
+    const compensations = wrapper.get('[data-testid="attendance-materialize-absence-compensations"]')
+    expect(compensations.attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-testid="attendance-write-time-summary"]').setValue(true)
+    expect(compensations.attributes('disabled')).toBeUndefined()
+    await compensations.setValue(true)
+    await wrapper.get('[data-testid="attendance-write-time-summary"]').setValue(false)
+    expect((compensations.element as HTMLInputElement).checked).toBe(false)
+
+    await wrapper.get('[data-testid="attendance-apply"]').trigger('click')
+    await flushPromises()
+    expect(m.apply).toHaveBeenCalledWith(expect.objectContaining({ materialize_absence_compensations: false }))
+  })
+
+  it('pošle volbu a ukáže počty i osoby bez výpočtu', async () => {
+    m.apply.mockResolvedValue(applyResult({
+      absence_compensation: {
+        created: 3,
+        updated: 1,
+        unchanged: 2,
+        cancelled: 0,
+        rates: { vacation_hours: 100, doctor_hours: 100, obstacle_employer_hours: 80 },
+        skipped: [{ employment_id: 501, meaning: 'sick_hours', reason: 'Náhradu mzdy při DPN nejde ověřit.' }],
+        warnings: [{ employment_id: 502, meaning: 'doctor_hours', message: 'Zkontrolujte podklad.' }],
+      },
+    }))
+    const wrapper = mountPanel(true)
+    await loadToSummary(wrapper)
+    await wrapper.get('[data-testid="attendance-write-time-summary"]').setValue(true)
+    await wrapper.get('[data-testid="attendance-materialize-absence-compensations"]').setValue(true)
+    await wrapper.get('[data-testid="attendance-apply"]').trigger('click')
+    await flushPromises()
+
+    expect(m.apply).toHaveBeenCalledWith(expect.objectContaining({
+      write_time_summary: true,
+      materialize_absence_compensations: true,
+    }))
+    expect(wrapper.get('[data-testid="attendance-absence-compensation-counts"]').text()).toContain('"created":3')
+    expect(wrapper.get('[data-testid="attendance-absence-compensation-skipped"]').text()).toContain('Náhradu mzdy při DPN nejde ověřit.')
+    expect(wrapper.get('[data-testid="attendance-absence-compensation-warnings"]').text()).toContain('Zkontrolujte podklad.')
+  })
+
+  it('bez volby výsledek náhrad neukazuje', async () => {
+    const wrapper = mountPanel(true)
+    await loadToSummary(wrapper)
+    await wrapper.get('[data-testid="attendance-apply"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="attendance-absence-compensation"]').exists()).toBe(false)
+  })
+})

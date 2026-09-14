@@ -5,6 +5,8 @@ import { personalNumberLabel } from '@/pages/payroll/employmentLifecycleUi'
 import {
   payrollImportsApi,
   type AttendanceBatch,
+  type AttendanceBatchComparison,
+  type AttendanceBatchComparisonRow,
   type AttendanceBatchRow,
 } from '@/api/payrollImports'
 import { payrollAttendanceApprovalApi, type AttendanceTimeApproval } from '@/api/payrollAttendanceApproval'
@@ -46,6 +48,39 @@ async function approve(batch: AttendanceBatch) {
   } finally {
     approving.value = null
   }
+}
+
+// Kontrola proti mzdovému exportu v podkladech: hrubá a čistá z výpočtu běhu.
+const comparing = ref<number | null>(null)
+const comparisons = ref<Record<number, AttendanceBatchComparison>>({})
+const compareErrors = ref<Record<number, string>>({})
+
+async function compare(batch: AttendanceBatch) {
+  if (comparing.value !== null) return
+  comparing.value = batch.id
+  compareErrors.value = Object.fromEntries(
+    Object.entries(compareErrors.value).filter(([id]) => Number(id) !== batch.id),
+  )
+  try {
+    comparisons.value = { ...comparisons.value, [batch.id]: await payrollImportsApi.attendanceBatchComparison(batch.id) }
+  } catch (err) {
+    compareErrors.value = { ...compareErrors.value, [batch.id]: apiErrorMessage(err, t('payroll_imports.attendance.history.compare_failed')) }
+  } finally {
+    comparing.value = null
+  }
+}
+
+function money(minor: number | null): string {
+  return minor === null ? '—' : formatMoneyMinor(minor)
+}
+
+function diffClass(diff: number | null): string {
+  if (diff === null) return 'text-neutral-400'
+  return Math.abs(diff) > 100 ? 'font-medium text-danger-600' : 'text-neutral-500'
+}
+
+function statusClass(status: AttendanceBatchComparisonRow['status']): string {
+  return { match: 'bg-success-50 text-success-700', diff: 'bg-danger-50 text-danger-600', missing: 'bg-warning-50 text-warning-700' }[status]
 }
 
 const batches = ref<AttendanceBatch[]>([])
@@ -146,6 +181,11 @@ defineExpose({ reload })
               <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.checkCircle" /></svg>
               {{ approving === batch.id ? t('payroll_imports.attendance_time.approving') : t('payroll_imports.attendance_time.approve') }}
             </button>
+            <button type="button" :class="btnOutlineSm('primary')" :disabled="comparing !== null"
+              :title="t('payroll_imports.attendance.history.compare_hint')" data-testid="attendance-history-compare" @click="compare(batch)">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chart" /></svg>
+              {{ comparing === batch.id ? t('payroll_imports.common.working') : t('payroll_imports.attendance.history.compare') }}
+            </button>
             <button type="button" :class="btnOutlineSm('neutral')" :aria-expanded="expanded === batch.id" @click="toggle(batch)">
               <svg class="h-3.5 w-3.5 transition-transform" :class="expanded === batch.id ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevron" /></svg>
               {{ t(expanded === batch.id ? 'payroll_imports.attendance.history.hide' : 'payroll_imports.attendance.history.show') }}
@@ -156,6 +196,49 @@ defineExpose({ reload })
         <div v-if="approveErrors[batch.id] || approvals[batch.id]" class="px-4 pb-3" data-testid="attendance-history-approval">
           <p v-if="approveErrors[batch.id]" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-700">{{ approveErrors[batch.id] }}</p>
           <AttendanceTimeApprovalResult v-else-if="approvals[batch.id]" :approval="approvals[batch.id]" :period="batch.period" />
+        </div>
+
+        <div v-if="compareErrors[batch.id] || comparisons[batch.id]" class="px-4 pb-3" data-testid="attendance-history-comparison">
+          <p v-if="compareErrors[batch.id]" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-700">{{ compareErrors[batch.id] }}</p>
+          <template v-else-if="comparisons[batch.id]">
+            <p v-if="comparisons[batch.id].rows.length === 0" class="text-sm text-neutral-500">{{ t('payroll_imports.attendance.history.compare_no_reference') }}</p>
+            <template v-else>
+              <p v-if="comparisons[batch.id].summary.missing === comparisons[batch.id].rows.length" class="mb-2 text-sm text-warning-700">{{ t('payroll_imports.attendance.history.compare_no_run') }}</p>
+              <p class="mb-2 text-xs text-neutral-600">{{ t('payroll_imports.attendance.history.compare_summary', comparisons[batch.id].summary) }}</p>
+              <div class="max-h-96 overflow-auto rounded-lg border border-neutral-200 bg-surface">
+                <table class="min-w-full divide-y divide-neutral-200 text-sm">
+                  <thead>
+                    <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                      <th class="sticky top-0 bg-surface px-3 py-2">{{ t('payroll_imports.attendance.history.columns.employee') }}</th>
+                      <th class="sticky top-0 bg-surface px-3 py-2 text-right">{{ t('payroll_imports.attendance.history.compare_columns.reference_gross') }}</th>
+                      <th class="sticky top-0 bg-surface px-3 py-2 text-right">{{ t('payroll_imports.attendance.history.compare_columns.computed_gross') }}</th>
+                      <th class="sticky top-0 bg-surface px-3 py-2 text-right">{{ t('payroll_imports.attendance.history.compare_columns.diff') }}</th>
+                      <th class="sticky top-0 bg-surface px-3 py-2 text-right">{{ t('payroll_imports.attendance.history.compare_columns.reference_net') }}</th>
+                      <th class="sticky top-0 bg-surface px-3 py-2 text-right">{{ t('payroll_imports.attendance.history.compare_columns.computed_net') }}</th>
+                      <th class="sticky top-0 bg-surface px-3 py-2 text-right">{{ t('payroll_imports.attendance.history.compare_columns.diff') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-neutral-100">
+                    <tr v-for="row in comparisons[batch.id].rows" :key="row.employment_id">
+                      <td class="px-3 py-1.5">
+                        <span class="font-medium">{{ row.employee_name }}</span> <span class="text-xs text-neutral-500">{{ personalNumberLabel(t, row.employment_code) }}</span>
+                        <span class="ml-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium" :class="statusClass(row.status)">{{ t(`payroll_imports.attendance.history.compare_status.${row.status}`) }}</span>
+                      </td>
+                      <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-neutral-600">{{ money(row.reference_gross_minor) }}</td>
+                      <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ money(row.computed_gross_minor) }}</td>
+                      <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums" :class="diffClass(row.gross_diff_minor)">{{ money(row.gross_diff_minor) }}</td>
+                      <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-neutral-600">{{ money(row.reference_net_minor) }}</td>
+                      <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">
+                        <span v-if="row.net_shared" class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.history.compare_net_shared') }}</span>
+                        <template v-else>{{ money(row.computed_net_minor) }}</template>
+                      </td>
+                      <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums" :class="diffClass(row.net_diff_minor)">{{ money(row.net_diff_minor) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+          </template>
         </div>
 
         <div v-if="expanded === batch.id" class="border-t border-neutral-100 bg-neutral-50/60 px-4 py-3">

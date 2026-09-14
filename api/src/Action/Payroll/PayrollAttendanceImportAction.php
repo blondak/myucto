@@ -89,6 +89,8 @@ final class PayrollAttendanceImportAction
                 ($body['adopt_monthly_wage'] ?? false) === true,
                 ($body['write_time_summary'] ?? false) === true,
                 ($body['approve_clean_time_months'] ?? false) === true,
+                ($body['materialize_absence_compensations'] ?? false) === true,
+                ($body['create_deductions'] ?? false) === true,
             );
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -116,6 +118,11 @@ final class PayrollAttendanceImportAction
                 'time_summary_exceptions' => count(is_array($timeSummary['exceptions'] ?? null) ? $timeSummary['exceptions'] : []),
                 'time_months_approved' => $timeApproval['approved'] ?? 0,
                 'time_approval_exceptions' => self::exceptionCodes($timeApproval),
+                'absence_compensations_created' => is_array($result['absence_compensation'] ?? null)
+                    ? ($result['absence_compensation']['created'] ?? 0)
+                    : null,
+                'deductions_created' => is_array($result['deductions'] ?? null) ? ($result['deductions']['created'] ?? 0) : 0,
+                'deductions_updated' => is_array($result['deductions'] ?? null) ? ($result['deductions']['updated'] ?? 0) : 0,
                 'replayed' => $result['replayed'] ?? false,
             ],
             $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
@@ -246,6 +253,20 @@ final class PayrollAttendanceImportAction
         return Json::ok($response, $detail);
     }
 
+    /** @param array{id:string} $args */
+    public function comparison(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, 'payroll.inputs.write')) !== null) {
+            return $error;
+        }
+        $comparison = $this->imports->comparison($this->currentSupplierId($request), (int) $args['id']);
+        if ($comparison === null) {
+            return Json::error($response, 'not_found', 'Dávka importu nebyla nalezena.', 404);
+        }
+
+        return Json::ok($response, $comparison);
+    }
+
     public function profiles(Request $request, Response $response): Response
     {
         if (($error = $this->authorize($request, $response, 'payroll.inputs.write')) !== null) {
@@ -288,6 +309,17 @@ final class PayrollAttendanceImportAction
         }
 
         return Json::ok($response, ['deleted' => true]);
+    }
+
+    /** Obnoví vzorový profil GIRITON (třeba po omylem smazaném). */
+    public function restoreSampleProfile(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, 'payroll.settings')) !== null) {
+            return $error;
+        }
+        $result = $this->imports->restoreSampleProfile($this->currentSupplierId($request), $this->userId($request));
+
+        return Json::ok($response, $result, $result['restored'] ? 201 : 200);
     }
 
     /**

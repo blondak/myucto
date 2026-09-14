@@ -6,9 +6,11 @@ namespace MyInvoice\Service\Payroll\Absence;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\MonthlyWageProration;
 use MyInvoice\Service\Payroll\Time\CzechHolidayCalendar;
+use MyInvoice\Service\Payroll\Time\PayrollEmploymentCalendarProvisioner;
 use MyInvoice\Service\Payroll\Time\PayrollMonthlyFundService;
 use MyInvoice\Service\Payroll\Time\PayrollWorkCalendarSchedule;
 use PDO;
@@ -36,12 +38,132 @@ use PDO;
  */
 final class PayrollWageProrationService
 {
+    /**
+     * Hodiny souhrnu importu docházky → titul náhrady. Stejné tituly jako
+     * {@see PayrollWageReplacementTitle::forAbsenceType()} pro absence s daty.
+     * Nemoc se v měsíčním součtu nedá rozdělit oknem § 192, klíč je ale jen
+     * popisný a do aritmetiky vstupuje součtem. Svátek, odpracované hodiny,
+     * pracovní cesta ani práce z domova základní mzdu nekrátí.
+     */
+    private const IMPORT_SUMMARY_TITLES = [
+        'vacation_hours' => PayrollWageReplacementTitle::Vacation,
+        'sick_hours' => PayrollWageReplacementTitle::SicknessCompensation,
+        'care_hours' => PayrollWageReplacementTitle::StateBenefit,
+        'paternity_hours' => PayrollWageReplacementTitle::StateBenefit,
+        'doctor_hours' => PayrollWageReplacementTitle::PaidObstacle,
+        'obstacle_employee_hours' => PayrollWageReplacementTitle::PaidObstacle,
+        'obstacle_employer_hours' => PayrollWageReplacementTitle::PaidObstacle,
+        'unpaid_leave_hours' => PayrollWageReplacementTitle::Unpaid,
+        'unexcused_hours' => PayrollWageReplacementTitle::Unpaid,
+        'compensatory_time_off_hours' => PayrollWageReplacementTitle::Unpaid,
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollAbsenceRepository $absences,
         private readonly PayrollMonthlyFundService $fund,
+        private readonly PayrollTimeRepository $time,
+        private readonly PayrollEmploymentCalendarProvisioner $calendars,
         private readonly CzechHolidayCalendar $holidays = new CzechHolidayCalendar(),
     ) {}
+
+    /**
+     * Krácení měsíční mzdy v měsíci, jehož docházka je souhrnem importu.
+     *
+     * Směny ani data absencí takový měsíc nemá, nahrazené minuty se proto
+     * berou z měsíčních součtů hodin souhrnu. Fail-closed navíc tam, kde by
+     * se souhrn s jiným podkladem rozešel: nepřítomnost s daty ve stejném
+     * měsíci (tatáž doba by se krátila dvakrát) a fond z podkladů, který
+     * nesedí s kalendářem (hodiny by se vztahovaly k jinému fondu).
+     *
+     * @return array{
+     *   supported:bool,
+     *   reason:?string,
+     *   fund_minutes:?int,
+     *   replaced_minutes:int,
+     *   replaced_minutes_by_title:array<string,int>,
+     *   amount_minor:?int,
+     *   trace:?array<string,mixed>
+     * }
+     */
+    public function forImportSummary(
+        int $supplierId,
+        int $employmentId,
+        string $period,
+        int $monthlyGrossMinor,
+    ): array {
+        $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $period . '-01');
+        if ($start === false || $start->format('Y-m') !== $period) {
+            throw new \InvalidArgumentException('period musí být ve formátu YYYY-MM.');
+        }
+        $periodStart = $start->format('Y-m-d');
+        $periodEnd = $start->modify('last day of this month')->format('Y-m-d');
+
+        $summary = $this->time->importSummary($supplierId, $employmentId, $periodStart);
+        if ($summary === null) {
+            return self::unsupported('import_summary_missing');
+        }
+        if ($this->absencesInMonth($supplierId, $employmentId, $periodStart, $periodEnd) !== []) {
+            return self::unsupported('import_summary_with_dated_absences');
+        }
+        try {
+            $byTitle = self::replacedMinutesFromImportSummary($summary['values']);
+        } catch (\InvalidArgumentException) {
+            return self::unsupported('import_summary_inconsistent');
+        }
+        if ($byTitle === []) {
+            return self::none();
+        }
+
+        $fundMinutes = $this->fund->minutes($supplierId, $employmentId, $period);
+        if ($fundMinutes === null) {
+            return self::unsupported('missing_work_calendar');
+        }
+        if ($fundMinutes <= 0) {
+            return self::unsupported('empty_work_fund');
+        }
+        if (isset($summary['values']['fund_hours'])
+            && $this->calendars->fundCheck($supplierId, $employmentId, $periodStart, $summary['values']['fund_hours']) !== null
+        ) {
+            return self::unsupported('import_fund_mismatch');
+        }
+        if (array_sum($byTitle) > $fundMinutes) {
+            return self::unsupported('absence_exceeds_work_fund');
+        }
+
+        $result = MonthlyWageProration::calculate($monthlyGrossMinor, $fundMinutes, $byTitle);
+
+        return [
+            'supported' => true,
+            'reason' => null,
+            'fund_minutes' => $result->fundMinutes,
+            'replaced_minutes' => $result->replacedMinutes,
+            'replaced_minutes_by_title' => $result->replacedMinutesByTitle,
+            'amount_minor' => $result->amountMinor,
+            'trace' => $result->trace(),
+        ];
+    }
+
+    /**
+     * Nahrazené minuty podle titulu z hodin souhrnu (význam → millihodiny).
+     * Minuty se zaokrouhlují po významech stejně jako u náhrady mzdy, aby
+     * se krácení a náhrada opíraly o tytéž minuty.
+     *
+     * @param array<string,int> $values
+     * @return array<string,int> titul => minuty, jen kladné
+     */
+    public static function replacedMinutesFromImportSummary(array $values): array
+    {
+        $byTitle = [];
+        foreach (self::IMPORT_SUMMARY_TITLES as $meaning => $title) {
+            $minutes = PayrollImportAbsenceCompensationMaterializer::minutes($values[$meaning] ?? 0);
+            if ($minutes > 0) {
+                $byTitle[$title->value] = ($byTitle[$title->value] ?? 0) + $minutes;
+            }
+        }
+
+        return $byTitle;
+    }
 
     /**
      * @return array{

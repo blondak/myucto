@@ -138,6 +138,33 @@ final class PayrollDeductionAgreementRepository
         return ['items' => $items, 'total' => $total];
     }
 
+    /**
+     * Dohoda podle stabilní reference — pro idempotentní zápis z importů.
+     *
+     * @return array{id:int,status:string,requested_minor:int,withheld_total_minor:int,row_version:int}|null
+     */
+    public function findByReference(int $supplierId, int $employeeId, string $reference): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, status, requested_minor, withheld_total_minor, row_version
+               FROM payroll_deduction_agreements
+              WHERE supplier_id = ? AND employee_id = ? AND agreement_reference = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId, $reference]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $row['id'],
+            'status' => (string) $row['status'],
+            'requested_minor' => (int) $row['requested_minor'],
+            'withheld_total_minor' => (int) $row['withheld_total_minor'],
+            'row_version' => (int) $row['row_version'],
+        ];
+    }
+
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, int $id): ?array
     {

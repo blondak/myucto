@@ -7,10 +7,13 @@ import {
   ATTENDANCE_MEANING_GROUPS,
   ATTENDANCE_UNITS,
   AUTO_COMPONENT_CODE,
+  DEFAULT_OBSTACLE_RATE,
+  OBSTACLE_RATE_MEANING,
   PROFILE_COMPONENT_KINDS,
   emptyComponentDraft,
   emptyRuleDraft,
   moveItem,
+  obstacleRateIsReduced,
   ruleUnitForMeaning,
   type ProfileDraft,
   type ProfileDraftIssue,
@@ -106,6 +109,7 @@ function inputClass(invalid: boolean): string {
                 <th class="min-w-52 px-2 py-2">{{ t('payroll_imports.mapping.rules.columns.meaning') }}</th>
                 <th class="min-w-36 px-2 py-2">{{ t('payroll_imports.mapping.rules.columns.unit') }}</th>
                 <th class="min-w-32 px-2 py-2">{{ t('payroll_imports.mapping.rules.columns.component') }}</th>
+                <th class="min-w-56 px-2 py-2">{{ t('payroll_imports.mapping.rules.columns.condition') }}</th>
                 <th v-if="!readonly" class="w-28 px-3 py-2"><span class="sr-only">{{ t('payroll_imports.mapping.rules.columns.actions') }}</span></th>
               </tr>
             </thead>
@@ -144,8 +148,31 @@ function inputClass(invalid: boolean): string {
                     :class="`${inputClass(hasIssue(index + 1, ['rule_component_missing']))} font-mono uppercase`"
                     :placeholder="t('payroll_imports.mapping.rules.component_placeholder')"
                     :aria-label="t('payroll_imports.mapping.rules.component_for', { row: index + 1 })">
+                  <div v-else-if="rule.meaning === OBSTACLE_RATE_MEANING" class="flex items-center gap-1">
+                    <div class="w-16">
+                      <input v-model="rule.rate_percent" inputmode="numeric" maxlength="3" :disabled="readonly"
+                        :class="`${inputClass(hasIssue(index + 1, ['rule_rate_invalid']))} text-right tabular-nums`"
+                        :placeholder="String(DEFAULT_OBSTACLE_RATE)"
+                        :aria-label="t('payroll_imports.mapping.rules.rate_for', { row: index + 1 })">
+                    </div>
+                    <span class="whitespace-nowrap text-xs text-neutral-500">{{ t('payroll_imports.mapping.rules.rate_suffix') }}</span>
+                  </div>
                   <span v-else class="text-xs text-neutral-300">—</span>
                   <p v-if="rule.meaning === 'component' && rule.component_code.trim() === AUTO_COMPONENT_CODE" class="mt-0.5 text-[11px] text-neutral-500">{{ t('payroll_imports.mapping.rules.auto_code') }}</p>
+                  <p v-if="obstacleRateIsReduced(rule)" class="mt-0.5 max-w-56 text-[11px] text-warning-700">{{ t('payroll_imports.mapping.rules.rate_low_hint') }}</p>
+                </td>
+                <td class="px-2 py-1.5">
+                  <div class="flex items-center gap-1">
+                    <input v-model="rule.when_header" maxlength="191" :disabled="readonly"
+                      :class="inputClass(hasIssue(index + 1, ['rule_condition_incomplete', 'rule_condition_auto']))"
+                      :placeholder="t('payroll_imports.mapping.rules.condition_header_placeholder')"
+                      :aria-label="t('payroll_imports.mapping.rules.condition_header_for', { row: index + 1 })">
+                    <span class="text-xs text-neutral-400" aria-hidden="true">=</span>
+                    <input v-model="rule.when_value" maxlength="191" :disabled="readonly"
+                      :class="inputClass(hasIssue(index + 1, ['rule_condition_incomplete']))"
+                      :placeholder="t('payroll_imports.mapping.rules.condition_value_placeholder')"
+                      :aria-label="t('payroll_imports.mapping.rules.condition_value_for', { row: index + 1 })">
+                  </div>
                 </td>
                 <td v-if="!readonly" class="px-3 py-1.5">
                   <div class="flex items-center gap-1">
@@ -216,6 +243,25 @@ function inputClass(invalid: boolean): string {
                 <input v-model="rule.component_code" :list="codesListId" maxlength="64" :disabled="readonly"
                   :class="`${inputClass(hasIssue(index + 1, ['rule_component_missing']))} font-mono uppercase`"
                   :placeholder="t('payroll_imports.mapping.rules.component_placeholder')">
+              </label>
+              <label v-if="rule.meaning === OBSTACLE_RATE_MEANING" class="block sm:col-span-2">
+                <span class="mb-0.5 block text-[11px] text-neutral-500">{{ t('payroll_imports.mapping.rules.rate_for', { row: index + 1 }) }} ({{ t('payroll_imports.mapping.rules.rate_suffix') }})</span>
+                <input v-model="rule.rate_percent" inputmode="numeric" maxlength="3" :disabled="readonly"
+                  :class="`${inputClass(hasIssue(index + 1, ['rule_rate_invalid']))} tabular-nums`"
+                  :placeholder="String(DEFAULT_OBSTACLE_RATE)">
+                <span v-if="obstacleRateIsReduced(rule)" class="mt-0.5 block text-[11px] text-warning-700">{{ t('payroll_imports.mapping.rules.rate_low_hint') }}</span>
+              </label>
+              <label class="block">
+                <span class="mb-0.5 block text-[11px] text-neutral-500">{{ t('payroll_imports.mapping.rules.columns.condition') }}</span>
+                <input v-model="rule.when_header" maxlength="191" :disabled="readonly"
+                  :class="inputClass(hasIssue(index + 1, ['rule_condition_incomplete', 'rule_condition_auto']))"
+                  :placeholder="t('payroll_imports.mapping.rules.condition_header_placeholder')">
+              </label>
+              <label class="block">
+                <span class="mb-0.5 block text-[11px] text-neutral-500">&nbsp;</span>
+                <input v-model="rule.when_value" maxlength="191" :disabled="readonly"
+                  :class="inputClass(hasIssue(index + 1, ['rule_condition_incomplete']))"
+                  :placeholder="t('payroll_imports.mapping.rules.condition_value_placeholder')">
               </label>
             </div>
           </li>

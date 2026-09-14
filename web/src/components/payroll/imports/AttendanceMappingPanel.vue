@@ -55,7 +55,7 @@ const workspace = useAttendanceWorkspace()
 const { period, files, profiles, profilesLoading, profilesError } = workspace
 const supplierStore = useSupplierStore()
 
-type Busy = 'save' | 'delete' | 'copy' | 'export' | 'import' | 'test'
+type Busy = 'save' | 'delete' | 'copy' | 'export' | 'import' | 'test' | 'restore'
 
 const draft = ref<ProfileDraft | null>(null)
 const baseline = ref('')
@@ -76,6 +76,8 @@ const savedProfile = computed(() => {
 const otherNames = computed(() => profiles.value.filter(profile => profile.id !== draft.value?.id).map(profile => profile.name))
 const issues = computed<ProfileDraftIssue[]>(() => draft.value ? profileDraftIssues(draft.value, otherNames.value) : [])
 const otherSuppliers = computed(() => supplierStore.availableSuppliers.filter(supplier => supplier.id !== supplierStore.currentSupplierId))
+// Vzor jde vrátit, když ho firma smazala; dokud ho má, tlačítko se nenabízí.
+const hasSample = computed(() => profiles.value.some(profile => profile.is_sample))
 
 const saveBlockedReason = computed(() => issues.value.length ? t('payroll_imports.mapping.reason.issues') : '')
 /*
@@ -280,6 +282,21 @@ async function remove() {
   }
 }
 
+async function restoreSample() {
+  if (busy.value !== null || !confirmDiscard()) return
+  busy.value = 'restore'
+  try {
+    const { profile, restored } = await payrollImportsApi.restoreAttendanceSampleProfile()
+    workspace.upsertProfile(profile)
+    openProfile(profile)
+    toast.success(t(restored ? 'payroll_imports.mapping.sample_restored' : 'payroll_imports.mapping.sample_exists', { name: profile.name }))
+  } catch (err) {
+    toast.error(apiErrorMessage(err, t('payroll_imports.mapping.sample_restore_failed')))
+  } finally {
+    busy.value = null
+  }
+}
+
 async function copyTo(supplierId: number) {
   const profile = savedProfile.value
   if (!profile || busy.value !== null) return
@@ -416,6 +433,11 @@ watch(workspace.mappingFocus, focus => {
           <button type="button" data-testid="attendance-profile-import" :class="btnOutline('neutral')" :disabled="busy !== null" @click="pickImport">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.upload" /></svg>
             {{ busy === 'import' ? t('payroll_imports.common.working') : t('payroll_imports.mapping.import') }}
+          </button>
+          <button v-if="!hasSample && !profilesLoading" type="button" data-testid="attendance-profile-restore-sample" :class="btnOutline('neutral')"
+            :disabled="busy !== null" :title="t('payroll_imports.mapping.restore_sample_hint')" @click="restoreSample">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+            {{ busy === 'restore' ? t('payroll_imports.common.working') : t('payroll_imports.mapping.restore_sample') }}
           </button>
         </div>
 

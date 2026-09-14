@@ -282,7 +282,10 @@ export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeani
       'compensatory_time_off_hours',
     ],
   },
-  { key: 'money', meanings: ['component', 'reference_gross', 'reference_net', 'reference_hours'] },
+  {
+    key: 'money',
+    meanings: ['component', 'net_meal_deduction', 'net_other_deduction', 'reference_gross', 'reference_net', 'reference_hours'],
+  },
 ]
 
 export const ATTENDANCE_MEANINGS: AttendanceMeaning[] = ATTENDANCE_MEANING_GROUPS.flatMap(group => group.meanings)
@@ -298,7 +301,9 @@ const TEXT_MEANINGS = new Set<AttendanceMeaning>([
   'person_name', 'personal_number', 'birth_number', 'relation_label', 'department',
   'cost_center', 'position', 'start_end_note', 'monthly_wage',
 ])
-const MONEY_MEANINGS = new Set<AttendanceMeaning>(['component', 'reference_gross', 'reference_net'])
+const MONEY_MEANINGS = new Set<AttendanceMeaning>([
+  'component', 'net_meal_deduction', 'net_other_deduction', 'reference_gross', 'reference_net',
+])
 
 /**
  * Jednotka, která k významu dává smysl. U hodinových významů zůstává
@@ -340,7 +345,16 @@ export interface RuleDraft {
   meaning: AttendanceMeaning
   unit: AttendanceUnit | null
   component_code: string
+  /** Podmínka pravidla: sloupec a hodnota; obojí prázdné = bez podmínky. */
+  when_header: string
+  when_value: string
+  /** Sazba náhrady u překážky na straně zaměstnavatele; prázdné = výchozí. */
+  rate_percent: string
 }
+
+/** Význam, u kterého pravidlo nese sazbu náhrady mzdy, a sazba bez jejího zadání. */
+export const OBSTACLE_RATE_MEANING: AttendanceMeaning = 'obstacle_employer_hours'
+export const DEFAULT_OBSTACLE_RATE = 80
 
 export interface ComponentDraft {
   uid: string
@@ -371,11 +385,25 @@ export function ruleToDraft(rule: AttendanceRule): RuleDraft {
     meaning: rule.meaning,
     unit: rule.unit,
     component_code: rule.component_code ?? '',
+    when_header: rule.when_header ?? '',
+    when_value: rule.when_value ?? '',
+    rate_percent: rule.rate_percent === undefined ? '' : String(rule.rate_percent),
   }
 }
 
 export function emptyRuleDraft(overrides: Partial<Omit<RuleDraft, 'uid'>> = {}): RuleDraft {
-  return { uid: nextUid('rule'), sheet: '', header: '', meaning: 'ignore', unit: null, component_code: '', ...overrides }
+  return {
+    uid: nextUid('rule'),
+    sheet: '',
+    header: '',
+    meaning: 'ignore',
+    unit: null,
+    component_code: '',
+    when_header: '',
+    when_value: '',
+    rate_percent: '',
+    ...overrides,
+  }
 }
 
 export function componentToDraft(component: AttendanceProfileComponent): ComponentDraft {
@@ -423,13 +451,25 @@ export function duplicateDraft(draft: ProfileDraft, name: string): ProfileDraft 
 export function draftRules(draft: ProfileDraft): AttendanceRule[] {
   return draft.rules
     .filter(rule => rule.header.trim() !== '')
-    .map(rule => ({
-      sheet: rule.sheet.trim() === '' ? null : rule.sheet.trim(),
-      header: rule.header.trim(),
-      meaning: rule.meaning,
-      unit: rule.meaning === 'ignore' ? null : ruleUnitForMeaning(rule.meaning, rule.unit),
-      component_code: rule.meaning === 'component' ? normalizeRuleComponentCode(rule.component_code) : null,
-    }))
+    .map(rule => {
+      const result: AttendanceRule = {
+        sheet: rule.sheet.trim() === '' ? null : rule.sheet.trim(),
+        header: rule.header.trim(),
+        meaning: rule.meaning,
+        unit: rule.meaning === 'ignore' ? null : ruleUnitForMeaning(rule.meaning, rule.unit),
+        component_code: rule.meaning === 'component' ? normalizeRuleComponentCode(rule.component_code) : null,
+      }
+      // Podmínka jen u pravidla, které ji má — neúplnou zastaví ruleIssues i server.
+      const whenHeader = rule.when_header.trim()
+      const whenValue = rule.when_value.trim()
+      if (whenHeader !== '' || whenValue !== '') {
+        result.when_header = whenHeader
+        result.when_value = whenValue
+      }
+      const rate = rule.rate_percent.trim()
+      if (rule.meaning === OBSTACLE_RATE_MEANING && rate !== '') result.rate_percent = Number(rate)
+      return result
+    })
 }
 
 export function draftComponents(draft: ProfileDraft): AttendanceProfileComponent[] {
@@ -453,6 +493,10 @@ export type ProfileDraftIssue =
   | { kind: 'no_rules' }
   | { kind: 'rule_header_missing'; row: number }
   | { kind: 'rule_component_missing'; row: number }
+  | { kind: 'rule_condition_incomplete'; row: number }
+  | { kind: 'rule_condition_auto'; row: number }
+  | { kind: 'rule_rate_invalid'; row: number }
+  | { kind: 'rule_rate_mixed' }
   | { kind: 'component_code_missing'; row: number }
   | { kind: 'component_code_duplicate'; row: number; code: string }
   | { kind: 'component_code_auto'; row: number }
@@ -495,8 +539,31 @@ export function ruleIssues(draft: ProfileDraft): ProfileDraftIssue[] {
     if (rule.meaning === 'component' && normalizeRuleComponentCode(rule.component_code) === null) {
       issues.push({ kind: 'rule_component_missing', row })
     }
+    const hasHeader = rule.when_header.trim() !== ''
+    const hasValue = rule.when_value.trim() !== ''
+    if (hasHeader !== hasValue) issues.push({ kind: 'rule_condition_incomplete', row })
+    if ((hasHeader || hasValue) && rule.meaning === 'component'
+      && normalizeRuleComponentCode(rule.component_code) === AUTO_COMPONENT_CODE) {
+      issues.push({ kind: 'rule_condition_auto', row })
+    }
+    const rate = rule.rate_percent.trim()
+    if (rule.meaning === OBSTACLE_RATE_MEANING && rate !== ''
+      && (!/^\d+$/.test(rate) || Number(rate) < 60 || Number(rate) > 100)) {
+      issues.push({ kind: 'rule_rate_invalid', row })
+    }
   })
+  // Hodnoty stejného významu se nesčítají, platí jedna — sazba proto také jedna.
+  const rates = new Set(draft.rules
+    .filter(rule => rule.meaning === OBSTACLE_RATE_MEANING)
+    .map(rule => rule.rate_percent.trim() === '' ? DEFAULT_OBSTACLE_RATE : Number(rule.rate_percent.trim())))
+  if (rates.size > 1) issues.push({ kind: 'rule_rate_mixed' })
   return issues
+}
+
+/** Sazba pod 80 % připadá v úvahu jen u § 207 písm. b) a § 209 — editor na to upozorní. */
+export function obstacleRateIsReduced(rule: RuleDraft): boolean {
+  const rate = Number(rule.rate_percent.trim())
+  return rule.meaning === OBSTACLE_RATE_MEANING && rule.rate_percent.trim() !== '' && rate >= 60 && rate < DEFAULT_OBSTACLE_RATE
 }
 
 /** Posun položky o `delta`; mimo rozsah vrací kopii beze změny. */
@@ -644,14 +711,28 @@ export function pruneManualLinks(
 }
 
 /**
- * Osobu lze rovnou založit, když ji import nenašel nebo je nejasná a nemá
- * (ani ručně zvolený) přiřazený pracovní vztah. Sdílí ji krok Osoby (checkbox
- * u řádku) i krok Souhrn (nabídka založit chybějící osoby) — počítat to jinde
- * jinak by rozjelo, kolik osob jde založit z obou míst.
+ * Osobu lze rovnou založit, když ji import nenašel a nemá (ani ručně
+ * zvolený) přiřazený pracovní vztah. Nejasná osoba má možné shody v evidenci —
+ * nová osoba by z ní udělala duplicitu, vybírá se proto vztah. Sdílí ji krok
+ * Osoby (checkbox u řádku) i krok Souhrn (nabídka založit chybějící osoby).
  */
 export function personCanBeCreated(person: AttendancePerson, manual: ManualLinks): boolean {
-  return (person.match.status === 'not_found' || person.match.status === 'ambiguous')
-    && effectiveEmploymentId(person, manual) === null
+  return person.match.status === 'not_found' && effectiveEmploymentId(person, manual) === null
+}
+
+export function personHasIdentifier(person: AttendancePerson): boolean {
+  return Boolean(person.personal_number?.trim()) || Boolean(person.birth_number_masked)
+}
+
+/**
+ * Osoby, které import založí sám. Nesou-li podklady osobní nebo rodná čísla
+ * (mzdový export), zakládají se jen osoby s nimi: osoba jen ze seznamu bez
+ * čísel bývá jinak zapsané jméno někoho z evidence (změna příjmení) a nová
+ * karta by byla duplicitou. Takové osoby zůstanou k ruční volbě v kroku Osoby.
+ */
+export function autoCreatablePersons(persons: AttendancePerson[], manual: ManualLinks): AttendancePerson[] {
+  const creatable = persons.filter(person => personCanBeCreated(person, manual))
+  return persons.some(personHasIdentifier) ? creatable.filter(personHasIdentifier) : creatable
 }
 
 /** Klíče osob bez vztahu, které lze rovnou založit — pro předvýběr v kroku Osoby. */
@@ -723,7 +804,8 @@ export function buildPersonsPayload(
       relation_type: relationTypeFor ? relationTypeFor(person) : defaults.relation_type,
       weekly_hours: weekly === '' ? null : weekly.replace(',', '.'),
       monthly_gross: Number.isFinite(wage) && wage > 0 ? Math.round(wage) : null,
-      planned_start_on: defaults.planned_start_on,
+      // Nástup z poznámky v podkladech je přesnější než jednotný den pro celou dávku.
+      planned_start_on: person.start_on || defaults.planned_start_on,
       personal_number: person.personal_number,
       activate: defaults.activate,
     }
@@ -731,6 +813,14 @@ export function buildPersonsPayload(
 }
 
 // ─── Docházka: souhrn ─────────────────────────────────────────────────────────
+
+export function summaryDeductions(persons: AttendancePerson[]): AttendanceMeaning[] {
+  const present = new Set<AttendanceMeaning>()
+  for (const person of persons) {
+    for (const deduction of person.deductions ?? []) present.add(deduction.meaning)
+  }
+  return ATTENDANCE_MEANINGS.filter(meaning => present.has(meaning))
+}
 
 export function summaryMeanings(persons: AttendancePerson[]): AttendanceMeaning[] {
   const present = new Set<AttendanceMeaning>()

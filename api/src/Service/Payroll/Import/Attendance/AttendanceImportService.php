@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll\Import\Attendance;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
+use MyInvoice\Repository\Payroll\PayrollDeductionAgreementConflictException;
+use MyInvoice\Repository\Payroll\PayrollDeductionAgreementRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
@@ -16,8 +18,12 @@ use MyInvoice\Repository\Payroll\PayrollInputImportRepository;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
+use MyInvoice\Service\Payroll\Absence\ImportAbsenceCompensationRates;
+use MyInvoice\Service\Payroll\Absence\PayrollImportAbsenceCompensationMaterializer;
 use MyInvoice\Service\Payroll\Component\PayrollInputImportService;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
+use MyInvoice\Service\Payroll\Net\DeductionAgreementStatus;
+use MyInvoice\Service\Payroll\Net\DeductionAgreementTerms;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -68,6 +74,13 @@ final class AttendanceImportService
      */
     private const WAGE_BASE_KINDS = ['hourly_wage', 'task_wage'];
 
+    /**
+     * Srážky z podkladů = dohody o srážce na importovaný měsíc. Druh dohody
+     * podle významu sloupce; pořadí za ručně sjednanými dohodami.
+     */
+    private const DEDUCTION_KINDS = ['net_meal_deduction' => 'meal', 'net_other_deduction' => 'other'];
+    private const DEDUCTION_PRIORITY = 500;
+
     public function __construct(
         private readonly AttendanceWorkbookReader $reader,
         private readonly AttendanceColumnMapper $mapper,
@@ -87,6 +100,8 @@ final class AttendanceImportService
         private readonly PayrollEmploymentValidator $employmentValidator,
         private readonly PayrollTimeImportSummaryWriter $timeSummaries,
         private readonly PayrollTimeImportApprovalService $timeApprovals,
+        private readonly PayrollImportAbsenceCompensationMaterializer $absenceCompensations,
+        private readonly PayrollDeductionAgreementRepository $deductions,
     ) {
     }
 
@@ -137,10 +152,17 @@ final class AttendanceImportService
         bool $adoptMonthlyWage = false,
         bool $writeTimeSummary = false,
         bool $approveCleanTimeMonths = false,
+        bool $materializeAbsenceCompensations = false,
+        bool $createDeductions = false,
     ): array {
         if ($approveCleanTimeMonths && !$writeTimeSummary) {
             throw new \InvalidArgumentException(
                 'Hromadné schválení pracovních měsíců vyžaduje zápis souhrnu docházky do pracovních měsíců.',
+            );
+        }
+        if ($materializeAbsenceCompensations && !$writeTimeSummary) {
+            throw new \InvalidArgumentException(
+                'Výpočet náhrad mzdy z hodin nepřítomnosti vyžaduje zápis souhrnu docházky do pracovních měsíců.',
             );
         }
         $periodStart = $this->period($period);
@@ -222,8 +244,9 @@ final class AttendanceImportService
             'create_inputs' => $createInputs,
             'create_components' => $createComponents,
             'adopt_personal_numbers' => $adoptPersonalNumbers,
-        // Klíč jen při zapnutí, ať otisky dávek bez převzetí mzdy zůstanou stejné.
-        ] + ($adoptMonthlyWage ? ['adopt_monthly_wage' => true] : []), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), true);
+        // Klíče jen při zapnutí, ať otisky dávek bez těchto voleb zůstanou stejné.
+        ] + ($adoptMonthlyWage ? ['adopt_monthly_wage' => true] : [])
+            + ($createDeductions ? ['create_deductions' => true] : []), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), true);
 
         /*
          * Mzda se zapisuje až po dávce, vztah po vztahu, a to i při opakování
@@ -246,9 +269,9 @@ final class AttendanceImportService
          * téže dávky. Zápis je idempotentní a volba není v otisku dávky, takže
          * zapnutí nad už použitými podklady souhrn jen doplní.
          */
-        $timeSteps = function (int $importId) use ($supplierId, $userId, $writeTimeSummary, $approveCleanTimeMonths): array {
+        $timeSteps = function (int $importId) use ($supplierId, $userId, $writeTimeSummary, $approveCleanTimeMonths, $materializeAbsenceCompensations, $computed): array {
             if (!$writeTimeSummary) {
-                return ['time_summary' => null, 'time_approval' => null];
+                return ['time_summary' => null, 'time_approval' => null, 'absence_compensation' => null];
             }
             $summary = $this->timeSummaries->writeFromBatch($supplierId, $importId, $userId);
 
@@ -258,6 +281,14 @@ final class AttendanceImportService
                 // souhrnech; výjimky se vracejí seznamem, nic nezastaví import.
                 'time_approval' => $approveCleanTimeMonths
                     ? $this->timeApprovals->approveWritten($supplierId, $importId, $summary, true, $userId)
+                    : null,
+                'absence_compensation' => $materializeAbsenceCompensations
+                    ? $this->absenceCompensations->materializeFromBatch(
+                        $supplierId,
+                        $importId,
+                        $userId,
+                        self::compensationRates($computed['rules']),
+                    )
                     : null,
             ];
         };
@@ -279,6 +310,7 @@ final class AttendanceImportService
             $createInputs,
             $createComponents,
             $adoptPersonalNumbers,
+            $createDeductions,
             $userId,
         ): ?array {
             $rows = [];
@@ -302,6 +334,16 @@ final class AttendanceImportService
                         'quantity_millihours' => null,
                         'amount_minor' => $component['amount_minor'],
                         'source_ref' => $component['source'],
+                    ];
+                }
+                foreach ($item['person']['_deductions'] ?? [] as $meaning => $deduction) {
+                    $rows[] = [
+                        'employment_id' => $employmentId,
+                        'meaning' => (string) $meaning,
+                        'component_code' => '',
+                        'quantity_millihours' => null,
+                        'amount_minor' => $deduction['amount_minor'],
+                        'source_ref' => $deduction['source'],
                     ];
                 }
             }
@@ -360,6 +402,9 @@ final class AttendanceImportService
                 'links_saved' => $linksSaved,
                 'components_created' => $created,
                 'adoption' => $adoption,
+                'deductions' => $createDeductions
+                    ? $this->createDeductions($supplierId, $periodStart, $assigned, $userId)
+                    : null,
             ];
         });
 
@@ -385,6 +430,7 @@ final class AttendanceImportService
             'wage_conflicts' => $wages['conflicts'],
             'runs_needing_refresh' => $wages['runs_needing_refresh'],
             'skipped_persons' => $skipped,
+            'deductions' => $result['deductions'],
         ] + $time;
     }
 
@@ -530,6 +576,24 @@ final class AttendanceImportService
         ];
     }
 
+    /**
+     * Hrubá a čistá mzda z mzdového exportu v dávce proti výpočtu mzdového běhu období.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function comparison(int $supplierId, int $importId): ?array
+    {
+        $batch = $this->imports->batch($supplierId, $importId);
+        if ($batch === null || $batch['source_system'] !== AttendanceMeaning::SOURCE_SYSTEM) {
+            return null;
+        }
+
+        return ['batch' => self::publicBatch($batch)] + AttendanceReferenceComparison::compare(
+            $this->imports->batchRows($supplierId, $importId),
+            $this->imports->runResultsForPeriod($supplierId, $batch['period'] . '-01'),
+        );
+    }
+
     /** @return list<array<string,mixed>> */
     public function profiles(int $supplierId): array
     {
@@ -573,6 +637,41 @@ final class AttendanceImportService
     public function deleteProfile(int $supplierId, int $id): bool
     {
         return $this->profiles->delete($supplierId, AttendanceMeaning::SOURCE_SYSTEM, $id);
+    }
+
+    /**
+     * Znovu založí vzorový profil GIRITON, třeba po omylem smazaném. Vzor vznikne
+     * v aktuální verzi a dál se sám aktualizuje; existující vzor se vrátí beze
+     * změny. Obsadil-li jeho název vlastní profil, dostane vzor příponu.
+     *
+     * @return array{profile:array<string,mixed>,restored:bool}
+     */
+    public function restoreSampleProfile(int $supplierId, ?int $userId): array
+    {
+        $existing = $this->profiles->list($supplierId, AttendanceMeaning::SOURCE_SYSTEM);
+        foreach ($existing as $profile) {
+            if (!empty($profile['is_sample'])) {
+                return ['profile' => $profile, 'restored' => false];
+            }
+        }
+        $taken = array_map(static fn (array $profile): string => mb_strtolower((string) $profile['name'], 'UTF-8'), $existing);
+        $name = AttendanceSampleProfile::NAME;
+        for ($suffix = 2; in_array(mb_strtolower($name, 'UTF-8'), $taken, true); ++$suffix) {
+            $name = AttendanceSampleProfile::NAME . " ({$suffix})";
+        }
+        $profile = $this->profiles->save(
+            $supplierId,
+            AttendanceMeaning::SOURCE_SYSTEM,
+            null,
+            $name,
+            AttendanceSampleProfile::rules(),
+            $userId,
+            AttendanceSampleProfile::components(),
+            true,
+            AttendanceSampleProfile::VERSION,
+        ) ?? throw new \RuntimeException('Vzorový profil se nepodařilo založit.');
+
+        return ['profile' => $profile, 'restored' => true];
     }
 
     /**
@@ -866,18 +965,24 @@ final class AttendanceImportService
             foreach (array_keys($person['_components']) as $code) {
                 $usedCodes[(string) $code] = true;
             }
+            if (is_string($person['end_on'] ?? null) && in_array($person['match']['status'], ['linked', 'matched'], true)) {
+                $person['warnings'][] = 'Podklady uvádějí ukončení k ' . self::czechDate($person['end_on'])
+                    . '. Zkontrolujte, že je pracovní vztah k tomuto dni ukončený; import ho neukončuje.';
+            }
         }
         unset($person);
 
         $codes = [];
         foreach ($mapped['sheets'] as $sheet) {
             foreach ($sheet['columns'] as $binding) {
-                if ($binding['meaning'] === AttendanceMeaning::COMPONENT
-                    && $binding['component_code'] !== null
-                    // Složka „podle hlavičky" se hlásí jen tehdy, když opravdu nese částku.
-                    && (!isset($mapped['auto_components'][$binding['component_code']])
-                        || isset($usedCodes[$binding['component_code']]))) {
-                    $codes[$binding['component_code']] = true;
+                foreach ([$binding, ...$binding['conditions']] as $candidate) {
+                    if ($candidate['meaning'] === AttendanceMeaning::COMPONENT
+                        && $candidate['component_code'] !== null
+                        // Složka „podle hlavičky" se hlásí jen tehdy, když opravdu nese částku.
+                        && (!isset($mapped['auto_components'][$candidate['component_code']])
+                            || isset($usedCodes[$candidate['component_code']]))) {
+                        $codes[$candidate['component_code']] = true;
+                    }
                 }
             }
         }
@@ -963,6 +1068,8 @@ final class AttendanceImportService
             'metrics' => 0,
             'components' => 0,
             'amount_minor_total' => 0,
+            'deductions' => 0,
+            'deduction_minor_total' => 0,
         ];
         foreach ($persons as $person) {
             $status = $person['match']['status'];
@@ -977,6 +1084,10 @@ final class AttendanceImportService
             $summary['components'] += count($person['components']);
             foreach ($person['components'] as $component) {
                 $summary['amount_minor_total'] += $component['amount_minor'];
+            }
+            $summary['deductions'] += count($person['deductions']);
+            foreach ($person['deductions'] as $deduction) {
+                $summary['deduction_minor_total'] += $deduction['amount_minor'];
             }
         }
 
@@ -1014,6 +1125,12 @@ final class AttendanceImportService
                     'component_code' => $binding['component_code'],
                     'rule_source' => $binding['rule_source'],
                     'samples' => $binding['samples'],
+                    'conditions' => array_map(static fn (array $condition): array => [
+                        'when_header' => $condition['when_header'],
+                        'when_value' => $condition['when_value'],
+                        'meaning' => $condition['meaning'],
+                        'component_code' => $condition['component_code'],
+                    ], $binding['conditions']),
                 ], $sheet['columns'])),
             ], $mapped['sheets']),
             'rules' => $mapped['rules'],
@@ -1130,6 +1247,124 @@ final class AttendanceImportService
                 : (int) ($result['duplicate_count'] ?? 0),
             'errors' => $errors,
         ];
+    }
+
+    /**
+     * Srážky z podkladů jako dohody o srážce platné jen pro importovaný měsíc.
+     * Identita dohody je reference `attendance:{měsíc}:{zaměstnanec}:{druh}`,
+     * takže opakovaný import dohodu opraví, místo aby založil druhou. Dohodu,
+     * ze které schválená mzda už něco strhla, import nemění — jen to ohlásí.
+     * Dohoda patří zaměstnanci, srážky z více jeho vztahů se sečtou.
+     *
+     * @param list<array{person:array<string,mixed>,employment:array<string,mixed>}> $assigned
+     * @return array{created:int,updated:int,unchanged:int,conflicts:list<array{key:string,display_name:string,reason:string}>}
+     */
+    private function createDeductions(int $supplierId, string $periodStart, array $assigned, ?int $userId): array
+    {
+        $period = substr($periodStart, 0, 7);
+        $periodEnd = (new \DateTimeImmutable($periodStart))->format('Y-m-t');
+        $wanted = [];
+        foreach ($assigned as $item) {
+            foreach ($item['person']['_deductions'] ?? [] as $meaning => $deduction) {
+                $kind = self::DEDUCTION_KINDS[(string) $meaning] ?? null;
+                if ($kind === null) {
+                    continue;
+                }
+                $employeeId = (int) $item['employment']['employee_id'];
+                $entry = $wanted[$employeeId][$kind] ?? [
+                    'amount_minor' => 0,
+                    'sources' => [],
+                    'key' => (string) $item['person']['key'],
+                    'display_name' => (string) $item['person']['display_name'],
+                ];
+                $entry['amount_minor'] += (int) $deduction['amount_minor'];
+                $entry['sources'][] = (string) $deduction['source'];
+                $wanted[$employeeId][$kind] = $entry;
+            }
+        }
+
+        $report = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'conflicts' => []];
+        foreach ($wanted as $employeeId => $kinds) {
+            foreach ($kinds as $kind => $entry) {
+                $conflict = static fn (string $reason): array => [
+                    'key' => $entry['key'],
+                    'display_name' => $entry['display_name'],
+                    'reason' => $reason,
+                ];
+                $reference = "attendance:{$period}:{$employeeId}:{$kind}";
+                try {
+                    $terms = DeductionAgreementTerms::fromRequest([
+                        'agreement_reference' => $reference,
+                        'title' => ($kind === 'meal' ? 'Obědy – úhrada zaměstnance ' : 'Srážky z podkladů docházky ')
+                            . (new \DateTimeImmutable($periodStart))->format('n/Y'),
+                        'deduction_kind' => $kind,
+                        'priority_no' => self::DEDUCTION_PRIORITY,
+                        'requested_minor' => $entry['amount_minor'],
+                        'total_limit_minor' => $entry['amount_minor'],
+                        'valid_from' => $periodStart,
+                        'valid_to' => $periodEnd,
+                        'note' => mb_substr(
+                            "Import docházky za {$period} (" . implode(', ', $entry['sources']) . '). '
+                            . 'Srážka na základě dohody o srážkách ze mzdy (§ 146 písm. b) zákoníku práce).',
+                            0,
+                            500,
+                        ),
+                    ]);
+                    $existing = $this->deductions->findByReference($supplierId, $employeeId, $reference);
+                    if ($existing === null) {
+                        $this->deductions->create($supplierId, $employeeId, $terms, DeductionAgreementStatus::Active, $userId);
+                        ++$report['created'];
+                        continue;
+                    }
+                    if ($existing['requested_minor'] === $entry['amount_minor']) {
+                        ++$report['unchanged'];
+                        continue;
+                    }
+                    if ($existing['withheld_total_minor'] > 0) {
+                        $report['conflicts'][] = $conflict(
+                            "Srážka za {$period} už byla použita ve schválené mzdě ("
+                            . AttendanceDecimal::formatMinor($existing['requested_minor']) . ' Kč), podklady teď uvádějí '
+                            . AttendanceDecimal::formatMinor($entry['amount_minor']) . ' Kč. Opravte ji ručně v Dohodách o srážkách.',
+                        );
+                        continue;
+                    }
+                    $this->deductions->update(
+                        $supplierId,
+                        $existing['id'],
+                        $terms,
+                        $existing['row_version'],
+                        null,
+                        "Oprava z importu docházky za {$period}.",
+                        $userId,
+                    );
+                    ++$report['updated'];
+                } catch (PayrollDeductionAgreementConflictException) {
+                    $report['conflicts'][] = $conflict('Dohodu o srážce mezitím změnil někdo jiný. Použijte import znovu.');
+                } catch (\DomainException|\InvalidArgumentException $e) {
+                    $report['conflicts'][] = $conflict($e->getMessage());
+                }
+            }
+        }
+
+        return $report;
+    }
+
+    /**
+     * Sazba náhrady za překážku na straně zaměstnavatele z pravidel profilu;
+     * bez ní platí výchozí sazby materializace (80 %).
+     *
+     * @param list<array<string,mixed>> $rules
+     */
+    private static function compensationRates(array $rules): ?ImportAbsenceCompensationRates
+    {
+        $rate = AttendanceRules::obstacleEmployerRate($rules);
+
+        return $rate === null ? null : ImportAbsenceCompensationRates::fromMap([AttendanceRules::RATE_MEANING => $rate]);
+    }
+
+    private static function czechDate(string $date): string
+    {
+        return (new \DateTimeImmutable($date))->format('j. n. Y');
     }
 
     /**
@@ -1712,6 +1947,7 @@ final class AttendanceImportService
             'wage_conflicts' => $wages['conflicts'],
             'runs_needing_refresh' => $wages['runs_needing_refresh'],
             'skipped_persons' => $skipped,
+            'deductions' => null,
         ];
     }
 

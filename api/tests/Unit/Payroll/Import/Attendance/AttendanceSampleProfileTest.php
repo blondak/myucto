@@ -53,7 +53,7 @@ final class AttendanceSampleProfileTest extends TestCase
         }
         ksort($persons);
         // Pomocný list „Produktivita" má vlastní jména — osoby z něj nevznikají.
-        self::assertSame(['jana novakova', 'petr svoboda'], array_keys($persons));
+        self::assertSame(['jana novakova', 'karel technik', 'petr svoboda'], array_keys($persons));
 
         $jana = $persons['jana novakova'];
         $metrics = array_column($jana['metrics'], null, 'meaning');
@@ -75,10 +75,24 @@ final class AttendanceSampleProfileTest extends TestCase
             'MZDA_HODINOVA_DOCH' => 2_352_000,
             'MZDA_HODINOVA_NOC' => 172_900,
             'MZDA_UKOLOVA' => 1_292_900,
-            'ODMENA' => 200_000,
             'PRIPLATEK_BOZP' => 170_000,
             'PRIPLATKY_K_HODINOVE' => 673_800,
         ], $components);
+        // Obědy placené zaměstnancem jsou srážka z čisté mzdy, ne mzdová složka.
+        self::assertSame(['net_meal_deduction' => 29_000], array_column($jana['deductions'], 'amount_minor', 'meaning'));
+
+        // Mimo výrobu je ve sloupci odměn odměna, srážky jdou z čisté mzdy.
+        $petr = $persons['petr svoboda'];
+        self::assertSame(200_000, array_column($petr['components'], 'amount_minor', 'component_code')['ODMENA']);
+        self::assertSame(['net_other_deduction' => 50_000], array_column($petr['deductions'], 'amount_minor', 'meaning'));
+
+        // Ve výrobě nese sloupec odměn celou úkolovou mzdu technika.
+        $karel = $persons['karel technik'];
+        $karelComponents = array_column($karel['components'], 'amount_minor', 'component_code');
+        ksort($karelComponents);
+        self::assertSame(['MZDA_UKOLOVA' => 7_000_000, 'PRIPLATEK_BOZP' => 200_000], $karelComponents);
+        self::assertSame('2026-06-03', $karel['end_on']);
+        self::assertNull($karel['start_on']);
 
         // Kopie jmen s nulami, součty a sazby v hlavičce složku nevyrobí.
         self::assertSame(['DOCH_PREMIE_ZA_BALENI' => 'Prémie za balení'], $result['auto_components']);
@@ -158,6 +172,8 @@ final class AttendanceSampleProfileTest extends TestCase
                         'A' => 'Petr Svoboda', 'B' => 176, 'C' => 0, 'D' => 150, 'E' => 0, 'F' => 0,
                         'G' => 21000, 'H' => 0, 'I' => 0, 'J' => 0, 'K' => 21000, 'L' => 0, 'M' => 0, 'N' => 0,
                     ],
+                    // Technik: úkol je jen v hlavním seznamu, výpočet ho nemá (prázdná buňka, ne nula).
+                    4 => ['A' => 'Karel Technik', 'B' => 176, 'D' => 20],
                 ],
                 'formats' => ['A1' => 'd.m.yyyy', 'M2:M3' => self::DURATION],
             ],
@@ -177,9 +193,14 @@ final class AttendanceSampleProfileTest extends TestCase
                         'A' => 'jméno a příjmení', 'B' => 'oddělení', 'C' => 'středisko', 'D' => 'týdenní fond',
                         'E' => 'název pozice', 'F' => 'MV', 'G' => 'příplatek BOZP', 'H' => 'nový nástup/ukončení',
                         'I' => 'Součet z výpočtu obědů', 'J' => 'Srážky', 'K' => 'Odměny/bonus/příspěvky',
+                        'L' => 'Součet z Dotovaná cena / por.',
                     ],
-                    3 => ['A' => 'Jana Nováková', 'B' => 'výroba', 'C' => 'VÝROBA', 'D' => 40, 'E' => 'Operátorka', 'G' => 1700, 'I' => 610, 'K' => 2000],
-                    4 => ['A' => 'Petr Svoboda', 'B' => 'sklad', 'C' => 'SKLAD', 'D' => 40, 'E' => 'Skladník', 'F' => 42000, 'G' => 0, 'J' => 500],
+                    3 => ['A' => 'Jana Nováková', 'B' => 'výroba', 'C' => 'VÝROBA', 'D' => 40, 'E' => 'Operátorka', 'G' => 1700, 'I' => 610, 'L' => 290],
+                    4 => ['A' => 'Petr Svoboda', 'B' => 'sklad', 'C' => 'SKLAD', 'D' => 40, 'E' => 'Skladník', 'F' => 42000, 'G' => 0, 'J' => 500, 'K' => 2000],
+                    5 => [
+                        'A' => 'Karel Technik', 'B' => 'výroba', 'C' => 'VÝROBA', 'D' => 37.5, 'E' => 'Technik',
+                        'G' => 2000, 'H' => 'ukončení k 3.6.2026', 'K' => 70000,
+                    ],
                 ],
             ],
         ]);

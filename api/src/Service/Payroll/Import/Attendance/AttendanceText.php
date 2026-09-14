@@ -21,12 +21,18 @@ final class AttendanceText
         'ć' => 'c', 'ń' => 'n', 'ź' => 'z', 'ż' => 'z',
     ];
 
-    /** Tituly před a za jménem — do klíče osoby nepatří. */
+    /** Tituly před a za jménem — do klíče osoby nepatří. `mqa` je častý překlep MgA. */
     private const TITLES = [
-        'ing', 'bc', 'mgr', 'mudr', 'mvdr', 'judr', 'phdr', 'rndr', 'paedr',
-        'thdr', 'doc', 'prof', 'phd', 'csc', 'drsc', 'dis', 'mba', 'bba', 'arch',
-        'ingarch', 'dr', 'mddr', 'pharmdr', 'thlic', 'llm', 'msc', 'ba', 'ma',
+        'ing', 'bc', 'bca', 'mgr', 'mga', 'mqa', 'mudr', 'mvdr', 'judr', 'phdr', 'rndr', 'paedr', 'paeddr',
+        'thdr', 'icdr', 'rsdr', 'doc', 'prof', 'phd', 'csc', 'drsc', 'dis', 'mba', 'bba', 'arch',
+        'ingarch', 'dr', 'mddr', 'pharmdr', 'thlic', 'llm', 'msc', 'ba', 'ma', 'artd', 'dipl',
     ];
+
+    /**
+     * Závorka s druhem vztahu nebo kódem („(DPP)", „(Z0042)") je poznámka ke
+     * jménu, ne jeho část. „(ml.)" a „(st.)" zůstávají — rozlišují otce a syna.
+     */
+    private const NOTE_IN_BRACKETS = '/[(\[]\s*(?:dpp|dpc|hpp|vpp|zmr|brigad[a-z]*|dohod[a-z ]*|[a-z]{0,4}\d[a-z0-9\/.-]*)\s*[)\]]/u';
 
     public static function normalize(string $value): string
     {
@@ -53,7 +59,8 @@ final class AttendanceText
     /** @return list<string> */
     public static function nameWords(string $name): array
     {
-        $normalized = (string) preg_replace('/[^\p{L}\p{N}\s-]+/u', ' ', self::normalize($name));
+        $normalized = (string) preg_replace(self::NOTE_IN_BRACKETS, ' ', self::normalize($name));
+        $normalized = (string) preg_replace('/[^\p{L}\p{N}\s-]+/u', ' ', $normalized);
         $words = [];
         foreach (preg_split('/[\s]+/u', $normalized) ?: [] as $word) {
             $word = trim($word, '-');
@@ -64,6 +71,30 @@ final class AttendanceText
         }
 
         return $words;
+    }
+
+    /**
+     * Nástup a ukončení z poznámky („nový nástup 15.6.2026", „ukončení k 3. 6. 2026").
+     * Datum bez slova nástup nebo ukončení se nebere — nevíme, co znamená.
+     *
+     * @return array{start_on:?string,end_on:?string}
+     */
+    public static function noteDates(string $note): array
+    {
+        $normalized = self::normalize($note);
+        $find = static function (string $keywords) use ($normalized): ?string {
+            if (preg_match('/(?:' . $keywords . ')\D{0,15}?(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/u', $normalized, $match) !== 1) {
+                return null;
+            }
+            [$day, $month, $year] = [(int) $match[1], (int) $match[2], (int) $match[3]];
+
+            return checkdate($month, $day, $year) ? sprintf('%04d-%02d-%02d', $year, $month, $day) : null;
+        };
+
+        return [
+            'start_on' => $find('nastup|zahajeni'),
+            'end_on' => $find('ukonc|skonc|vystup|odchod|konec'),
+        ];
     }
 
     /**

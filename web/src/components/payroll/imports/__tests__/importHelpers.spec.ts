@@ -9,7 +9,9 @@ import type {
   RegistrationRecord,
 } from '@/api/payrollImports'
 import {
+  autoCreatablePersons,
   autoPersonCreateDefaults,
+  personHasIdentifier,
   buildAttendanceLinks,
   buildPersonsPayload,
   buildRegistrationPairs,
@@ -43,6 +45,7 @@ import {
   moveItem,
   normalizeHeader,
   normalizeRuleComponentCode,
+  obstacleRateIsReduced,
   parseProfileExport,
   profileDraftIssues,
   profileExportFilename,
@@ -373,6 +376,47 @@ describe('pravidla mapování', () => {
     expect(ruleIssues(emptyProfileDraft('X')).map(issue => issue.kind)).toEqual(['no_rules'])
   })
 
+  it('podmínku pravidla pošle jen vyplněnou a neúplnou nebo s kódem * nahlásí', () => {
+    const draft = emptyProfileDraft('Test')
+    draft.rules = [
+      emptyRuleDraft({ header: 'Odměny*', meaning: 'component', component_code: 'mzda_ukolova', when_header: ' oddělení ', when_value: ' výroba ' }),
+      emptyRuleDraft({ header: 'Odměny*', meaning: 'component', component_code: 'ODMENA' }),
+      emptyRuleDraft({ header: 'Srážky', meaning: 'net_other_deduction', when_header: 'oddělení' }),
+      emptyRuleDraft({ header: 'Prémie', meaning: 'component', component_code: '*', when_header: 'oddělení', when_value: 'sklad' }),
+    ]
+    expect(draftRules(draft).slice(0, 2)).toEqual([
+      { sheet: null, header: 'Odměny*', meaning: 'component', unit: 'amount', component_code: 'MZDA_UKOLOVA', when_header: 'oddělení', when_value: 'výroba' },
+      { sheet: null, header: 'Odměny*', meaning: 'component', unit: 'amount', component_code: 'ODMENA' },
+    ])
+    expect(draftRules(draft)[2]).toMatchObject({ meaning: 'net_other_deduction', unit: 'amount' })
+    expect(ruleIssues(draft)).toEqual([
+      { kind: 'rule_condition_incomplete', row: 3 },
+      { kind: 'rule_condition_auto', row: 4 },
+    ])
+    expect(profileToDraft(profile({ rules: draftRules(draft).slice(0, 1) })).rules[0])
+      .toMatchObject({ when_header: 'oddělení', when_value: 'výroba' })
+  })
+
+  it('sazbu náhrady pošle jen u překážky zaměstnavatele a hlídá rozsah i jednotnost', () => {
+    const draft = emptyProfileDraft('Test')
+    draft.rules = [
+      emptyRuleDraft({ header: 'Doma za 80*', meaning: 'obstacle_employer_hours', rate_percent: ' 70 ' }),
+      emptyRuleDraft({ header: 'Dovolená', meaning: 'vacation_hours', rate_percent: '90' }),
+    ]
+    expect(draftRules(draft)).toEqual([
+      { sheet: null, header: 'Doma za 80*', meaning: 'obstacle_employer_hours', unit: null, component_code: null, rate_percent: 70 },
+      { sheet: null, header: 'Dovolená', meaning: 'vacation_hours', unit: null, component_code: null },
+    ])
+    expect(ruleIssues(draft)).toEqual([])
+    expect(obstacleRateIsReduced(draft.rules[0])).toBe(true)
+    draft.rules[0].rate_percent = '55'
+    expect(ruleIssues(draft)).toEqual([{ kind: 'rule_rate_invalid', row: 1 }])
+    draft.rules[0].rate_percent = '60'
+    draft.rules.push(emptyRuleDraft({ header: 'Prostoj', meaning: 'obstacle_employer_hours' }))
+    expect(ruleIssues(draft)).toEqual([{ kind: 'rule_rate_mixed' }])
+    expect(profileToDraft(profile({ rules: draftRules(draft).slice(0, 1) })).rules[0].rate_percent).toBe('60')
+  })
+
   it('hlásí název, který už ve firmě je, bez ohledu na velikost písmen', () => {
     const draft = profileToDraft(profile({ name: 'Vzor GIRITON' }))
     expect(profileDraftIssues(draft, ['vzor giriton']).map(issue => issue.kind)).toEqual(['name_taken'])
@@ -520,13 +564,32 @@ describe('osoby a vazby', () => {
     expect(payload.map(item => item.relation_type)).toEqual(['employment', 'dpp'])
   })
 
-  it('osobu lze rovnou založit, jen když ji import nenašel/je nejasná a nemá vztah', () => {
+  it('osobu lze rovnou založit, jen když ji import nenašel a nemá vztah; nejasnou ne', () => {
     const ambiguous = person('petra', { match: { ...missing.match, status: 'ambiguous' } })
     expect(personCanBeCreated(missing, {})).toBe(true)
-    expect(personCanBeCreated(ambiguous, {})).toBe(true)
+    expect(personCanBeCreated(ambiguous, {})).toBe(false)
     expect(personCanBeCreated(matched, {})).toBe(false)
     expect(personCanBeCreated(missing, { petr: 2 })).toBe(false)
-    expect(creatablePersonKeys([matched, missing, ambiguous], {})).toEqual(['petr', 'petra'])
+    expect(creatablePersonKeys([matched, missing, ambiguous], {})).toEqual(['petr'])
+  })
+
+  it('automaticky zakládá jen osoby s číslem, nesou-li podklady čísla', () => {
+    const numbered = person('karel', { personal_number: 'Z010' })
+    const masked = person('jitka', { birth_number_masked: '••••••/1234' })
+    expect(personHasIdentifier(numbered)).toBe(true)
+    expect(personHasIdentifier(missing)).toBe(false)
+    expect(autoCreatablePersons([missing, numbered, masked, matched], {}).map(item => item.key)).toEqual(['karel', 'jitka'])
+    // Podklady bez čísel vůbec: zakládá se jako dřív každý nenalezený.
+    expect(autoCreatablePersons([missing, matched], {}).map(item => item.key)).toEqual(['petr'])
+  })
+
+  it('nástup z poznámky v podkladech má přednost před dnem pro celou dávku', () => {
+    const payload = buildPersonsPayload(
+      [person('nova', { display_name: 'Nová Dana', start_on: '2026-06-15' }), missing],
+      {},
+      { relation_type: 'employment', weekly_hours: '40', planned_start_on: '2026-06-01', activate: true },
+    )
+    expect(payload.map(item => item.planned_start_on)).toEqual(['2026-06-15', '2026-06-01'])
   })
 
   it('spočítá osoby bez vztahu a sestaví výchozí hodnoty automatického založení', () => {

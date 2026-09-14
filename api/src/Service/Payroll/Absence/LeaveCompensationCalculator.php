@@ -52,10 +52,7 @@ final class LeaveCompensationCalculator
 
         $amountsByPeriod = [];
         foreach ($minutesByPeriod as $period => $minutes) {
-            $amountsByPeriod[$period] = RoundingMode::Ceil->roundFraction(
-                $averageHourlyMinor * $minutes,
-                60 * 100,
-            ) * 100;
+            $amountsByPeriod[$period] = self::calculateMinutes($averageHourlyMinor, $minutes);
         }
 
         return new LeaveCompensationResult(
@@ -63,5 +60,31 @@ final class LeaveCompensationCalculator
             $minutesByPeriod,
             $amountsByPeriod,
         );
+    }
+
+    /**
+     * Náhrada za úhrn minut JEDNOHO výplatního období, volitelně jen procentem
+     * průměru (překážky na straně zaměstnavatele § 207 a § 209 ZP). Stejné
+     * zaokrouhlení jako výše: přesný zlomek a na celé koruny nahoru až z úhrnu.
+     */
+    public static function calculateMinutes(
+        int $averageHourlyMinor,
+        int $minutes,
+        int $ratePercent = 100,
+    ): int {
+        if ($averageHourlyMinor <= 0) {
+            throw new InvalidArgumentException('Náhrada mzdy vyžaduje kladný hodinový průměr.');
+        }
+        if ($minutes <= 0) {
+            throw new InvalidArgumentException('Náhrada mzdy vyžaduje kladný počet minut.');
+        }
+        if ($ratePercent <= 0 || $ratePercent > 100) {
+            throw new InvalidArgumentException('Sazba náhrady mzdy musí být 1 až 100 % průměru.');
+        }
+
+        return RoundingMode::Ceil->roundFraction(
+            $averageHourlyMinor * $minutes * $ratePercent,
+            60 * 100 * 100,
+        ) * 100;
     }
 }

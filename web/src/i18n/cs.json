@@ -24882,7 +24882,8 @@
       "label": "Druh importu",
       "registration": "JMHZ",
       "attendance": "Docházka",
-      "mapping": "Mapování sloupců"
+      "mapping": "Mapování sloupců",
+      "pohoda_oic": "OIČ z POHODY"
     },
     "common": {
       "working": "Pracuji…",
@@ -24913,6 +24914,73 @@
       "selected": "Vybráno souborů: {count} ({size})",
       "clear": "Odebrat vše",
       "remove": "Odebrat soubor {name}"
+    },
+    "pohoda_oic": {
+      "title": "OIČ z POHODY",
+      "hint": "Nahrajte export Tabulky agendy Personalistika z POHODY se sloupci Příjmení, Jméno, Rodné číslo, Osobní číslo a OIC. Aplikace najde osoby podle rodného čísla a nabídne doplnit osobní identifikační číslo od ČSSZ tam, kde ještě chybí. Uložené OIČ nikdy nepřepíše.",
+      "no_permission": "Nemáte oprávnění upravovat osoby a pracovní vztahy v mzdách. Import OIČ proto nejde spustit.",
+      "environment_hint": "OIČ se uloží k prostředí, pro které ho ČSSZ přidělila. Běžně jde o ostré podání.",
+      "drop_hint": "Přetáhněte sem export Personalistiky z POHODY (XLSX nebo CSV), případně ho vyberte",
+      "preview": "Načíst náhled",
+      "refresh_preview": "Načíst náhled znovu",
+      "preview_failed": "Náhled importu OIČ se nepodařilo načíst.",
+      "apply_failed": "OIČ se nepodařilo zapsat.",
+      "applied": "Zapsáno OIČ: {applied}, přeskočeno {skipped}.",
+      "applied_with_errors": "Zapsáno OIČ: {applied}, {failed} selhalo a {skipped} přeskočeno. Podrobnosti najdete ve výsledku pod tabulkou.",
+      "row_count": "řádků: {count}",
+      "company_ico": "IČ {ico}",
+      "summary": {
+        "total": "Řádků s OIČ",
+        "ready": "K zápisu",
+        "already_stored": "Už uloženo",
+        "conflict": "Jiné OIČ v evidenci",
+        "blocked": "Nejde zapsat"
+      },
+      "without_oic": "Řádků bez vyplněného OIČ: {count}. Import je přeskakuje.",
+      "rows_title": "Osoby v exportu",
+      "selected_count": "Vybráno {count} z {total}",
+      "select_all": "Vybrat vše k zápisu",
+      "select_none": "Zrušit výběr",
+      "select_row": "Vybrat {name}",
+      "no_rows": "Export neobsahuje žádný řádek s OIČ.",
+      "columns": {
+        "person": "Osoba",
+        "personal_number": "Osobní číslo",
+        "oic": "OIČ",
+        "status": "Stav"
+      },
+      "source_row": "řádek {row} v souboru",
+      "employment": "Vztah {code}",
+      "valid_from": "platnost od {date}",
+      "status": {
+        "ready": "Připraveno",
+        "already_stored": "Už uloženo",
+        "conflict": "Jiné OIČ v evidenci",
+        "oic_owned_by_other": "OIČ má jiná osoba",
+        "not_found": "Osoba nenalezena",
+        "ambiguous": "Nejednoznačná osoba",
+        "no_employment": "Bez pracovního vztahu",
+        "duplicate": "Duplicitní řádek",
+        "invalid_birth_number": "Neplatné rodné číslo",
+        "invalid_oic": "Neplatné OIČ",
+        "no_oic": "Bez OIČ"
+      },
+      "confirm": "OIČ jsem ověřil(a) proti ePortálu ČSSZ nebo registracím. POHODA není protokol ČSSZ.",
+      "confirm_hint": "OIČ se uloží jako ověřený ruční opis, stejně jako při zadání na kartě pracovního vztahu. Podle něj se měsíční hlášení páruje s osobou.",
+      "apply": "Zapsat OIČ ({count})",
+      "reason": {
+        "no_files": "Nejdřív nahrajte export Personalistiky.",
+        "no_preview": "Nejdřív načtěte náhled.",
+        "no_selection": "Vyberte aspoň jeden řádek k zápisu.",
+        "no_confirmation": "Potvrďte, že jste OIČ ověřili proti ePortálu ČSSZ nebo registracím."
+      },
+      "result_title": "Výsledek zápisu",
+      "result_summary": "Zapsáno {applied}, selhalo {failed}, přeskočeno {skipped}.",
+      "result_status": {
+        "applied": "Zapsáno",
+        "failed": "Selhalo",
+        "skipped": "Přeskočeno"
+      }
     },
     "registration": {
       "title": "JMHZ",
@@ -25134,6 +25202,8 @@
       "home_office_hours": "Home office",
       "compensatory_time_off_hours": "Náhradní volno",
       "component": "Mzdová složka (Kč)",
+      "net_meal_deduction": "Obědy – srážka ze mzdy",
+      "net_other_deduction": "Srážka ze mzdy",
       "reference_gross": "Hrubá mzda (kontrola)",
       "reference_net": "Čistá mzda (kontrola)",
       "reference_hours": "Hodiny (kontrola)"
@@ -25342,6 +25412,9 @@
         "edit_in_persons_step": "Upravit v kroku Osoby",
         "auto_create_persons": "Chybějící osoby založit automaticky ({count})",
         "auto_create_persons_hint": "Založí se jméno, osobní číslo, rodné číslo a měsíční mzda z podkladů, druh vztahu odhadnutý z podkladů (jinak pracovní poměr), úvazek z podkladů nebo 40 h, nástup první den importovaného období, vztah rovnou aktivní. Údaje lze doplnit později na kartě zaměstnance.",
+        "auto_create_manual_only": "{count} nenalezených osob nemá osobní ani rodné číslo, import je sám nezaloží – může jít o jinak zapsané jméno už evidované osoby (třeba po změně příjmení). Přiřaďte je nebo založte v kroku Osoby.",
+        "create_deductions": "Založit srážky ze mzdy ({count})",
+        "create_deductions_hint": "Obědy a srážky z podkladů se založí jako dohody o srážkách platné jen pro importovaný měsíc a strhnou se z čisté mzdy. Opakovaný import částku opraví, dokud se srážka nepoužila ve schválené mzdě. Předpokládá uzavřenou dohodu o srážkách ze mzdy se zaměstnancem.",
         "auto_create_failed_title": "Nepodařilo se založit ({count})",
         "auto_create_notes_title": "Založeno s upozorněním ({count})",
         "phase_creating": "Zakládám osoby…",
@@ -25360,6 +25433,8 @@
         "personal_numbers_adopted": "Převzato osobních čísel: {count}",
         "personal_number_conflicts_title": "Osobní čísla, která se nepřevzala ({count})",
         "monthly_wages_adopted": "Převzato měsíčních mezd: {count}",
+        "deductions": "Srážky ze mzdy: založeno {created}, upraveno {updated}, beze změny {unchanged}",
+        "deduction_conflicts_title": "Srážky, které se nezapsaly ({count})",
         "wage_conflicts_title": "Měsíční mzdy, které se nepřevzaly ({count})",
         "runs_refresh_title": "Mzdové běhy k přepočtu",
         "runs_refresh_hint": "Změněná mzda se do běhu dostane až s novým snímkem vstupů. Otevřete běh a postupujte podle jeho stavu.",
@@ -25388,6 +25463,25 @@
           "meaning": "Význam",
           "value": "Hodnota",
           "source": "Zdroj"
+        },
+        "compare": "Porovnat s výpočtem mezd",
+        "compare_hint": "Hrubá a čistá mzda z výpočtu mzdového běhu proti mzdovému exportu v podkladech.",
+        "compare_failed": "Porovnání se nepodařilo načíst.",
+        "compare_no_run": "Za období zatím není vypočtený mzdový běh. Vypočtěte ho a porovnejte znovu.",
+        "compare_no_reference": "Dávka neobsahuje hrubou ani čistou mzdu z mzdového exportu.",
+        "compare_summary": "Shoda {match}, rozdíl {diff}, bez výpočtu {missing}. Rozdíl do 1 Kč se bere jako zaokrouhlení.",
+        "compare_net_shared": "více vztahů, čistá mzda je jen za osobu",
+        "compare_columns": {
+          "reference_gross": "Hrubá (podklady)",
+          "computed_gross": "Hrubá (výpočet)",
+          "reference_net": "Čistá (podklady)",
+          "computed_net": "Čistá (výpočet)",
+          "diff": "Rozdíl"
+        },
+        "compare_status": {
+          "match": "Shoda",
+          "diff": "Rozdíl",
+          "missing": "Bez výpočtu"
         }
       }
     },
@@ -25398,7 +25492,10 @@
         "approve_clean": "Bezchybné měsíce rovnou schválit",
         "approve_clean_hint": "Schválí se jen měsíce, u kterých souhrn nic netvrdí bez podkladu. Ostatní se ve výsledku vypíšou po lidech s důvodem a odkazem na nápravu.",
         "approve_needs_summary": "Schválení stojí na zapsaném souhrnu. Nejdřív zapněte zápis souhrnu do pracovních měsíců.",
-        "approve_no_permission": "Hromadné schválení vyžaduje oprávnění schvalovat mzdy."
+        "approve_no_permission": "Hromadné schválení vyžaduje oprávnění schvalovat mzdy.",
+        "compensations": "Vypočítat náhrady mzdy z hodin dovolené, lékaře a překážek",
+        "compensations_hint": "Z hodin souhrnu vzniknou koncepty náhrad mzdy: dovolená a lékař ve výši průměrného výdělku, překážky na straně zaměstnavatele (doma) podle sazby v pravidle profilu mapování, bez ní z 80 % průměru. Potřebuje schválený průměrný výdělek za čtvrtletí. Náhrada při nemoci (DPN) se z měsíčních součtů nepočítá.",
+        "compensations_needs_summary": "Náhrady se počítají ze zapsaného souhrnu. Nejdřív zapněte zápis souhrnu do pracovních měsíců."
       },
       "approve": "Schválit bezchybné měsíce",
       "approve_hint": "Zapíše souhrny dávky do pracovních měsíců a schválí ty bezchybné. Měsíce s výjimkou zůstanou otevřené a vypíšou se s důvodem.",
@@ -25419,7 +25516,12 @@
         "group": "{title} ({count})",
         "unknown_person": "Vztah č. {id}",
         "inputs_updated": "Aktualizováno konceptů vstupů: {count}",
-        "inputs_overridden": "Ručně přepsané hodnoty, které import nezměnil: {count}"
+        "inputs_overridden": "Ručně přepsané hodnoty, které import nezměnil: {count}",
+        "compensations_title": "Náhrady mzdy z hodin nepřítomnosti",
+        "compensations_counts": "Nové koncepty: {created}, aktualizované: {updated}, beze změny: {unchanged}, zrušené: {cancelled}",
+        "compensations_drafts_hint": "Náhrady vznikají jako koncepty mzdových vstupů. Po kontrole je schvalte v Mzdových vstupech.",
+        "compensations_skipped_title": "Bez výpočtu náhrady ({count})",
+        "compensations_warnings_title": "Ke kontrole ({count})"
       },
       "codes": {
         "absence_hours_without_dates": "Nepřítomnost bez dat od–do",
@@ -25484,6 +25586,11 @@
       "deleted": "Profil „{name}“ byl smazán.",
       "delete_failed": "Profil se nepodařilo smazat.",
       "duplicated": "Vznikla kopie profilu. Upravte název a uložte ji.",
+      "restore_sample": "Obnovit vzor GIRITON",
+      "restore_sample_hint": "Znovu založí vzorový profil GIRITON v aktuální verzi, třeba po omylem smazaném.",
+      "sample_restored": "Vzor „{name}“ byl obnoven.",
+      "sample_exists": "Vzor „{name}“ ve firmě už je.",
+      "sample_restore_failed": "Vzor se nepodařilo obnovit.",
       "export_failed": "Profil se nepodařilo exportovat.",
       "imported": "Profil „{name}“ byl nahrán.",
       "import_failed": "Profil se nepodařilo nahrát.",
@@ -25505,6 +25612,10 @@
         "no_rules": "Přidejte aspoň jedno pravidlo.",
         "rule_header_missing": "Pravidlo {row}: vyplňte hlavičku sloupce.",
         "rule_component_missing": "Pravidlo {row}: vyplňte kód mzdové složky, nebo * pro kód podle hlavičky.",
+        "rule_condition_incomplete": "Pravidlo {row}: vyplňte sloupec i hodnotu podmínky, nebo obojí smažte.",
+        "rule_condition_auto": "Pravidlo {row}: pravidlo s podmínkou potřebuje konkrétní kód složky, ne *.",
+        "rule_rate_invalid": "Pravidlo {row}: sazba náhrady musí být celé procento od 60 do 100.",
+        "rule_rate_mixed": "Překážka na straně zaměstnavatele má v profilu různé sazby náhrady. Hodnoty z více sloupců se nesčítají, nechte u všech jejích pravidel stejnou sazbu.",
         "component_code_missing": "Mzdová složka {row}: vyplňte kód.",
         "component_code_duplicate": "Mzdová složka {row}: kód {code} je v seznamu vícekrát.",
         "component_code_auto": "Mzdová složka {row}: hvězdička patří jen do pravidel, složka potřebuje skutečný kód.",
@@ -25512,7 +25623,7 @@
       },
       "rules": {
         "title": "Pravidla",
-        "hint": "Pravidla se vyhodnocují shora dolů a platí první, které sloupci odpovídá. Prázdný list znamená všechny listy. Hvězdička * zastoupí libovolný text (např. „Odměna*“). Kód složky * znamená složku podle hlavičky sloupce.",
+        "hint": "Pravidla se vyhodnocují shora dolů a platí první, které sloupci odpovídá. Prázdný list znamená všechny listy. Hvězdička * zastoupí libovolný text (např. „Odměna*“). Kód složky * znamená složku podle hlavičky sloupce. Podmínka omezí pravidlo na řádky, kde má jiný sloupec danou hodnotu (např. oddělení = výroba); v ostatních řádcích platí další pravidlo. U překážky na straně zaměstnavatele se místo kódu složky zadává sazba náhrady mzdy (bez zadání 80 % průměru).",
         "add": "Přidat pravidlo",
         "empty": "Profil zatím nemá žádné pravidlo.",
         "row": "Pravidlo {row}",
@@ -25522,8 +25633,16 @@
           "meaning": "Význam",
           "unit": "Jednotka",
           "component": "Kód složky",
+          "condition": "Podmínka",
           "actions": "Akce"
         },
+        "condition_header_placeholder": "sloupec, např. oddělení",
+        "condition_value_placeholder": "hodnota, např. výroba",
+        "condition_header_for": "Sloupec podmínky pravidla {row}",
+        "condition_value_for": "Hodnota podmínky pravidla {row}",
+        "rate_for": "Sazba náhrady pravidla {row}",
+        "rate_suffix": "% průměru",
+        "rate_low_hint": "Pod 80 % jen při nepříznivém počasí (§ 207 písm. b) nebo částečné nezaměstnanosti (§ 209), a to podle dohody s odbory nebo vnitřního předpisu.",
         "sheet_placeholder": "všechny listy",
         "header_placeholder": "např. Dovolená*",
         "component_placeholder": "ODMENA nebo *",

@@ -222,9 +222,9 @@ uložit znovu.
 ## 90.9 Importy zaměstnanců a docházky
 
 Stránka **Mzdy → Importy** leží v menu hned za Nastavením mezd a slouží
-k převzetí dat při zavádění mezd i v běžném měsíci. Má tři záložky:
-**JMHZ** (registrace i měsíční hlášení), **Docházka** (měsíční import) a **Mapování sloupců**
-(jednorázové nastavení). Importy pracují stejně: nahrajete soubory,
+k převzetí dat při zavádění mezd i v běžném měsíci. Má čtyři záložky:
+**JMHZ** (registrace i měsíční hlášení), **Docházka** (měsíční import), **Mapování sloupců**
+(jednorázové nastavení) a **OIČ z POHODY** (doplnění identifikátorů ČSSZ). Importy pracují stejně: nahrajete soubory,
 prohlédnete si náhled a teprve tlačítkem **Použít** se něco zapíše. Soubory se
 na serveru neukládají, při použití se náhled spočítá znovu ze stejných souborů.
 
@@ -303,11 +303,20 @@ Měsíční import má tři kroky:
    Odkaz **Upravit mapování** otevře záložku Mapování sloupců i s nahranými
    soubory.
 2. **Osoby.** Osoby ze všech souborů se sloučí podle jména, osobní číslo a
-   rodné číslo se k nim připojí. Každá se spáruje s pracovním vztahem podle
-   uložené vazby, rodného čísla, kódu vztahu nebo jména. Nejasné případy
-   přiřaďte ručně. Osoby, které v evidenci chybí, můžete samostatným tlačítkem
-   založit; měsíční mzda z mzdového výměru v podkladech se přitom předvyplní
-   jako pravidelná hrubá mzda vztahu.
+   rodné číslo se k nim připojí. Tituly (i s překlepem jako „MqA.“) a poznámka
+   v závorce jako „(DPP)“ nebo osobní číslo do jména nepatří, „(ml.)“ a „(st.)“
+   ano. Jméno, které se od jiné osoby liší jen dalším jménem navíc (třeba druhým
+   křestním), se s ní spojí a u osoby se to ohlásí. Každá osoba se spáruje
+   s pracovním vztahem podle uložené vazby, rodného čísla, kódu vztahu nebo
+   jména. Nejasné případy přiřaďte ručně, nejasnou osobu import nezakládá.
+   Osoby, které v evidenci chybí, můžete samostatným tlačítkem založit; měsíční
+   mzda z mzdového výměru v podkladech se přitom předvyplní jako pravidelná
+   hrubá mzda vztahu a nástup z poznámky („nový nástup 15. 6. 2026“) jako den
+   nástupu. Automatické založení při použití se týká jen osob s osobním nebo
+   rodným číslem, pokud je podklady (typicky CSV mezd) obsahují. Osoba bez čísel
+   bývá jinak zapsané jméno někoho z evidence, třeba po změně příjmení, proto
+   zůstane k ruční volbě. Uvádějí-li podklady ukončení, spárovaná osoba dostane
+   upozornění; import vztah neukončuje.
 3. **Souhrn a použití.** Tabulka ukáže hodiny a částky každé osoby i s buňkou,
    ze které pocházejí, a pro kontrolu i hrubou a čistou mzdu z mzdového exportu.
    Chybí-li ve firmě mzdová složka, kterou profil používá, import ji na
@@ -328,6 +337,15 @@ nepřevzaly, a mzdové běhy k přepočtu s odkazem na ně. Běh počítá ze
 zmrazeného snímku vstupů, novou mzdu proto vezme až nový snímek (viz
 [Mzdové běhy](80_Mzdove_behy.md)).
 
+**Srážky ze mzdy.** Sloupce s významem **Obědy – srážka ze mzdy** a **Srážka ze
+mzdy** (ve vzoru GIRITON dotovaná cena obědů a srážky z hlavního seznamu) se
+k hrubé mzdě nepřičítají. Volba **Založit srážky ze mzdy** z nich založí dohody
+o srážce platné jen pro importovaný měsíc, které se strhnou z čisté mzdy.
+Dohoda patří zaměstnanci, srážky z více jeho vztahů se sečtou. Opakovaný import
+dohodu opraví, dokud se srážka nepoužila ve schválené mzdě; potom ji import
+nemění a jen to ohlásí. Předpokládá se uzavřená dohoda o srážkách ze mzdy se
+zaměstnancem.
+
 **Verze vzoru.** Vzorový profil GIRITON dostane každá firma a s novou verzí
 aplikace se sám aktualizuje, pokud jste ho neupravili. Upravený vzor se
 nepřepíše: v Mapování sloupců nese štítek **Nová verze vzoru** a náhled
@@ -336,7 +354,8 @@ Tlačítko **Aktualizovat vzor** nahradí pravidla a složky profilu novou verz�
 uloží profil; vlastní úpravy se tím ztratí, proto si profil před aktualizací
 případně duplikujte. Pravidla nové verze posílá server spolu s náhledem, takže
 tlačítko je aktivní po načtení náhledu docházky nebo po zkoušce profilu na
-souborech.
+souborech. Smazaný vzor vrátí tlačítko **Obnovit vzor GIRITON** nad seznamem
+profilů; vzor vznikne v aktuální verzi a dál se sám aktualizuje.
 
 Hodnoty se nikdy nesčítají napříč listy. Když stejný údaj přichází ze dvou
 listů, použije se ten s vyšší prioritou a rozdílná hodnota se ukáže jako
@@ -344,6 +363,12 @@ konflikt. Opakuje-li se v jednom listu stejná hlavička, platí první sloupec.
 Vzorce se nepřepočítávají, bere se hodnota uložená v sešitu. Prázdná buňka ani
 chyba vzorce se nepovažují za nulu. Trvání delší než 24 hodin se převádí
 správně. Náhled nad podklady pro stovky zaměstnanců trvá jednotky sekund.
+
+**Pravidlo s podmínkou.** Pravidlo mapování může platit jen pro řádky, kde má
+jiný sloupec téhož listu danou hodnotu, například *Odměny → úkolová mzda, když
+oddělení = výroba*. Ostatní řádky dostanou další pravidlo pro tentýž sloupec.
+Vzor GIRITON takto čte sloupec odměn: ve výrobě jako úkolovou mzdu, jinde jako
+odměnu.
 
 Použitím vznikne dávka importu s měsíčním souhrnem hodin po pracovních
 vztazích a s původem každé hodnoty. Peněžní částky se volitelně založí jako
@@ -353,6 +378,49 @@ výpočtem běhu. Opakovaný import téhož souboru vrátí existující dávku.
 soubor nevytvoří druhou odměnu, protože vstup nese stálý identifikátor osoby,
 měsíce a složky; původní návrh je nutné nejdřív smazat.
 
-Import hodin nevytváří záznamy docházky ani absence s konkrétními dny. Dovolenou,
-nemoc a další nepřítomnost s daty zadejte v kapitole
-[Absence a dovolená](76_Absence_a_dovolena.md), jinak je výpočet běhu nezahrne.
+**Porovnání s výpočtem mezd.** Nese-li dávka hrubou a čistou mzdu z mzdového
+exportu (například CSV z předchozího mzdového programu), tlačítko **Porovnat
+s výpočtem mezd** v historii importů ji po výpočtu mzdového běhu téhož období
+porovná s výsledkem výpočtu po osobách. Rozdíl do 1 Kč se bere jako
+zaokrouhlení; osoby s rozdílem a bez výpočtu jsou nahoře. U osoby s více
+pracovními vztahy se porovná jen hrubá mzda, čistou mzdu výpočet vede za osobu.
+
+Import hodin nevytváří záznamy docházky ani absence s konkrétními dny. Se
+zápisem souhrnu docházky lze zapnout výpočet náhrad mzdy z hodin: z hodin
+dovolené, lékaře a překážek na straně zaměstnavatele vzniknou návrhy vstupů
+náhrady mzdy podle schváleného průměrného výdělku (dovolená a lékař 100 %,
+překážka na straně zaměstnavatele podle sazby v pravidle profilu mapování,
+bez zadání 80 %; nižší sazba, nejméně 60 %, jen při nepříznivém počasí podle
+§ 207 písm. b) nebo částečné nezaměstnanosti podle § 209) a měsíční mzda v rychlém vstupu se
+o hodiny nepřítomnosti zkrátí. Bez schváleného průměru se náhrada nezaloží.
+Náhradu mzdy při nemoci z měsíčního součtu spočítat nejde (rozhoduje prvních
+14 kalendářních dní a konkrétní dny), nemoc a další nepřítomnost s daty proto
+zadejte v kapitole [Absence a dovolená](76_Absence_a_dovolena.md).
+
+### 90.9.3 OIČ z POHODY
+
+Záložka doplní osobní identifikační číslo od ČSSZ (OIČ, také IK MPSV) osobám,
+které už v mzdové evidenci jsou. Zdrojem je export **Tabulka agendy
+Personalistika** z programu POHODA ve formátu XLSX, případně CSV se stejnými
+sloupci: Příjmení, Jméno, Rodné číslo, Osobní číslo a OIC. Řádek hlavičky
+aplikace najde sama, blok s názvem agendy a firmy nad ním nevadí. Liší-li se IČ
+v exportu od IČ firmy, náhled na to upozorní. Vyžaduje oprávnění
+`payroll.person.write` a `payroll.employment.write`.
+
+Náhled hledá osobu podle rodného čísla, které ukáže jen maskované, a zkontroluje,
+že OIČ má 10 číslic se správnou kontrolní číslicí. U každého řádku uvede stav:
+
+- **Připraveno**: OIČ se zapíše k pracovnímu vztahu, který platí dnes, jinak
+  k poslednímu vztahu, s platností ode dne nástupu.
+- **Už uloženo**: osoba má stejné OIČ, není co zapisovat.
+- **Jiné OIČ v evidenci**: import uložené číslo nikdy nepřepíše. Správné číslo
+  ověřte a případnou opravu udělejte na kartě pracovního vztahu.
+- **OIČ má jiná osoba**, osoba nenalezena nebo nejednoznačná, osoba bez
+  pracovního vztahu, duplicitní řádek a neplatné rodné číslo či OIČ: řádek nejde
+  vybrat a důvod je uvedený přímo u něj.
+
+Řádky bez OIČ se přeskočí, náhled ukáže jen jejich počet. POHODA není protokol
+ČSSZ, proto před zápisem potvrďte, že jste čísla ověřili proti ePortálu ČSSZ
+nebo registracím. OIČ se uloží jako ověřený ruční opis ke zvolenému prostředí
+(ostré nebo testovací), stejně jako při zadání na kartě vztahu. Opakovaný
+import téhož souboru nic nezapíše podruhé.

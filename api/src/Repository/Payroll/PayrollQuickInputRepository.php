@@ -717,6 +717,13 @@ final class PayrollQuickInputRepository
                            AND absence.date_to >= ?
                     ) AS away_in_month,
                     (
+                        SELECT time_month.work_source
+                          FROM payroll_time_months time_month
+                         WHERE time_month.supplier_id = employment.supplier_id
+                           AND time_month.employment_id = employment.id
+                           AND time_month.period_start = ?
+                    ) AS time_work_source,
+                    (
                         SELECT identifier.value_masked
                           FROM payroll_person_identifiers identifier
                          WHERE identifier.supplier_id = employment.supplier_id
@@ -773,6 +780,7 @@ final class PayrollQuickInputRepository
             $periodEnd,
             $periodEnd,
             $periodEnd,
+            $periodStart,
             $periodStart,
             $year,
             $quarter,
@@ -1718,14 +1726,19 @@ final class PayrollQuickInputRepository
         // Dotaz se pouští jen u vztahu, který v měsíci nějakou absenci má;
         // `away_in_month` to ví už z hlavního dotazu, takže běžný řádek
         // nic navíc nestojí.
+        // Měsíc ze souhrnu importu docházky nemá směny, takže nepřítomnost
+        // v něm nese jen měsíční součet hodin — krátí se podle něj.
+        $importSummaryMonth = ($employment['time_work_source'] ?? null) === 'import_summary';
         $proration = null;
-        if ($awayInMonth
+        if (($awayInMonth || $importSummaryMonth)
             && !$partialMonth
             && !$suspendedInMonth
             && !$managed['base']
             && $employment['monthly_gross_minor'] !== null
         ) {
-            $proration = $this->wageProration->forMonth(
+            $proration = ($importSummaryMonth
+                ? $this->wageProration->forImportSummary(...)
+                : $this->wageProration->forMonth(...))(
                 $supplierId,
                 PayrollTimeValue::int($employment['employment_id'] ?? null, 'employment_id'),
                 $period,

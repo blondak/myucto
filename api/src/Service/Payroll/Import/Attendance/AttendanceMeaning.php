@@ -78,11 +78,21 @@ final class AttendanceMeaning
         'reference_hours',
     ];
 
+    /**
+     * Srážky z čisté mzdy (obědy placené zaměstnancem, jiné srážky). Do hrubé
+     * mzdy nejdou; import z nich založí dohodu o srážce na importovaný měsíc.
+     */
+    public const DEDUCTIONS = [
+        'net_meal_deduction',
+        'net_other_deduction',
+    ];
+
     public const ALL = [
         self::IGNORE,
         ...self::IDENTITY,
         ...self::HOURS,
         self::COMPONENT,
+        ...self::DEDUCTIONS,
         ...self::REFERENCE,
     ];
 
@@ -98,7 +108,12 @@ final class AttendanceMeaning
 
     public static function isMoney(string $meaning): bool
     {
-        return in_array($meaning, ['component', 'reference_gross', 'reference_net'], true);
+        return in_array($meaning, ['component', 'reference_gross', 'reference_net'], true) || self::isDeduction($meaning);
+    }
+
+    public static function isDeduction(string $meaning): bool
+    {
+        return in_array($meaning, self::DEDUCTIONS, true);
     }
 
     public static function isIdentity(string $meaning): bool

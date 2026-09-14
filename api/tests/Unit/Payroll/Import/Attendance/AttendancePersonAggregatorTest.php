@@ -33,6 +33,8 @@ final class AttendancePersonAggregatorTest extends TestCase
         self::assertSame('Pracovní poměr', $jana['relation_label']);
         self::assertSame('20', $persons['eva pokusna']['weekly_hours']);
         self::assertSame('nástup 1. 6. 2026', $persons['eva pokusna']['start_end_note']);
+        self::assertSame('2026-06-01', $persons['eva pokusna']['start_on']);
+        self::assertNull($persons['eva pokusna']['end_on']);
 
         $sheets = [];
         foreach ($result['sheets'] as $sheet) {
@@ -128,6 +130,85 @@ final class AttendancePersonAggregatorTest extends TestCase
         self::assertSame('8.00', $vacation['hours']);
         self::assertSame('16.00', $vacation['conflicts'][0]['hours']);
         self::assertNotEmpty(array_filter($persons['jan novak']['warnings'], static fn (string $w): bool => str_contains($w, 'vícekrát')));
+    }
+
+    /**
+     * Seznam bez čísel uvádí jméno i s dalším křestním jménem, mzdový export
+     * bez něj. Je to jedna osoba — spojí se, ale ohlásí se to.
+     */
+    public function testNameVariantWithExtraGivenNameJoinsTheIdentifiedPerson(): void
+    {
+        $rules = AttendanceRules::validate([
+            ['sheet' => null, 'header' => 'Jméno', 'meaning' => 'person_name', 'unit' => null, 'component_code' => null],
+            ['sheet' => null, 'header' => 'Osobní číslo', 'meaning' => 'personal_number', 'unit' => null, 'component_code' => null],
+            ['sheet' => null, 'header' => 'Dovolená', 'meaning' => 'vacation_hours', 'unit' => 'hours', 'component_code' => null],
+        ]);
+        $persons = $this->byKey($this->pipeline([
+            AttendanceFixture::file('mzdy.csv', "Jméno;Osobní číslo\nZkoušková Marie Mgr.;Z9\n"),
+            AttendanceFixture::file('seznam.csv', "Jméno;Dovolená\nZkoušková Marie Anna;8\n"),
+        ], $rules)['persons']);
+
+        self::assertSame(['marie zkouskova'], array_keys($persons));
+        self::assertSame('Z9', $persons['marie zkouskova']['personal_number']);
+        self::assertSame('8.00', $this->metrics($persons['marie zkouskova'])['vacation_hours']['hours']);
+        self::assertNotEmpty(array_filter(
+            $persons['marie zkouskova']['warnings'],
+            static fn (string $w): bool => str_contains($w, 'spojily'),
+        ));
+    }
+
+    public function testGenerationMarkerKeepsFatherAndSonApart(): void
+    {
+        $csv = "Jméno;Dovolená\nNovák Jan;8\nNovák Jan ml.;16\n";
+        $persons = $this->byKey($this->pipeline([AttendanceFixture::file('a.csv', $csv)])['persons']);
+
+        self::assertSame(['jan ml novak', 'jan novak'], array_keys($persons));
+    }
+
+    public function testRelationNoteInBracketsIsNotPartOfTheName(): void
+    {
+        $csv = "Jméno;Dovolená\nKopecký Tomáš (DPP);8\n";
+        $persons = $this->byKey($this->pipeline([AttendanceFixture::file('a.csv', $csv)])['persons']);
+
+        self::assertSame(['kopecky tomas'], array_keys($persons));
+    }
+
+    public function testConditionalRuleDecidesPerRow(): void
+    {
+        $rules = AttendanceRules::validate([
+            ['sheet' => null, 'header' => 'Jméno', 'meaning' => 'person_name', 'unit' => null, 'component_code' => null],
+            ['sheet' => null, 'header' => 'Oddělení', 'meaning' => 'department', 'unit' => null, 'component_code' => null],
+            [
+                'sheet' => null, 'header' => 'Odměny', 'meaning' => 'component', 'unit' => 'amount',
+                'component_code' => 'MZDA_UKOLOVA', 'when_header' => 'oddělení', 'when_value' => 'výroba',
+            ],
+            ['sheet' => null, 'header' => 'Odměny', 'meaning' => 'component', 'unit' => 'amount', 'component_code' => 'ODMENA'],
+        ]);
+        $csv = "Jméno;Oddělení;Odměny\nJan Novák;Výroba;70000\nPetr Svoboda;sklad;2000\n";
+        $persons = $this->byKey($this->pipeline([AttendanceFixture::file('a.csv', $csv)], $rules)['persons']);
+
+        self::assertSame(['MZDA_UKOLOVA' => 7_000_000], array_column($persons['jan novak']['components'], 'amount_minor', 'component_code'));
+        self::assertSame(['ODMENA' => 200_000], array_column($persons['petr svoboda']['components'], 'amount_minor', 'component_code'));
+    }
+
+    public function testDeductionColumnsBecomeDeductionsNotComponents(): void
+    {
+        $rules = AttendanceRules::validate([
+            ['sheet' => null, 'header' => 'Jméno', 'meaning' => 'person_name', 'unit' => null, 'component_code' => null],
+            ['sheet' => null, 'header' => 'Obědy', 'meaning' => 'net_meal_deduction', 'unit' => 'amount', 'component_code' => null],
+            ['sheet' => null, 'header' => 'Srážky', 'meaning' => 'net_other_deduction', 'unit' => 'amount', 'component_code' => null],
+        ]);
+        $csv = "Jméno;Obědy;Srážky\nJan Novák;290;\nPetr Svoboda;-50;0\n";
+        $persons = $this->byKey($this->pipeline([AttendanceFixture::file('a.csv', $csv)], $rules)['persons']);
+
+        self::assertSame([], $persons['jan novak']['components']);
+        self::assertSame(['net_meal_deduction' => 29_000], array_column($persons['jan novak']['deductions'], 'amount_minor', 'meaning'));
+        self::assertSame(29_000, $persons['jan novak']['_deductions']['net_meal_deduction']['amount_minor']);
+        self::assertSame([], $persons['petr svoboda']['deductions']);
+        self::assertNotEmpty(array_filter(
+            $persons['petr svoboda']['warnings'],
+            static fn (string $w): bool => str_contains($w, 'záporná'),
+        ));
     }
 
     public function testSuggestedRulesAreReturnedAndCopiesOfNamesAreIgnored(): void
