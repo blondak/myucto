@@ -142,11 +142,27 @@ TOTP = time-based one-time password (RFC 6238).
 
 ![Aktivace 2FA](img/16_2fa_setup.webp)
 
-1. Aplikace ukáže **QR kód** + textový **secret key**.
-2. V mobilu otevři **autentikátor** (Google Authenticator, Authy, Microsoft
+1. Nejdřív znovu prokážeš, že jsi to ty: bez passkey **aktuálním heslem**,
+   s aktivní passkey **ověřením passkey** (stejně jako při registraci dalšího
+   klíče). Samotná přihlášená session na přidání druhého faktoru nestačí —
+   jinak by si ho na unesené session mohl založit útočník. Špatně zadaná
+   hesla se tu počítají do stejné ochrany proti hádání jako při přihlášení,
+   takže po opakovaných chybách se účet na 15 minut zamkne i pro login.
+2. Aplikace ukáže **QR kód** + textový **secret key**.
+3. V mobilu otevři **autentikátor** (Google Authenticator, Authy, Microsoft
    Authenticator, 1Password, Bitwarden) → Přidat účet → Sken QR kódu.
-3. Aplikace začne generovat 6-cifrené kódy každých 30 sekund.
-4. Zadej aktuální kód do MyÚčto → **Potvrdit aktivaci**.
+4. Aplikace začne generovat 6-cifrené kódy každých 30 sekund.
+5. Zadej aktuální kód do MyÚčto → **Potvrdit aktivaci**.
+
+Na vlastní doméně klientského portálu se nastavení TOTP otevře na hlavní
+adrese aplikace, kde lze bezpečně ověřit také existující passkey.
+
+Při přechodu politiky z passkeys na TOTP lze existující passkey použít
+výhradně k potvrzení zřízení TOTP. Nepovoluje to přihlášení ani jiné citlivé
+operace metodou, kterou správce zakázal.
+
+Změna nebo reset hesla, včetně změny správcem, ruší rozpracovanou aktivaci
+TOTP. Začni znovu a načti nový QR kód. Již aktivní TOTP se změnou hesla neruší.
 
 > 💡 Při ztrátě autentikátoru použij jinou passkey nebo **záložní kód**
 > (viz [§ 101.2.4](#10124-obnova-pristupu)). Až když nemáš nic z toho, zbývá CLI

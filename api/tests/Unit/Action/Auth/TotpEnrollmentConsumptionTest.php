@@ -8,9 +8,13 @@ use MyInvoice\Action\Auth\TotpAction;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\MfaProtectedOperationService;
 use MyInvoice\Service\Auth\MfaRecoveryCodeService;
+use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\SessionManager;
@@ -26,8 +30,8 @@ final class TotpEnrollmentConsumptionTest extends TestCase
     public function testEnrollmentCodeCannotAuthorizeAnotherOperation(): void
     {
         $pdo = \PDO::connect('sqlite::memory:');
-        $pdo->exec('CREATE TABLE users (id INTEGER, email TEXT, totp_secret TEXT, totp_enabled INTEGER)');
-        $pdo->exec("INSERT INTO users VALUES (1, 'synthetic@example.test', 'synthetic-encrypted-secret', 0)");
+        $pdo->exec('CREATE TABLE users (id INTEGER, email TEXT, password_hash TEXT, totp_secret TEXT, totp_enabled INTEGER)');
+        $pdo->exec("INSERT INTO users VALUES (1, 'synthetic@example.test', 'synthetic-hash', 'synthetic-encrypted-secret', 0)");
         $pdo->exec('CREATE TABLE totp_used_steps (secret_fingerprint TEXT, time_step INTEGER, PRIMARY KEY (secret_fingerprint, time_step))');
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
@@ -50,13 +54,21 @@ final class TotpEnrollmentConsumptionTest extends TestCase
             $this->createStub(SessionManager::class),
             $this->createStub(SessionCookieFactory::class),
             $this->createStub(ClockInterface::class),
+            $this->createStub(PasswordHasher::class),
+            $this->createStub(BruteForceGuard::class),
+            $this->createStub(MfaProtectedOperationService::class),
+            $this->createStub(PasskeyCredentialRepository::class),
         );
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/auth/totp/enable')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+            ->withAttribute(AuthMiddleware::ATTR_TOKEN, 'synthetic-session-token')
             ->withParsedBody(['code' => $code]);
         self::assertSame(200, $action->enable($request, new Response())->getStatusCode());
         self::assertSame(1, (int) $pdo->query('SELECT totp_enabled FROM users')->fetchColumn());
         self::assertFalse($totp->verifyAndConsume($db, $secret, $code));
-        self::assertSame(400, $action->enable($request, new Response())->getStatusCode());
+        // Opakovaná aktivace už aktivního faktoru končí 409 dřív, než se kód vůbec
+        // ověřuje — spotřebovaný kód by ji nepustil ani tak (viz assert výš).
+        self::assertSame(409, $action->enable($request, new Response())->getStatusCode());
     }
 }

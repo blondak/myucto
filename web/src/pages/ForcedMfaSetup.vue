@@ -6,7 +6,7 @@ import AppShell from '@/components/layout/AppShell.vue'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import { BTN_BASE, ICONS, OUTLINE } from '@/components/ui/buttonStyles'
 import { authApi, type TotpSetup } from '@/api/auth'
-import { createCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
+import { createCredential, getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { authorizePendingDomainLogin, hasPendingCanonicalDomainLogin } from '@/security/domainLogin'
@@ -53,13 +53,18 @@ const passkeyAuthorizationReady = computed(() => passkeyRequiresTotpStepUp.value
   ? /^\d{6}$/.test(totpCode.value)
   : currentPassword.value.length > 0)
 
+// Zrcadlo `passkeyRequiresTotpStepUp` pro opačný směr: `/auth/totp/setup` teď
+// taky vyžaduje čerstvé ověření, a má-li uživatel už passkey, ověří se jí
+// (step-up), ne heslem — stejný mechanismus jako u registrace nové passkey.
+const totpRequiresPasskeyStepUp = computed(() =>
+  auth.user?.mfa_methods?.includes('passkey') === true
+  || (auth.user?.passkey_count ?? 0) > 0,
+)
+
 async function selectMethod(next: 'passkey' | 'totp') {
   if (!allowed.value.includes(next)) return
   method.value = next
   error.value = ''
-  if (next === 'totp' && !totpSetup.value) {
-    await startTotp()
-  }
 }
 
 async function completePasskey() {
@@ -109,13 +114,52 @@ async function completePasskey() {
   }
 }
 
+function applyTotpSetupError(e: any) {
+  const code = e?.response?.data?.error?.code
+  if (code === 'current_password_invalid') {
+    error.value = e?.response?.data?.error?.message || t('auth.current_password_invalid')
+  } else if (code === 'already_enabled') {
+    error.value = e?.response?.data?.error?.message || t('auth.totp_already_enabled')
+  } else if (code === 'too_many_attempts') {
+    error.value = e?.response?.data?.error?.message || t('auth.too_many_attempts')
+  } else if (code === 'mfa_method_not_allowed') {
+    error.value = e?.response?.data?.error?.message || t('auth.mfa_method_not_allowed')
+  } else {
+    const ceremonyError = webAuthnErrorKey(e)
+    error.value = ceremonyError !== null
+      ? t(ceremonyError)
+      : e?.response?.data?.error?.message || t('common.error')
+  }
+}
+
 async function startTotp() {
-  busy.value = true
   error.value = ''
+  // Passkey ověří majitele přímo, žádné heslo netřeba — stejný mechanismus
+  // jako step-up při registraci nové passkey, jen s opačnou rolí faktorů.
+  if (totpRequiresPasskeyStepUp.value) {
+    busy.value = true
+    try {
+      const flow = await authApi.passkeyStepUpOptions('totp.enable')
+      const credential = await getCredential(flow.public_key)
+      const stepUpToken = await authApi.passkeyStepUpVerify(flow.flow_token, 'totp.enable', credential)
+      totpSetup.value = await authApi.totpSetup({ step_up_token: stepUpToken })
+    } catch (e: any) {
+      applyTotpSetupError(e)
+    } finally {
+      busy.value = false
+    }
+    return
+  }
+  if (!currentPassword.value) {
+    error.value = t('mfa_setup.password_required')
+    return
+  }
+  busy.value = true
   try {
-    totpSetup.value = await authApi.totpSetup()
+    totpSetup.value = await authApi.totpSetup({ current_password: currentPassword.value })
+    currentPassword.value = ''
   } catch (e: any) {
-    error.value = e?.response?.data?.error?.message || t('common.error')
+    applyTotpSetupError(e)
   } finally {
     busy.value = false
   }
@@ -141,7 +185,28 @@ async function completeTotp() {
     }
     await continueAfterSetup()
   } catch (e: any) {
-    error.value = e?.response?.data?.error?.message || t('auth.totp_invalid')
+    const code = e?.response?.data?.error?.code
+    error.value = code === 'already_enabled'
+      ? e?.response?.data?.error?.message || t('auth.totp_already_enabled')
+      : e?.response?.data?.error?.message || t('auth.totp_invalid')
+    if (code === 'already_enabled') {
+      totpSetup.value = null
+      totpCode.value = ''
+      let refreshed = false
+      try {
+        refreshed = await auth.refresh()
+      } catch {
+        refreshed = false
+      }
+      if (refreshed && !auth.mustSetupMfa && !auth.mustSetupTotp) {
+        await continueAfterSetup()
+        return
+      }
+      error.value = t('mfa_setup.already_enabled_relogin')
+    } else if (code === 'enrollment_stale' || code === 'no_secret') {
+      totpSetup.value = null
+      totpCode.value = ''
+    }
   } finally {
     busy.value = false
   }
@@ -292,7 +357,19 @@ onMounted(async () => {
               {{ busy ? '…' : t('auth.totp_force_enable_btn') }}
             </button>
           </template>
-          <div v-else class="text-center text-sm text-neutral-500 py-4">{{ t('common.loading') }}…</div>
+          <!-- Stejně jako u passkey: čerstvé ověření nejdřív, secret až potom —
+               bez passkey heslem, s ní step-up ceremonií pro 'totp.enable'. -->
+          <template v-else>
+            <input v-if="!totpRequiresPasskeyStepUp" v-model="currentPassword" type="password"
+              autocomplete="current-password" :placeholder="t('auth.current_password')"
+              data-test="totp-current-password"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md"
+              @keydown.enter="startTotp" />
+            <button type="button" @click="startTotp" :disabled="busy" data-test="totp-start"
+              class="w-full h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
+              {{ busy ? '…' : (totpRequiresPasskeyStepUp ? t('auth.totp_setup_verify_passkey_btn') : t('auth.totp_setup_btn')) }}
+            </button>
+          </template>
         </div>
 
         <div v-if="!policyReady" class="text-center text-sm text-neutral-500 py-4">{{ t('common.loading') }}…</div>

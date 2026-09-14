@@ -176,6 +176,31 @@ final class UserAdminTest extends TestCase
         self::assertSame(400, $res->getStatusCode(), (string) $res->getBody());
     }
 
+    public function testAdminPasswordChangeClearsOnlyPendingTotpEnrollment(): void
+    {
+        $admin = $this->mkUser('admin');
+        $session = $this->mkSession($admin);
+        $pending = $this->mkUser('readonly');
+        $active = $this->mkUser('readonly');
+        $this->db->pdo()->prepare('UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?')
+            ->execute(['enc:PENDING', 0, $pending]);
+        $this->db->pdo()->prepare('UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?')
+            ->execute(['enc:ACTIVE', 1, $active]);
+
+        foreach ([$pending, $active] as $id) {
+            $res = $this->sessionRequest('PUT', '/api/admin/users/' . $id, $session, [
+                'password' => 'New-synthetic-password-42',
+            ]);
+            self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        }
+
+        $stmt = $this->db->pdo()->prepare('SELECT totp_secret FROM users WHERE id = ?');
+        $stmt->execute([$pending]);
+        self::assertNull($stmt->fetchColumn() ?: null);
+        $stmt->execute([$active]);
+        self::assertSame('enc:ACTIVE', $stmt->fetchColumn());
+    }
+
     // ------------------------------------------------------------- fixtures
 
     private function mkEmail(): string

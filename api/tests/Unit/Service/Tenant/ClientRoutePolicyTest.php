@@ -165,6 +165,10 @@ final class ClientRoutePolicyTest extends TestCase
             '/profile/password?tab=passkeys',
             $this->policy->canonicalHandoffPath('/profile/password?tab=passkeys'),
         );
+        self::assertSame(
+            '/profile/password?tab=totp',
+            $this->policy->canonicalHandoffPath('/profile/password?tab=totp'),
+        );
         self::assertSame('/setup-mfa', $this->policy->canonicalHandoffPath('/setup-mfa'));
         self::assertSame(
             '/setup-mfa?method=totp',
@@ -174,7 +178,9 @@ final class ClientRoutePolicyTest extends TestCase
 
         foreach ([
             '/profile/password',
-            '/profile/password?tab=totp',
+            '/profile/password?tab=passkeys&tab=totp',
+            '/profile/password?tab=totp&tab=totp',
+            '/profile/password?tab[]=totp',
             '/portal',
             '/admin/settings',
             '//attacker.example/profile/passkeys',

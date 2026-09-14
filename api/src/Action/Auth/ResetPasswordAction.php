@@ -70,7 +70,12 @@ final class ResetPasswordAction
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
-            $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([$hash, $userId]);
+            $pdo->prepare(
+                'UPDATE users
+                    SET password_hash = ?,
+                        totp_secret = CASE WHEN totp_enabled = 0 THEN NULL ELSE totp_secret END
+                  WHERE id = ?'
+            )->execute([$hash, $userId]);
             $pdo->prepare('UPDATE password_resets SET used_at = NOW() WHERE id = ?')->execute([(int) $row['id']]);
             $pdo->prepare('DELETE FROM trusted_devices WHERE user_id = ?')->execute([$userId]);
             $pdo->prepare('DELETE FROM login_otps WHERE user_id = ?')->execute([$userId]);

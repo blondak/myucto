@@ -9,6 +9,11 @@ import { flushPromises, mount } from '@vue/test-utils'
  */
 const m = vi.hoisted(() => ({
   dismissMfaOffer: vi.fn(),
+  totpSetup: vi.fn(),
+  totpEnable: vi.fn(),
+  passkeyStepUpOptions: vi.fn(),
+  passkeyStepUpVerify: vi.fn(),
+  getCredential: vi.fn(),
   refresh: vi.fn(),
   logout: vi.fn(),
   replace: vi.fn(),
@@ -29,11 +34,13 @@ vi.mock('@/components/layout/AppShell.vue', () => ({
 vi.mock('@/api/auth', () => ({
   authApi: {
     dismissMfaOffer: m.dismissMfaOffer,
-    totpSetup: vi.fn().mockResolvedValue({ secret: 'S', uri: 'otpauth://x', qr_data_uri: 'data:,' }),
-    totpEnable: vi.fn(),
+    totpSetup: m.totpSetup,
+    totpEnable: m.totpEnable,
     totpStepUp: vi.fn(),
     passkeyRegisterOptions: vi.fn(),
     passkeyRegisterVerify: vi.fn(),
+    passkeyStepUpOptions: m.passkeyStepUpOptions,
+    passkeyStepUpVerify: m.passkeyStepUpVerify,
   },
 }))
 vi.mock('@/stores/auth', () => ({
@@ -49,6 +56,7 @@ vi.mock('@/stores/sessionSecurity', () => ({
 }))
 vi.mock('@/security/webauthn', () => ({
   createCredential: vi.fn(),
+  getCredential: m.getCredential,
   isWebAuthnAvailable: () => true,
   webAuthnErrorKey: () => null,
 }))
@@ -64,6 +72,7 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
+import { authApi } from '@/api/auth'
 import ForcedMfaSetup from '../ForcedMfaSetup.vue'
 
 const mountPage = () => mount(ForcedMfaSetup)
@@ -75,6 +84,7 @@ beforeEach(() => {
   m.store.mustSetupMfa = false
   m.store.mustSetupTotp = false
   m.store.shouldOfferMfa = false
+  m.totpSetup.mockResolvedValue({ secret: 'S', uri: 'otpauth://x', qr_data_uri: 'data:,' })
 })
 
 describe('ForcedMfaSetup — dobrovolná nabídka vs. vynucené MFA', () => {
@@ -123,5 +133,98 @@ describe('ForcedMfaSetup — dobrovolná nabídka vs. vynucené MFA', () => {
 
     expect(m.replace).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('nelze')
+  })
+})
+
+/**
+ * `/api/auth/totp/setup` vyžaduje čerstvé ověření, než vrátí secret. Bez
+ * passkey (výchozí `m.store.user`) je to heslo — stejné pole, jaké už stránka
+ * sbírá pro registraci passkey, jen na jiné větvi.
+ */
+describe('ForcedMfaSetup — TOTP vyžaduje čerstvé ověření', () => {
+  it('bez hesla nezavolá totpSetup a ukáže hlášku', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+
+    expect(authApi.totpSetup).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('mfa_setup.password_required')
+  })
+
+  it('s heslem zavolá totpSetup s { current_password }', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-test="totp-current-password"]').setValue('hunter2')
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+
+    expect(authApi.totpSetup).toHaveBeenCalledWith({ current_password: 'hunter2' })
+  })
+
+  it('s existující passkey dokončí vynucený přechod na jedinou povolenou TOTP metodu', async () => {
+    m.store.mustSetupMfa = true
+    m.store.user = { totp_enabled: false, mfa_methods: ['passkey'], passkey_count: 1 }
+    m.store.allowedMfaMethods = ['totp']
+    m.passkeyStepUpOptions.mockResolvedValue({ flow_token: 'flow', public_key: {} })
+    m.getCredential.mockResolvedValue({ id: 'credential' })
+    m.passkeyStepUpVerify.mockResolvedValue('proof')
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+
+    expect(m.passkeyStepUpOptions).toHaveBeenCalledWith('totp.enable')
+    expect(m.passkeyStepUpVerify).toHaveBeenCalledWith('flow', 'totp.enable', { id: 'credential' })
+    expect(m.totpSetup).toHaveBeenCalledWith({ step_up_token: 'proof' })
+    expect(wrapper.text()).toContain('auth.totp_setup_step1')
+  })
+
+  it.each(['enrollment_stale', 'no_secret'])(
+    'po chybě %s odstraní neplatný QR kód a dovolí začít znovu',
+    async (code) => {
+      m.totpEnable.mockRejectedValue({
+        response: { data: { error: { code, message: 'Začni znovu.' } } },
+      })
+      const wrapper = mountPage()
+      await flushPromises()
+
+      await wrapper.get('[data-test="totp-current-password"]').setValue('hunter2')
+      await wrapper.get('[data-test="totp-start"]').trigger('click')
+      await flushPromises()
+      const input = wrapper.find('input[autocomplete="one-time-code"]')
+      await input.setValue('123456')
+      await input.trigger('keydown.enter')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('Začni znovu.')
+      expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="totp-current-password"]').exists()).toBe(true)
+    },
+  )
+
+  it('při souběžně aktivovaném TOTP vyžádá nové přihlášení, pokud setup session zůstala slabá', async () => {
+    m.store.mustSetupMfa = true
+    m.refresh.mockResolvedValue(false)
+    m.totpEnable.mockRejectedValue({
+      response: { data: { error: { code: 'already_enabled' } } },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-test="totp-current-password"]').setValue('hunter2')
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+    const input = wrapper.find('input[autocomplete="one-time-code"]')
+    await input.setValue('123456')
+    await input.trigger('keydown.enter')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('mfa_setup.already_enabled_relogin')
+    expect(wrapper.find('[data-test="mfa-logout"]').exists()).toBe(true)
+    expect(m.replace).not.toHaveBeenCalledWith('/')
   })
 })

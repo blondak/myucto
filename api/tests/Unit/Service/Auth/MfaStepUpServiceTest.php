@@ -122,6 +122,50 @@ final class MfaStepUpServiceTest extends TestCase
         );
     }
 
+    public function testPhasedOutPasskeyCanAuthorizeTotpEnrollment(): void
+    {
+        $policy = $this->createMock(MfaPolicyService::class);
+        $policy->expects(self::exactly(2))
+            ->method('isMethodAllowed')
+            ->willReturnMap([
+                ['passkey', false],
+                ['totp', true],
+            ]);
+        $credentials = $this->createMock(PasskeyCredentialRepository::class);
+        $credentials->expects(self::once())
+            ->method('countActiveForUser')
+            ->with(17)
+            ->willReturn(1);
+        $service = new MfaStepUpService(
+            $this->createMock(MfaStepUpProofStore::class),
+            $policy,
+            $credentials,
+        );
+
+        self::assertSame(
+            MfaStepUpService::OPERATION_TOTP_ENABLE,
+            $service->assertAllowed(17, MfaStepUpService::OPERATION_TOTP_ENABLE, 'passkey'),
+        );
+    }
+
+    public function testPhasedOutPasskeyCannotAuthorizeDisallowedTotpEnrollment(): void
+    {
+        $policy = $this->createMock(MfaPolicyService::class);
+        $policy->expects(self::exactly(2))
+            ->method('isMethodAllowed')
+            ->willReturn(false);
+        $credentials = $this->createMock(PasskeyCredentialRepository::class);
+        $credentials->expects(self::never())->method('countActiveForUser');
+        $service = new MfaStepUpService(
+            $this->createMock(MfaStepUpProofStore::class),
+            $policy,
+            $credentials,
+        );
+
+        $this->expectException(StepUpOperationException::class);
+        $service->assertAllowed(17, MfaStepUpService::OPERATION_TOTP_ENABLE, 'passkey');
+    }
+
     public function testDisallowedMethodCannotAuthorizeApiTokenCreation(): void
     {
         $policy = $this->createMock(MfaPolicyService::class);
@@ -289,5 +333,61 @@ final class MfaStepUpServiceTest extends TestCase
         );
 
         return new StoredPasskeyCredential(42, 17, 'Pixel 9', $record, null, null, null);
+    }
+
+    /**
+     * Zřízení TOTP je „přidání silného faktoru" jako registrace passkey:
+     * kdo už passkey má, potvrdí ho jednorázovým proofem pro `totp.enable`.
+     */
+    public function testPasskeyProofCanAuthorizeTotpEnrollment(): void
+    {
+        $policy = $this->createMock(MfaPolicyService::class);
+        $policy->method('isMethodAllowed')->willReturnMap([
+            ['passkey', true],
+            ['totp', true],
+        ]);
+        $service = new MfaStepUpService(
+            $this->createMock(MfaStepUpProofStore::class),
+            $policy,
+            $this->createMock(PasskeyCredentialRepository::class),
+        );
+
+        self::assertSame(
+            MfaStepUpService::OPERATION_TOTP_ENABLE,
+            $service->assertAllowed(17, MfaStepUpService::OPERATION_TOTP_ENABLE, 'passkey'),
+        );
+    }
+
+    public function testDisallowedMethodCannotAuthorizeTotpEnrollment(): void
+    {
+        $policy = $this->createMock(MfaPolicyService::class);
+        $policy->method('isMethodAllowed')->willReturn(false);
+        $service = new MfaStepUpService(
+            $this->createMock(MfaStepUpProofStore::class),
+            $policy,
+            $this->createMock(PasskeyCredentialRepository::class),
+        );
+
+        $this->expectException(StepUpOperationException::class);
+        $service->assertAllowed(17, MfaStepUpService::OPERATION_TOTP_ENABLE, 'passkey');
+    }
+
+    /**
+     * Záložní kód TOTP nezřídí: nově zřízený TOTP by hned uspokojil vydání
+     * API tokenu, které je záložnímu kódu záměrně odepřené. Po ztrátě passkey
+     * si uživatel kódem zaregistruje nový passkey a TOTP až poté.
+     */
+    public function testRecoveryCodeCannotAuthorizeTotpEnrollment(): void
+    {
+        $proofs = $this->createMock(MfaStepUpProofStore::class);
+        $proofs->expects(self::never())->method('issue');
+        $service = new MfaStepUpService(
+            $proofs,
+            $this->createMock(MfaPolicyService::class),
+            $this->createMock(PasskeyCredentialRepository::class),
+        );
+
+        $this->expectException(StepUpOperationException::class);
+        $service->issue(17, 'session', MfaStepUpService::OPERATION_TOTP_ENABLE, 'recovery');
     }
 }

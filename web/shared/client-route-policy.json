@@ -37,7 +37,7 @@
     { "name": "recurring-edit", "path_pattern": "^/recurring/[0-9]+/edit/?$", "kind": "permission", "permission": "recurring", "access": "write" },
 
     { "name": "profile-totp", "path_pattern": "^/profile/totp/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=totp" },
-    { "name": "profile-password", "path_pattern": "^/profile/password/?$", "kind": "self_service", "canonical_handoff": { "match_query": { "tab": "passkeys" }, "to": "/profile/password?tab=passkeys" } },
+    { "name": "profile-password", "path_pattern": "^/profile/password/?$", "kind": "self_service", "canonical_handoff": { "match_query": { "tab": ["passkeys", "totp"] }, "to": "/profile/password?tab=passkeys", "query_targets": { "tab": { "passkeys": "/profile/password?tab=passkeys", "totp": "/profile/password?tab=totp" } } } },
     { "name": "profile-shortcuts", "path_pattern": "^/profile/shortcuts/?$", "kind": "router_redirect", "permission": "profile", "access": "write", "redirect_to": "/profile/password?tab=shortcuts" },
     { "name": "profile-passkeys", "path_pattern": "^/profile/passkeys/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=passkeys", "canonical_handoff": { "to": "/profile/password?tab=passkeys" } },
     { "name": "profile-session-lock", "path_pattern": "^/profile/session-lock/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=session-lock" },

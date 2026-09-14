@@ -24,6 +24,74 @@ final class MfaProtectedOperationService
         private readonly ApiTokenService $tokens,
     ) {}
 
+    public function storePendingTotpSecret(
+        int $userId,
+        string $sessionToken,
+        string $authorizedPasswordHash,
+        string $encryptedSecret,
+        ?string $proofToken,
+    ): string {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $cutoff = $this->clock->capture($pdo);
+            $user = $this->lockActiveUser($pdo, $userId);
+            if ((int) $user['totp_enabled'] === 1) {
+                throw new TotpEnrollmentException(TotpEnrollmentException::ALREADY_ENABLED);
+            }
+            if (!hash_equals((string) $user['password_hash'], $authorizedPasswordHash)) {
+                throw new TotpEnrollmentException(TotpEnrollmentException::STALE_AUTHORIZATION);
+            }
+            $this->lockCurrentSession($pdo, $cutoff, $userId, $sessionToken);
+
+            $authMethod = 'password';
+            if ($proofToken === null) {
+                if ($this->credentials->lockAllActiveForUser($pdo, $userId) !== []) {
+                    throw new TotpEnrollmentException(TotpEnrollmentException::STALE_AUTHORIZATION);
+                }
+            } else {
+                $proof = $this->stepUp->consumeInTransaction(
+                    $pdo,
+                    $cutoff,
+                    $proofToken,
+                    $userId,
+                    $sessionToken,
+                    MfaStepUpService::OPERATION_TOTP_ENABLE,
+                );
+                $authMethod = $proof->authMethod;
+            }
+
+            $stmt = $pdo->prepare(
+                'UPDATE users
+                    SET totp_secret = ?, totp_enabled = 0
+                  WHERE id = ? AND totp_enabled = 0
+                    AND HEX(password_hash) = HEX(?)'
+            );
+            $stmt->execute([$encryptedSecret, $userId, $authorizedPasswordHash]);
+            if ($stmt->rowCount() !== 1) {
+                throw new TotpEnrollmentException(TotpEnrollmentException::STALE_AUTHORIZATION);
+            }
+
+            $pdo->commit();
+            return $authMethod;
+        } catch (OneTimeTokenException|StepUpOperationException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
+            throw $e;
+        } catch (\DomainException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw new TotpEnrollmentException(TotpEnrollmentException::SESSION_INVALID, previous: $e);
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
     /**
      * ⚠️ Volitelné schopnosti tokenu se sem musí PROPAGOVAT, jinak je tahle
      * větev tiše zahodí. Uživatel s passkey chodí VŽDY tudy, takže zapomenutý
@@ -171,12 +239,12 @@ final class MfaProtectedOperationService
     }
 
     /**
-     * @return array{id:int,totp_enabled:int}
+     * @return array{id:int,totp_enabled:int,password_hash:string}
      */
     private function lockActiveUser(PDO $pdo, int $userId): array
     {
         $stmt = $pdo->prepare(
-            'SELECT id, totp_enabled
+            'SELECT id, totp_enabled, password_hash
                FROM users
               WHERE id = ? AND is_active = 1
               FOR UPDATE'
@@ -189,6 +257,7 @@ final class MfaProtectedOperationService
         return [
             'id' => (int) $user['id'],
             'totp_enabled' => (int) ($user['totp_enabled'] ?? 0),
+            'password_hash' => (string) $user['password_hash'],
         ];
     }
 

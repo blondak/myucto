@@ -12,6 +12,14 @@ final class MfaStepUpService
     public const OPERATION_API_TOKEN_CREATE = 'api_token.create';
     public const OPERATION_PASSKEY_REGISTER = 'passkey.register';
     /**
+     * Zřízení TOTP (`POST /api/auth/totp/setup`). Přidání druhého faktoru je stejně
+     * citlivé jako registrace passkey: kdo má aktivní passkey, potvrdí ho jím; kdo
+     * silný faktor nemá, prokáže se heslem (řeší {@see \MyInvoice\Action\Auth\TotpAction}).
+     * Záložní kód sem záměrně NEpatří — čerstvě zřízený TOTP by hned uspokojil
+     * vydání API tokenu, které je záložnímu kódu odepřené.
+     */
+    public const OPERATION_TOTP_ENABLE = 'totp.enable';
+    /**
      * MyÚčto: správa osobního kvalifikovaného certifikátu pro EPO a přímé podání.
      * Soukromý klíč podepisuje daňová podání jménem uživatele, takže sem patří
      * stejně účelový jednorázový proof jako k vydání API tokenu.
@@ -65,6 +73,7 @@ final class MfaStepUpService
         $isDomainActivation = preg_match('/^domain\.activate:([1-9][0-9]*)$/D', $operation) === 1;
         if ($operation !== self::OPERATION_API_TOKEN_CREATE
             && $operation !== self::OPERATION_PASSKEY_REGISTER
+            && $operation !== self::OPERATION_TOTP_ENABLE
             && $operation !== self::OPERATION_EPO_CERTIFICATE
             && $operation !== self::OPERATION_RECOVERY_CODES
             && $operation !== self::OPERATION_BACKUP_PASSWORD
@@ -114,6 +123,17 @@ final class MfaStepUpService
                 && $passkeyAllowed
                 && $this->credentials->countActiveForUser($userId) === 0;
             if (!$passkeyAllowed || (!$methodAllowed && !$firstPasskeyTransition)) {
+                throw new StepUpOperationException('Tato metoda není pro operaci povolená.');
+            }
+        } elseif ($operation === self::OPERATION_TOTP_ENABLE) {
+            $totpAllowed = $authMethod === 'totp'
+                ? $methodAllowed
+                : $this->policy->isMethodAllowed('totp');
+            $firstTotpTransition = !$methodAllowed
+                && $authMethod === 'passkey'
+                && $totpAllowed
+                && $this->credentials->countActiveForUser($userId) > 0;
+            if (!$totpAllowed || (!$methodAllowed && !$firstTotpTransition)) {
                 throw new StepUpOperationException('Tato metoda není pro operaci povolená.');
             }
         } elseif (!$methodAllowed) {

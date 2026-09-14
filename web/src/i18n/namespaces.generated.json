@@ -990,6 +990,7 @@
     ],
     "profile-password": [
       "domain_login",
+      "mfa_setup",
       "recovery_codes"
     ],
     "profile-api-tokens": [

@@ -63,6 +63,8 @@ final class RequireMfaMiddleware implements MiddlewareInterface
             '/api/auth/totp/enable',
             '/api/auth/webauthn/register/options',
             '/api/auth/webauthn/register/verify',
+            '/api/auth/webauthn/step-up/options',
+            '/api/auth/webauthn/step-up/verify',
             '/api/auth/mfa/step-up/totp',
             // Dokončení wizardu, ne business zápis: SetupSampleAction si sám hlídá
             // admin roli i to, že v systému ještě nejsou žádná data. Bez výjimky

@@ -12,13 +12,22 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\MfaProtectedOperationService;
 use MyInvoice\Service\Auth\MfaRecoveryCodeService;
+use MyInvoice\Service\Auth\MfaStepUpService;
+use MyInvoice\Service\Auth\OneTimeTokenException;
+use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\SessionManager;
+use MyInvoice\Service\Auth\StepUpOperationException;
+use MyInvoice\Service\Auth\TotpEnrollmentException;
 use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Clock\ClockInterface;
@@ -32,6 +41,18 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET  /api/auth/totp/status  — vrátí { enabled: bool }
  *
  * Disable: CLI `php api/bin/reset-2fa.php <email>` (fallback ručně v DB).
+ *
+ * ⚠️ Zřízení TOTP je „přidání silného faktoru" a samotná session na něj nestačí —
+ * jinak by unesená session (ukradená cookie, odemčené zařízení) útočníkovi
+ * založila vlastní druhý faktor, kterým by pak prošel každou step-up bránou
+ * ({@see \MyInvoice\Action\Auth\Tokens\CreateTokenAction} vydá trvalý API token
+ * na TOTP místo hesla, {@see MfaStepUpService} pustí regeneraci záložních kódů
+ * i zobrazení hesla k zálohám). Proto `setup()` vyžaduje totéž co registrace
+ * passkey ({@see PasskeyAction::registerOptions()}): má-li uživatel aktivní
+ * passkey, jednorázový step-up proof pro {@see MfaStepUpService::OPERATION_TOTP_ENABLE};
+ * jinak aktuální heslo (s brute-force ochranou jako u vydání API tokenu).
+ * `enable()` pak aktivuje výhradně secret, který takto autorizovaný `setup()`
+ * uložil, a to atomicky — souběžná výměna secretu nebo opakovaná aktivace selže.
  */
 final class TotpAction
 {
@@ -47,6 +68,10 @@ final class TotpAction
         private readonly SessionManager $sessions,
         private readonly SessionCookieFactory $sessionCookies,
         private readonly ClockInterface $clock,
+        private readonly PasswordHasher $passwords,
+        private readonly BruteForceGuard $bruteForce,
+        private readonly MfaProtectedOperationService $protectedOperations,
+        private readonly PasskeyCredentialRepository $credentials,
     ) {}
 
     public function status(Request $request, Response $response): Response
@@ -61,6 +86,12 @@ final class TotpAction
 
     public function setup(Request $request, Response $response): Response
     {
+        // Správa faktorů je jen pro webovou session — API token je nesmí měnit,
+        // stejně jako u passkey. BEARER_ALLOWED tenhle prefix nepouští, ale gate
+        // nesmí záviset jen na allowlistu jinde.
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Zřízení TOTP je dostupné pouze z přihlášené webové session.');
+        }
         $user = $this->user($request);
         if ($user === null) return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         if (!$this->mfaPolicy->isMethodAllowed('totp')) {
@@ -72,15 +103,40 @@ final class TotpAction
             return Json::error($response, 'already_enabled', 'TOTP už je aktivní. Pro reset použij: php api/bin/reset-2fa.php <email>.', 409);
         }
 
+        $authorization = $this->authorizeSetup($request, $response, $user);
+        if ($authorization instanceof Response) {
+            return $authorization;
+        }
+
         $secret = TotpService::generateSecret();
         try {
             $encrypted = $this->crypto->encrypt($secret);
         } catch (\RuntimeException) {
             return Json::error($response, 'server_error', 'Chyba konfigurace serveru.', 500);
         }
-        // Šifrované AES-256-GCM v DB; do response zasíláme plain (jednorázově pro setup)
-        $this->db->pdo()->prepare('UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?')
-            ->execute([$encrypted, (int) $user['id']]);
+        try {
+            $reauthMethod = $this->protectedOperations->storePendingTotpSecret(
+                (int) $user['id'],
+                (string) $request->getAttribute(AuthMiddleware::ATTR_TOKEN, ''),
+                (string) $user['password_hash'],
+                $encrypted,
+                $authorization['step_up_token'],
+            );
+        } catch (OneTimeTokenException|StepUpOperationException) {
+            $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+            $this->logger->log('auth.totp_setup_reauth_failed', (int) $user['id'], 'user', (int) $user['id'], ['reason' => 'step_up'], $ip, $request->getHeaderLine('User-Agent'));
+            return Json::error($response, 'step_up_proof_invalid', 'Je vyžadováno nové ověření silným faktorem.', 403);
+        } catch (TotpEnrollmentException $e) {
+            if ($e->reason === TotpEnrollmentException::ALREADY_ENABLED) {
+                return Json::error($response, 'already_enabled', 'TOTP už je aktivní. Pro reset použij: php api/bin/reset-2fa.php <email>.', 409);
+            }
+            if ($e->reason === TotpEnrollmentException::SESSION_INVALID) {
+                return Json::error($response, 'session_expired', 'Přihlášení už není platné.', 401);
+            }
+            return Json::error($response, 'enrollment_stale', 'Autorizace zřízení TOTP mezitím přestala platit. Začni znovu.', 409);
+        }
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $this->logger->log('auth.totp_setup', (int) $user['id'], 'user', (int) $user['id'], ['reauth' => $reauthMethod], $ip, $request->getHeaderLine('User-Agent'));
 
         $issuer = parse_url((string) $this->config->get('app.url', 'MyUcto.cz'), PHP_URL_HOST) ?: 'MyUcto.cz';
         $uri = $this->totp->provisioningUri($secret, (string) $user['email'], $issuer);
@@ -95,12 +151,52 @@ final class TotpAction
         ]);
         $qrDataUri = (new QRCode($options))->render($uri);
 
+        // Provisioning materiál je tajemství — nesmí skončit v žádné cache.
         return Json::ok($response, [
             'secret'      => $secret,        // pro manuální vložení do app
             'uri'         => $uri,
             'qr_data_uri' => $qrDataUri,
             'issuer'      => $issuer,
-        ]);
+        ])->withHeader('Cache-Control', 'no-store');
+    }
+
+    /**
+     * Opětovné prokázání identity před zřízením TOTP. Passkey proof se spotřebuje
+     * až spolu se zápisem secretu v jedné transakci.
+     *
+     * @param array<string,mixed> $user
+     * @return Response|array{step_up_token:?string}
+     */
+    private function authorizeSetup(Request $request, Response $response, array $user): Response|array
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        $userId = (int) $user['id'];
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $userAgent = $request->getHeaderLine('User-Agent');
+
+        // TOTP tu aktivní být nemůže (409 výš), takže jediný silný faktor je passkey.
+        // Počítá se bez ohledu na aktuální MFA politiku: zakázaný passkey nesmí
+        // tiše přepnout na slabší heslovou větev.
+        if ($this->credentials->countActiveForUser($userId) > 0) {
+            return ['step_up_token' => trim((string) ($body['step_up_token'] ?? ''))];
+        }
+
+        // Účet bez silného faktoru: heslo, stejně jako u vydání API tokenu
+        // ({@see Tokens\CreateTokenAction}) — včetně brute-force brány, protože
+        // generický rate limit na hádání hesla nestačí.
+        $email = (string) ($user['email'] ?? '');
+        $bfState = $this->bruteForce->check($email, (string) $ip);
+        if (in_array($bfState, [BruteForceGuard::STATE_LOCKED_15M, BruteForceGuard::STATE_LOCKED_24H], true)) {
+            return Json::error($response, 'too_many_attempts', 'Příliš mnoho pokusů. Zkus to později.', 429);
+        }
+        $password = (string) ($body['current_password'] ?? '');
+        if ($password === '' || !$this->passwords->verify($password, (string) ($user['password_hash'] ?? ''))) {
+            $this->passwords->dummyVerify();
+            $this->bruteForce->recordFailure($email, (string) $ip);
+            $this->logger->log('auth.totp_setup_reauth_failed', $userId, 'user', $userId, ['reason' => 'password'], $ip, $userAgent);
+            return Json::error($response, 'current_password_invalid', 'Aktuální heslo není správné.', 403);
+        }
+        return ['step_up_token' => null];
     }
 
     public function enable(Request $request, Response $response): Response
@@ -111,6 +207,12 @@ final class TotpAction
             return Json::error($response, 'mfa_method_not_allowed', 'TOTP není v této instalaci povolené.', 403);
         }
 
+        // Opakovaná aktivace by znovu ověřila kód, znovu vydala záložní kódy
+        // a znovu povýšila session — aktivní faktor se neaktivuje podruhé.
+        if ((int) $user['totp_enabled'] === 1) {
+            return Json::error($response, 'already_enabled', 'TOTP už je aktivní.', 409);
+        }
+
         $body = (array) ($request->getParsedBody() ?? []);
         $code = trim((string) ($body['code'] ?? ''));
         if ($code === '') {
@@ -119,8 +221,9 @@ final class TotpAction
         if (empty($user['totp_secret'])) {
             return Json::error($response, 'no_secret', 'Nejdřív zavolej /setup pro vygenerování secretu.', 400);
         }
+        $storedSecret = (string) $user['totp_secret'];
         try {
-            $secret = $this->crypto->decrypt((string) $user['totp_secret']);
+            $secret = $this->crypto->decrypt($storedSecret);
         } catch (\RuntimeException) {
             return Json::error($response, 'server_error', 'Chyba konfigurace serveru.', 500);
         }
@@ -128,8 +231,14 @@ final class TotpAction
             return Json::error($response, 'invalid_code', 'Neplatný TOTP kód.', 400);
         }
 
-        $this->db->pdo()->prepare('UPDATE users SET totp_enabled = 1 WHERE id = ?')
-            ->execute([(int) $user['id']]);
+        // Atomicky: aktivuje se jen ten secret, proti kterému kód prošel. Když ho
+        // mezitím vyměnil souběžný setup() (nebo už proběhla aktivace), zápis
+        // nezasáhne žádný řádek a neověřený secret zůstane vypnutý.
+        $stmt = $this->db->pdo()->prepare('UPDATE users SET totp_enabled = 1 WHERE id = ? AND totp_enabled = 0 AND totp_secret = ?');
+        $stmt->execute([(int) $user['id'], $storedSecret]);
+        if ($stmt->rowCount() !== 1) {
+            return Json::error($response, 'enrollment_stale', 'Zřízení TOTP mezitím změnil jiný požadavek. Začni znovu od /setup.', 409);
+        }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('auth.totp_enabled', (int) $user['id'], 'user', (int) $user['id'], null, $ip, $request->getHeaderLine('User-Agent'));
@@ -172,7 +281,7 @@ final class TotpAction
         $u = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (empty($u)) return null;
         // Načti čerstvý záznam (auth middleware nedává totp_*)
-        $stmt = $this->db->pdo()->prepare('SELECT id, email, totp_secret, totp_enabled FROM users WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT id, email, password_hash, totp_secret, totp_enabled FROM users WHERE id = ?');
         $stmt->execute([(int) $u['id']]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $row ?: null;

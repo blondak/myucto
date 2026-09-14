@@ -64,6 +64,8 @@ final class RequireMfaMiddlewareTest extends TestCase
             ['POST', '/api/auth/totp/enable'],
             ['POST', '/api/auth/webauthn/register/options'],
             ['POST', '/api/auth/webauthn/register/verify'],
+            ['POST', '/api/auth/webauthn/step-up/options'],
+            ['POST', '/api/auth/webauthn/step-up/verify'],
             ['POST', '/api/auth/mfa/step-up/totp'],
             // Dokončení wizardu — bez toho by při povinném MFA ukázková data tiše nevznikla.
             ['POST', '/api/auth/setup-sample'],
@@ -84,6 +86,8 @@ final class RequireMfaMiddlewareTest extends TestCase
         $blocked = [
             ['GET', '/api/auth/webauthn/register/options'],
             ['POST', '/api/auth/webauthn/register/options/extra'],
+            ['GET', '/api/auth/webauthn/step-up/options'],
+            ['POST', '/api/auth/webauthn/step-up/verify/extra'],
             ['GET', '/api/auth/session/activity'],
             ['POST', '/api/invoices'],
         ];
