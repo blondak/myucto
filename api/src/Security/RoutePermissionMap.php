@@ -253,6 +253,9 @@ final class RoutePermissionMap
         // Sloučené uzamčení vstupů a výpočet; akce sama vynucuje navíc
         // `payroll.inputs.write`, protože zamyká vstupy.
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/lock_and_calculate$#', 'payroll.calculate', AccessLevel::WRITE],
+        // Obnova podkladů otevřené revize — přepočet nad novým snímkem. Akce
+        // vynucuje navíc `payroll.inputs.write` (zamyká nově schválené vstupy).
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/refresh_inputs$#', 'payroll.calculate', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/(review|request_correction)$#', 'payroll.review', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/reopen$#', 'payroll.reopen', AccessLevel::WRITE],

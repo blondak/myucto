@@ -33,6 +33,7 @@ final class PayrollRunCommandPermissionContractTest extends TestCase
             ['prepare_payments', 'payroll.payments'],
             ['mark_paid', 'payroll.payments'],
             ['calculate', 'payroll.calculate'],
+            ['refresh_inputs', 'payroll.calculate'],
             ['review', 'payroll.review'],
         ] as [$command, $permission]) {
             $matched = $map->match(

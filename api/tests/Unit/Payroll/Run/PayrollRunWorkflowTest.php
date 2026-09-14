@@ -356,6 +356,67 @@ final class PayrollRunWorkflowTest extends TestCase
         }
     }
 
+    /**
+     * Obnova podkladů jen u OTEVŘENÉ revize: snímek, výpočet, kontrola.
+     * Schválená revize je neměnná a koncept snímek ještě nemá.
+     */
+    public function testRefreshInputsIsOfferedOnlyForOpenRevision(): void
+    {
+        $open = [
+            PayrollRunStatus::INPUTS_LOCKED,
+            PayrollRunStatus::REOPENED,
+            PayrollRunStatus::CALCULATED,
+            PayrollRunStatus::REVIEWED,
+        ];
+        foreach (PayrollRunStatus::cases() as $status) {
+            self::assertSame(
+                in_array($status, $open, true),
+                in_array(
+                    PayrollRunCommand::REFRESH_INPUTS,
+                    $this->workflow->availableCommands($status),
+                    true,
+                ),
+                $status->value,
+            );
+        }
+    }
+
+    public function testRefreshInputsReturnsRunToRecalculation(): void
+    {
+        self::assertSame(
+            PayrollRunStatus::REOPENED,
+            $this->workflow->transition(
+                PayrollRunStatus::CALCULATED,
+                PayrollRunCommand::REFRESH_INPUTS,
+                $this->context(correctionRevision: true),
+            )->to,
+        );
+        self::assertSame(
+            PayrollRunStatus::INPUTS_LOCKED,
+            $this->workflow->transition(
+                PayrollRunStatus::REVIEWED,
+                PayrollRunCommand::REFRESH_INPUTS,
+                $this->context(correctionRevision: false),
+            )->to,
+        );
+    }
+
+    /** Novější podklady schválení zastaví — tiché vynechání není varování. */
+    public function testApprovalRejectsStaleSources(): void
+    {
+        try {
+            $this->workflow->transition(
+                PayrollRunStatus::CALCULATED,
+                PayrollRunCommand::APPROVE,
+                $this->context(staleSourceCount: 2),
+            );
+            self::fail('Schválení nesmí projít nad zastaralým snímkem.');
+        } catch (\DomainException $e) {
+            self::assertStringContainsString('Obnovit podklady', $e->getMessage());
+            self::assertStringContainsString('(2)', $e->getMessage());
+        }
+    }
+
     public function testImmutableArtifactsAreRequiredAtTheirBoundaries(): void
     {
         foreach ([
@@ -384,6 +445,8 @@ final class PayrollRunWorkflowTest extends TestCase
         bool $hasPostingBatch = true,
         bool $hasPaymentBatch = true,
         ?string $reason = null,
+        bool $correctionRevision = false,
+        int $staleSourceCount = 0,
     ): PayrollRunTransitionContext {
         return new PayrollRunTransitionContext(
             actorUserId: $actorUserId,
@@ -396,6 +459,8 @@ final class PayrollRunWorkflowTest extends TestCase
             hasPostingBatch: $hasPostingBatch,
             hasPaymentBatch: $hasPaymentBatch,
             reason: $reason,
+            correctionRevision: $correctionRevision,
+            staleSourceCount: $staleSourceCount,
         );
     }
 }

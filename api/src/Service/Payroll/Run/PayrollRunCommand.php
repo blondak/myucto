@@ -18,6 +18,17 @@ enum PayrollRunCommand: string
      */
     case LOCK_AND_CALCULATE = 'lock_and_calculate';
     case CALCULATE = 'calculate';
+    /**
+     * „Obnovit podklady" — nový snímek vstupů do OTEVŘENÉ revize.
+     *
+     * `calculate` počítá ze snímku zmrazeného při zámku nebo znovuotevření,
+     * takže vstup schválený až potom (doplatek, oprava, zapomenutý příplatek)
+     * ani opravená zákonná evidence se do revize nedostaly jinak než přes
+     * zrušení a nové otevření. Tenhle příkaz založí novou revizi téhož druhu
+     * stejnou cestou jako zámek (snímek, graf, zámek schválených vstupů)
+     * a rozpracovanou zahodí. Schválená revize se jím nemění nikdy.
+     */
+    case REFRESH_INPUTS = 'refresh_inputs';
     case REVIEW = 'review';
     case APPROVE = 'approve';
     case POST = 'post';

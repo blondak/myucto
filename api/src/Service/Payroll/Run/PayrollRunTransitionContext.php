@@ -28,11 +28,22 @@ final readonly class PayrollRunTransitionContext
          * {@see PayrollRunCommandService}.
          */
         public ?string $reason = null,
+        /*
+         * Obnova podkladů vrací běh na úroveň „k přepočtu". Opravná revize
+         * zůstává opravnou (`reopened`), řádná se vrací do `inputs_locked`.
+         */
+        public bool $correctionRevision = false,
+        /*
+         * Kolik podkladů se od vzniku snímku změnilo (nové nebo změněné
+         * schválené vstupy, nepřítomnosti, vztahy, zákonná evidence). Schválení
+         * s nenulovým počtem by revizi uzavřelo bez nich.
+         */
+        public int $staleSourceCount = 0,
     ) {
         if ($actorUserId <= 0) {
             throw new \InvalidArgumentException('Uživatel přechodu musí být platný.');
         }
-        if ($blockerCount < 0 || $unresolvedOverrideCount < 0) {
+        if ($blockerCount < 0 || $unresolvedOverrideCount < 0 || $staleSourceCount < 0) {
             throw new \InvalidArgumentException('Počet validačních problémů nesmí být záporný.');
         }
     }

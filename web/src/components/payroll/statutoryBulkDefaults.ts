@@ -111,15 +111,17 @@ export function firstStatutoryReviewId(validations: PayrollRunValidation[]): num
  * Jak dostat nově zapsanou evidenci do běhu.
  *
  * `calculate` počítá ze zmrazeného snímku vstupů, takže sám nic nového
- * nepřinese. Nový snímek vzniká jen uzamčením vstupů (koncept) nebo novou
- * revizí (`reopen` ze zrušeného nebo opravného běhu). Rozpracovaný běh je
- * proto potřeba nejdřív zrušit, schválený vrátit k opravě. Pořadí vybírá
- * první krok, který je v daném stavu opravdu k dispozici.
+ * nepřinese. Nový snímek vzniká uzamčením vstupů (koncept), obnovou podkladů
+ * (`refresh_inputs` u otevřené revize) nebo novou revizí (`reopen` ze
+ * zrušeného nebo opravného běhu). Schválený běh se vrací k opravě. Zrušení
+ * zůstává jen jako záloha pro odpověď serveru bez obnovy podkladů. Pořadí
+ * vybírá první krok, který je v daném stavu opravdu k dispozici.
  */
 const REFRESH_ORDER: PayrollRunCommand[] = [
   'lock_and_calculate',
   'lock_inputs',
   'reopen',
+  'refresh_inputs',
   'cancel',
   'request_correction',
 ]

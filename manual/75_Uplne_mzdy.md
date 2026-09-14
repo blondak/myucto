@@ -261,8 +261,12 @@ stejným sledem devíti kroků a odkazuje rovnou na příslušné obrazovky.
     závislé činnosti**) a **Zobrazit historii a změny**.
 13. Musíte-li něco opravit, opravte **zdrojový údaj** a klikněte
     **Přepočítat**. Přepočet pracuje pořád se stejným zmrazeným snímkem, takže
-    ho lze opakovat kolikrát chcete; jde-li o změnu samotného vstupu, otevřete
-    novou revizi. Vypočtený výsledek se nikdy neupravuje ručně.
+    ho lze opakovat kolikrát chcete. Změnu samotného podkladu (nový nebo
+    opravený schválený vstup, nepřítomnost, zákonná evidence osoby) převezme
+    do rozpracovaného běhu tlačítko **Obnovit podklady**: založí nový snímek
+    a běh vrátí k přepočtu. Změnily-li se podklady od zamknutí, ukáže karta
+    běhu varování s počtem změn a běh nepůjde schválit, dokud je neobnovíte
+    a nepřepočítáte. Vypočtený výsledek se nikdy neupravuje ručně.
 14. Klikněte **Schválit** (zelené tlačítko). Schválení uloží výsledek jako
     závazný, **samo založí výplatní pásky** každé zpracované osoby, v podvojném
     účetnictví připraví rozdílový mzdový deník a zapíše kontrolu i schválení do
@@ -277,6 +281,7 @@ Primární tlačítko na kartě běhu se po každém kroku samo přepne na ten d
 |---|---|---|
 | Koncept | **Spočítat mzdy** | zamkne vstupy a spočítá |
 | Vstupy uzamčeny / Oprava otevřena | **Přepočítat** | přepočítá ze zmrazeného snímku |
+| Rozpracovaný běh se změněnými podklady | **Obnovit podklady** | nový snímek z aktuálních podkladů, pak přepočet |
 | Spočítáno / Zkontrolováno | **Schválit** | závazný výsledek + výplatní pásky |
 | Schváleno | **Zaúčtovat** | zápis do deníku (u daňové evidence se přeskočí) |
 | Zaúčtováno | **Připravit platby** | vznikne seznam platebních závazků |
@@ -331,6 +336,7 @@ chybějící akce je nejčastěji chybějící oprávnění, ne chyba:
 |---|---|
 | **Nový mzdový běh**, **Smazat prázdný běh** | `payroll.inputs.write` |
 | **Spočítat mzdy**, **Přepočítat**, **Uzamknout vstupy** | `payroll.calculate` |
+| **Obnovit podklady** | `payroll.calculate` a `payroll.inputs.write` |
 | **Vyžádat opravu** | `payroll.review` |
 | **Schválit**, **Uzavřít**, **Schválit vše**, **Schválit výjimku** | `payroll.approve` |
 | **Otevřít opravu**, **Zrušit běh** | `payroll.reopen` |

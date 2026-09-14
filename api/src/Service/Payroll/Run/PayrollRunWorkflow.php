@@ -16,9 +16,13 @@ final class PayrollRunWorkflow
                 PayrollRunCommand::LOCK_INPUTS,
                 PayrollRunCommand::CANCEL,
             ],
+            // `REFRESH_INPUTS` je dostupné jen u OTEVŘENÉ revize (snímek,
+            // výpočet, kontrola). Schválená revize je neměnná — tam vede cesta
+            // dál jen přes vyžádání opravy.
             PayrollRunStatus::INPUTS_LOCKED,
             PayrollRunStatus::REOPENED => [
                 PayrollRunCommand::CALCULATE,
+                PayrollRunCommand::REFRESH_INPUTS,
                 PayrollRunCommand::CANCEL,
             ],
             // `APPROVE` je dostupné už z `CALCULATED`: bez pravidla čtyř očí
@@ -29,12 +33,14 @@ final class PayrollRunWorkflow
             // toho, kdo krok chce projít zvlášť.
             PayrollRunStatus::CALCULATED => [
                 PayrollRunCommand::CALCULATE,
+                PayrollRunCommand::REFRESH_INPUTS,
                 PayrollRunCommand::REVIEW,
                 PayrollRunCommand::APPROVE,
                 PayrollRunCommand::CANCEL,
             ],
             PayrollRunStatus::REVIEWED => [
                 PayrollRunCommand::CALCULATE,
+                PayrollRunCommand::REFRESH_INPUTS,
                 PayrollRunCommand::APPROVE,
                 PayrollRunCommand::CANCEL,
             ],
@@ -103,6 +109,11 @@ final class PayrollRunWorkflow
             ),
             PayrollRunCommand::LOCK_INPUTS => PayrollRunStatus::INPUTS_LOCKED,
             PayrollRunCommand::CALCULATE => PayrollRunStatus::CALCULATED,
+            // Nová revize nemá výsledek, takže běh se vrací tam, odkud se
+            // počítá. Druh revize se nemění, proto i stav zůstává „svůj".
+            PayrollRunCommand::REFRESH_INPUTS => $context->correctionRevision
+                ? PayrollRunStatus::REOPENED
+                : PayrollRunStatus::INPUTS_LOCKED,
             PayrollRunCommand::REVIEW => PayrollRunStatus::REVIEWED,
             PayrollRunCommand::APPROVE => PayrollRunStatus::APPROVED,
             PayrollRunCommand::POST => PayrollRunStatus::POSTED,
@@ -131,6 +142,30 @@ final class PayrollRunWorkflow
             && !$context->hasImmutableSnapshot
         ) {
             throw new \DomainException('Výpočet vyžaduje neměnný snapshot vstupů.');
+        }
+        if ($command === PayrollRunCommand::REFRESH_INPUTS
+            && !$context->hasImmutableSnapshot
+        ) {
+            throw new \DomainException('Podklady lze obnovit jen u běhu s neměnným snapshotem.');
+        }
+        /*
+         * Novější podklady jsou BLOKÁTOR, ne varování s výjimkou.
+         *
+         * Stejně model zachází s neschváleným vstupem (`draft_inputs_present`):
+         * co do revize patří a není v ní, se nepotvrzuje, ale doplňuje. Výjimka
+         * by tu nic nerozhodovala — schválený vstup, který revize vynechá,
+         * zůstane ve stavu `approved`, žádný běh ho už nezamkne a doplatek
+         * se nevyplatí ani nevykáže. Cesta ven je vždy jedno kliknutí
+         * („Obnovit podklady" a přepočet), nebo vstup vědomě zrušit či
+         * přesunout do jiného období.
+         */
+        if ($command === PayrollRunCommand::APPROVE && $context->staleSourceCount > 0) {
+            throw new \DomainException(sprintf(
+                'Od zamknutí vstupů se změnily podklady, se kterými revize '
+                . 'počítá (%d). Klikněte na „Obnovit podklady“ a běh přepočítejte '
+                . '— schválená revize by je jinak tiše vynechala.',
+                $context->staleSourceCount,
+            ));
         }
         if (in_array($command, [
             PayrollRunCommand::REVIEW,

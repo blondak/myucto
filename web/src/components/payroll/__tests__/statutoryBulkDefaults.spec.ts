@@ -136,7 +136,13 @@ describe('evidenceRefreshCommand', () => {
       .toBe('lock_and_calculate')
   })
 
-  it('spočítaný běh nepřepočítává ze starého snímku, ale nabídne zrušení', () => {
+  it('spočítaný běh nepřepočítává ze starého snímku, ale obnoví podklady', () => {
+    expect(evidenceRefreshCommand({
+      available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
+    })).toBe('refresh_inputs')
+  })
+
+  it('bez obnovy podkladů zůstává záložní cestou zrušení', () => {
     expect(evidenceRefreshCommand({ available_commands: ['calculate', 'review', 'approve', 'cancel'] }))
       .toBe('cancel')
   })

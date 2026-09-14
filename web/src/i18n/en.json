@@ -2137,6 +2137,7 @@
           "reopen": "Run reopened",
           "cancel": "Run cancelled",
           "close": "Run closed",
+          "refresh_inputs": "Inputs refreshed",
           "validation_override": "Check exception approved",
           "validation_override_revoked": "Check exception revoked",
           "unknown": "Another audit action"
@@ -2163,6 +2164,7 @@
           "lock_and_calculate": "The filled-in data reaches the run when the inputs are locked. Calculate the payroll.",
           "lock_inputs": "The filled-in data reaches the run when the inputs are locked. Lock the inputs and calculate the payroll.",
           "reopen": "The filled-in data reaches the run only through a new revision. Open it, then calculate the payroll.",
+          "refresh_inputs": "The run calculates from a frozen snapshot of inputs, so recalculating alone will not pick up the new data. Refresh the inputs and calculate the payroll again.",
           "cancel": "The run calculates from a frozen snapshot of inputs, so recalculating alone will not pick up the new data. Cancel the run, open its new revision and calculate the payroll again.",
           "request_correction": "The run is approved. The filled-in data reaches it only through a correction revision: request a correction, open a new revision and calculate the payroll.",
           "none": "The filled-in data applies to further processing. In this state it cannot be reflected in the run calculation."
@@ -2461,7 +2463,8 @@
         "reopen_cancelled": "Start from corrected inputs",
         "cancel": "Cancel run",
         "close": "Close",
-        "lock_and_calculate": "Calculate payroll"
+        "lock_and_calculate": "Calculate payroll",
+        "refresh_inputs": "Refresh inputs"
       },
       "outcome": {
         "posted": "Payroll has been posted to accounting.",
@@ -2521,7 +2524,22 @@
         "prepare_payments": "Prepares the payment liabilities (net pay, contributions, tax) and opens payments. This is where a missing verified institution account shows up.",
         "mark_paid": "Marks contributions and net pay as settled. Only possible once every liability is covered by a matched payment.",
         "close": "Closes the run for the period. A closed run can only be reopened by requesting a correction.",
-        "reopen": "Opens a new revision over corrected inputs. The original revision stays in the history together with the documents already issued."
+        "reopen": "Opens a new revision over corrected inputs. The original revision stays in the history together with the documents already issued.",
+        "refresh_inputs": "Takes a new snapshot of the current approved inputs, absences and statutory records and returns the run to recalculation. The work-in-progress revision stays in the history as abandoned; approved revisions are never affected."
+      },
+      "source_drift": {
+        "title": "Since the inputs were locked ({date}), sources used by this revision have changed: {count}. The run can be approved only after the inputs are refreshed and the payroll recalculated.",
+        "inputs_added": "New approved payroll inputs: {count}",
+        "inputs_changed": "Changed payroll inputs: {count}",
+        "inputs_removed": "Cancelled payroll inputs: {count}",
+        "absences_added": "New approved absences: {count}",
+        "absences_changed": "Changed absences: {count}",
+        "absences_removed": "Cancelled absences: {count}",
+        "employments_added": "Employments that now belong to the period: {count}",
+        "employments_removed": "Employments that no longer belong to the period: {count}",
+        "statutory_evidence_changed": "People with changed statutory records: {count}",
+        "action": "Click “Refresh inputs”, then recalculate the run.",
+        "action_forbidden": "Inputs can be refreshed by a user allowed to calculate payroll and write payroll inputs."
       },
       "next_steps": {
         "title": "What comes next",

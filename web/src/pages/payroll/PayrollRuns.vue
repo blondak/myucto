@@ -497,6 +497,7 @@ const KNOWN_COMMANDS: PayrollRunCommand[] = [
   'lock_and_calculate',
   'lock_inputs',
   'calculate',
+  'refresh_inputs',
   'approve',
   'post',
   'prepare_payments',
@@ -513,8 +514,24 @@ function commandLabel(command: PayrollRunCommand, run?: PayrollRun): string {
   return t(`payroll.runs.commands.${command}`)
 }
 
+/**
+ * Změnily-li se od zmrazení snímku podklady otevřené revize, je jediný
+ * smysluplný další krok obnovit je: schválení by server odmítl a přepočet by
+ * počítal ze starého snímku.
+ */
+function hasSourceDrift(run: PayrollRun): boolean {
+  return (run.source_drift?.total ?? 0) > 0
+}
+
+function primaryCommand(run: PayrollRun): PayrollRunCommand | undefined {
+  if (hasSourceDrift(run) && run.available_commands.includes('refresh_inputs')) {
+    return 'refresh_inputs'
+  }
+  return PRIMARY_COMMAND[run.status]
+}
+
 function commandClass(run: PayrollRun, command: PayrollRunCommand): string {
-  if (PRIMARY_COMMAND[run.status] === command) {
+  if (primaryCommand(run) === command) {
     return btnFilled(command === 'approve' ? 'success' : 'primary')
   }
   if (command === 'cancel') return btnOutline('danger')
@@ -525,7 +542,7 @@ function commandClass(run: PayrollRun, command: PayrollRunCommand): string {
 }
 
 function commandIcon(command: PayrollRunCommand): string {
-  if (command === 'lock_inputs') return ICONS.lock
+  if (command === 'lock_inputs' || command === 'refresh_inputs') return ICONS.lock
   if (command === 'calculate' || command === 'lock_and_calculate') return ICONS.cycle
   if (command === 'post') return ICONS.doc
   if (command === 'prepare_payments') return ICONS.coin
@@ -543,6 +560,7 @@ function commandIcon(command: PayrollRunCommand): string {
 const COMMAND_HINTS: PayrollRunCommand[] = [
   'lock_and_calculate',
   'calculate',
+  'refresh_inputs',
   'approve',
   'post',
   'prepare_payments',
@@ -571,10 +589,31 @@ function coverageLabel(run: PayrollRun): string {
 }
 
 function commandHint(run: PayrollRun): string {
-  const primary = PRIMARY_COMMAND[run.status]
+  const primary = primaryCommand(run)
   if (!primary || !COMMAND_HINTS.includes(primary)) return ''
   if (!visibleCommands(run).includes(primary)) return ''
   return t(`payroll.runs.command_hint.${primary}`)
+}
+
+const SOURCE_DRIFT_KEYS = [
+  'inputs_added',
+  'inputs_changed',
+  'inputs_removed',
+  'absences_added',
+  'absences_changed',
+  'absences_removed',
+  'employments_added',
+  'employments_removed',
+  'statutory_evidence_changed',
+] as const
+
+/** Jen nenulové druhy změn — u 500 lidí nechceme číst sloupec nul. */
+function sourceDriftLines(run: PayrollRun): { key: string, text: string }[] {
+  const drift = run.source_drift
+  if (!drift) return []
+  return SOURCE_DRIFT_KEYS
+    .filter(key => drift[key] > 0)
+    .map(key => ({ key, text: t(`payroll.runs.source_drift.${key}`, { count: drift[key] }) }))
 }
 
 function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
@@ -589,6 +628,11 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
       return canWrite.value && auth.canWrite('payroll.calculate')
     }
     if (command === 'calculate') return auth.canWrite('payroll.calculate')
+    // Obnova podkladů zamyká nově schválené vstupy — stejné dvě brány jako
+    // sloučený krok „Spočítat mzdy".
+    if (command === 'refresh_inputs') {
+      return canWrite.value && auth.canWrite('payroll.calculate')
+    }
     if (command === 'request_correction') return auth.canWrite('payroll.review')
     if (command === 'approve') return auth.canWrite('payroll.approve')
     if (command === 'reopen') return auth.canWrite('payroll.reopen')
@@ -600,7 +644,7 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
 
 /** Primární akce vlevo, zrušení běhu vždy až úplně vpravo. */
 function commandWeight(run: PayrollRun, command: PayrollRunCommand): number {
-  if (PRIMARY_COMMAND[run.status] === command) return 0
+  if (primaryCommand(run) === command) return 0
   if (command === 'cancel') return 2
   return 1
 }
@@ -1599,6 +1643,36 @@ onMounted(load)
         >
           {{ commandHint(run) }}
         </p>
+        <!--
+          Otevřená revize počítá ze snímku, který mezitím zastaral. Bez tohohle
+          upozornění se doplatek schválený po zámku do revize nedostal a nikdo
+          si toho nevšiml; schválení teď server zastaví, tak ať účetní ví proč
+          dřív, než na něj klikne.
+        -->
+        <div
+          v-if="hasSourceDrift(run)"
+          :data-testid="`payroll-run-${run.id}-source-drift`"
+          class="mt-3 flex max-w-3xl items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path :d="ICONS.bell" />
+          </svg>
+          <div class="flex-1 space-y-1">
+            <p class="font-medium">
+              {{ t('payroll.runs.source_drift.title', { count: run.source_drift?.total ?? 0, date: formatDateTime(run.source_drift?.snapshot_created_at ?? '') }) }}
+            </p>
+            <ul class="list-disc pl-5">
+              <li
+                v-for="line in sourceDriftLines(run)"
+                :key="line.key"
+                :data-test="`payroll-run-source-drift-${line.key}`"
+              >{{ line.text }}</li>
+            </ul>
+            <p>
+              {{ t(visibleCommands(run).includes('refresh_inputs') ? 'payroll.runs.source_drift.action' : 'payroll.runs.source_drift.action_forbidden') }}
+            </p>
+          </div>
+        </div>
         <!--
           Stav úhrady, ne úkol. Účetní tu nemá co potvrzovat — příkaz do banky
           poslala a výpis dorazí, až dorazí. Vidí jen, kolik závazků je

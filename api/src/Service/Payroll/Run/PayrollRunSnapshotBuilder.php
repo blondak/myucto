@@ -619,6 +619,78 @@ final class PayrollRunSnapshotBuilder
     }
 
     /**
+     * Aktuální stav podkladů, které snímek zmrazuje — bez stavby celého snímku.
+     *
+     * Pro detekci zastaralé otevřené revize ({@see PayrollRunSourceDriftDetector}).
+     * Musí jít TÝMIŽ dotazy a TOUŽ normalizací jako `build()`; vlastní výklad
+     * by hlásil změnu tam, kde by nový snímek vyšel stejně, nebo naopak mlčel.
+     * Množina vztahů jde přes `employmentRows()`, takže nový vztah v období
+     * (nástup, vstup po skončení) se pozná stejně, jako by ho vzal nový snímek.
+     *
+     * @param list<int> $employmentIds vztahy zmrazeného snímku
+     * @param list<int> $employeeIds osoby zmrazeného snímku
+     * @return array{
+     *   eligible_employment_ids:list<int>,
+     *   inputs:array<int,list<array<string,mixed>>>,
+     *   absences:array<int,list<array<string,mixed>>>,
+     *   statutory_evidence:array<int,mixed>|null
+     * }
+     */
+    public function currentSources(
+        int $supplierId,
+        string $periodStart,
+        string $paymentDate,
+        ?int $officeId,
+        array $employmentIds,
+        array $employeeIds,
+    ): array {
+        $period = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
+        if ($supplierId <= 0 || $period === false || $period->format('Y-m-d') !== $periodStart) {
+            throw new \InvalidArgumentException('Období mzdového běhu není platné.');
+        }
+        $periodEnd = $period->modify('last day of this month')->format('Y-m-d');
+
+        $eligible = [];
+        $eligibleEmployees = [];
+        foreach ($this->employmentRows($supplierId, $periodStart, $periodEnd, $officeId) as $row) {
+            $eligible[] = (int) $row['employment_id'];
+            $eligibleEmployees[] = (int) $row['employee_id'];
+        }
+        $allEmployments = array_values(array_unique([...$employmentIds, ...$eligible]));
+        $inputRows = $this->batch->inputs($supplierId, $allEmployments, $periodStart);
+        $absenceRows = $this->batch->absences(
+            $supplierId,
+            $allEmployments,
+            $periodStart,
+            $periodEnd,
+        );
+        $inputs = [];
+        $absences = [];
+        foreach ($allEmployments as $employmentId) {
+            $inputs[$employmentId] = $this->inputs($inputRows[$employmentId] ?? []);
+            $absences[$employmentId] = $this->absences($absenceRows[$employmentId] ?? []);
+        }
+
+        $statutoryEvidence = null;
+        if ($this->statutoryEvidence !== null) {
+            $statutoryPeriod = ($this->periods ?? new PayrollStatutoryPeriodResolver())
+                ->resolve($periodStart, $paymentDate);
+            $statutoryEvidence = $this->statutoryEvidence->snapshotMany(
+                $supplierId,
+                array_values(array_unique([...$employeeIds, ...$eligibleEmployees])),
+                $statutoryPeriod->taxCalculationDate,
+            );
+        }
+
+        return [
+            'eligible_employment_ids' => $eligible,
+            'inputs' => $inputs,
+            'absences' => $absences,
+            'statutory_evidence' => $statutoryEvidence,
+        ];
+    }
+
+    /**
      * Prohlášení k dani do snímku vztahu.
      *
      * Zdrojem je ZÁKONNÁ EVIDENCE OSOBY, ne sloupec smluvních podmínek.

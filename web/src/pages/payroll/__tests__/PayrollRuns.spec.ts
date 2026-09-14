@@ -1418,6 +1418,103 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  // ── Obnovení podkladů otevřené revize (B2) ──────────────────────────────
+  //
+  // Vstup schválený po zámku přepočet nevidí; schválení by ho tiše vynechalo.
+  // Karta musí varovat s počtem a hlavním krokem musí být obnova podkladů.
+  const drift = {
+    total: 2,
+    inputs_added: 1,
+    inputs_changed: 0,
+    inputs_removed: 0,
+    absences_added: 0,
+    absences_changed: 0,
+    absences_removed: 0,
+    employments_added: 0,
+    employments_removed: 0,
+    statutory_evidence_changed: 1,
+    snapshot_created_at: '2026-09-01 10:00:00',
+  }
+
+  it('otevřená revize se změněnými podklady varuje s počtem a nabídne obnovu jako hlavní krok', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      revision_id: 40,
+      revision_no: 2,
+      revision_kind: 'correction',
+      available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
+      source_drift: drift,
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const box = wrapper.get('[data-testid="payroll-run-15-source-drift"]')
+    expect(box.text()).toContain('payroll.runs.source_drift.title')
+    expect(box.find('[data-test="payroll-run-source-drift-inputs_added"]').exists()).toBe(true)
+    expect(box.find('[data-test="payroll-run-source-drift-statutory_evidence_changed"]').exists()).toBe(true)
+    // Nulové druhy změn se nevypisují.
+    expect(box.find('[data-test="payroll-run-source-drift-inputs_changed"]').exists()).toBe(false)
+    expect(box.text()).toContain('payroll.runs.source_drift.action')
+
+    const buttons = wrapper.findAll('button[data-testid^="payroll-run-15-"]')
+    expect(buttons[0]!.attributes('data-testid')).toBe('payroll-run-15-refresh_inputs')
+    expect(wrapper.get('[data-testid="payroll-run-15-hint"]').text())
+      .toBe('payroll.runs.command_hint.refresh_inputs')
+
+    await wrapper.get('[data-testid="payroll-run-15-refresh_inputs"]').trigger('click')
+    await flushPromises()
+
+    expect(m.commandRun).toHaveBeenCalledWith(
+      15,
+      'refresh_inputs',
+      { row_version: 2 },
+      expect.any(String),
+    )
+
+    wrapper.unmount()
+  })
+
+  it('bez změn podkladů nevaruje a hlavním krokem zůstává schválení', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
+      source_drift: { ...drift, total: 0, inputs_added: 0, statutory_evidence_changed: 0 },
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-source-drift"]').exists()).toBe(false)
+    const buttons = wrapper.findAll('button[data-testid^="payroll-run-15-"]')
+    expect(buttons[0]!.attributes('data-testid')).toBe('payroll-run-15-approve')
+    // Obnova zůstává po ruce jako vedlejší akce.
+    expect(wrapper.find('[data-testid="payroll-run-15-refresh_inputs"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('bez práva zapisovat vstupy obnovu nenabídne a řekne proč', async () => {
+    m.canWrite.mockImplementation((permission: string) => permission !== 'payroll.inputs.write')
+    m.runs.mockResolvedValue([run({
+      status: 'reopened',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'cancel'],
+      source_drift: drift,
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-refresh_inputs"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payroll-run-15-source-drift"]').text())
+      .toContain('payroll.runs.source_drift.action_forbidden')
+
+    wrapper.unmount()
+  })
+
   it('nálezy kontroly ukáže předem a před zahájením se zeptá, ale nezablokuje', async () => {
     const readiness: PayrollRunReadiness = {
       period_start: '2026-08-01',

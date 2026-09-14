@@ -23,7 +23,9 @@ Musí být dokončeno nastavení zaměstnavatele, zaměstnanců, vztahů, kalend
 3. Projděte blokace, varování i výsledky jednotlivých zaměstnanců.
 4. Porovnejte souhrny s docházkou, vstupy, srážkami a očekávanými odvody.
 5. Po opravě zdroje klikněte **Přepočítat**; neupravujte vypočtený výsledek bez
-   podkladu.
+   podkladu. Přepočet počítá ze snímku zmrazeného při zamknutí. Vstup,
+   nepřítomnost nebo zákonnou evidenci schválenou až potom převezme
+   **Obnovit podklady** (viz [80.8.3](#8083-obnoveni-podkladu-rozpracovaneho-behu)).
 6. Klikněte **Schválit**. Samostatný krok **Zkontrolovat** aplikace jako
    tlačítko nenabízí — schválení ho provede za vás. Následné činnosti provádějte
    z této schválené revize: **Zaúčtovat**, potom **Připravit platby** a nakonec
@@ -167,9 +169,9 @@ karta osoby; výsledek ukáže doplněné, přeskočené a neúspěšné osoby s
 
 Spočítaný běh počítá ze zmrazeného snímku vstupů, samotný přepočet proto
 doplněné údaje nevezme. Po uložení nabídne dialog další krok podle stavu
-běhu: u konceptu **Spočítat mzdy**, u spočítaného běhu **Zrušit** (potom
-otevřete novou revizi a spočítejte mzdy), u zrušeného nebo opravného běhu
-otevření nové revize a u schváleného běhu **Vyžádat opravu**.
+běhu: u konceptu **Spočítat mzdy**, u rozpracovaného běhu **Obnovit
+podklady** (potom spočítejte mzdy), u zrušeného nebo opravného běhu otevření
+nové revize a u schváleného běhu **Vyžádat opravu**.
 
 ### 80.8.2 Hromadné doplnění místa výkonu práce pro JMHZ
 
@@ -188,6 +190,31 @@ a zapíší se jako oprava platné verze podmínek, stejně jako na kartě vztah
 včetně záznamu v historii změn. Vyplněné pracoviště se nikdy nepřepíše.
 Do běhu se doplněné údaje dostanou až novou revizí: schválený běh vraťte
 k opravě, otevřete novou revizi, spočítejte, schvalte a hlášení připravte znovu.
+
+### 80.8.3 Obnovení podkladů rozpracovaného běhu
+
+Zamknutí vstupů i otevření opravy zmrazí snímek podkladů a **Přepočítat**
+počítá vždy z něj. Co se schválí až potom, typicky doplatek, oprava nebo
+zapomenutý příplatek, se do rozpracované revize samo nedostane.
+
+Karta rozpracovaného běhu (vstupy uzamčeny, spočítáno nebo otevřená oprava)
+proto hlídá, jestli od zmrazení snímku přibyly nebo se změnily schválené
+mzdové vstupy, nepřítomnosti, pracovní vztahy v období nebo zákonná evidence
+osob. Když ano, ukáže varování s datem snímku a počtem změn podle druhu
+a jako hlavní akci nabídne **Obnovit podklady**.
+
+**Obnovit podklady** založí novou revizi téhož druhu (opravná zůstává
+opravnou) ze stejných podkladů, jaké by vzalo zamknutí vstupů, nově schválené
+vstupy zamkne a běh vrátí k přepočtu. Rozpracovaná revize zůstane v historii
+jako zahozená, v historii běhu přibude událost **Podklady obnoveny**.
+Schválenou revizi obnova nikdy nemění, u schváleného běhu vede cesta přes
+**Vyžádat opravu**. Výjimky schválené u varování předchozí revize se
+nepřenášejí, nová revize je vyžaduje znovu.
+
+Schválení revize, ke které existují novější podklady, aplikace odmítne
+s výzvou k obnovení. Nejde o varování s výjimkou: schválený vstup, který by
+revize vynechala, by zůstal navždy nezaúčtovaný a nevyplacený. Nechcete-li
+vstup do měsíce zahrnout, zrušte ho nebo ho přesuňte do jiného období.
 
 Výpočet odděluje hotovost zahrnutou do exekučního základu od částek, které se
 nesrážejí, například správně klasifikovaných cestovních náhrad. Vypočtená

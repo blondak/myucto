@@ -27,6 +27,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentsUnsettledException;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
+use MyInvoice\Service\Payroll\Run\PayrollRunSourceDriftDetector;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -56,6 +57,8 @@ final class PayrollRunsAction
          * doplní přehled „doloženo / čeká na výpis".
          */
         private readonly PayrollRunAutoSettlementService $autoSettlement,
+        // Otevřená revize se zastaralým snímkem — varování s počtem u běhu.
+        private readonly PayrollRunSourceDriftDetector $sourceDrift,
     ) {}
 
     /**
@@ -439,6 +442,11 @@ final class PayrollRunsAction
                     $this->currentSupplierId($request),
                     $revisionId,
                 );
+            $item['source_drift'] = $this->sourceDriftFor(
+                $this->currentSupplierId($request),
+                PayrollRunStatus::from($status),
+                PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
+            );
             $deletion = $this->runs->canDelete(
                 $this->currentSupplierId($request),
                 PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
@@ -493,6 +501,44 @@ final class PayrollRunsAction
                 $items,
             ),
         ]);
+    }
+
+    /**
+     * Kolik podkladů se změnilo od vzniku snímku otevřené revize.
+     *
+     * Jen tam, kde jde podklady obnovit (stejná podmínka jako nabídka příkazu
+     * `refresh_inputs`), jinak `null`. Chyba detekce seznam neshodí — schválení
+     * si totéž ověří samo a bez výjimky ho zastaví.
+     *
+     * @return array<string,int|string>|null
+     */
+    private function sourceDriftFor(
+        int $supplierId,
+        PayrollRunStatus $status,
+        int $runId,
+    ): ?array {
+        if (!in_array(
+            PayrollRunCommand::REFRESH_INPUTS,
+            $this->workflow->availableCommands($status),
+            true,
+        )) {
+            return null;
+        }
+        try {
+            $revision = $this->runs->currentRevision($supplierId, $runId);
+            if (!is_array($revision['input_snapshot'] ?? null)) {
+                return null;
+            }
+
+            return [
+                ...$this->sourceDrift
+                    ->detect($supplierId, $revision['input_snapshot'])
+                    ->toArray(),
+                'snapshot_created_at' => (string) $revision['created_at'],
+            ];
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -782,6 +828,10 @@ final class PayrollRunsAction
             // Sloučený krok „Spočítat mzdy" pod sebou udělá obojí, takže musí
             // projít OBĚMA branami — druhá se ověřuje hned pod tímhle blokem.
             'lock_and_calculate' => 'payroll.calculate',
+            // Obnova podkladů je přepočet nad novým snímkem — a stejně jako
+            // sloučený krok zamyká nově schválené vstupy, takže i ona projde
+            // oběma branami.
+            'refresh_inputs' => 'payroll.calculate',
             'review', 'request_correction' => 'payroll.review',
             'approve' => 'payroll.approve',
             'reopen' => 'payroll.reopen',
@@ -810,7 +860,7 @@ final class PayrollRunsAction
         )) !== null) {
             return $error;
         }
-        if ($command === 'lock_and_calculate'
+        if (in_array($command, ['lock_and_calculate', 'refresh_inputs'], true)
             && ($error = $this->authorize(
                 $request,
                 $response,
@@ -930,6 +980,9 @@ final class PayrollRunsAction
                 $supplierId, $runId, $version, $idempotencyKey, $userId,
             ),
             'calculate' => $this->commands->calculate(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            'refresh_inputs' => $this->commands->refreshInputs(
                 $supplierId, $runId, $version, $idempotencyKey, $userId,
             ),
             'review' => $this->commands->review(

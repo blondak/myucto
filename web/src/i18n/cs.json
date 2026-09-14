@@ -2137,6 +2137,7 @@
           "reopen": "Běh znovu otevřen",
           "cancel": "Běh zrušen",
           "close": "Běh uzavřen",
+          "refresh_inputs": "Podklady obnoveny",
           "validation_override": "Schválena výjimka kontroly",
           "validation_override_revoked": "Výjimka kontroly odvolána",
           "unknown": "Další auditní krok"
@@ -2163,6 +2164,7 @@
           "lock_and_calculate": "Doplněné údaje se do běhu dostanou uzamčením vstupů. Spočítejte mzdy.",
           "lock_inputs": "Doplněné údaje se do běhu dostanou uzamčením vstupů. Uzamkněte vstupy a spočítejte mzdy.",
           "reopen": "Doplněné údaje se do běhu dostanou až novou revizí. Otevřete ji a potom spočítejte mzdy.",
+          "refresh_inputs": "Běh počítá ze zmrazeného snímku vstupů, samotný přepočet doplněné údaje nevezme. Obnovte podklady a spočítejte mzdy znovu.",
           "cancel": "Běh počítá ze zmrazeného snímku vstupů, samotný přepočet doplněné údaje nevezme. Běh zrušte, otevřete jeho novou revizi a spočítejte mzdy znovu.",
           "request_correction": "Běh je schválený. Doplněné údaje se do něj dostanou jen opravnou revizí: vyžádejte opravu, otevřete novou revizi a spočítejte mzdy.",
           "none": "Doplněné údaje platí pro další zpracování. V tomto stavu je do výpočtu běhu promítnout nelze."
@@ -2461,7 +2463,8 @@
         "reopen_cancelled": "Začít z opravených vstupů",
         "cancel": "Zrušit běh",
         "close": "Uzavřít",
-        "lock_and_calculate": "Spočítat mzdy"
+        "lock_and_calculate": "Spočítat mzdy",
+        "refresh_inputs": "Obnovit podklady"
       },
       "outcome": {
         "posted": "Mzdy jsou zaúčtované.",
@@ -2521,7 +2524,22 @@
         "prepare_payments": "Připraví platební závazky (výplaty, odvody, daň) a otevře platby. Tady se pozná, jestli má každá instituce ověřený účet.",
         "mark_paid": "Označí odvody i výplaty za uhrazené. Jde to až tehdy, když jsou všechny závazky pokryté spárovanou platbou.",
         "close": "Uzavře běh za období. Uzavřený běh jde otevřít jen vyžádáním opravy.",
-        "reopen": "Otevře novou revizi nad opravenými vstupy. Původní revize zůstává v historii i s vydanými doklady."
+        "reopen": "Otevře novou revizi nad opravenými vstupy. Původní revize zůstává v historii i s vydanými doklady.",
+        "refresh_inputs": "Založí nový snímek z aktuálních schválených vstupů, nepřítomností i zákonné evidence a vrátí běh k přepočtu. Rozpracovaná revize zůstane v historii jako zahozená; schválené revize se to netýká."
+      },
+      "source_drift": {
+        "title": "Od zamknutí vstupů ({date}) se změnily podklady, se kterými revize počítá: {count}. Schválit běh půjde až po obnovení podkladů a přepočtu.",
+        "inputs_added": "Nové schválené mzdové vstupy: {count}",
+        "inputs_changed": "Změněné mzdové vstupy: {count}",
+        "inputs_removed": "Zrušené mzdové vstupy: {count}",
+        "absences_added": "Nové schválené nepřítomnosti: {count}",
+        "absences_changed": "Změněné nepřítomnosti: {count}",
+        "absences_removed": "Zrušené nepřítomnosti: {count}",
+        "employments_added": "Pracovní vztahy, které do období nově patří: {count}",
+        "employments_removed": "Pracovní vztahy, které do období už nepatří: {count}",
+        "statutory_evidence_changed": "Osoby se změněnou zákonnou evidencí: {count}",
+        "action": "Klikněte na „Obnovit podklady“ a potom běh přepočítejte.",
+        "action_forbidden": "Obnovit podklady může uživatel s právem počítat mzdy a zapisovat mzdové vstupy."
       },
       "next_steps": {
         "title": "Co následuje",

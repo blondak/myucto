@@ -5470,11 +5470,16 @@ export type PayrollRunStatus =
  * `review` (samostatná kontrola) se v UI už nenabízí — u jedné účetní je to
  * druhý podpis téhož člověka — ale příkaz i stav `reviewed` zůstávají kvůli
  * starším datům a API. Schválení si kontrolu zapíše samo.
+ *
+ * `refresh_inputs` („Obnovit podklady") založí u otevřené revize nový snímek
+ * vstupů a vrátí běh k přepočtu. `calculate` sám počítá ze zmrazeného snímku,
+ * takže vstup schválený až po zámku by jinak do revize nedostal.
  */
 export type PayrollRunCommand =
   | 'lock_inputs'
   | 'lock_and_calculate'
   | 'calculate'
+  | 'refresh_inputs'
   | 'review'
   | 'approve'
   | 'post'
@@ -5698,6 +5703,29 @@ export interface PayrollRun {
   available_commands: PayrollRunCommand[]
   validations: PayrollRunValidation[]
   payment_coverage?: PayrollRunPaymentCoverage | null
+  /**
+   * Co se od zmrazení snímku otevřené revize změnilo v podkladech. `null`
+   * u běhu, kde podklady obnovit nejde (koncept, schválený, uzavřený…).
+   */
+  source_drift?: PayrollRunSourceDrift | null
+}
+
+/**
+ * Změny podkladů od vzniku snímku otevřené revize. Nenulový `total` znamená,
+ * že schválení server odmítne, dokud se podklady neobnoví a běh nepřepočítá.
+ */
+export interface PayrollRunSourceDrift {
+  total: number
+  inputs_added: number
+  inputs_changed: number
+  inputs_removed: number
+  absences_added: number
+  absences_changed: number
+  absences_removed: number
+  employments_added: number
+  employments_removed: number
+  statutory_evidence_changed: number
+  snapshot_created_at: string
 }
 
 export type PayrollRunHistoryTotalKey =

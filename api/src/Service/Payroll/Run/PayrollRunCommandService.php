@@ -25,6 +25,7 @@ final class PayrollRunCommandService
     private const COMBINED_SAVEPOINT = 'payroll_run_lock_calc';
     private const DELETE_SAVEPOINT = 'payroll_run_delete';
     private readonly PayrollYearCloseGuard $yearClose;
+    private readonly PayrollRunSourceDriftDetector $sourceDrift;
 
     public function __construct(
         private readonly Connection $db,
@@ -48,6 +49,9 @@ final class PayrollRunCommandService
             $documentQueue = null,
     ) {
         $this->yearClose = new PayrollYearCloseGuard($db);
+        // Detektor čte podklady přes týž builder, ze kterého vzniká snímek —
+        // vědomě ne volitelný parametr, který by DI tiše nechalo prázdný.
+        $this->sourceDrift = new PayrollRunSourceDriftDetector($snapshotBuilder);
     }
 
     /** @return array<string,mixed> */
@@ -331,6 +335,33 @@ final class PayrollRunCommandService
             $runId,
             $expectedVersion,
             PayrollRunCommand::CALCULATE,
+            $idempotencyKey,
+            $actorUserId,
+        );
+    }
+
+    /**
+     * „Obnovit podklady" — převezme do otevřené revize aktuální vstupy.
+     *
+     * Založí novou revizi téhož druhu TOUŽ cestou jako zámek a znovuotevření
+     * (`build()` → u opravy `prepareCorrectionSnapshot()` → graf snímku →
+     * zámek schválených vstupů), rozpracovanou revizi zahodí
+     * (`supersedeAbandonedRevisions()`) a běh vrátí k přepočtu. Stejné
+     * záruky jako ostatní příkazy: `row_version`, Idempotency-Key, auditní
+     * událost i potvrzenka.
+     */
+    public function refreshInputs(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+    ): PayrollRunCommandResult {
+        return $this->execute(
+            $supplierId,
+            $runId,
+            $expectedVersion,
+            PayrollRunCommand::REFRESH_INPUTS,
             $idempotencyKey,
             $actorUserId,
         );
@@ -688,6 +719,11 @@ final class PayrollRunCommandService
                 throw new PayrollRunConflictException($currentVersion);
             }
             $from = PayrollRunStatus::from((string) $run['status']);
+            $commandAvailable = in_array(
+                $command,
+                $this->workflow->availableCommands($from),
+                true,
+            );
             $approvedBaseline = $command === PayrollRunCommand::REOPEN
                 && $from === PayrollRunStatus::CANCELLED
                     ? $this->runs->latestApprovedRevision($supplierId, $runId)
@@ -696,18 +732,27 @@ final class PayrollRunCommandService
                 && ($from === PayrollRunStatus::CORRECTION_PENDING
                     || $approvedBaseline !== null);
             $revision = $this->runs->currentRevision($supplierId, $runId);
+            // Obnova podkladů druh revize nemění: opravná zůstává opravnou
+            // (snímek jde přes `prepareCorrectionSnapshot()` stejně jako při
+            // znovuotevření), řádná řádnou.
+            $refreshAsCorrection = $command === PayrollRunCommand::REFRESH_INPUTS
+                && ($revision['revision_kind'] ?? null) === 'correction';
             $snapshot = null;
             if (in_array($command, [
                 PayrollRunCommand::LOCK_INPUTS,
                 PayrollRunCommand::REOPEN,
-            ], true)) {
+            ], true)
+                || ($command === PayrollRunCommand::REFRESH_INPUTS
+                    && $commandAvailable
+                    && $revision !== null)
+            ) {
                 $snapshot = $this->snapshotBuilder->build(
                     $supplierId,
                     (string) $run['period_start'],
                     (string) $run['payment_date'],
                     $run['office_id'] === null ? null : (int) $run['office_id'],
                 );
-                if ($reopenAsCorrection) {
+                if ($reopenAsCorrection || $refreshAsCorrection) {
                     $snapshot = $this->calculationPipeline
                         ->prepareCorrectionSnapshot(
                             $supplierId,
@@ -728,11 +773,6 @@ final class PayrollRunCommandService
             // jinak by ruční zaúčtování nikdy neprošlo. Side effect pouštíme
             // až po ověření, že je příkaz v tomto stavu vůbec dostupný.
             $outcome = null;
-            $commandAvailable = in_array(
-                $command,
-                $this->workflow->availableCommands($from),
-                true,
-            );
             if ($commandAvailable && $command === PayrollRunCommand::POST) {
                 $outcome = $this->applyPosting(
                     $supplierId,
@@ -743,6 +783,20 @@ final class PayrollRunCommandService
             if ($commandAvailable && $command === PayrollRunCommand::MARK_PAID) {
                 $outcome = $this->assertPaymentsSettled($supplierId, $revision);
             }
+            /*
+             * Schválení se ptá, jestli snímek revize pořád odpovídá podkladům.
+             * Bez toho prošel doplatek schválený po znovuotevření bez povšimnutí:
+             * `calculate` ho ze zmrazeného snímku nevidí, revize se schválila bez
+             * něj a vstup zůstal navždy `approved`. Počítá se jen tady — výpočet
+             * nad starším snímkem je legitimní (účetní vidí varování v seznamu).
+             */
+            $staleSourceCount = $commandAvailable
+                && $command === PayrollRunCommand::APPROVE
+                && is_array($revision['input_snapshot'] ?? null)
+                    ? $this->sourceDrift
+                        ->detect($supplierId, $revision['input_snapshot'])
+                        ->total()
+                    : 0;
             $context = new PayrollRunTransitionContext(
                 actorUserId: $actorUserId,
                 calculatedBy: $revision['calculated_by'] ?? null,
@@ -775,22 +829,39 @@ final class PayrollRunCommandService
                     true,
                 ),
                 reason: $reason,
+                correctionRevision: $refreshAsCorrection,
+                staleSourceCount: $staleSourceCount,
             );
             $transition = $this->workflow->transition($from, $command, $context);
 
+            $replacedRevisionId = null;
             if ($command === PayrollRunCommand::LOCK_INPUTS
                 || $command === PayrollRunCommand::REOPEN
+                || $command === PayrollRunCommand::REFRESH_INPUTS
             ) {
+                if ($snapshot === null) {
+                    throw new \LogicException('Nová revize mzdového běhu nemá snímek vstupů.');
+                }
                 $revisionNo = (int) $run['current_revision_no'] + 1;
-                $previousRevisionId = $approvedBaseline !== null
-                    ? (int) $approvedBaseline['id']
-                    : ($revision === null ? null : (int) $revision['id']);
+                if ($command === PayrollRunCommand::REFRESH_INPUTS) {
+                    $replacedRevisionId = $revision === null ? null : (int) $revision['id'];
+                    // Opravná revize se dál vztahuje ke schválenému základu,
+                    // proti kterému se opravuje; řádná navazuje na tu, kterou
+                    // nahrazuje — stejně jako znovuotevření po zrušení.
+                    $previousRevisionId = $refreshAsCorrection
+                        ? ($revision['previous_revision_id'] ?? null)
+                        : $replacedRevisionId;
+                } else {
+                    $previousRevisionId = $approvedBaseline !== null
+                        ? (int) $approvedBaseline['id']
+                        : ($revision === null ? null : (int) $revision['id']);
+                }
                 $revisionId = $this->runs->insertRevision(
                     $supplierId,
                     $runId,
                     $revisionNo,
                     $previousRevisionId,
-                    $reopenAsCorrection ? 'correction' : 'regular',
+                    $reopenAsCorrection || $refreshAsCorrection ? 'correction' : 'regular',
                     $snapshot,
                     $keyHashBinary,
                 );
@@ -1094,6 +1165,9 @@ final class PayrollRunCommandService
                     'idempotency_key_hash' => $keyHashHex,
                     'request_hash' => $requestHash,
                     'row_version' => (int) $run['row_version'],
+                    ...($replacedRevisionId === null
+                        ? []
+                        : ['replaced_revision_id' => $replacedRevisionId]),
                 ],
             );
             $this->runs->insertCommandReceipt(
