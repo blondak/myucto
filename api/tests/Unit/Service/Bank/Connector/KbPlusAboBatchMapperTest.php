@@ -19,6 +19,8 @@ final class KbPlusAboBatchMapperTest extends TestCase
         self::assertMatchesRegularExpression('/^[a-f0-9]{14}$/', $batch['exchange_identification']);
         self::assertCount(1, $batch['payments']);
         $payment = $batch['payments'][0];
+        self::assertArrayNotHasKey('PaymentIdentification', $payment);
+        self::assertMatchesRegularExpression('/^MU001[a-f0-9]{20}$/D', $payment['paymentIdentification']['instructionIdentification']);
         self::assertSame(1234.56, $payment['amount']['instructedAmount']['value']);
         self::assertSame('CZK', $payment['amount']['instructedAmount']['currency']);
         self::assertSame('2026-09-08', $payment['requestedExecutionDate']);

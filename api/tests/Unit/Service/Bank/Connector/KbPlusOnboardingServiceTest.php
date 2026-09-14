@@ -89,7 +89,15 @@ final class KbPlusOnboardingServiceTest extends TestCase
     {
         $this->oauth->expects(self::once())->method('account')->with(7, 11)->willReturn($this->account());
         $this->oauth->expects(self::once())->method('client')->with(7)->willReturn(null);
+        $registrationState = null;
         $this->registrationClient->expects(self::once())->method('createSoftwareStatement')
+            ->with(self::anything(), self::callback(static function (array $metadata) use (&$registrationState): bool {
+                parse_str((string) parse_url($metadata['registrationBackUri'], PHP_URL_QUERY), $query);
+                $registrationState = $query['state'] ?? null;
+                return ($query['supplier_id'] ?? null) === '7'
+                    && is_string($registrationState)
+                    && preg_match('/^[A-Za-z0-9_-]{32,128}$/D', $registrationState) === 1;
+            }))
             ->willReturn('eyJhbGciOiJIUzI1NiJ9.e30.c2lnbmF0dXJl');
         $this->registration->expects(self::once())->method('begin')
             ->willReturnCallback(static fn (string $statement, array $application, string $state): array => [
@@ -109,9 +117,64 @@ final class KbPlusOnboardingServiceTest extends TestCase
         $result = $this->service->start(7, 11, 5, $this->registrationInput());
 
         self::assertSame('registration_pending', $result['status']);
+        parse_str((string) parse_url($result['redirect_url'], PHP_URL_QUERY), $redirectQuery);
+        self::assertSame($registrationState, $redirectQuery['state']);
         self::assertStringStartsWith('https://api-gateway.kb.cz/client-registration-ui/v2/saml/register?', $result['redirect_url']);
         self::assertArrayNotHasKey('state', $result);
         self::assertArrayNotHasKey('credentials', $result);
+    }
+
+    public function testMissingStateCanRecoverOnlyAnAuthenticatedRegistrationResponse(): void
+    {
+        $state = str_repeat('r', 43);
+        $session = ['stage' => 'registration'] + $this->session($state);
+        $this->oauth->expects(self::exactly(3))->method('pendingRegistrations')->with(7, 5)
+            ->willReturnOnConsecutiveCalls([$session], [$session], []);
+        $this->oauth->expects(self::once())->method('currencyForState')->with(hash('sha256', $state), 7, 5)->willReturn(11);
+        $this->oauth->expects(self::once())->method('claim')->with(hash('sha256', $state), 7, 5, 'registration')->willReturn($session);
+        $this->secrets->method('decryptFor')->willReturn(json_encode([
+            'state' => $state, 'encryption_key' => base64_encode(str_repeat('K', 32)),
+            'oauth_api_key' => 'synthetic-oauth-key', 'adaa_api_key' => 'synthetic-adaa-key',
+            'batchda_api_key' => '', 'redirect_uri' => 'https://example.invalid/callback',
+        ], JSON_THROW_ON_ERROR));
+        $this->secrets->method('encryptFor')->willReturn('enc:v2:synthetic');
+        $this->api->method('authorizationUrl')->willReturn('https://login.kb.cz/autfe/ssologin?state=synthetic');
+        $this->oauth->expects(self::once())->method('finish')->with(hash('sha256', $state), true);
+        $service = new KbPlusOnboardingService(
+            $this->oauth, $this->connections, $this->registrationClient, new KbPlusRegistrationService(),
+            $this->api, $this->vault, $this->calls, $this->secrets, $this->config,
+        );
+        $payload = [
+            'application_type' => 'web', 'redirect_uris' => ['https://example.invalid/callback'],
+            'scope' => 'adaa', 'response_types' => ['code'],
+            'grant_types' => ['authorization_code', 'refresh_token'],
+            'token_endpoint_auth_method' => 'client_secret_post',
+            'client_id' => 'synthetic-client', 'client_secret' => 'synthetic-client-secret',
+            'client_id_issued_at' => 1788750000,
+        ];
+        $salt = str_repeat('I', 12);
+        $tag = '';
+        $encrypted = openssl_encrypt(json_encode($payload, JSON_THROW_ON_ERROR), 'aes-256-gcm', str_repeat('K', 32), OPENSSL_RAW_DATA, $salt, $tag);
+        self::assertIsString($encrypted);
+        $encode = static fn (string $value): string => rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+        $callback = ['salt' => $encode($salt), 'encryptedData' => $encode($encrypted . $tag)];
+        try {
+            $service->completeRegistration(7, 5, '', ['salt' => $encode(str_repeat('J', 12))] + $callback);
+            self::fail('Tampered response must not claim the pending session.');
+        } catch (BankConnectorOperationException $e) {
+            self::assertSame('kb_plus_onboarding_used_or_expired', $e->errorCode);
+        }
+        self::assertSame('authorization_pending', $service->completeRegistration(7, 5, '', $callback)['status']);
+        $this->expectException(BankConnectorOperationException::class);
+        $service->completeRegistration(7, 5, '', $callback);
+    }
+
+    public function testExplicitInvalidStateDoesNotUseRegistrationRecovery(): void
+    {
+        $this->oauth->expects(self::never())->method('pendingRegistrations');
+        $this->oauth->expects(self::never())->method('claim');
+        $this->expectException(BankConnectorOperationException::class);
+        $this->service->completeRegistration(7, 5, '', ['state' => '', 'salt' => 'synthetic', 'encryptedData' => 'synthetic']);
     }
 
     public function testServerPrerequisiteFailureDoesNotCreateSessionOrCallBank(): void

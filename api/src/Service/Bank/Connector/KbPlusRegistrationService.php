@@ -42,11 +42,13 @@ final class KbPlusRegistrationService
             'softwareStatement' => $softwareStatement,
         ];
         try {
-            $encodedRequest = base64_encode(json_encode(
+            $json = json_encode(
                 $request,
-                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+                JSON_THROW_ON_ERROR | JSON_HEX_TAG,
                 16,
-            ));
+            );
+            $json = str_replace(['?', '~'], ['\\u003f', '\\u007e'], $json);
+            $encodedRequest = base64_encode($json . str_repeat(' ', (3 - strlen($json) % 3) % 3));
         } catch (\JsonException) {
             throw $this->invalid('Registrační požadavek KB+ nelze serializovat.');
         }

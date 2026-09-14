@@ -14,6 +14,7 @@ final class CsobBankConnector implements MultiFileBankConnector
     public function __construct(
         private readonly CsobBusinessConnectorClient $client,
         private readonly CsobGpcStatementSplitter $splitter,
+        private readonly CsobBbfAdviceParser $adviceParser = new CsobBbfAdviceParser(),
     ) {}
 
     public function provider(): string
@@ -66,12 +67,13 @@ final class CsobBankConnector implements MultiFileBankConnector
         $files = [];
         $bytes = 0;
         foreach ($listed as $file) {
+            $extension = $file['type'] === 'AVIZO' ? 'bbf' : 'gpc';
             foreach ($this->download($values, $file, $bytes, $deadline) as $block) {
                 if (!$this->matches($block['parsed']['header'], $values)) continue;
                 if (count($files) >= self::MAX_FILES) throw $this->tooLarge();
                 $files[] = [
                     'content' => base64_encode($block['content']),
-                    'filename' => 'csob-' . substr(hash('sha256', $block['content']), 0, 24) . '.gpc',
+                    'filename' => 'csob-' . substr(hash('sha256', $block['content']), 0, 24) . '.' . $extension,
                 ];
             }
         }
@@ -124,13 +126,14 @@ final class CsobBankConnector implements MultiFileBankConnector
             throw new BankConnectorException('history_gap', 'Požadované období přesahuje dostupnou historii ČSOB.');
         }
         $result = $this->client->listFiles($this->clientCredentials($values), [
-            'file_types' => ['VYPIS'], 'file_formats' => ['BBGPC'],
+            'file_types' => ['VYPIS', 'AVIZO'], 'file_formats' => ['BBGPC', 'BBF'],
             'created_after' => $start->format(\DateTimeInterface::ATOM),
             'created_before' => $end->modify('+1 day')->format(\DateTimeInterface::ATOM),
         ]);
         if (count($result['files']) > self::MAX_FILES) throw $this->tooLarge();
         foreach ($result['files'] as $file) {
-            if ($file['type'] !== 'VYPIS' || $file['format'] !== 'BBGPC') throw $this->invalid();
+            if (!(($file['type'] === 'VYPIS' && $file['format'] === 'BBGPC')
+                || ($file['type'] === 'AVIZO' && $file['format'] === 'BBF'))) throw $this->invalid();
         }
         return $result['files'];
     }
@@ -142,7 +145,8 @@ final class CsobBankConnector implements MultiFileBankConnector
         $raw = $this->client->downloadFile($this->clientCredentials($values), $file);
         $this->checkDeadline($deadline);
         $bytes += strlen($raw);
-        return $this->splitter->split($raw);
+        if ($bytes > self::MAX_BYTES) throw $this->tooLarge();
+        return $file['type'] === 'AVIZO' ? $this->adviceParser->split($raw) : $this->splitter->split($raw);
     }
 
     private function envelope(#[\SensitiveParameter] string $content): array
@@ -163,15 +167,29 @@ final class CsobBankConnector implements MultiFileBankConnector
         $bytes = 0;
         foreach ($value['files'] as $file) {
             if (!is_array($file) || !is_string($file['content'] ?? null) || !is_string($file['filename'] ?? null)
-                || preg_match('/^csob-[a-f0-9]{24}\.gpc$/D', $file['filename']) !== 1) throw $this->invalid();
+                || preg_match('/^csob-[a-f0-9]{24}\.(gpc|bbf)$/D', $file['filename'], $extension) !== 1) throw $this->invalid();
             $raw = base64_decode($file['content'], true);
             if ($raw === false) throw $this->invalid();
             $bytes += strlen($raw);
             if ($bytes > self::MAX_BYTES) throw $this->tooLarge();
-            $blocks = $this->splitter->split($raw);
+            $isAdvice = $extension[1] === 'bbf';
+            $blocks = $isAdvice ? $this->adviceParser->split($raw) : $this->splitter->split($raw);
             if (count($blocks) !== 1 || !$this->matches($blocks[0]['parsed']['header'], $account)
-                || $file['filename'] !== 'csob-' . substr(hash('sha256', $raw), 0, 24) . '.gpc') throw $this->invalid();
-            $files[] = ['content' => $raw, 'filename' => $file['filename']];
+                || $file['filename'] !== 'csob-' . substr(hash('sha256', $raw), 0, 24) . '.' . $extension[1]) throw $this->invalid();
+            if ($isAdvice) {
+                $advice = [
+                    'reference' => $blocks[0]['parsed']['header']['statement_number'],
+                    'booked_on' => $blocks[0]['parsed']['header']['statement_date'],
+                    'balance' => $blocks[0]['parsed']['header']['curr_balance'],
+                ];
+                $blocks[0]['parsed']['header']['prev_balance'] = null;
+                $blocks[0]['parsed']['header']['curr_balance'] = null;
+            }
+            $files[] = $isAdvice ? [
+                'content' => json_encode(['provider' => 'csob', 'format' => 'BBF', 'encoding' => 'base64', 'content' => base64_encode($raw), 'advice' => $advice], JSON_THROW_ON_ERROR),
+                'filename' => 'csob-advice-' . substr(hash('sha256', $raw), 0, 24) . '.json',
+                'parsed' => $blocks[0]['parsed'],
+            ] : ['content' => $raw, 'filename' => $file['filename']];
         }
         return ['account' => $account, 'files' => $files];
     }

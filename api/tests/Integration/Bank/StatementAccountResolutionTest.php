@@ -387,6 +387,151 @@ final class StatementAccountResolutionTest extends TestCase
         self::assertNull($pdo->query('SELECT curr_balance FROM bank_statements WHERE id = ' . $id)->fetchColumn());
     }
 
+    public function testCsobAdviceUsesLatestSequencedBalanceUntilGpcFinalizesIt(): void
+    {
+        $account = '9000000001';
+        $currencyId = $this->registerCurrency('CZK', $account, '0300');
+        $pdo = $this->db->pdo();
+        [$latestId, $latestTx] = $this->insertCsobAdvice($account, '20990715000002', '100.00', 25.0);
+        [$olderId, $olderTx] = $this->insertCsobAdvice($account, '20990715000001', '80.00', 5.0);
+        [$newerId, $newerTx] = $this->insertCsobAdvice($account, '20990715000003', null, -10.0);
+
+        $pdo->beginTransaction();
+        $mapping = (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo))
+            ->projectAccount($this->supplierId, $account, '0300', 'CZK');
+        $pdo->commit();
+        $monthId = $mapping[$latestId][0];
+        $this->statementIds[] = $monthId;
+        self::assertSame($monthId, $mapping[$olderId][0]);
+        self::assertSame($monthId, $mapping[$newerId][0]);
+
+        $request = $this->mockRequest(
+            $this->supplierId,
+            'admin',
+            [],
+            [],
+            ['filter' => ['year' => 2099, 'account' => $account]],
+        );
+        $list = json_decode((string) $this->action->list($request, new Response())->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $items = array_column($list['items'], null, 'id');
+        self::assertSame('calculated', $items[$monthId]['balance_calculation']['status']);
+        self::assertNull($items[$monthId]['balance_calculation']['opening']);
+        self::assertSame(90.0, (float) $items[$monthId]['balance_calculation']['closing']);
+
+        $balances = json_decode((string) $this->action->accountBalances($request, new Response())->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $accounts = array_column($balances['accounts'], null, 'id');
+        self::assertSame(90.0, (float) $accounts[$currencyId]['current_balance']);
+
+        $pdo->beginTransaction();
+        self::assertSame([], (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo))
+            ->projectAccount($this->supplierId, $account, '0300', 'CZK'));
+        $pdo->commit();
+        self::assertSame(3, (int) $pdo->query(
+            'SELECT COUNT(*) FROM bank_transactions bt WHERE ' . \MyInvoice\Service\Bank\StatementTransactionScope::sql($monthId)
+        )->fetchColumn());
+
+        $gpcId = $this->insertStatement('gpc', $account, '0300', '2099-07-15', 90.0, 'csob-advice-final');
+        $pdo->prepare('UPDATE bank_statements
+                          SET supplier_id = ?, prev_balance = 70, credit_total = 30, debit_total = 10, file_content = ?
+                        WHERE id = ?')
+            ->execute([$this->supplierId, 'synthetic GPC evidence', $gpcId]);
+        $link = $pdo->prepare('INSERT INTO bank_transaction_imports
+            (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id)
+            SELECT ?, ?, ?, ?, statement_id FROM bank_transactions WHERE id = ?');
+        foreach ([$latestTx, $olderTx, $newerTx] as $txId) {
+            $link->execute([$gpcId, $txId, hash('sha256', "synthetic-gpc-advice:{$txId}"), $this->supplierId, $txId]);
+        }
+        $pdo->beginTransaction();
+        (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo))
+            ->projectAccount($this->supplierId, $account, '0300', 'CZK');
+        $pdo->commit();
+
+        $snapshot = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($this->supplierId, $monthId);
+        self::assertSame('confirmed', $snapshot['status']);
+        self::assertSame(70.0, (float) $snapshot['opening']);
+        self::assertSame(90.0, (float) $snapshot['closing']);
+    }
+
+    public function testCsobAdviceReportsActualBalanceWhenEarlierMovementsAreNotImportedYet(): void
+    {
+        $account = '9000000001';
+        $this->registerCurrency('CZK', $account, '0300');
+        $pdo = $this->db->pdo();
+        $anchorId = $this->insertStatement('gpc', $account, '0300', '2099-06-30', 0.0, 'csob-known-zero');
+        $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')->execute([$this->supplierId, $anchorId]);
+        [$adviceId] = $this->insertCsobAdvice($account, '20990715000002', '200.00', 100.0);
+        $pdo->beginTransaction();
+        $mapping = (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo))->projectAccount($this->supplierId, $account, '0300', 'CZK');
+        $pdo->commit();
+        $monthId = $mapping[$adviceId][0];
+        foreach ($mapping as $ids) foreach ($ids as $id) $this->statementIds[] = $id;
+        $snapshot = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($this->supplierId, $monthId);
+        self::assertSame('calculated', $snapshot['status']);
+        self::assertSame(200.0, (float) $snapshot['closing']);
+        self::assertNull($snapshot['opening']);
+        self::assertSame(100.0, (float) $snapshot['credit']);
+        self::assertSame(1, $snapshot['transaction_count']);
+    }
+
+    public function testCsobAdviceBalanceCarriesLaterMovementsAcrossMonthBoundary(): void
+    {
+        $account = '9000000028';
+        $this->registerCurrency('CZK', $account, '0300');
+        $pdo = $this->db->pdo();
+        [$checkpointId] = $this->insertCsobAdvice($account, '20990831000002', '100.00', 20.0, '2099-08-30');
+        [$laterAugustId] = $this->insertCsobAdvice($account, '20990831000003', null, 5.0, '2099-08-31');
+        [$septemberId] = $this->insertCsobAdvice($account, '20990901000001', null, 7.0, '2099-09-01');
+
+        $pdo->beginTransaction();
+        $mapping = (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo))
+            ->projectAccount($this->supplierId, $account, '0300', 'CZK');
+        $pdo->commit();
+        $augustId = $mapping[$checkpointId][0];
+        $septemberMonthId = $mapping[$septemberId][0];
+        $this->statementIds[] = $augustId;
+        $this->statementIds[] = $septemberMonthId;
+        self::assertSame($augustId, $mapping[$laterAugustId][0]);
+
+        $service = new \MyInvoice\Service\Bank\StatementBalanceService($this->db);
+        $august = $service->summary($this->supplierId, $augustId);
+        self::assertSame('calculated', $august['status']);
+        self::assertNull($august['opening']);
+        self::assertSame(105.0, (float) $august['closing']);
+
+        $september = $service->summary($this->supplierId, $septemberMonthId);
+        self::assertSame('calculated', $september['status']);
+        self::assertNull($september['opening']);
+        self::assertSame(112.0, (float) $september['closing']);
+    }
+
+    public function testCsobAdviceRejectsConflictingBalanceForSameReference(): void
+    {
+        $account = '9000000036';
+        $this->registerCurrency('CZK', $account, '0300');
+        $pdo = $this->db->pdo();
+        [$firstId] = $this->insertCsobAdvice($account, '20991001000001', '100.00', 10.0);
+        [$secondId] = $this->insertCsobAdvice(
+            $account,
+            '20991001000002',
+            '101.00',
+            1.0,
+            null,
+            '20991001000001',
+        );
+
+        $pdo->beginTransaction();
+        $mapping = (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo))
+            ->projectAccount($this->supplierId, $account, '0300', 'CZK');
+        $pdo->commit();
+        $monthId = $mapping[$firstId][0];
+        $this->statementIds[] = $monthId;
+        self::assertSame($monthId, $mapping[$secondId][0]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('balance_conflict');
+        (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->snapshot($this->supplierId, $monthId);
+    }
+
     public function testApiBalanceIsAuthoritativeOnlyWhenProvided(): void
     {
         $account = '1000000005';
@@ -651,6 +796,41 @@ final class StatementAccountResolutionTest extends TestCase
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->statementIds[] = $id;
         return $id;
+    }
+
+    /** @return array{0:int,1:int} */
+    private function insertCsobAdvice(
+        string $accountNumber,
+        string $reference,
+        ?string $balance,
+        float $amount,
+        ?string $bookedOn = null,
+        ?string $metadataReference = null,
+    ): array
+    {
+        $date = $bookedOn ?? substr($reference, 0, 4) . '-' . substr($reference, 4, 2) . '-' . substr($reference, 6, 2);
+        $statementId = $this->insertStatement('bank_api', $accountNumber, '0300', $date, 0.0, 'csob-' . $reference);
+        $payload = json_encode([
+            'provider' => 'csob',
+            'format' => 'BBF',
+            'encoding' => 'base64',
+            'content' => base64_encode('synthetic BBF ' . $reference),
+            'advice' => ['reference' => $metadataReference ?? $reference, 'booked_on' => $date, 'balance' => $balance],
+        ], JSON_THROW_ON_ERROR);
+        $this->db->pdo()->prepare('UPDATE bank_statements
+                                      SET supplier_id = ?, file_name = ?, file_content = ?, curr_balance = NULL
+                                    WHERE id = ?')
+            ->execute([
+                $this->supplierId,
+                'csob-advice-' . substr(hash('sha256', $reference), 0, 24) . '.json',
+                $payload,
+                $statementId,
+            ]);
+        $this->db->pdo()->prepare('INSERT INTO bank_transactions
+            (statement_id, posted_at, amount, currency, import_fingerprint)
+            VALUES (?, ?, ?, ?, ?)')
+            ->execute([$statementId, $date, $amount, 'CZK', hash('sha256', 'synthetic-csob-advice:' . $reference)]);
+        return [$statementId, (int) $this->db->pdo()->lastInsertId()];
     }
 
     /**

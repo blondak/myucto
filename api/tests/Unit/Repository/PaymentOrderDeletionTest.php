@@ -60,7 +60,10 @@ final class PaymentOrderDeletionTest extends TestCase
         self::assertSame('import_started', $this->pdo->query('SELECT status FROM bank_payment_order_submissions')->fetchColumn());
         self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM payment_order_items')->fetchColumn());
         self::assertSame('submitted', $this->repository->deleteUnsubmitted(1, 10));
-        self::assertFalse($this->repository->archiveAfterBankCancellation(1, 10, 8));
+        self::assertTrue($this->repository->archiveAfterBankCancellation(1, 10, 8));
+        self::assertSame(7, (int) $this->pdo->query('SELECT archived_by_user_id FROM payment_orders WHERE id=1')->fetchColumn());
+        self::assertFalse($this->repository->archiveAfterBankCancellation(1, 20, 8));
+        self::assertFalse($this->repository->archiveAfterBankCancellation(99, 10, 8));
     }
 
     public function testItemDeletionFailureRollsBackHeaderDeletion(): void

@@ -88,14 +88,14 @@ final class KbPlusOnboardingService
             unset($input['payment_batches']);
             $credentials = $this->registrationInput($input);
             try {
+                $state = $this->state();
                 $statement = $this->calls->call(
                     $credentials['client_registration_api_key'],
                     fn (): string => $this->registrationClient->createSoftwareStatement(
                         $credentials,
-                        $this->softwareMetadata($supplierId),
+                        $this->softwareMetadata($supplierId, $state),
                     ),
                 );
-                $state = $this->state();
                 $begin = $this->registration->begin($statement, [
                     'client_name' => 'MyÚčto.cz',
                     'client_name_en' => 'MyUcto.cz',
@@ -126,6 +126,9 @@ final class KbPlusOnboardingService
         #[\SensitiveParameter] string $state,
         #[\SensitiveParameter] array $callback,
     ): array {
+        if ($state === '' && !array_key_exists('state', $callback)) {
+            $state = $this->registrationStateFromResponse($supplierId, $userId, $callback);
+        }
         $currencyId = $this->currencyForState($supplierId, $userId, $state);
         if ($currencyId === null) {
             throw new BankConnectorOperationException('kb_plus_onboarding_used_or_expired');
@@ -402,7 +405,7 @@ final class KbPlusOnboardingService
     }
 
     /** @return array<string,mixed> */
-    private function softwareMetadata(int $supplierId): array
+    private function softwareMetadata(int $supplierId, string $state): array
     {
         $base = $this->baseUrl();
         $email = trim((string) $this->config->get('smtp.from_email', ''));
@@ -416,7 +419,7 @@ final class KbPlusOnboardingService
             'softwareVersion' => '1.0',
             'softwareUri' => $base,
             'redirectUris' => [$this->oauthCallback($supplierId)],
-            'registrationBackUri' => $this->registrationCallback($supplierId),
+            'registrationBackUri' => $this->registrationCallback($supplierId) . '&state=' . rawurlencode($state),
             'contacts' => ['email: ' . $email],
         ];
     }
@@ -479,6 +482,37 @@ final class KbPlusOnboardingService
             throw new BankConnectorOperationException('encryption_failed');
         }
         $this->oauth->replacePending($hash, $supplierId, $currencyId, $userId, $stage, $ciphertext, $ttl);
+    }
+
+    private function registrationStateFromResponse(int $supplierId, int $userId, #[\SensitiveParameter] array $callback): string
+    {
+        $matched = null;
+        foreach ($this->oauth->pendingRegistrations($supplierId, $userId) as $session) {
+            try {
+                $secret = $this->decryptSession($session);
+                $state = (string) ($secret['state'] ?? '');
+                if (!$this->validState($state) || !hash_equals((string) $session['state_hash'], hash('sha256', $state))) {
+                    continue;
+                }
+                $this->registration->complete(
+                    (string) $secret['encryption_key'],
+                    $state,
+                    (string) $secret['redirect_uri'],
+                    $this->scopes($secret),
+                    $callback + ['state' => $state],
+                );
+            } catch (BankConnectorException | BankConnectorOperationException) {
+                continue;
+            }
+            if ($matched !== null) {
+                throw new BankConnectorOperationException('kb_plus_registration_invalid');
+            }
+            $matched = $state;
+        }
+        if ($matched === null) {
+            throw new BankConnectorOperationException('kb_plus_onboarding_used_or_expired');
+        }
+        return $matched;
     }
 
     private function decryptSession(array $session): array

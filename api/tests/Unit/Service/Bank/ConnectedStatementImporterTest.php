@@ -81,6 +81,18 @@ final class ConnectedStatementImporterTest extends TestCase
         self::assertSame(3, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_statements WHERE file_content IS NOT NULL')->fetchColumn());
     }
 
+    public function testApiIbanIsStoredAsTheLinkedCurrencyAccountNumber(): void
+    {
+        $this->pdo->exec("UPDATE currencies SET bank_code = '0100' WHERE id = 1");
+        $parsed = new GpcParser()->parse($this->gpc());
+        $parsed['header']['account_number'] = 'CZ6501000000001000000005';
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
+        $result = $this->importer->importConnectedParsed($parsed, 'synthetic-kb-iban', 'kb.json', null, 1, 10);
+        self::assertGreaterThan(0, $result['transactions']);
+        $accounts = $this->pdo->query('SELECT DISTINCT account_number FROM bank_statements')->fetchAll(PDO::FETCH_COLUMN);
+        self::assertSame(['1000000005'], $accounts);
+    }
+
     public function testApiDownloadSpanningMonthsSeparatesTransactionsByBookingDate(): void
     {
         $parsed = new GpcParser()->parse($this->gpc());

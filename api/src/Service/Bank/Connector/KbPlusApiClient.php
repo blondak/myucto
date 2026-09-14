@@ -7,6 +7,10 @@ namespace MyInvoice\Service\Bank\Connector;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Clock\ClockInterface;
+use Symfony\Component\Clock\NativeClock;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 final class KbPlusApiClient
 {
@@ -21,7 +25,11 @@ final class KbPlusApiClient
     private const MAX_TRANSACTIONS = 50_000;
     private const MAX_TRANSACTION_DURATION_SECONDS = 120.0;
 
-    public function __construct(private readonly ClientInterface $http) {}
+    public function __construct(
+        private readonly ClientInterface $http,
+        private readonly ClockInterface $clock = new NativeClock(),
+        private readonly LoggerInterface $logger = new NullLogger(),
+    ) {}
 
     /** BATCHDA autorizuje access token; dávky smí jen souhlas se scope bpisp. */
     public static function grantsBatchPayments(string $scope): bool
@@ -145,6 +153,14 @@ final class KbPlusApiClient
             );
         }
 
+        $fromDateTime = $from . 'T00:00:00.000Z';
+        $toDateTime = min(
+            $to . 'T23:59:59.999Z',
+            $this->clock->now()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z'),
+        );
+        if ($fromDateTime > $toDateTime) {
+            throw new BankConnectorException(BankConnectorException::INVALID_DATE_RANGE, 'Počáteční datum nesmí být v budoucnosti.');
+        }
         $transactions = [];
         $totalBytes = 0;
         $startedAt = microtime(true);
@@ -154,8 +170,8 @@ final class KbPlusApiClient
             }
             $url = self::API_BASE . '/accounts/' . rawurlencode($accountId) . '/transactions?'
                 . http_build_query([
-                    'fromDateTime' => $from . 'T00:00:00.000Z',
-                    'toDateTime' => $to . 'T23:59:59.999Z',
+                    'fromDateTime' => $fromDateTime,
+                    'toDateTime' => $toDateTime,
                     'size' => self::PAGE_SIZE,
                     'page' => $page,
                 ], '', '&', PHP_QUERY_RFC3986);
@@ -168,6 +184,12 @@ final class KbPlusApiClient
             $pageNumber = $body['pageNumber'] ?? null;
             $totalPages = $body['totalPages'] ?? null;
             $last = $body['last'] ?? null;
+            $pagination = ['requested_page' => $page, 'content_type' => get_debug_type($content), 'content_count' => is_array($content) ? count($content) : null];
+            foreach (['pageNumber', 'totalPages', 'pageSize', 'numberOfElements', 'first', 'last', 'empty'] as $field) {
+                $value = $body[$field] ?? null;
+                $pagination[$field] = is_int($value) || is_bool($value) ? $value : get_debug_type($value);
+            }
+            $this->logger->info('kb_plus_transaction_page', $pagination);
             if (
                 !is_array($content)
                 || !array_is_list($content)
@@ -197,6 +219,11 @@ final class KbPlusApiClient
             }
             foreach ($content as $transaction) {
                 if (!is_array($transaction) || !$this->isTransaction($transaction)) {
+                    $shape = [];
+                    foreach (['lastUpdated', 'accountType', 'transactionType', 'amount'] as $field) {
+                        $shape[$field] = get_debug_type(is_array($transaction) ? ($transaction[$field] ?? null) : null);
+                    }
+                    $this->logger->warning('kb_plus_transaction_invalid', $shape);
                     throw $this->invalidResponse($response, 'KB+ vrátila neplatný pohyb.');
                 }
                 $transactions[] = $transaction;
@@ -592,6 +619,7 @@ final class KbPlusApiClient
         bool $ambiguousPaymentOutcome = false,
     ): BankConnectorException
     {
+        $this->logger->warning('kb_plus_response_invalid', ['reason' => $message, 'http_status' => $response->getStatusCode()]);
         return new BankConnectorException(
             BankConnectorException::INVALID_RESPONSE,
             $message,
@@ -635,7 +663,7 @@ final class KbPlusApiClient
     private function isBatchPayment(array $payment): bool
     {
         $allowed = [
-            'PaymentIdentification', 'paymentTypeInformation', 'amount', 'requestedExecutionDate',
+            'paymentIdentification', 'paymentTypeInformation', 'amount', 'requestedExecutionDate',
             'exchangeRateInformation', 'chargeBearer', 'ultimateDebtor', 'debtor', 'debtorAccount',
             'creditorAgent', 'creditor', 'creditorAccount', 'ultimateCreditor', 'purpose',
             'remittanceInformation',
@@ -643,7 +671,7 @@ final class KbPlusApiClient
         if (array_diff(array_keys($payment), $allowed) !== []) {
             return false;
         }
-        $identification = $payment['PaymentIdentification'] ?? null;
+        $identification = $payment['paymentIdentification'] ?? null;
         $amount = $payment['amount']['instructedAmount'] ?? null;
         return is_array($identification)
             && is_string($identification['instructionIdentification'] ?? null)

@@ -99,6 +99,8 @@ final class CsobBankConnectorTest extends TestCase
         self::assertStringNotContainsString(base64_encode($foreign), $envelope);
         $body = (string) $history[0]['request']->getBody();
         self::assertStringNotContainsString('PrevQueryTimestamp', $body);
+        self::assertStringContainsString('AVIZO', $body);
+        self::assertStringContainsString('BBF', $body);
         self::assertStringContainsString('<b:CreatedAfter>' . $this->today()->format(\DateTimeInterface::ATOM), $body);
         self::assertStringContainsString('<b:CreatedBefore>' . $this->today()->modify('+1 day')->format(\DateTimeInterface::ATOM), $body);
         self::assertStringContainsString('010126', $files[0]['content']);
@@ -112,6 +114,57 @@ final class CsobBankConnectorTest extends TestCase
         $result = $connector->downloadStatement($this->credentials($connector), $today, $today);
         self::assertSame([], $connector->statementFiles($result));
         self::assertSame('CZK', $connector->parseStatement($result)['header']['currency']);
+    }
+
+    public function testUnexpectedAdviceFormatIsRejectedBeforeDownload(): void
+    {
+        $history = [];
+        $connector = $this->connector([$this->listResponse([['type' => 'AVIZO', 'format' => 'MT942']])], $history);
+        $today = $this->today()->format('Y-m-d');
+        try {
+            $connector->downloadStatement($this->credentials($connector), $today, $today);
+            self::fail('Unsupported advice format accepted.');
+        } catch (BankConnectorException $e) {
+            self::assertSame('statement_invalid', $e->errorCode);
+        }
+        self::assertCount(1, $history);
+    }
+
+    public function testAdvicePreservesOriginalEvidenceFiltersAccountsAndDoesNotClaimClosingBalance(): void
+    {
+        $advice = self::bbf();
+        $foreign = self::bbf(account: '2000000018', advice: '20260101000002');
+        $eur = self::bbf(currency: 'EUR', advice: '20260101000003');
+        $raw = $advice . $foreign . $eur;
+        $history = [];
+        $connector = $this->connector([$this->listResponse([['type' => 'AVIZO', 'format' => 'BBF', 'content' => $raw]]), new Response(200, [], $raw)], $history);
+        $today = $this->today()->format('Y-m-d');
+        $envelope = $connector->downloadStatement($this->credentials($connector), $today, $today);
+        $files = $connector->statementFiles($envelope);
+        self::assertCount(1, $files);
+        $evidence = json_decode($files[0]['content'], true, 8, JSON_THROW_ON_ERROR);
+        self::assertSame('BBF', $evidence['format']);
+        self::assertSame(['reference' => '20260101000001', 'booked_on' => '2026-01-01', 'balance' => '110.00'], $evidence['advice']);
+        self::assertSame($advice, base64_decode($evidence['content'], true));
+        self::assertMatchesRegularExpression('/^csob-advice-[a-f0-9]{24}\.json$/D', $files[0]['filename']);
+        self::assertNull($files[0]['parsed']['header']['curr_balance']);
+        self::assertNull($files[0]['parsed']['header']['prev_balance']);
+        self::assertSame('10.00', $files[0]['parsed']['transactions'][0]['amount']);
+        self::assertSame('2026-01-01', $files[0]['parsed']['transactions'][0]['posted_at']);
+        self::assertSame('1000000000001', $files[0]['parsed']['transactions'][0]['bank_ref']);
+        self::assertStringNotContainsString(base64_encode($foreign), $envelope);
+        self::assertSame($files, $connector->statementFiles($envelope));
+    }
+
+    public function testAdviceEnvelopeCannotSmuggleAnotherAccount(): void
+    {
+        $history = [];
+        $connector = $this->connector([], $history);
+        $raw = self::bbf(account: '2000000018');
+        $envelope = json_encode(['version' => 1, 'account' => ['account_number' => '0000001000000005', 'bank_code' => '0300', 'currency' => 'CZK'],
+            'files' => [['content' => base64_encode($raw), 'filename' => 'csob-' . substr(hash('sha256', $raw), 0, 24) . '.bbf']]], JSON_THROW_ON_ERROR);
+        $this->expectException(BankConnectorException::class);
+        $connector->statementFiles($envelope);
     }
 
     #[DataProvider('notReadyStatuses')]
@@ -250,7 +303,7 @@ final class CsobBankConnectorTest extends TestCase
         foreach ($files as $index => $file) {
             $status = $file['status'] ?? 'D';
             $details .= '<b:FileDetail>' . ($status === 'D' ? '<b:Url>https://ceb-bc.csob.cz/ExtFileHubDown/v2/download?id=synthetic' . $index . '</b:Url>' : '')
-                . '<b:Filename>synthetic' . $index . '.gpc</b:Filename><b:Type>VYPIS</b:Type><b:Format>BBGPC</b:Format><b:CreationDateTime>'
+                . '<b:Filename>synthetic' . $index . '.gpc</b:Filename><b:Type>' . ($file['type'] ?? 'VYPIS') . '</b:Type><b:Format>' . ($file['format'] ?? 'BBGPC') . '</b:Format><b:CreationDateTime>'
                 . $this->today()->format(\DateTimeInterface::ATOM) . '</b:CreationDateTime><b:Size>' . strlen($file['content'] ?? '')
                 . '</b:Size><b:Status>' . $status . '</b:Status></b:FileDetail>';
         }
@@ -278,5 +331,19 @@ final class CsobBankConnectorTest extends TestCase
         $transaction = '075' . $own . '0000002000000018' . $reference . '000000001000' . '2' . '0000000111' . '00'
             . '0100' . '0000' . '0000000000' . '010126' . str_pad('SYNTHETIC PARTNER', 20) . $currency . '010126';
         return $header . "\r\n" . $transaction . "\r\n";
+    }
+
+    private static function bbf(string $account = '1000000005', string $currency = 'CZK', string $advice = '20260101000001'): string
+    {
+        $line = str_repeat(' ', 548);
+        foreach ([1 => 'T777777  ADVMUL 02', 19 => '11', 21 => 'SYNTHETIC-TRANSACTION-1', 43 => '100', 46 => '0300',
+            64 => 'SYNTHETIC COMPANY', 99 => str_pad($account, 16, '0', STR_PAD_LEFT), 149 => '1000000000001',
+            165 => '20260101', 173 => '20260101', 189 => 'C ', 191 => '0000000000010.00', 207 => $currency,
+            210 => '0000000000110.00', 226 => 'C', 227 => '0100', 238 => '0000002000000018',
+            272 => 'SYNTHETIC PARTNER', 307 => '0000', 311 => '0000000111', 321 => '0000000000',
+            351 => 'Synthetic advice transaction',
+        ] as $position => $value) $line = substr_replace($line, $value, $position - 1, strlen($value));
+        return 'T777777  HEADER 0001.0000BBCSOB' . "\r\n" . 'T777777  ADVMUL 01' . $advice . "\r\n" . $line . "\r\n"
+            . 'T777777  LOCK   99' . str_repeat(' ', 12) . '2026010100001' . str_repeat(' ', 8) . "1\r\n";
     }
 }

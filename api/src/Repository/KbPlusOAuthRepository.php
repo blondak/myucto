@@ -150,6 +150,19 @@ final class KbPlusOAuthRepository
         return $row;
     }
 
+    public function pendingRegistrations(int $supplierId, int $userId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT state_hash, supplier_id, currency_id, user_id, stage, secret_ciphertext
+               FROM bank_oauth_sessions
+              WHERE supplier_id = ? AND user_id = ? AND provider = 'kb_plus'
+                AND stage = 'registration' AND status = 'pending' AND expires_at > CURRENT_TIMESTAMP(6)
+              ORDER BY created_at DESC LIMIT 10"
+        );
+        $stmt->execute([$supplierId, $userId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function currencyForState(string $stateHash, int $supplierId, int $userId): ?int
     {
         $stmt = $this->db->pdo()->prepare(

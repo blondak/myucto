@@ -11,14 +11,30 @@ vi.mock('@/api/bankConnections', () => ({ bankConnectionsApi: { list: async () =
   providers: [
     { code: 'fio', label: 'Fio', implemented: true, bank_codes: ['2010', '8330'], capabilities: { statement_import: true } },
     { code: 'csob', label: 'ČSOB', implemented: false, bank_codes: ['0300'], capabilities: { statement_import: false } },
-  ], connections: [],
+  ], connections: [
+    { currency_id: 5, has_token: true, enabled: false },
+    { currency_id: 6, has_token: false, enabled: false },
+  ],
 }) } }))
 
 describe('Bank connections panel', () => {
+  it('keeps inactive accounts only when they have stored bank access', async () => {
+    const wrapper = mount(BankConnectionsPanel, {
+      props: { canManage: true, accounts: [
+        { id: 1, bank_code: '2010', is_active: true },
+        { id: 5, bank_code: '2010', is_active: false },
+        { id: 6, bank_code: '2010', is_active: false },
+        { id: 7, bank_code: '2010', is_active: false },
+      ] as CurrencyAccount[] },
+    })
+    await flushPromises()
+    expect(wrapper.findAllComponents({ name: 'BankConnectionAccount' }).map(row => row.props('account').id)).toEqual([1, 5])
+  })
+
   it('filters unsupported accounts but keeps the provider overview and box', async () => {
     const wrapper = mount(BankConnectionsPanel, {
       props: { canManage: true, accounts: [
-        { id: 1, bank_code: '2010' }, { id: 2, bank_code: '0300' }, { id: 3, bank_code: null }, { id: 4, bank_code: '8330' },
+        { id: 1, bank_code: '2010', is_active: true }, { id: 2, bank_code: '0300', is_active: true }, { id: 3, bank_code: null, is_active: true }, { id: 4, bank_code: '8330', is_active: true },
       ] as CurrencyAccount[] },
       global: { stubs: { BankConnectionAccount: true } },
     })

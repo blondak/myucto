@@ -41,6 +41,24 @@ beforeEach(() => {
 })
 
 describe('Bank connection account', () => {
+  it('explains an empty CSOB file response without treating existing duplicate files as missing', async () => {
+    m.sync.mockResolvedValueOnce({ status: 'success', imported_statement_id: null, import_result: { transactions: 0, matched: 0 }, period: { from: '2026-01-01', to: '2026-01-31' } })
+    const wrapper = mount(BankConnectionAccount, {
+      props: { account: { ...account, bank_code: '0300' }, connection: { ...connection, provider: 'csob' }, canWrite: true,
+        providers: [{ ...provider, code: 'csob', bank_codes: ['0300'] }] },
+      global: { stubs: { DateInput: true, RouterLink: true } },
+    })
+    await wrapper.find('button').trigger('click')
+    expect(wrapper.findAll('form')[1]!.text()).toContain('bank_connection.csob_sync')
+    await wrapper.findAll('form')[1]!.trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('bank_connection.csob_no_files')
+    m.sync.mockResolvedValueOnce({ status: 'success', imported_statement_id: 801, import_result: { transactions: 0, matched: 0 }, period: { from: '2026-01-01', to: '2026-01-31' } })
+    await wrapper.findAll('form')[1]!.trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('bank_connection.csob_no_files')
+  })
+
   it('opens the account targeted by an action item without starting an import', () => {
     m.query = { currency_id: '3' }
     const wrapper = mount(BankConnectionAccount, {

@@ -26,7 +26,13 @@ final class PaymentOrderRepository
               AND EXISTS (SELECT 1 FROM bank_payment_order_submissions s
                           WHERE s.payment_order_id = payment_orders.id AND s.supplier_id = payment_orders.supplier_id)');
         $query->execute([$userId, $id, $supplierId]);
-        return $query->rowCount() === 1;
+        if ($query->rowCount() === 1) return true;
+        $existing = $this->db->pdo()->prepare('SELECT 1 FROM payment_orders
+            WHERE id = ? AND supplier_id = ? AND archived_at IS NOT NULL
+              AND EXISTS (SELECT 1 FROM bank_payment_order_submissions s
+                          WHERE s.payment_order_id = payment_orders.id AND s.supplier_id = payment_orders.supplier_id)');
+        $existing->execute([$id, $supplierId]);
+        return $existing->fetchColumn() !== false;
     }
 
     public function deleteUnsubmitted(int $id, int $supplierId): string

@@ -192,7 +192,16 @@ final class BankConnectionService
                 if ($connector instanceof MultiFileBankConnector) {
                     $result = ['statement_id' => null, 'statement_ids' => [], 'transactions' => 0, 'matched' => 0, 'skipped_duplicates' => 0];
                     foreach ($connector->statementFiles($content) as $file) {
-                        $imported = $this->importer->importConnected(
+                        $imported = isset($file['parsed']) ? $this->importer->importConnectedParsed(
+                            $file['parsed'],
+                            $file['content'],
+                            $file['filename'],
+                            $userId,
+                            $currencyId,
+                            $supplierId,
+                            'bank_api',
+                            $reconciliationConfirmations,
+                        ) : $this->importer->importConnected(
                             $file['content'],
                             $file['filename'],
                             $userId,

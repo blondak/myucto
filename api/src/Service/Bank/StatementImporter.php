@@ -112,6 +112,9 @@ final class StatementImporter
             if ($accountQuery->fetch(PDO::FETCH_ASSOC) !== $account) {
                 throw new \InvalidArgumentException('Nastavení účtu se během importu změnilo. Opakujte načtení.');
             }
+            if ($source === 'bank_api' && trim((string) $account['account_number']) !== '') {
+                $parsed['header']['account_number'] = trim((string) $account['account_number']);
+            }
             $processingIds = [];
             $result = $this->persist($parsed, $content, $fileName, $userId, $currencyId, $source, true, $processingIds, $reconciliationConfirmations);
             $scope = $pdo->prepare("SELECT id FROM bank_statements WHERE id = ? AND supplier_id = ? AND source = ? AND currency = ? AND COALESCE(bank_code, '') = ?");

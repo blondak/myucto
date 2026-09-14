@@ -45,6 +45,31 @@ final class KbPlusRegistrationServiceTest extends TestCase
         self::assertSame($request['encryptionKey'], $result['encryption_key']);
     }
 
+    public function testRegistrationSurvivesRepeatedUrlEncodingWithoutChangingPayload(): void
+    {
+        for ($length = 0; $length < 3; $length++) {
+            $application = $this->application();
+            $application['client_name'] = 'MyÚčto ?~> \\ 😀' . str_repeat('x', $length);
+            $application['redirect_uris'] = ['https://example.invalid/callback?supplier_id=1&value=~%2F'];
+            $result = new KbPlusRegistrationService()->begin(
+                $this->softwareStatement(),
+                $application,
+                self::STATE,
+            );
+            parse_str((string) parse_url($result['url'], PHP_URL_QUERY), $query);
+            self::assertMatchesRegularExpression('/^[A-Za-z0-9]+$/D', $query['registrationRequest']);
+            $afterDisclaimer = rawurldecode(rawurlencode(rawurlencode($query['registrationRequest'])));
+            $json = base64_decode($afterDisclaimer, true);
+            self::assertIsString($json);
+            $request = json_decode($json, true, 16, JSON_THROW_ON_ERROR);
+            self::assertSame($application['client_name'], $request['clientName']);
+            self::assertSame($application['redirect_uris'], $request['redirectUris']);
+            self::assertSame($this->softwareStatement(), $request['softwareStatement']);
+            self::assertSame($result['encryption_key'], $request['encryptionKey']);
+            self::assertSame(32, strlen(base64_decode($request['encryptionKey'], true)));
+        }
+    }
+
     public function testDecryptsAndValidatesCredentialCallbackWithEncryptedState(): void
     {
         $service = new KbPlusRegistrationService();

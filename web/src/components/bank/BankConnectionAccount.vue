@@ -199,6 +199,7 @@ async function confirmReconciliation() {
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
         <p class="font-medium text-sm break-words">{{ account.label || account.code }} <span class="font-mono text-neutral-600">{{ formatAccountNumber(account.account_number, account.bank_code) || account.iban }} ({{ account.code }})</span></p>
+        <p v-if="!account.is_active" class="text-xs text-warning-700 mt-1">{{ t('bank_connection.account_inactive') }}</p>
         <p class="text-xs text-neutral-500 mt-1">{{ connection?.has_token ? (connection.enabled ? t('bank_connection.enabled') : t('bank_connection.paused')) : t('bank_connection.disconnected') }}</p>
         <p v-if="connection?.last_sync_at" class="text-xs text-neutral-500">{{ t('bank_connection.last_sync', { date: formatDateTime(connection.last_sync_at) }) }}</p>
         <p v-if="connection?.last_sync_error_code" class="text-xs text-warning-700">{{ t('bank_connection.last_failed') }}</p>
@@ -206,6 +207,7 @@ async function confirmReconciliation() {
       <button v-if="available.length || connection" type="button" :class="btnOutline('neutral')" :aria-expanded="opened" @click="opened = !opened">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>
         {{ t('bank_connection.settings') }}
+        <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': opened }" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6" /></svg>
       </button>
       <p v-else class="text-xs text-neutral-500">{{ t('bank_connection.bank_unavailable') }}</p>
     </div>
@@ -263,13 +265,14 @@ async function confirmReconciliation() {
         <div class="flex flex-wrap items-end gap-3">
           <label class="flex flex-wrap items-center gap-2 text-sm"><span class="whitespace-nowrap">{{ t('bank_connection.from') }}:</span><DateInput v-model="from" :disabled="busy" :max="to || appIsoDate()" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface" /></label>
           <label class="flex flex-wrap items-center gap-2 text-sm"><span class="whitespace-nowrap">{{ t('bank_connection.to') }}:</span><DateInput v-model="to" :disabled="busy || !from" :min="from || undefined" :max="appIsoDate()" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface" /></label>
-          <button type="submit" :class="btnOutline('primary')" :disabled="busy || invalidPeriod"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.download" /></svg>{{ busy ? t('common.loading') : t('bank_connection.sync') }}</button>
+          <button type="submit" :class="btnOutline('primary')" :disabled="busy || invalidPeriod"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.download" /></svg>{{ busy ? t('common.loading') : t(provider === 'csob' ? 'bank_connection.csob_sync' : 'bank_connection.sync') }}</button>
         </div>
         <p v-if="invalidPeriod" class="text-xs text-warning-700">{{ t('bank_connection.invalid_period') }}</p>
       </form>
       <p v-if="saved" class="text-sm text-success-600" role="status">{{ t('bank_connection.saved') }}</p>
       <div v-if="result" class="text-sm text-success-600 space-y-1" role="status">
         <p>{{ t('bank_connection.synced', { imported: result.import_result?.transactions ?? 0, matched: result.import_result?.matched ?? 0, skipped: result.import_result?.skipped_duplicates ?? 0 }) }}</p>
+        <p v-if="provider === 'csob' && result.imported_statement_id === null" class="text-neutral-600">{{ t('bank_connection.csob_no_files') }}</p>
         <RouterLink v-if="result.imported_statement_id" :to="{ name: 'bank-detail', params: { id: result.imported_statement_id } }" class="underline">{{ t('bank_connection.open_statement') }}</RouterLink>
       </div>
       <p v-if="error" class="text-sm text-danger-600" role="alert">{{ error }}</p>

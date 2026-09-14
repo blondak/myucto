@@ -54,7 +54,7 @@ má vždy přednost před oběma.
 | `cron-backup-documents.{cmd,sh}` | ZIP celé sekce Dokumenty (`storage/documents/`, všechny typy; vynechává `_thumbs`/`_jobs`) do `storage/backup/{dbname}-documents-YYYY-MM-DD.zip`, stejná retention; oddělené od `cron-backup-pdf` (ten Dokumenty nezahrnuje) |
 | `cron-backup-payroll.{cmd,sh}` | ZIP mzdového úložiště (`storage/payroll-documents/`, `payroll-period-exports/`, `payroll-payment-exports/`) do `storage/backup/{dbname}-payroll-YYYY-MM-DD.zip`, stejná retention. Do žádné z ostatních záloh tyhle soubory nespadají — po obnově by zbyla metadata bez obsahu. Ukládá je tak, jak leží (šifrované, pod otiskem), pro člověka přikládá `MANIFEST.csv` |
 | `cron-bank-scan.{cmd,sh}` | Auto-import nových GPC výpisů z `private/bank-incoming/` + matching plateb na faktury |
-| `cron-bank-connections.{cmd,sh}` | Stažení nových GPC výpisů z aktivních přímých bankovních konektorů a předání do společného importu a párování |
+| `cron-bank-connections.{cmd,sh}` | Načtení výpisů a pohybů z aktivních přímých bankovních konektorů do společného importu a párování; ČSOB současně kontroluje výpisy GPC a průběžná avíza BBF, opakované pohyby deduplikuje |
 | `cron-bank-email-notices.{cmd,sh}` | IMAP polling bankovních e-mailových avíz, parsování plateb a matching na faktury (konfigurace v **Admin → Bankovní účty**) |
 | `cron-scan-purchase-inbox.{cmd,sh}` | Import nových přijatých dokladů z nastaveného inbox adresáře |
 | `cron-send-reminders.{cmd,sh}` | Odeslání upomínkových e-mailů na faktury po splatnosti (`--days=N`, `--cooldown=N`, `--dry-run`) |

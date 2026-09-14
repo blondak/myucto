@@ -14,6 +14,7 @@ use MyInvoice\Service\Bank\Connector\BankConnectorOperationException;
 use MyInvoice\Service\Bank\Connector\KbPlusOnboardingService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Log\LoggerInterface;
 
 final class KbPlusOnboardingAction
 {
@@ -22,6 +23,7 @@ final class KbPlusOnboardingAction
     public function __construct(
         private readonly KbPlusOnboardingService $service,
         private readonly Config $config,
+        private readonly LoggerInterface $logger,
     ) {}
 
     public function status(Request $request, Response $response, array $args): Response
@@ -69,16 +71,16 @@ final class KbPlusOnboardingAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $supplierId = SupplierGuard::currentId($request);
         $currencyId = $this->service->currencyForState($supplierId, (int) ($user['id'] ?? 0), $state);
+        $this->logCallback('registration', $request, $supplierId, (int) ($user['id'] ?? 0), $currencyId);
         try {
             $result = $this->service->completeRegistration(
                 $supplierId,
                 (int) ($user['id'] ?? 0),
                 $state,
                 [
-                    'state' => $state,
                     'salt' => is_string($query['salt'] ?? null) ? $query['salt'] : '',
                     'encryptedData' => is_string($query['encryptedData'] ?? null) ? $query['encryptedData'] : '',
-                ],
+                ] + (array_key_exists('state', $query) ? ['state' => $state] : []),
             );
             $this->assertBankRedirect((string) $result['redirect_url']);
             return $this->redirect($response, (string) $result['redirect_url']);
@@ -99,12 +101,36 @@ final class KbPlusOnboardingAction
         $supplierId = SupplierGuard::currentId($request);
         $userId = (int) ($user['id'] ?? 0);
         $currencyId = $this->service->currencyForState($supplierId, $userId, $state);
+        $this->logCallback('oauth', $request, $supplierId, $userId, $currencyId);
         try {
             $currencyId = $this->service->completeOAuth($supplierId, $userId, $state, $code);
             return $this->redirect($response, $this->cleanReturn('connected', $currencyId));
         } catch (BankConnectorOperationException $e) {
             return $this->redirect($response, $this->cleanReturn('error', $currencyId, $e->errorCode));
         }
+    }
+
+    private function logCallback(string $stage, Request $request, int $supplierId, int $userId, ?int $currencyId): void
+    {
+        if ($this->config->get('app.env') !== 'development') {
+            return;
+        }
+        $query = $request->getQueryParams();
+        $state = $query['state'] ?? null;
+        $this->logger->info('kb_plus_callback_received', [
+            'stage' => $stage,
+            'method' => $request->getMethod(),
+            'supplier_id' => $supplierId,
+            'user_id' => $userId,
+            'session_matched' => $currencyId !== null,
+            'state_present' => array_key_exists('state', $query),
+            'state_length' => is_string($state) ? strlen($state) : null,
+            'state_format_valid' => is_string($state) && preg_match('/^[A-Za-z0-9_-]{32,128}$/D', $state) === 1,
+            'salt_present' => array_key_exists('salt', $query),
+            'encrypted_data_present' => array_key_exists('encryptedData', $query),
+            'code_present' => array_key_exists('code', $query),
+            'body_present' => $request->getParsedBody() !== null,
+        ]);
     }
 
     private function denied(Request $request, Response $response, AccessLevel $minimum): ?Response

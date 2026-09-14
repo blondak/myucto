@@ -790,6 +790,8 @@ shrnuje, co napojení jako celek umí, jaké má limity a jak je to bezpečnostn
 
 Přehled bank se v sekci zobrazuje vždy; v seznamu účtů pod ním se nabízí jen
 účet, jehož kód banky konektor podporuje — ostatní účty tam nejsou vidět.
+Neaktivní účty bez uloženého napojení se nezobrazují. Neaktivní účet s existujícím
+napojením zůstává dostupný pro správu a je označený jako neaktivní.
 Každý měnový účet má vlastní přístupové údaje a vlastní stav napojení
 (aktivní / pozastavené / odpojené).
 
@@ -819,6 +821,14 @@ Načítání má bezpečnostní meze:
   dotazů na jednou za 61, resp. 10 minut).
 
 ### 29.9.3 Automatická synchronizace (cron)
+
+U ČSOB tlačítko **Načíst výpisy a avíza** i automatická synchronizace načítají
+denní výpisy GPC a průběžná avíza BBF. V CEB musí být povolené vytváření
+a stahování obou formátů. Datum filtru se vztahuje k vytvoření souboru v bance.
+Avízo doplní pohyb a dostupný průběžný zůstatek; následný výpis pohyby potvrdí
+a doplní chybějící historii bez zdvojení již propojených plateb. Pokud se pohyb
+nedá jednoznačně ztotožnit, je potřeba zkontrolovat případnou duplicitu.
+Samotný známý zůstatek avíza nenahrazuje chybějící počáteční stav pro export GPC.
 
 Ruční tlačítko **Načíst pohyby** u účtu není jediná cesta — cron
 `cmd/cron-bank-connections.{sh,cmd}` (spouští
@@ -875,6 +885,8 @@ Napojení KB+ stojí na registraci aplikace u KB (Software Statement) a na
 OAuth2 tokenech. Stejný základ mají všechna API KB. MyÚčto nad ním čte pohyby
 přes **ADAA** a volitelně odesílá platební dávky přes **BATCHDA**; STATDA
 (stažení originálních souborů výpisu) a NOTDA (notifikace) konektor nevyužívá.
+Přístupový údaj pro ADAA je ve formuláři označen **Direct Access API JWT token**,
+stejně jako na portálu banky.
 
 Hromadné platby **nepotřebují samostatný API klíč BATCHDA**. Dávku autorizuje
 access token, který banka vydá se scope **`bpisp`**. Tento scope musí mít

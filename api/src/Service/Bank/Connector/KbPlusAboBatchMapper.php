@@ -52,7 +52,7 @@ final class KbPlusAboBatchMapper
                 $specific === '' ? null : 'SS:' . $specific,
             ], static fn (?string $value): bool => $value !== null));
             $payment = [
-                'PaymentIdentification' => [
+                'paymentIdentification' => [
                     'instructionIdentification' => sprintf('MU%03d%s', $index + 1, substr(hash('sha256', $line), 0, 20)),
                 ],
                 'amount' => ['instructedAmount' => ['value' => $minor / 100, 'currency' => 'CZK']],

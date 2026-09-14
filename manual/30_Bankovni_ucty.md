@@ -121,9 +121,12 @@ jeho heslo, pokud je chráněný. Účet musí mít zapnuté **Aktivní účet**
 Ověření kontroluje certifikát a přístup ke smlouvě, nikoli existenci pohybů.
 Připojit lze i nový účet bez výpisů. Samotný přístup ke smlouvě nepotvrzuje
 bankovní oprávnění ke konkrétnímu účtu; číslo účtu a měna se kontrolují
-při importu každého výpisu. Prázdný seznam nevytváří žádný umělý výpis.
-Datum při načítání určuje vytvoření souboru výpisu v bance. Pro import
-musí být v CEB dostupný formát GPC. Předané příkazy je nutné zkontrolovat
+při importu každého výpisu nebo avíza. Prázdný seznam nevytváří žádný umělý výpis.
+Datum při načítání určuje vytvoření souboru v bance. V CEB povol vytváření
+a stahování výpisů ve formátu GPC a průběžných avíz ve formátu BBF.
+Oba formáty načítá tlačítko **Načíst výpisy a avíza** i pravidelná synchronizace.
+Avíza doplňují pohyby a průběžný zůstatek, denní výpis je následně potvrdí.
+Předané platební příkazy je nutné zkontrolovat
 a autorizovat v bankovnictví.
 
 **Česká spořitelna (0800)** používá Premium Accounts API v3. Na

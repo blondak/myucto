@@ -9,6 +9,6 @@ interface MultiFileBankConnector extends StructuredBankConnector
     /** @return array{account_number:string,bank_code:string,currency:string} */
     public function verifyAccount(#[\SensitiveParameter] string $credentials): array;
 
-    /** @return list<array{content:string,filename:string}> */
+    /** @return list<array{content:string,filename:string,parsed?:array}> */
     public function statementFiles(#[\SensitiveParameter] string $content): array;
 }

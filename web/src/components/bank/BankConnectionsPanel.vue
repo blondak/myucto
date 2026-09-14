@@ -17,9 +17,12 @@ const loading = ref(false)
 const error = ref('')
 const canRead = computed(() => auth.canRead('settings.bank_accounts'))
 const canWrite = computed(() => props.canManage && auth.canWrite('settings.bank_accounts'))
-const supportedAccounts = computed(() => props.accounts.filter(account => providers.value.some(provider =>
-  provider.implemented && provider.capabilities.statement_import && provider.bank_codes.includes(account.bank_code || ''),
-)))
+const supportedAccounts = computed(() => props.accounts.filter(account =>
+  connections.value.some(connection => connection.currency_id === account.id && connection.has_token)
+  || (account.is_active && providers.value.some(provider =>
+    provider.implemented && provider.capabilities.statement_import && provider.bank_codes.includes(account.bank_code || ''),
+  )),
+))
 async function load() {
   if (!canRead.value || loading.value) return
   loading.value = true

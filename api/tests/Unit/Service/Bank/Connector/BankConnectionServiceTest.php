@@ -21,6 +21,33 @@ use PHPUnit\Framework\TestCase;
 #[AllowMockObjectsWithoutExpectations]
 final class BankConnectionServiceTest extends TestCase
 {
+    public function testMixedStatementBatchRoutesAdviceThroughStructuredImporter(): void
+    {
+        $parsed = ['header' => ['account_number' => '1000000005'], 'transactions' => [['amount' => '100.00']]];
+        $connector = $this->createMock(\MyInvoice\Service\Bank\Connector\MultiFileBankConnector::class);
+        $connector->method('provider')->willReturn('csob');
+        $connector->method('downloadStatement')->willReturn('synthetic-envelope');
+        $connector->method('parseStatement')->willReturn(['header' => ['account_number' => '1000000005'], 'transactions' => []]);
+        $connector->method('statementFormat')->willReturn('gpc');
+        $connector->method('statementFiles')->willReturn([
+            ['content' => 'synthetic-gpc', 'filename' => 'statement.gpc'],
+            ['content' => '{"synthetic":"bbf"}', 'filename' => 'advice.json', 'parsed' => $parsed],
+        ]);
+        $importer = new RecordingStatementImporter(static function ($content, $name, $user, $currency, $supplier, $confirmations): array {
+            self::assertSame('synthetic-gpc', $content);
+            self::assertSame([77, 11, 1, ['synthetic-confirmation']], [$user, $currency, $supplier, $confirmations]);
+            return self::importResult();
+        });
+        $h = $this->harness($connector, $importer, array_replace($this->connection(), [
+            'provider' => 'csob', 'bank_code' => '0300', 'verified_bank_code' => '0300',
+        ]));
+        $h['connections']->expects(self::once())->method('recordSyncSuccess');
+        $result = $h['service']->sync(1, 11, userId: 77, reconciliationConfirmations: ['synthetic-confirmation']);
+        self::assertSame(1, $importer->calls);
+        self::assertSame([$parsed, '{"synthetic":"bbf"}', 'advice.json', 77, 11, 1, 'bank_api', ['synthetic-confirmation']], $importer->structuredCall);
+        self::assertSame(4, $result['import_result']['transactions']);
+    }
+
     public function testConfigurePreservesCredentialRotatedDuringValidation(): void
     {
         $connection = array_replace($this->connection(), [
@@ -522,8 +549,15 @@ final class RotatingCredentialConnector implements BankConnector, \MyInvoice\Ser
 final class RecordingStatementImporter extends StatementImporter
 {
     public int $calls = 0;
+    public array $structuredCall = [];
 
     public function __construct(private readonly \Closure $import) {}
+
+    public function importConnectedParsed(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source = 'bank_api', array $reconciliationConfirmations = []): array
+    {
+        $this->structuredCall = func_get_args();
+        return BankConnectionServiceTest::importResult();
+    }
 
     public function importConnected(
         string $content,

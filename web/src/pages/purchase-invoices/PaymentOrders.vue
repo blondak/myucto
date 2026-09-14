@@ -58,12 +58,14 @@ async function deleteOrder(item: PaymentOrderListItem) {
       await paymentOrdersApi.archiveAfterBankCancellation(item.id)
       archived = true
     }
+    removedOrderIds.add(item.id)
     history.value = history.value.filter(order => order.id !== item.id)
     if (bankOrderId.value === item.id) bankOrderId.value = null
     toast.success(t(archived ? 'bank_connection.archived_cancelled' : 'payment_order.deleted'))
     await loadHistory()
   } catch (e) {
     toast.error(apiErrorMessage(e, t('payment_order.delete_failed')))
+    await loadHistory()
   } finally {
     deletingOrderId.value = null
   }
@@ -89,6 +91,8 @@ const historyLoading = ref(false)
 const historyLoadingMore = ref(false)
 const historyPage = ref(1)
 const historyPages = ref(1)
+const removedOrderIds = new Set<number>()
+let historyLoadVersion = 0
 const editingAccountId = ref<number | null>(null)
 
 // Předvybrané ID z InvoiceList.vue (?preselect=1,2,3)
@@ -169,6 +173,7 @@ function onPayerChange() {
 }
 
 async function loadHistory(reset = true) {
+  const version = ++historyLoadVersion
   if (reset) {
     historyLoading.value = true
     historyPage.value = 1
@@ -178,13 +183,18 @@ async function loadHistory(reset = true) {
   }
   try {
     const res = await paymentOrdersApi.list(historyPage.value)
-    history.value = reset ? res.data : [...history.value, ...res.data]
+    if (version !== historyLoadVersion) return
+    const orders = res.data.filter(order => !removedOrderIds.has(order.id))
+    history.value = reset ? orders : [...history.value, ...orders]
     historyPages.value = res.meta.pages
+    if (reset && bankOrderId.value !== null && !history.value.some(order => order.id === bankOrderId.value)) bankOrderId.value = null
   } catch {
     // historie není kritická — tichý fail
   } finally {
-    historyLoading.value = false
-    historyLoadingMore.value = false
+    if (version === historyLoadVersion) {
+      historyLoading.value = false
+      historyLoadingMore.value = false
+    }
   }
 }
 

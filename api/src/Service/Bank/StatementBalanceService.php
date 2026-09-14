@@ -21,7 +21,9 @@ final class StatementBalanceService
         try {
             $byId = [];
             $groups = [];
-            foreach ($this->loadStatements($supplierId) as $row) {
+            $statements = $this->loadStatements($supplierId);
+            $adviceMemberships = $this->adviceMemberships($statements);
+            foreach ($statements as $row) {
                 $account = AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']);
                 if ($account === null || !BankStatementSource::isStatement((string) $row['source'])) continue;
                 $key = json_encode([$account, $row['currency']], JSON_THROW_ON_ERROR);
@@ -58,7 +60,12 @@ final class StatementBalanceService
                     $transactions[$key] = $query->fetchAll(PDO::FETCH_ASSOC);
                 }
                 try {
-                    $calculation = $this->calculateSnapshot($selected['row'], $groups[$key], $transactions[$key]);
+                    $calculation = $this->calculateSnapshot(
+                        $selected['row'],
+                        $groups[$key],
+                        $transactions[$key],
+                        $adviceMemberships,
+                    );
                     $calculation['transaction_count'] = count($calculation['transactions']);
                     unset($calculation['transactions']);
                     $results[$id] = $calculation;
@@ -103,11 +110,101 @@ final class StatementBalanceService
 
     private function loadStatements(int $supplierId): array
     {
-        $query = $this->db->pdo()->prepare('SELECT bs.id, bs.source, bs.account_number, bs.bank_code, bs.currency,
+        $query = $this->db->pdo()->prepare("SELECT bs.id, bs.source, bs.account_number, bs.bank_code, bs.currency,
             bs.statement_date, bs.prev_balance, bs.credit_total, bs.debit_total, bs.curr_balance,
-            (bs.pdf_content IS NOT NULL) AS has_pdf, (bs.file_content IS NOT NULL) AS has_file FROM bank_statements bs WHERE ' . BankStatementOwnershipResolver::sql() . ' ORDER BY bs.statement_date, bs.id');
+            (bs.pdf_content IS NOT NULL) AS has_pdf, (bs.file_content IS NOT NULL) AS has_file,
+            CASE WHEN bs.source = 'bank_api' AND bs.file_name LIKE 'csob-advice-%.json' AND JSON_VALID(bs.file_content)
+                 THEN JSON_UNQUOTE(JSON_EXTRACT(bs.file_content, '$.advice.reference')) END AS advice_reference,
+            CASE WHEN bs.source = 'bank_api' AND bs.file_name LIKE 'csob-advice-%.json' AND JSON_VALID(bs.file_content)
+                 THEN JSON_UNQUOTE(JSON_EXTRACT(bs.file_content, '$.advice.booked_on')) END AS advice_booked_on,
+            CASE WHEN bs.source = 'bank_api' AND bs.file_name LIKE 'csob-advice-%.json' AND JSON_VALID(bs.file_content)
+                 THEN JSON_UNQUOTE(JSON_EXTRACT(bs.file_content, '$.advice.balance')) END AS advice_balance,
+            ((bs.source = 'bank_api' AND bs.file_name LIKE 'csob-advice-%.json') OR EXISTS (
+                SELECT 1 FROM bank_api_evidence_months advice_link
+                JOIN bank_statements advice ON advice.id = advice_link.evidence_statement_id
+                WHERE advice_link.monthly_statement_id = bs.id
+                  AND advice.source = 'bank_api'
+                  AND advice.file_name LIKE 'csob-advice-%.json'
+            )) AS has_csob_advice
+            FROM bank_statements bs WHERE " . BankStatementOwnershipResolver::sql() . ' ORDER BY bs.statement_date, bs.id');
         $query->execute(BankStatementOwnershipResolver::params($supplierId));
         return $query->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function adviceMemberships(array $statements): array
+    {
+        $adviceByStatement = [];
+        foreach ($statements as $row) {
+            $advice = self::advice($row);
+            if ($advice !== null) $adviceByStatement[(int) $row['id']] = $advice;
+        }
+        if ($adviceByStatement === []) return [];
+
+        $ids = implode(',', array_keys($adviceByStatement));
+        $query = $this->db->pdo()->query(
+            "SELECT bt.statement_id AS evidence_statement_id, bt.id AS transaction_id
+               FROM bank_transactions bt
+              WHERE bt.statement_id IN ($ids)
+              UNION ALL
+             SELECT bti.statement_id AS evidence_statement_id, bti.bank_transaction_id AS transaction_id
+               FROM bank_transaction_imports bti
+               JOIN bank_statements evidence ON evidence.id = bti.statement_id
+               JOIN bank_transactions bt ON bt.id = bti.bank_transaction_id
+               JOIN bank_statements original ON original.id = bt.statement_id
+              WHERE bti.statement_id IN ($ids)
+                AND evidence.supplier_id = original.supplier_id"
+        );
+        $memberships = [];
+        foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $advice = $adviceByStatement[(int) $row['evidence_statement_id']];
+            $transactionId = (int) $row['transaction_id'];
+            if (!isset($memberships[$transactionId]) || self::compareAdvice($advice, $memberships[$transactionId]) < 0) {
+                $memberships[$transactionId] = $advice;
+            }
+        }
+        return $memberships;
+    }
+
+    private static function advice(array $row): ?array
+    {
+        $reference = trim((string) ($row['advice_reference'] ?? ''));
+        $bookedOn = trim((string) ($row['advice_booked_on'] ?? ''));
+        if (preg_match('/^(\d{8})(\d{6})$/D', $reference, $match) !== 1
+            || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $bookedOn) !== 1) {
+            return null;
+        }
+        $referenceDate = \DateTimeImmutable::createFromFormat('!Ymd', $match[1]);
+        $bookedDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $bookedOn);
+        if ($referenceDate === false || $referenceDate->format('Ymd') !== $match[1]
+            || $bookedDate === false || $bookedDate->format('Y-m-d') !== $bookedOn) {
+            return null;
+        }
+        $sequence = ltrim($match[2], '0');
+        $balance = $row['advice_balance'] ?? null;
+        try {
+            $balance = $balance === null || $balance === '' || $balance === 'null'
+                ? null
+                : self::cents($balance);
+        } catch (\InvalidArgumentException) {
+            $balance = null;
+        }
+        return [
+            'reference' => $reference,
+            'reference_date' => $referenceDate->format('Y-m-d'),
+            'booked_on' => $bookedOn,
+            'sequence' => $sequence === '' ? '0' : $sequence,
+            'balance' => $balance,
+        ];
+    }
+
+    private static function compareAdvice(array $left, array $right): int
+    {
+        $date = $left['reference_date'] <=> $right['reference_date'];
+        if ($date !== 0) return $date;
+        $leftSequence = (string) $left['sequence'];
+        $rightSequence = (string) $right['sequence'];
+        return strlen($leftSequence) <=> strlen($rightSequence)
+            ?: ($leftSequence <=> $rightSequence);
     }
 
     private static function transactionLowerBound(array $statements, string $from): string
@@ -134,10 +231,15 @@ final class StatementBalanceService
         $statements = array_values(array_filter($statements, static fn (array $row): bool =>
             $row['currency'] === $selected['currency'] && BankStatementSource::isStatement((string) $row['source'])
             && AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) === $key));
-        return $this->calculateSnapshot($selected, $statements);
+        return $this->calculateSnapshot($selected, $statements, null, $this->adviceMemberships($statements));
     }
 
-    private function calculateSnapshot(array $selected, array $statements, ?array $preloadedTransactions = null): array
+    private function calculateSnapshot(
+        array $selected,
+        array $statements,
+        ?array $preloadedTransactions = null,
+        array $adviceMemberships = [],
+    ): array
     {
         $key = AuthoritativeTransactionReconciler::account((string) $selected['account_number'], (string) $selected['bank_code']);
         $to = substr((string) $selected['statement_date'], 0, 10);
@@ -149,12 +251,14 @@ final class StatementBalanceService
         $checkpoints = [];
         $unverifiedPdf = false;
         $hasKnownBalance = false;
+        $latestBalanceDate = null;
         foreach ($statements as $row) {
             $date = substr($row['statement_date'], 0, 10);
             if ($date > $to) continue;
             if ($row['curr_balance'] !== null || $row['prev_balance'] !== null) $hasKnownBalance = true;
             if ($row['source'] === 'bank_api' && $row['has_pdf'] && $date >= $from) $unverifiedPdf = true;
             if (!BankStatementSource::isBalanceAnchor((string) $row['source']) || $row['curr_balance'] === null) continue;
+            $latestBalanceDate = $date;
             $balance = self::cents($row['curr_balance']);
             if ($row['prev_balance'] !== null && $row['credit_total'] !== null && $row['debit_total'] !== null
                 && self::cents($row['prev_balance']) + self::cents($row['credit_total']) - self::cents($row['debit_total']) !== $balance) {
@@ -179,7 +283,7 @@ final class StatementBalanceService
         $after = self::transactionLowerBound($statements, $from);
         if ($preloadedTransactions === null) {
             $ids = array_map(static fn (array $row): int => (int) $row['id'], $statements);
-            $tx = $this->db->pdo()->prepare("SELECT bt.id, bt.posted_at, bt.amount, bt.currency, bt.bank_ref,
+            $tx = $this->db->pdo()->prepare("SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount, bt.currency, bt.bank_ref,
             bt.variable_symbol, bt.constant_symbol, bt.specific_symbol, bt.counterparty_account,
             bt.counterparty_bank, bt.counterparty_name, bt.description
             FROM bank_transactions bt WHERE bt.statement_id IN (" . implode(',', $ids) . ")
@@ -198,7 +302,24 @@ final class StatementBalanceService
                 break;
             }
         }
-        $opening = $anchor ?? $firstOpening ?? ($selected['source'] === 'bank_api' && !$hasKnownBalance ? 0 : null);
+        $opening = $anchor ?? $firstOpening ?? (
+            $selected['source'] === 'bank_api' && !$hasKnownBalance && empty($selected['has_csob_advice']) ? 0 : null
+        );
+        $adviceCheckpoint = null;
+        if ($confirmed === null && !empty($selected['has_csob_advice'])) {
+            foreach ($statements as $row) {
+                $advice = self::advice($row);
+                if ($advice === null || $advice['balance'] === null || $advice['booked_on'] > $to) continue;
+                if ($latestBalanceDate !== null && $advice['booked_on'] <= $latestBalanceDate) continue;
+                $comparison = $adviceCheckpoint === null ? 1 : self::compareAdvice($advice, $adviceCheckpoint);
+                if ($comparison === 0 && $advice['balance'] !== $adviceCheckpoint['balance']) {
+                    throw new \InvalidArgumentException('balance_conflict');
+                }
+                if ($comparison > 0) {
+                    $adviceCheckpoint = $advice;
+                }
+            }
+        }
         $credit = 0;
         $debit = 0;
         $transactions = [];
@@ -217,6 +338,29 @@ final class StatementBalanceService
             $transactions[] = $row;
         }
         $closing = $opening === null ? null : $opening + $credit - $debit;
+        if ($closing === null && $confirmed !== null && !empty($selected['has_csob_advice'])) {
+            $closing = $confirmed;
+        } elseif ($adviceCheckpoint !== null) {
+            $adviceClosing = $adviceCheckpoint['balance'];
+            foreach ($preloadedTransactions as $row) {
+                if ($row['posted_at'] < $adviceCheckpoint['booked_on']) continue;
+                if ($row['posted_at'] > $to) break;
+                if ($row['posted_at'] > $adviceCheckpoint['booked_on']) {
+                    $adviceClosing += self::cents($row['amount']);
+                    continue;
+                }
+                $membership = $adviceMemberships[(int) $row['id']] ?? null;
+                if ($membership === null) {
+                    $adviceClosing = null;
+                    break;
+                }
+                if (self::compareAdvice($membership, $adviceCheckpoint) > 0) {
+                    $adviceClosing += self::cents($row['amount']);
+                }
+            }
+            if ($closing !== $adviceClosing) $opening = null;
+            $closing = $adviceClosing;
+        }
         $difference = $closing === null || $confirmed === null ? null : $confirmed - $closing;
         $checkpointMismatch = false;
         if ($opening !== null) {

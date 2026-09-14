@@ -136,6 +136,37 @@ final class KbPlusApiClientTest extends TestCase
         self::assertStringContainsString(rawurlencode(self::ACCOUNT_ID), (string) $history[0]['request']->getUri());
     }
 
+    public function testTransactionEndIsCappedAtCurrentUtcTimeForEveryPage(): void
+    {
+        foreach (['2026-09-14', '2026-09-15'] as $to) {
+            $history = [];
+            $client = $this->client([
+                new Response(200, [], $this->json($this->transactionPage(0, 2, false, [$this->transaction('SYNTHETIC-001')]))),
+                new Response(200, [], $this->json($this->transactionPage(1, 2, true, [$this->transaction('SYNTHETIC-002')]))),
+            ], $history);
+            $client->transactions($this->credentials(), self::ACCESS_TOKEN, self::ACCOUNT_ID, '2026-09-14', $to);
+            self::assertCount(2, $history);
+            foreach ($history as $transfer) {
+                parse_str($transfer['request']->getUri()->getQuery(), $query);
+                self::assertSame('2026-09-14T00:00:00.000Z', $query['fromDateTime']);
+                self::assertSame('2026-09-14T10:42:00.123Z', $query['toDateTime']);
+            }
+        }
+    }
+
+    public function testFutureTransactionStartIsRejectedWithoutCallingBank(): void
+    {
+        $history = [];
+        $client = $this->client([], $history);
+        try {
+            $client->transactions($this->credentials(), self::ACCESS_TOKEN, self::ACCOUNT_ID, '2026-09-15', '2026-09-16');
+            self::fail('Future transaction range must not be sent to KB.');
+        } catch (BankConnectorException $e) {
+            self::assertSame(BankConnectorException::INVALID_DATE_RANGE, $e->errorCode);
+            self::assertSame([], $history);
+        }
+    }
+
     public function testRetriesOneTransientGetButNeverFollowsRedirects(): void
     {
         $history = [];
@@ -389,7 +420,10 @@ final class KbPlusApiClientTest extends TestCase
         $mock = new MockHandler($queue);
         $stack = HandlerStack::create($mock);
         $stack->push(Middleware::history($history));
-        return new KbPlusApiClient(new Client(['handler' => $stack]));
+        return new KbPlusApiClient(
+            new Client(['handler' => $stack]),
+            new \Symfony\Component\Clock\MockClock('2026-09-14T12:42:00.123+02:00'),
+        );
     }
 
     /** @param array<string,mixed> $override @return array<string,mixed> */
@@ -454,7 +488,7 @@ final class KbPlusApiClientTest extends TestCase
     private function payment(string $instructionId = 'SYNTHETIC-001'): array
     {
         return [
-            'PaymentIdentification' => ['instructionIdentification' => $instructionId],
+            'paymentIdentification' => ['instructionIdentification' => $instructionId],
             'amount' => ['instructedAmount' => ['value' => 1234.56, 'currency' => 'CZK']],
             'requestedExecutionDate' => '2026-09-08',
             'debtorAccount' => ['identification' => ['iban' => 'CZ0401000000191000000005']],
