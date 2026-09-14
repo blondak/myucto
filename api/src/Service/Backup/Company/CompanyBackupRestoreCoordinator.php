@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Company;
 
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Invoice\ApprovalTokenLock;
 use PDO;
 use PDOStatement;
 
@@ -60,6 +61,46 @@ final readonly class CompanyBackupRestoreCoordinator
         if ($this->database->inTransaction()) {
             throw self::error('restore_transaction_nested');
         }
+
+        $entered = false;
+        $completed = false;
+        try {
+            // Zámek předchází transakci i jejímu prvnímu snapshotu. Běžné
+            // zápisy faktur nezamyká; sdílejí jej pouze schvalovací operace.
+            return ApprovalTokenLock::run($this->database, function () use (
+                $source, $backupId, $preflight, $decisions, $sensitiveData,
+                &$entered, &$completed,
+            ): CompanyBackupRestoreResult {
+                $entered = true;
+                $result = $this->restoreLocked(
+                    $source, $backupId, $preflight, $decisions, $sensitiveData,
+                );
+                $completed = true;
+                return $result;
+            });
+        } catch (\Throwable $failure) {
+            if (!$entered) {
+                try {
+                    $source->close();
+                } catch (\Throwable $cleanup) {
+                    throw self::error('restore_cleanup_failed', $cleanup);
+                }
+            }
+            // Selhání uvolnění po commitu nesmí vypadat jako bezpečný rollback.
+            if ($completed) {
+                throw self::error('restore_transaction_outcome_unknown', $failure);
+            }
+            throw $failure;
+        }
+    }
+
+    private function restoreLocked(
+        CompanyBackupImportSource $source,
+        string $backupId,
+        CompanyBackupDataPreflightResult $preflight,
+        CompanyBackupReferenceDecisionPlan $decisions,
+        PayrollSensitiveData $sensitiveData,
+    ): CompanyBackupRestoreResult {
 
         $staged = null;
         $published = null;

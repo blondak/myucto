@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Invoice\ApprovalTokenLock;
 use MyInvoice\Service\Invoice\CzkRecap;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Support\PaymentMethods;
@@ -2041,22 +2042,24 @@ final class InvoiceRepository
      */
     public function setApprovalRequested(int $invoiceId, int $ttlDays = 30): string
     {
-        $token = bin2hex(random_bytes(24)); // 48 hex chars
-        $expiresExpr = 'DATE_ADD(NOW(), INTERVAL ' . max(1, $ttlDays) . ' DAY)';
-        $this->db->pdo()->prepare(
-            "UPDATE invoices
-                SET approval_status = 'requested',
-                    approval_token = ?,
-                    approval_token_expires_at = $expiresExpr,
-                    approval_requested_at = NOW(),
-                    approval_decided_at = NULL,
-                    approval_decided_by_email = NULL,
-                    approval_rejection_reason = NULL,
-                    approval_reminder_at = NULL,
-                    approval_reminder_count = 0
-              WHERE id = ?"
-        )->execute([$token, $invoiceId]);
-        return $token;
+        return ApprovalTokenLock::run($this->db->pdo(), function () use ($invoiceId, $ttlDays): string {
+            $token = bin2hex(random_bytes(24)); // 48 hex chars
+            $expiresExpr = 'DATE_ADD(NOW(), INTERVAL ' . max(1, $ttlDays) . ' DAY)';
+            $this->db->pdo()->prepare(
+                "UPDATE invoices
+                    SET approval_status = 'requested',
+                        approval_token = ?,
+                        approval_token_expires_at = $expiresExpr,
+                        approval_requested_at = NOW(),
+                        approval_decided_at = NULL,
+                        approval_decided_by_email = NULL,
+                        approval_rejection_reason = NULL,
+                        approval_reminder_at = NULL,
+                        approval_reminder_count = 0
+                  WHERE id = ?"
+            )->execute([$token, $invoiceId]);
+            return $token;
+        });
     }
 
     /**
@@ -2072,19 +2075,21 @@ final class InvoiceRepository
         if (!in_array($newStatus, ['approved', 'rejected'], true)) {
             throw new \InvalidArgumentException("Invalid approval status: $newStatus");
         }
-        $this->db->pdo()->prepare(
-            'UPDATE invoices
-                SET approval_status = ?,
-                    approval_receipt_hash = CASE
-                        WHEN approval_token IS NULL THEN approval_receipt_hash
-                        ELSE SHA2(approval_token, 256)
-                    END,
-                    approval_token = NULL,
-                    approval_decided_at = NOW(),
-                    approval_decided_by_email = ?,
-                    approval_rejection_reason = ?
-              WHERE id = ?'
-        )->execute([$newStatus, $decidedBy, $rejectionReason, $invoiceId]);
+        ApprovalTokenLock::run($this->db->pdo(), function () use ($invoiceId, $newStatus, $decidedBy, $rejectionReason): void {
+            $this->db->pdo()->prepare(
+                'UPDATE invoices
+                    SET approval_status = ?,
+                        approval_receipt_hash = CASE
+                            WHEN approval_token IS NULL THEN approval_receipt_hash
+                            ELSE SHA2(approval_token, 256)
+                        END,
+                        approval_token = NULL,
+                        approval_decided_at = NOW(),
+                        approval_decided_by_email = ?,
+                        approval_rejection_reason = ?
+                  WHERE id = ?'
+            )->execute([$newStatus, $decidedBy, $rejectionReason, $invoiceId]);
+        });
     }
 
     /**
@@ -2101,20 +2106,22 @@ final class InvoiceRepository
         if (!in_array($newStatus, ['approved', 'rejected'], true)) {
             throw new \InvalidArgumentException("Invalid approval status: $newStatus");
         }
-        $stmt = $this->db->pdo()->prepare(
-            "UPDATE invoices
-                SET approval_status = ?,
-                    approval_receipt_hash = SHA2(approval_token, 256),
-                    approval_token = NULL,
-                    approval_decided_at = NOW(),
-                    approval_decided_by_email = ?,
-                    approval_rejection_reason = ?
-              WHERE id = ?
-                AND approval_token = ?
-                AND approval_status = 'requested'"
-        );
-        $stmt->execute([$newStatus, $decidedBy, $rejectionReason, $invoiceId, $token]);
-        return $stmt->rowCount() === 1;
+        return ApprovalTokenLock::run($this->db->pdo(), function () use ($invoiceId, $token, $newStatus, $decidedBy, $rejectionReason): bool {
+            $stmt = $this->db->pdo()->prepare(
+                "UPDATE invoices
+                    SET approval_status = ?,
+                        approval_receipt_hash = SHA2(approval_token, 256),
+                        approval_token = NULL,
+                        approval_decided_at = NOW(),
+                        approval_decided_by_email = ?,
+                        approval_rejection_reason = ?
+                  WHERE id = ?
+                    AND approval_token = ?
+                    AND approval_status = 'requested'"
+            );
+            $stmt->execute([$newStatus, $decidedBy, $rejectionReason, $invoiceId, $token]);
+            return $stmt->rowCount() === 1;
+        });
     }
 
     /**
@@ -2122,20 +2129,22 @@ final class InvoiceRepository
      */
     public function resetApproval(int $invoiceId): void
     {
-        $this->db->pdo()->prepare(
-            'UPDATE invoices
-                SET approval_status = "none",
-                    approval_token = NULL,
-                    approval_receipt_hash = NULL,
-                    approval_token_expires_at = NULL,
-                    approval_requested_at = NULL,
-                    approval_decided_at = NULL,
-                    approval_decided_by_email = NULL,
-                    approval_rejection_reason = NULL,
-                    approval_reminder_at = NULL,
-                    approval_reminder_count = 0
-              WHERE id = ?'
-        )->execute([$invoiceId]);
+        ApprovalTokenLock::run($this->db->pdo(), function () use ($invoiceId): void {
+            $this->db->pdo()->prepare(
+                'UPDATE invoices
+                    SET approval_status = "none",
+                        approval_token = NULL,
+                        approval_receipt_hash = NULL,
+                        approval_token_expires_at = NULL,
+                        approval_requested_at = NULL,
+                        approval_decided_at = NULL,
+                        approval_decided_by_email = NULL,
+                        approval_rejection_reason = NULL,
+                        approval_reminder_at = NULL,
+                        approval_reminder_count = 0
+                  WHERE id = ?'
+            )->execute([$invoiceId]);
+        });
     }
 
     /**

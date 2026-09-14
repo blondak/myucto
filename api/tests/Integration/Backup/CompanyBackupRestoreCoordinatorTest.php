@@ -28,6 +28,7 @@ use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Invoice\ApprovalTokenLock;
 use PDO;
 use PDOStatement;
 use PHPUnit\Framework\Attributes\Group;
@@ -50,6 +51,8 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
 
     private bool $connected = false;
 
+    private Connection $competitor;
+
     protected function setUp(): void
     {
         $rootDir = dirname(__DIR__, 4);
@@ -67,6 +70,10 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
             }
             $pdo = $connection->pdo();
             $this->db = $connection;
+            $config = $container->get(Config::class);
+            $this->competitor = Connection::withoutSharedTestConnection(
+                static fn () => new Connection($config),
+            );
             $this->connected = true;
         } catch (\Throwable $e) {
             $this->markTestSkipped('Testovací DB není dostupná: ' . $e->getMessage());
@@ -98,6 +105,7 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
                 $pdo->exec('DROP TABLE IF EXISTS `' . $this->table . '`');
             }
             $this->db->close();
+            $this->competitor->close();
         }
         if ($this->stagingRoot !== '') {
             $this->removeTree($this->stagingRoot);
@@ -117,6 +125,8 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
             $this->table,
             $plan,
         );
+        $importer->onRestore = fn () => $this->assertApprovalLockHeld();
+        $source->onClose = fn () => $this->assertApprovalLockHeld();
         $coordinator = new CompanyBackupRestoreCoordinator(
             $pdo,
             importer: $importer,
@@ -143,6 +153,9 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
         self::assertSame(1, $source->closes);
         self::assertSame(1, $this->rowCount($pdo));
         self::assertSame([], $this->entries($this->stagingRoot));
+        self::assertSame(1, ApprovalTokenLock::run(
+            $this->competitor->pdo(), fn () => $this->rowCount($this->competitor->pdo()), 0,
+        ));
     }
 
     public function testRollbackAlsoRestoresPreviousSessionIsolation(): void
@@ -159,6 +172,8 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
             $this->table,
             $plan,
         );
+        $importer->onRestore = fn () => $this->assertApprovalLockHeld();
+        $source->onClose = fn () => $this->assertApprovalLockHeld();
         $coordinator = new CompanyBackupRestoreCoordinator(
             $pdo,
             importer: $importer,
@@ -186,6 +201,24 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
         self::assertSame(0, $this->rowCount($pdo));
         self::assertSame(1, $source->closes);
         self::assertSame([], $this->entries($this->stagingRoot));
+        self::assertSame(0, ApprovalTokenLock::run(
+            $this->competitor->pdo(), fn () => $this->rowCount($this->competitor->pdo()), 0,
+        ));
+    }
+
+    private function assertApprovalLockHeld(): void
+    {
+        $entered = false;
+        $failure = null;
+        try {
+            ApprovalTokenLock::run($this->competitor->pdo(), static function () use (&$entered): void {
+                $entered = true;
+            }, 0);
+        } catch (\RuntimeException $e) {
+            $failure = $e;
+        }
+        self::assertFalse($entered, 'Schvalovací zápis nesmí předběhnout commit obnovy.');
+        self::assertNotNull($failure);
     }
 
     /**
@@ -358,6 +391,8 @@ final class MariaDbCoordinatorDatabaseImporter implements CompanyBackupDatabaseI
 {
     public string $isolation = '';
 
+    public ?\Closure $onRestore = null;
+
     public function __construct(
         private readonly PDO $database,
         private readonly string $table,
@@ -370,6 +405,7 @@ final class MariaDbCoordinatorDatabaseImporter implements CompanyBackupDatabaseI
         CompanyBackupReferenceDecisionPlan $decisions,
         PayrollSensitiveData $sensitiveData,
     ): CompanyBackupDatabaseImportResult {
+        ($this->onRestore ?? static fn () => null)();
         if (!$this->database->inTransaction()) {
             throw new \RuntimeException('MariaDB import nedostal transakci.');
         }
@@ -412,6 +448,8 @@ final class MariaDbCoordinatorImportSource implements CompanyBackupImportSource
     public int $closes = 0;
 
     public ?\Throwable $closeFailure = null;
+
+    public ?\Closure $onClose = null;
 
     private bool $closed = false;
 
@@ -473,6 +511,7 @@ final class MariaDbCoordinatorImportSource implements CompanyBackupImportSource
         }
         $this->closed = true;
         $this->closes++;
+        ($this->onClose ?? static fn () => null)();
         if ($this->closeFailure instanceof \Throwable) {
             throw $this->closeFailure;
         }

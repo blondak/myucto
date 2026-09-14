@@ -420,6 +420,11 @@ V detailu faktury se objeví:
    - Faktura zůstává jako draft — můžeš výkaz upravit a poslat znovu
      ke schválení (vygeneruje se nový token, předchozí ztrácí platnost)
 
+> ⚠️ Pokud právě probíhá obnova firmy nebo jiný souběžný zápis související se
+> schvalováním, může operace schválení nejprve čekat a potom vrátit chybu.
+> V takovém případě akci opakuj, až konflikt doběhne. Přitom běžné úpravy jiných
+> faktur zůstávají tímto mechanismem globálně neblokované.
+
 ### 15.7.2 Test schválení
 
 Pro náhled e-mailu před produkčním odesláním klikni **„Test schválení"** v
