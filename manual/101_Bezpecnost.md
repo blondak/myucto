@@ -145,7 +145,9 @@ TOTP = time-based one-time password (RFC 6238).
 1. Nejdřív znovu prokážeš, že jsi to ty: bez passkey **aktuálním heslem**,
    s aktivní passkey **ověřením passkey** (stejně jako při registraci dalšího
    klíče). Samotná přihlášená session na přidání druhého faktoru nestačí —
-   jinak by si ho na unesené session mohl založit útočník.
+   jinak by si ho na unesené session mohl založit útočník. Špatně zadaná
+   hesla se tu počítají do stejné ochrany proti hádání jako při přihlášení,
+   takže po opakovaných chybách se účet na 15 minut zamkne i pro login.
 2. Aplikace ukáže **QR kód** + textový **secret key**.
 3. V mobilu otevři **autentikátor** (Google Authenticator, Authy, Microsoft
    Authenticator, 1Password, Bitwarden) → Přidat účet → Sken QR kódu.
