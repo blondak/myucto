@@ -89,7 +89,7 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollPeriodExportPartKind'
             => 'db:payroll_period_export_job_parts.part_kind',
         'payroll.ts::PayrollDeadlinePhase'
-            => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::PHASES',
+            => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::GROUP_PHASES',
         // Mzdy → Importy
         'payrollImports.ts::RegistrationEnvironment'
             => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::ENVIRONMENTS',

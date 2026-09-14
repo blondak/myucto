@@ -98,6 +98,14 @@ final readonly class PayrollDeadlineOverviewService
     public const UNDATED_PHASE = 'undated';
 
     /**
+     * Všechny fáze, které může nést skupina seskupeného přehledu (a tedy klient):
+     * fáze s termínem plus sekce bez termínu.
+     *
+     * @var list<string>
+     */
+    public const GROUP_PHASES = [...self::PHASES, self::UNDATED_PHASE];
+
+    /**
      * Odkud termín pochází. Účetní to řeší až jako druhé — primárně ji zajímá,
      * co je pozdě — ale rozhoduje to, kam vede proklik.
      *
