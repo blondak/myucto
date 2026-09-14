@@ -122,8 +122,16 @@ final class JmhzSignedProtocolFactory
         if (!$message instanceof \DOMElement) {
             throw new \RuntimeException('Vzorek protokolu nemá obálku `Message`.');
         }
+        // Jako ČSSZ: `txDoc.LoadXml(nod.OuterXml)`, tedy `Message` odpojený od
+        // obálky, bez deklarací jmenných prostorů jeho předků.
+        $detached = new \DOMDocument();
+        if (!$detached->loadXML((string) $dom->saveXML($message), LIBXML_NONET | LIBXML_NOBLANKS)
+            || $detached->documentElement === null
+        ) {
+            throw new \RuntimeException('Obálku `Message` nelze odpojit.');
+        }
 
-        return (string) $message->C14N();
+        return (string) $detached->documentElement->C14N();
     }
 
     private function cms(string $content, string $commonName, bool $detached): string

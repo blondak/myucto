@@ -70,6 +70,56 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
         self::assertStringContainsString('ProcessingResult', $verified);
     }
 
+    /**
+     * Odpověď VREP (i testovacího prostředí) deklaruje na `GovTalkMessage`
+     * jmenný prostor `xsig`, který uvnitř `Message` nikdo nepoužívá. ČSSZ
+     * kanonizuje `Message` ODPOJENÝ od obálky (`LoadXml(nod.OuterXml)`), takže
+     * deklarace předků v podepsaných datech nejsou. Kanonizace na místě by je
+     * do otisku zatáhla a platně podepsaný protokol by padal na neshodě otisku.
+     */
+    public function testEnvelopeNamespaceOutsideMessageDoesNotBreakTheDigest(): void
+    {
+        $xml = $this->protocols()->sign($this->withEnvelopeNamespace($this->protocol()));
+        self::assertStringContainsString('xmlns:xsig=', $xml);
+
+        $verified = $this->verifier()->verifiedProtocolXml($xml, 'test');
+
+        self::assertStringContainsString('ProcessingResult', $verified);
+    }
+
+    public function testTamperedProtocolWithEnvelopeNamespaceStillFailsClosed(): void
+    {
+        $xml = $this->protocols()->sign($this->withEnvelopeNamespace($this->protocol()));
+        $tampered = str_replace('result="ERROR"', 'result="OK"', $xml);
+        self::assertNotSame($xml, $tampered);
+
+        $this->assertFailsWith(
+            'jmhz_protocol_digest_mismatch',
+            fn (): string => $this->verifier()->verifiedProtocolXml($tampered, 'test'),
+        );
+    }
+
+    /**
+     * Deklarace přidaná po podpisu PŘÍMO na `Message` do podepsaných dat patří.
+     * Hlídá, že odpojení od obálky nesklouzlo k exkluzivní kanonizaci, která
+     * by nepoužité deklarace zahodila a změnu propustila.
+     */
+    public function testNamespaceAddedToMessageAfterSigningFailsClosed(): void
+    {
+        $xml = $this->protocols()->sign($this->protocol());
+        $tampered = str_replace(
+            '<Message version="1.2"',
+            '<Message xmlns:cizi="urn:example:cizi" version="1.2"',
+            $xml,
+        );
+        self::assertNotSame($xml, $tampered);
+
+        $this->assertFailsWith(
+            'jmhz_protocol_digest_mismatch',
+            fn (): string => $this->verifier()->verifiedProtocolXml($tampered, 'test'),
+        );
+    }
+
     public function testForeignSignerIsRejected(): void
     {
         $xml = $this->protocols()->sign($this->protocol(), self::FOREIGN);
@@ -225,6 +275,19 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
     private function protocols(): JmhzSignedProtocolFactory
     {
         return $this->factory ??= new JmhzSignedProtocolFactory();
+    }
+
+    private function withEnvelopeNamespace(string $protocol): string
+    {
+        $declared = str_replace(
+            '<GovTalkMessage xmlns="http://www.govtalk.gov.uk/CM/envelope">',
+            '<GovTalkMessage xmlns:xsig="http://www.w3.org/2000/09/xmldsig#"'
+                . ' xmlns="http://www.govtalk.gov.uk/CM/envelope">',
+            $protocol,
+        );
+        self::assertNotSame($protocol, $declared);
+
+        return $declared;
     }
 
     private function protocol(): string

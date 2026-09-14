@@ -26,6 +26,14 @@ use MyInvoice\Service\Pdf\Asn1;
  * 3. otisk se spočítá algoritmem z `DigestMethod/@Algorithm` (dnes SHA-512)
  *    a porovná bajt po bajtu s `eContent`.
  *
+ * Kanonizuje se `Message` **odpojený od obálky**: referenční kód dělá
+ * `txDoc.LoadXml(nod.OuterXml)` a teprve nad novým dokumentem C14N. Deklarace
+ * jmenných prostorů předků (VREP posílá na `GovTalkMessage` nepoužitý
+ * `xmlns:xsig`) proto v podepsaných datech NEJSOU. Kanonizace na místě by je
+ * do otisku zatáhla a platně podepsaný protokol by padal. Exkluzivní C14N to
+ * není: ta by zahodila i nepoužité deklarace přímo na `Message`, které ČSSZ
+ * podepisuje.
+ *
  * Ověřeno proti skutečnému protokolu ČSSZ z podkladů: otisk sedí právě tehdy,
  * když se dokument načte **bez bílých míst** (`LIBXML_NOBLANKS`, což odpovídá
  * `XmlDocument.PreserveWhitespace = false` v .NET). S ponechaným odsazením
@@ -93,7 +101,7 @@ final readonly class JmhzProtocolSignatureVerifier implements JmhzProtocolSignat
         // podpisu — tady by vyšel jiný otisk a ověření by padalo vždy.
         $this->signatureValueNode($signature)->textContent = '';
 
-        $digest = hash($algorithm, (string) $message->C14N(), true);
+        $digest = $this->messageDigest($message, $algorithm);
         $signed = $this->verifySignedData($signedData, $this->signedAt($signature));
         if (!hash_equals($signed, $digest)) {
             throw new JmhzTransportException(
@@ -400,13 +408,38 @@ final readonly class JmhzProtocolSignatureVerifier implements JmhzProtocolSignat
     {
         $dom = $this->load($xml);
         $message = $this->requireMessage($dom);
-        if (!hash_equals($digest, hash($algorithm, (string) $message->C14N(), true))) {
+        if (!hash_equals($digest, $this->messageDigest($message, $algorithm))) {
             throw new JmhzTransportException(
                 'jmhz_protocol_canonicalization_unstable',
                 'Ověřený protokol po serializaci nedává tentýž otisk; vydat by'
                     . ' znamenalo předat parseru neověřené bajty.',
             );
         }
+    }
+
+    /**
+     * Otisk `Message` stejnou cestou jako ČSSZ: `OuterXml` → nový dokument →
+     * C14N. `DOMDocument::importNode()` to NENÍ — nad skutečnými protokoly
+     * dává jiný otisk.
+     */
+    private function messageDigest(DOMElement $message, string $algorithm): string
+    {
+        $outer = $message->ownerDocument?->saveXML($message);
+        if (!is_string($outer) || $outer === '') {
+            throw new JmhzTransportException(
+                'jmhz_protocol_unreadable',
+                'Podepsanou část protokolu nelze oddělit od obálky.',
+            );
+        }
+        $detached = $this->load($outer)->documentElement;
+        if (!$detached instanceof DOMElement) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_unreadable',
+                'Podepsanou část protokolu nelze oddělit od obálky.',
+            );
+        }
+
+        return hash($algorithm, (string) $detached->C14N(), true);
     }
 
     /**
