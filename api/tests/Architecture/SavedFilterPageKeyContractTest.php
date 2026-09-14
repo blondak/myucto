@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Action\UserSettings\SavedFilterAction;
+use MyInvoice\Routes;
+use MyInvoice\Security\RoutePermissionMap;
 use PHPUnit\Framework\TestCase;
+use Slim\Factory\AppFactory;
+use Slim\Routing\RoutingResults;
 
 /**
  * Kontrakt page_key mezi frontendem a backendem (static source scan).
@@ -76,6 +80,44 @@ final class SavedFilterPageKeyContractTest extends TestCase
                     implode(', ', $files),
                 ),
             );
+        }
+    }
+
+    /**
+     * Klíč, který projde whitelistem, se musí dostat i přes router. Routa preferencí má
+     * na `{key}` vlastní regex a ten nepouštěl pomlčku, takže PUT
+     * `table.payroll-quick-inputs` končil na 404 „Route not found" dřív, než se
+     * k whitelistu vůbec dostal. Whitelist i frontend přitom seděly, takže to testy
+     * výše nechytily — na obrazovce se jen žádné nastavení sloupců neuložilo.
+     *
+     * Nestačí se ptát, jestli router cestu NAJDE: catch-all `/api/{path:.*}` najde každou
+     * a teprve ten vrací „Route not found". Rozhoduje vzor trefené routy.
+     */
+    public function testEveryWhitelistedTablePrefsKeyReachesPreferenceRoute(): void
+    {
+        $app = AppFactory::create();
+        Routes::register($app);
+        $resolver = $app->getRouteResolver();
+        $collector = $app->getRouteCollector();
+        $permissions = new RoutePermissionMap();
+
+        foreach (SavedFilterAction::PAGE_KEYS as $pageKey) {
+            $path = '/api/user/preferences/table.' . $pageKey;
+            foreach (['PUT', 'DELETE'] as $method) {
+                $routing = $resolver->computeRoutingResults($path, $method);
+                $pattern = $routing->getRouteStatus() === RoutingResults::FOUND
+                    ? $collector->lookupRoute((string) $routing->getRouteIdentifier())->getPattern()
+                    : null;
+                self::assertStringStartsWith(
+                    '/api/user/preferences/',
+                    (string) $pattern,
+                    "{$method} {$path} netrefí routu preferencí (trefil '{$pattern}') — uložení skončí na 404 Route not found.",
+                );
+                self::assertNotNull(
+                    $permissions->match($method, $path),
+                    "{$method} {$path} nemá politiku oprávnění.",
+                );
+            }
         }
     }
 

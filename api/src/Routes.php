@@ -3147,8 +3147,8 @@ final class Routes
         $app->delete('/api/user/filters/{id:[0-9]+}',         [\MyInvoice\Action\UserSettings\SavedFilterAction::class, 'delete']);
 
         $app->get   ('/api/user/preferences',                 [\MyInvoice\Action\UserSettings\UserPreferenceAction::class, 'list']);
-        $app->put   ('/api/user/preferences/{key:[a-z0-9_.]+}', [\MyInvoice\Action\UserSettings\UserPreferenceAction::class, 'put']);
-        $app->delete('/api/user/preferences/{key:[a-z0-9_.]+}', [\MyInvoice\Action\UserSettings\UserPreferenceAction::class, 'delete']);
+        $app->put   ('/api/user/preferences/{key:[a-z0-9_.-]+}', [\MyInvoice\Action\UserSettings\UserPreferenceAction::class, 'put']);
+        $app->delete('/api/user/preferences/{key:[a-z0-9_.-]+}', [\MyInvoice\Action\UserSettings\UserPreferenceAction::class, 'delete']);
 
         // F5: Excel export/import číselníků (osnova, kontace, majetek)
         $app->group('/api/accounting', function ($g) {
