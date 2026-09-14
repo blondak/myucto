@@ -208,13 +208,13 @@ final class JmhzScenario1ControlEvaluator
             1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 110, 112, 113, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
-            150, 151, 153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
+            150, 151, 153, 154, 155, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
             204, 207, 208, 209, 213, 215,
             191, 192, 193, 211, 216, 227, 229, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
             253, 255, 260, 265, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
             296, 297, 299, 300, 301, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
-            335, 341, 342, 354, 355,
+            335, 341, 342, 343, 354, 355,
         ];
     }
 
@@ -440,6 +440,7 @@ final class JmhzScenario1ControlEvaluator
             237 => $this->cancelledFormsHaveHeaderOnly($projection),
             240 => $this->packageMetadataPresent($projection),
             341, 342 => $this->schemaValidated($context),
+            343 => $this->formTypeMatchesActivity($projection),
             244 => $this->noCreditsWithoutDeclaration($projection),
             248 => $this->summaryDataOnlyOnPrimary($projection),
             251 => $this->employmentIdentifierUniqueAcrossReport($projection),
@@ -474,6 +475,7 @@ final class JmhzScenario1ControlEvaluator
             152, 335 => $this->workplaceMunicipality($projection),
             153 => $this->workplaceCountry($projection),
             154 => $this->activePolicyInstrument($projection),
+            155 => $this->activityFromCodebook($projection),
             159 => $this->activePolicyInstrumentRequired($projection),
             162 => $this->employerBasePresence($projection),
             167 => $this->employerInsuranceRate($projection, '10484', '10483', 'source_row_5'),
@@ -3652,6 +3654,188 @@ final class JmhzScenario1ControlEvaluator
 
             return null;
         });
+    }
+
+    // --- druh činnosti ----------------------------------------------------
+
+    /**
+     * Typy formuláře součásti podle druhu činnosti (10239) tak, jak je
+     * vyjmenovává kontrola 343 katalogu 1.4.2.9 (body 1, 2, 3, 5, 6 a 7).
+     * Klíčem je lokální jméno elementu, který `xs:choice` součásti zvolil
+     * (`formBezPriznaku.xsd` → `bezPriznaku`).
+     *
+     * Týž koncept drží resolver scénáře (`JmhzScenarioSelectorResolver`), který
+     * podle 10239 a 10502 formulář vybírá PŘED serializací. Vědomě se nesdílí:
+     * kontrola má volbu resolveru ověřit, ne ji zopakovat z téže tabulky, jinak
+     * by společná chyba prošla oběma. Rozejít se ale nesmí — hlídá to
+     * `JmhzScenario1ControlEvaluatorActivityTest`.
+     */
+    private const ACTIVITY_FORM_TYPES = [
+        'bezPriznaku' => [
+            '15', '16',
+            'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+            'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC',
+        ],
+        'pestoun' => ['M'],
+        'cinnostKS' => ['K', 'N', 'O', 'P', 'Q', 'R', 'S'],
+        'ozpTpp' => ['10'],
+        'jinyPrijem' => ['11', '13', '14'],
+        'mezinarodniPronajemSily' => ['12'],
+    ];
+
+    /**
+     * Formuláře, mezi kterými u činností 1 až 9 volí bližší určení
+     * pracovněprávního vztahu (10502): „žádné", „výkon trestu", „pracovní
+     * vztah specifické skupiny" (body 1, 4 a 3 kontroly 343).
+     */
+    private const RELATIONSHIP_DETAIL_FORM_TYPES = ['bezPriznaku', 'vezen', 'cinnostKS'];
+
+    private const DEFERRED_INCOME_FORM_TYPE = 'odlozenyPrijem';
+
+    /**
+     * Typy formuláře, které kontrola 343 druhu činnosti připouští. Odložený
+     * příjem smějí podle bodu 8 podávat všechny skupiny kromě činnosti 10.
+     * Kód mimo číselník nemá žádný.
+     *
+     * @return list<string>
+     */
+    public static function formTypesForActivity(string $activity): array
+    {
+        $types = preg_match('/^[1-9]$/D', $activity) === 1
+            ? self::RELATIONSHIP_DETAIL_FORM_TYPES
+            : [];
+        foreach (self::ACTIVITY_FORM_TYPES as $type => $activities) {
+            if (in_array($activity, $activities, true)) {
+                $types[] = $type;
+            }
+        }
+        if ($types !== [] && $activity !== '10') {
+            $types[] = self::DEFERRED_INCOME_FORM_TYPE;
+        }
+
+        return $types;
+    }
+
+    /**
+     * Kontrola 155 — druh činnosti (10239) musí být z číselníku `druh_cinnosti`.
+     *
+     * Podání ho nese jen v jmenné větvi `identifikaceType`, tedy u zaměstnance
+     * bez OIČ a ID PPV. Ve větvi OIČ + ID PPV ho ČSSZ bere z registrace
+     * a kontrola tu nemá co číst.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function activityFromCodebook(JmhzAttributeProjection $projection): array
+    {
+        if (!$projection->has('10239')) {
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_FORM,
+                'Žádná součást nevykazuje druh činnosti (10239).',
+            )];
+        }
+
+        return $this->againstCodebook(
+            $projection,
+            fn (JmhzAttributeProjection $p): array => $this->checkActivityFromCodebook($p),
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function checkActivityFromCodebook(JmhzAttributeProjection $projection): array
+    {
+        $catalog = $this->codebooks;
+        if ($catalog === null) {
+            return [JmhzControlVerdict::unverifiable(
+                JmhzAttributeProjection::PART_FORM,
+                'Číselník druhů činnosti není k dispozici.',
+            )];
+        }
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($catalog): ?string {
+                $activity = $form->value('10239');
+                if ($activity === null) {
+                    return null;
+                }
+                try {
+                    $catalog->requireValue('druh_cinnosti', $activity);
+                } catch (JmhzCodebookValueException | JmhzCodebookUnavailableException $exception) {
+                    return $exception->getMessage();
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Kontrola 343 — typ formuláře součásti musí odpovídat druhu činnosti
+     * (10239); formulář odloženého příjmu navíc musí mít vyplněný typ (10548).
+     *
+     * U činností 1 až 9 volí mezi `bezPriznaku`, `vezen` a `cinnostKS` bližší
+     * určení pracovněprávního vztahu (10502). Slovník 1.4.1.6 ho mapuje jen do
+     * registrace (REGZEC), do měsíčního hlášení ne, takže se z podání přečíst
+     * nedá: formulář mimo tuhle trojici je vada, volba uvnitř ní je
+     * `NotEvaluable`. Před serializací ji vynucuje resolver scénáře, proti
+     * registraci ji ověří cJMHZ.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function formTypeMatchesActivity(JmhzAttributeProjection $projection): array
+    {
+        $verdicts = [];
+        $undecided = 0;
+        $evaluated = 0;
+        foreach ($projection->forms() as $form) {
+            $activity = $form->value('10239');
+            $bodies = $form->bodies();
+            // Součást bez formuláře nebo s více formuláři hlásí kontrola 303.
+            if ($activity === null || count($bodies) !== 1) {
+                continue;
+            }
+            ++$evaluated;
+            $body = $bodies[0];
+            if (!in_array($body, self::formTypesForActivity($activity), true)) {
+                $verdicts[] = JmhzControlVerdict::failed(
+                    JmhzAttributeProjection::PART_FORM,
+                    $form->ordinal,
+                    "Formulář {$body} neodpovídá druhu činnosti {$activity}.",
+                );
+                continue;
+            }
+            if ($body === self::DEFERRED_INCOME_FORM_TYPE) {
+                if (($form->value('10548') ?? '') === '') {
+                    $verdicts[] = JmhzControlVerdict::failed(
+                        JmhzAttributeProjection::PART_FORM,
+                        $form->ordinal,
+                        'Formulář odloženého příjmu nemá vyplněný typ odloženého příjmu (10548).',
+                    );
+                }
+                continue;
+            }
+            if (preg_match('/^[1-9]$/D', $activity) === 1) {
+                ++$undecided;
+            }
+        }
+        if ($undecided > 0) {
+            $verdicts[] = JmhzControlVerdict::notEvaluable(
+                JmhzAttributeProjection::PART_FORM,
+                'U druhu činnosti 1 až 9 rozhoduje o typu formuláře bližší určení'
+                    . ' pracovněprávního vztahu (10502), které měsíční hlášení nenese;'
+                    . ' ověří ho cJMHZ proti registraci.',
+            );
+        }
+        if ($verdicts !== []) {
+            return $verdicts;
+        }
+
+        return $evaluated === 0
+            ? [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_FORM,
+                'Žádná součást nevykazuje druh činnosti (10239).',
+            )]
+            : [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_FORM)];
     }
 
     // --- kód ELDP ---------------------------------------------------------
