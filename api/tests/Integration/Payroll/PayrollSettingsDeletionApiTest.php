@@ -629,11 +629,15 @@ final class PayrollSettingsDeletionApiTest extends TestCase
     private function insertJmhzMapping(int $componentId): void
     {
         $this->installDefaultJmhzSpecPackage($this->db);
+        // Zařazení v AKTUÁLNÍM balíku — zařazení ze staršího balíku by čtení
+        // číselníku převzalo do aktuálního (adoptLegacy) a smazaly by se dvě.
         $attribute = $this->fetchRow(
-            "SELECT package_id, attribute_id
-               FROM payroll_jmhz_dictionary_attributes
-              WHERE attribute_id = '10328'
-              ORDER BY package_id LIMIT 1"
+            "SELECT a.package_id, a.attribute_id
+               FROM payroll_jmhz_dictionary_attributes a
+               JOIN payroll_jmhz_spec_packages p ON p.id = a.package_id
+              WHERE a.attribute_id = '10328'
+                AND p.package_key = '" . \MyInvoice\Service\Payroll\Component\PayrollComponentJmhzTargetCatalog::PACKAGE_KEY . "'
+              LIMIT 1"
         );
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_component_jmhz_mappings

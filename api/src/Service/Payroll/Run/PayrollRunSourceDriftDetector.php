@@ -26,9 +26,10 @@ final class PayrollRunSourceDriftDetector
         if (!is_string($periodStart) || !is_string($paymentDate)
             || ($officeId !== null && !is_int($officeId))
         ) {
-            throw new \UnexpectedValueException(
-                'Vstupní snímek mzdového běhu nemá období, datum výplaty nebo účtárnu.',
-            );
+            // Snímek bez období nebo data výplaty (vznikl ve starší verzi) nejde
+            // porovnat s aktuálním stavem. Detekce je jen pojistka navíc — neumí-li
+            // snímek porovnat, nesmí zablokovat schválení ani seznam běhů.
+            return new PayrollRunSourceDrift();
         }
 
         $employmentIds = [];
