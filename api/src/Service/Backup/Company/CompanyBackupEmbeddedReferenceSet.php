@@ -213,7 +213,7 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             $taxSummary = $this->registryKey === 'table:tax_submissions';
             if ($taxSummary) {
                 CompanyBackupTaxSubmissionSummaryContract::assertRow($row);
-                if (!is_string($raw)) {
+                if (!is_string($raw) || !is_string($row['form_code'] ?? null)) {
                     throw $this->valueError($column);
                 }
                 try {
@@ -258,7 +258,9 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             }
             if ($encoded) {
                 if ($taxSummary) {
-                    $row[$column] = CompanyBackupTaxSubmissionSummaryRemapper::rewrite($raw, $value);
+                    $row[$column] = CompanyBackupTaxSubmissionSummaryRemapper::rewrite(
+                        $raw, $value, $row['form_code'],
+                    );
                     continue;
                 }
                 try {

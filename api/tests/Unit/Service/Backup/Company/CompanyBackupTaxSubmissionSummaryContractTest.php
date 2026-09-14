@@ -38,7 +38,7 @@ final class CompanyBackupTaxSubmissionSummaryContractTest extends TestCase
 
     public function testRejectsUnknownFormAndUnrecognizedCurrentOrHistoricShapes(): void
     {
-        foreach (['dphdp3', 'dphkh1', 'ossei1', 'dpfdp7', 'dppdp9', 'osvc25', 'dpfdp5'] as $form) {
+        foreach (['dphdp3', 'ossei1', 'dpfdp5'] as $form) {
             $this->assertInvalid(['form_code' => $form, 'summary_json' => '{}'],
                 'data_tax_submission_summary_unsupported');
         }

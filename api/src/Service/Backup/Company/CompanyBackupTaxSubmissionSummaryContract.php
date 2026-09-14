@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Company;
 
-/** Přesně známý tvar souhrnu SH; samotné JSON zůstává beze změny. */
+/** Přesně známé tvary souhrnů; samotné JSON zůstává beze změny. */
 final class CompanyBackupTaxSubmissionSummaryContract
 {
     private const REGISTRY_KEY = 'table:tax_submissions';
@@ -23,7 +23,11 @@ final class CompanyBackupTaxSubmissionSummaryContract
     /** @param array<string,mixed> $row */
     public static function assertRow(array $row): void
     {
-        if (($row['form_code'] ?? null) !== 'dphshv') {
+        $formCode = $row['form_code'] ?? null;
+        if ($formCode !== 'dphshv'
+            && (!is_string($formCode)
+                || !CompanyBackupTaxSubmissionScalarSummaryContract::supports($formCode))
+        ) {
             throw new CompanyBackupDataSourceException(
                 'data_tax_submission_summary_unsupported', self::REGISTRY_KEY, 'form_code',
             );
@@ -39,6 +43,10 @@ final class CompanyBackupTaxSubmissionSummaryContract
             throw new CompanyBackupDataSourceException(
                 'data_tax_submission_summary_invalid', self::REGISTRY_KEY, 'summary_json', $e,
             );
+        }
+        if ($summary instanceof \stdClass && $formCode !== 'dphshv') {
+            CompanyBackupTaxSubmissionScalarSummaryContract::assertSummary($formCode, $summary);
+            return;
         }
         if (!$summary instanceof \stdClass || !self::hasKeys($summary, self::SH_KEYS)
             || !is_string($summary->period)

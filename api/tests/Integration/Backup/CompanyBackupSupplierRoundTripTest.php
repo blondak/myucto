@@ -548,6 +548,151 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
         $before = $source->fetchAll(PDO::FETCH_ASSOC);
         self::assertCount(2, $before);
 
+        $result = $this->restoreTaxArchive($pdo, $registry, $supplier, $country, $vat, $actor, 2);
+        $source->execute($sourceIds);
+        self::assertSame($before, $source->fetchAll(PDO::FETCH_ASSOC));
+        $target = $pdo->prepare('SELECT * FROM tax_submissions WHERE supplier_id = ? ORDER BY id');
+        $target->execute([$result->supplierId]);
+        $after = $target->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(2, $after);
+        self::assertNotSame($sourceIds, array_map(static fn (array $row): int => (int) $row['id'], $after));
+        foreach ($after as $index => $row) {
+            self::assertSame($result->supplierId, (int) $row['supplier_id']);
+            self::assertSame($xml[$index], $row['xml_content']);
+            self::assertSame(strlen($xml[$index]), (int) $row['xml_size_bytes']);
+            self::assertSame(hash('sha256', $xml[$index]), $row['xml_sha256']);
+        }
+        self::assertSame(null, json_decode((string) $after[0]['summary_json'], true)['reference_submission_id']);
+        self::assertSame((int) $after[0]['id'],
+            json_decode((string) $after[1]['summary_json'], true)['reference_submission_id']);
+        $sourceSummary = (string) $before[1]['summary_json'];
+        $expectedSummary = str_replace('"reference_submission_id":' . $sourceIds[0],
+            '"reference_submission_id":' . $after[0]['id'], $sourceSummary);
+        self::assertSame($expectedSummary, $after[1]['summary_json']);
+        self::assertStringContainsString('1.2300', (string) $after[1]['summary_json']);
+        self::assertStringContainsString('1e+03', (string) $after[1]['summary_json']);
+        $pdo->rollBack();
+        $target->execute([$result->supplierId]);
+        self::assertSame([], $target->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public function testScalarTaxSummariesRestoreByteIdenticallyIntoNewSupplier(): void
+    {
+        self::assertInstanceOf(Connection::class, $this->connection);
+        $pdo = $this->connection->pdo();
+        [$registry, $supplier, $country, $vat, $actor, $shIds] = $this->taxShFixture($pdo);
+        $scalarIds = $this->insertScalarTaxSubmissions($pdo, $supplier);
+        self::assertCount(5, $scalarIds);
+        $source = $pdo->prepare('SELECT * FROM tax_submissions WHERE supplier_id = ? ORDER BY id');
+        $source->execute([$supplier]);
+        $before = $source->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(7, $before);
+
+        $result = $this->restoreTaxArchive($pdo, $registry, $supplier, $country, $vat, $actor, 7);
+        $source->execute([$supplier]);
+        self::assertSame($before, $source->fetchAll(PDO::FETCH_ASSOC), 'Export a import nesmí změnit zdroj.');
+        $target = $pdo->prepare('SELECT * FROM tax_submissions WHERE supplier_id = ? ORDER BY id');
+        $target->execute([$result->supplierId]);
+        $after = $target->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(7, $after);
+        $scalarSource = array_values(array_filter($before,
+            static fn (array $row): bool => in_array((int) $row['id'], $scalarIds, true)));
+        self::assertCount(5, $scalarSource);
+        self::assertSame(['dphkh1', 'dphkh1', 'dpfdp7', 'dppdp9', 'osvc25'],
+            array_column($scalarSource, 'form_code'));
+        self::assertStringContainsString('1.2300e+02', (string) $scalarSource[2]['summary_json']);
+        self::assertStringContainsString('2.10e-1', (string) $scalarSource[3]['summary_json']);
+        self::assertStringContainsString('Synthetic\\u0020warning', (string) $scalarSource[4]['summary_json']);
+        $scalarTarget = array_values(array_filter($after,
+            static fn (array $row): bool => $row['form_code'] !== 'dphshv'));
+        self::assertCount(5, $scalarTarget);
+        foreach ($scalarSource as $original) {
+            $matches = array_values(array_filter($scalarTarget,
+                static fn (array $row): bool => $row['form_code'] === $original['form_code']
+                    && $row['summary_json'] === $original['summary_json']));
+            self::assertCount(1, $matches, 'Skalární JSON se nesmí přepisovat ani znovu serializovat.');
+            $restored = $matches[0];
+            self::assertNotContains((int) $restored['id'], [...$shIds, ...$scalarIds]);
+            self::assertSame($result->supplierId, (int) $restored['supplier_id']);
+            self::assertSame($original['xml_content'], $restored['xml_content']);
+            self::assertSame($original['xml_size_bytes'], $restored['xml_size_bytes']);
+            self::assertSame($original['xml_sha256'], $restored['xml_sha256']);
+            self::assertSame(strlen((string) $restored['xml_content']), (int) $restored['xml_size_bytes']);
+            self::assertSame(hash('sha256', (string) $restored['xml_content']), $restored['xml_sha256']);
+        }
+        $pdo->rollBack();
+        $target->execute([$result->supplierId]);
+        self::assertSame([], $target->fetchAll(PDO::FETCH_ASSOC));
+        $source->execute([$supplier]);
+        self::assertSame([], $source->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** @return list<int> */
+    private function insertScalarTaxSubmissions(PDO $pdo, int $supplier): array
+    {
+        $kh = [
+            'a1_count' => 0, 'a2_count' => 0, 'a4_count' => 1, 'a5_count_aggregated' => 0,
+            'b1_count' => 0, 'b2_count' => 0, 'b3_count_aggregated' => 0,
+            'c_jed_vyzvy' => null, 'd_zjist' => null, 'is_follow_up' => false,
+            'khdph_forma' => 'B', 'period' => '2026-09',
+            'submission_deadline' => '2026-10-26', 'variant' => 'radne',
+        ];
+        $khReply = $kh;
+        $khReply['variant'] = 'vyzva_potvrzeni';
+        $khReply['khdph_forma'] = 'N';
+        $khReply['is_follow_up'] = true;
+        $khReply['c_jed_vyzvy'] = '12345678/12/3456-12345-123456';
+        $khReply['is_vyzva_odpoved'] = true;
+        $khReply['vyzva_odp'] = 'P';
+        $dpfo = [
+            'total_base' => 1000, 'rounded_base' => 1000, 'tax16' => 150,
+            'tax_after_credits' => 150, 'child_bonus' => 0, 'child_credit' => 0,
+            'spouse_credit' => 0, 'bonus_qualifying_income' => 0,
+            'final_tax' => 150, 'balance_due' => 123.45,
+            'separate_base' => 0, 'separate_base_tax' => 0,
+            's7_profit' => 1000, 'uhrn_710' => 1000,
+            'loss_applied' => 0, 'year_tax_loss' => 0,
+            'variant' => 'radne', 'warnings' => ['Syntetické upozornění'],
+        ];
+        $dppo = [
+            'rate' => 0.21, 'vh' => 1000, 'base' => 1000,
+            'rounded_base' => 1000, 'tax_gross' => 210,
+            'credits' => 0, 'credits_entitlement' => 0,
+            'disabled_employee_credit_amount' => 0,
+            'disabled_employee_severe_credit_amount' => 0,
+            'disabled_employees_avg' => 0, 'disabled_employees_severe_avg' => 0,
+            'total_tax' => 210, 'balance_due' => 123.45,
+            'loss_applied' => 0, 'rnd_applied' => 0,
+            'education_applied' => 0, 'donation_applied' => 0,
+            'variant' => 'radne', 'warnings' => [],
+        ];
+        $summaries = [
+            ['dphkh1', 9, 'B', json_encode($kh, JSON_THROW_ON_ERROR)],
+            ['dphkh1', 9, 'N', json_encode($khReply, JSON_THROW_ON_ERROR)],
+            ['dpfdp7', null, 'B', str_replace('"balance_due":123.45',
+                '"balance_due":1.2300e+02', json_encode($dpfo, JSON_THROW_ON_ERROR))],
+            ['dppdp9', null, 'B', str_replace('"rate":0.21',
+                '"rate":2.10e-1', json_encode($dppo, JSON_THROW_ON_ERROR))],
+            ['osvc25', null, 'B', '{ "insurance" : "social", "warnings" : ["Synthetic\\u0020warning"] }'],
+        ];
+        $insert = $pdo->prepare('INSERT INTO tax_submissions
+            (supplier_id, form_code, period_year, period_month, form_variant,
+             xml_content, xml_size_bytes, xml_sha256, validation_status, status,
+             summary_json, generated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $ids = [];
+        foreach ($summaries as $index => [$form, $month, $variant, $summary]) {
+            $xml = "<?xml version=\"1.0\"?>\r\n<synthetic form=\"$form\">řádek $index</synthetic>\n";
+            $insert->execute([$supplier, $form, 2026, $month, $variant, $xml, strlen($xml),
+                hash('sha256', $xml), 'skipped', 'downloaded', $summary, null]);
+            $ids[] = (int) $pdo->lastInsertId();
+        }
+        return $ids;
+    }
+
+    private function restoreTaxArchive(PDO $pdo, TenantDataRegistrySnapshot $registry,
+        int $supplier, int $country, int $vat, int $actor, int $expectedTaxRows): Backup\CompanyBackupDatabaseImportResult
+    {
         $archive = $this->archive($pdo, $registry, $supplier);
         $inspection = (new Backup\CompanyBackupArchiveInspector(
             new Backup\CompanyBackupFormat([Backup\CompanyBackupSecretEnvelopeDescriptor::CAPABILITY]),
@@ -558,7 +703,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
             self::APP_VERSION, Backup\CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
         $taxObject = $inspection->dataInventory->object('table:tax_submissions');
         self::assertNotNull($taxObject);
-        self::assertSame(2, $taxObject->rows);
+        self::assertSame($expectedTaxRows, $taxObject->rows);
         $preflight = (new Backup\CompanyBackupDataPreflight())->inspect(
             $archive, self::PASSWORD, $validation, $pdo,
         );
@@ -599,31 +744,7 @@ final class CompanyBackupSupplierRoundTripTest extends TestCase
             $importSource->close();
         }
 
-        $source->execute($sourceIds);
-        self::assertSame($before, $source->fetchAll(PDO::FETCH_ASSOC));
-        $target = $pdo->prepare('SELECT * FROM tax_submissions WHERE supplier_id = ? ORDER BY id');
-        $target->execute([$result->supplierId]);
-        $after = $target->fetchAll(PDO::FETCH_ASSOC);
-        self::assertCount(2, $after);
-        self::assertNotSame($sourceIds, array_map(static fn (array $row): int => (int) $row['id'], $after));
-        foreach ($after as $index => $row) {
-            self::assertSame($result->supplierId, (int) $row['supplier_id']);
-            self::assertSame($xml[$index], $row['xml_content']);
-            self::assertSame(strlen($xml[$index]), (int) $row['xml_size_bytes']);
-            self::assertSame(hash('sha256', $xml[$index]), $row['xml_sha256']);
-        }
-        self::assertSame(null, json_decode((string) $after[0]['summary_json'], true)['reference_submission_id']);
-        self::assertSame((int) $after[0]['id'],
-            json_decode((string) $after[1]['summary_json'], true)['reference_submission_id']);
-        $sourceSummary = (string) $before[1]['summary_json'];
-        $expectedSummary = str_replace('"reference_submission_id":' . $sourceIds[0],
-            '"reference_submission_id":' . $after[0]['id'], $sourceSummary);
-        self::assertSame($expectedSummary, $after[1]['summary_json']);
-        self::assertStringContainsString('1.2300', (string) $after[1]['summary_json']);
-        self::assertStringContainsString('1e+03', (string) $after[1]['summary_json']);
-        $pdo->rollBack();
-        $target->execute([$result->supplierId]);
-        self::assertSame([], $target->fetchAll(PDO::FETCH_ASSOC));
+        return $result;
     }
 
     /** @return iterable<string,array{string,string}> */
