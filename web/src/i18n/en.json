@@ -17473,6 +17473,7 @@
     "debit_total": "Debit total",
     "match_status": {
       "payroll": "Matched to payroll",
+      "transfer": "Own account transfer",
       "auto_exact": "Auto OK",
       "auto_partial": "Partial",
       "manual": "Manual",

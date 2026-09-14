@@ -56,6 +56,12 @@ const { t } = useI18n()
 const auth = useAuthStore()
 const ruleTemplateOpen = ref(false)
 const payrollMatched = computed(() => props.tx.posting?.payroll_matched === true)
+// Vlastní převod fakturu nečeká: jeho protějškem je druhá noha na jiném vlastním účtu.
+const ownTransfer = computed(() => props.tx.match_status === 'unmatched' && props.tx.posting?.transfer != null)
+const noInvoiceExpected = computed(() => payrollMatched.value || ownTransfer.value)
+const statusText = computed(() => payrollMatched.value
+  ? t('bank.match_status.payroll')
+  : ownTransfer.value ? t('bank.match_status.transfer') : statusLabel(props.tx.match_status))
 // Dialog přeúčtování drží řádek, ne PostingRowActions: řádek se vykresluje ve
 // dvou podobách (tabulka i karta) a dvě instance dialogu by si přebíjely stav.
 const repostTx = ref<RowTx | null>(null)
@@ -284,14 +290,14 @@ function candidateReject() {
         </template>
       </td>
       <td class="px-3 py-2 text-center">
-        <span class="text-xs px-2 py-0.5 rounded font-medium" :class="statusBadge(payrollMatched ? 'auto_exact' : tx.match_status)">
-          {{ payrollMatched ? t('bank.match_status.payroll') : statusLabel(tx.match_status) }}
+        <span class="text-xs px-2 py-0.5 rounded font-medium" :class="statusBadge(noInvoiceExpected ? 'auto_exact' : tx.match_status)">
+          {{ statusText }}
         </span>
-        <div v-if="!payrollMatched && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
+        <div v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
           class="mt-1 text-[11px] leading-tight text-neutral-500" :title="t('bank.match_reason_title')">
           {{ reasonLabel(tx.match_reason) }}
         </div>
-        <button v-if="!payrollMatched && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
+        <button v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
           class="mt-1 mx-auto inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600"
           :aria-expanded="expandedSuggestions.has(tx.id)" :title="t('bank.match_v2.title')"
           @click="toggleSuggestion(tx.id)">
@@ -344,14 +350,14 @@ function candidateReject() {
         {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
       </div>
       <div class="flex flex-col items-end gap-1">
-        <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="statusBadge(payrollMatched ? 'auto_exact' : tx.match_status)">
-          {{ payrollMatched ? t('bank.match_status.payroll') : statusLabel(tx.match_status) }}
+        <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="statusBadge(noInvoiceExpected ? 'auto_exact' : tx.match_status)">
+          {{ statusText }}
         </span>
-        <span v-if="!payrollMatched && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
+        <span v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
           class="text-[11px] leading-tight text-right text-neutral-500" :title="t('bank.match_reason_title')">
           {{ reasonLabel(tx.match_reason) }}
         </span>
-        <button v-if="!payrollMatched && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
+        <button v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
           class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600"
           :aria-expanded="expandedSuggestions.has(tx.id)" :title="t('bank.match_v2.title')"
           @click="toggleSuggestion(tx.id)">

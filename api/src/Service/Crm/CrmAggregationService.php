@@ -1122,13 +1122,15 @@ final class CrmAggregationService
         // Scope banky řeší BankStatementOwnershipResolver (SEC-01) — starý predikát
         // podle shody account_number pouštěl do dashboardu i cizí transakce.
         // Jen příchozí (amount > 0) za posledních 90 dní, aby se nevynořovaly prastaré
-        // vlastní převody/poplatky; starší šum lze i tak skrýt přes dismiss „historická".
+        // poplatky; starší šum lze i tak skrýt přes dismiss „historická". Vlastní převody
+        // a mzdy fakturu nečekají, takže je vynechává NonInvoiceBankTransactionScope.
         $stmt = $pdo->prepare(
             "SELECT bt.id FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.match_status = 'unmatched'
                 AND bt.amount > 0
                 AND bt.posted_at >= DATE_SUB(?, INTERVAL 90 DAY)
+                AND NOT " . \MyInvoice\Service\Bank\NonInvoiceBankTransactionScope::sql((int) $supplierId, 'bt.id') . "
                 AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql()
         );
         $stmt->execute(array_merge(
@@ -2774,6 +2776,7 @@ final class CrmAggregationService
                       WHERE bt.match_status = 'unmatched'
                         AND bt.amount > 0
                         AND bt.posted_at >= DATE_SUB(?, INTERVAL 90 DAY)
+                        AND NOT " . \MyInvoice\Service\Bank\NonInvoiceBankTransactionScope::sql((int) $supplierId, 'bt.id') . "
                         AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql()
                 );
                 // SEC-01: shodný scope jako v buildFeed() — jinak by drill-down

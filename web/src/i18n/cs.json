@@ -17473,6 +17473,7 @@
     "debit_total": "Odchozí celkem",
     "match_status": {
       "payroll": "Spárováno se mzdami",
+      "transfer": "Převod mezi účty",
       "auto_exact": "Auto OK",
       "auto_partial": "Částečně",
       "manual": "Ručně",

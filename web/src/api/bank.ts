@@ -32,6 +32,8 @@ export interface BankStatement {
   } | null
   transaction_count: number
   matched_count: number
+  /** Nespárované pohyby, u kterých se faktura nečeká (vlastní převod, mzda). */
+  non_invoice_count?: number
   ignored_count?: number
   /** Počet skutečných pohybů bez aktivního účetního zápisu (ignorované položky se nepočítají). */
   unposted_count: number

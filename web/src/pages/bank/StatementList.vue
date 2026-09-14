@@ -405,8 +405,12 @@ function statementDateLabel(s: BankStatement): string {
     : formatDate(s.statement_date)
 }
 
+function resolvedCount(s: BankStatement): number {
+  return s.matched_count + (s.non_invoice_count ?? 0)
+}
+
 function isFullyResolved(s: BankStatement): boolean {
-  return s.matched_count + (s.ignored_count ?? 0) >= s.transaction_count
+  return resolvedCount(s) + (s.ignored_count ?? 0) >= s.transaction_count
 }
 
 // Seskupení výpisů po měsících (YYYY-MM z statement_date), zachová pořadí ze
@@ -785,7 +789,7 @@ async function onFileSelected(e: Event) {
             <td class="px-3 py-2 text-center">
               <span class="text-xs px-2 py-0.5 rounded font-medium"
                 :class="isFullyResolved(s) ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">
-                {{ s.matched_count }} / {{ s.transaction_count }}
+                {{ resolvedCount(s) }} / {{ s.transaction_count }}
               </span>
             </td>
             <td class="px-3 py-2 text-right whitespace-nowrap">
@@ -854,7 +858,7 @@ async function onFileSelected(e: Event) {
             <span class="text-xs text-neutral-500">{{ s.transaction_count }} transakcí</span>
             <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap"
               :class="isFullyResolved(s) ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">
-              {{ s.matched_count }} / {{ s.transaction_count }} {{ t('bank.matched') }}
+              {{ resolvedCount(s) }} / {{ s.transaction_count }} {{ t('bank.matched') }}
             </span>
           </div>
           <div v-if="s.unposted_count > 0" class="mt-1 text-xs text-warning-600 font-medium">

@@ -789,6 +789,8 @@ final class BankStatementAction
                     bs.prev_balance, bs.curr_balance, bs.imported_at,
                     " . StatementTransactionScope::countSql('bs.id', 'cbt') . " AS transaction_count,
                     " . StatementTransactionScope::countSql('bs.id', 'mbt', "mbt.match_status IN ('auto_exact', 'auto_partial', 'manual')") . " AS matched_count,
+                    " . StatementTransactionScope::countSql('bs.id', 'nbt', "nbt.match_status = 'unmatched' AND "
+                        . \MyInvoice\Service\Bank\NonInvoiceBankTransactionScope::sql($sid, 'nbt.id')) . " AS non_invoice_count,
                     (bs.file_content IS NOT NULL) AS has_file,
                     (bs.pdf_content IS NOT NULL) AS has_pdf, bs.pdf_name,
                     " . StatementTransactionScope::countSql('bs.id', 'ibt', "ibt.match_status = 'ignored'") . " AS ignored_count,
@@ -824,6 +826,7 @@ final class BankStatementAction
             $r['id'] = (int) $r['id'];
             $r['transaction_count'] = (int) $r['transaction_count'];
             $r['matched_count'] = (int) $r['matched_count'];
+            $r['non_invoice_count'] = (int) $r['non_invoice_count'];
             $r['ignored_count'] = (int) $r['ignored_count'];
             $r['unposted_count'] = (int) $r['unposted_count'];
             $r['prev_balance'] = $r['prev_balance'] === null ? null : (float) $r['prev_balance'];

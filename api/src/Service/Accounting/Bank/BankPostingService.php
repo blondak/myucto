@@ -4358,11 +4358,9 @@ final class BankPostingService
           LEFT JOIN journal_entries pair_je ON pair_je.supplier_id = ? AND pair_je.source_type = 'bank'
                  AND pair_je.source_id = pair_bt.id AND pair_je.reversed_by IS NULL
               WHERE bt.id IN ($ph)
-                AND EXISTS (SELECT 1 FROM bank_posting_suggestions s
-                             WHERE s.supplier_id = ? AND s.bank_transaction_id = bt.id
-                               AND s.source = 'transfer' AND s.status IN ('pending','approved','auto_posted'))"
+                AND " . \MyInvoice\Service\Bank\NonInvoiceBankTransactionScope::ownTransferSql((int) $supplierId, 'bt.id')
         );
-        $transfers->execute(array_merge([$supplierId, $supplierId], $txIds, [$supplierId]));
+        $transfers->execute(array_merge([$supplierId, $supplierId], $txIds));
         foreach ($transfers->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $txId = (int) $row['tx_id'];
             if (!isset($out[$txId])) continue;
