@@ -297,12 +297,18 @@ final class PayrollQuickInputListPaginationTest extends TestCase
     public function testQueryCountDoesNotGrowWithHeadcount(): void
     {
         $pdo = $this->db->pdo();
+        // Zahřívací volání před každým měřením: jednorázová inicializace (doplnění
+        // výchozích zařazení JMHZ, převzetí ze staršího balíku a podobně) patří
+        // prvnímu čtení, ne velikosti firmy. Dotaz na řádek by se opakoval při
+        // každém volání, takže ho zahřátí neskryje.
         $this->seedEmployments(4);
+        $this->quickInputs->month($this->supplierId, self::PERIOD, 4, 0);
         $before = PayrollRunScaleFixture::statementRoundTrips($pdo);
         $small = $this->quickInputs->month($this->supplierId, self::PERIOD, 4, 0);
         $smallCost = PayrollRunScaleFixture::statementRoundTrips($pdo) - $before;
 
         $this->seedEmployments(12);
+        $this->quickInputs->month($this->supplierId, self::PERIOD, 4, 0);
         $before = PayrollRunScaleFixture::statementRoundTrips($pdo);
         $large = $this->quickInputs->month($this->supplierId, self::PERIOD, 4, 0);
         $largeCost = PayrollRunScaleFixture::statementRoundTrips($pdo) - $before;
