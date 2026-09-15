@@ -266,6 +266,23 @@ describe('KB+ onboarding', () => {
     await flushPromises()
     expect(m.start).toHaveBeenCalledExactlyOnceWith(3, expect.objectContaining({ payment_batches: false, api_plan: 'basic' }))
   })
+  it('warns that a Basic account needs a statement registration before anything imports', async () => {
+    const wrapper = await open({
+      status: 'connected', required_fields: [], api_plan: 'basic',
+      capabilities: { statement_import: true, statement_import_status: 'registration_scope_missing', payment_batch_submission: false, payment_batch_status: 'plan_basic' },
+    })
+    const alert = wrapper.findAll('[role="alert"]').find(item => item.text() === 'kb_plus.statements_unavailable_registration')
+    expect(alert).toBeDefined()
+  })
+
+  it('does not warn about statements when the consent covers the selected variant', async () => {
+    const wrapper = await open({
+      status: 'connected', required_fields: [], api_plan: 'basic',
+      capabilities: { statement_import: true, statement_import_status: 'available', payment_batch_submission: false, payment_batch_status: 'plan_basic' },
+    })
+    expect(wrapper.text()).not.toContain('kb_plus.statements_unavailable')
+  })
+
   it('lets readonly users see the plan but not change it', async () => {
     const wrapper = await open({ status: 'connected', required_fields: [], api_plan: 'basic' }, false)
     expect(wrapper.find('[data-plan="basic"]').attributes('aria-checked')).toBe('true')

@@ -31,6 +31,7 @@ export function kbPlusErrorKey(code: string): string {
     bank_rate_limited: 'cooldown', rate_limited: 'cooldown', bank_connection_busy: 'busy',
     invalid_token: 'credentials_rejected',
     kb_plus_plan_invalid: 'plan', kb_plus_not_connected: 'plan',
+    kb_plus_registration_plan_mismatch: 'registration_plan',
   }
   return `kb_plus.error_${Object.hasOwn(keys, code) ? keys[code] : 'generic'}`
 }

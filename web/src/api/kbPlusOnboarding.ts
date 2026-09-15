@@ -17,10 +17,16 @@ export interface KbPlusOnboardingStatus {
   registration_fields?: KbPlusCredentialField[]
   optional_fields?: KbPlusCredentialField[]
   api_plan?: KbPlusApiPlan | null
-  capabilities: { statement_import: boolean; payment_batch_submission: boolean; payment_batch_status?: KbPlusPaymentBatchStatus }
+  capabilities: {
+    statement_import: boolean
+    statement_import_status?: KbPlusStatementImportStatus | null
+    payment_batch_submission: boolean
+    payment_batch_status?: KbPlusPaymentBatchStatus
+  }
   expires_at?: string | null
 }
 export type KbPlusPaymentBatchStatus = 'available' | 'not_registered' | 'plan_basic' | 'registration_scope_missing' | 'authorization_scope_missing' | 'unknown'
+export type KbPlusStatementImportStatus = 'available' | 'registration_scope_missing' | 'authorization_scope_missing' | 'unknown'
 export type KbPlusStartRequest = Partial<KbPlusCredentials> & { payment_batches?: boolean; api_plan?: KbPlusApiPlan }
 
 export const kbPlusOnboardingApi = {

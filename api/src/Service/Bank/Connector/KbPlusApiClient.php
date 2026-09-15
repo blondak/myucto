@@ -16,6 +16,12 @@ final class KbPlusApiClient
 {
     private const API_BASE = 'https://api-gateway.kb.cz/adaa/v2';
     private const BATCH_API_BASE = 'https://api.kb.cz/directapi/batchda/v3';
+    private const STATEMENT_API_BASE = 'https://api.kb.cz/directapi/statda/v1';
+    private const STATEMENT_FORMAT = 'KM';
+    private const MAX_STATEMENT_BYTES = 10 * 1024 * 1024;
+    private const MAX_STATEMENT_FILES = 400;
+    private const MAX_STATEMENT_POLLS = 30;
+    private const MAX_STATEMENT_DURATION_SECONDS = 120;
     private const TOKEN_URL = 'https://api-gateway.kb.cz/oauth2/v3/access_token';
     private const AUTHORIZE_URL = 'https://login.kb.cz/autfe/ssologin';
     private const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -37,6 +43,12 @@ final class KbPlusApiClient
         return in_array('bpisp', preg_split('/\s+/', trim($scope)) ?: [], true);
     }
 
+    /** Výpisy STATDA (varianta Basic) smí jen souhlas se scope statda. */
+    public static function grantsStatements(string $scope): bool
+    {
+        return in_array('statda', preg_split('/\s+/', trim($scope)) ?: [], true);
+    }
+
     /** @param array<string,mixed> $credentials */
     public function authorizationUrl(#[\SensitiveParameter] array $credentials, string $state): string
     {
@@ -47,8 +59,8 @@ final class KbPlusApiClient
         }
         $scope = trim((string) ($credentials['scope'] ?? 'adaa'));
         $scopes = preg_split('/\s+/', $scope) ?: [];
-        if (!in_array('adaa', $scopes, true)) {
-            throw $this->invalidToken('OAuth scope musí obsahovat ADAA.');
+        if (!in_array('adaa', $scopes, true) && !in_array('statda', $scopes, true)) {
+            throw $this->invalidToken('OAuth scope musí obsahovat ADAA nebo STATDA.');
         }
         foreach ($scopes as $item) {
             if (!in_array($item, ['adaa', 'bpisp', 'statda'], true)) {
@@ -240,6 +252,79 @@ final class KbPlusApiClient
             BankConnectorException::RESPONSE_TOO_LARGE,
             'KB+ vrátila příliš mnoho stránek transakcí.',
         );
+    }
+
+    /**
+     * Účty dostupné pro výpisy STATDA. Seznam nenese měnu, ta se bere z účtu v MyÚčtu.
+     *
+     * @return list<array{accountId:string,iban:string}>
+     */
+    public function statementAccounts(#[\SensitiveParameter] string $accessToken): array
+    {
+        $response = $this->statementRequest('GET', self::STATEMENT_API_BASE . '/accounts', $accessToken);
+        $accounts = $this->json($response, true)['accounts'] ?? null;
+        if (!is_array($accounts) || !array_is_list($accounts) || count($accounts) > 1000) {
+            throw $this->invalidResponse($response, 'KB+ vrátila neplatný seznam účtů pro výpisy.');
+        }
+        $result = [];
+        foreach ($accounts as $account) {
+            if (!is_array($account) || !is_string($account['iban'] ?? null) || !$this->isIban($account['iban'])) {
+                throw $this->invalidResponse($response, 'KB+ vrátila neplatný IBAN účtu pro výpisy.');
+            }
+            $result[] = ['accountId' => $this->accountId($account['accountId'] ?? null), 'iban' => $account['iban']];
+        }
+        return $result;
+    }
+
+    /**
+     * Výpisy STATDA ve formátu KM (GPC). Banka výpis nejdřív vygeneruje a teprve
+     * potom jde stáhnout; dokud není hotový, vrací PENDING s doporučeným odstupem.
+     * Prázdný seznam znamená, že v období nebyl žádný pohyb.
+     *
+     * @return list<string>
+     */
+    public function statements(
+        #[\SensitiveParameter] string $accessToken,
+        string $accountId,
+        string $from,
+        string $to,
+    ): array {
+        $accountId = $this->accountId($accountId);
+        if ($this->date($from) > $this->date($to)) {
+            throw new BankConnectorException(
+                BankConnectorException::INVALID_DATE_RANGE,
+                'Počáteční datum musí předcházet koncovému datu.',
+            );
+        }
+        $url = self::STATEMENT_API_BASE . '/accounts/' . rawurlencode($accountId) . '/statements';
+        $startedAt = $this->clock->now();
+        $response = $this->statementRequest('POST', $url . '?' . http_build_query([
+            'fromDate' => $from,
+            'toDate' => $to,
+            'format' => self::STATEMENT_FORMAT,
+            'preferredLanguage' => 'cs',
+        ], '', '&', PHP_QUERY_RFC3986), $accessToken);
+        if ($response->getStatusCode() === 204) {
+            return [];
+        }
+        $status = $this->statementStatus($response);
+        $statementId = $status['statementId'];
+        for ($poll = 0; ; $poll++) {
+            if ($status['status'] === 'PENDING') {
+                $this->waitForStatement($poll, $status['pollingInterval'], $startedAt);
+            }
+            $response = $this->statementRequest('GET', $url . '/' . rawurlencode($statementId), $accessToken);
+            if ($response->getStatusCode() === 204) {
+                return [];
+            }
+            if (!str_starts_with(strtolower($response->getHeaderLine('Content-Type')), 'application/json')) {
+                return $this->statementFiles($response);
+            }
+            $status = $this->statementStatus($response);
+            if ($status['status'] !== 'PENDING' || $status['statementId'] !== $statementId) {
+                throw $this->invalidResponse($response, 'KB+ vrátila neplatný stav výpisu.');
+            }
+        }
     }
 
     /**
@@ -639,6 +724,134 @@ final class KbPlusApiClient
             throw $this->invalidToken('Access token nemá platný formát.');
         }
         return $accessToken;
+    }
+
+    /** STATDA autorizuje jen access token se scope statda; API klíč její OpenAPI definice nezná. */
+    private function statementRequest(string $method, string $url, #[\SensitiveParameter] string $accessToken): ResponseInterface
+    {
+        return $this->request($method, $url, [
+            'headers' => [
+                'Accept' => 'application/json, application/octet-stream, application/zip',
+                'Authorization' => 'Bearer ' . $this->accessToken($accessToken),
+                'x-correlation-id' => $this->correlationId(),
+                'User-Agent' => 'MyUcto-KBPlus-Connector/1.0',
+            ],
+        ], false, $method === 'GET');
+    }
+
+    /** @return array{status:string,statementId:string,pollingInterval:?int} */
+    private function statementStatus(ResponseInterface $response): array
+    {
+        $body = $this->json($response, true);
+        $statementId = $body['statementId'] ?? null;
+        $interval = $body['pollingInterval'] ?? null;
+        if (!in_array($body['status'] ?? null, ['READY', 'PENDING'], true)
+            || !is_string($statementId)
+            || $statementId === ''
+            || strlen($statementId) > 400
+            || preg_match('/[\x00-\x1F\x7F]/', $statementId)
+            || ($interval !== null && (!is_int($interval) || $interval < 0))
+        ) {
+            throw $this->invalidResponse($response, 'KB+ vrátila neplatný stav výpisu.');
+        }
+        return ['status' => $body['status'], 'statementId' => $statementId, 'pollingInterval' => $interval];
+    }
+
+    private function waitForStatement(int $poll, ?int $interval, \DateTimeImmutable $startedAt): void
+    {
+        $seconds = max(1, min(10, $interval ?? 2));
+        $elapsed = $this->clock->now()->getTimestamp() - $startedAt->getTimestamp();
+        if ($poll >= self::MAX_STATEMENT_POLLS || $elapsed + $seconds > self::MAX_STATEMENT_DURATION_SECONDS) {
+            throw new BankConnectorException('kb_plus_statement_pending', 'KB+ výpis v časovém limitu nepřipravila.');
+        }
+        if ($this->clock instanceof \Symfony\Component\Clock\ClockInterface) {
+            $this->clock->sleep($seconds);
+        } else {
+            sleep($seconds);
+        }
+    }
+
+    /**
+     * KB posílá jeden soubor KM, nebo ZIP se souborem za každý obchodní den.
+     *
+     * @return list<string>
+     */
+    private function statementFiles(ResponseInterface $response): array
+    {
+        $body = $this->rawBody($response);
+        if (!str_starts_with($body, "PK\x03\x04")) {
+            return [$body];
+        }
+        $tmp = class_exists(\ZipArchive::class) ? tempnam(sys_get_temp_dir(), 'kbstatda-') : false;
+        if ($tmp === false) {
+            throw $this->invalidResponse($response, 'ZIP s výpisy KB+ nelze na serveru rozbalit.');
+        }
+        try {
+            $zip = new \ZipArchive();
+            if (file_put_contents($tmp, $body) === false || $zip->open($tmp) !== true) {
+                throw $this->invalidResponse($response, 'KB+ vrátila nečitelný ZIP s výpisy.');
+            }
+            try {
+                if ($zip->numFiles > self::MAX_STATEMENT_FILES) {
+                    throw $this->statementTooLarge();
+                }
+                $files = [];
+                $total = 0;
+                for ($index = 0; $index < $zip->numFiles; $index++) {
+                    $stat = $zip->statIndex($index);
+                    if ($stat === false) {
+                        throw $this->invalidResponse($response, 'KB+ vrátila nečitelný ZIP s výpisy.');
+                    }
+                    if (str_ends_with($stat['name'], '/')) {
+                        continue;
+                    }
+                    $total += (int) $stat['size'];
+                    if ($total > self::MAX_STATEMENT_BYTES) {
+                        throw $this->statementTooLarge();
+                    }
+                    $content = $zip->getFromIndex($index, self::MAX_STATEMENT_BYTES + 1);
+                    if (!is_string($content) || strlen($content) !== (int) $stat['size']) {
+                        throw $this->invalidResponse($response, 'KB+ vrátila nečitelný ZIP s výpisy.');
+                    }
+                    $files[$stat['name']] = $content;
+                }
+            } finally {
+                $zip->close();
+            }
+        } finally {
+            @unlink($tmp);
+        }
+        ksort($files, SORT_STRING);
+        return array_values($files);
+    }
+
+    private function rawBody(ResponseInterface $response): string
+    {
+        try {
+            $stream = $response->getBody();
+            $body = '';
+            while (!$stream->eof() && strlen($body) <= self::MAX_STATEMENT_BYTES) {
+                $chunk = $stream->read(min(65536, self::MAX_STATEMENT_BYTES + 1 - strlen($body)));
+                if ($chunk === '') {
+                    throw new \RuntimeException();
+                }
+                $body .= $chunk;
+            }
+        } catch (\Throwable) {
+            throw $this->invalidResponse($response, 'KB+ vrátila nečitelný výpis.');
+        }
+        if (strlen($body) > self::MAX_STATEMENT_BYTES) {
+            throw $this->statementTooLarge();
+        }
+        if ($body === '') {
+            throw $this->invalidResponse($response, 'KB+ vrátila prázdný výpis.');
+        }
+        return $body;
+    }
+
+    private function statementTooLarge(): BankConnectorException
+    {
+        return new BankConnectorException(BankConnectorException::RESPONSE_TOO_LARGE, 'Výpisy KB+ překračují povolený objem.');
     }
 
     /** @param array<string,mixed> $transaction */

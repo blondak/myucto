@@ -10,10 +10,10 @@ use MyInvoice\Service\Auth\SecretEncryption;
 final class KbPlusCredentialVault
 {
     /**
-     * Varianta Extra služby API Business sjednaná u KB. Basic dovoluje stáhnout
-     * pohyby jednou denně jen za předchozí dny a neumí dávky; Plus stahuje
-     * nejvýš jednou za 61 minut. Údaje uložené před zavedením volby variantu
-     * nenesou a chovají se jako Plus.
+     * Varianta Extra služby API Business sjednaná u KB. Basic nemá ADAA ani dávky,
+     * stahuje jednou denně výpisy STATDA za předchozí obchodní dny; Plus čte
+     * pohyby ADAA nejvýš jednou za 61 minut. Údaje uložené před zavedením volby
+     * variantu nenesou a chovají se jako Plus.
      */
     public const PLAN_BASIC = 'basic';
     public const PLAN_PLUS = 'plus';

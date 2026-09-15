@@ -60,6 +60,7 @@ final class KbPlusOnboardingService
             'api_plan' => $token === null ? null : KbPlusCredentialVault::plan($token),
             'capabilities' => [
                 'statement_import' => true,
+                'statement_import_status' => $this->statementImport($supplierId, $client, $token),
                 'payment_batch_submission' => $batch === 'available',
                 'payment_batch_status' => $batch,
             ],
@@ -191,12 +192,16 @@ final class KbPlusOnboardingService
             $hash = hash('sha256', $state);
             try {
                 $secret = $this->decryptSession($session);
+                $basic = KbPlusCredentialVault::plan($secret) === KbPlusCredentialVault::PLAN_BASIC;
                 try {
                     [$tokens, $accounts] = $this->calls->call(
                         (string) $secret['call_guard_key'],
-                        function () use ($secret, $code): array {
+                        function () use ($secret, $code, $basic): array {
                             $tokens = $this->api->exchangeAuthorizationCode($secret, $code);
-                            return [$tokens, $this->api->accounts($secret, $tokens['access_token'])];
+                            // Basic nemá ADAA; účty pro výpisy vrací STATDA, a to bez měny.
+                            return [$tokens, $basic
+                                ? $this->api->statementAccounts($tokens['access_token'])
+                                : $this->api->accounts($secret, $tokens['access_token'])];
                         },
                     );
                 } catch (BankConnectorException $e) {
@@ -204,7 +209,7 @@ final class KbPlusOnboardingService
                 }
                 $account = $this->account($supplierId, $currencyId);
                 $matches = array_values(array_filter($accounts, fn (array $candidate): bool =>
-                    strtoupper((string) $candidate['currency']) === strtoupper((string) $account['code'])
+                    (!isset($candidate['currency']) || strtoupper((string) $candidate['currency']) === strtoupper((string) $account['code']))
                     && $this->matchesAccount((string) $candidate['iban'], $account)
                 ));
                 if ($matches === []) {
@@ -215,6 +220,7 @@ final class KbPlusOnboardingService
                 }
                 $connectionId = $this->connections->ensure($supplierId, $currencyId, 'kb_plus');
                 $remote = $matches[0];
+                $remoteCurrency = strtoupper((string) ($remote['currency'] ?? $account['code']));
                 $credentials = [
                     'version' => 1,
                     'supplier_id' => $supplierId,
@@ -231,7 +237,7 @@ final class KbPlusOnboardingService
                     'access_expires_at' => time() + (int) $tokens['expires_in'],
                     'account_id' => $remote['accountId'],
                     'account_iban' => strtoupper((string) $remote['iban']),
-                    'account_currency' => strtoupper((string) $remote['currency']),
+                    'account_currency' => $remoteCurrency,
                     'call_guard_key' => $secret['call_guard_key'],
                     'api_plan' => KbPlusCredentialVault::plan($secret),
                 ];
@@ -242,7 +248,7 @@ final class KbPlusOnboardingService
                 }
                 $this->connections->saveValidated(
                     $supplierId, $connectionId, 'kb_plus', $ciphertext, true,
-                    strtoupper((string) $remote['iban']), '0100', strtoupper((string) $remote['currency']),
+                    strtoupper((string) $remote['iban']), '0100', $remoteCurrency,
                 );
                 $this->oauth->finish($hash, true);
                 return $currencyId;
@@ -302,9 +308,13 @@ final class KbPlusOnboardingService
         $state = $this->state();
         $secret = $client + ['state' => $state, 'call_guard_key' => $this->state()];
         $secret['api_plan'] = $plan;
-        // Basic dávky neumí, souhlas se proto žádá jen ke čtení i u registrace s bpisp.
+        // Souhlas nemůže přesáhnout registraci: Basic čte výpisy STATDA, Plus pohyby ADAA.
+        if (!self::hasScope((string) ($client['scope'] ?? ''), self::planScope($plan))) {
+            throw new BankConnectorOperationException('kb_plus_registration_plan_mismatch');
+        }
+        // Basic nemá ADAA ani dávky, souhlas se žádá jen k výpisům i u širší registrace.
         if ($plan === KbPlusCredentialVault::PLAN_BASIC) {
-            $secret['scope'] = 'adaa';
+            $secret['scope'] = 'statda';
         }
         $url = $this->api->authorizationUrl($secret, $state);
         $this->storeSession($state, $supplierId, $currencyId, $userId, 'oauth', $this->encodeSecret($secret), self::OAUTH_TTL);
@@ -391,6 +401,7 @@ final class KbPlusOnboardingService
      * BATCHDA stojí na stejné registraci a tokenech jako ADAA, jen se scope bpisp.
      * Ten se žádá, když si správce dávky výslovně zvolí nebo vyplní klíč BATCHDA;
      * jinak zůstane registrace jen pro čtení, protože scope bez sjednané služby KB odmítne.
+     * Basic ADAA ani dávky nezahrnuje, registruje se jen pro výpisy STATDA.
      *
      * @param array<string,mixed> $keys
      * @return list<string>
@@ -398,7 +409,7 @@ final class KbPlusOnboardingService
     private function scopes(#[\SensitiveParameter] array $keys): array
     {
         if (KbPlusCredentialVault::plan($keys) === KbPlusCredentialVault::PLAN_BASIC) {
-            return ['adaa'];
+            return ['statda'];
         }
         return ($keys['payment_batches'] ?? false) === true || trim((string) ($keys['batchda_api_key'] ?? '')) !== ''
             ? ['adaa', 'bpisp']
@@ -471,6 +482,44 @@ final class KbPlusOnboardingService
             return 'unknown';
         }
         return KbPlusApiClient::grantsBatchPayments((string) ($token['scope'] ?? '')) ? 'available' : 'authorization_scope_missing';
+    }
+
+    /**
+     * Po přepnutí varianty u připojeného účtu musí registrace i udělený souhlas
+     * nést scope služby, přes kterou varianta čte (Basic STATDA, Plus ADAA).
+     * Nepřipojený účet nemá co hlásit.
+     *
+     * @param array<string,mixed>|null $token
+     * @return 'available'|'registration_scope_missing'|'authorization_scope_missing'|'unknown'|null
+     */
+    private function statementImport(int $supplierId, ?array $client, #[\SensitiveParameter] ?array $token): ?string
+    {
+        if ($token === null) {
+            return null;
+        }
+        $scope = self::planScope(KbPlusCredentialVault::plan($token));
+        if (self::hasScope((string) ($token['scope'] ?? ''), $scope)) {
+            return 'available';
+        }
+        if ($client === null) {
+            return 'unknown';
+        }
+        try {
+            $registered = (string) ($this->decryptClient($supplierId, (string) $client['credentials_ciphertext'])['scope'] ?? '');
+        } catch (BankConnectorOperationException) {
+            return 'unknown';
+        }
+        return self::hasScope($registered, $scope) ? 'authorization_scope_missing' : 'registration_scope_missing';
+    }
+
+    private static function planScope(string $plan): string
+    {
+        return $plan === KbPlusCredentialVault::PLAN_BASIC ? 'statda' : 'adaa';
+    }
+
+    private static function hasScope(string $scopes, string $scope): bool
+    {
+        return in_array($scope, preg_split('/\s+/', trim($scopes)) ?: [], true);
     }
 
     /** @return array<string,mixed> */

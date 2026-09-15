@@ -48,6 +48,7 @@ export function bankConnectionErrorMessage(error: unknown, t: (key: string) => s
     statement_too_large: 'period', period_invalid: 'period', period_incomplete: 'period',
     payment_order_items_not_payable: 'payable', payment_order_date_expired: 'date',
     payment_submission_unavailable: 'payment_unavailable',
+    kb_plus_statements_unavailable: 'kb_plus_statements', kb_plus_statement_pending: 'kb_plus_statement_pending',
   }
   const key = keys[apiErrorCode(error)]
   if (!key) return apiErrorMessage(error, fallback)

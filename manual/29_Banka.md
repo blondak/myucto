@@ -796,7 +796,7 @@ shrnuje, co napojení jako celek umí, jaké má limity a jak je to bezpečnostn
 
 | Banka | Kód | Technologie | Pohyby | Odeslání příkazu |
 |---|---|---|---|---|
-| **KB Business (KB+)** | 0100 | Extra služba API Business — OAuth2, ADAA (pohyby) + BATCHDA (dávky) | ano | ano, se souhlasem `bpisp` (§ 29.9.6) |
+| **KB Business (KB+)** | 0100 | Extra služba API Business — OAuth2, ADAA (pohyby, Plus) nebo STATDA (výpisy KM, Basic) + BATCHDA (dávky) | ano | ano, se souhlasem `bpisp` (§ 29.9.6) |
 | **Fio banka** (ČR i SR) | 2010, 8330 | API token vázaný na konkrétní účet | ano | ano |
 | **ČSOB** | 0300 | CEB Business Connector — číslo smlouvy + komunikační certifikát | ano | ano |
 | **Raiffeisenbank** | 5500 | Premium API — Client ID + certifikát | ano | ano |
@@ -897,9 +897,10 @@ certifikátu v paměti a rozšíření OpenSSL.
 ### 29.9.6 KB Business (KB+) — rozšíření o odesílání dávek (BATCHDA)
 
 Napojení KB+ stojí na registraci aplikace u KB (Software Statement) a na
-OAuth2 tokenech. Stejný základ mají všechna API KB. MyÚčto nad ním čte pohyby
-přes **ADAA** a volitelně odesílá platební dávky přes **BATCHDA**; STATDA
-(stažení originálních souborů výpisu) a NOTDA (notifikace) konektor nevyužívá.
+OAuth2 tokenech. Stejný základ mají všechna API KB. MyÚčto nad ním u varianty
+Plus čte pohyby přes **ADAA** a volitelně odesílá platební dávky přes **BATCHDA**.
+U varianty Basic stahuje výpisy ve formátu KM přes **STATDA**. NOTDA
+(notifikace) konektor nevyužívá.
 Přístupový údaj pro ADAA je ve formuláři označen **Direct Access API JWT token**,
 stejně jako na portálu banky.
 

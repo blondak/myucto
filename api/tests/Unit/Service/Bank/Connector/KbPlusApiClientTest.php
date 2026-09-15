@@ -414,6 +414,109 @@ final class KbPlusApiClientTest extends TestCase
         self::assertFalse(KbPlusApiClient::grantsBatchPayments(''));
     }
 
+    public function testDownloadsKmStatementAfterGenerationWithTokenOnly(): void
+    {
+        $history = [];
+        $client = $this->client([
+            new Response(200, ['Content-Type' => 'application/json'], $this->json([
+                'status' => 'PENDING', 'statementId' => 'SYNTHETIC-STATEMENT-1', 'pollingInterval' => 3,
+            ])),
+            new Response(200, ['Content-Type' => 'application/json'], $this->json([
+                'status' => 'PENDING', 'statementId' => 'SYNTHETIC-STATEMENT-1',
+            ])),
+            new Response(200, ['Content-Type' => 'application/octet-stream'], "074SYNTHETIC\r\n"),
+        ], $history);
+
+        $files = $client->statements(self::ACCESS_TOKEN, self::ACCOUNT_ID, '2026-09-01', '2026-09-11');
+
+        self::assertSame(["074SYNTHETIC\r\n"], $files);
+        self::assertCount(3, $history);
+        $base = 'https://api.kb.cz/directapi/statda/v1/accounts/' . rawurlencode(self::ACCOUNT_ID) . '/statements';
+        self::assertSame('POST', $history[0]['request']->getMethod());
+        self::assertSame($base, (string) $history[0]['request']->getUri()->withQuery(''));
+        parse_str($history[0]['request']->getUri()->getQuery(), $query);
+        self::assertSame(['fromDate' => '2026-09-01', 'toDate' => '2026-09-11', 'format' => 'KM', 'preferredLanguage' => 'cs'], $query);
+        foreach ([1, 2] as $index) {
+            self::assertSame('GET', $history[$index]['request']->getMethod());
+            self::assertSame($base . '/SYNTHETIC-STATEMENT-1', (string) $history[$index]['request']->getUri());
+        }
+        foreach ($history as $transfer) {
+            self::assertSame('Bearer ' . self::ACCESS_TOKEN, $transfer['request']->getHeaderLine('Authorization'));
+            self::assertFalse($transfer['request']->hasHeader('apiKey'));
+            self::assertFalse($transfer['options']['allow_redirects']);
+        }
+    }
+
+    public function testEmptyStatementPeriodReturnsNoFiles(): void
+    {
+        $client = $this->client([new Response(204)]);
+
+        self::assertSame([], $client->statements(self::ACCESS_TOKEN, self::ACCOUNT_ID, '2026-09-12', '2026-09-13'));
+    }
+
+    public function testUnpacksZipWithOneStatementPerBusinessDay(): void
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'kbzip-');
+        self::assertIsString($tmp);
+        $zip = new \ZipArchive();
+        self::assertTrue($zip->open($tmp, \ZipArchive::CREATE | \ZipArchive::OVERWRITE));
+        $zip->addFromString('20260914.gpc', "074DAY2\r\n");
+        $zip->addFromString('20260911.gpc', "074DAY1\r\n");
+        $zip->close();
+        $archive = (string) file_get_contents($tmp);
+        unlink($tmp);
+        $client = $this->client([
+            new Response(200, ['Content-Type' => 'application/json'], $this->json(['status' => 'READY', 'statementId' => 'SYNTHETIC-STATEMENT-2'])),
+            new Response(200, ['Content-Type' => 'application/zip'], $archive),
+        ]);
+
+        self::assertSame(["074DAY1\r\n", "074DAY2\r\n"], $client->statements(self::ACCESS_TOKEN, self::ACCOUNT_ID, '2026-09-11', '2026-09-14'));
+    }
+
+    public function testStatementNotReadyWithinTimeLimitFailsWithoutFiles(): void
+    {
+        $history = [];
+        $client = $this->client(array_map(fn (): Response => new Response(200, ['Content-Type' => 'application/json'], $this->json([
+            'status' => 'PENDING', 'statementId' => 'SYNTHETIC-STATEMENT-3', 'pollingInterval' => 10,
+        ])), range(0, 20)), $history);
+
+        try {
+            $client->statements(self::ACCESS_TOKEN, self::ACCOUNT_ID, '2026-09-01', '2026-09-11');
+            self::fail('Nedokončený výpis se nesmí vydávat za prázdné období.');
+        } catch (BankConnectorException $e) {
+            self::assertSame('kb_plus_statement_pending', $e->errorCode);
+        }
+        self::assertLessThan(21, count($history));
+    }
+
+    public function testListsStatementAccountsForBasicConsent(): void
+    {
+        $history = [];
+        $client = $this->client([new Response(200, [], $this->json([
+            'accounts' => [['iban' => 'CZ0401000000191000000005', 'accountId' => self::ACCOUNT_ID]],
+        ]))], $history);
+
+        self::assertSame(
+            [['accountId' => self::ACCOUNT_ID, 'iban' => 'CZ0401000000191000000005']],
+            $client->statementAccounts(self::ACCESS_TOKEN),
+        );
+        self::assertSame('https://api.kb.cz/directapi/statda/v1/accounts', (string) $history[0]['request']->getUri());
+        self::assertFalse($history[0]['request']->hasHeader('apiKey'));
+    }
+
+    public function testBasicConsentMayRequestStatementsWithoutAdaa(): void
+    {
+        $client = $this->client([]);
+        $url = $client->authorizationUrl($this->credentials(['scope' => 'statda']), 'synthetic_oauth_state_000000000001');
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+        self::assertSame('statda', $query['scope']);
+        self::assertTrue(KbPlusApiClient::grantsStatements('statda'));
+        self::assertFalse(KbPlusApiClient::grantsStatements('adaa bpisp'));
+        $this->expectException(BankConnectorException::class);
+        $client->authorizationUrl($this->credentials(['scope' => 'bpisp']), 'synthetic_oauth_state_000000000001');
+    }
+
     /** @param list<mixed> $queue @param array<int,array<string,mixed>> $history */
     private function client(array $queue, array &$history = []): KbPlusApiClient
     {

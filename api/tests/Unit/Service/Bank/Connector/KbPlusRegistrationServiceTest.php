@@ -191,6 +191,15 @@ final class KbPlusRegistrationServiceTest extends TestCase
         }
     }
 
+    public function testBasicRegistrationMayRequestStatementsWithoutAdaa(): void
+    {
+        $service = new KbPlusRegistrationService();
+
+        self::assertArrayHasKey('url', $service->begin($this->softwareStatement(), ['scopes' => ['statda']] + $this->application(), self::STATE));
+        $this->expectException(BankConnectorException::class);
+        $service->begin($this->softwareStatement(), ['scopes' => ['bpisp']] + $this->application(), self::STATE);
+    }
+
     /** @return array<string,mixed> */
     private function application(): array
     {

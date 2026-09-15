@@ -55,6 +55,12 @@ const batchUnavailableKey = computed(() => {
   if (reason === 'authorization_scope_missing') return 'kb_plus.batch_unavailable_authorization'
   return 'kb_plus.batch_unavailable'
 })
+const statementsUnavailableKey = computed(() => {
+  const reason = state.value?.capabilities.statement_import_status
+  if (reason === 'registration_scope_missing') return 'kb_plus.statements_unavailable_registration'
+  if (reason === 'authorization_scope_missing') return 'kb_plus.statements_unavailable_authorization'
+  return ''
+})
 const planLabelId = computed(() => `kb-plus-plan-${props.currencyId}`)
 
 function emptyFields(): KbPlusCredentials {
@@ -237,6 +243,7 @@ onBeforeUnmount(() => { requestVersion++; clearCredentials() })
       </div>
       <p v-if="!knownRequirements" class="text-sm text-danger-600" role="alert">{{ t('kb_plus.error_generic') }}</p>
       <p v-if="pending" class="text-sm text-warning-700">{{ t('kb_plus.pending_hint') }}</p>
+      <p v-if="statementsUnavailableKey" class="rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-sm text-warning-700" role="alert">{{ t(statementsUnavailableKey, { service: state.api_plan === 'basic' ? 'STATDA' : 'ADAA' }) }}</p>
       <p v-if="state.status !== 'not_registered' && !state.capabilities.payment_batch_submission" class="text-sm text-neutral-600">{{ t(batchUnavailableKey) }}</p>
       <form v-if="showForm" class="space-y-3" @submit.prevent="start">
         <div v-if="required.length" class="grid sm:grid-cols-2 gap-3">

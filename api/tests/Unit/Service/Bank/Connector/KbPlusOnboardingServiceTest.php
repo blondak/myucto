@@ -344,7 +344,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
         yield 'samostatný klíč BATCHDA stále zapíná dávky' => ['synthetic-batchda-key', false, ['adaa', 'bpisp']];
     }
 
-    public function testBasicPlanRegistersReadOnlyEvenWithBatchChoiceAndKey(): void
+    public function testBasicPlanRegistersStatementsOnlyEvenWithBatchChoiceAndKey(): void
     {
         $this->oauth->method('account')->willReturn($this->account());
         $this->oauth->method('client')->willReturn(null);
@@ -352,7 +352,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
             ->with(self::callback(static fn (array $credentials): bool => !array_key_exists('api_plan', $credentials)), self::anything())
             ->willReturn('eyJhbGciOiJIUzI1NiJ9.e30.c2lnbmF0dXJl');
         $this->registration->expects(self::once())->method('begin')
-            ->with(self::anything(), self::callback(static fn (array $application): bool => $application['scopes'] === ['adaa']), self::anything())
+            ->with(self::anything(), self::callback(static fn (array $application): bool => $application['scopes'] === ['statda']), self::anything())
             ->willReturnCallback(static fn (string $statement, array $application, string $state): array => [
                 'url' => 'https://api-gateway.kb.cz/client-registration-ui/v2/saml/register?state=' . $state,
                 'state' => $state,
@@ -367,17 +367,17 @@ final class KbPlusOnboardingServiceTest extends TestCase
         self::assertSame('registration_pending', $result['status']);
     }
 
-    public function testExistingClientWithBasicPlanRequestsReadOnlyConsent(): void
+    public function testExistingClientWithBasicPlanRequestsStatementConsentOnly(): void
     {
         $this->oauth->method('account')->willReturn($this->account());
         $this->oauth->method('client')->willReturn(['credentials_ciphertext' => 'enc:v2:client']);
         $this->secrets->method('decryptFor')->willReturn(json_encode(
-            ['client_id' => 'synthetic-client', 'scope' => 'adaa bpisp', 'redirect_uri' => 'https://example.invalid/callback'],
+            ['client_id' => 'synthetic-client', 'scope' => 'adaa statda', 'redirect_uri' => 'https://example.invalid/callback'],
             JSON_THROW_ON_ERROR,
         ));
         $this->registrationClient->expects(self::never())->method('createSoftwareStatement');
         $this->api->expects(self::once())->method('authorizationUrl')
-            ->with(self::callback(static fn (array $secret): bool => $secret['scope'] === 'adaa' && $secret['api_plan'] === 'basic'), self::anything())
+            ->with(self::callback(static fn (array $secret): bool => $secret['scope'] === 'statda' && $secret['api_plan'] === 'basic'), self::anything())
             ->willReturn('https://login.kb.cz/autfe/ssologin?state=synthetic');
         $this->secrets->expects(self::once())->method('encryptFor')
             ->with(self::callback(static fn (string $plaintext): bool => str_contains($plaintext, '"api_plan":"basic"')), self::anything())
@@ -386,6 +386,83 @@ final class KbPlusOnboardingServiceTest extends TestCase
         $result = $this->service->start(7, 11, 5, ['api_plan' => 'basic']);
 
         self::assertSame('authorization_pending', $result['status']);
+    }
+
+    /** Registrace z varianty Plus statda nezná; souhlas by KB odmítla, je třeba registrovat znovu. */
+    public function testExistingClientRegisteredWithoutStatdaCannotStartBasicConsent(): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->oauth->method('client')->willReturn(['credentials_ciphertext' => 'enc:v2:client']);
+        $this->secrets->method('decryptFor')->willReturn(json_encode(
+            ['client_id' => 'synthetic-client', 'scope' => 'adaa bpisp', 'redirect_uri' => 'https://example.invalid/callback'],
+            JSON_THROW_ON_ERROR,
+        ));
+        $this->api->expects(self::never())->method('authorizationUrl');
+        $this->oauth->expects(self::never())->method('replacePending');
+
+        try {
+            $this->service->start(7, 11, 5, ['api_plan' => 'basic']);
+            self::fail('Basic bez registrace statda nesmí otevřít souhlas v KB.');
+        } catch (BankConnectorOperationException $e) {
+            self::assertSame('kb_plus_registration_plan_mismatch', $e->errorCode);
+        }
+    }
+
+    public function testBasicOAuthMatchesStatementAccountAndKeepsLocalCurrency(): void
+    {
+        $state = str_repeat('u', 43);
+        $this->oauth->method('currencyForState')->willReturn(11);
+        $this->oauth->method('claim')->willReturn($this->session($state));
+        $this->secrets->method('decryptFor')->willReturn(json_encode(
+            ['api_plan' => 'basic', 'scope' => 'statda'] + $this->oauthSecret(),
+            JSON_THROW_ON_ERROR,
+        ));
+        $this->api->method('exchangeAuthorizationCode')->willReturn(['scope' => 'statda'] + $this->tokens());
+        $this->api->expects(self::never())->method('accounts');
+        $this->api->expects(self::once())->method('statementAccounts')->with('synthetic-access-token-0001')->willReturn([[
+            'accountId' => 'synthetic-statement-account',
+            'iban' => 'CZ0401000000191000000005',
+        ]]);
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->connections->method('ensure')->willReturn(19);
+        $this->vault->expects(self::once())->method('encode')->with(self::callback(static fn (array $value): bool =>
+            $value['api_plan'] === 'basic'
+            && $value['scope'] === 'statda'
+            && $value['account_id'] === 'synthetic-statement-account'
+            && $value['account_currency'] === 'CZK'
+        ))->willReturn('{"synthetic":"credential"}');
+        $this->secrets->method('encryptFor')->willReturn('enc:v2:connection');
+        $this->connections->expects(self::once())->method('saveValidated')
+            ->with(7, 19, 'kb_plus', 'enc:v2:connection', true, 'CZ0401000000191000000005', '0100', 'CZK');
+
+        self::assertSame(11, $this->service->completeOAuth(7, 5, $state, 'synthetic_authorization_code_001'));
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('basicStatementConsents')]
+    public function testConnectedBasicAccountReportsWhetherConsentCoversStatements(string $registered, string $granted, string $expected): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->connections->method('findPublicByCurrency')->willReturn(['provider' => 'kb_plus', 'has_token' => true]);
+        $this->connections->method('findWithCredentialByCurrency')->willReturn(['id' => 19, 'token_ciphertext' => 'enc:v2:connection']);
+        $this->oauth->method('client')->willReturn(['credentials_ciphertext' => 'enc:v2:client']);
+        $this->oauth->method('publicStatus')->willReturn(null);
+        $this->secrets->method('decryptFor')->willReturnCallback(static fn (string $stored, string $context): string =>
+            $context === KbPlusCredentialVault::context(7, 19)
+                ? '{"synthetic":"connection"}'
+                : json_encode(['batchda_api_key' => '', 'scope' => $registered], JSON_THROW_ON_ERROR)
+        );
+        $this->vault->method('decode')->willReturn(['scope' => $granted, 'api_plan' => 'basic']);
+
+        $status = $this->service->status(7, 11);
+
+        self::assertSame($expected, $status['capabilities']['statement_import_status']);
+    }
+
+    public static function basicStatementConsents(): iterable
+    {
+        yield 'registrace z Plus bez statda' => ['adaa bpisp', 'adaa bpisp', 'registration_scope_missing'];
+        yield 'registrace se statda, souhlas ještě z Plus' => ['adaa statda', 'adaa', 'authorization_scope_missing'];
+        yield 'souhlas k výpisům' => ['statda', 'statda', 'available'];
     }
 
     public function testUnknownPlanIsRejectedBeforeBank(): void

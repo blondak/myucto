@@ -205,8 +205,8 @@ final class KbPlusRegistrationService
             }
             $scopes[] = $scope;
         }
-        if (!in_array('adaa', $scopes, true)) {
-            throw $this->invalid('Registrační scopes KB+ musí obsahovat ADAA.');
+        if (!in_array('adaa', $scopes, true) && !in_array('statda', $scopes, true)) {
+            throw $this->invalid('Registrační scopes KB+ musí obsahovat ADAA nebo STATDA.');
         }
         sort($scopes);
         return $scopes;

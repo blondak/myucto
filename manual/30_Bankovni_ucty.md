@@ -200,11 +200,15 @@ Bankovní tarif Business není totéž co varianta API Business **Basic / Plus /
 Sjednanou variantu nastav v napojení KB+ v přepínači **Varianta Extra služby
 API Business**; u připojeného účtu se volba uloží hned a banku to nekontaktuje.
 
-- **Basic** je zdarma a umožňuje jen čtení pohybů za předchozí dny. KB povoluje
-  nejvýše 50 stažení měsíčně, automatické načítání proto běží jednou denně
-  a pohyby načte nejdéle do včerejška. Odesílání příkazů není dostupné.
-- **Plus** načítá i dnešní pohyby, automaticky nejvýše jednou za 61 minut,
-  a umožňuje odesílat hromadné příkazy. Zvol ji i při variantě **Pro**
+- **Basic** je zdarma a poskytuje jen výpisy z účtu. MyÚčto je stahuje službou
+  **STATDA** ve formátu **KM** (GPC) za předchozí obchodní dny, nejdéle do
+  včerejška. KB povoluje nejvýše 50 stažení měsíčně, automatické načítání proto
+  běží jednou denně. Odesílání příkazů není dostupné. Varianta potřebuje
+  registraci i souhlas s oprávněním `statda`. Po přepnutí z Plus sekce napojení
+  ukáže, zda stačí **Zahájit nové ověření v KB+**, nebo je třeba **Zadat klíče
+  znovu** a zaregistrovat aplikaci pro výpisy.
+- **Plus** čte pohyby službou **ADAA** včetně dnešních, automaticky nejvýše
+  jednou za 61 minut, a umožňuje odesílat hromadné příkazy. Zvol ji i při variantě **Pro**
   (KB u ní povoluje interval 10 minut, aplikace drží odstup jako u Plus).
 
 U čtení se do limitů započítávají datové stránky. Cena a rozsah podléhají
@@ -219,13 +223,16 @@ s KB na `kbplus@kb.cz`.
 [FAQ a správa souhlasů](https://www.kb.cz/cs/kbapi/caste-dotazy-rozcestnik/caste-dotazy-extra-sluzba-api-business),
 [limity ADAA](https://www.kb.cz/cs/kbapi/extra-sluzba-api-business/primy-pristup-k-uctu-v-kb).
 
-Náš konektor používá **ADAA** pro pohyby a **BATCHDA** pro příkazy. Import
-pohybů do evidence výpisů není stažení originálního souboru přes **STATDA**;
-STATDA ani notifikace **NOTDA** zde nejsou implementované.
+U varianty Plus konektor čte pohyby přes **ADAA** a příkazy odesílá přes
+**BATCHDA**. U varianty Basic stahuje výpisy ve formátu KM přes **STATDA**
+a čísla účtů z vnitřního formátu KB převádí na běžný tvar. Notifikace **NOTDA**
+zde nejsou implementované.
 Registrace aplikace a následné udělení přístupu k účtu probíhá přes OAuth.
 Technické klíče nenahrazují smlouvu o API službě ani souhlas majitele účtu.
 Před prvním připojením správce na developer portálu KB připraví API klíče
 pro služby **Client Registration**, **OAuth** a **ADAA** (účty a pohyby).
+U varianty Basic předplať navíc **Statements Direct API (STATDA)**; samostatný
+klíč se pro výpisy nezadává, autorizuje je přístupový token se scope `statda`.
 Platební dávky (**BATCHDA**) samostatný API klíč nepotřebují, autorizuje je
 přístupový token se scope `bpisp`. Chceš-li odesílat příkazy, zaškrtni
 při připojení **Chci i hromadné platby**; bez toho připojení slouží jen
