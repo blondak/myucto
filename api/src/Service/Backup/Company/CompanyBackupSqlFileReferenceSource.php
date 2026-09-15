@@ -16,8 +16,10 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
 {
     private const PATH_ALIAS = '_file_source_path';
 
-    public function __construct(private int $batchSize = 1_000)
-    {
+    public function __construct(
+        private int $batchSize = 1_000,
+        private CompanyBackupTenantSqlSelector $tenantSelector = new CompanyBackupTenantSqlSelector(),
+    ) {
         if ($batchSize < 1 || $batchSize > 10_000) {
             throw new \InvalidArgumentException(
                 'Velikost dávky souborových referencí musí být mezi 1 a 10000.',
@@ -219,6 +221,7 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
         sort($keys, SORT_STRING);
         $strategy = $ownership['strategy'] ?? null;
         $column = $ownership['column'] ?? null;
+        // Přímí starší vlastníci mohou mít pouze lehká metadata bez data projekce.
         if ($target->policy === TenantDataPolicy::TenantRoot
             && $target->name() === 'supplier'
             && $keys === ['column', 'strategy']
@@ -242,6 +245,18 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
                 ) . ' = ?',
                 [$supplierId],
             );
+        }
+        if ($target->policy === TenantDataPolicy::TenantOwnedIndirect
+            && $strategy === 'foreign_key_path'
+        ) {
+            try {
+                return $this->tenantSelector->select(
+                    CompanyBackupTableProjection::fromDefinition($target),
+                    $supplierId,
+                );
+            } catch (CompanyBackupDataSourceException|\InvalidArgumentException) {
+                throw $this->error('file_reference_ownership_invalid', $area);
+            }
         }
         throw $this->error('file_reference_ownership_unsupported', $area);
     }

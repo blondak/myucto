@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupFileSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
+use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlFileReferenceSource;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
@@ -179,6 +181,111 @@ final class CompanyBackupSqlFileReferenceSourceTest extends TestCase
         self::assertSame('storage_key', $references[0]->column);
     }
 
+    public function testReadsOnlyIndirectInvoiceFileOwnersOfSelectedSupplierAcrossPages(): void
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE supplier (id INTEGER PRIMARY KEY)');
+        $pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
+        $pdo->exec('CREATE TABLE invoice_attachments (id INTEGER PRIMARY KEY, invoice_id INTEGER, filename TEXT)');
+        $pdo->exec('CREATE TABLE invoice_pdfs (id INTEGER PRIMARY KEY, invoice_id INTEGER, filename TEXT)');
+        $pdo->exec('INSERT INTO supplier (id) VALUES (7), (8)');
+        $pdo->exec('INSERT INTO invoices (id, supplier_id) VALUES (101, 7), (102, 7), (201, 8)');
+        $pdo->exec("INSERT INTO invoice_attachments (id, invoice_id, filename) VALUES
+            (11, 101, 'storage/invoices/own-attachment-11.pdf'),
+            (12, 102, 'storage/invoices/own-attachment-12.pdf'),
+            (13, 201, 'storage/invoices/foreign-attachment.pdf'),
+            (14, 999, 'storage/invoices/orphan-attachment.pdf')");
+        $pdo->exec("INSERT INTO invoice_pdfs (id, invoice_id, filename) VALUES
+            (31, 101, 'storage/invoices/own-pdf-31.pdf'),
+            (32, 102, 'storage/invoices/own-pdf-32.pdf'),
+            (33, 201, 'storage/invoices/foreign-pdf.pdf'),
+            (34, 999, 'storage/invoices/orphan-pdf.pdf')");
+        $registry = $this->indirectRegistry($this->invoiceOwnership());
+        $area = $registry->definition('file-area:invoice-test-files');
+        self::assertNotNull($area);
+
+        $references = iterator_to_array(
+            (new CompanyBackupSqlFileReferenceSource(batchSize: 1))->references(
+                $pdo,
+                7,
+                $area,
+                $registry,
+            ),
+        );
+
+        self::assertSame(
+            ['table:invoice_attachments', 'table:invoice_attachments',
+                'table:invoice_pdfs', 'table:invoice_pdfs'],
+            array_column($references, 'registryKey'),
+        );
+        self::assertSame(
+            [['id' => 11], ['id' => 12], ['id' => 31], ['id' => 32]],
+            array_column($references, 'primaryKey'),
+        );
+        self::assertSame(
+            ['own-attachment-11.pdf', 'own-attachment-12.pdf',
+                'own-pdf-31.pdf', 'own-pdf-32.pdf'],
+            array_column($references, 'sourcePath'),
+        );
+
+        $otherSupplier = iterator_to_array(
+            (new CompanyBackupSqlFileReferenceSource(batchSize: 1))->references(
+                $pdo,
+                8,
+                $area,
+                $registry,
+            ),
+        );
+        self::assertSame(
+            [['id' => 13], ['id' => 33]],
+            array_column($otherSupplier, 'primaryKey'),
+        );
+        self::assertSame(
+            ['foreign-attachment.pdf', 'foreign-pdf.pdf'],
+            array_column($otherSupplier, 'sourcePath'),
+        );
+    }
+
+    public function testRejectsInvalidIndirectOwnershipMetadataBeforeQuery(): void
+    {
+        $cases = [
+            [$this->invoiceOwnership(path: [[
+                'from_column' => 'invoice_id',
+                'to_table' => 'invoices',
+                'to_column' => 'id',
+            ]]), ['id', 'invoice_id', 'filename'], 'file_reference_ownership_invalid'],
+            [$this->invoiceOwnership(), ['id', 'filename'], 'file_reference_ownership_invalid'],
+            [['strategy' => 'unknown_relationship'],
+                ['id', 'invoice_id', 'filename'], 'file_reference_ownership_unsupported'],
+        ];
+        foreach ($cases as [$ownership, $columns, $expectedCode]) {
+            $registry = $this->indirectRegistry($ownership, $columns);
+            $area = $registry->definition('file-area:invoice-test-files');
+            self::assertNotNull($area);
+            $pdo = $this->createMock(PDO::class);
+            $pdo->expects(self::never())->method('prepare');
+
+            try {
+                iterator_to_array(
+                    (new CompanyBackupSqlFileReferenceSource())->references(
+                        $pdo,
+                        7,
+                        $area,
+                        $registry,
+                    ),
+                );
+                self::fail('Vadná nepřímá ownership metadata nesmějí otevřít SQL dotaz.');
+            } catch (CompanyBackupFileSourceException $e) {
+                self::assertSame($expectedCode, $e->errorCode);
+                self::assertSame('file-area:invoice-test-files', $e->registryKey);
+                self::assertNull($e->sourcePath);
+                self::assertNull($e->getPrevious());
+                self::assertStringNotContainsString('SELECT', $e->getMessage());
+            }
+        }
+    }
+
     /** @param list<array<string,mixed>> $rows */
     private function statement(array $rows): PDOStatement
     {
@@ -263,6 +370,85 @@ final class CompanyBackupSqlFileReferenceSourceTest extends TestCase
                         'path' => [],
                         'stored_prefix' => '',
                     ]],
+                ],
+            ),
+        ]);
+    }
+
+    /**
+     * @param list<array{from_column:string,to_table:string,to_column:string}>|null $path
+     * @return array<string,mixed>
+     */
+    private function invoiceOwnership(?array $path = null): array
+    {
+        return [
+            'strategy' => 'foreign_key_path',
+            'path' => $path ?? [
+                ['from_column' => 'invoice_id', 'to_table' => 'invoices', 'to_column' => 'id'],
+                ['from_column' => 'supplier_id', 'to_table' => 'supplier', 'to_column' => 'id'],
+            ],
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $ownership
+     * @param list<string> $columns
+     */
+    private function indirectRegistry(
+        array $ownership,
+        array $columns = ['id', 'invoice_id', 'filename'],
+    ): TenantDataRegistry {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        $tables = [];
+        foreach (['invoice_attachments', 'invoice_pdfs'] as $name) {
+            $tables[] = new TenantDataDefinition(
+                'table:' . $name,
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantOwnedIndirect,
+                [$profile],
+                [
+                    'primary_key' => ['id'],
+                    'ownership' => $ownership,
+                    'secrets' => [],
+                    'company_backup' => [
+                        'data_columns' => $columns,
+                        'embedded_references' => [],
+                        'generated_columns' => [],
+                        'omit_columns' => [],
+                        'references' => [[
+                            'columns' => ['invoice_id'],
+                            'target' => 'table:invoices',
+                            'target_columns' => ['id'],
+                            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                            'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                            'nullable_columns' => [],
+                            'fallbacks' => [],
+                        ]],
+                        'restore_overrides' => [],
+                    ],
+                ],
+            );
+        }
+        return new TenantDataRegistry(1, [
+            ...$tables,
+            new TenantDataDefinition(
+                'file-area:invoice-test-files',
+                TenantDataObjectKind::FileArea,
+                TenantDataPolicy::TenantOwned,
+                [$profile],
+                [
+                    'file_policy' => 'historical_optional',
+                    'ownership' => ['strategy' => 'database_references'],
+                    'path_policy' => 'relative',
+                    'storage_subdirectory' => 'invoices',
+                    'file_owners' => [
+                        ['registry_key' => 'table:invoice_attachments',
+                            'column' => 'filename', 'path' => [],
+                            'stored_prefix' => 'storage/invoices/'],
+                        ['registry_key' => 'table:invoice_pdfs',
+                            'column' => 'filename', 'path' => [],
+                            'stored_prefix' => 'storage/invoices/'],
+                    ],
                 ],
             ),
         ]);
