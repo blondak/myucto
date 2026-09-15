@@ -32,6 +32,8 @@ use Slim\Psr7\Factory\ResponseFactory;
  *   setup_per_hour_per_ip     → 3600s window, key = "rl:setup:ip:{ip}"
  *   mutation_per_min_per_user → 60s window, key = "rl:mut:user:{id}" (POST/PUT/PATCH/DELETE)
  *   read_per_min_per_user     → 60s window, key = "rl:read:user:{id}" (GET)
+ *   upload_chunks_per_min_per_user → 60s window, key = "rl:upload-chunk:user:{id}"
+ *                               (části velkých záloh, mimo rl:mut)
  *
  * Při překročení vrátí 429 Too Many Requests s Retry-After.
  *
@@ -392,6 +394,18 @@ final class RateLimitMiddleware implements MiddlewareInterface
                 (int) ($rl['payroll_reveal_per_5min_per_user'] ?? 20),
                 300,
             ];
+        }
+
+        // Části velké zálohy (Money S3 .lz až 4 GB po 8 MB). 1GB záloha je 122 POSTů,
+        // které na rychlé lince odejdou za pár sekund, takže ve sdíleném `rl:mut`
+        // bucketu upload spadl na 429 těsně před koncem. Vlastní bucket per uživatel;
+        // limit je fakticky objemový (600 × 8 MB = 4,8 GB/min) a legitimní nahrávání
+        // nebrzdí. Závěrečný `complete` a ostatní mutace zůstávají v generic bucketu.
+        if ($userId > 0
+            && $method === 'POST'
+            && preg_match('#^/api/admin/imports/[a-z0-9-]+/uploads/[a-f0-9]{16}/chunks$#', $path) === 1
+        ) {
+            return ['rl:upload-chunk:user:' . $userId, (int) ($rl['upload_chunks_per_min_per_user'] ?? 600), 60];
         }
 
         // Generic per-user mutation/read limit (jen pro přihlášené, mimo public)

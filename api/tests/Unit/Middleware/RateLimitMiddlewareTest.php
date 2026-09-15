@@ -51,6 +51,21 @@ final class RateLimitMiddlewareTest extends TestCase
     }
 
     /**
+     * 1GB záloha Money S3 je 122 částí po 8 MB; ve sdíleném mutation bucketu
+     * (60–120/min) upload spadl na 429 těsně před koncem.
+     */
+    public function testUploadChunksHaveOwnBucketOutsideMutationLimit(): void
+    {
+        $chunk = $this->rule($this->request('POST', '/api/admin/imports/money-s3/uploads/0123456789abcdef/chunks', str_repeat('a', 64)));
+        self::assertSame('rl:upload-chunk:user:17', $chunk[0]);
+        self::assertSame(600, $chunk[1]);
+        self::assertSame(60, $chunk[2]);
+
+        $complete = $this->rule($this->request('POST', '/api/admin/imports/money-s3/uploads/0123456789abcdef/complete', str_repeat('a', 64)));
+        self::assertSame('rl:mut:user:17', $complete[0]);
+    }
+
+    /**
      * @return array{0:string,1:int,2:int}
      */
     private function rule(ServerRequestInterface $request): array
