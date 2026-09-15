@@ -159,8 +159,15 @@ Opětovný import téhož výpisu pak pohyby spáruje a zaúčtuje znovu, bez dv
   stornovat,
 - k platbě z pohybu je vystavený daňový doklad k přijaté platbě (nejdřív ho
   smaž nebo stornuj),
-- výpis slouží jako doklad o vyplacení mezd nebo je součástí měsíční evidence
-  bankovního API.
+- výpis slouží jako doklad o vyplacení mezd,
+- jde o měsíční výpis bankovního API (průběžně se doplňuje z banky).
+
+Měsíční výpis API skládá pohyby z jednotlivých stažení. Jejich **zdrojové výpisy**
+najdeš v detailu měsíčního výpisu v nabídce **…**. Zdrojový výpis, který přinesl
+duplicitu (například po opětovném připojení banky), smažeš tlačítkem **Smazat
+zdrojový výpis**. Výpis se odpojí od měsíce, jeho vlastní pohyby se uvolní
+a smažou a měsíční výpis se přepočítá. Ostatní zdrojové výpisy zůstanou beze
+změny. Smazání se odmítne, když pohyb dokládá ještě jiný import.
 
 ### 29.3.1 Všechny pohyby
 

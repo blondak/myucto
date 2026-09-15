@@ -1295,9 +1295,15 @@ final class BankStatementAction
         // větu, která jmenuje co a kolik brání, ne syrovou hlášku databáze.
         // Platí pro VŠECHNY zdroje výpisů: kontrola výš se týká jen avíz a jen
         // spárovaných faktur, kdežto tahle mzdové vazby (RESTRICT) pokrývá i GPC.
-        $conflict = $this->deletionGuard->conflict($sid, $id);
-        if ($conflict !== null) {
-            return Json::error($response, $conflict->code, $conflict->message, 409, $conflict->toErrorExtra());
+        // Zdrojový výpis měsíční evidence API se kontroluje až po odpojení od
+        // měsíce (níž v transakci); jinak by ho blokovala právě vazba na měsíc.
+        $monthly = new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo);
+        $isApiEvidence = $monthly->isEvidence($id);
+        if (!$isApiEvidence) {
+            $conflict = $this->deletionGuard->conflict($sid, $id);
+            if ($conflict !== null) {
+                return Json::error($response, $conflict->code, $conflict->message, 409, $conflict->toErrorExtra());
+            }
         }
 
         $userId = isset($user['id']) ? (int) $user['id'] : null;
@@ -1305,15 +1311,26 @@ final class BankStatementAction
         $savepoint = 'bank_statement_delete';
         $own = self::beginAtomic($pdo, $savepoint);
         try {
+            $months = [];
+            if ($isApiEvidence) {
+                $months = $monthly->detachEvidence($id, $sid);
+                $conflict = $this->deletionGuard->conflict($sid, $id);
+                if ($conflict !== null) {
+                    self::rollbackAtomic($pdo, $own, $savepoint);
+                    return Json::error($response, $conflict->code, $conflict->message, 409, $conflict->toErrorExtra());
+                }
+            }
             $released = 0;
             foreach ($this->release->releasableTransactionIds($sid, $id) as $txId) {
                 $this->release->release($sid, $txId, BankTransactionReleaseService::MODE_DELETE, $userId ?: null);
                 $released++;
             }
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
+            $monthly->refreshMonths($months, $sid);
             $this->logger->log('bank.statement_deleted', $userId ?: null, 'bank_statement', $id, [
                 'file_name'             => $fileName,
                 'released_transactions' => $released,
+                'api_months'            => $months,
             ], $ip, $request->getHeaderLine('User-Agent'), $sid);
             self::commitAtomic($pdo, $own, $savepoint);
         } catch (BankTransactionReleaseException $e) {
@@ -1692,7 +1709,10 @@ final class BankStatementAction
         $s['id'] = (int) $s['id'];
         $s['has_file'] = (bool) ($s['has_file'] ?? false);
         $s['has_pdf'] = (bool) ($s['has_pdf'] ?? false);
-        $s['evidence_pdfs'] = (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($this->db->pdo()))->evidencePdfs($id, $sid);
+        $monthlyEvidence = new \MyInvoice\Service\Bank\BankApiMonthlyStatements($this->db->pdo());
+        $s['evidence_pdfs'] = $monthlyEvidence->evidencePdfs($id, $sid);
+        $s['evidence_statements'] = $monthlyEvidence->evidenceStatements($id, $sid);
+        $s['api_evidence'] = $monthlyEvidence->isEvidence($id);
         $s['transactions'] = $transactions;
         $summary = $this->db->pdo()->query(
             "SELECT COUNT(*) AS total, SUM(bt.match_status IN ('auto_exact', 'auto_partial', 'manual')) AS matched

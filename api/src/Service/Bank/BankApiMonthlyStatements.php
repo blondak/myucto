@@ -71,7 +71,14 @@ final class BankApiMonthlyStatements
                 $update->execute([$covered, $covered, $monthId]);
             }
         }
-        foreach (array_keys($affected) as $id) {
+        $this->refreshMonths(array_keys($affected), $supplierId);
+        return $result;
+    }
+
+    /** Přepočte souhrny měsíčních výpisů a jejich doklad banky po změně zdrojových výpisů. */
+    public function refreshMonths(array $monthIds, int $supplierId): void
+    {
+        foreach (array_unique(array_map('intval', $monthIds)) as $id) {
             $totals = $this->pdo->query("SELECT COUNT(*) AS total,
                 COALESCE(SUM(CASE WHEN bt.amount > 0 THEN bt.amount ELSE 0 END), 0) AS credit,
                 COALESCE(SUM(CASE WHEN bt.amount < 0 THEN -bt.amount ELSE 0 END), 0) AS debit,
@@ -82,7 +89,61 @@ final class BankApiMonthlyStatements
             $this->useBankDocument($id, $supplierId);
             $this->preservePdf($id, $supplierId);
         }
-        return $result;
+    }
+
+    /** Zdrojový výpis, který zobrazuje měsíční evidence API (sám je v seznamu skrytý). */
+    public function isEvidence(int $statementId): bool
+    {
+        $query = $this->pdo->prepare('SELECT 1 FROM bank_api_evidence_months WHERE evidence_statement_id = ? LIMIT 1');
+        $query->execute([$statementId]);
+        return $query->fetchColumn() !== false;
+    }
+
+    /**
+     * Zdrojové výpisy měsíce: jen tak se k nim uživatel dostane, protože seznam
+     * výpisů je skrývá za měsíčním výpisem.
+     *
+     * @return list<array{id:int,file_name:?string,source:string,statement_date:?string,transaction_count:int}>
+     */
+    public function evidenceStatements(int $monthId, int $supplierId): array
+    {
+        $query = $this->pdo->prepare('SELECT bs.id, bs.file_name, bs.source, bs.statement_date,
+                (SELECT COUNT(*) FROM bank_transactions bt WHERE bt.statement_id = bs.id) AS transaction_count
+            FROM bank_api_evidence_months e
+            JOIN bank_statements bs ON bs.id = e.evidence_statement_id
+            WHERE e.monthly_statement_id = ? AND e.supplier_id = ? AND bs.supplier_id = ?
+            ORDER BY bs.statement_date, bs.id');
+        $query->execute([$monthId, $supplierId, $supplierId]);
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'file_name' => $row['file_name'],
+            'source' => (string) $row['source'],
+            'statement_date' => $row['statement_date'],
+            'transaction_count' => (int) $row['transaction_count'],
+        ], $query->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Odpojí zdrojový výpis od měsíční evidence před jeho smazáním: zruší vazbu
+     * výpis → měsíc a vazby měsíce na pohyby, které výpis sám vlastní. Vazby
+     * z jiných importů zůstanou a smazání dál blokují. Vrací měsíce k přepočtu.
+     *
+     * @return list<int>
+     */
+    public function detachEvidence(int $evidenceId, int $supplierId): array
+    {
+        if (!$this->pdo->inTransaction()) throw new \LogicException('Detaching monthly evidence requires a transaction.');
+        $query = $this->pdo->prepare('SELECT monthly_statement_id FROM bank_api_evidence_months WHERE evidence_statement_id = ? AND supplier_id = ?');
+        $query->execute([$evidenceId, $supplierId]);
+        $months = array_map('intval', $query->fetchAll(PDO::FETCH_COLUMN));
+        if ($months === []) return [];
+        $this->pdo->prepare('DELETE FROM bank_transaction_imports
+            WHERE statement_id IN (' . implode(',', $months) . ')
+              AND bank_transaction_id IN (SELECT bt.id FROM bank_transactions bt WHERE bt.statement_id = ?)')
+            ->execute([$evidenceId]);
+        $this->pdo->prepare('DELETE FROM bank_api_evidence_months WHERE evidence_statement_id = ? AND supplier_id = ?')
+            ->execute([$evidenceId, $supplierId]);
+        return $months;
     }
 
     public function hasApiAccount(int $supplierId, string $account, string $bank, string $currency): bool

@@ -44,6 +44,10 @@ export interface BankStatement {
   /** Původní název nahraného PDF, pokud je. */
   pdf_name?: string | null
   evidence_pdfs?: Array<{ id: number; pdf_name: string | null }>
+  /** Zdrojové výpisy měsíčního výpisu API; v seznamu výpisů jsou skryté. */
+  evidence_statements?: Array<{ id: number; file_name: string | null; source: string; statement_date: string | null; transaction_count: number }>
+  /** Výpis je zdrojem měsíčního výpisu API (smazat jde jen s odpojením od měsíce). */
+  api_evidence?: boolean
 }
 
 export type MatchStatus = 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'

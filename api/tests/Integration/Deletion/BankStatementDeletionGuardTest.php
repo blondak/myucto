@@ -177,7 +177,72 @@ final class BankStatementDeletionGuardTest extends TestCase
         self::assertSame(0, $this->rowCount('bank_statements', 'id', $statementId));
     }
 
+    // ── Zdrojový výpis měsíční evidence API ─────────────────────────────────
+
+    /**
+     * Duplicitní pohyb z opakovaného stažení leží ve zdrojovém výpisu, který
+     * zobrazuje měsíční výpis API. Smazání ho odpojí od měsíce, smaže jen jeho
+     * vlastní pohyby a měsíc přepočte; ostatní zdroje měsíce zůstanou.
+     */
+    public function testApiEvidenceStatementIsDetachedFromMonthAndDeleted(): void
+    {
+        $pdo = $this->db->pdo();
+        [$monthId, $keptId, $keptTx, $duplicateId, $duplicateTx] = $this->seedApiMonth($pdo, 'evidence');
+
+        $response = $this->delete($duplicateId);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->rowCount('bank_statements', 'id', $duplicateId));
+        self::assertSame(0, $this->rowCount('bank_transactions', 'id', $duplicateTx));
+        self::assertSame(1, $this->rowCount('bank_transactions', 'id', $keptTx));
+        self::assertSame(1, $this->rowCount('bank_api_evidence_months', 'evidence_statement_id', $keptId));
+        self::assertSame(1, $this->rowCount('bank_statements', 'id', $monthId));
+        $month = $pdo->query('SELECT transaction_count, debit_total FROM bank_statements WHERE id = ' . $monthId)->fetch(PDO::FETCH_ASSOC);
+        self::assertSame(1, (int) $month['transaction_count']);
+        self::assertEqualsWithDelta(1000.0, (float) $month['debit_total'], 0.001);
+    }
+
+    /** Pohyb doložený i jiným importem nesmí zmizet; odpojení od měsíce se vrátí. */
+    public function testApiEvidenceStatementBackedByAnotherImportStaysLinked(): void
+    {
+        $pdo = $this->db->pdo();
+        [, , , $duplicateId, $duplicateTx] = $this->seedApiMonth($pdo, 'evidence-alias');
+        $otherId = $this->seedBankStatement($pdo, $this->supplierId, 'evidence-alias-other');
+        $this->linkImport($pdo, $otherId, $duplicateTx, $duplicateId, 'evidence-alias-other');
+
+        $response = $this->delete($duplicateId);
+
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('has_dependencies', $this->json($response)['error']['code']);
+        self::assertSame(1, $this->rowCount('bank_api_evidence_months', 'evidence_statement_id', $duplicateId));
+        self::assertSame(1, $this->rowCount('bank_transactions', 'id', $duplicateTx));
+    }
+
     // ── Pomocné ──────────────────────────────────────────────────────────────
+
+    /** @return array{int,int,int,int,int} měsíc, ponechaný výpis a pohyb, duplicitní výpis a pohyb */
+    private function seedApiMonth(PDO $pdo, string $seed): array
+    {
+        $monthId = $this->seedBankStatement($pdo, $this->supplierId, "{$seed}-month", 'bank_api');
+        $pdo->prepare("INSERT INTO bank_api_months (supplier_id, account_key, currency, month_start, statement_id) VALUES (?, ?, 'CZK', '2099-01-01', ?)")
+            ->execute([$this->supplierId, '0100:' . str_pad('1000000005', 16, '0', STR_PAD_LEFT), $monthId]);
+        $result = [$monthId];
+        foreach (['kept', 'duplicate'] as $part) {
+            $statementId = $this->seedBankStatement($pdo, $this->supplierId, "{$seed}-{$part}", 'bank_api');
+            $transactionId = $this->seedBankTransaction($pdo, $statementId, "{$seed}-{$part}");
+            $pdo->prepare('INSERT INTO bank_api_evidence_months (evidence_statement_id, monthly_statement_id, supplier_id) VALUES (?, ?, ?)')
+                ->execute([$statementId, $monthId, $this->supplierId]);
+            $this->linkImport($pdo, $monthId, $transactionId, $statementId, "{$seed}-{$part}");
+            array_push($result, $statementId, $transactionId);
+        }
+        return $result;
+    }
+
+    private function linkImport(PDO $pdo, int $statementId, int $transactionId, int $originalId, string $seed): void
+    {
+        $pdo->prepare('INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$statementId, $transactionId, hash('sha256', "fkguard-link-{$seed}"), $this->supplierId, $originalId]);
+    }
 
     private function delete(int $statementId): ResponseInterface
     {

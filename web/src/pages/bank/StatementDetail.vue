@@ -288,7 +288,7 @@ async function onDeletePdf() {
 const deletingStatement = ref(false)
 async function onDeleteStatement() {
   if (!statement.value) return
-  if (!confirm(t('bank.statement_delete_confirm'))) return
+  if (!confirm(t(statement.value.api_evidence ? 'bank.statement_delete_evidence_confirm' : 'bank.statement_delete_confirm'))) return
   deletingStatement.value = true
   try {
     await bankApi.delete(statement.value.id)
@@ -374,6 +374,13 @@ const statementActions = computed<ActionItem[]>(() => {
       tier: 'overflow' as const,
       run: () => { void downloadStatementFile(bankApi.pdfUrl(pdf.id), pdf.pdf_name ?? 'vypis.pdf') },
     })),
+    ...(s.evidence_statements ?? []).map(source => ({
+      key: `evidence_statement_${source.id}`,
+      label: t('bank.evidence_statement', { name: source.file_name ?? String(source.id), count: source.transaction_count }),
+      icon: 'eye' as const,
+      tier: 'overflow' as const,
+      run: () => { void router.push({ name: 'bank-detail', params: { id: source.id } }) },
+    })),
     {
       key: 'pdf_upload',
       label: t('bank.pdf_upload'),
@@ -395,12 +402,12 @@ const statementActions = computed<ActionItem[]>(() => {
     },
     {
       key: 'statement_delete',
-      label: t('bank.statement_delete'),
+      label: t(s.api_evidence ? 'bank.statement_delete_evidence' : 'bank.statement_delete'),
       icon: 'trash',
       tier: 'advanced',
       variant: 'danger',
-      show: auth.isCompanyAdminRole && isVirtual.value && s.matched_count === 0,
-      title: t('bank.statement_delete_hint'),
+      show: auth.isCompanyAdminRole && (s.api_evidence === true || (isVirtual.value && s.matched_count === 0)),
+      title: t(s.api_evidence ? 'bank.statement_delete_evidence_hint' : 'bank.statement_delete_hint'),
       disabled: deletingStatement.value,
       loading: deletingStatement.value,
       run: () => { void onDeleteStatement() },
