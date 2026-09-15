@@ -34,6 +34,8 @@ use MyInvoice\Service\Backup\Company\CompanyBackupRegistryPostImportValidator;
 use MyInvoice\Service\Backup\Company\CompanyBackupRestoreCoordinator;
 use MyInvoice\Service\Backup\Company\CompanyBackupRestoreException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
+use MyInvoice\Service\Backup\Company\CompanyBackupWorkReportLinkDecisionPlan;
+use MyInvoice\Service\Backup\Company\CompanyBackupWorkReportLinkInventory;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
@@ -108,6 +110,31 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
             'synthetic-logo',
             file_get_contents($this->target($liveRoot)),
         );
+    }
+
+    public function testPassesSameWorkReportLinkDecisionPlanToDatabaseImporter(): void
+    {
+        [$source, $preflight, $decisions, $filePlan] = $this->context();
+        $inventory = new CompanyBackupWorkReportLinkInventory();
+        $linkDecisions = CompanyBackupWorkReportLinkDecisionPlan::fromArray([
+            'data_preflight_binding_sha256' => $preflight->bindingSha256,
+            'link_inventory_sha256' => $inventory->sha256(),
+            'decisions' => [],
+        ], $inventory, $preflight->bindingSha256, $preflight->targetRegistryFingerprint,
+            $decisions->targetInstanceId, $decisions->restoreActorId);
+        $importer = new CoordinatorDatabaseImporter($this->database, $filePlan);
+        [$coordinator] = $this->coordinator($importer, new CoordinatorPostImportValidator());
+
+        $coordinator->restore(
+            $source,
+            self::BACKUP_ID,
+            $preflight,
+            $decisions,
+            $this->sensitiveData(),
+            $linkDecisions,
+        );
+
+        self::assertSame($linkDecisions, $importer->receivedLinkDecisions);
     }
 
     public function testMaterializesDerivedStateBeforePostImportValidation(): void
@@ -794,6 +821,8 @@ final class CompanyBackupRestoreCoordinatorTest extends TestCase
 /** @internal */
 final class CoordinatorDatabaseImporter implements CompanyBackupDatabaseImport
 {
+    public ?CompanyBackupWorkReportLinkDecisionPlan $receivedLinkDecisions = null;
+
     public function __construct(
         private readonly PDO $database,
         private readonly CompanyBackupFilePublicationPlan $plan,
@@ -805,7 +834,9 @@ final class CoordinatorDatabaseImporter implements CompanyBackupDatabaseImport
         CompanyBackupDataPreflightResult $preflight,
         CompanyBackupReferenceDecisionPlan $decisions,
         PayrollSensitiveData $sensitiveData,
+        ?CompanyBackupWorkReportLinkDecisionPlan $linkDecisions = null,
     ): CompanyBackupDatabaseImportResult {
+        $this->receivedLinkDecisions = $linkDecisions;
         if (!$this->database->inTransaction()) {
             throw new \LogicException('Syntetický import nedostal transakci.');
         }

@@ -30,6 +30,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         CompanyBackupDataPreflightResult $preflight,
         CompanyBackupReferenceDecisionPlan $decisions,
         PayrollSensitiveData $sensitiveData,
+        ?CompanyBackupWorkReportLinkDecisionPlan $linkDecisions = null,
     ): CompanyBackupDatabaseImportResult {
         $this->assertTransaction('import_transaction_required');
         $sourceRegistry = $source->sourceRegistry();
@@ -79,9 +80,48 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         if ($contexts['row_count'] !== $preflight->rowCount) {
             throw self::error('import_row_count_mismatch');
         }
+        $linkObject = $inventory->object(CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY);
+        if (($linkObject !== null && ($preflight->workReportLinkInventory === null || $linkDecisions === null))
+            || ($linkObject === null && ($preflight->workReportLinkInventory !== null || $linkDecisions !== null))
+        ) {
+            throw self::error('work_report_link_import_context_missing', CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY);
+        }
         $payload = $source->secretPayload();
         if ($contexts['requires_secret_payload'] && $payload === null) {
             throw self::error('import_protected_secret_payload_missing');
+        }
+        $linkTokenGuard = null;
+        if ($linkObject !== null) {
+            $collector = new CompanyBackupWorkReportLinkPreflightInventoryCollector($this->limits);
+            foreach ($payload?->values() ?? [] as $value) {
+                if ($value->registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY) {
+                    $collector->acceptSecret($value);
+                }
+            }
+            unset($value);
+            $consumedLinks = $source->consumeRows(
+                CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY,
+                static function (array $row) use ($collector): void {
+                    $collector->acceptRow($row);
+                },
+            );
+            if ($consumedLinks !== $linkObject->rows) {
+                throw self::error('import_row_count_mismatch', CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY);
+            }
+            $currentLinkInventory = $collector->finish($this->database);
+            if (!hash_equals($preflight->workReportLinkInventory->sha256(), $currentLinkInventory->sha256())) {
+                throw self::error('work_report_link_inventory_stale', CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY);
+            }
+            $linkDecisions->assertContext(
+                $currentLinkInventory,
+                $preflight->bindingSha256,
+                $targetRegistry->fingerprint,
+                $decisions->targetInstanceId,
+                $decisions->restoreActorId,
+            );
+            $linkTokenGuard = new CompanyBackupWorkReportLinkImportTokenGuard(
+                $this->database, $currentLinkInventory, $linkDecisions,
+            );
         }
         $secrets = $payload === null
             ? null
@@ -189,6 +229,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                 $statutoryResults,
                 $skips,
                 $mappedSystemRecipientRows,
+                $linkTokenGuard,
             );
             if ($insertedRows !== $preallocatedRows
                 || $mappedGlobalRows + $insertedRows + $manualRows + $skippedRows !== $preflight->rowCount
@@ -593,6 +634,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
         ?CompanyBackupPayrollStatutoryResultSetImportPreparer $statutoryResults,
         CompanyBackupSkippedInvoiceCounters $skips,
         int $mappedSystemRecipientRows,
+        ?CompanyBackupWorkReportLinkImportTokenGuard $linkTokenGuard,
     ): array {
         $insertedRows = 0;
         $supplierId = null;
@@ -648,6 +690,7 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                         $hashMapper,
                         $hashReferenceMapper,
                         $secrets,
+                        $linkTokenGuard,
                         $statutoryResults,
                         &$insertedRows,
                         &$supplierId,
@@ -682,6 +725,13 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                             $this->database, $definition->key, $prepared->row,
                         );
                         if ($definition->key === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY) {
+                            $sourceId = $row['id'] ?? null;
+                            $sourceToken = $protected[CompanyBackupWorkReportLinkPolicy::COLUMN] ?? null;
+                            if ($linkTokenGuard === null || !is_int($sourceId) || !is_string($sourceToken)) {
+                                throw self::error('work_report_link_import_context_missing', $definition->key);
+                            }
+                            $protected[CompanyBackupWorkReportLinkPolicy::COLUMN] =
+                                $linkTokenGuard->resolve($sourceId, $sourceToken);
                             CompanyBackupWorkReportLinkRelationGuard::assertValid($this->database, [
                                 'supplier_id' => $prepared->row['supplier_id'] ?? null,
                                 'client_id' => $prepared->row['client_id'] ?? null,

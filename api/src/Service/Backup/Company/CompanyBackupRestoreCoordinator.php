@@ -57,6 +57,7 @@ final readonly class CompanyBackupRestoreCoordinator
         CompanyBackupDataPreflightResult $preflight,
         CompanyBackupReferenceDecisionPlan $decisions,
         PayrollSensitiveData $sensitiveData,
+        ?CompanyBackupWorkReportLinkDecisionPlan $linkDecisions = null,
     ): CompanyBackupRestoreResult {
         if ($this->database->inTransaction()) {
             throw self::error('restore_transaction_nested');
@@ -69,11 +70,13 @@ final readonly class CompanyBackupRestoreCoordinator
             // zápisy faktur nezamyká; sdílejí jej pouze schvalovací operace.
             return ApprovalTokenLock::run($this->database, function () use (
                 $source, $backupId, $preflight, $decisions, $sensitiveData,
+                $linkDecisions,
                 &$entered, &$completed,
             ): CompanyBackupRestoreResult {
                 $entered = true;
                 $result = $this->restoreLocked(
                     $source, $backupId, $preflight, $decisions, $sensitiveData,
+                    $linkDecisions,
                 );
                 $completed = true;
                 return $result;
@@ -100,6 +103,7 @@ final readonly class CompanyBackupRestoreCoordinator
         CompanyBackupDataPreflightResult $preflight,
         CompanyBackupReferenceDecisionPlan $decisions,
         PayrollSensitiveData $sensitiveData,
+        ?CompanyBackupWorkReportLinkDecisionPlan $linkDecisions = null,
     ): CompanyBackupRestoreResult {
 
         $staged = null;
@@ -120,6 +124,7 @@ final readonly class CompanyBackupRestoreCoordinator
                 $preflight,
                 $decisions,
                 $sensitiveData,
+                $linkDecisions,
             );
             $this->assertTransaction('restore_transaction_lost');
             $this->materializers->materialize(

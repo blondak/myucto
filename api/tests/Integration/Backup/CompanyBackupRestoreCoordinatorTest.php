@@ -22,6 +22,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupImportSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupRestoreCoordinator;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
+use MyInvoice\Service\Backup\Company\CompanyBackupWorkReportLinkDecisionPlan;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
 use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
@@ -404,6 +405,7 @@ final class MariaDbCoordinatorDatabaseImporter implements CompanyBackupDatabaseI
         CompanyBackupDataPreflightResult $preflight,
         CompanyBackupReferenceDecisionPlan $decisions,
         PayrollSensitiveData $sensitiveData,
+        ?CompanyBackupWorkReportLinkDecisionPlan $linkDecisions = null,
     ): CompanyBackupDatabaseImportResult {
         ($this->onRestore ?? static fn () => null)();
         if (!$this->database->inTransaction()) {

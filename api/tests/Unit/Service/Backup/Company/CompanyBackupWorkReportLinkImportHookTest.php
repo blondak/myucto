@@ -16,12 +16,16 @@ use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportSchemaSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportSource;
 use MyInvoice\Service\Backup\Company\CompanyBackupImportTableMetadata;
+use MyInvoice\Service\Backup\Company\CompanyBackupImportWriteException;
 use MyInvoice\Service\Backup\Company\CompanyBackupPreflightException;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceDecisionPlan;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretPayload;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretScope;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretValue;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
+use MyInvoice\Service\Backup\Company\CompanyBackupWorkReportLinkDecisionPlan;
+use MyInvoice\Service\Backup\Company\CompanyBackupWorkReportLinkImportTokenGuard;
+use MyInvoice\Service\Backup\Company\CompanyBackupWorkReportLinkPreflightInventoryCollector;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableSchema;
 use MyInvoice\Service\Backup\Registry\CompanyBackupWorkReportLinksDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -51,11 +55,11 @@ final class CompanyBackupWorkReportLinkImportHookTest extends TestCase
             $pdo->exec('INSERT INTO users (id) VALUES (91)');
             $pdo->beginTransaction();
             try {
-                [$source, $preflight, $decisions] = $this->context($registry, $mismatchedProjectClient);
+                [$source, $preflight, $decisions, $linkDecisions] = $this->context($pdo, $registry, $mismatchedProjectClient);
                 $importer = new CompanyBackupDatabaseImporter($pdo, new LinkHookImportSchema());
                 if ($mismatchedProjectClient) {
                     try {
-                        $importer->restore($source, $preflight, $decisions, $this->sensitiveData());
+                        $importer->restore($source, $preflight, $decisions, $this->sensitiveData(), $linkDecisions);
                         self::fail('Import nesmí vložit odkaz na projekt jiného klienta.');
                     } catch (CompanyBackupPreflightException $e) {
                         self::assertSame('work_report_link_relation_mismatch', $e->errorCode);
@@ -65,7 +69,7 @@ final class CompanyBackupWorkReportLinkImportHookTest extends TestCase
                     self::assertInstanceOf(\PDOStatement::class, $count);
                     self::assertSame(0, (int) $count->fetchColumn());
                 } else {
-                    $result = $importer->restore($source, $preflight, $decisions, $this->sensitiveData());
+                    $result = $importer->restore($source, $preflight, $decisions, $this->sensitiveData(), $linkDecisions);
                     self::assertNotSame(7, $result->supplierId);
                     $query = $pdo->query('SELECT l.supplier_id, l.client_id, l.project_id, l.token, l.revoked_at,
                         c.supplier_id AS client_supplier_id, p.client_id AS project_client_id
@@ -83,6 +87,254 @@ final class CompanyBackupWorkReportLinkImportHookTest extends TestCase
                 $pdo->rollBack();
             }
         }
+    }
+
+    public function testRestoreRegeneratesTargetCollisionAndArchiveDuplicateTokens(): void
+    {
+        foreach ([false, true] as $archiveDuplicate) {
+            $pdo = $this->database();
+            $registry = $this->registry();
+            $pdo->exec("INSERT INTO supplier (id, name) VALUES (7, 'Existing tenant')");
+            $pdo->exec('INSERT INTO users (id) VALUES (91)');
+            if (!$archiveDuplicate) {
+                $pdo->exec("INSERT INTO work_report_links (id, supplier_id, scope, client_id, token, revoked_at)
+                    VALUES (90, 999, 'client', 100, '" . self::TOKEN . "', '2026-01-09 00:00:00')");
+            }
+            $targetBefore = self::targetLink($pdo);
+            $tokens = $archiveDuplicate ? [31 => self::TOKEN, 32 => self::TOKEN] : [31 => self::TOKEN];
+            [$source, $preflight, $decisions, $linkDecisions] = $this->context($pdo, $registry, false, $tokens);
+            self::assertNotNull($linkDecisions);
+            self::assertSame(count($tokens), $linkDecisions->inventory->collisionCount());
+
+            $pdo->beginTransaction();
+            try {
+                (new CompanyBackupDatabaseImporter($pdo, new LinkHookImportSchema()))->restore(
+                    $source, $preflight, $decisions, $this->sensitiveData(), $linkDecisions,
+                );
+                $statement = $pdo->query('SELECT token, revoked_at FROM work_report_links WHERE id != 90 ORDER BY id');
+                self::assertInstanceOf(\PDOStatement::class, $statement);
+                $restored = $statement->fetchAll(PDO::FETCH_ASSOC);
+                self::assertCount(count($tokens), $restored);
+                $issued = [];
+                foreach ($restored as $row) {
+                    self::assertMatchesRegularExpression('/\A[0-9a-f]{48}\z/D', $row['token']);
+                    self::assertNotSame(self::TOKEN, $row['token']);
+                    self::assertSame('2026-01-03 04:05:06', $row['revoked_at']);
+                    $issued[$row['token']] = true;
+                }
+                self::assertCount(count($tokens), $issued);
+                if (!$archiveDuplicate) {
+                    self::assertSame($targetBefore, self::targetLink($pdo));
+                }
+            } finally {
+                $pdo->rollBack();
+            }
+        }
+    }
+
+    public function testChangedTargetCollisionAndMissingPlanFailBeforeRestoredWrites(): void
+    {
+        foreach (['stale', 'missing'] as $case) {
+            $pdo = $this->database();
+            $registry = $this->registry();
+            $pdo->exec("INSERT INTO supplier (id, name) VALUES (7, 'Existing tenant')");
+            $pdo->exec('INSERT INTO users (id) VALUES (91)');
+            [$source, $preflight, $decisions, $linkDecisions] = $this->context($pdo, $registry, false);
+            self::assertNotNull($linkDecisions);
+            if ($case === 'stale') {
+                $pdo->exec("INSERT INTO work_report_links (id, supplier_id, scope, client_id, token, revoked_at)
+                    VALUES (90, 999, 'client', 100, '" . self::TOKEN . "', '2026-01-09 00:00:00')");
+            }
+            $before = self::counts($pdo);
+            $targetBefore = self::targetLink($pdo);
+            $pdo->beginTransaction();
+            try {
+                try {
+                    (new CompanyBackupDatabaseImporter($pdo, new LinkHookImportSchema()))->restore(
+                        $source, $preflight, $decisions, $this->sensitiveData(),
+                        $case === 'missing' ? null : $linkDecisions,
+                    );
+                    self::fail('Neplatný plán musí import odmítnout před zápisy.');
+                } catch (CompanyBackupImportWriteException $e) {
+                    self::assertSame($case === 'stale'
+                        ? 'work_report_link_inventory_stale'
+                        : 'work_report_link_import_context_missing', $e->errorCode);
+                    self::assertStringNotContainsString(self::TOKEN, $e->getMessage());
+                }
+                self::assertSame($before, self::counts($pdo));
+                self::assertSame($targetBefore, self::targetLink($pdo));
+            } finally {
+                $pdo->rollBack();
+            }
+        }
+    }
+
+    public function testExplicitRejectDecisionStopsBeforeImporterAndEmptyActivePlanIsRequired(): void
+    {
+        $pdo = $this->database();
+        $registry = $this->registry();
+        $pdo->exec("INSERT INTO supplier (id, name) VALUES (7, 'Existing tenant')");
+        $pdo->exec('INSERT INTO users (id) VALUES (91)');
+        $pdo->exec("INSERT INTO work_report_links (id, supplier_id, scope, client_id, token, revoked_at)
+            VALUES (90, 999, 'client', 100, '" . self::TOKEN . "', '2026-01-09 00:00:00')");
+        [, $preflight, , $linkDecisions] = $this->context($pdo, $registry, false);
+        self::assertNotNull($linkDecisions);
+        $before = self::counts($pdo);
+        try {
+            CompanyBackupWorkReportLinkDecisionPlan::fromArray([
+                'data_preflight_binding_sha256' => $preflight->bindingSha256,
+                'link_inventory_sha256' => $linkDecisions->inventory->sha256(),
+                'decisions' => [['source_link_id' => 31, 'action' => 'reject']],
+            ], $linkDecisions->inventory, $preflight->bindingSha256,
+                $registry->fingerprint, self::INSTANCE_ID, 91);
+            self::fail('Explicitní odmítnutí nesmí vytvořit importní plán.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('work_report_link_collision_rejected', $e->errorCode);
+        }
+        self::assertSame($before, self::counts($pdo));
+
+        $emptyPdo = $this->database();
+        $emptyPdo->exec("INSERT INTO supplier (id, name) VALUES (7, 'Existing tenant')");
+        $emptyPdo->exec('INSERT INTO users (id) VALUES (91)');
+        [$source, $emptyPreflight, $decisions, $emptyPlan] = $this->context(
+            $emptyPdo, $this->registry(), false, [],
+        );
+        self::assertNotNull($emptyPlan);
+        self::assertSame(0, $emptyPlan->inventory->count());
+        $emptyPdo->beginTransaction();
+        try {
+            (new CompanyBackupDatabaseImporter($emptyPdo, new LinkHookImportSchema()))->restore(
+                $source, $emptyPreflight, $decisions, $this->sensitiveData(), $emptyPlan,
+            );
+            self::assertSame(0, self::counts($emptyPdo)['work_report_links']);
+        } finally {
+            $emptyPdo->rollBack();
+        }
+    }
+
+    public function testAbsentLinkObjectRejectsUnexpectedLinkPlan(): void
+    {
+        $pdo = $this->database();
+        $registry = $this->registry(false);
+        $pdo->exec("INSERT INTO supplier (id, name) VALUES (7, 'Existing tenant')");
+        $pdo->exec('INSERT INTO users (id) VALUES (91)');
+        [$source, $preflight, $decisions] = $this->context($pdo, $registry, false);
+        $emptyInventory = new \MyInvoice\Service\Backup\Company\CompanyBackupWorkReportLinkInventory();
+        $unexpectedPlan = CompanyBackupWorkReportLinkDecisionPlan::fromArray([
+            'data_preflight_binding_sha256' => $preflight->bindingSha256,
+            'link_inventory_sha256' => $emptyInventory->sha256(),
+            'decisions' => [],
+        ], $emptyInventory, $preflight->bindingSha256, $registry->fingerprint,
+            self::INSTANCE_ID, 91);
+        $before = self::counts($pdo);
+        $pdo->beginTransaction();
+        try {
+            try {
+                (new CompanyBackupDatabaseImporter($pdo, new LinkHookImportSchema()))->restore(
+                    $source, $preflight, $decisions, $this->sensitiveData(), $unexpectedPlan,
+                );
+                self::fail('Plán bez objektu odkazů musí být odmítnut.');
+            } catch (CompanyBackupImportWriteException $e) {
+                self::assertSame('work_report_link_import_context_missing', $e->errorCode);
+            }
+            self::assertSame($before, self::counts($pdo));
+        } finally {
+            $pdo->rollBack();
+        }
+
+        $unexpectedPreflight = new CompanyBackupDataPreflightResult(
+            $preflight->externalReferences, $preflight->rowCount, $preflight->identityCount,
+            $preflight->sourceKeyCount, $preflight->sourceIndexBytes,
+            $preflight->referenceOccurrenceCount, $registry->fingerprint,
+            self::TECHNICAL_BINDING, workReportLinkInventory: $emptyInventory,
+        );
+        $matchingReferences = CompanyBackupReferenceDecisionPlan::fromArray([
+            'format' => CompanyBackupReferenceDecisionPlan::FORMAT,
+            'version' => CompanyBackupReferenceDecisionPlan::VERSION,
+            'data_preflight_binding_sha256' => $unexpectedPreflight->bindingSha256,
+            'decisions' => [],
+        ], $unexpectedPreflight, $registry, self::INSTANCE_ID, 91);
+        $pdo->beginTransaction();
+        try {
+            try {
+                (new CompanyBackupDatabaseImporter($pdo, new LinkHookImportSchema()))->restore(
+                    $source, $unexpectedPreflight, $matchingReferences, $this->sensitiveData(),
+                );
+                self::fail('Inventář bez objektu odkazů musí být odmítnut.');
+            } catch (CompanyBackupImportWriteException $e) {
+                self::assertSame('work_report_link_import_context_missing', $e->errorCode);
+            }
+            self::assertSame($before, self::counts($pdo));
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+
+    public function testPlanWithChangedRestoreActorFailsAtImporterBoundaryBeforeWrites(): void
+    {
+        $pdo = $this->database();
+        $registry = $this->registry();
+        $pdo->exec("INSERT INTO supplier (id, name) VALUES (7, 'Existing tenant')");
+        $pdo->exec('INSERT INTO users (id) VALUES (91)');
+        [$source, $preflight, $decisions, $linkDecisions] = $this->context($pdo, $registry, false);
+        self::assertNotNull($linkDecisions);
+        $wrongActorPlan = CompanyBackupWorkReportLinkDecisionPlan::fromArray([
+            'data_preflight_binding_sha256' => $preflight->bindingSha256,
+            'link_inventory_sha256' => $linkDecisions->inventory->sha256(),
+            'decisions' => [],
+        ], $linkDecisions->inventory, $preflight->bindingSha256,
+            $registry->fingerprint, self::INSTANCE_ID, 92);
+        $before = self::counts($pdo);
+        $pdo->beginTransaction();
+        try {
+            try {
+                (new CompanyBackupDatabaseImporter($pdo, new LinkHookImportSchema()))->restore(
+                    $source, $preflight, $decisions, $this->sensitiveData(), $wrongActorPlan,
+                );
+                self::fail('Plán jiného obnovujícího aktéra musí být odmítnut.');
+            } catch (CompanyBackupPreflightException $e) {
+                self::assertSame('work_report_link_decision_context_mismatch', $e->errorCode);
+            }
+            self::assertSame($before, self::counts($pdo));
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+
+    public function testImportTokenGuardIssuesEachSourceIdAtMostOnce(): void
+    {
+        $pdo = $this->database();
+        [, , , $plan] = $this->context($pdo, $this->registry(), false);
+        self::assertNotNull($plan);
+        $guard = new CompanyBackupWorkReportLinkImportTokenGuard($pdo, $plan->inventory, $plan);
+        self::assertSame(self::TOKEN, $guard->resolve(31, self::TOKEN));
+        try {
+            $guard->resolve(31, self::TOKEN);
+            self::fail('Stejný zdrojový odkaz nesmí vydat token dvakrát.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('work_report_link_decision_stale', $e->errorCode);
+            self::assertStringNotContainsString(self::TOKEN, $e->getMessage());
+        }
+    }
+
+    /** @return array{supplier:int,clients:int,projects:int,work_report_links:int} */
+    private static function counts(PDO $database): array
+    {
+        $counts = [];
+        foreach (['supplier', 'clients', 'projects', 'work_report_links'] as $table) {
+            $statement = $database->query('SELECT COUNT(*) FROM ' . $table);
+            self::assertInstanceOf(\PDOStatement::class, $statement);
+            $counts[$table] = (int) $statement->fetchColumn();
+        }
+        return $counts;
+    }
+
+    /** @return array<string,mixed>|false */
+    private static function targetLink(PDO $database): array|false
+    {
+        $statement = $database->query('SELECT * FROM work_report_links WHERE id = 90');
+        self::assertInstanceOf(\PDOStatement::class, $statement);
+        return $statement->fetch(PDO::FETCH_ASSOC);
     }
 
     private function database(): PDO
@@ -105,7 +357,7 @@ final class CompanyBackupWorkReportLinkImportHookTest extends TestCase
         return $pdo;
     }
 
-    private function registry(): TenantDataRegistrySnapshot
+    private function registry(bool $includeLinks = true): TenantDataRegistrySnapshot
     {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(1, [
@@ -118,7 +370,7 @@ final class CompanyBackupWorkReportLinkImportHookTest extends TestCase
                 ['id', 'client_id'], ['strategy' => 'parent_join', 'parent' => 'table:clients',
                     'local_column' => 'client_id', 'parent_column' => 'id'],
                 [$this->reference('client_id', 'clients')]),
-            CompanyBackupWorkReportLinksDefinition::definition(),
+            ...($includeLinks ? [CompanyBackupWorkReportLinksDefinition::definition()] : []),
             new TenantDataDefinition('table:users', TenantDataObjectKind::Table,
                 TenantDataPolicy::InstanceOwned, [$profile],
                 ['primary_key' => ['id'], 'ownership' => ['strategy' => 'instance']]),
@@ -158,8 +410,12 @@ final class CompanyBackupWorkReportLinkImportHookTest extends TestCase
         ];
     }
 
-    /** @return array{LinkHookImportSource,CompanyBackupDataPreflightResult,CompanyBackupReferenceDecisionPlan} */
-    private function context(TenantDataRegistrySnapshot $registry, bool $mismatch): array
+    /**
+     * @param array<int,string> $linkTokens
+     * @return array{LinkHookImportSource,CompanyBackupDataPreflightResult,CompanyBackupReferenceDecisionPlan,?CompanyBackupWorkReportLinkDecisionPlan}
+     */
+    private function context(PDO $database, TenantDataRegistrySnapshot $registry, bool $mismatch,
+        array $linkTokens = [31 => self::TOKEN]): array
     {
         $rows = [
             'table:supplier' => [['id' => 7, 'name' => 'Restored tenant']],
@@ -168,14 +424,19 @@ final class CompanyBackupWorkReportLinkImportHookTest extends TestCase
                 ['id' => 12, 'supplier_id' => 7],
             ],
             'table:projects' => [['id' => 21, 'client_id' => $mismatch ? 12 : 11]],
-            'table:work_report_links' => [[
-                'id' => 31, 'supplier_id' => 7, 'scope' => 'project',
-                'client_id' => 11, 'project_id' => 21,
-                'created_by_user_id' => null, 'created_at' => '2026-01-01 01:02:03',
-                'last_sent_at' => null, 'last_viewed_at' => null,
-                'revoked_at' => '2026-01-03 04:05:06',
-            ]],
         ];
+        if ($registry->registry->definition('table:work_report_links') !== null) {
+            $rows['table:work_report_links'] = [];
+            foreach ($linkTokens as $id => $_) {
+                $rows['table:work_report_links'][] = [
+                    'id' => $id, 'supplier_id' => 7, 'scope' => 'project',
+                    'client_id' => 11, 'project_id' => 21,
+                    'created_by_user_id' => null, 'created_at' => '2026-01-01 01:02:03',
+                    'last_sent_at' => null, 'last_viewed_at' => null,
+                    'revoked_at' => '2026-01-03 04:05:06',
+                ];
+            }
+        }
         $objects = [];
         foreach (CompanyBackupDataInventory::payloadDefinitions($registry) as $index => $definition) {
             $objects[] = CompanyBackupDataObject::fromWrittenPayload(
@@ -188,15 +449,35 @@ final class CompanyBackupWorkReportLinkImportHookTest extends TestCase
             'version' => CompanyBackupFileInventory::VERSION,
             'areas' => [],
         ], $registry);
-        $payload = CompanyBackupSecretPayload::fromValues([
-            CompanyBackupSecretValue::fromPlaintext(
-                'table:work_report_links', CompanyBackupSecretScope::Column,
-                'token', ['id' => 31], self::TOKEN,
-            ),
-        ], $registry);
+        $secretValues = [];
+        foreach ($linkTokens as $id => $token) {
+            if (isset($rows['table:work_report_links'])) {
+                $secretValues[] = CompanyBackupSecretValue::fromPlaintext(
+                    'table:work_report_links', CompanyBackupSecretScope::Column,
+                    'token', ['id' => $id], $token,
+                );
+            }
+        }
+        $payload = CompanyBackupSecretPayload::fromValues($secretValues, $registry);
+        $linkInventory = null;
+        if (isset($rows['table:work_report_links'])) {
+            $linkCollector = new CompanyBackupWorkReportLinkPreflightInventoryCollector();
+            foreach ($payload->values() as $value) {
+                if ($value->registryKey === 'table:work_report_links') {
+                    $linkCollector->acceptSecret($value);
+                }
+            }
+            foreach ($rows['table:work_report_links'] as $row) {
+                $linkCollector->acceptRow($row);
+            }
+            $linkInventory = $linkCollector->finish($database);
+        }
+        $rowCount = 4 + count($rows['table:work_report_links'] ?? []);
         $preflight = new CompanyBackupDataPreflightResult(
-            new CompanyBackupExternalReferenceInventory([]), 5, 5, 8, 1_024, 0,
+            new CompanyBackupExternalReferenceInventory([]), $rowCount, $rowCount,
+            6 + 2 * count($rows['table:work_report_links'] ?? []), 1_024, 0,
             $registry->fingerprint, self::TECHNICAL_BINDING,
+            workReportLinkInventory: $linkInventory,
         );
         $decisions = CompanyBackupReferenceDecisionPlan::fromArray([
             'format' => CompanyBackupReferenceDecisionPlan::FORMAT,
@@ -204,8 +485,21 @@ final class CompanyBackupWorkReportLinkImportHookTest extends TestCase
             'data_preflight_binding_sha256' => $preflight->bindingSha256,
             'decisions' => [],
         ], $preflight, $registry, self::INSTANCE_ID, 91);
+        $linkDecisions = $linkInventory === null ? null :
+            CompanyBackupWorkReportLinkDecisionPlan::fromArray([
+                'data_preflight_binding_sha256' => $preflight->bindingSha256,
+                'link_inventory_sha256' => $linkInventory->sha256(),
+                'decisions' => array_map(
+                    static fn (array $entry): array => [
+                        'source_link_id' => $entry['source_link_id'], 'action' => 'regenerate',
+                    ],
+                    array_values(array_filter($linkInventory->entries(),
+                        static fn (array $entry): bool => $entry['collision'])),
+                ),
+            ], $linkInventory, $preflight->bindingSha256, $registry->fingerprint,
+                self::INSTANCE_ID, 91);
         return [new LinkHookImportSource($registry, $inventory, $files, $rows, $payload),
-            $preflight, $decisions];
+            $preflight, $decisions, $linkDecisions];
     }
 
     private function sensitiveData(): PayrollSensitiveData

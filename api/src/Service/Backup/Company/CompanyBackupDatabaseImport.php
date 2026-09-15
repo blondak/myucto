@@ -14,5 +14,6 @@ interface CompanyBackupDatabaseImport
         CompanyBackupDataPreflightResult $preflight,
         CompanyBackupReferenceDecisionPlan $decisions,
         PayrollSensitiveData $sensitiveData,
+        ?CompanyBackupWorkReportLinkDecisionPlan $linkDecisions = null,
     ): CompanyBackupDatabaseImportResult;
 }
