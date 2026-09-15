@@ -26350,6 +26350,7 @@ components:
         has_pdf: { type: boolean, description: "True pokud je nahrán doprovodný PDF výpis." }
         pdf_name: { type: [string, "null"] }
         account_label: { type: [string, "null"], description: "Odvozeno z currencies.label" }
+        api_month: { type: boolean, description: "True u měsíčního výpisu bankovního API. Ten se průběžně doplňuje z banky a nejde smazat; smazat lze jeho zdrojový výpis (viz `evidence_statements` v detailu). Vrací jen seznam." }
 
     BankStatementDetail:
       description: Detail i seznam zahrnují také pohyby připojené z jiného API/GPC importu. Sdílená transakce má stále jediné ID a jedinou účetní evidenci. Mzdové párování a odkaz na existující účetní zápis vrací posting.payroll_matched a posting.journal_entry_id.
@@ -26366,6 +26367,19 @@ components:
                 properties:
                   id: { type: integer, format: int64 }
                   pdf_name: { type: [string, "null"] }
+            evidence_statements:
+              type: array
+              description: Zdrojové výpisy měsíčního výpisu bankovního API. V seznamu výpisů jsou skryté, detail je vrací přes GET /bank-statements/{id}. U ostatních výpisů je pole prázdné.
+              items:
+                type: object
+                required: [id, file_name, source, statement_date, transaction_count]
+                properties:
+                  id: { type: integer, format: int64 }
+                  file_name: { type: [string, "null"] }
+                  source: { type: string }
+                  statement_date: { type: [string, "null"], format: date }
+                  transaction_count: { type: integer, description: "Počet pohybů, které zdrojový výpis sám vlastní." }
+            api_evidence: { type: boolean, description: "True u zdrojového výpisu měsíčního výpisu API. Smazání ho nejdřív odpojí od měsíce a měsíční výpis přepočítá." }
             file_hash: { type: string, description: "SHA-256 originálního souboru" }
             credit_total: { type: [number, "null"], format: float }
             debit_total: { type: [number, "null"], format: float }

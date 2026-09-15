@@ -17344,7 +17344,7 @@
     "default_revenue_category_backfilled": "Default revenue category applied to {count} project invoices without a category."
   },
   "bank": {
-    "gpc_calculated_hint": "The ČSOB/CREDITAS-profile GPC export includes all recorded booked account transactions in this period, excluding notices. This is a MyÚčto export, not an original bank statement. Calculated balances assume complete transaction records. Long bank references are included in the description.",
+    "gpc_calculated_hint": "The export in the standard GPC (ABO) format includes all recorded booked account transactions in this period, excluding notices. This is a MyÚčto export, not an original bank statement. Calculated balances assume complete transaction records. Long bank references are included in the description.",
     "balance_calculated": "Balance calculated from recorded transactions",
     "balance_confirmed": "Calculated balance agrees with the bank statement",
     "balance_bank_evidence": "The transactions are backed by a bank GPC statement. The GPC button downloads the bank original; matching and accounting entries are preserved.",

@@ -48,6 +48,8 @@ export interface BankStatement {
   evidence_statements?: Array<{ id: number; file_name: string | null; source: string; statement_date: string | null; transaction_count: number }>
   /** Výpis je zdrojem měsíčního výpisu API (smazat jde jen s odpojením od měsíce). */
   api_evidence?: boolean
+  /** Měsíční výpis API (jen v seznamu); průběžně se doplňuje z banky a smazat nejde. */
+  api_month?: boolean
 }
 
 export type MatchStatus = 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'

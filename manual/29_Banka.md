@@ -188,8 +188,9 @@ Klik na řádek → detail.
 
 ### 29.4.1 Zůstatky z API a export GPC
 
-U pohybů z API tlačítko **GPC** vytváří export v profilu ČSOB/CREDITAS
-(CP1250, řádky 074/075/078/079). Export obsahuje všechny evidované zaúčtované
+U pohybů z API tlačítko **GPC** vytváří export ve standardním formátu GPC (ABO)
+s kódováním CP1250 a řádky 074/075/078/079, který načte většina účetních
+programů bez ohledu na banku. Export obsahuje všechny evidované zaúčtované
 pohyby stejného účtu a měny od začátku měsíce do data zvoleného výpisu.
 Není omezený stránkováním ani filtrem tabulky. Avíza se nezahrnují a pohyb
 sdílený mezi API a GPC se započítá jednou. Původní JSON z API slouží interně,

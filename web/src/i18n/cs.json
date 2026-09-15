@@ -17344,7 +17344,7 @@
     "default_revenue_category_backfilled": "Výchozí kategorie tržby doplněna do {count} faktur zakázky bez kategorie."
   },
   "bank": {
-    "gpc_calculated_hint": "Export GPC v profilu ČSOB/CREDITAS obsahuje všechny evidované zaúčtované pohyby účtu za uvedené období, bez avíz. Jde o export MyÚčta, nikoli originální výpis banky. Vypočtený zůstatek předpokládá úplnou evidenci pohybů. Dlouhé bankovní reference se přenášejí do popisu.",
+    "gpc_calculated_hint": "Export ve standardním formátu GPC (ABO) obsahuje všechny evidované zaúčtované pohyby účtu za uvedené období, bez avíz. Jde o export MyÚčta, nikoli originální výpis banky. Vypočtený zůstatek předpokládá úplnou evidenci pohybů. Dlouhé bankovní reference se přenášejí do popisu.",
     "balance_calculated": "Zůstatek vypočtený z evidovaných pohybů",
     "balance_confirmed": "Vypočtený zůstatek souhlasí s bankovním výpisem",
     "balance_bank_evidence": "Pohyby jsou doložené bankovním GPC. Tlačítko GPC stáhne originál banky; párování i zaúčtování zůstávají zachované.",

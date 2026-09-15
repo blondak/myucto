@@ -822,8 +822,18 @@ final class BankStatementAction
             // Stav se počítá výpisům, jejichž GPC se skládá ze zůstatků (API, převod z jiného programu).
             array_map('intval', array_column(array_filter($rows, static fn (array $row): bool => in_array($row['source'], ['bank_api', 'import'], true)), 'id')),
         );
+        // Měsíční výpis API se doplňuje z banky a smazat nejde (duplicitu maže
+        // jeho zdrojový výpis v detailu); seznam podle příznaku nenabídne koš.
+        $monthIds = [];
+        if ($rows !== []) {
+            $monthIds = array_flip(array_map('intval', $this->db->pdo()->query(
+                'SELECT statement_id FROM bank_api_months WHERE statement_id IN ('
+                . implode(',', array_map('intval', array_column($rows, 'id'))) . ')'
+            )->fetchAll(\PDO::FETCH_COLUMN)));
+        }
         foreach ($rows as &$r) {
             $r['id'] = (int) $r['id'];
+            $r['api_month'] = isset($monthIds[$r['id']]);
             $r['transaction_count'] = (int) $r['transaction_count'];
             $r['matched_count'] = (int) $r['matched_count'];
             $r['non_invoice_count'] = (int) $r['non_invoice_count'];
