@@ -286,6 +286,81 @@ final class CompanyBackupSqlFileReferenceSourceTest extends TestCase
         }
     }
 
+    public function testInvoiceAttachmentsKeepSameBasenameDistinctByInvoiceId(): void
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE supplier (id INTEGER PRIMARY KEY)');
+        $pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
+        $pdo->exec('CREATE TABLE invoice_attachments (id INTEGER PRIMARY KEY, invoice_id INTEGER, filename TEXT)');
+        $pdo->exec('INSERT INTO supplier (id) VALUES (7), (8)');
+        $pdo->exec('INSERT INTO invoices (id, supplier_id) VALUES (101, 7), (102, 7), (201, 8)');
+        $pdo->exec("INSERT INTO invoice_attachments (id, invoice_id, filename) VALUES
+            (11, 101, 'same.pdf'), (12, 102, 'same.pdf'),
+            (13, 201, 'same.pdf'), (14, 999, 'orphan.pdf')");
+        $registry = $this->invoiceAttachmentRegistry();
+        $area = $registry->definition('file-area:invoice-attachments');
+        self::assertNotNull($area);
+        $source = new CompanyBackupSqlFileReferenceSource(batchSize: 1);
+
+        $own = iterator_to_array($source->references($pdo, 7, $area, $registry));
+        self::assertSame(
+            ['sup-7/attachments/101/same.pdf',
+                'sup-7/attachments/102/same.pdf'],
+            array_column($own, 'sourcePath'),
+        );
+        self::assertSame(
+            [['id' => 11], ['id' => 12]],
+            array_column($own, 'primaryKey'),
+        );
+        self::assertSame(
+            ['table:invoice_attachments', 'table:invoice_attachments'],
+            array_column($own, 'registryKey'),
+        );
+        self::assertSame(['filename', 'filename'], array_column($own, 'column'));
+
+        $foreign = iterator_to_array($source->references($pdo, 8, $area, $registry));
+        self::assertSame([['id' => 13]], array_column($foreign, 'primaryKey'));
+        self::assertSame(
+            ['sup-8/attachments/201/same.pdf'],
+            array_column($foreign, 'sourcePath'),
+        );
+    }
+
+    public function testInvoiceAttachmentRejectsNullEmptyAndInvalidBasenamesInsteadOfSkipping(): void
+    {
+        foreach ([null, '', '../escape.pdf'] as $basename) {
+            $pdo = new PDO('sqlite::memory:');
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $pdo->exec('CREATE TABLE supplier (id INTEGER PRIMARY KEY)');
+            $pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
+            $pdo->exec('CREATE TABLE invoice_attachments (id INTEGER PRIMARY KEY, invoice_id INTEGER, filename TEXT)');
+            $pdo->exec('INSERT INTO supplier (id) VALUES (7)');
+            $pdo->exec('INSERT INTO invoices (id, supplier_id) VALUES (101, 7)');
+            $insert = $pdo->prepare(
+                'INSERT INTO invoice_attachments (id, invoice_id, filename)'
+                    . ' VALUES (11, 101, ?)',
+            );
+            self::assertInstanceOf(PDOStatement::class, $insert);
+            self::assertTrue($insert->execute([$basename]));
+            self::assertTrue($insert->closeCursor());
+            $registry = $this->invoiceAttachmentRegistry();
+            $area = $registry->definition('file-area:invoice-attachments');
+            self::assertNotNull($area);
+
+            try {
+                iterator_to_array(
+                    (new CompanyBackupSqlFileReferenceSource(batchSize: 1))
+                        ->references($pdo, 7, $area, $registry),
+                );
+                self::fail('Nesprávný basename nesmí být přes SQL filtr vynechán.');
+            } catch (CompanyBackupFileSourceException $e) {
+                self::assertSame('file_reference_path_invalid', $e->errorCode);
+                self::assertSame('file-area:invoice-attachments', $e->registryKey);
+            }
+        }
+    }
+
     /** @param list<array<string,mixed>> $rows */
     private function statement(array $rows): PDOStatement
     {
@@ -367,6 +442,58 @@ final class CompanyBackupSqlFileReferenceSourceTest extends TestCase
                     'file_owners' => [[
                         'registry_key' => 'table:stock_media',
                         'column' => 'storage_key',
+                        'path' => [],
+                        'stored_prefix' => '',
+                    ]],
+                ],
+            ),
+        ]);
+    }
+
+    private function invoiceAttachmentRegistry(): TenantDataRegistry
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        return new TenantDataRegistry(1, [
+            new TenantDataDefinition(
+                'table:invoice_attachments',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantOwnedIndirect,
+                [$profile],
+                [
+                    'primary_key' => ['id'],
+                    'ownership' => $this->invoiceOwnership(),
+                    'secrets' => [],
+                    'company_backup' => [
+                        'data_columns' => ['id', 'invoice_id', 'filename'],
+                        'embedded_references' => [],
+                        'generated_columns' => [],
+                        'omit_columns' => [],
+                        'references' => [[
+                            'columns' => ['invoice_id'],
+                            'target' => 'table:invoices',
+                            'target_columns' => ['id'],
+                            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                            'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                            'nullable_columns' => [],
+                            'fallbacks' => [],
+                        ]],
+                        'restore_overrides' => [],
+                    ],
+                ],
+            ),
+            new TenantDataDefinition(
+                'file-area:invoice-attachments',
+                TenantDataObjectKind::FileArea,
+                TenantDataPolicy::TenantOwned,
+                [$profile],
+                [
+                    'file_policy' => 'historical_optional',
+                    'ownership' => ['strategy' => 'database_references'],
+                    'path_policy' => 'supplier_invoice_attachment',
+                    'storage_subdirectory' => 'invoices',
+                    'file_owners' => [[
+                        'registry_key' => 'table:invoice_attachments',
+                        'column' => 'filename',
                         'path' => [],
                         'stored_prefix' => '',
                     ]],

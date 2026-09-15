@@ -15,6 +15,7 @@ enum CompanyBackupFilePathPolicy: string
     case Relative = 'relative';
     case SupplierContentHash = 'supplier_content_hash';
     case SupplierLogo = 'supplier_logo';
+    case SupplierInvoiceAttachment = 'supplier_invoice_attachment';
 
     public static function fromDefinition(TenantDataDefinition $definition): self
     {
@@ -43,16 +44,29 @@ enum CompanyBackupFilePathPolicy: string
                 $sourcePath,
                 $supplierId,
             ),
+            self::SupplierInvoiceAttachment => CompanyBackupInvoiceAttachmentFilePath::accepts(
+                $sourcePath,
+                $supplierId,
+            ),
         };
     }
 
     public function sourcePath(
         string $storedRelativePath,
         int $supplierId,
+        ?int $invoiceId = null,
     ): string {
         $storedRelativePath = CompanyBackupFileEntry::normalizeSourcePath(
             $storedRelativePath,
         );
+        if ($this === self::SupplierInvoiceAttachment) {
+            if ($invoiceId === null) {
+                throw new \InvalidArgumentException('ID faktury pro cestu přílohy chybí.');
+            }
+            return CompanyBackupInvoiceAttachmentFilePath::sourcePath(
+                $storedRelativePath, $supplierId, $invoiceId,
+            );
+        }
         if ($this === self::SupplierContentHash) {
             if ($supplierId < 1
                 || preg_match('/^[0-9a-f]{64}$/D', $storedRelativePath) !== 1
@@ -76,6 +90,11 @@ enum CompanyBackupFilePathPolicy: string
         if ($supplierId < 1 || !$this->accepts($sourcePath, $supplierId)) {
             throw new \InvalidArgumentException(
                 'Zdrojová cesta souboru neodpovídá obnovované firmě.',
+            );
+        }
+        if ($this === self::SupplierInvoiceAttachment) {
+            return CompanyBackupInvoiceAttachmentFilePath::storedFilename(
+                $sourcePath, $supplierId,
             );
         }
         if ($this !== self::SupplierContentHash) {
@@ -103,6 +122,7 @@ enum CompanyBackupFilePathPolicy: string
         string $sourcePath,
         int $sourceSupplierId,
         int $targetSupplierId,
+        ?int $targetInvoiceId = null,
     ): string {
         $sourcePath = CompanyBackupFileEntry::normalizeSourcePath($sourcePath);
         if ($sourceSupplierId < 1
@@ -111,6 +131,14 @@ enum CompanyBackupFilePathPolicy: string
         ) {
             throw new \InvalidArgumentException(
                 'Zdrojová cesta souboru neodpovídá obnovované firmě.',
+            );
+        }
+        if ($this === self::SupplierInvoiceAttachment) {
+            if ($targetInvoiceId === null) {
+                throw new \InvalidArgumentException('Cílové ID faktury pro přílohu chybí.');
+            }
+            return CompanyBackupInvoiceAttachmentFilePath::restoreTargetPath(
+                $sourcePath, $sourceSupplierId, $targetSupplierId, $targetInvoiceId,
             );
         }
         if ($this === self::Relative) {

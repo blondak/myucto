@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Backup\Company;
 
+use MyInvoice\Service\Backup\CanonicalJson;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
 use MyInvoice\Service\Backup\Registry\TenantDataObjectKind;
+use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 
 /** Exportní kontrakt runtime kořene jedné registrované souborové oblasti. */
@@ -48,15 +50,25 @@ final readonly class CompanyBackupFileAreaProjection
                 $registry,
             );
             foreach ($owners->owners as $owner) {
-                if (($pathPolicy === CompanyBackupFilePathPolicy::SupplierContentHash)
+                if (in_array($pathPolicy, [
+                        CompanyBackupFilePathPolicy::SupplierContentHash,
+                        CompanyBackupFilePathPolicy::SupplierInvoiceAttachment,
+                    ], true)
                     !== ($owner->storedPrefix === '')
                 ) {
                     throw new \InvalidArgumentException(
-                        'Content-addressed vlastník nemá jednoznačné kódování.',
+                        'Souborový vlastník nemá jednoznačné kódování.',
                     );
                 }
             }
-        } catch (\InvalidArgumentException $e) {
+            if ($pathPolicy === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment) {
+                self::assertInvoiceAttachmentContract(
+                    $subdirectory,
+                    $owners,
+                    $registry,
+                );
+            }
+        } catch (\InvalidArgumentException|CompanyBackupDataSourceException $e) {
             throw new CompanyBackupFileSourceException(
                 'file_area_metadata_invalid',
                 $definition->key,
@@ -71,6 +83,78 @@ final readonly class CompanyBackupFileAreaProjection
             $subdirectory,
             $owners,
         );
+    }
+
+    private static function assertInvoiceAttachmentContract(
+        string $subdirectory,
+        CompanyBackupFileOwnerSet $owners,
+        TenantDataRegistry $registry,
+    ): void {
+        $owner = $owners->owners[0] ?? null;
+        $target = $registry->definition('table:invoice_attachments');
+        if ($subdirectory !== 'invoices'
+            || count($owners->owners) !== 1
+            || !$owner instanceof CompanyBackupFileOwnerDefinition
+            || $owner->registryKey !== 'table:invoice_attachments'
+            || $owner->column !== 'filename'
+            || $owner->path !== []
+            || $owner->storedPrefix !== ''
+            || !$target instanceof TenantDataDefinition
+            || $target->kind !== TenantDataObjectKind::Table
+            || $target->policy !== TenantDataPolicy::TenantOwnedIndirect
+            || ($target->details['primary_key'] ?? null) !== ['id']
+        ) {
+            throw new \InvalidArgumentException(
+                'Oblast příloh nemá jednoznačného databázového vlastníka.',
+            );
+        }
+        $expectedOwnership = [
+            'strategy' => 'foreign_key_path',
+            'path' => [
+                ['from_column' => 'invoice_id', 'to_table' => 'invoices',
+                    'to_column' => 'id'],
+                ['from_column' => 'supplier_id', 'to_table' => 'supplier',
+                    'to_column' => 'id'],
+            ],
+        ];
+        if (CanonicalJson::encode($target->details['ownership'] ?? null)
+            !== CanonicalJson::encode($expectedOwnership)
+        ) {
+            throw new \InvalidArgumentException(
+                'Příloha nemá přímou tenantovou vazbu přes fakturu.',
+            );
+        }
+
+        $projection = CompanyBackupTableProjection::fromDefinition($target);
+        if ($projection->primaryKey !== ['id']
+            || !in_array('invoice_id', $projection->dataColumns, true)
+            || !in_array('filename', $projection->dataColumns, true)
+        ) {
+            throw new \InvalidArgumentException(
+                'Příloha nemá exportované ID faktury a název souboru.',
+            );
+        }
+        $invoiceReferences = array_values(array_filter(
+            $projection->references->references,
+            static fn (CompanyBackupReference $reference): bool =>
+                in_array('invoice_id', $reference->columns, true),
+        ));
+        $reference = $invoiceReferences[0] ?? null;
+        if (count($invoiceReferences) !== 1
+            || !$reference instanceof CompanyBackupReference
+            || $reference->columns !== ['invoice_id']
+            || $reference->target !== 'table:invoices'
+            || $reference->targetColumns !== ['id']
+            || $reference->mapping !== CompanyBackupReferenceMapping::TenantId
+            || $reference->constraint !== CompanyBackupReferenceConstraint::Required
+            || $reference->nullableColumns !== []
+            || $reference->fallbacks !== []
+            || $reference->condition !== null
+        ) {
+            throw new \InvalidArgumentException(
+                'Příloha nemá povinnou ne-null referenci na fakturu.',
+            );
+        }
     }
 
     private static function validSubdirectory(string $value): bool

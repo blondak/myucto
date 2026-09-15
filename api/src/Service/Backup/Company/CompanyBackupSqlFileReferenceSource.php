@@ -15,6 +15,7 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
     CompanyBackupFileReferenceSource
 {
     private const PATH_ALIAS = '_file_source_path';
+    private const INVOICE_ID_ALIAS = '_file_invoice_id';
 
     public function __construct(
         private int $batchSize = 1_000,
@@ -90,10 +91,22 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
                     }
                     $key[$column] = $row[$column];
                 }
+                $invoiceId = null;
+                if ($area->pathPolicy
+                    === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment
+                ) {
+                    $invoiceId = self::positiveId(
+                        $row[self::INVOICE_ID_ALIAS] ?? null,
+                    );
+                    if ($invoiceId === null) {
+                        throw $this->error('file_reference_row_invalid', $area);
+                    }
+                }
                 try {
                     $sourcePath = $area->pathPolicy->sourcePath(
                         $owner->relativeSourcePath($storedPath),
                         $supplierId,
+                        $invoiceId,
                     );
                 } catch (\InvalidArgumentException $e) {
                     throw $this->error(
@@ -155,12 +168,19 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
             $alias,
             $area->registryKey,
         );
+        $invoiceAttachment = $area->pathPolicy
+            === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment;
         $sql = 'SELECT ' . implode(', ', $keyColumns)
             . ', ' . $pathExpression . ' AS `' . self::PATH_ALIAS . '`'
+            . ($invoiceAttachment
+                ? ', ' . self::column($alias, 'invoice_id')
+                    . ' AS `' . self::INVOICE_ID_ALIAS . '`'
+                : '')
             . ' FROM ' . $table . ' AS ' . $quotedAlias
             . ' WHERE ' . $selection->where
-            . ' AND ' . $pathExpression . ' IS NOT NULL'
-            . " AND " . $pathExpression . " <> ''"
+            . ($invoiceAttachment ? ''
+                : ' AND ' . $pathExpression . ' IS NOT NULL'
+                    . " AND " . $pathExpression . " <> ''")
             . ' ORDER BY ' . implode(', ', $keyColumns)
             . ' LIMIT ' . $this->batchSize . ' OFFSET ' . $offset;
 
@@ -184,6 +204,9 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
             $statement = null;
 
             $expectedColumns = [...$primaryKey, self::PATH_ALIAS];
+            if ($invoiceAttachment) {
+                $expectedColumns[] = self::INVOICE_ID_ALIAS;
+            }
             foreach ($rows as $row) {
                 if (!is_array($row)
                     || array_is_list($row)
@@ -303,6 +326,25 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
     private static function column(string $alias, string $column): string
     {
         return '`' . $alias . '`.`' . $column . '`';
+    }
+
+    private static function positiveId(mixed $value): ?int
+    {
+        if (is_int($value)) {
+            return $value > 0 ? $value : null;
+        }
+        if (!is_string($value)
+            || preg_match('/^[1-9][0-9]*$/D', $value) !== 1
+            || strlen($value) > strlen((string) PHP_INT_MAX)
+        ) {
+            return null;
+        }
+        $parsed = filter_var(
+            $value,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]],
+        );
+        return is_int($parsed) ? $parsed : null;
     }
 
     private function error(
