@@ -215,6 +215,37 @@ final class CsobBankConnectorTest extends TestCase
         self::assertCount(1, $history);
     }
 
+    /** Denní GPC za den bez pohybu nese jen hlavičku; nesmí zastavit synchronizaci ani založit prázdný výpis. */
+    public function testSplitterSkipsDayWithoutTransactionsAndKeepsOtherDays(): void
+    {
+        $empty = substr(self::gpc(), 0, 130);
+        $splitter = new CsobGpcStatementSplitter(new GpcParser());
+
+        self::assertSame([], $splitter->split($empty));
+        $blocks = $splitter->split($empty . self::gpc(reference: '1000000000002'));
+        self::assertCount(1, $blocks);
+        self::assertSame(self::gpc(reference: '1000000000002'), $blocks[0]['content']);
+    }
+
+    public function testSplitterStillRejectsMalformedHeaderOfEmptyDay(): void
+    {
+        $this->expectException(BankConnectorException::class);
+        (new CsobGpcStatementSplitter(new GpcParser()))->split(substr_replace(substr(self::gpc(), 0, 130), 'X', 50, 1));
+    }
+
+    public function testDownloadWithOnlyEmptyDayImportsNothingAndDoesNotFail(): void
+    {
+        $empty = substr(self::gpc(), 0, 130);
+        $history = [];
+        $connector = $this->connector([$this->listResponse([['content' => $empty]]), new Response(200, [], $empty)], $history);
+        $today = $this->today()->format('Y-m-d');
+
+        $envelope = $connector->downloadStatement($this->credentials($connector), $today, $today);
+
+        self::assertSame([], $connector->statementFiles($envelope));
+        self::assertCount(2, $history);
+    }
+
     #[DataProvider('invalidStatements')]
     public function testSplitterRejectsAmbiguousOrMalformedBankEvidence(string $raw): void
     {
@@ -230,7 +261,6 @@ final class CsobBankConnectorTest extends TestCase
         yield 'missing currency' => [substr_replace($valid, '00000', 247, 5)];
         yield 'invalid posting date' => [substr_replace($valid, '310226', 252, 6)];
         yield 'invalid amount' => [substr_replace($valid, 'X', 178, 1)];
-        yield 'empty header only' => [substr($valid, 0, 130)];
         yield 'foreign block malformed' => [$valid . substr_replace(self::gpc(account: '2000000018'), 'X', 178, 1)];
         yield 'mixed currency block' => [$valid . substr(self::gpc(currency: '00978'), 130)];
         yield 'zip instead of gpc' => ["PK\x03\x04" . $valid];

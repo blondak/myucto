@@ -57,7 +57,10 @@ final class CsobGpcStatementSplitter
                     throw $this->invalid();
                 }
             }
-            if (!$hasTransaction) throw $this->invalid();
+            // Denní výpis za den bez pohybu nese jen hlavičku 074. Hlavička je výš
+            // ověřená, pohyb žádný není, takže se blok přeskočí; jako chyba by
+            // jediný takový soubor zastavil synchronizaci, dokud v ČSOB nezestárne.
+            if (!$hasTransaction) continue;
             try {
                 $parsed = $this->parser->parse($block);
             } catch (\Throwable) {
