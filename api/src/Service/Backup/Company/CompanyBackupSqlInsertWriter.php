@@ -96,7 +96,7 @@ final class CompanyBackupSqlInsertWriter
     /** @param array<string,mixed> $protectedValues */
     public function insert(
         CompanyBackupPreparedImportRow $prepared,
-        array $protectedValues = [],
+        #[\SensitiveParameter] array $protectedValues = [],
     ): void {
         $this->assertOpen();
         $this->assertTransaction('import_transaction_lost');
@@ -163,10 +163,15 @@ final class CompanyBackupSqlInsertWriter
             } catch (\Throwable) {
                 // Primární bezpečná chyba INSERTu má přednost před úklidem.
             }
+            // Token veřejného odkazu umožňuje přístup k výkazům. PDO driver může
+            // zapsat bindovanou hodnotu do message i errorInfo při libovolné
+            // chybě INSERTu, proto zde nepřenášíme původní výjimku.
             throw self::error(
                 'import_row_insert_failed',
                 $this->projection->registryKey,
-                previous: $e,
+                previous: $this->projection->registryKey
+                    === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY
+                    ? null : $e,
             );
         }
         $this->inserted++;

@@ -44,6 +44,32 @@ final readonly class CompanyBackupDataPreflight
         $result = null;
         $failure = null;
         try {
+            $hasWorkReportLinks = false;
+            foreach ($validation->inspection->dataInventory->objects as $object) {
+                if ($object->registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY) {
+                    $hasWorkReportLinks = true;
+                    break;
+                }
+            }
+            $linkCollector = $hasWorkReportLinks
+                ? new CompanyBackupWorkReportLinkPreflightInventoryCollector($this->limits)
+                : null;
+            if ($linkCollector !== null) {
+                $payload = $source->secretPayload();
+                if ($payload === null) {
+                    throw new CompanyBackupPreflightException(
+                        'work_report_link_secret_payload_missing',
+                        CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY,
+                        CompanyBackupWorkReportLinkPolicy::COLUMN,
+                    );
+                }
+                foreach ($payload->values() as $value) {
+                    if ($value->registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY) {
+                        $linkCollector->acceptSecret($value);
+                    }
+                }
+                unset($value, $payload);
+            }
             $index = new CompanyBackupSqlSourceIdentityIndex($database, $this->limits);
             $aggregateIndex = $this->usesStatutoryResultAggregate($validation)
                 ? new CompanyBackupPayrollStatutoryResultSetSourceIndex(
@@ -69,7 +95,13 @@ final readonly class CompanyBackupDataPreflight
                         &$bankAccountCollision,
                         &$pendingApprovalRequestCount,
                         $database,
+                        $linkCollector,
                     ): void {
+                        if ($linkCollector !== null
+                            && $object->registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY
+                        ) {
+                            $linkCollector->acceptRow($row);
+                        }
                         $index->add($context['identity']->identityForRow($row));
                         CompanyBackupSubmissionCorrelationGuard::assertAvailable($database, $object->registryKey, $row);
                         CompanyBackupIsdsGatewayTokenGuard::assertAvailable($database, $object->registryKey, $row);
@@ -109,6 +141,7 @@ final readonly class CompanyBackupDataPreflight
             }
             $index->seal();
             $aggregateIndex?->seal();
+            $linkInventory = $linkCollector?->finish($database);
 
             $collector = new CompanyBackupExternalReferenceCollector($this->limits);
             $integrity = new CompanyBackupReferenceIntegrityValidator(
@@ -223,6 +256,7 @@ final readonly class CompanyBackupDataPreflight
                 $bankAccountCollision,
                 new CompanyBackupSkippedInvoiceCounters($skippedCounters),
                 $pendingApprovalRequestCount,
+                $linkInventory,
             );
         } catch (\Throwable $e) {
             $failure = $e;
