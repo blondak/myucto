@@ -747,6 +747,7 @@ final class TenantDataRegistryFactory
             ...CompanyBackupTaxProfileDefinitions::definitions(),
             CompanyBackupSupplierDomainsDefinition::definition(),
             CompanyBackupSubmissionRecipientsDefinition::definition(),
+            CompanyBackupWorkReportLinksDefinition::definition(),
             ...CompanyBackupInstanceSecurityDefinitions::definitions(),
             ...CompanyBackupLookupCacheDefinitions::definitions(),
         ];

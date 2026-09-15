@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Backup\Registry;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupWorkReportLinksProjection;
 
-/** Neaktivní kontrakt: projektový odkaz musí mít vazbu už při prvním INSERT. */
+/** Kontrakt odkazů v neúplném company profilu; projektová vazba platí už při INSERT. */
 final class CompanyBackupWorkReportLinksDefinition
 {
     public static function definition(): TenantDataDefinition
