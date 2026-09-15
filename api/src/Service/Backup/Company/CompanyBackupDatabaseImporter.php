@@ -681,6 +681,14 @@ final readonly class CompanyBackupDatabaseImporter implements CompanyBackupDatab
                         CompanyBackupIsdsGatewayTokenGuard::assertAvailable(
                             $this->database, $definition->key, $prepared->row,
                         );
+                        if ($definition->key === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY) {
+                            CompanyBackupWorkReportLinkRelationGuard::assertValid($this->database, [
+                                'supplier_id' => $prepared->row['supplier_id'] ?? null,
+                                'client_id' => $prepared->row['client_id'] ?? null,
+                                'project_id' => $prepared->row['project_id'] ?? null,
+                                'scope' => $prepared->row['scope'] ?? null,
+                            ]);
+                        }
                         if ($supplierCurrencyCycle && $definition->key === 'table:supplier') {
                             CompanyBackupSupplierCurrencyCycle::insert($this->database,
                                 static fn () => $writer->insert($prepared, $protected));

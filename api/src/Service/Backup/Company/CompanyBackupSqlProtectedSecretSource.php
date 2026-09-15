@@ -87,6 +87,19 @@ final readonly class CompanyBackupSqlProtectedSecretSource implements
                 }
                 foreach ($projection->columns as $column) {
                     $stored = $row[$column];
+                    if ($projection->registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY
+                        && $column === CompanyBackupWorkReportLinkPolicy::COLUMN
+                    ) {
+                        try {
+                            CompanyBackupWorkReportLinkPolicy::restoreToken($stored, false);
+                        } catch (CompanyBackupPreflightException) {
+                            throw new CompanyBackupDataSourceException(
+                                'secret_source_value_invalid',
+                                $projection->registryKey,
+                                $column,
+                            );
+                        }
+                    }
                     if ($stored === null || $stored === '') {
                         continue;
                     }

@@ -395,6 +395,10 @@ final class TenantPredicateTest extends TestCase
         // jednu firmu by limit rozbilo — každá firma by měla vlastní počet.
         'SeatPolicy.php::seatConditionSql' => 'licenční místa se počítají za celou instalaci',
 
+        // Veřejný token má globální UNIQUE index; kolize při obnově musí zahrnout
+        // všechny firmy i revokované odkazy, cílové odkazy přitom nemění.
+        'CompanyBackupWorkReportLinkCollisionLookup.php::hasCollision' => 'kontrola globální unikátnosti veřejného tokenu',
+
         // Superadmin-only endpointy (jinak 403) — globální rozsah je jejich smysl.
         'ListSentEmailsAction.php::__invoke'         => 'superadmin přehled odeslaných e-mailů napříč instancí',
         'SetupSampleAction.php::__invoke'            => 'setup wizard nad prázdnou DB, superadmin-only',

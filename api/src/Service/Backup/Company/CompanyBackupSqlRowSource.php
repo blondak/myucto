@@ -118,7 +118,16 @@ final readonly class CompanyBackupSqlRowSource implements CompanyBackupDataRowSo
                 // Materializuje se jen snapshot, zdrojový výpis zůstává nedotčený.
                 $row['supplier_id'] = $supplierId;
             }
-            $result[] = $this->encodeColumns($row, $projection);
+            $encoded = $this->encodeColumns($row, $projection);
+            if ($projection->registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY) {
+                CompanyBackupWorkReportLinkRelationGuard::assertValid($snapshot, [
+                    'supplier_id' => $encoded['supplier_id'] ?? null,
+                    'client_id' => $encoded['client_id'] ?? null,
+                    'project_id' => $encoded['project_id'] ?? null,
+                    'scope' => $encoded['scope'] ?? null,
+                ]);
+            }
+            $result[] = $encoded;
         }
         return $result;
     }

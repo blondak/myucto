@@ -79,6 +79,15 @@ final readonly class CompanyBackupJsonlWriter
                         $rowNumber,
                     );
                 }
+                if ($registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY
+                    && array_key_exists(CompanyBackupWorkReportLinkPolicy::COLUMN, $row)
+                ) {
+                    throw new CompanyBackupDataWriteException(
+                        'data_row_invalid',
+                        $registryKey,
+                        $rowNumber,
+                    );
+                }
                 try {
                     $line = CanonicalJson::encode($row) . "\n";
                 } catch (\Throwable $e) {

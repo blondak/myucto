@@ -79,6 +79,17 @@ final readonly class CompanyBackupRawSecretMaterialization
             throw new CompanyBackupDataSourceException('secret_restore_value_invalid',
                 $this->registryKey, $this->secretColumn);
         }
+        // Tento raw secret je zároveň veřejný bearer token; délka sama nestačí.
+        if ($this->registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY
+            && $this->secretColumn === CompanyBackupWorkReportLinkPolicy::COLUMN
+        ) {
+            try {
+                CompanyBackupWorkReportLinkPolicy::restoreToken($value->plaintext(), false);
+            } catch (CompanyBackupPreflightException) {
+                throw new CompanyBackupDataSourceException('secret_restore_value_invalid',
+                    $this->registryKey, $this->secretColumn);
+            }
+        }
     }
 
     private static function invalid(string $registryKey): CompanyBackupDataSourceException
