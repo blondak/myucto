@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\CanonicalJson;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
+use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileRestoreException;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlFilePathMap;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
@@ -15,6 +16,7 @@ use MyInvoice\Service\Backup\Registry\TenantDataPolicy;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot;
 use PDO;
+use PDOStatement;
 use PHPUnit\Framework\TestCase;
 
 final class CompanyBackupSqlFilePathMapTest extends TestCase
@@ -194,6 +196,196 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
 
         $map->close();
         self::assertTrue($database->inTransaction());
+        self::assertTrue($database->rollBack());
+    }
+
+    public function testFinishChecksEverySharedMissingFileOwnerAgainstPublicationPath(): void
+    {
+        $database = $this->database();
+        $snapshot = $this->snapshot();
+        $inventory = $this->sharedInventory($snapshot);
+        self::assertTrue($database->beginTransaction());
+        $map = new CompanyBackupSqlFilePathMap(
+            $database, $inventory, $snapshot, $snapshot,
+        );
+        $storedPath = 'storage/supplier-logos/sup-7.png';
+
+        $supplier = $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7, 'logo_path' => $storedPath],
+            ['id' => 41, 'logo_path' => $storedPath],
+            true,
+        );
+        $invoiceDocument = CanonicalJson::encode(['logo_path' => $storedPath]);
+        $invoice = $map->transform(
+            $this->projection($snapshot, 'table:invoices'),
+            ['id' => 31, 'supplier_snapshot' => $invoiceDocument],
+            ['id' => 91, 'supplier_snapshot' => $invoiceDocument],
+            true,
+        );
+        self::assertSame(
+            'storage/supplier-logos/sup-41.png',
+            $supplier['logo_path'],
+        );
+        self::assertSame(
+            CanonicalJson::encode([
+                'logo_path' => 'storage/supplier-logos/sup-41.png',
+            ]),
+            $invoice['supplier_snapshot'],
+        );
+
+        $deferred = $map->transform(
+            $this->projection($snapshot, 'table:invoices'),
+            ['id' => 31, 'supplier_snapshot' => $invoiceDocument],
+            ['id' => 91, 'supplier_snapshot' => $invoiceDocument],
+            false,
+        );
+        self::assertSame($invoice, $deferred);
+        $map->finish();
+        self::assertSame(1, $map->fileEntryCount());
+        self::assertSame(2, $map->ownerEntryCount());
+        self::assertSame(1, $map->publicationPlan()->missingEntryCount());
+        self::assertSame(
+            'sup-41.png',
+            $map->publicationPlan()->entries[0]->targetPath,
+        );
+        $map->close();
+        self::assertTrue($database->rollBack());
+    }
+
+    public function testFinishRejectsTamperedOwnerTargetPathAndCleansTemporaryMap(): void
+    {
+        $database = new PDO('sqlite::memory:', options: [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        ]);
+        $snapshot = $this->snapshot();
+        self::assertTrue($database->beginTransaction());
+        $map = new CompanyBackupSqlFilePathMap(
+            $database,
+            $this->sharedInventory($snapshot),
+            $snapshot,
+            $snapshot,
+        );
+        $storedPath = 'storage/supplier-logos/sup-7.png';
+        $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7, 'logo_path' => $storedPath],
+            ['id' => 41, 'logo_path' => $storedPath],
+            true,
+        );
+        $document = CanonicalJson::encode(['logo_path' => $storedPath]);
+        $map->transform(
+            $this->projection($snapshot, 'table:invoices'),
+            ['id' => 31, 'supplier_snapshot' => $document],
+            ['id' => 91, 'supplier_snapshot' => $document],
+            true,
+        );
+
+        $temporaryStatement = $database->query(
+            "SELECT name FROM sqlite_temp_master WHERE name LIKE 'company_backup_file_path_%'",
+        );
+        self::assertInstanceOf(PDOStatement::class, $temporaryStatement);
+        $temporaryName = $temporaryStatement->fetchColumn();
+        self::assertTrue($temporaryStatement->closeCursor());
+        self::assertIsString($temporaryName);
+        self::assertSame(1, $database->exec(
+            'UPDATE "' . $temporaryName . '" SET target_path = '
+            . "'sup-999.png' WHERE owner_payload LIKE '%table:supplier%'",
+        ));
+        try {
+            $map->transform(
+                $this->projection($snapshot, 'table:supplier'),
+                ['id' => 7, 'logo_path' => $storedPath],
+                ['id' => 41, 'logo_path' => $storedPath],
+                false,
+            );
+            self::fail('Odložený průchod musí porovnat uloženou cílovou cestu.');
+        } catch (CompanyBackupFileRestoreException $e) {
+            self::assertSame('file_restore_publication_path_mismatch', $e->errorCode);
+        }
+        try {
+            $map->finish();
+            self::fail('Publikační plán nesmí obejít přepsanou cestu jednoho vlastníka.');
+        } catch (CompanyBackupFileRestoreException $e) {
+            self::assertSame('file_restore_publication_path_mismatch', $e->errorCode);
+        }
+        $map->close();
+        $cleanupStatement = $database->query(
+            "SELECT COUNT(*) FROM sqlite_temp_master WHERE name LIKE 'company_backup_file_path_%'",
+        );
+        self::assertInstanceOf(PDOStatement::class, $cleanupStatement);
+        self::assertSame(0, $cleanupStatement->fetchColumn());
+        self::assertTrue($cleanupStatement->closeCursor());
+        self::assertTrue($database->rollBack());
+    }
+
+    public function testEmptyInventoryLeavesNullablePathsUnchangedAndBuildsEmptyPlan(): void
+    {
+        $database = $this->database();
+        $snapshot = $this->snapshot();
+        $raw = $this->inventory($snapshot)->toArray();
+        $raw['areas'][0]['entries'] = [];
+        $inventory = CompanyBackupFileInventory::fromArray($raw, $snapshot);
+        self::assertTrue($database->beginTransaction());
+        $map = new CompanyBackupSqlFilePathMap(
+            $database, $inventory, $snapshot, $snapshot,
+        );
+        $supplier = ['id' => 41, 'logo_path' => null];
+        self::assertSame($supplier, $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7, 'logo_path' => null],
+            $supplier,
+            true,
+        ));
+        $document = CanonicalJson::encode(['logo_path' => null]);
+        $invoice = ['id' => 91, 'supplier_snapshot' => $document];
+        self::assertSame($invoice, $map->transform(
+            $this->projection($snapshot, 'table:invoices'),
+            ['id' => 31, 'supplier_snapshot' => $document],
+            $invoice,
+            true,
+        ));
+        $map->finish();
+        self::assertSame([], $map->publicationPlan()->entries);
+        $map->close();
+        self::assertTrue($database->rollBack());
+    }
+
+    public function testTargetPathStorageRespectsIndexByteLimitBeforeConsumption(): void
+    {
+        $database = $this->database();
+        $snapshot = $this->snapshot();
+        $inventory = $this->inventory($snapshot);
+        self::assertTrue($database->beginTransaction());
+        $unlimited = new CompanyBackupSqlFilePathMap(
+            $database, $inventory, $snapshot, $snapshot,
+        );
+        $initialBytes = $unlimited->indexedBytes();
+        $unlimited->close();
+
+        $map = new CompanyBackupSqlFilePathMap(
+            $database,
+            $inventory,
+            $snapshot,
+            $snapshot,
+            new CompanyBackupArchiveLimits(
+                maxSourceIndexBytes: $initialBytes + strlen('sup-41.png') - 1,
+            ),
+        );
+        $storedPath = 'storage/supplier-logos/sup-7.png';
+        try {
+            $map->transform(
+                $this->projection($snapshot, 'table:supplier'),
+                ['id' => 7, 'logo_path' => $storedPath],
+                ['id' => 41, 'logo_path' => $storedPath],
+                true,
+            );
+            self::fail('Cílová cesta nesmí překročit omezenou SQL mapu.');
+        } catch (CompanyBackupFileRestoreException $e) {
+            self::assertSame('file_restore_owner_size_exceeded', $e->errorCode);
+        }
+        self::assertSame($initialBytes, $map->indexedBytes());
+        $map->close();
         self::assertTrue($database->rollBack());
     }
 
@@ -417,6 +609,23 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
                 ]],
             ]],
         ], $snapshot);
+    }
+
+    private function sharedInventory(
+        TenantDataRegistrySnapshot $snapshot,
+    ): CompanyBackupFileInventory {
+        $raw = $this->inventory($snapshot)->toArray();
+        $invoiceOwner = $raw['areas'][0]['entries'][0]['owners'][0];
+        $supplierOwner = $raw['areas'][0]['entries'][1]['owners'][0];
+        $raw['areas'][0]['entries'] = [[
+            'source_path' => 'sup-7.png',
+            'archive_path' => null,
+            'state' => 'missing',
+            'bytes' => null,
+            'sha256' => null,
+            'owners' => [$invoiceOwner, $supplierOwner],
+        ]];
+        return CompanyBackupFileInventory::fromArray($raw, $snapshot);
     }
 
     private function contentInventory(

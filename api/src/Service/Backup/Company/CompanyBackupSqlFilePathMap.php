@@ -94,6 +94,7 @@ final class CompanyBackupSqlFilePathMap
                         . '`area_registry_key` VARCHAR(191) CHARACTER SET ascii'
                         . ' COLLATE ascii_bin NOT NULL,'
                         . '`source_path` VARBINARY(1024) NOT NULL,'
+                        . '`target_path` VARBINARY(1024) NULL,'
                         . '`consumed` TINYINT UNSIGNED NOT NULL DEFAULT 0,'
                         . 'PRIMARY KEY (`owner_id`)'
                         . ') ENGINE=InnoDB',
@@ -104,6 +105,7 @@ final class CompanyBackupSqlFilePathMap
                         . 'owner_payload BLOB NOT NULL,'
                         . 'area_registry_key TEXT NOT NULL,'
                         . 'source_path BLOB NOT NULL,'
+                        . 'target_path BLOB NULL,'
                         . 'consumed INTEGER NOT NULL DEFAULT 0'
                         . ')',
                 );
@@ -113,7 +115,8 @@ final class CompanyBackupSqlFilePathMap
                 );
             }
             $select = $database->prepare(
-                'SELECT owner_payload, area_registry_key, source_path, consumed'
+                'SELECT owner_payload, area_registry_key, source_path,'
+                    . ' target_path, consumed'
                     . ' FROM ' . $this->quotedTable
                     . ' WHERE owner_id = ?',
             );
@@ -123,7 +126,8 @@ final class CompanyBackupSqlFilePathMap
                     . ' VALUES (?, ?, ?, ?)',
             );
             $consume = $database->prepare(
-                'UPDATE ' . $this->quotedTable . ' SET consumed = 1'
+                'UPDATE ' . $this->quotedTable
+                    . ' SET consumed = 1, target_path = ?'
                     . ' WHERE owner_id = ? AND consumed = 0',
             );
             if (!$select instanceof PDOStatement
@@ -261,11 +265,24 @@ final class CompanyBackupSqlFilePathMap
                         $area->registryKey,
                     );
                 }
-                $this->markConsumed($ownerId, $area->registryKey);
+                $targetPathBytes = strlen($targetPath);
+                if ($targetPathBytes > 1_024
+                    || $targetPathBytes
+                        > $this->limits->maxSourceIndexBytes - $this->indexedBytes
+                ) {
+                    throw self::error(
+                        'file_restore_owner_size_exceeded',
+                        $area->registryKey,
+                    );
+                }
+                $this->markConsumed($ownerId, $targetPath, $area->registryKey);
                 $this->consumedOwners++;
+                $this->indexedBytes += $targetPathBytes;
             } elseif (!$binding['consumed']) {
+                throw self::error('file_restore_owner_not_consumed', $area->registryKey);
+            } elseif ($binding['target_path'] !== $targetPath) {
                 throw self::error(
-                    'file_restore_owner_not_consumed',
+                    'file_restore_publication_path_mismatch',
                     $area->registryKey,
                 );
             }
@@ -320,6 +337,14 @@ final class CompanyBackupSqlFilePathMap
         ) {
             throw self::error('file_restore_owner_unconsumed');
         }
+        $publicationPlan = CompanyBackupFilePublicationPlan::fromInventory(
+            $this->inventory,
+            $this->targetRegistry,
+            $this->sourceSupplierId,
+            $this->targetSupplierId,
+        );
+        $this->assertPublicationPaths($publicationPlan);
+        $this->publicationPlan = $publicationPlan;
         $this->finished = true;
     }
 
@@ -578,15 +603,51 @@ final class CompanyBackupSqlFilePathMap
             return;
         }
 
-        $publicationPlan = CompanyBackupFilePublicationPlan::fromInventory(
-            $this->inventory,
-            $this->targetRegistry,
-            $sourceId,
-            $targetId,
-        );
         $this->sourceSupplierId = $sourceId;
         $this->targetSupplierId = $targetId;
-        $this->publicationPlan = $publicationPlan;
+    }
+
+    private function assertPublicationPaths(
+        CompanyBackupFilePublicationPlan $plan,
+    ): void {
+        $entryIndex = 0;
+        foreach ($this->inventory->areas as $area) {
+            foreach ($area->entries as $entry) {
+                $published = $plan->entries[$entryIndex] ?? null;
+                if (!$published instanceof CompanyBackupFilePublicationEntry
+                    || $published->registryKey !== $area->registryKey
+                    || $published->sourcePath !== $entry->sourcePath
+                ) {
+                    throw self::error(
+                        'file_restore_publication_path_mismatch',
+                        $area->registryKey,
+                    );
+                }
+                foreach ($entry->owners as $owner) {
+                    $payload = CanonicalJson::encode($owner);
+                    $binding = $this->lookup(
+                        hash('sha256', $payload),
+                        $area->registryKey,
+                    );
+                    if ($binding === null
+                        || !hash_equals($payload, $binding['owner_payload'])
+                        || $binding['area_registry_key'] !== $area->registryKey
+                        || $binding['source_path'] !== $entry->sourcePath
+                        || !$binding['consumed']
+                        || $binding['target_path'] !== $published->targetPath
+                    ) {
+                        throw self::error(
+                            'file_restore_publication_path_mismatch',
+                            $area->registryKey,
+                        );
+                    }
+                }
+                $entryIndex++;
+            }
+        }
+        if ($entryIndex !== count($plan->entries)) {
+            throw self::error('file_restore_publication_path_mismatch');
+        }
     }
 
     /**
@@ -772,6 +833,7 @@ final class CompanyBackupSqlFilePathMap
      *   owner_payload:string,
      *   area_registry_key:string,
      *   source_path:string,
+     *   target_path:?string,
      *   consumed:bool
      * }|null
      */
@@ -816,12 +878,15 @@ final class CompanyBackupSqlFilePathMap
                 'owner_payload',
                 'area_registry_key',
                 'source_path',
+                'target_path',
                 'consumed',
             ]
             || !is_string($row['owner_payload'])
             || !is_string($row['area_registry_key'])
             || !is_string($row['source_path'])
+            || !($row['target_path'] === null || is_string($row['target_path']))
             || !in_array($row['consumed'], [0, 1, '0', '1'], true)
+            || ((int) $row['consumed'] === 1) !== is_string($row['target_path'])
         ) {
             throw self::error(
                 'file_restore_map_corrupted',
@@ -832,6 +897,9 @@ final class CompanyBackupSqlFilePathMap
             $sourcePath = CompanyBackupFileEntry::normalizeSourcePath(
                 $row['source_path'],
             );
+            $targetPath = is_string($row['target_path'])
+                ? CompanyBackupFileEntry::normalizeSourcePath($row['target_path'])
+                : null;
         } catch (\InvalidArgumentException $e) {
             throw self::error(
                 'file_restore_map_corrupted',
@@ -843,6 +911,7 @@ final class CompanyBackupSqlFilePathMap
             'owner_payload' => $row['owner_payload'],
             'area_registry_key' => $row['area_registry_key'],
             'source_path' => $sourcePath,
+            'target_path' => $targetPath,
             'consumed' => (int) $row['consumed'] === 1,
         ];
     }
@@ -889,6 +958,7 @@ final class CompanyBackupSqlFilePathMap
 
     private function markConsumed(
         string $ownerId,
+        string $targetPath,
         string $areaRegistryKey,
     ): void {
         $statement = $this->consume;
@@ -896,7 +966,7 @@ final class CompanyBackupSqlFilePathMap
             throw self::error('file_restore_map_closed', $areaRegistryKey);
         }
         try {
-            if (!$statement->execute([$ownerId])
+            if (!$statement->execute([$targetPath, $ownerId])
                 || $statement->rowCount() !== 1
                 || !$statement->closeCursor()
             ) {
