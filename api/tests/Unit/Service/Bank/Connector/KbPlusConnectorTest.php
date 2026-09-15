@@ -188,6 +188,55 @@ final class KbPlusConnectorTest extends TestCase
         $this->vault->encode(['api_plan' => 'pro'] + $this->credentials('', 'adaa'));
     }
 
+    /** Basic ukládá každý den jako originál výpisu banky, aby ho import spároval s dřívějšími pohyby z ADAA. */
+    public function testBasicStatementFilesAreBankDocumentsPerDay(): void
+    {
+        $this->api->method('statements')->willReturn([self::kmFile()]);
+        $token = $this->vault->encode(
+            ['api_plan' => 'basic', 'account_iban' => 'CZ0401000000191000000005'] + $this->credentials('', 'statda'),
+        );
+
+        $files = $this->connector->statementFiles($this->connector->downloadStatement($token, '2026-09-14', '2026-09-14'));
+
+        self::assertCount(1, $files);
+        self::assertSame('gpc', $files[0]['source']);
+        self::assertSame(self::kmFile(), $files[0]['content']);
+        self::assertMatchesRegularExpression('/^kb-km-2026-09-14-[a-f0-9]{12}\.gpc$/D', $files[0]['filename']);
+        self::assertSame('0000191000000005', $files[0]['parsed']['header']['account_number']);
+        self::assertSame(10989.9, $files[0]['parsed']['header']['curr_balance']);
+        self::assertSame('0000001000000005', $files[0]['parsed']['transactions'][0]['counterparty_account']);
+    }
+
+    public function testPlusStatementFilesKeepSingleApiRecord(): void
+    {
+        $this->api->method('transactions')->willReturn(['transactions' => [], 'pages' => 1]);
+        $content = $this->connector->downloadStatement($this->vault->encode($this->credentials('', 'adaa')), '2026-09-14', '2026-09-14');
+
+        $files = $this->connector->statementFiles($content);
+
+        self::assertCount(1, $files);
+        self::assertSame(
+            ['content' => $content, 'filename' => 'kb_plus-2026-09-14-2026-09-14.json', 'source' => 'bank_api'],
+            array_diff_key($files[0], ['parsed' => true]),
+        );
+        self::assertSame([], $files[0]['parsed']['transactions']);
+    }
+
+    /** Ověření účtu u Basic nesmí spotřebovat jedno z 50 měsíčních stažení. */
+    public function testBasicAccountVerificationDoesNotCallBank(): void
+    {
+        $this->api->expects(self::never())->method('statements');
+        $this->api->expects(self::never())->method('refreshAccessToken');
+        $token = $this->vault->encode(
+            ['api_plan' => 'basic', 'account_iban' => 'CZ0401000000191000000005'] + $this->credentials('', 'statda'),
+        );
+
+        self::assertSame(
+            ['account_number' => 'CZ0401000000191000000005', 'bank_code' => '0100', 'currency' => 'CZK'],
+            $this->connector->verifyAccount($token),
+        );
+    }
+
     /** Syntetický výpis KM účtu 19-1000000005/0100: příchozí platba a poplatek, účty ve vnitřním formátu. */
     private static function kmFile(): string
     {

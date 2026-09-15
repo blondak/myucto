@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank\Connector;
 
 final class KbPlusConnector implements
-    StructuredBankConnector,
+    MultiFileBankConnector,
     BankConnectorCredentialKeyProvider,
     BankPaymentCapabilityProvider,
     BankConnectorSyncPacing
@@ -56,6 +56,29 @@ final class KbPlusConnector implements
         return $existing;
     }
 
+    /**
+     * Basic ověří účet z údajů uložených při souhlasu, aby ověření nespotřebovalo
+     * jedno z 50 měsíčních stažení. Plus ověřuje dotazem na dnešní pohyby jako dřív.
+     */
+    public function verifyAccount(#[\SensitiveParameter] string $credentials): array
+    {
+        $values = $this->vault->decode($credentials);
+        $identity = ['account_number' => (string) $values['account_iban'], 'bank_code' => '0100', 'currency' => (string) $values['account_currency']];
+        if (KbPlusCredentialVault::plan($values) === KbPlusCredentialVault::PLAN_BASIC) {
+            return $identity;
+        }
+        $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $content = $this->downloadStatement($credentials, $today, $today);
+        try {
+            $identity['account_number'] = (string) $this->parseStatement($content)['header']['account_number'];
+        } catch (BankConnectorException $e) {
+            throw $e;
+        } catch (\RuntimeException) {
+            throw new BankConnectorException('statement_invalid', 'Pohyby KB+ nemají platný formát.');
+        }
+        return $identity;
+    }
+
     public function downloadStatement(#[\SensitiveParameter] string $token, string $from, string $to): string
     {
         $credentials = $this->vault->decode($token);
@@ -71,7 +94,7 @@ final class KbPlusConnector implements
             $from,
             $to,
         );
-        return $this->envelope([
+        return $this->encodeEnvelope([
             'account_number' => $credentials['account_iban'],
             'currency' => $credentials['account_currency'],
             'from' => $from,
@@ -82,32 +105,49 @@ final class KbPlusConnector implements
 
     public function parseStatement(#[\SensitiveParameter] string $content): array
     {
-        try {
-            $data = json_decode($content, true, 64, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            throw new \RuntimeException('KB+ statement envelope is invalid.');
-        }
-        $isKm = is_array($data) && ($data['format'] ?? null) === self::STATEMENT_FORMAT_KM;
-        $keys = $isKm
-            ? ['account_number', 'currency', 'from', 'to', 'format', 'files']
-            : ['account_number', 'currency', 'from', 'to', 'transactions'];
-        if (!is_array($data) || array_is_list($data) || array_diff(array_keys($data), $keys) !== []) {
-            throw new \RuntimeException('KB+ statement envelope is invalid.');
-        }
-        $account = is_string($data['account_number'] ?? null) ? $data['account_number'] : '';
-        $currency = is_string($data['currency'] ?? null) ? $data['currency'] : '';
-        $from = is_string($data['from'] ?? null) ? $data['from'] : '';
-        $to = is_string($data['to'] ?? null) ? $data['to'] : '';
-        if ($isKm) {
-            return $this->kmParser->parse($this->kmFiles($data['files'] ?? null), $account, $currency, $from, $to);
+        $data = $this->decodeEnvelope($content);
+        if (($data['format'] ?? null) === self::STATEMENT_FORMAT_KM) {
+            return $this->kmParser->parse($this->kmFiles($data['files'] ?? null), $data['account_number'], $data['currency'], $data['from'], $data['to']);
         }
         return $this->parser->parse(
             is_array($data['transactions'] ?? null) ? $data['transactions'] : [],
-            $account,
-            $currency,
-            $from,
-            $to,
+            $data['account_number'],
+            $data['currency'],
+            $data['from'],
+            $data['to'],
         );
+    }
+
+    /**
+     * Plus: jeden záznam pohybů ADAA za období (zdroj bank_api, beze změny).
+     * Basic: každý obchodní den výpisu KM je originál výpisu banky (zdroj gpc),
+     * takže ho import spáruje s pohyby načtenými dříve přes ADAA a nezdvojí je.
+     */
+    public function statementFiles(#[\SensitiveParameter] string $content): array
+    {
+        $data = $this->decodeEnvelope($content);
+        if (($data['format'] ?? null) !== self::STATEMENT_FORMAT_KM) {
+            return [[
+                'content' => $content,
+                'filename' => sprintf('kb_plus-%s-%s.json', $data['from'], $data['to']),
+                'parsed' => $this->parseStatement($content),
+                'source' => 'bank_api',
+            ]];
+        }
+        $files = [];
+        foreach ($this->kmParser->statements($this->kmFiles($data['files'] ?? null), $data['account_number'], $data['currency']) as $statement) {
+            $files[] = [
+                'content' => $statement['content'],
+                'filename' => sprintf(
+                    'kb-km-%s-%s.gpc',
+                    $statement['parsed']['header']['statement_date'],
+                    substr(hash('sha256', $statement['content']), 0, 12),
+                ),
+                'parsed' => $statement['parsed'],
+                'source' => 'gpc',
+            ];
+        }
+        return $files;
     }
 
     public function statementFormat(): string
@@ -161,7 +201,7 @@ final class KbPlusConnector implements
             $from,
             $to,
         );
-        return $this->envelope([
+        return $this->encodeEnvelope([
             'account_number' => $access['credentials']['account_iban'],
             'currency' => $access['credentials']['account_currency'],
             'from' => $from,
@@ -169,6 +209,27 @@ final class KbPlusConnector implements
             'format' => self::STATEMENT_FORMAT_KM,
             'files' => array_map('base64_encode', $files),
         ]);
+    }
+
+    /** @return array{account_number:string,currency:string,from:string,to:string,format?:string,files?:mixed,transactions?:mixed} */
+    private function decodeEnvelope(#[\SensitiveParameter] string $content): array
+    {
+        try {
+            $data = json_decode($content, true, 64, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw new \RuntimeException('KB+ statement envelope is invalid.');
+        }
+        $isKm = is_array($data) && ($data['format'] ?? null) === self::STATEMENT_FORMAT_KM;
+        $keys = $isKm
+            ? ['account_number', 'currency', 'from', 'to', 'format', 'files']
+            : ['account_number', 'currency', 'from', 'to', 'transactions'];
+        if (!is_array($data) || array_is_list($data) || array_diff(array_keys($data), $keys) !== []) {
+            throw new \RuntimeException('KB+ statement envelope is invalid.');
+        }
+        foreach (['account_number', 'currency', 'from', 'to'] as $key) {
+            $data[$key] = is_string($data[$key] ?? null) ? $data[$key] : '';
+        }
+        return $data;
     }
 
     /** @return list<string> */
@@ -189,7 +250,7 @@ final class KbPlusConnector implements
     }
 
     /** @param array<string,mixed> $envelope */
-    private function envelope(#[\SensitiveParameter] array $envelope): string
+    private function encodeEnvelope(#[\SensitiveParameter] array $envelope): string
     {
         try {
             return json_encode($envelope, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE, 64);

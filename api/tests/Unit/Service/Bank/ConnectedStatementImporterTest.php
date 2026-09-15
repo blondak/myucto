@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\Connector\KbPlusKmStatementParser;
 use MyInvoice\Service\Bank\EmailNoticeReconciler;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Bank\StatementImporter;
@@ -555,6 +556,44 @@ final class ConnectedStatementImporterTest extends TestCase
             self::assertSame(1, $result['skipped_duplicates']);
             self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC));
         }
+    }
+
+    /**
+     * KB: tentýž pohyb načtený dřív přes ADAA (varianta Plus) a později z výpisu KM
+     * (varianta Basic). Liší se referencí, tvarem protiúčtu (IBAN × národní číslo)
+     * i popisem; výpis KM jako originál banky ho musí spárovat, ne založit znovu.
+     */
+    public function testKbStatementReconcilesMovementImportedEarlierFromAdaa(): void
+    {
+        $this->pdo->exec("INSERT INTO currencies VALUES (2, 10, '1000000005', 'CZ6501000000001000000005', '0100', 'CZK', 1)");
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $adaa = [
+            'header' => [
+                'account_number' => 'CZ6501000000001000000005', 'statement_date' => '2026-09-14', 'statement_number' => null,
+                'prev_balance' => null, 'curr_balance' => null, 'debit_total' => null, 'credit_total' => null,
+            ],
+            'transactions' => [[
+                'posted_at' => '2026-09-10', 'amount' => 10000.0, 'currency' => 'CZK',
+                'variable_symbol' => '1', 'constant_symbol' => null, 'specific_symbol' => null,
+                'counterparty_account' => 'CZ0622500000001000000005', 'counterparty_bank' => '2250',
+                'counterparty_name' => 'Synteticka s.r.o.', 'description' => 'vlastni ucet | CZ0622500000001000000005',
+                'bank_ref' => 'kbplus:SYNTHETIC-0001',
+            ]],
+        ];
+        $this->importer->importConnectedParsed($adaa, '{"synthetic":"adaa"}', 'kb_plus.json', null, 2, 10, 'bank_api');
+        $km = '074' . '5000100000000000' . str_repeat(' ', 20) . '090926' . str_repeat('0', 14) . '+'
+            . sprintf('%014d', 1000000) . '+' . str_repeat('0', 14) . '0' . sprintf('%014d', 1000000) . '0'
+            . '001' . '100926' . 'CZ650100' . 'MB' . str_repeat(' ', 4) . "\r\n"
+            . '075' . '5000100000000000' . '5000100000000000' . sprintf('%013d', 1) . sprintf('%012d', 1000000) . '2'
+            . sprintf('%010d', 1) . '00' . '2250' . '0000' . str_repeat('0', 10) . '000000'
+            . str_pad('SYNTETICKA S.R.O.', 20) . '0' . str_repeat(' ', 4) . '100926' . "\r\n";
+        $statement = (new KbPlusKmStatementParser())->statements([$km], 'CZ6501000000001000000005', 'CZK')[0];
+
+        $result = $this->importer->importConnectedParsed($statement['parsed'], $statement['content'], 'kb-km.gpc', null, 2, 10, 'gpc');
+
+        self::assertSame(0, $result['transactions']);
+        self::assertSame(1, $result['skipped_duplicates']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
     }
 
     private function gpc(): string

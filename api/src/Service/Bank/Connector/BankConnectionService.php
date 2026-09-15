@@ -199,7 +199,7 @@ final class BankConnectionService
                             $userId,
                             $currencyId,
                             $supplierId,
-                            'bank_api',
+                            $file['source'] ?? 'bank_api',
                             $reconciliationConfirmations,
                         ) : $this->importer->importConnected(
                             $file['content'],

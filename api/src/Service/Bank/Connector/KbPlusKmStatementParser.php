@@ -21,6 +21,37 @@ final class KbPlusKmStatementParser
     public function __construct(private readonly GpcParser $gpc = new GpcParser()) {}
 
     /**
+     * Výpisy po obchodních dnech: surové bajty dne (záznam 074 s pohyby) a jejich
+     * rozbor s čísly účtů v edičním tvaru. Každý den se ukládá jako originál výpisu
+     * banky, takže opakované stažení téhož dne pozná import podle otisku souboru.
+     *
+     * @param list<string> $files
+     * @return list<array{content:string,parsed:array{header:array<string,mixed>,transactions:list<array<string,mixed>>}}>
+     */
+    public function statements(#[\SensitiveParameter] array $files, string $iban, string $currency): array
+    {
+        $account = $this->editionAccount($iban);
+        $currency = strtoupper(trim($currency));
+        if (!preg_match('/^[A-Z]{3}$/D', $currency)) {
+            throw $this->invalid('neplatná měna účtu');
+        }
+        $statements = [];
+        foreach ($files as $file) {
+            foreach ($this->blocks($file) as $block) {
+                $parsed = $this->statement($block, $account, $currency);
+                $parsed['header']['account_number'] = $account;
+                $parsed['header']['currency'] = $currency;
+                $statements[] = ['content' => implode("\r\n", $block) . "\r\n", 'parsed' => $parsed];
+            }
+        }
+        usort($statements, static fn (array $a, array $b): int =>
+            strcmp($a['parsed']['header']['statement_date'], $b['parsed']['header']['statement_date']));
+        return $statements;
+    }
+
+    /**
+     * Souhrn období pro kontrolu účtu při synchronizaci.
+     *
      * @param list<string> $files
      * @return array{header:array<string,mixed>,transactions:list<array<string,mixed>>}
      */
@@ -31,23 +62,10 @@ final class KbPlusKmStatementParser
         string $from,
         string $to,
     ): array {
-        $account = $this->editionAccount($iban);
-        $currency = strtoupper(trim($currency));
-        if (!preg_match('/^[A-Z]{3}$/D', $currency)) {
-            throw $this->invalid('neplatná měna účtu');
-        }
         if ($this->date($from, 'Y-m-d') > $this->date($to, 'Y-m-d')) {
             throw $this->invalid('neplatné období');
         }
-
-        $statements = [];
-        foreach ($files as $file) {
-            foreach ($this->blocks($file) as $block) {
-                $statements[] = $this->statement($block, $account, $currency);
-            }
-        }
-        usort($statements, static fn (array $a, array $b): int =>
-            strcmp($a['header']['statement_date'], $b['header']['statement_date']));
+        $statements = array_column($this->statements($files, $iban, $currency), 'parsed');
         $headers = array_column($statements, 'header');
         $first = $headers[0] ?? null;
         $last = $headers === [] ? null : $headers[array_key_last($headers)];

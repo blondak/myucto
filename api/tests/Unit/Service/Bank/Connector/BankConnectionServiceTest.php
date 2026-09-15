@@ -48,6 +48,28 @@ final class BankConnectionServiceTest extends TestCase
         self::assertSame(4, $result['import_result']['transactions']);
     }
 
+    /** Originál výpisu z vícesouborového konektoru (KB Basic) se eviduje jako gpc, ne jako data z API. */
+    public function testMultiFileStatementKeepsDeclaredBankDocumentSource(): void
+    {
+        $parsed = ['header' => ['account_number' => '1000000005'], 'transactions' => [['amount' => '100.00']]];
+        $connector = $this->createMock(\MyInvoice\Service\Bank\Connector\MultiFileBankConnector::class);
+        $connector->method('provider')->willReturn('kb_plus');
+        $connector->method('downloadStatement')->willReturn('synthetic-envelope');
+        $connector->method('parseStatement')->willReturn(['header' => ['account_number' => '1000000005'], 'transactions' => []]);
+        $connector->method('statementFormat')->willReturn('json');
+        $connector->method('statementFiles')->willReturn([
+            ['content' => 'synthetic-km', 'filename' => 'kb-km.gpc', 'parsed' => $parsed, 'source' => 'gpc'],
+        ]);
+        $importer = new RecordingStatementImporter(static fn (): array => self::importResult());
+        $h = $this->harness($connector, $importer, array_replace($this->connection(), [
+            'provider' => 'kb_plus', 'bank_code' => '0100', 'verified_bank_code' => '0100',
+        ]));
+
+        $h['service']->sync(1, 11, userId: 77);
+
+        self::assertSame([$parsed, 'synthetic-km', 'kb-km.gpc', 77, 11, 1, 'gpc', []], $importer->structuredCall);
+    }
+
     public function testConfigurePreservesCredentialRotatedDuringValidation(): void
     {
         $connection = array_replace($this->connection(), [
