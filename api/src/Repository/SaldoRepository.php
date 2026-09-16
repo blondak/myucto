@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Support\Sql\CreditNoteRefundExpr;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
@@ -727,10 +728,15 @@ final class SaldoRepository
         $foreignExpr = "ROUND(SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
                                        THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
                                        ELSE 0 END), 2)";
-        $ratio = self::paidRatioSql(
+        // Proplacený dobropis se v `invoice_payments` neobjeví (PAYABLE_TYPES ho tam
+        // nepustí) — zkratka „vrácené peníze ⇒ poměr 1" je proto jediný způsob, jak
+        // ho uzavřít. Zrcadlí zkratku `d.status='paid'` z fetchOpenPurchases().
+        // SSOT predikátu: {@see CreditNoteRefundExpr}.
+        $refundedExpr = CreditNoteRefundExpr::refundedAsOfSql('d');
+        $ratio = "CASE WHEN {$refundedExpr} THEN 1 ELSE " . self::paidRatioSql(
             "{$paidExpr} + {$advanceExpr}",
             "{$toPayExpr} + {$advanceExpr}",
-        );
+        ) . ' END';
 
         $sql =
             "WITH bank_settle AS (
@@ -748,7 +754,7 @@ final class SaldoRepository
             )
             SELECT d.id AS doc_id,
                    COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no,
-                   d.issue_date, d.due_date, d.status,
+                   d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at,
                    cl.id AS partner_id, cl.company_name AS partner_name,
                    cur.code AS currency_code,
                    {$toPayExpr} AS amount_to_pay,
@@ -773,7 +779,7 @@ final class SaldoRepository
                AND d.status <> 'draft'
                AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)
                " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . $invoiceFilter . "
-             GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status,
+             GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at,
                       cl.id, cl.company_name, cur.code, d.amount_to_pay,
                       paid.paid_sum, adv.advance_sum
             HAVING " . self::openFilterSql($bookedExpr, $ratio) . "
@@ -783,7 +789,7 @@ final class SaldoRepository
         return $this->$fetch(
             $sql,
             static fn (string $pageSql): array => self::asOfParams($pageSql, $asOf),
-            function (array $r): array {
+            function (array $r) use ($asOf): array {
                 // Předplacení z proformy uhrazené PŘÍMO na tenhle účet (viz advanceOnAccountCte):
                 // vstupuje do čitatele i jmenovatele poměru. `amount_to_pay` finální faktury je
                 // o zálohu snížené (u plně předplacené je nulové), takže bez téhle korekce vyjde
@@ -802,9 +808,15 @@ final class SaldoRepository
                     'booked_signed'  => round((float) $r['booked_signed'], 2),
                     'foreign_signed' => round((float) $r['foreign_signed'], 2),
                     // Stejnoměnný poměr k asOf; invoice_payments pokrývá bankovní,
-                    // hotovostní i ruční platby jednotně.
+                    // hotovostní i ruční platby jednotně. Dobropis tam ale nikdy
+                    // nepřistane — jeho proplacení nese stav dokladu (CreditNoteRefundExpr).
                     'paid_ratio'     => $this->paidRatio(
-                        false,
+                        CreditNoteRefundExpr::isRefundedAsOf(
+                            (string) $r['invoice_type'],
+                            (string) $r['status'],
+                            $r['paid_at'] === null ? null : (string) $r['paid_at'],
+                            $asOf,
+                        ),
                         (float) $r['paid_as_of'] + $advance,
                         (float) $r['amount_to_pay'] + $advance,
                     ),

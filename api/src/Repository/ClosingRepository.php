@@ -1170,6 +1170,29 @@ final class ClosingRepository
                    AND (e.reversed_by IS NULL OR rev.entry_date > ?)
                    AND (ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
                  GROUP BY stl.doc_id
+            ), settled_gopay AS (
+                -- Inkaso z platební brány: GoPay se do banky promítne až SOUHRNNOU výplatou
+                -- za celé vyúčtování, takže úhrada JEDNÉ faktury nemá vlastní bankovní pohyb
+                -- ani `invoice_payments.bank_transaction_id` — vazbu na doklad nese pohyb
+                -- vyúčtování (`gopay_movements.invoice_id`, u vratky `credit_note_id`) a jeho
+                -- zápis `source_type='gopay'` (221.x / 311.x). Bez téhle větve hlásila
+                -- kontrola každou fakturu placenou kartou jako marked_paid_unposted,
+                -- přestože 311 je v deníku vyrovnané.
+                SELECT COALESCE(gm.invoice_id, gm.credit_note_id) AS invoice_id,
+                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS settled
+                  FROM gopay_movements gm
+                  JOIN journal_entries e ON e.supplier_id = gm.supplier_id
+                   AND e.source_type = 'gopay' AND e.source_id = gm.id
+                  JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                  JOIN chart_of_accounts ca ON ca.id = l.account_id
+                  LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+                  LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
+                 WHERE gm.supplier_id = ?
+                   AND (gm.invoice_id IS NOT NULL OR gm.credit_note_id IS NOT NULL)
+                   AND e.posted_at IS NOT NULL AND e.entry_date <= ?
+                   AND (e.reversed_by IS NULL OR rev.entry_date > ?)
+                   AND (ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
+                 GROUP BY COALESCE(gm.invoice_id, gm.credit_note_id)
             ), doc AS (
                 -- Doklad + jeho peněžní vyrovnání; dobropis patří do skupiny svého RODIČE.
                 -- Zdůvodnění skupiny viz {@see paidPurchasesOpenSaldo} — na výnosové straně
@@ -1179,12 +1202,13 @@ final class ClosingRepository
                             THEN i.parent_invoice_id ELSE i.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)
-                         + COALESCE(so.settled, 0) AS settled
+                         + COALESCE(so.settled, 0) + COALESCE(sg.settled, 0) AS settled
                   FROM booked b
                   JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
                   LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
                   LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
                   LEFT JOIN settled_offset so ON so.invoice_id = i.id
+                  LEFT JOIN settled_gopay sg ON sg.invoice_id = i.id
             ), grp AS (
                 SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
                   FROM doc
@@ -1214,6 +1238,7 @@ final class ClosingRepository
             $supplierId,                        // bank_target
             $supplierId, $asOf, $asOf,          // settled_cash
             $supplierId, $asOf, $asOf,          // settled_offset
+            $supplierId, $asOf, $asOf,          // settled_gopay
             $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);

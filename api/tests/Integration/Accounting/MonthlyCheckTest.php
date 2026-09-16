@@ -607,6 +607,73 @@ final class MonthlyCheckTest extends TestCase
             'Doklad uhrazený zápočtem nesmí kontrola hlásit jako otevřené saldo.');
     }
 
+    /**
+     * Inkaso platební bránou: GoPay nemá k JEDNÉ faktuře bankovní pohyb (do banky
+     * přijde až souhrnná výplata za vyúčtování), takže úhrada visí jen na pohybu
+     * vyúčtování a jeho zápisu `source_type='gopay'` (221.x MD / 311.x D).
+     * Kontrola ji musí uznat jako vyrovnání 311 — jinak hlásí každou fakturu
+     * placenou kartou jako „uhrazeno ručně, úhrada není zaúčtovaná".
+     */
+    public function testGoPayClearingSettlesInvoiceOnSaldoCheck(): void
+    {
+        $pdo = $this->db->pdo();
+        $clientId = $this->createClient();
+        $entryDate = self::YEAR . '-06-12';
+
+        $invoiceId = $this->createPaidInvoice($clientId, 'K3-GOPAY-001', $entryDate);
+        $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 1210],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 1000],
+            ['account_code' => '343', 'side' => 'credit', 'amount' => 210],
+        ], ['entry_date' => $entryDate, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        // Úhrada evidovaná jen u dokladu (`source='mark_paid'`, bez bank_transaction_id) —
+        // přesně to, co zapíše GoPay platební tlačítko.
+        $pdo->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source, bank_reference)
+             VALUES (?, ?, ?, 1210, "CZK", "mark_paid", "GOPAY:9000000001")'
+        )->execute([$this->supplierId, $invoiceId, $entryDate]);
+        $paymentId = (int) $pdo->lastInsertId();
+
+        $movementId = $this->gopayMovement($invoiceId, $paymentId, 1210.00, $entryDate);
+        $this->posting->postDocument($this->supplierId, 'gopay', $movementId, [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => 1210],
+            ['account_code' => '311', 'side' => 'credit', 'amount' => 1210],
+        ], ['entry_date' => $entryDate, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $findings = $this->checkByKey('paid_invoices_open_saldo')['value']['findings'] ?? [];
+        self::assertArrayNotHasKey(
+            $invoiceId,
+            array_column($findings, null, 'doc_id'),
+            'Faktura vyrovnaná zápisem GoPay vyúčtování nesmí být hlášená jako otevřené saldo na 311.',
+        );
+    }
+
+    /** Pohyb GoPay vyúčtování navázaný na fakturu (minimální clearing + movement). */
+    private function gopayMovement(int $invoiceId, int $paymentId, float $amount, string $performedOn): int
+    {
+        $pdo = $this->db->pdo();
+        $hash = hash('sha256', 'gopay-monthly-check-' . $invoiceId . '-' . microtime(true));
+        $pdo->prepare(
+            'INSERT INTO gopay_clearings
+                (supplier_id, clearing_id, account_name, currency, variable_symbol, cleared_from, cleared_to,
+                 performed_on, amount_gross, amount_transfer, amount_sent, file_name, file_hash, file_content)
+             VALUES (?, ?, "Test", "CZK", "1", ?, ?, ?, ?, ?, ?, "gopay-test.xml", ?, "")'
+        )->execute([$this->supplierId, substr($hash, 0, 20), $performedOn, $performedOn, $performedOn,
+            $amount, $amount, $amount, $hash]);
+        $clearingId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO gopay_movements
+                (supplier_id, clearing_id, external_id, movement_type, performed_on, amount,
+                 invoice_id, invoice_payment_id, status)
+             VALUES (?, ?, ?, "credit", ?, ?, ?, ?, "posted")'
+        )->execute([$this->supplierId, $clearingId, substr($hash, 20, 20), $performedOn, $amount,
+            $invoiceId, $paymentId]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
     private function purchaseStatusOf(int $purchaseInvoiceId): string
     {
         $stmt = $this->db->pdo()->prepare('SELECT status FROM purchase_invoices WHERE id = ?');

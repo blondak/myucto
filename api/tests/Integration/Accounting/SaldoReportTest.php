@@ -521,6 +521,62 @@ final class SaldoReportTest extends TestCase
         self::assertSame(self::cents(-500.00), self::cents($creditItem['remaining_czk']));
     }
 
+    // ── T5b: PROPLACENÝ dobropis (vratka) už otevřenou položkou není ────────
+
+    public function testRefundedCreditNoteIsClosed(): void
+    {
+        $a = $this->client('Alfa s.r.o.');
+        $invA = $this->invoice($a, 1210.00, self::YEAR . '-03-10', self::YEAR . '-03-24');
+        $this->postInvoice($invA, [
+            self::l('311', 'debit', 1210.00),
+            self::l('602', 'credit', 1000.00),
+            self::l('343', 'credit', 210.00),
+        ], self::YEAR . '-03-10');
+        $this->invoicePayments->recordPayment($invA, 1210.00, self::YEAR . '-03-20', ['source' => 'cash']);
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            self::l('221', 'debit', 1210.00),
+            self::l('311', 'credit', 1210.00),
+        ], ['entry_date' => self::YEAR . '-03-20', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $credA = $this->creditNote($a, -500.00, self::YEAR . '-05-01', self::YEAR . '-05-15');
+        $this->posting->postDocument($this->supplierId, 'invoice', $credA, [
+            self::l('602', 'debit', 500.00),
+            self::l('311', 'credit', 500.00),
+        ], ['entry_date' => self::YEAR . '-05-01', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        // Vratka peněz zákazníkovi: dobropis se NIKDY neobjeví v invoice_payments
+        // (PAYABLE_TYPES ho tam nepustí), stav nese jen status='paid' + paid_at.
+        // Tohle je jediný zápis, který dělá i GoPay vyúčtování pohybu `storno`.
+        $this->invoicePayments->markCreditNoteRefunded($credA, $this->supplierId, self::YEAR . '-05-20');
+        // Protistrana vratky v deníku (u GoPay ji zaúčtuje pohyb `storno`): Dr 311 / Cr 221.
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            self::l('311', 'debit', 500.00),
+            self::l('221', 'credit', 500.00),
+        ], ['entry_date' => self::YEAR . '-05-20', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $data = $this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-12-31', '311');
+        $acc = $this->accBlock($data, '311');
+        self::assertNotNull($acc);
+
+        // Faktura uhrazená, dobropis proplacený → účet 311 je vyrovnaný a saldokonto
+        // nesmí mít ANI JEDNU otevřenou položku. Bez opravy tu dobropis zůstal jako
+        // −500 a `difference` vyšlo +500 (falešný inventarizační nález).
+        self::assertSame(0, self::cents($acc['gl_balance']));
+        self::assertSame(0, self::cents($acc['open_items_total']));
+        self::assertSame(0, $acc['open_items_count'], 'Proplacený dobropis není otevřená položka.');
+        self::assertSame(0, self::cents($acc['difference']));
+        self::assertTrue($acc['matches']);
+        self::assertNull($this->partner($acc, $a), 'Partner bez otevřených položek v saldu nefiguruje.');
+
+        // …ale k datu PŘED vratkou otevřený být MUSÍ (jinak by zkratka mazala historii).
+        $before = $this->accBlock(
+            $this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-05-10', '311'),
+            '311',
+        );
+        self::assertNotNull($before);
+        self::assertSame(self::cents(-500.00), self::cents($before['open_items_total']));
+    }
+
     // ── T6 (H4): storno DATOVANÉ PO rozvahovém dni nezmizí ze seznamu k asOf ─
 
     public function testReversalAfterAsOfDoesNotHideOpenItem(): void
