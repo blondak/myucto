@@ -4273,6 +4273,8 @@ final class BankPostingService
 
         $entries = $pdo->prepare(
             "SELECT je.source_id AS tx_id, je.id AS entry_id, je.document_no,
+                    " . \MyInvoice\Service\Bank\NonInvoiceBankTransactionScope::postedOutsideSaldoSql(
+                        (int) $supplierId, 'je.source_id') . " AS outside_saldo,
                     (EXISTS(SELECT 1 FROM bank_posting_suggestions aps
                              WHERE aps.supplier_id = je.supplier_id AND aps.journal_entry_id = je.id
                                AND aps.status = 'auto_posted')
@@ -4302,6 +4304,10 @@ final class BankPostingService
                 'status'           => 'posted',
                 'journal_entry_id' => (int) $r['entry_id'],
                 'document_no'      => $r['document_no'] !== null ? (string) $r['document_no'] : null,
+                // Zaúčtováno mimo saldokontní účty (daň, poplatek, odvod, splátka) — pohyb
+                // žádnou fakturu nečeká a „Nespárováno" u něj jen mate. SSOT predikátu:
+                // {@see \MyInvoice\Service\Bank\NonInvoiceBankTransactionScope}.
+                'outside_saldo'    => (bool) $r['outside_saldo'],
                 'automated'        => (bool) $r['automated'],
                 'automation_source'=> $r['automation_source'] !== null ? (string) $r['automation_source'] : null,
                 'rule_name'        => $r['automation_rule_name'] !== null ? (string) $r['automation_rule_name'] : null,

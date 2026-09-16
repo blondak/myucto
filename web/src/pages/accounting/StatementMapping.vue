@@ -394,8 +394,9 @@ onMounted(async () => {
         <li v-for="s in visibleSuggestions" :key="suggestionKey(s)" class="px-4 py-2 text-sm flex gap-3 items-start" data-test="suggestion">
           <input type="checkbox" class="mt-1" :checked="selected.has(suggestionKey(s))" :disabled="!canWrite" @change="toggleSuggestion(s)" />
           <div class="min-w-0">
-            <p class="font-medium">
-              <span class="font-mono">{{ s.account_code }}</span> {{ s.account_name }}
+            <p class="font-medium flex flex-wrap items-baseline gap-x-2">
+              <span class="font-mono whitespace-nowrap">{{ s.account_code }}</span>
+              <span>{{ s.account_name }}</span>
               <span class="font-mono text-neutral-500 whitespace-nowrap">{{ s.from_row_code }} → {{ s.to_row_code }}</span>
             </p>
             <p class="text-xs text-neutral-600">{{ s.reason }}</p>
@@ -505,8 +506,10 @@ onMounted(async () => {
                 <tr v-for="a in filteredAccounts" :key="a.account_code" :data-test="`account-${a.account_code}`"
                     :class="overrideFor(a.account_code) ? 'bg-primary-50/40' : ''">
                   <td class="px-3 py-1.5">
-                    <span class="font-mono" :class="a.is_synthetic ? 'font-semibold' : ''">{{ a.account_code }}</span>
-                    <span class="text-neutral-600"> {{ a.name }}</span>
+                    <div class="flex items-baseline gap-2">
+                      <span class="font-mono whitespace-nowrap" :class="a.is_synthetic ? 'font-semibold' : ''">{{ a.account_code }}</span>
+                      <span class="text-neutral-600">{{ a.name }}</span>
+                    </div>
                   </td>
                   <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ formatMoney(a.balance) }}</td>
                   <td class="px-2 py-1.5">

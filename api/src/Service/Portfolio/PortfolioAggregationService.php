@@ -70,6 +70,17 @@ final class PortfolioAggregationService
         ];
     }
 
+    /**
+     * Smí uživatel vidět tuhle firmu v přehledu? Táž membership sémantika jako
+     * {@see overview()} — endpointy, které berou `supplier_id` z URL, se musí ptát
+     * TADY, ne skládat vlastní variantu pravidla.
+     */
+    public function userCanAccess(int $userId, bool $isSuperadmin, int $supplierId): bool
+    {
+        return $supplierId > 0
+            && in_array($supplierId, $this->allowedSupplierIds($userId, $isSuperadmin), true);
+    }
+
     /** @return list<int> */
     private function allowedSupplierIds(int $userId, bool $isSuperadmin): array
     {

@@ -52,6 +52,32 @@ export interface PortfolioOverview {
   generated_at: string
 }
 
+/** Jedna neúspěšná kontrola z měsíční kontroly firmy. */
+export interface PortfolioCheckFinding {
+  key: string
+  severity: 'error' | 'warning'
+  count: number
+}
+
+/**
+ * Souhrn měsíční kontroly firmy (kurátorovaná podmnožina kontrol, viz
+ * PortfolioCheckService::KEYS). Nálezy samotné se sem NEPOSÍLAJÍ — na ně
+ * vede proklik do měsíční kontroly té firmy.
+ */
+export interface PortfolioCheckSummary {
+  supplier_id: number
+  period: { id: number; fiscal_year: number }
+  range_from: string
+  range_to: string
+  errors: number
+  warnings: number
+  findings: PortfolioCheckFinding[]
+}
+
 export const portfolioApi = {
   overview: () => api.get<PortfolioOverview>('/portfolio/overview').then(r => r.data),
+  /** null = firma nevede podvojné účetnictví nebo nemá založené účetní období. */
+  monthlyCheck: (supplierId: number) =>
+    api.get<{ summary: PortfolioCheckSummary | null }>(`/portfolio/monthly-check/${supplierId}`)
+      .then(r => r.data.summary),
 }

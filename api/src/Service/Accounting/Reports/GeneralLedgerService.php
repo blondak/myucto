@@ -121,6 +121,12 @@ final class GeneralLedgerService
                 'name'         => (string) $r['name'],
                 'account_type' => (string) $r['account_type'],
                 'is_synthetic' => (bool) $r['is_synthetic'],
+                // Syntetika, pod kterou analytika patří — jen s `analytics=1` má smysl
+                // (bez rozpadu je řádek sám syntetikou). Klient z toho skládá strom
+                // „221 a pod ním 221.100/…", aby rozpad nebyl plochý seznam.
+                'parent_id'    => $r['parent_id'] === null ? null : (int) $r['parent_id'],
+                'parent_code'  => $r['parent_code'] === null ? null : (string) $r['parent_code'],
+                'parent_name'  => $r['parent_name'] === null ? null : (string) $r['parent_name'],
                 'opening_md'   => $psMd / 100,
                 'opening_d'    => $psD / 100,
                 'months'       => $monthMap,

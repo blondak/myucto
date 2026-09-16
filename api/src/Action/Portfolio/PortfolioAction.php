@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Portfolio\PortfolioAggregationService;
+use MyInvoice\Service\Portfolio\PortfolioCheckService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -21,6 +22,7 @@ final class PortfolioAction
 {
     public function __construct(
         private readonly PortfolioAggregationService $portfolio,
+        private readonly PortfolioCheckService $checks,
     ) {}
 
     public function overview(Request $request, Response $response): Response
@@ -32,5 +34,28 @@ final class PortfolioAction
             RequestAuthorization::isSuperadmin($request),
             new \DateTimeImmutable(),
         ));
+    }
+
+    /**
+     * Souhrn měsíční kontroly JEDNÉ firmy. Samostatný endpoint (ne součást
+     * `overview`) schválně: kontroly jsou o řád dražší než zbytek přehledu a
+     * klient si je dotahuje po firmách, aby se tabulka zobrazila hned.
+     *
+     * Přístup ke KAŽDÉ firmě se ověřuje stejně jako u přehledu — seznam povolených
+     * ID staví PortfolioAggregationService z `user_suppliers`, takže tudy nejde
+     * přečíst cizí firmu.
+     */
+    public function monthlyCheck(Request $request, Response $response, array $args): Response
+    {
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = (int) ($user['id'] ?? 0);
+        $supplierId = (int) ($args['supplierId'] ?? 0);
+        if (!$this->portfolio->userCanAccess($userId, RequestAuthorization::isSuperadmin($request), $supplierId)) {
+            return Json::error($response, 'not_found', 'Firma nenalezena.', 404);
+        }
+
+        return Json::ok($response, [
+            'summary' => $this->checks->summary($supplierId, new \DateTimeImmutable()),
+        ]);
     }
 }

@@ -8,7 +8,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { portfolioApi, type PortfolioCompany } from '@/api/portfolio'
+import { portfolioApi, type PortfolioCompany, type PortfolioCheckSummary } from '@/api/portfolio'
+import Modal from '@/components/ui/Modal.vue'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { apiErrorMessage } from '@/api/errors'
@@ -35,6 +36,7 @@ async function load() {
     const res = await portfolioApi.overview()
     companies.value = [...res.companies].sort((a, b) => a.company_name.localeCompare(b.company_name, 'cs'))
     generatedAt.value = res.generated_at
+    void loadChecks(companies.value)
   } catch (e) {
     error.value = apiErrorMessage(e)
   } finally {
@@ -88,6 +90,81 @@ function unbookedLink(c: PortfolioCompany): string {
   return c.unbooked_breakdown?.[0]?.link ?? '/invoices?booked=0'
 }
 
+// ── Měsíční kontrola per firma ──────────────────────────────────────────────
+// Dotahuje se AŽ PO přehledu a po firmách: kontroly jsou o řád dražší než zbytek
+// karty a tabulka by na ně čekala celá. Souběh je omezený, ať padesát firem
+// nepošle padesát dotazů naráz.
+const CHECK_CONCURRENCY = 3
+
+type CheckState =
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'done'; summary: PortfolioCheckSummary | null }
+
+const checks = ref<Record<number, CheckState>>({})
+const openCheck = ref<PortfolioCompany | null>(null)
+
+const openCheckSummary = computed<PortfolioCheckSummary | null>(() => {
+  const c = openCheck.value
+  if (!c) return null
+  const state = checks.value[c.supplier_id]
+  return state?.status === 'done' ? state.summary : null
+})
+
+async function loadChecks(list: PortfolioCompany[]) {
+  const queue = list.filter(c => c.accounting_mode === 'double_entry')
+  checks.value = Object.fromEntries(queue.map(c => [c.supplier_id, { status: 'loading' } as CheckState]))
+  let next = 0
+  const worker = async () => {
+    while (next < queue.length) {
+      const c = queue[next++]
+      try {
+        const summary = await portfolioApi.monthlyCheck(c.supplier_id)
+        checks.value = { ...checks.value, [c.supplier_id]: { status: 'done', summary } }
+      } catch {
+        checks.value = { ...checks.value, [c.supplier_id]: { status: 'error' } }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CHECK_CONCURRENCY, queue.length) }, worker))
+}
+
+function checkState(c: PortfolioCompany): CheckState | undefined {
+  return checks.value[c.supplier_id]
+}
+
+/** Pilulka „kontrola": červená u chyb, jantarová u varování, zelená když nic. */
+function checkBadgeClass(s: PortfolioCheckSummary): string {
+  if (s.errors > 0) return 'bg-danger-50 text-danger-600 ring-danger-500/20'
+  if (s.warnings > 0) return 'bg-warning-50 text-warning-600 ring-warning-500/20'
+  return 'bg-success-50 text-success-600 ring-success-500/20'
+}
+
+/** „3 chyby · 7 varování", nebo „Kontrola v pořádku", když nic nesvítí. */
+function checkSummaryLabel(s: PortfolioCheckSummary): string {
+  if (s.errors === 0 && s.warnings === 0) return t('portfolio.check_ok')
+  const parts: string[] = []
+  if (s.errors > 0) parts.push(t('portfolio.check_errors', { n: s.errors }))
+  if (s.warnings > 0) parts.push(t('portfolio.check_warnings', { n: s.warnings }))
+  return parts.join(' · ')
+}
+
+/** Popisek kontroly bere tytéž překlady jako stránka měsíční kontroly. */
+function checkLabel(key: string): string {
+  const k = `accounting.closing.checks.${key}`
+  const label = t(k)
+  return label === k ? key : label
+}
+
+function openMonthlyCheck(c: PortfolioCompany) {
+  const s = checks.value[c.supplier_id]
+  const summary = s?.status === 'done' ? s.summary : null
+  const query = summary
+    ? `?period_id=${summary.period.id}&date_from=${summary.range_from}&date_to=${summary.range_to}`
+    : ''
+  switchTo(c.supplier_id, `/accounting/monthly-check${query}`)
+}
+
 function periodBadgeClass(status: string): string {
   if (status === 'open') return 'bg-success-50 text-success-600 ring-success-500/20'
   if (status === 'closing') return 'bg-warning-50 text-warning-600 ring-warning-500/20'
@@ -138,6 +215,16 @@ function periodBadgeClass(status: string): string {
                 <span v-if="c.period_status" class="inline-flex items-center px-2 py-0.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap" :class="periodBadgeClass(c.period_status.status)">
                   {{ c.period_status.fiscal_year }} · {{ t('portfolio.period_status_' + c.period_status.status) }}
                 </span>
+                <!-- Krátká sumarizace měsíční kontroly; detail je v popupu. -->
+                <span v-if="checkState(c)?.status === 'loading'" class="text-neutral-400">{{ t('portfolio.check_loading') }}</span>
+                <span v-else-if="checkState(c)?.status === 'error'" class="text-neutral-400">{{ t('portfolio.check_failed') }}</span>
+                <button v-else-if="checkState(c)?.status === 'done' && (checkState(c) as { summary: PortfolioCheckSummary | null }).summary"
+                  type="button" data-testid="check-badge"
+                  class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap hover:brightness-95"
+                  :class="checkBadgeClass((checkState(c) as { summary: PortfolioCheckSummary }).summary)"
+                  @click="openCheck = c">
+                  {{ checkSummaryLabel((checkState(c) as { summary: PortfolioCheckSummary }).summary) }}
+                </button>
               </div>
             </div>
             <button type="button" class="cursor-pointer inline-flex items-center gap-1.5 px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg whitespace-nowrap shadow-sm"
@@ -194,5 +281,35 @@ function periodBadgeClass(status: string): string {
 
       <p class="text-xs text-neutral-400 mt-4">{{ t('portfolio.generated_at') }}: {{ new Date(generatedAt).toLocaleString() }}</p>
     </template>
+
+    <!-- Co v měsíční kontrole té firmy nesedí. Jen klíče a počty — na nálezy vede
+         proklik do měsíční kontroly, kde je celý kontext i opravy. -->
+    <Modal v-if="openCheck" :title="t('portfolio.check_modal_title', { company: openCheck.company_name })"
+      width-class="max-w-xl" @close="openCheck = null">
+      <template v-if="openCheckSummary">
+        <p class="text-xs text-neutral-500 mb-3">
+          {{ openCheckSummary.period.fiscal_year }} · {{ openCheckSummary.range_from }} – {{ openCheckSummary.range_to }}
+        </p>
+        <p v-if="openCheckSummary.findings.length === 0" class="text-sm text-success-600">
+          {{ t('portfolio.check_ok_long') }}
+        </p>
+        <ul v-else class="divide-y divide-neutral-100 text-sm">
+          <li v-for="f in openCheckSummary.findings" :key="f.key" class="flex items-center justify-between gap-3 py-2">
+            <span class="flex items-center gap-2 min-w-0">
+              <span class="w-2 h-2 rounded-full shrink-0" :class="f.severity === 'error' ? 'bg-danger-500' : 'bg-warning-500'" aria-hidden="true"></span>
+              <span class="truncate">{{ checkLabel(f.key) }}</span>
+            </span>
+            <span class="font-mono tabular-nums text-neutral-600 shrink-0">{{ f.count }}</span>
+          </li>
+        </ul>
+        <p class="text-xs text-neutral-400 mt-3">{{ t('portfolio.check_subset_hint') }}</p>
+      </template>
+      <template #footer>
+        <button type="button" :class="btnOutline('neutral')" @click="openCheck = null">{{ t('common.close') }}</button>
+        <button type="button" :class="btnFilled('primary')" @click="openMonthlyCheck(openCheck!)">
+          {{ t('portfolio.check_open') }} →
+        </button>
+      </template>
+    </Modal>
   </div>
 </template>

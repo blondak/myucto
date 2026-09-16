@@ -871,6 +871,10 @@ export interface GeneralLedgerAccount {
   name: string
   account_type: AccountType
   is_synthetic: boolean
+  /** Syntetika, pod kterou analytika patří (jen při `analytics=1`; jinak null). */
+  parent_id: number | null
+  parent_code: string | null
+  parent_name: string | null
   opening_md: number
   opening_d: number
   /** Měsíční obraty keyed 'YYYY-MM' (jen měsíce s pohybem). */

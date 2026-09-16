@@ -150,14 +150,16 @@ async function remove(item: CostCenter) {
     <div v-if="auth.canWrite('accounting') && formOpen" class="mt-5 bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4">
       <h3 class="text-lg font-semibold">{{ editingId === null ? t('accounting.cost_centers.new') : t('accounting.cost_centers.edit') }}</h3>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <!-- Název první: kód se z něj odvodí slugem, takže se vyplňuje jen výjimečně. -->
+        <div>
+          <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.cost_centers.name') }}</label>
+          <input v-model="form.name" type="text" maxlength="255" @input="centerSlug.fromName(form.name)" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+        </div>
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.cost_centers.code') }}</label>
           <input v-model="form.code" type="text" maxlength="50" :disabled="editingId !== null" @input="centerSlug.markManual(form.code)" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" />
           <p v-if="editingId !== null" class="text-xs text-neutral-400 mt-1">{{ t('accounting.cost_centers.code_immutable') }}</p>
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.cost_centers.name') }}</label>
-          <input v-model="form.name" type="text" maxlength="255" @input="centerSlug.fromName(form.name)" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          <p v-else class="text-xs text-neutral-400 mt-1">{{ t('accounting.cost_centers.code_auto') }}</p>
         </div>
       </div>
       <label v-if="editingId !== null" class="flex items-center gap-2 text-sm text-neutral-700">

@@ -2,12 +2,15 @@
 import { ref, onMounted, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, RouterLink } from 'vue-router'
-import { accountingApi, type AccountDetailReport, type AccountDetailChild, type AccountingPeriod } from '@/api/accounting'
+import { accountingApi, type AccountDetailReport, type AccountDetailChild, type AccountingPeriod, type AccountStatementItem } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
+import { journalSourceLink, journalEntryLink } from '@/utils/journalSourceLink'
+import { ICONS, BTN_ICON_SM_BASE, OUTLINE } from '@/components/ui/buttonStyles'
 
 /**
  * Karta účtu — rozcestník drill-through nad osnovou.
@@ -44,6 +47,7 @@ async function load() {
   notFound.value = false
   try {
     report.value = await accountingApi.getAccountDetail(accountId.value, { from: filters.from, to: filters.to })
+    void loadMovements()
   } catch (e: any) {
     if (e?.response?.status === 404) {
       notFound.value = true
@@ -117,6 +121,40 @@ const journalLink = computed(() => {
 
 function childLink(c: AccountDetailChild) {
   return { name: 'accounting-account-detail', params: { accountId: c.id }, query: { from: filters.from, to: filters.to } }
+}
+
+// ── Pohyby účtu přímo na kartě ─────────────────────────────────────────────
+// Karta byla čistý rozcestník: čísla ano, ale „co ta čísla tvoří" až po dvou
+// proklicích (opis účtu / deník filtrovaný rozsahem kódů). Pohyby proto visí
+// rovnou tady, se stejnou nabídkou jako v opisu — doklad, zápis v deníku, náhled.
+// Data bere TÝŽ endpoint jako opis účtu, aby se definice pohybu nerozdvojila.
+const MOVEMENT_LIMIT = 25
+
+const movements = ref<AccountStatementItem[]>([])
+const movementsTotal = ref(0)
+const movementsLoading = ref(false)
+const previewEntryId = ref<number | null>(null)
+
+async function loadMovements() {
+  if (!accountId.value) return
+  movementsLoading.value = true
+  try {
+    const r = await accountingApi.getAccountStatement(accountId.value, {
+      from: filters.from, to: filters.to, page: 1, per_page: MOVEMENT_LIMIT,
+    })
+    movements.value = r.items
+    movementsTotal.value = r.total
+  } catch {
+    movements.value = []
+    movementsTotal.value = 0
+  } finally {
+    movementsLoading.value = false
+  }
+}
+
+/** Prvotní doklad zápisu; bez rozpoznaného zdroje se jde na zápis v deníku. */
+function movementLink(it: AccountStatementItem) {
+  return journalSourceLink(it) ?? journalEntryLink(it.entry_id)
 }
 
 const actions = computed<ActionItem[]>(() => {
@@ -301,6 +339,72 @@ onMounted(async () => {
             </div>
           </dl>
         </div>
+
+        <!-- Pohyby účtu — co ta čísla nahoře tvoří, bez opuštění karty. -->
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
+          <div class="px-3 py-2 bg-neutral-50 border-b border-neutral-100 flex flex-wrap items-baseline justify-between gap-2">
+            <span class="text-xs font-bold uppercase tracking-wide text-neutral-500">
+              {{ t('accounting.accounts.detail.movements') }}
+            </span>
+            <RouterLink v-if="movementsTotal > movements.length" :to="statementLink"
+              class="text-xs text-primary-600 hover:underline">
+              {{ t('accounting.accounts.detail.movements_all', { shown: movements.length, total: movementsTotal }) }}
+            </RouterLink>
+          </div>
+
+          <div v-if="movementsLoading" class="px-3 py-6 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
+          <EmptyState v-else-if="movements.length === 0" accent="neutral" icon="doc"
+            :title="t('accounting.accounts.detail.movements_empty')" />
+
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+                <tr>
+                  <th class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.account_statement.col_date') }}</th>
+                  <th class="px-3 py-2 text-left font-medium w-36">{{ t('accounting.account_statement.col_document') }}</th>
+                  <th class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.account_statement.col_line_account') }}</th>
+                  <th class="px-3 py-2 text-left font-medium">{{ t('accounting.account_statement.col_description') }}</th>
+                  <th class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.account_statement.col_md') }}</th>
+                  <th class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.account_statement.col_d') }}</th>
+                  <th class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.account_statement.col_balance') }}</th>
+                  <th class="px-3 py-2 w-20"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="(it, idx) in movements" :key="`${it.entry_id}-${idx}`" class="hover:bg-neutral-50">
+                  <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.entry_date) }}</td>
+                  <td class="px-3 py-2">
+                    <RouterLink :to="movementLink(it)" class="font-mono text-xs text-primary-600 hover:text-primary-700 hover:underline">
+                      {{ it.document_no || t('accounting.account_statement.journal_link', { id: it.entry_id }) }}
+                    </RouterLink>
+                  </td>
+                  <td class="px-3 py-2 font-mono text-xs text-neutral-500">{{ it.account_code }}</td>
+                  <td class="px-3 py-2">{{ it.description || '—' }}</td>
+                  <td class="px-3 py-2 text-right font-mono">
+                    <template v-if="it.side === 'debit'">{{ formatMoney(it.amount) }}</template>
+                  </td>
+                  <td class="px-3 py-2 text-right font-mono">
+                    <template v-if="it.side === 'credit'">{{ formatMoney(it.amount) }}</template>
+                  </td>
+                  <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.balance) }}</td>
+                  <td class="px-3 py-2 text-right whitespace-nowrap">
+                    <button type="button" :class="[BTN_ICON_SM_BASE, OUTLINE.neutral]"
+                      :title="t('accounting.account_statement.preview_source')" @click="previewEntryId = it.entry_id">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+                    </button>
+                    <RouterLink :to="journalEntryLink(it.entry_id)" :class="[BTN_ICON_SM_BASE, OUTLINE.neutral, 'ml-1']"
+                      :title="t('accounting.account_statement.open_journal')">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
+                    </RouterLink>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <JournalSourceDrawer v-if="previewEntryId" :entry-id="previewEntryId"
+          @close="previewEntryId = null" @focus-entry="(id) => { previewEntryId = null; $router.push(journalEntryLink(id)) }" />
 
         <!-- Analytiky -->
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

@@ -139,6 +139,24 @@ final class PortfolioMembershipTest extends TestCase
         self::assertCount(1, $ids, 'S membershipem {A} vidí uživatel jen jednu firmu.');
     }
 
+    /**
+     * Souhrn měsíční kontroly bere `supplier_id` z URL, ne z X-Supplier-Id hlavičky —
+     * musí tedy stát na TÉŽE membership bráně jako přehled sám, jinak by šlo přečíst
+     * stav účetnictví cizí firmy pouhou změnou čísla v adrese.
+     */
+    public function testMonthlyCheckAccessHonoursMembership(): void
+    {
+        $userId = $this->mkUser('accountant');
+        $this->assign($userId, [$this->supplierA]);
+
+        self::assertTrue($this->portfolio->userCanAccess($userId, false, $this->supplierA));
+        self::assertFalse($this->portfolio->userCanAccess($userId, false, $this->supplierB),
+            'Firma mimo membership nesmí být přístupná ani přes supplier_id v URL.');
+        self::assertTrue($this->portfolio->userCanAccess($userId, true, $this->supplierB),
+            'Globální admin projde i mimo vlastní membership.');
+        self::assertFalse($this->portfolio->userCanAccess($userId, true, 0));
+    }
+
     public function testUserWithoutMembershipSeesNoCompanies(): void
     {
         $userId = $this->mkUser('accountant');

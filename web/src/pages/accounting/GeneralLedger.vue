@@ -85,6 +85,127 @@ async function load() {
   }
 }
 
+/**
+ * Rozpad po analytikách jako STROM, ne plochý seznam.
+ *
+ * Se zapnutými analytikami vrací server řádky per analytika (221.100, 221.400, …)
+ * a syntetika 221 v sestavě chybí — účetní tak nevidí stav účtu jako celku, jen
+ * jeho kusy. Skládáme proto mezisoučet za syntetiku z jejích analytik: PS a obraty
+ * se sčítají v HALÉŘÍCH (float by na dlouhém účtu ujel) a KS se z nich dopočítá
+ * TOUŽ deltou jako na serveru (`ps_md − ps_d + to_md − to_d`), ne sečtením KS
+ * analytik — u účtu s jednou analytikou v MD a druhou v D by součet KS ukázal
+ * zůstatek na obou stranách místo jednoho netto.
+ */
+interface LedgerGroup {
+  key: number
+  code: string
+  name: string
+  accounts: GeneralLedgerAccount[]
+  opening_md: number
+  opening_d: number
+  turnover_md: number
+  turnover_d: number
+  closing_md: number
+  closing_d: number
+}
+
+function cents(v: number): number {
+  return Math.round(v * 100)
+}
+
+const ledgerGroups = computed<LedgerGroup[]>(() => {
+  const r = report.value
+  if (!r || !r.analytics) return []
+  const byKey = new Map<number, LedgerGroup>()
+  for (const a of r.accounts) {
+    const key = a.parent_id ?? a.account_id
+    let g = byKey.get(key)
+    if (!g) {
+      g = {
+        key,
+        code: a.parent_id ? (a.parent_code ?? '') : a.account_code,
+        name: a.parent_id ? (a.parent_name ?? '') : a.name,
+        accounts: [],
+        opening_md: 0, opening_d: 0, turnover_md: 0, turnover_d: 0, closing_md: 0, closing_d: 0,
+      }
+      byKey.set(key, g)
+    }
+    g.accounts.push(a)
+    g.opening_md += cents(a.opening_md)
+    g.opening_d += cents(a.opening_d)
+    g.turnover_md += cents(a.turnover_md)
+    g.turnover_d += cents(a.turnover_d)
+  }
+  return [...byKey.values()].map(g => {
+    const delta = g.opening_md - g.opening_d + g.turnover_md - g.turnover_d
+    return {
+      ...g,
+      opening_md: g.opening_md / 100,
+      opening_d: g.opening_d / 100,
+      turnover_md: g.turnover_md / 100,
+      turnover_d: g.turnover_d / 100,
+      closing_md: (delta > 0 ? delta : 0) / 100,
+      closing_d: (delta > 0 ? 0 : -delta) / 100,
+    }
+  }).sort((a, b) => a.code.localeCompare(b.code))
+})
+
+/** Syntetika s jedinou vlastní analytikou = obyčejný řádek, mezisoučet by nic nepřidal. */
+function isPlainGroup(g: LedgerGroup): boolean {
+  return g.accounts.length === 1 && g.accounts[0].account_id === g.key
+}
+
+const openGroups = ref<Set<number>>(new Set())
+function toggleGroup(g: LedgerGroup) {
+  const next = new Set(openGroups.value)
+  if (next.has(g.key)) next.delete(g.key)
+  else next.add(g.key)
+  openGroups.value = next
+}
+function groupOpen(g: LedgerGroup): boolean {
+  return openGroups.value.has(g.key)
+}
+const allGroupsOpen = computed(() =>
+  ledgerGroups.value.every(g => isPlainGroup(g) || openGroups.value.has(g.key)))
+function toggleAllGroups() {
+  openGroups.value = allGroupsOpen.value ? new Set() : new Set(ledgerGroups.value.map(g => g.key))
+}
+
+/**
+ * Řádky tabulky v pořadí, v jakém se kreslí: bez rozpadu prostě účty, s rozpadem
+ * mezisoučet syntetiky a pod ním (když je rozbalená) její analytiky.
+ */
+type LedgerRow =
+  | { type: 'group'; key: string; group: LedgerGroup }
+  | { type: 'account'; key: string; account: GeneralLedgerAccount; nested: boolean }
+
+const displayRows = computed<LedgerRow[]>(() => {
+  const r = report.value
+  if (!r) return []
+  if (!r.analytics) {
+    return r.accounts.map(a => ({ type: 'account' as const, key: `a${a.account_id}`, account: a, nested: false }))
+  }
+  const rows: LedgerRow[] = []
+  for (const g of ledgerGroups.value) {
+    if (isPlainGroup(g)) {
+      rows.push({ type: 'account', key: `a${g.accounts[0].account_id}`, account: g.accounts[0], nested: false })
+      continue
+    }
+    rows.push({ type: 'group', key: `g${g.key}`, group: g })
+    if (groupOpen(g)) {
+      for (const a of g.accounts) {
+        rows.push({ type: 'account', key: `a${a.account_id}`, account: a, nested: true })
+      }
+    }
+  }
+  return rows
+})
+
+/** Šablonový pomocník: účtový řádek se kreslí beze změny, skupina ho přeskočí. */
+function rowAccounts(row: LedgerRow): GeneralLedgerAccount[] {
+  return row.type === 'account' ? [row.account] : []
+}
+
 const expandedId = ref<number | null>(null)
 function toggleExpand(a: GeneralLedgerAccount) {
   const next = expandedId.value === a.account_id ? null : a.account_id
@@ -177,6 +298,12 @@ async function focusAccountFromQuery() {
 async function focusAccount(id: number) {
   if (id <= 0 || !report.value) return
   if (!report.value.accounts.some(a => a.account_id === id)) return
+  // S rozpadem analytik je hledaný účet schovaný pod mezisoučtem syntetiky —
+  // bez rozbalení skupiny by proklik odroloval na prázdno.
+  const group = ledgerGroups.value.find(g => g.accounts.some(a => a.account_id === id))
+  if (group && !isPlainGroup(group)) {
+    openGroups.value = new Set(openGroups.value).add(group.key)
+  }
   expandedId.value = id
   await nextTick()
   paneDom.querySelector(`#gl-account-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
@@ -401,11 +528,15 @@ onMounted(async () => {
           <DateInput v-model="filters.to" @change="load"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
-        <div class="flex items-end pb-2">
+        <div class="flex items-end pb-2 gap-3 flex-wrap">
           <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
             <input v-model="filters.analytics" type="checkbox" @change="onAnalyticsToggle" class="rounded border-neutral-300" />
             {{ t('accounting.general_ledger.filter_analytics') }}
           </label>
+          <button v-if="filters.analytics && ledgerGroups.length" type="button" @click="toggleAllGroups"
+            class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 hover:underline whitespace-nowrap">
+            {{ allGroupsOpen ? t('accounting.general_ledger.collapse_all') : t('accounting.general_ledger.expand_all') }}
+          </button>
         </div>
         <!-- Výchozí je stav PŘED uzavřením knih; po uzavření jsou rozvahové účty
              převedené na 702 a konečné stavy vyjdou nulové. -->
@@ -467,10 +598,41 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <template v-for="a in report.accounts" :key="a.account_id">
+            <template v-for="row in displayRows" :key="row.key">
+              <!-- Mezisoučet syntetiky: stav účtu jako celku, analytiky se rozbalí kliknutím. -->
+              <tr v-if="row.type === 'group'" class="cursor-pointer bg-neutral-50 hover:bg-neutral-100 font-medium"
+                @click="toggleGroup(row.group)">
+                <td class="px-3 py-2 text-neutral-400">
+                  <span class="inline-block transition-transform" :class="{ 'rotate-90': groupOpen(row.group) }">▸</span>
+                </td>
+                <td v-if="tbl.isVisible('account')" class="px-3 py-2">
+                  <RouterLink :to="{ name: 'accounting-account-detail', params: { accountId: row.group.key }, query: { from: report.from, to: report.to } }"
+                    @click.stop :title="t('accounting.general_ledger.open_account')"
+                    class="row-link font-mono text-primary-600 hover:text-primary-700 hover:underline">
+                    {{ row.group.code }}
+                  </RouterLink>
+                </td>
+                <td v-if="tbl.isVisible('name')" class="px-3 py-2">
+                  {{ row.group.name }}
+                  <span class="ml-1 text-xs font-normal text-neutral-500">
+                    {{ t('accounting.general_ledger.group_analytics_count', { n: row.group.accounts.length }) }}
+                  </span>
+                </td>
+                <td v-if="tbl.isVisible('account_type')" class="px-3 py-2"></td>
+                <td v-if="tbl.isVisible('synthetic')" class="px-3 py-2 text-neutral-600 whitespace-nowrap">
+                  {{ t('accounting.general_ledger.synthetic') }}
+                </td>
+                <td v-if="tbl.isVisible('opening_md')" class="px-3 py-2 text-right font-mono">{{ formatMoney(row.group.opening_md) }}</td>
+                <td v-if="tbl.isVisible('opening_d')" class="px-3 py-2 text-right font-mono">{{ formatMoney(row.group.opening_d) }}</td>
+                <td v-if="tbl.isVisible('turnover_md')" class="px-3 py-2 text-right font-mono">{{ formatMoney(row.group.turnover_md) }}</td>
+                <td v-if="tbl.isVisible('turnover_d')" class="px-3 py-2 text-right font-mono">{{ formatMoney(row.group.turnover_d) }}</td>
+                <td v-if="tbl.isVisible('closing_md')" class="px-3 py-2 text-right font-mono">{{ formatMoney(row.group.closing_md) }}</td>
+                <td v-if="tbl.isVisible('closing_d')" class="px-3 py-2 text-right font-mono">{{ formatMoney(row.group.closing_d) }}</td>
+              </tr>
+            <template v-for="a in rowAccounts(row)" :key="a.account_id">
               <tr :id="`gl-account-${a.account_id}`" class="cursor-pointer hover:bg-neutral-50"
                 :class="{ 'bg-primary-50/40': expandedId === a.account_id }" @click="toggleExpand(a)">
-                <td class="px-3 py-2 text-neutral-400">
+                <td class="px-3 py-2 text-neutral-400" :class="{ 'pl-8': row.type === 'account' && row.nested }">
                   <span class="inline-block transition-transform" :class="{ 'rotate-90': expandedId === a.account_id }">▸</span>
                 </td>
                 <td v-if="tbl.isVisible('account')" class="px-3 py-2">
@@ -589,6 +751,7 @@ onMounted(async () => {
                   </table>
                 </td>
               </tr>
+            </template>
             </template>
           </tbody>
           <tfoot>

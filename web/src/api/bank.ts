@@ -106,6 +106,8 @@ export interface BankTransaction {
   posting?: {
     status: 'posted' | 'suggested' | null
     payroll_matched?: boolean
+    /** Zaúčtováno mimo saldokontní účty (daň, odvod, poplatek, splátka) — pohyb doklad nečeká. */
+    outside_saldo?: boolean
     payroll_posting_blocked?: boolean
     journal_entry_id?: number
     document_no?: string

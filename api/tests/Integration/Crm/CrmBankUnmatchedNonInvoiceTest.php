@@ -34,6 +34,8 @@ final class CrmBankUnmatchedNonInvoiceTest extends TestCase
     private array $transactions = [];
     /** @var int[] */
     private array $suggestions = [];
+    /** @var int[] */
+    private array $entries = [];
     private string $today;
 
     protected function setUp(): void
@@ -63,6 +65,10 @@ final class CrmBankUnmatchedNonInvoiceTest extends TestCase
         $pdo = $this->db->pdo();
         foreach ($this->suggestions as $id) {
             $pdo->prepare('DELETE FROM bank_posting_suggestions WHERE id = ?')->execute([$id]);
+        }
+        foreach ($this->entries as $id) {
+            $pdo->prepare('DELETE FROM journal_entry_lines WHERE entry_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM journal_entries WHERE id = ?')->execute([$id]);
         }
         foreach ($this->transactions as $id) {
             $pdo->prepare('DELETE FROM bank_transactions WHERE id = ?')->execute([$id]);
@@ -140,6 +146,71 @@ final class CrmBankUnmatchedNonInvoiceTest extends TestCase
         $id = (int) $pdo->lastInsertId();
         $this->transactions[] = $id;
         return $id;
+    }
+
+    /**
+     * Platba daně / poplatku fakturu nikdy mít nebude: zápis se nedotkne žádného
+     * saldokontního účtu, takže pohyb uzavírá sám. Naopak zápis přes 311 doklad
+     * pořád čeká — kdyby ho scope pohltil, zmizely by z počítadla i skutečné
+     * nespárované úhrady faktur.
+     */
+    public function testPohybZauctovanyMimoSaldoNecekaFakturu(): void
+    {
+        $tax = $this->accountId('341');
+        $bank = $this->accountId('221');
+        $receivable = $this->accountId('311');
+        if ($tax === 0 || $bank === 0 || $receivable === 0) {
+            self::markTestSkipped('Osnova tenanta nemá 341/221/311.');
+        }
+
+        $before = $this->bankUnmatchedCount();
+
+        $taxPayment = $this->insertIncoming();
+        $this->insertPostedEntry($taxPayment, $tax, $bank);
+        $invoicePayment = $this->insertIncoming();
+        $this->insertPostedEntry($invoicePayment, $bank, $receivable);
+
+        self::assertContains($taxPayment, $this->nonInvoiceIds(), 'Platba daně fakturu nečeká.');
+        self::assertNotContains($invoicePayment, $this->nonInvoiceIds(),
+            'Zápis přes 311 je úhrada faktury — ta se párovat má.');
+        self::assertSame($before + 1, $this->bankUnmatchedCount(),
+            'Do počítadla nespárovaných přibude jen ten pohyb přes 311.');
+    }
+
+    private function accountId(string $prefix): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code LIKE ? ORDER BY is_synthetic DESC, id LIMIT 1'
+        );
+        $stmt->execute([$this->supplierId, $prefix . '%']);
+        return (int) ($stmt->fetchColumn() ?: 0);
+    }
+
+    private function insertPostedEntry(int $txId, int $debitAccountId, int $creditAccountId): void
+    {
+        $pdo = $this->db->pdo();
+        $period = $pdo->prepare(
+            'SELECT id FROM accounting_periods WHERE supplier_id = ? AND ? BETWEEN starts_on AND ends_on LIMIT 1'
+        );
+        $period->execute([$this->supplierId, $this->today]);
+        $periodId = (int) ($period->fetchColumn() ?: 0);
+        if ($periodId === 0) {
+            self::markTestSkipped('Pro dnešek není založené účetní období.');
+        }
+
+        $pdo->prepare(
+            "INSERT INTO journal_entries (supplier_id, period_id, entry_date, source_type, source_id, description, posted_at)
+             VALUES (?, ?, ?, 'bank', ?, 'Test scope', NOW())"
+        )->execute([$this->supplierId, $periodId, $this->today, $txId]);
+        $entryId = (int) $pdo->lastInsertId();
+        $this->entries[] = $entryId;
+
+        $line = $pdo->prepare(
+            'INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount)
+             VALUES (?, ?, ?, ?, 10000.00)'
+        );
+        $line->execute([$this->supplierId, $entryId, $debitAccountId, 'debit']);
+        $line->execute([$this->supplierId, $entryId, $creditAccountId, 'credit']);
     }
 
     private function insertSuggestion(int $txId, string $status): void

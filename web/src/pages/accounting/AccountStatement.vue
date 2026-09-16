@@ -9,7 +9,8 @@ import {
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnOutline, BTN_ICON_SM_BASE, OUTLINE } from '@/components/ui/buttonStyles'
+import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { journalSourceLink, journalEntryLink } from '@/utils/journalSourceLink'
 import { appIsoDate, appYear } from '@/utils/date'
@@ -20,6 +21,9 @@ const route = useRoute()
 const toast = useToast()
 
 const accountId = computed(() => Number(route.params.accountId))
+
+/** Náhled zdrojového dokladu zápisu — sdílený drawer s deníkem (read-only). */
+const previewEntryId = ref<number | null>(null)
 
 const report = ref<AccountStatementReport | null>(null)
 const loading = ref(false)
@@ -216,6 +220,7 @@ onMounted(load)
               <th class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.account_statement.col_md') }}</th>
               <th class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.account_statement.col_d') }}</th>
               <th class="px-3 py-2 text-right font-medium w-36">{{ t('accounting.account_statement.col_balance') }}</th>
+              <th class="px-3 py-2 w-20"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -244,11 +249,27 @@ onMounted(load)
                 <template v-if="it.side === 'credit'">{{ formatMoney(it.amount) }}</template>
               </td>
               <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.balance) }}</td>
+              <!-- Náhled dokladu bez opuštění opisu + skok na zápis v deníku. Bez nich
+                   vedla z řádku jediná cesta a účetní se k rozpadu na účty musela
+                   proklikat oklikou přes doklad. -->
+              <td class="px-3 py-2 text-right whitespace-nowrap">
+                <button type="button" :class="[BTN_ICON_SM_BASE, OUTLINE.neutral]" :title="t('accounting.account_statement.preview_source')"
+                  @click="previewEntryId = it.entry_id">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+                </button>
+                <RouterLink :to="journalEntryLink(it.entry_id)" :class="[BTN_ICON_SM_BASE, OUTLINE.neutral, 'ml-1']"
+                  :title="t('accounting.account_statement.open_journal')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
+                </RouterLink>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+
+    <JournalSourceDrawer v-if="previewEntryId" :entry-id="previewEntryId"
+      @close="previewEntryId = null" @focus-entry="(id) => { previewEntryId = null; $router.push(journalEntryLink(id)) }" />
 
     <nav v-if="!loading && report && report.total > report.per_page" class="mt-4 flex items-center justify-end gap-1 text-sm">
       <button type="button" :disabled="page <= 1" @click="goToPage(page - 1)"

@@ -2528,6 +2528,9 @@ final class Routes
         // user_suppliers membership. RBAC: READONLY_RULES (accountant/admin/
         // readonly), role 'client' zamítnuta (PermissionMiddleware terminální větev).
         $app->get    ('/api/portfolio/overview', [PortfolioAction::class, 'overview']);
+        // Souhrn měsíční kontroly jedné firmy do přehledu — vlastní endpoint, aby se
+        // tabulka firem zobrazila hned a kontroly se dotáhly až po ní.
+        $app->get    ('/api/portfolio/monthly-check/{supplierId:[0-9]+}', [PortfolioAction::class, 'monthlyCheck']);
 
         // Kokpit Automat — cross-supplier read model; mutace návrhů zůstávají na
         // tenant-scoped bankovních endpointech.

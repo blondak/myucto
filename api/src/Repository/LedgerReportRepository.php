@@ -39,7 +39,8 @@ final class LedgerReportRepository
      * @param array{vendor?:string, client?:string, item?:string} $filters hledání
      *        dle protistrany/položky zdrojového dokladu (viz {@see counterpartyFilter()})
      * @return list<array<string,mixed>> {id, account_code, name, account_type,
-     *                                    normal_side, is_synthetic, ps_md, ps_d, to_md, to_d}
+     *                                    normal_side, is_synthetic, parent_id, parent_code,
+     *                                    parent_name, ps_md, ps_d, to_md, to_d}
      */
     public function trialBalanceRows(int $supplierId, string $from, string $to, string $periodStart, bool $analytics = false, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
@@ -86,9 +87,11 @@ final class LedgerReportRepository
                 GROUP BY acc_id
             )
             SELECT c.id, c.account_code, c.name, c.account_type, c.normal_side, c.is_synthetic,
+                   p.id AS parent_id, p.account_code AS parent_code, p.name AS parent_name,
                    agg.ps_md, agg.ps_d, agg.to_md, agg.to_d
               FROM agg
               JOIN chart_of_accounts c ON c.id = agg.acc_id
+              LEFT JOIN chart_of_accounts p ON p.id = c.parent_id
              ORDER BY c.account_code"
         );
         $stmt->execute([
@@ -104,6 +107,7 @@ final class LedgerReportRepository
         return array_map(static function (array $r): array {
             $r['id'] = (int) $r['id'];
             $r['is_synthetic'] = (bool) $r['is_synthetic'];
+            $r['parent_id'] = $r['parent_id'] === null ? null : (int) $r['parent_id'];
             foreach (['ps_md', 'ps_d', 'to_md', 'to_d'] as $k) {
                 $r[$k] = round((float) $r[$k], 2);
             }
