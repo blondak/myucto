@@ -567,7 +567,7 @@ final class ConnectedStatementImporterTest extends TestCase
         $movement = [
             'posted_at' => '2026-09-14', 'amount' => 10000.0, 'currency' => 'EUR',
             'variable_symbol' => '1', 'constant_symbol' => null, 'specific_symbol' => null,
-            'counterparty_account' => '0000000112866706', 'counterparty_bank' => '2250',
+            'counterparty_account' => '0000001000000005', 'counterparty_bank' => '0100',
             'counterparty_name' => 'SYNTHETIC', 'description' => 'Vlastni prevod',
             'bank_ref' => null,
         ];
