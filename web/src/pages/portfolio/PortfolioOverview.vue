@@ -294,12 +294,14 @@ function periodBadgeClass(status: string): string {
           {{ t('portfolio.check_ok_long') }}
         </p>
         <ul v-else class="divide-y divide-neutral-100 text-sm">
-          <li v-for="f in openCheckSummary.findings" :key="f.key" class="flex items-center justify-between gap-3 py-2">
-            <span class="flex items-center gap-2 min-w-0">
+          <!-- Počet ve vlastním sloupci: zkrácený popisek jinak končí těsně u čísla
+               a na první pohled to vypadá jako jeden údaj. -->
+          <li v-for="f in openCheckSummary.findings" :key="f.key" class="flex items-center py-2">
+            <span class="flex items-center gap-2 min-w-0 flex-1">
               <span class="w-2 h-2 rounded-full shrink-0" :class="f.severity === 'error' ? 'bg-danger-500' : 'bg-warning-500'" aria-hidden="true"></span>
-              <span class="truncate">{{ checkLabel(f.key) }}</span>
+              <span class="truncate" :title="checkLabel(f.key)">{{ checkLabel(f.key) }}</span>
             </span>
-            <span class="font-mono tabular-nums text-neutral-600 shrink-0">{{ f.count }}</span>
+            <span class="font-mono tabular-nums text-neutral-600 shrink-0 w-12 pl-4 text-right">{{ f.count }}</span>
           </li>
         </ul>
         <p class="text-xs text-neutral-400 mt-3">{{ t('portfolio.check_subset_hint') }}</p>
