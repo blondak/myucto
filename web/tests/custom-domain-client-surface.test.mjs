@@ -35,7 +35,10 @@ test('navigation switches to the client experience for every locked custom domai
   assert.match(layout, /clientExperience = computed\(\(\) => usesClientNavigation\(auth\.isClientRole, auth\.domainContext\)\)/)
   assert.match(layout, /if \(clientExperience\.value\) \{\s*return filterNavigation/)
   assert.match(layout, /!clientExperience\.value && auth\.hasCommercialFeatures && auth\.canWrite\('accounting\.journal\.write'\)/)
-  assert.match(layout, /!clientExperience\.value && !auth\.isDemo && auth\.canWrite\('purchase_invoices\.scan'\)/)
+  // Předmětem je klientská plocha, ne ukázkový režim: hlídá se `!clientExperience`.
+  // `!auth.isDemo` tu bylo jen proto, že se opisoval celý řádek, a od 6.13.2 v kódu
+  // není — ukázka vidí celou aplikaci včetně AI importu a vytěžení odmítne backend.
+  assert.match(layout, /!clientExperience\.value && auth\.canWrite\('purchase_invoices\.scan'\)/)
   assert.equal((layout.match(/v-if="!clientExperience" to="\/admin\/support"/g) || []).length, 2)
   assert.match(layout, /if \(!auth\.domainContext\?\.locked \|\| !canonicalBaseUrl\) return path/)
   assert.match(layout, /new URL\(canonicalBaseUrl\)\.origin/)
