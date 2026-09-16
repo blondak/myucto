@@ -201,6 +201,12 @@ export interface Supplier {
   /** Přidat SPAYD DT se splatností do QR přijatých dokladů. */
   purchase_invoice_qr_include_due_date: boolean
   proforma_payment_document: 'final_on_full_payment' | 'always_tax_document' | 'manual'
+  /**
+   * Datum přijetí u importovaných přijatých dokladů (migrace 1848). 'issue_date' =
+   * datum z dokladu (vystavení, jinak DUZP) — výchozí; 'import_date' = den importu.
+   * Platí pro všechny formáty importu, ne jen AI extrakci.
+   */
+  purchase_import_received_at: 'issue_date' | 'import_date'
   logo_path: string | null
   signature_path: string | null
   pohoda_account_code: string | null

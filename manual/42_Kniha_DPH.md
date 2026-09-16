@@ -55,7 +55,8 @@ nestáhne:
   **srpna**; v tabulce je označený hvězdičkou a v PDF je za ní rozhodné datum.
 
 Datum přijetí ovlivní zařazení jen tehdy, když ho zadáš ty. U dokladu z importu nebo
-z AI extrakce je předvyplněné dnem zpracování, a dokud na pole nesáhneš, do období
+z AI extrakce je předvyplněné datem z dokladu (datum vystavení, jinak DUZP), a dokud
+na pole nesáhneš, do období
 odpočtu nevstupuje — doklad, který jsi po vytěžení upravil(a), tak skončí ve stejném
 období jako ten, kterého ses nedotkl(a). Když datum přijetí neodpovídá skutečnosti,
 oprav ho na dokladu; editor přijaté faktury u dat rovnou píše, do jakého období

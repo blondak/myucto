@@ -831,7 +831,8 @@
         "1844_pohoda_migration.sql",
         "1845_payroll_surcharge_fixed_hourly_amounts.sql",
         "1846_payroll_employer_surcharge_defaults.sql",
-        "1847_payroll_component_jmhz_stravovani_mapping.sql"
+        "1847_payroll_component_jmhz_stravovani_mapping.sql",
+        "1848_supplier_purchase_import_received_at.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -19248,6 +19249,7 @@
                 "pohoda_contract_code": "varchar(20) NULL DEFAULT NULL",
                 "proforma_number_format": "varchar(60) NULL DEFAULT NULL",
                 "proforma_payment_document": "enum('final_on_full_payment','always_tax_document','manual') NOT NULL DEFAULT 'always_tax_document'",
+                "purchase_import_received_at": "enum('issue_date','import_date') NOT NULL DEFAULT 'issue_date'",
                 "purchase_invoice_number_format": "varchar(60) NULL DEFAULT NULL",
                 "purchase_invoice_qr_include_due_date": "tinyint(1) NOT NULL DEFAULT 0",
                 "reminder_days_after_due": "int(11) NOT NULL DEFAULT 3",

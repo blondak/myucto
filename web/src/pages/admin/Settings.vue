@@ -476,6 +476,9 @@ async function saveSupplier() {
       self_copy: supplier.value.self_copy ?? null,
       auto_generate_recurring: supplier.value.auto_generate_recurring,
       embed_isdoc: supplier.value.embed_isdoc,
+      // Datum přijetí u importovaných přijatých dokladů (migrace 1848) — chybějící
+      // hodnota (nedoběhlá migrace) se posílá jako výchozí, ne prázdná.
+      purchase_import_received_at: supplier.value.purchase_import_received_at ?? 'issue_date',
       invoice_qr_include_due_date: supplier.value.invoice_qr_include_due_date,
       purchase_invoice_qr_include_due_date: supplier.value.purchase_invoice_qr_include_due_date,
       proforma_payment_document: supplier.value.proforma_payment_document,
@@ -1101,6 +1104,15 @@ async function confirmTaxRepDelete() {
               {{ t('settings.embed_isdoc') }}
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.embed_isdoc_hint') }}</p>
+          </div>
+          <div class="md:col-span-2">
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.purchase_import_received_at') }}</label>
+            <select v-model="supplier.purchase_import_received_at"
+                    class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option value="issue_date">{{ t('settings.purchase_import_received_at_document') }}</option>
+              <option value="import_date">{{ t('settings.purchase_import_received_at_import') }}</option>
+            </select>
+            <p class="text-xs text-neutral-500 mt-1">{{ t('settings.purchase_import_received_at_hint') }}</p>
           </div>
           <div class="md:col-span-2">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.proforma_payment_document') }}</label>

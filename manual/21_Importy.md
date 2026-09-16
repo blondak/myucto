@@ -564,9 +564,19 @@ nemá, a účetní by musela stovky dokladů otevřít jednu po druhé. Zaškrt�
 **Založit jako koncept** je pro dávku, kterou chceš ještě projít, než ji pustíš
 do výkazů.
 
-**Datum přijetí** se přebírá z dokladu (DUZP, jinak datum vystavení), ne z data
-importu. Na období nároku na odpočet to vliv nemá — to se u importovaného dokladu
-řídí DUZP (§ 73), protože datum přijetí není vědomé zadání účetní.
+**Datum přijetí** se přebírá z dokladu — **datum vystavení**, a když ho doklad
+nenese, DUZP. Nikdy se nepoužije datum v budoucnosti. Stejné pravidlo platí pro
+**všechny** formáty importu, tedy i pro AI import z PDF, iDoklad, Fakturoid a scan
+inbox. Nemá-li doklad čitelné vůbec žádné datum, zbyde den importu a doklad dostane
+žluté upozornění, ať si údaj zkontroluješ.
+
+Chceš-li dosavadní chování, tedy datum přijetí rovné dni importu, přepni
+**Nastavení → Firma → Doklady → Datum přijetí u importovaných přijatých dokladů**
+na „Den importu". Volba je nastavením firmy, takže se pamatuje a nemusíš ji klikat
+u každé dávky.
+
+Na období nároku na odpočet to vliv nemá — to se u importovaného dokladu řídí DUZP
+a datem vystavení (§ 73), protože datum přijetí není vědomé zadání účetní.
 
 Strukturovaný import nepoužívá AI. PDF bez vloženého ISDOC proto patří do
 **Nákup → AI import**, případně je lze zpracovat přes scan inbox. Importovaný

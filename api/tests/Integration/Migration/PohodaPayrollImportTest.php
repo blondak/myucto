@@ -201,6 +201,14 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_absences WHERE supplier_id = ? AND employment_id = ? AND absence_type = 'vacation'", [$supplierId, $jana['id']]), $this->explain($protocol));
         self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_PEOPLE)['absences_from_import'] ?? 0, $this->explain($protocol));
         self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM payroll_person_accounts WHERE supplier_id = ? AND employee_id = ? AND is_active = 1', [$supplierId, $jana['employee_id']]));
+        // Účet, na který PAMICA opakovaně vyplácela mzdu, je ověřený dnem POSLEDNÍ výplaty
+        // (10. 3. za únor), ne dnem převodu. Bez ověření brání značka podání i příkazu.
+        self::assertSame(1, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_person_accounts
+              WHERE supplier_id = ? AND employee_id = ? AND verification_source = 'user_verified'
+                AND verified_on = '2026-03-10' AND verified_by = ?",
+            [$supplierId, $jana['employee_id'], $this->userId],
+        ), $this->explain($protocol));
         self::assertSame(1, $this->scalar("SELECT COUNT(*) FROM payroll_employee_profiles WHERE supplier_id = ? AND employee_id = ? AND payout_method = 'bank'", [$supplierId, $jana['employee_id']]));
         // Předpis základní měsíční mzdy dostane jen měsíčně placený vztah, ne Petrova DPP za hodiny.
         // Souvislá řada bez děr: první předpis platí od prvního převáděného měsíce, druhý

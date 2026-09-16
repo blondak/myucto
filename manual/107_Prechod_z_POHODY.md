@@ -355,6 +355,15 @@ odškrtne, jen když je založil sám import mezd tím, že zapsal změnu měsí
 z PAMICA jako historickou verzi podmínek vztahu. Po jiné změně podmínek
 zůstanou otevřené.
 
+**Výplatní účty.** Účet, na který PAMICA opakovaně vyplácela mzdu, převod
+označí za ověřený. Doklad je věcný: peníze na ten účet skutečně chodily.
+Jako datum ověření nese den poslední výplaty z PAMICA (ne den převodu) a původ
+je v popisku účtu, takže je při kontrole vidět. Bez ověřeného účtu by u každé
+osoby zůstala značka, která brání podání i bankovnímu příkazu. Neověřený
+zůstane účet, který PAMICA vede jako neaktivní, tedy mzda na něj nechodila,
+a účet osoby, u které export žádnou vyplacenou mzdu nemá; protokol je vypíše
+s počtem a ověříte je v kartě osoby.
+
 **Pracoviště a CZ-ISCO.** Obec pracoviště, stát a CZ-ISCO zapisuje převod hned
 po každém převedeném měsíci, dokud je verze podmínek toho měsíce ta poslední.
 Opravit jde totiž vždy jen poslední verzi; zapsáno až nakonec by pracoviště

@@ -26466,6 +26466,7 @@ components:
         a `signature_path` přes tento endpoint změnit NELZE (bezpečnost).
       properties:
         company_name: { type: string }
+        purchase_import_received_at: { type: string, enum: [issue_date, import_date], default: issue_date, description: "Datum přijetí u importovaných přijatých dokladů (migrace 1848). issue_date = datum z dokladu (datum vystavení, jinak DUZP), import_date = den importu. Platí pro všechny formáty importu — AI z PDF, ISDOC/ISDOCX/PDF/A-3, Pohoda XML, iDoklad, Fakturoid i scan inbox. Na období nároku na odpočet vliv nemá: importovaný doklad si drží received_at_source='import'." }
         display_name: { type: [string, "null"], description: "Obchodní/značkové jméno v hlavičce PDF a e-mailů (fallback = company_name)" }
         street: { type: string }
         city: { type: string }
@@ -26541,6 +26542,7 @@ components:
       properties:
         id: { type: integer }
         company_name: { type: string }
+        purchase_import_received_at: { type: string, enum: [issue_date, import_date], description: "Datum přijetí u importovaných přijatých dokladů (migrace 1848). issue_date = datum z dokladu (datum vystavení, jinak DUZP) — výchozí; import_date = den importu." }
         display_name: { type: [string, "null"] }
         street: { type: string }
         city: { type: string }

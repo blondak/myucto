@@ -125,6 +125,16 @@ final class IsdocToPurchaseInvoiceMapper
             ? (bool) $vendor['is_vat_payer']
             : null;
 
+        // Datum přijetí z dokladu, ne den importu. Pravidlo (vystavení → DUZP → dnešek,
+        // budoucí datum nikdy) je od migrace 1848 sdílené se všemi ostatními importními
+        // kanály — viz {@see ImportedReceivedDatePolicy}. Dřív tenhle mapper preferoval
+        // DUZP před vystavením; sjednoceno, protože doklad nelze držet dřív, než vznikl.
+        $receivedAt = ImportedReceivedDatePolicy::resolve(
+            ImportedReceivedDatePolicy::modeForSupplier($this->db, $supplierId),
+            $parsed['issue_date'] ?? null,
+            $parsed['tax_date'] ?? null,
+        );
+
         $payload = [
             'vendor_id'             => $resolved['id'],
             'vendor_is_vat_payer'   => $docVendorPayer
@@ -135,12 +145,7 @@ final class IsdocToPurchaseInvoiceMapper
             'issue_date'            => (string) ($parsed['issue_date'] ?? date('Y-m-d')),
             'tax_date'              => $parsed['tax_date'] !== null ? (string) $parsed['tax_date'] : null,
             'due_date'              => (string) ($parsed['due_date'] ?? date('Y-m-d', strtotime('+14 days'))),
-            // Datum vlastního dokladu, ne datum importu. Na období odpočtu to nemá vliv —
-            // o tom rozhoduje `received_at_source` (viz níž) — ale migrace tisíce let
-            // starých dokladů jinak vyrobí sloupec „Datum přijetí", ve kterém má celá
-            // historie firmy dnešek. Dnešní datum zůstává jen tam, kde doklad žádné
-            // vlastní nemá, a budoucí datum se nedosazuje nikdy.
-            'received_at'           => self::receivedAtFromDocument($parsed),
+            'received_at'           => $receivedAt['date'],
             // C6 (§ 73/1/a): received_at je jen otisk dat ze souboru, ne vědomé zadání data
             // držení dokladu účetní → 'import', aby VatLedgerService neposunul odpočet.
             'received_at_source'    => 'import',
@@ -188,6 +193,11 @@ final class IsdocToPurchaseInvoiceMapper
         }
 
         $id = $this->repo->createDraft($payload, $userId, $supplierId);
+        // Soubor bez čitelného data vystavení i DUZP → datum přijetí je NÁHRADA. Ať to
+        // uživatel vidí na dokladu, ne aby to tiše prošlo (stejný box jako varování DPH níž).
+        if ($receivedAt['fell_back']) {
+            $this->repo->appendExtractionWarning($id, $supplierId, ImportedReceivedDatePolicy::fallbackWarning());
+        }
         $this->repo->replaceItems($id, $items);
         $this->calc->recompute($id);
 
@@ -281,27 +291,6 @@ final class IsdocToPurchaseInvoiceMapper
         $ic = $stmt->fetchColumn();
         if ($ic === false || $ic === '' || $ic === null) return null;
         return $this->normalizeIc((string) $ic);
-    }
-
-    /**
-     * Datum přijetí odvozené z dokladu: DUZP, jinak datum vystavení, jinak dnešek.
-     * Budoucí datum se nedosazuje — doklad, který ještě nenastal, jsme nemohli převzít.
-     *
-     * @param array<string,mixed> $parsed
-     */
-    private static function receivedAtFromDocument(array $parsed): string
-    {
-        $today = date('Y-m-d');
-        foreach ([$parsed['tax_date'] ?? null, $parsed['issue_date'] ?? null] as $candidate) {
-            $date = trim((string) ($candidate ?? ''));
-            if ($date === '') continue;
-            $date = substr($date, 0, 10);
-            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) continue;
-
-            return $date <= $today ? $date : $today;
-        }
-
-        return $today;
     }
 
     /**

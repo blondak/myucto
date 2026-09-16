@@ -142,7 +142,7 @@ Limity:
 | **Datum vystavení** | Z faktury. |
 | **DUZP (datum uskutečnění zdanitelného plnění)** | Klíčové pro DPH období. Default = datum vystavení. U **reverse charge** se doklad zařazuje do DPH období právě podle DUZP (povinnost přiznat daň vzniká bez ohledu na doručení dokladu); u **pořízení zboží z EU** je DUZP dle § 25 ZDPH **15. den měsíce následujícího po dodání**, pokud doklad nebyl vystaven dříve — editor to připomene hintem. |
 | **Splatnost** | Z platebních podmínek dodavatele. |
-| **Datum přijetí** | Kdy jsi to fyzicky / e-mailem dostal. Default = dnes. |
+| **Datum přijetí** | Kdy jsi to fyzicky / e-mailem dostal. U ručně zakládaného dokladu je default dnes. U **importovaného** dokladu se přebírá z dokladu (datum vystavení, jinak DUZP) — viz [§ 21.15](21_Importy.md); firma si může nastavit, že se má místo toho použít den importu. |
 | **Datum dodání** | Datum dodání či převzetí uvedené na dokladu (na zahraničním „Leistungsdatum" / „date of supply"). Evidenční údaj — DUZP zůstává ve svém poli. U **pořízení zboží z jiného členského státu** je vstupem výpočtu podle § 25 ZDPH: aplikace z něj ověří, že DUZP odpovídá 15. dni měsíce následujícího po dodání (nebo dřívějšímu datu vystavení). Necháš-li pole prázdné, systém datum **nedomýšlí** — doklad jen dostane upozornění, že § 25 nelze ověřit. |
 | **Měna faktury** | Měna, ve které je doklad vystaven (USD, EUR, CZK…). |
 | **Kurz k DUZP** | Pokud je měna ≠ CZK, **musíš zafixovat kurz**. Tlačítko „Načíst z ČNB" stáhne denní kurz k rozhodnému dni dokladu. Korunový doklad kurz nemá — když měnu přepneš na CZK, kurz i jeho datum se vyprázdní. Viz [§ 23.2.9](#2329-kurz-cizi-meny-a-jeho-prenacitani). |
@@ -162,8 +162,10 @@ Ikona v poli otevře kalendář.
 > DUZP až v lednu — pokud datum přijetí ručně nastavíš na leden, faktura spadne do
 > lednové [Knihy DPH](42_Kniha_DPH.md) i přiznání, ne do prosincové. U faktur
 > **importovaných** (AI extrakce, ISDOC, iDoklad/Fakturoid, bankovní avízo, scan
-> inboxu) se datum přijetí do tohoto výpočtu nepočítá — import ho plní datem
-> zpracování, ne skutečným datem přijetí, takže by zařazení jen zkreslilo.
+> inboxu) se datum přijetí do tohoto výpočtu nepočítá — import ho přebírá z dokladu
+> (datum vystavení, jinak DUZP), což není totéž co vědomé posouzení účetní, kdy jsi
+> doklad opravdu držel. Jakmile na poli něco změníš, stane se z něj vědomé zadání
+> a do výpočtu období odpočtu vstoupí.
 
 ### 23.2.3 Položky
 

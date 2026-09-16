@@ -14383,7 +14383,7 @@
         "issue_date": "driven by the issue date (you cannot hold the document earlier)",
         "received_at": "driven by the date received"
       },
-      "vat_claim_received_note": "Check that the date received matches the day you actually got the document — after AI extraction it is pre-filled with the processing date. Until you edit the field, it does not affect the deduction period.",
+      "vat_claim_received_note": "Check that the date received matches the day you actually got the document — on an imported document it is pre-filled from the document itself (the issue date, or the tax point when there is none). Until you edit the field, it does not affect the deduction period.",
       "currency": "Invoice currency",
       "currency_purchase_only": "for purchases only",
       "currency_add_hint": "Add a currency for received invoices (created as inactive for issued)",
@@ -18825,6 +18825,10 @@
     "auto_generate_recurring_hint": "When off, the cron skips all recurring invoice templates for this supplier. Manual \"Generate now\" still works.",
     "embed_isdoc": "Embed ISDOC XML in invoice PDFs",
     "embed_isdoc_hint": "Machine-readable invoice data (ISDOC 6.0.2) is attached to the PDF. Czech accounting software (Pohoda, Money S3, …) extracts it automatically; Adobe Reader / Foxit show a paperclip icon below the variable symbol. Only applies to CZK invoices with an assigned variable symbol.",
+    "purchase_import_received_at": "Date received on imported purchase documents",
+    "purchase_import_received_at_document": "Date from the document (issue date) — recommended",
+    "purchase_import_received_at_import": "Import day",
+    "purchase_import_received_at_hint": "Applies to every import format for received documents: AI import from PDF, ISDOC, ISDOCX, PDF/A-3, Pohoda XML, iDoklad, Fakturoid and the scan inbox. The document option takes the issue date, falling back to the tax point when the document carries none; a future date is never used. If the document carries no readable date at all, the import day remains and the document is flagged. This choice does not affect the VAT deduction period — for an imported document that is driven by the tax point and the issue date (§ 73) until you enter the date received manually.",
     "proforma_payment_document": "After a proforma is paid, issue",
     "proforma_payment_document_final": "A final invoice once the advance is paid in full",
     "proforma_payment_document_tax": "Always a tax document for the payment received (recommended)",
@@ -24832,7 +24836,9 @@
       "recurring_wage_hourly": "of which relations with hourly or task pay too",
       "absences_approved": "absences approved",
       "absences_from_import": "absences left to the attendance import summary",
-      "components_without_jmhz": "components without a JMHZ classification"
+      "components_without_jmhz": "components without a JMHZ classification",
+      "payout_accounts_verified": "payout accounts verified",
+      "payout_accounts_to_verify": "payout accounts to verify"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",

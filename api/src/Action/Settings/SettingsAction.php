@@ -602,7 +602,27 @@ final class SettingsAction
             // F7 — AI provider selection (NON-secret; secrety `*_enc` jdou VÝHRADNĚ přes
             // AiProviderCredentialsAction, NIKDY tady — mustFix #11).
             'ai_provider', 'ai_data_region', 'ai_eu_residency_required',
+            // Datum přijetí u importovaných přijatých dokladů (migrace 1848) — 'issue_date'
+            // (z dokladu, výchozí) vs 'import_date' (den importu, chování do 1848).
+            // Platí pro VŠECHNY importní kanály, ne jen AI extrakci.
+            'purchase_import_received_at',
         ];
+
+        // ENUM validace volby data přijetí u importu (migrace 1848).
+        if (array_key_exists('purchase_import_received_at', $body)
+            && !in_array(
+                $body['purchase_import_received_at'],
+                \MyInvoice\Service\Import\ImportedReceivedDatePolicy::MODES,
+                true,
+            )
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                "purchase_import_received_at musí být 'issue_date' nebo 'import_date'.",
+                400,
+            );
+        }
 
         // F7 — ENUM validace AI provider selection (§3.8).
         if (array_key_exists('ai_provider', $body)
@@ -1287,6 +1307,14 @@ final class SettingsAction
         // Auto-post hook (A2, migrace 1035) — opt-in auto-zaúčtování; FE gatuje na double_entry.
         $row['auto_post_invoices']       = (bool) ($row['auto_post_invoices'] ?? false);
         $row['auto_post_purchases']      = (bool) ($row['auto_post_purchases'] ?? false);
+        // Datum přijetí u importu (migrace 1848). Chybějící hodnota = nedoběhlá migrace;
+        // fallback drží VÝCHOZÍ režim a hlavně nenechá FE select bez vybrané položky.
+        $row['purchase_import_received_at'] = in_array(
+            $row['purchase_import_received_at'] ?? null,
+            \MyInvoice\Service\Import\ImportedReceivedDatePolicy::MODES,
+            true,
+        ) ? (string) $row['purchase_import_received_at']
+          : \MyInvoice\Service\Import\ImportedReceivedDatePolicy::DEFAULT_MODE;
         // F7 — AI provider selection (non-secret; klíče `*_enc` jsou níže redigovány).
         $row['ai_provider']              = (string) ($row['ai_provider'] ?? 'anthropic');
         $row['ai_data_region']           = (string) ($row['ai_data_region'] ?? 'us');

@@ -96,6 +96,15 @@ extrahují **beze změny** i nadále včetně rozpadu na položky.
 - **Chybějící splatnost se neodhaduje.** Pokud na dokladu datum splatnosti není,
   výsledek ho nechá neurčené a doplníš ho při kontrole v editoru. Stejně tak se
   nesnaží „opravovat" DUZP jen proto, že předchází datu vystavení.
+- **Datum přijetí se bere z dokladu, ne ze dne vytěžení.** Do pole **Datum přijetí**
+  se doplní **datum vystavení** dokladu, a když ho doklad nenese, DUZP; datum
+  v budoucnosti se nepoužije nikdy. Nemá-li doklad čitelné vůbec žádné datum, zůstane
+  den importu a doklad na to upozorní žlutou hláškou. Chceš-li zpátky den importu,
+  přepni **Nastavení → Firma → Doklady → Datum přijetí u importovaných přijatých
+  dokladů** na „Den importu" — volba se pamatuje pro celou firmu. Podrobnosti
+  a platnost napříč formáty v [§ 21.15](21_Importy.md). Na období nároku na odpočet
+  DPH to vliv nemá, dokud datum přijetí nezadáš ručně (viz
+  [Kniha DPH](42_Kniha_DPH.md)).
 - **IČO s vedoucí nulou zůstává osmimístné.** Vyhledání i párování dodavatele
   používá normalizovaný osmimístný tvar, takže například `01234567` není
   zaměněno za jiný identifikátor ani uloženo bez úvodní nuly.

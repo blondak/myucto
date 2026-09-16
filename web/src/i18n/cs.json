@@ -14383,7 +14383,7 @@
         "issue_date": "rozhoduje datum vystavení (dřív doklad nemůžete mít)",
         "received_at": "rozhoduje datum přijetí"
       },
-      "vat_claim_received_note": "Zkontroluj, že datum přijetí odpovídá dni, kdy jsi doklad skutečně dostal — po vytěžení AI je předvyplněné dnem zpracování. Dokud na pole nesáhneš, do období odpočtu nevstupuje.",
+      "vat_claim_received_note": "Zkontroluj, že datum přijetí odpovídá dni, kdy jsi doklad skutečně dostal — u importovaného dokladu je předvyplněné datem z dokladu (datum vystavení, jinak DUZP). Dokud na pole nesáhneš, do období odpočtu nevstupuje.",
       "currency": "Měna faktury",
       "currency_purchase_only": "jen pro nákup",
       "currency_add_hint": "Přidat novou měnu pro přijaté faktury (zakládá se jako neaktivní pro vystavené)",
@@ -18825,6 +18825,10 @@
     "auto_generate_recurring_hint": "Když je vypnuto, cron pro tohoto dodavatele přeskočí všechny šablony pravidelné fakturace. Manuální spuštění (tlačítko \"Vygenerovat teď\") funguje vždy.",
     "embed_isdoc": "Přiložit ISDOC XML do PDF faktur",
     "embed_isdoc_hint": "Strojově čitelná data faktury (ISDOC 6.0.2) se vloží jako příloha do PDF. České účetní programy (Pohoda, Money S3, …) si je z PDF samy extrahují; v Adobe Reader / Foxit je vidět paperclip ikona pod variabilním symbolem. Funguje jen pro CZK faktury s přiděleným VS.",
+    "purchase_import_received_at": "Datum přijetí u importovaných přijatých dokladů",
+    "purchase_import_received_at_document": "Datum z dokladu (datum vystavení) — doporučeno",
+    "purchase_import_received_at_import": "Den importu",
+    "purchase_import_received_at_hint": "Platí pro všechny formáty importu přijatých dokladů: AI import z PDF, ISDOC, ISDOCX, PDF/A-3, Pohoda XML, iDoklad, Fakturoid i scan inbox. Volba „Datum z dokladu“ vezme datum vystavení, a když ho doklad nenese, DUZP; datum v budoucnosti se nedosazuje nikdy. Nemá-li doklad čitelné vůbec žádné datum, zbyde den importu a doklad na to upozorní. Na období nároku na odpočet DPH tahle volba vliv nemá — u importovaného dokladu se řídí DUZP a datem vystavení (§ 73), dokud datum přijetí nezadáte ručně.",
     "proforma_payment_document": "Po úhradě zálohové faktury vystavit",
     "proforma_payment_document_final": "Vyúčtovací fakturu, je-li záloha doplacena",
     "proforma_payment_document_tax": "Vždy daňový doklad k přijaté platbě (doporučeno)",
@@ -24832,7 +24836,9 @@
       "recurring_wage_hourly": "z toho vztahů i s hodinovou nebo úkolovou mzdou",
       "absences_approved": "schválených nepřítomností",
       "absences_from_import": "nepřítomností ponechaných na souhrnu z importu docházky",
-      "components_without_jmhz": "složek bez zařazení do JMHZ"
+      "components_without_jmhz": "složek bez zařazení do JMHZ",
+      "payout_accounts_verified": "ověřených výplatních účtů",
+      "payout_accounts_to_verify": "výplatních účtů k ověření"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",

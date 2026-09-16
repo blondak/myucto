@@ -110,6 +110,8 @@ final class PohodaPayrollPeople
         /** @var array<string,array{relation:string,month:int}> $payslipOf mzda => vztah a měsíc (pro nepřítomnosti) */
         $payslipOf = [];
         $transferStart = null;
+        /** @var array<string,string> $lastPaid osoba => den poslední výplaty (`MZ.Datum` mzdy s výplatou) */
+        $lastPaid = [];
         foreach (PohodaXml::records($file, 'MZ') as $mz) {
             if ((int) PohodaXml::text($mz, 'Rok') !== $year) {
                 continue;
@@ -138,6 +140,16 @@ final class PohodaPayrollPeople
                 'worked_days' => PohodaXml::num($mz, 'DnyOdpra'),
             ];
             $person = PohodaXml::text($mz, 'RefZAM');
+            // Den, kdy PAMICA mzdu opravdu vyplatila. `Datum` je den výplaty (v exportu vždy
+            // 10. následujícího měsíce), `KcVyplat` odděluje mzdy, ze kterých se platilo.
+            $paidOn = self::realDate(PohodaXml::date($mz, 'Datum'));
+            // Jen den, který už nastal: mzda posledního zpracovaného měsíce má den výplaty
+            // v budoucnu a doklad o výplatě z ní ještě není.
+            if ($paidOn !== null && $paidOn <= date('Y-m-d') && PohodaXml::num($mz, 'KcVyplat') > 0
+                && ($lastPaid[$person] ?? '') < $paidOn
+            ) {
+                $lastPaid[$person] = $paidOn;
+            }
             $sums = $personMonths[$person][$month] ?? [
                 'social' => 0, 'advance_base' => 0, 'advance_tax' => 0, 'withholding_base' => 0,
                 'withholding_tax' => 0, 'non_refundable' => 0, 'child' => 0, 'bonus' => 0, 'signed' => false,
@@ -239,7 +251,7 @@ final class PohodaPayrollPeople
             $benefitMonths[$payslip['relation']][$label] = ($benefitMonths[$payslip['relation']][$label] ?? 0) + 1;
         }
 
-        /** @var array<string,list<array{account:string,bank_code:string}>> $accounts osoba => výplatní účty */
+        /** @var array<string,list<array{account:string,bank_code:string,active:bool}>> $accounts osoba => výplatní účty */
         $accounts = [];
         foreach ($byId['ZAMucet'] ?? [] as $row) {
             $account = PohodaXml::text($row, 'Ucet');
@@ -247,7 +259,17 @@ final class PohodaPayrollPeople
             if ($account === '' || preg_match('/^[0-9]{4}$/D', $bankCode) !== 1) {
                 continue;
             }
-            $accounts[PohodaXml::text($row, 'RefAg')][] = ['account' => $account, 'bank_code' => $bankCode];
+            // `Active` je jediné, čím PAMICA odliší účet, na který se vyplácí, od účtu jen
+            // vedeného v evidenci: vazbu mezi mzdou a účtem export nenese.
+            $accounts[PohodaXml::text($row, 'RefAg')][] = [
+                'account' => $account,
+                'bank_code' => $bankCode,
+                'active' => PohodaXml::text($row, 'Active') !== '0',
+            ];
+        }
+        foreach ($accounts as $personKey => $rows) {
+            usort($rows, static fn (array $a, array $b): int => ($b['active'] ? 1 : 0) <=> ($a['active'] ? 1 : 0));
+            $accounts[$personKey] = $rows;
         }
 
         $health = self::healthNotices($byId);
@@ -300,6 +322,8 @@ final class PohodaPayrollPeople
                 'averages' => self::averages($relationMonths[$relationId] ?? [], $year),
                 'absences' => $absences[$relationId] ?? [],
                 'accounts' => $accounts[$personId] ?? [],
+                // Den poslední mzdy vyplacené v PAMICA: doklad, že se na účet opravdu platilo.
+                'accounts_paid_on' => $lastPaid[$personId] ?? null,
                 'first_signed_period' => $firstSigned,
                 'start' => $start,
                 'end' => $end,

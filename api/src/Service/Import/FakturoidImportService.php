@@ -516,6 +516,14 @@ final class FakturoidImportService
             ];
         }
 
+        // Datum přijetí z dokladu, ne ze dne pullu (migrace 1848) — sdílené pravidlo
+        // všech importních kanálů, {@see ImportedReceivedDatePolicy}.
+        $receivedAt = ImportedReceivedDatePolicy::resolve(
+            ImportedReceivedDatePolicy::modeForSupplier($this->db, $supplierId),
+            $issueDate,
+            $taxDate,
+        );
+
         $payload = [
             'vendor_id'             => $vendorId,
             // #113: original_number = číslo dokladu dodavatele; number je jen interní číslo
@@ -529,9 +537,9 @@ final class FakturoidImportService
             'issue_date'            => $issueDate,
             'tax_date'              => $taxDate,
             'due_date'              => $dueDate,
-            'received_at'           => date('Y-m-d'),
-            // C6 (§ 73/1/a): received_at je jen otisk data importu, ne skutečné držení
-            // dokladu → 'import', aby VatLedgerService neposunul odpočet do měsíce importu.
+            'received_at'           => $receivedAt['date'],
+            // C6 (§ 73/1/a): received_at zůstává i po migraci 1848 jen údajem z dokladu,
+            // ne vědomým zadáním účetní → 'import', aby VatLedgerService neposunul odpočet.
             'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId((string) ($e['currency'] ?? 'CZK'), $supplierId, isActive: false),
             'exchange_rate'         => isset($e['exchange_rate']) ? (float) $e['exchange_rate'] : null,

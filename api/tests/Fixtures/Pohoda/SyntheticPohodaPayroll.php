@@ -73,6 +73,8 @@ final class SyntheticPohodaPayroll
             $petr = 20 + $m;
             $row('MZ', ['ID' => $jana, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => self::YEAR, 'RelMes' => $m, 'HodFond' => 160, 'HodOdpra' => $m === 2 ? 152 : 160,
                 'TUvazek' => 40, 'RefPoj' => 1, 'KcHrubaM' => self::GROSS[0], 'KcCistaM' => 33000, 'Prohlas' => 1, 'JeSocPP' => 1, 'KcSoc' => 3053, 'KcZdr' => 1935,
+                // Den výplaty a vyplacená částka: doklad, že mzda na účet opravdu odešla.
+                'Datum' => sprintf('%04d-%02d-10', self::YEAR, $m + 1), 'KcVyplat' => 33000,
                 // Sjednaná měsíční mzda a čtvrtletní průměr, se kterým PAMICA počítala náhrady.
                 'KcZaklM' => $m === 2 ? 42000 : 40000, 'DnyPrac' => 20, 'DnyOdpra' => 20, 'KcPrum' => 250,
                 'KcSocZak' => 43000, 'KcZdaM' => 43000, 'KcDanPrS' => 6450, 'KcNzdZak' => 2570, 'KcDanZal' => 3880, 'KcZalDan' => 3880]);

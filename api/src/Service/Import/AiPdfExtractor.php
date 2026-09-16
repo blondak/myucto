@@ -871,6 +871,17 @@ final class AiPdfExtractor
             ? (bool) $data['vendor']['is_vat_payer']
             : null;
 
+        // Datum přijetí se přebírá Z DOKLADU, ne ze dne vytěžení (migrace 1848) — sdílené
+        // pravidlo všech importních kanálů, viz {@see ImportedReceivedDatePolicy}. Firma si
+        // může den importu vrátit přepínačem `supplier.purchase_import_received_at`.
+        // `issue_date` je v tomhle bodě už ověřené (viz validace výš), takže `fell_back`
+        // je tu čistě defenzivní pojistka.
+        $receivedAt = ImportedReceivedDatePolicy::resolve(
+            ImportedReceivedDatePolicy::modeForSupplier($this->db, $supplierId),
+            $data['issue_date'] ?? null,
+            $data['tax_date'] ?? null,
+        );
+
         $payload = [
             'vendor_id'             => $vendorId,
             'vendor_is_vat_payer'   => $docVendorPayer
@@ -902,9 +913,9 @@ final class AiPdfExtractor
             // aby šel dopočet zpětně ověřit a nemusel se dohadovat z `tax_date`.
             'delivery_date'         => self::firstNonEmptyDate([$data['delivery_date'] ?? null]),
             'due_date'              => (string) ($data['due_date'] ?? $data['issue_date']),
-            'received_at'           => date('Y-m-d'),
-            // C6 (§ 73/1/a): received_at je jen otisk data importu, ne skutečné držení
-            // dokladu → 'import', aby VatLedgerService neposunul odpočet do měsíce importu.
+            'received_at'           => $receivedAt['date'],
+            // C6 (§ 73/1/a): received_at zůstává i po migraci 1848 jen ÚDAJEM Z DOKLADU,
+            // ne vědomým zadáním účetní → 'import', aby VatLedgerService neposunul odpočet.
             'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId((string) $data['currency'], $supplierId),
             'exchange_rate'         => null,
@@ -942,7 +953,11 @@ final class AiPdfExtractor
             return $existingId;
         }
         $id = $this->repo->createDraft($payload, $userId, $supplierId);
-        // Koncovka karty z účtenky / výpisu terminálu (migrace 1800) je silný signál pro
+        // Doklad bez jediného čitelného data → datum přijetí je NÁHRADA, ne údaj z dokladu.
+        // Uživatel to musí vidět (žluté upozornění), ne se to dozvědět až v knize DPH.
+        if ($receivedAt['fell_back']) {
+            $this->repo->appendExtractionWarning($id, $supplierId, ImportedReceivedDatePolicy::fallbackWarning());
+        }
         // párování platby kartou. Čte se přes týž SSOT jako u skenů; ruční hodnotu nepřepíše.
         $cardLast4 = \MyInvoice\Service\Document\ScanAttach\ScanExtractionNormalizer::cardLast4($data['card_last4'] ?? null);
         if ($cardLast4 !== null) {
