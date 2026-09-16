@@ -22,6 +22,15 @@ final class KbPlusApiClient
     private const MAX_STATEMENT_FILES = 400;
     private const MAX_STATEMENT_POLLS = 30;
     private const MAX_STATEMENT_DURATION_SECONDS = 120;
+    /**
+     * Ruční načtení běží ve webovém požadavku. IIS počítá max_execution_time
+     * i FastCGI activityTimeout/requestTimeout jako reálný čas včetně spánku,
+     * takže dvouminutové čekání na výpis STATDA proces zabil dřív, než stihl
+     * vrátit chybu, a prohlížeč dostal holou 500 (activityTimeout 70 s,
+     * requestTimeout 90 s). Web proto celé stažení výpisu utne po 20 s
+     * a vrátí kb_plus_statement_pending; cron (CLI) má plný limit.
+     */
+    public const INTERACTIVE_STATEMENT_DURATION_SECONDS = 20;
     private const TOKEN_URL = 'https://api-gateway.kb.cz/oauth2/v3/access_token';
     private const AUTHORIZE_URL = 'https://login.kb.cz/autfe/ssologin';
     private const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -31,11 +40,21 @@ final class KbPlusApiClient
     private const MAX_TRANSACTIONS = 50_000;
     private const MAX_TRANSACTION_DURATION_SECONDS = 120.0;
 
+    private readonly int $maxStatementDurationSeconds;
+
     public function __construct(
         private readonly ClientInterface $http,
         private readonly ClockInterface $clock = new NativeClock(),
         private readonly LoggerInterface $logger = new NullLogger(),
-    ) {}
+        ?int $maxStatementDurationSeconds = null,
+    ) {
+        $this->maxStatementDurationSeconds = max(1, min(
+            self::MAX_STATEMENT_DURATION_SECONDS,
+            $maxStatementDurationSeconds ?? (PHP_SAPI === 'cli'
+                ? self::MAX_STATEMENT_DURATION_SECONDS
+                : self::INTERACTIVE_STATEMENT_DURATION_SECONDS),
+        ));
+    }
 
     /** BATCHDA autorizuje access token; dávky smí jen souhlas se scope bpisp. */
     public static function grantsBatchPayments(string $scope): bool
@@ -303,7 +322,7 @@ final class KbPlusApiClient
             'toDate' => $to,
             'format' => self::STATEMENT_FORMAT,
             'preferredLanguage' => 'cs',
-        ], '', '&', PHP_QUERY_RFC3986), $accessToken);
+        ], '', '&', PHP_QUERY_RFC3986), $accessToken, $this->statementTimeout($startedAt));
         if ($response->getStatusCode() === 204) {
             return [];
         }
@@ -313,7 +332,7 @@ final class KbPlusApiClient
             if ($status['status'] === 'PENDING') {
                 $this->waitForStatement($poll, $status['pollingInterval'], $startedAt);
             }
-            $response = $this->statementRequest('GET', $url . '/' . rawurlencode($statementId), $accessToken);
+            $response = $this->statementRequest('GET', $url . '/' . rawurlencode($statementId), $accessToken, $this->statementTimeout($startedAt));
             if ($response->getStatusCode() === 204) {
                 return [];
             }
@@ -727,8 +746,12 @@ final class KbPlusApiClient
     }
 
     /** STATDA autorizuje jen access token se scope statda; API klíč její OpenAPI definice nezná. */
-    private function statementRequest(string $method, string $url, #[\SensitiveParameter] string $accessToken): ResponseInterface
-    {
+    private function statementRequest(
+        string $method,
+        string $url,
+        #[\SensitiveParameter] string $accessToken,
+        ?float $timeout = null,
+    ): ResponseInterface {
         return $this->request($method, $url, [
             'headers' => [
                 'Accept' => 'application/json, application/octet-stream, application/zip',
@@ -736,7 +759,22 @@ final class KbPlusApiClient
                 'x-correlation-id' => $this->correlationId(),
                 'User-Agent' => 'MyUcto-KBPlus-Connector/1.0',
             ],
-        ], false, $method === 'GET');
+        ] + ($timeout !== null ? ['timeout' => $timeout] : []), false, $method === 'GET');
+    }
+
+    /**
+     * Každý požadavek výpisu smí trvat jen do termínu celého stažení, jinak by
+     * se k čekání na PENDING připočetly plné timeouty požadavků a webový
+     * požadavek by přesto přetekl limit IIS.
+     */
+    private function statementTimeout(\DateTimeImmutable $startedAt): float
+    {
+        $remaining = $this->maxStatementDurationSeconds
+            - ($this->clock->now()->getTimestamp() - $startedAt->getTimestamp());
+        if ($remaining < 1) {
+            throw new BankConnectorException('kb_plus_statement_pending', 'KB+ výpis v časovém limitu nepřipravila.');
+        }
+        return (float) min(20, $remaining);
     }
 
     /** @return array{status:string,statementId:string,pollingInterval:?int} */
@@ -761,7 +799,7 @@ final class KbPlusApiClient
     {
         $seconds = max(1, min(10, $interval ?? 2));
         $elapsed = $this->clock->now()->getTimestamp() - $startedAt->getTimestamp();
-        if ($poll >= self::MAX_STATEMENT_POLLS || $elapsed + $seconds > self::MAX_STATEMENT_DURATION_SECONDS) {
+        if ($poll >= self::MAX_STATEMENT_POLLS || $elapsed + $seconds > $this->maxStatementDurationSeconds) {
             throw new BankConnectorException('kb_plus_statement_pending', 'KB+ výpis v časovém limitu nepřipravila.');
         }
         if ($this->clock instanceof \Symfony\Component\Clock\ClockInterface) {

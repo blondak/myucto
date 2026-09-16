@@ -32,7 +32,33 @@ namespace MyInvoice\Service\Payroll\Import\Attendance;
 final class AttendanceSampleProfile
 {
     public const NAME = 'Vzor GIRITON';
-    public const VERSION = 3;
+    /*
+     * 4: „Suma hodinovky NOC" je v podkladech částka, kterou mzdy vyplácejí
+     *    jako příplatek za noční práci, ne druhá hodinová mzda. Složka je proto
+     *    příplatek a hodinová mzda za noc se nezakládá (základ by se zdvojil
+     *    s „Suma hodinovky").
+     * 5: „Kontejnery" je deklarovaná složka vzoru, ne složka podle hlavičky.
+     *    Složka podle hlavičky vzniká s druhem „ostatní" a bez zařazení pro
+     *    JMHZ, takže měsíční hlášení nešlo zmrazit, dokud zařazení nedoplnila
+     *    účetní ručně.
+     * 6: Pomocné sloupce výpočetního listu (stropy „max příplatek za přesčas",
+     *    kontroly a mezisoučty) se výslovně ignorují. Peníze v nich nejsou
+     *    k výplatě, ale pravidlo „vše ostatní podle hlavičky" by z nich jinak
+     *    udělalo mzdovou složku a nafouklo hrubou mzdu.
+     * 7: „senior", „doplatek" a „školení" jsou deklarované složky, ne složky
+     *    podle hlavičky, aby měly zařazení pro JMHZ.
+     * 8: Zdanitelná část stravování („Součet z Výpočet pro socku") je nepeněžní
+     *    příjem a patří do hrubé mzdy i do obou vyměřovacích základů. Bere se
+     *    z výchozího číselníku, ne jako deklarovaná složka vzoru: deklarovaná
+     *    složka vzniká vždy jako PENĚŽNÍ a tahle by se pak zaměstnanci vyplatila
+     *    v čisté mzdě, přestože jídlo už dostal.
+     * 9: Stravování míří na vlastní složku číselníku STRAVOVANI_ZDANITELNE se
+     *    zařazením 10328 (úhrn zúčtované mzdy) místo obecného NEPENEZNI_PRIJEM.
+     *    Obecná složka nese i plnění, která do úhrnu zúčtované mzdy nepatří,
+     *    takže výchozí zařazení mít nesmí; bez zařazení ale nejde zmrazit
+     *    měsíční hlášení.
+     */
+    public const VERSION = 9;
 
     private const CALCULATION = 'výpočet*';
     private const EXPORT = 'data*';
@@ -91,19 +117,40 @@ final class AttendanceSampleProfile
         }
         foreach ([
             'mzda úkol' => 'MZDA_UKOLOVA',
-            'suma hodinovky noc*' => 'MZDA_HODINOVA_NOC',
+            'suma hodinovky noc*' => 'PRIPLATEK_NOCNI',
             'suma hodinovky*' => 'MZDA_HODINOVA_DOCH',
             'příplatky k hodinové mzdě*' => 'PRIPLATKY_K_HODINOVE',
             'příplatek odpolední*' => 'PRIPLATEK_ODPOLEDNI',
+            'kontejnery' => 'ODMENA_KONTEJNERY',
             'mimořádná odměna' => 'ODMENA_MIMORADNA',
             'hotovostní odměna*' => 'ODMENA_HOTOVOSTNI',
+            /*
+             * Tyhle tři sloupce bývají celé měsíce prázdné, a právě proto jsou tu
+             * vyjmenované: jakmile v nich částka je, udělalo by z nich pravidlo
+             * „vše ostatní podle hlavičky" složku s druhem „ostatní" a bez zařazení
+             * pro JMHZ, což zablokuje zmrazení měsíčního hlášení. Zařazení plyne
+             * z druhu složky: odměna za seniorství je nepravidelná odměna,
+             * doplatek do zaručené mzdy i placená doba školení jsou mzda.
+             */
+            'senior' => 'ODMENA_SENIOR',
+            'doplatek' => 'DOPLATEK_MZDY',
+            'školení' => 'MZDA_SKOLENI',
         ] as $header => $code) {
             $add(self::CALCULATION, $header, 'component', AttendanceMeaning::UNIT_AMOUNT, $code);
         }
-        // Mezisoučty, kontroly a pomocná množství — kdyby se přenesly, zdvojily by mzdu.
+        /*
+         * Mezisoučty, kontroly a pomocná množství — kdyby se přenesly, zdvojily by mzdu.
+         *
+         * Patří sem i sloupce, které vypadají jako peníze za přesčas: „přesčas den x 25 %"
+         * nese hodiny, ne částku, a „max příplatek za přesčas +100" je jen strop sazby pro
+         * výpočet v sešitu. Mzdu za přesčas nese „Suma hodinovky vč. přesčasů", zákonný
+         * příplatek počítá MyÚčto z hodin přesčasu podle politiky příplatků vztahu.
+         */
         foreach ([
             'z toho v hodinovce*', 'úkol', 'hod', 'součet*', 'orientační*', 'hrubý příjem',
             'čas hodinovky*', 'přesčas*25*', 'noční úvazek', 'záloha*', 'oddělení', 'poznámka',
+            'max příplatek*', 'kontrola*', 'dorovnání*', 'souhrn v hodinovce*', 'souhrn v úkole*',
+            'souhrn noc*',
         ] as $header) {
             $add(self::CALCULATION, $header, 'ignore');
         }
@@ -134,6 +181,20 @@ final class AttendanceSampleProfile
         // Ve výrobě nese sloupec odměn úkolovou mzdu, jinde odměnu.
         $add(self::MAIN, 'odměny*', 'component', AttendanceMeaning::UNIT_AMOUNT, 'MZDA_UKOLOVA', 'oddělení', 'výroba');
         $add(self::MAIN, 'odměny*', 'component', AttendanceMeaning::UNIT_AMOUNT, 'ODMENA');
+        /*
+         * Zdanitelná část závodního stravování: hodnota jídla nad osvobozený limit
+         * (§ 6 odst. 9 písm. b) ZDP). Je to NEPENĚŽNÍ příjem — zvyšuje hrubou mzdu
+         * a oba vyměřovací základy, ale nevyplácí se. Proto míří na složku
+         * STRAVOVANI_ZDANITELNE z výchozího číselníku, kterou vstupní brána zná
+         * a která má výchozí zařazení do JMHZ 10328 (úhrn zúčtované mzdy);
+         * deklarovat ji ve vzoru nelze, složky vzoru vznikají jako peněžní.
+         *
+         * Druhá strana téhož plnění je srážka za obědy („dotovaná cena") níže.
+         * Ta jde z ČISTÉ mzdy a zůstává beze změny — nejde o dvojí započtení,
+         * ale o dvě různé strany: hodnota jídla v hrubém, spoluúčast v čistém.
+         */
+        $add(self::MAIN, '*pro socku*', 'component', AttendanceMeaning::UNIT_AMOUNT, 'STRAVOVANI_ZDANITELNE');
+        $add(self::MAIN, '*výpočtu obědů*', 'component', AttendanceMeaning::UNIT_AMOUNT, 'STRAVOVANI_ZDANITELNE');
         $add(self::MAIN, '*dotovaná cena*', 'net_meal_deduction', AttendanceMeaning::UNIT_AMOUNT);
         $add(self::MAIN, 'srážky*', 'net_other_deduction', AttendanceMeaning::UNIT_AMOUNT);
         $add(self::MAIN, '*', 'ignore');
@@ -159,12 +220,20 @@ final class AttendanceSampleProfile
     {
         return [
             ['code' => 'MZDA_HODINOVA_DOCH', 'name' => 'Hodinová mzda podle docházky', 'kind' => 'hourly_wage'],
-            ['code' => 'MZDA_HODINOVA_NOC', 'name' => 'Hodinová mzda za noční směny podle docházky', 'kind' => 'hourly_wage'],
+            ['code' => 'PRIPLATEK_NOCNI', 'name' => 'Příplatek za noční práci podle podkladů', 'kind' => 'premium'],
             ['code' => 'PRIPLATKY_K_HODINOVE', 'name' => 'Příplatky k hodinové mzdě', 'kind' => 'premium'],
             ['code' => 'PRIPLATEK_ODPOLEDNI', 'name' => 'Příplatek za odpolední směnu', 'kind' => 'premium'],
             ['code' => 'PRIPLATEK_BOZP', 'name' => 'Příplatek BOZP', 'kind' => 'premium'],
+            // Odměna za odvedený výkon (počet kontejnerů), vyplácená nepravidelně:
+            // druh `bonus` a jednorázová četnost ji v JMHZ řadí na 10331 Odměny nepravidelné.
+            ['code' => 'ODMENA_KONTEJNERY', 'name' => 'Odměna za kontejnery', 'kind' => 'bonus'],
             ['code' => 'ODMENA_MIMORADNA', 'name' => 'Mimořádná odměna', 'kind' => 'bonus'],
             ['code' => 'ODMENA_HOTOVOSTNI', 'name' => 'Hotovostní odměna', 'kind' => 'bonus'],
+            ['code' => 'ODMENA_SENIOR', 'name' => 'Odměna za seniorství', 'kind' => 'bonus'],
+            // Doplatek do zaručené mzdy a placená doba školení jsou mzda za práci,
+            // proto tarifní druh; v JMHZ jdou na tarifní mzdy jako hodinová mzda.
+            ['code' => 'DOPLATEK_MZDY', 'name' => 'Doplatek mzdy', 'kind' => 'hourly_wage'],
+            ['code' => 'MZDA_SKOLENI', 'name' => 'Mzda za dobu školení', 'kind' => 'hourly_wage'],
         ];
     }
 }

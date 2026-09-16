@@ -54,9 +54,16 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
+import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const {
+  request: sendConfirmRequest,
+  confirmProductionSend,
+  settle: settleSendConfirm,
+} = useProductionSendConfirm()
 
 const loading = ref(true)
 const creating = ref(false)
@@ -346,6 +353,11 @@ async function dispatch(
 ): Promise<void> {
   const key = dispatchKey(item, document)
   if (!canWrite.value || dispatchingKey.value !== null) return
+  const confirmed = await confirmProductionSend(
+    environment.value,
+    t('payroll.production_send.sickness', { document: document.toUpperCase() }),
+  )
+  if (!confirmed || dispatchingKey.value !== null) return
   dispatchingKey.value = key
   error.value = ''
   success.value = ''
@@ -930,5 +942,11 @@ onMounted(() => void load())
         >{{ previewXml.xml }}</pre>
       </li>
     </ul>
+    <ProductionSendConfirmDialog
+      v-if="sendConfirmRequest"
+      :message="sendConfirmRequest.message"
+      @confirm="settleSendConfirm(true)"
+      @cancel="settleSendConfirm(false)"
+    />
   </div>
 </template>

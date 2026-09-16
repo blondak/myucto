@@ -169,6 +169,38 @@ describe('Bank connection account', () => {
     await wrapper.find('button').trigger('click')
     expect((wrapper.find('input[type="password"]').element as HTMLInputElement).value).toBe('')
   })
+  it('shows KB progress while waiting and a readable error instead of the raw HTTP 500', async () => {
+    vi.useFakeTimers()
+    try {
+      let reject: (reason: unknown) => void = () => {}
+      m.sync.mockReturnValueOnce(new Promise((_, fail) => { reject = fail }))
+      const wrapper = mount(BankConnectionAccount, {
+        props: { account, connection: { ...connection, provider: 'kb_plus' }, canWrite: true,
+          providers: [{ ...provider, code: 'kb_plus' }] },
+        global: { stubs: { DateInput: true, RouterLink: true, KbPlusOnboarding: true } },
+      })
+      await wrapper.find('button').trigger('click')
+      const form = wrapper.findAll('form')[1]!
+      await form.trigger('submit')
+      vi.advanceTimersByTime(3000)
+      await wrapper.vm.$nextTick()
+
+      expect(form.find('button[type="submit"]').text()).toContain('common.loading')
+      expect(wrapper.find('[data-testid="sync-progress"]').text()).toBe('bank_connection.kb_plus_sync_progress')
+
+      reject({ message: 'Request failed with status code 500', response: { status: 500, data: '<html>IIS</html>' } })
+      await flushPromises()
+
+      expect(form.find('button[type="submit"]').text()).toContain('bank_connection.sync')
+      expect(form.find('button[type="submit"]').attributes('disabled')).toBeUndefined()
+      expect(wrapper.find('[data-testid="sync-progress"]').exists()).toBe(false)
+      expect(wrapper.find('[role="alert"]').text()).toBe('bank_connection.error_server_kb_plus')
+      expect(wrapper.text()).not.toContain('Request failed')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows reconciliation evidence and retries only after an explicit confirmation', async () => {
     vi.useFakeTimers()
     try {

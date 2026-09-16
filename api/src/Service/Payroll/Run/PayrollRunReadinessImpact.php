@@ -61,6 +61,15 @@ final class PayrollRunReadinessImpact
     private const CLASSIFICATION = [
         // ── Skupina 3: bez tohohle výpočet nemá z čeho vyjít ─────────────────
         'employer_policy_missing' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        /*
+         * Období PŘED prvním mzdovým obdobím firmy. Běh za něj nejde ani
+         * založit ({@see \MyInvoice\Service\Payroll\Run\PayrollRunCommandService::assertModuleAvailable()}),
+         * takže je to skutečná závora, ne informace. Zároveň je to JEDINÝ nález,
+         * který se za takové období vypisuje: měsíce zpracované v předchozím
+         * programu patří do počátečních stavů, a vypsat u nich dvě stě chybějících
+         * podkladů by účetní poslalo opravovat data, která se nikdy počítat nebudou.
+         */
+        'period_before_module_start' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
 
         // ── Skupina 2: opraví se, ale po zamknutí přes opravnou revizi ───────
         // Všechno, co vstupuje do zmrazeného snímku vstupů.

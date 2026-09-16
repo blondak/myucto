@@ -135,6 +135,8 @@ final class DocumentLinker
                 SET t.match_status = 'manual', t.matched_at = NOW(), t.matched_by = ?, t.matched_invoice_id = COALESCE(?, t.matched_invoice_id)
               WHERE t.id = ? AND s.supplier_id = ?"
         );
+        $cashLink = $pdo->prepare('SELECT invoice_id, purchase_invoice_id FROM cash_documents WHERE id = ? AND supplier_id = ?');
+        $cashMulti = [];
 
         foreach ([['PFaktury', $ctx->purchaseInvoices, false], ['VFaktury', $ctx->issuedInvoices, true]] as [$table, $docs, $isIssued]) {
             foreach ($ctx->backup->rowsAcrossYears($table) as $r) {
@@ -179,10 +181,20 @@ final class DocumentLinker
                 $cashCandidates = $cashByDoc[$settledBy] ?? [];
                 $cashId = self::choosePayment($cashCandidates, $year, $docTotal, $paidAt);
                 if ($cashId !== null) {
-                    $pdo->prepare(
-                        'UPDATE cash_documents SET ' . ($isIssued ? 'invoice_id' : 'purchase_invoice_id')
-                        . ' = ?, purpose = ? WHERE id = ? AND supplier_id = ?'
-                    )->execute([$docId, $isIssued ? 'invoice_payment' : 'purchase_payment', $cashId, $ctx->supplierId]);
+                    // Pokladní doklad nese vazbu jen na jeden doklad. Hradí-li víc faktur, zůstane
+                    // vazba na první a další ji nepřepíše; faktury jsou uhrazené podle Money.
+                    $cashLink->execute([$cashId, $ctx->supplierId]);
+                    $linked = $cashLink->fetch(PDO::FETCH_ASSOC) ?: [];
+                    $current = $isIssued ? ($linked['invoice_id'] ?? null) : ($linked['purchase_invoice_id'] ?? null);
+                    if (($linked['invoice_id'] ?? null) === null && ($linked['purchase_invoice_id'] ?? null) === null) {
+                        $pdo->prepare(
+                            'UPDATE cash_documents SET ' . ($isIssued ? 'invoice_id' : 'purchase_invoice_id')
+                            . ' = ?, purpose = ? WHERE id = ? AND supplier_id = ?'
+                        )->execute([$docId, $isIssued ? 'invoice_payment' : 'purchase_payment', $cashId, $ctx->supplierId]);
+                    } elseif ($current === null || (int) $current !== $docId) {
+                        $cashMulti[$settledBy] = true;
+                        $p->count(self::STEP_PAYMENTS, 'cash_multi_invoice');
+                    }
                     if (!$isIssued) {
                         $pdo->prepare("UPDATE purchase_invoices SET payment_method = 'cash' WHERE id = ? AND supplier_id = ?")
                             ->execute([$docId, $ctx->supplierId]);
@@ -203,7 +215,40 @@ final class DocumentLinker
                 $p->warn(self::STEP_PAYMENTS, 'payment_not_found', "Úhrada {$settledBy} faktury {$docNo} v převedené bance ani pokladně není.", ['document_no' => $docNo]);
             }
         }
+        $this->markBookedWithoutInvoice($ctx);
+        if ($cashMulti !== []) {
+            $p->info(self::STEP_PAYMENTS, 'cash_multi_invoice', count($cashMulti) . ' pokladních dokladů hradí víc faktur; pokladní doklad ukazuje vazbu jen na první, faktury jsou uhrazené podle Money.',
+                ['documents' => array_slice(array_keys($cashMulti), 0, 50)]);
+        }
         $p->finish(self::STEP_PAYMENTS);
+    }
+
+    /**
+     * Pohyby, které Money zaúčtovalo bez faktury (poplatky, převody mezi vlastními účty,
+     * mzdy, odvody, ostatní závazky), jsou vyřízené - v MyÚčtu pro ně faktura není a výpis
+     * by jinak trvale svítil jako nedopárovaný. Označí se jako ignorované s poznámkou; jen
+     * pohyby převodu, které mají zápis v deníku a zůstaly nespárované. Uživatel to u pohybu
+     * může vrátit.
+     */
+    private function markBookedWithoutInvoice(ImportContext $ctx): void
+    {
+        $ids = array_values(array_unique(array_map('intval', $ctx->bankTransactions)));
+        $marked = 0;
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(
+                "UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                    SET t.match_status = 'ignored', t.match_reason = 'money_s3_booked', t.matched_at = NOW(), t.matched_by = ?,
+                        t.ignore_note = 'Zaúčtováno v Money S3 bez dokladu (převod z Money S3).'
+                  WHERE s.supplier_id = ? AND t.match_status = 'unmatched'
+                    AND EXISTS (SELECT 1 FROM journal_entry_document_links k WHERE k.supplier_id = s.supplier_id AND k.doc_type = 'bank' AND k.doc_id = t.id)
+                    AND t.id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ')'
+            );
+            $stmt->execute(array_merge([$ctx->userId > 0 ? $ctx->userId : null, $ctx->supplierId], $chunk));
+            $marked += $stmt->rowCount();
+        }
+        if ($marked > 0) {
+            $ctx->protocol->count(self::STEP_PAYMENTS, 'booked_without_invoice', $marked);
+        }
     }
 
     /**

@@ -48,7 +48,7 @@ final class PayrollJmhzPreparationAction
             return $denied;
         }
         $body = $request->getParsedBody();
-        $environment = is_array($body) ? ($body['environment'] ?? 'test') : 'test';
+        $environment = is_array($body) ? ($body['environment'] ?? 'production') : 'production';
         if (!in_array($environment, ['test', 'production'], true)) {
             return Json::error(
                 $response,

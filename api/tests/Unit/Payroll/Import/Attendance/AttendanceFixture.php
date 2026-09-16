@@ -205,6 +205,32 @@ final class AttendanceFixture
         return self::toWindows1250(implode("\r\n", $lines) . "\r\n");
     }
 
+    /** Tentýž mzdový export navíc s datem narození a kódem zdravotní pojišťovny. */
+    public static function payrollCsvWithPersonalData(): string
+    {
+        $lines = [
+            'Jméno,Rodné číslo,Osobní číslo,Datum narození,Zdravotní pojišťovna,Hrubá mzda',
+            '"Testovací Jana","' . self::janaBirthNumber() . '","Z001","1. 5. 1990","211","71 875,00 Kč"',
+            '"Zkušební Petr","' . self::petrBirthNumber() . '","Z002","12.03.1985","111","48 000,00 Kč"',
+        ];
+
+        return self::toWindows1250(implode("\r\n", $lines) . "\r\n");
+    }
+
+    /**
+     * Scénář s mzdovým exportem, který nese i datum narození a pojišťovnu.
+     *
+     * @return list<array{name:string,content:string,sha256:string,extension:string}>
+     */
+    public static function scenarioWithPersonalData(): array
+    {
+        return [
+            self::file('podklady.xlsx', self::mainWorkbook()),
+            self::file('provoz.xlsx', self::operationsWorkbook()),
+            self::file('mzdy.csv', self::payrollCsvWithPersonalData()),
+        ];
+    }
+
     /** mbstring Windows-1250 nezná; převod jde přes tutéž tabulku, kterou čte import. */
     public static function toWindows1250(string $utf8): string
     {

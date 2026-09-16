@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import type { CurrencyAccount } from '@/api/settings'
 import { bankConnectionsApi, type BankConnection, type BankConnectionProvider, type BankReconciliationCandidate, type BankSyncRequest, type BankSyncResult } from '@/api/bankConnections'
-import { bankConnectionErrorMessage, bankReconciliationCandidates } from '@/utils/bankConnectionError'
+import { bankConnectionErrorMessage, bankReconciliationCandidates, bankSyncFallback } from '@/utils/bankConnectionError'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { formatDateTime } from '@/composables/useFormat'
 import { formatAccountNumber } from '@/utils/bankAccount'
@@ -43,6 +43,9 @@ const reconciliationConfirmations = ref<string[]>([])
 const reconciliationRequest = ref<BankSyncRequest | null>(null)
 const reconciliationRetrySeconds = ref(0)
 let reconciliationTimer: number | null = null
+const syncing = ref(false)
+const syncSeconds = ref(0)
+let syncTimer: number | null = null
 const available = computed(() => props.providers.filter(p => p.implemented && p.capabilities.statement_import && p.bank_codes.includes(props.account.bank_code || '')))
 const newCertificate = computed(() => !!clientId.value || !!certificate.value || !!certificatePassword.value)
 const canSave = computed(() => props.canWrite && !busy.value && !!provider.value && (certificateProvider.value
@@ -81,6 +84,12 @@ function clearCredentials() {
 watch(opened, value => { if (!value) clearCredentials() })
 watch(provider, clearCredentials)
 onBeforeUnmount(clearReconciliation)
+onBeforeUnmount(stopSyncTimer)
+function stopSyncTimer() {
+  if (syncTimer !== null) window.clearInterval(syncTimer)
+  syncTimer = null
+  syncing.value = false
+}
 function clearReconciliation() {
   reconciliationCandidates.value = []
   reconciliationConfirmations.value = []
@@ -161,6 +170,10 @@ async function runSync(request: BankSyncRequest, confirmations: string[] = [], r
   busy.value = true
   error.value = ''
   result.value = null
+  stopSyncTimer()
+  syncing.value = true
+  syncSeconds.value = 0
+  syncTimer = window.setInterval(() => { syncSeconds.value++ }, 1000)
   try {
     result.value = await bankConnectionsApi.sync(props.account.id, {
       ...request,
@@ -169,7 +182,7 @@ async function runSync(request: BankSyncRequest, confirmations: string[] = [], r
     clearReconciliation()
     emit('changed')
   } catch (e) {
-    error.value = bankConnectionErrorMessage(e, t, t('bank_connection.sync_failed'), provider.value)
+    error.value = bankConnectionErrorMessage(e, t, bankSyncFallback(e, t, provider.value), provider.value)
     const candidates = bankReconciliationCandidates(e)
     if (candidates.length > 0) {
       reconciliationConfirmations.value = confirmations
@@ -179,6 +192,7 @@ async function runSync(request: BankSyncRequest, confirmations: string[] = [], r
     }
     emit('changed')
   } finally {
+    stopSyncTimer()
     busy.value = false
   }
 }
@@ -267,6 +281,7 @@ async function confirmReconciliation() {
           <label class="flex flex-wrap items-center gap-2 text-sm"><span class="whitespace-nowrap">{{ t('bank_connection.to') }}:</span><DateInput v-model="to" :disabled="busy || !from" :min="from || undefined" :max="appIsoDate()" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface" /></label>
           <button type="submit" :class="btnOutline('primary')" :disabled="busy || invalidPeriod"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.download" /></svg>{{ busy ? t('common.loading') : t(provider === 'csob' ? 'bank_connection.csob_sync' : 'bank_connection.sync') }}</button>
         </div>
+        <p v-if="syncing && provider === 'kb_plus'" class="text-xs text-neutral-600" role="status" data-testid="sync-progress">{{ t('bank_connection.kb_plus_sync_progress', { seconds: syncSeconds }) }}</p>
         <p v-if="invalidPeriod" class="text-xs text-warning-700">{{ t('bank_connection.invalid_period') }}</p>
       </form>
       <p v-if="saved" class="text-sm text-success-600" role="status">{{ t('bank_connection.saved') }}</p>

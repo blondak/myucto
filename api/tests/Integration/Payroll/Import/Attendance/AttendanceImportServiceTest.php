@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSourceConfirmationRequired;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -478,6 +479,38 @@ final class AttendanceImportServiceTest extends TestCase
     }
 
     /**
+     * Datum narození a kód zdravotní pojišťovny klient nezná; při zakládání
+     * je doplní server z podkladů stejně jako rodné číslo.
+     */
+    public function testPersonsWithFilesTakeBirthDateAndHealthInsurerFromSourceData(): void
+    {
+        $result = $this->service->persons($this->supplierId, self::PERIOD, [
+            [
+                'person_key' => 'petr zkusebni',
+                'full_name' => 'Petr Zkušební',
+                'first_name' => 'Petr',
+                'last_name' => 'Zkušební',
+                'birth_number' => null,
+                'relation_type' => 'employment',
+                'weekly_hours' => '40',
+                'planned_start_on' => '2026-06-01',
+                'activate' => false,
+            ],
+        ], $this->userId, null, null, AttendanceFixture::scenarioWithPersonalData());
+
+        self::assertSame('created', $result['results'][0]['status'], (string) $result['results'][0]['message']);
+        $employeeId = (int) $result['results'][0]['employee_id'];
+        $stmt = $this->db->pdo()->prepare('SELECT birth_date FROM payroll_employees WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$this->supplierId, $employeeId]);
+        self::assertSame('1985-03-12', $stmt->fetchColumn());
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT insurer_code FROM payroll_person_health_coverage_history WHERE supplier_id = ? AND employee_id = ?',
+        );
+        $stmt->execute([$this->supplierId, $employeeId]);
+        self::assertSame(['111'], $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
      * Úvazek z podkladů bývá text: číslo se z něj vezme a nepřečtený úvazek
      * osobu neshodí — vztah vznikne bez něj a výsledek řekne, co doplnit.
      */
@@ -562,6 +595,65 @@ final class AttendanceImportServiceTest extends TestCase
         self::assertTrue($again['restored']);
         self::assertSame($sample::NAME . ' (2)', $again['profile']['name']);
         self::assertTrue($again['profile']['is_sample']);
+    }
+
+    public function testSourceChecksGuardPeriodAndInputsFromAnotherImport(): void
+    {
+        $files = AttendanceFixture::scenario();
+        $rules = $this->rules($files);
+        $clean = $this->service->preview($this->supplierId, self::PERIOD, $files, $rules, null);
+        self::assertFalse($clean['source_checks']['requires_confirmation']);
+        self::assertSame([], $clean['source_checks']['period']['detected']);
+
+        // Podklady se názvem hlásí k jinému měsíci, než je vybraný.
+        $named = array_map(static fn (array $file): array => ['name' => '05-2026 ' . $file['name']] + $file, $files);
+        $preview = $this->service->preview($this->supplierId, self::PERIOD, $named, $rules, null);
+        self::assertTrue($preview['source_checks']['period']['mismatch']);
+        self::assertSame(['2026-05'], array_column($preview['source_checks']['period']['detected'], 'period'));
+        try {
+            $this->service->apply($this->supplierId, self::PERIOD, $named, $rules, [], false, true, $this->userId, sourceChecksConfirmed: false);
+            self::fail('Podklady jiného měsíce se bez potvrzení nesmí použít.');
+        } catch (AttendanceSourceConfirmationRequired $e) {
+            self::assertTrue($e->checks['period']['mismatch']);
+            self::assertStringContainsString('2026-05', $e->getMessage());
+        }
+        self::assertSame(0, $this->countRows('SELECT COUNT(*) FROM payroll_attendance_imports WHERE supplier_id = ?', [$this->supplierId]));
+
+        // Bez kontroly (převod, skripty) i s potvrzením se dávka použije.
+        $this->service->apply($this->supplierId, self::PERIOD, $files, $rules, [], false, true, $this->userId);
+        $same = $this->service->preview($this->supplierId, self::PERIOD, $files, $rules, null);
+        self::assertSame([], $same['source_checks']['other_sources'], 'Opakované použití týchž souborů není jiný zdroj.');
+
+        $corrected = AttendanceFixture::scenario(2500);
+        $other = $this->service->preview($this->supplierId, self::PERIOD, $corrected, $this->rules($corrected), null);
+        self::assertTrue($other['source_checks']['requires_confirmation']);
+        self::assertCount(1, $other['source_checks']['other_sources']);
+        self::assertSame(3, $other['source_checks']['other_sources'][0]['active_inputs']);
+        try {
+            $this->service->apply($this->supplierId, self::PERIOD, $corrected, $this->rules($corrected), [], false, true, $this->userId, sourceChecksConfirmed: false);
+            self::fail('Druhý import téhož období se bez potvrzení nesmí použít.');
+        } catch (AttendanceSourceConfirmationRequired $e) {
+            self::assertStringContainsString('dvojí vstupy', $e->getMessage());
+        }
+        $confirmed = $this->service->apply($this->supplierId, self::PERIOD, $corrected, $this->rules($corrected), [], false, true, $this->userId, sourceChecksConfirmed: true);
+        self::assertFalse($confirmed['replayed']);
+    }
+
+    public function testAutomaticProfileSkipsProfileThatKnowsNoColumn(): void
+    {
+        // Profil jiného systému (převod mezd z POHODY) pravidly míří na vlastní list.
+        $this->service->saveProfile($this->supplierId, null, 'POHODA mzdy (převod)', [
+            ['sheet' => 'mzdy-pohoda', 'header' => 'Zaměstnanec', 'meaning' => 'person_name', 'unit' => 'text', 'component_code' => null],
+            ['sheet' => 'mzdy-pohoda', 'header' => 'Odpracováno (h)', 'meaning' => 'worked_hours', 'unit' => 'hours', 'component_code' => null],
+        ], $this->userId);
+        $preview = $this->service->preview($this->supplierId, self::PERIOD, AttendanceFixture::scenario(), null, null);
+        self::assertNull($preview['profile']['id'], 'Profil, který v souborech nezná žádný sloupec, se nesmí vybrat automaticky.');
+        self::assertTrue($preview['profile']['auto']);
+
+        $own = $this->service->saveProfile($this->supplierId, null, 'Docházka sklad', $this->rules(AttendanceFixture::scenario()), $this->userId);
+        $again = $this->service->preview($this->supplierId, self::PERIOD, AttendanceFixture::scenario(), null, null);
+        self::assertSame($own['id'], $again['profile']['id']);
+        self::assertTrue($again['profile']['auto']);
     }
 
     public function testActionDecodesFilesAndAnswersWithoutRawBirthNumber(): void

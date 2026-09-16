@@ -39,6 +39,9 @@ final class PayrollRegistrationTransportAction
         if ($key === '') {
             return $this->invalid($response, 'Hlavička Idempotency-Key je povinná.');
         }
+        if (($missing = $this->missingSendEnvironment($request, $response)) !== null) {
+            return $missing;
+        }
 
         return $this->run($request, $response, function (string $environment) use (
             $request,
@@ -176,7 +179,7 @@ final class PayrollRegistrationTransportAction
         $body = $request->getParsedBody();
         $value = is_array($body) ? ($body['environment'] ?? null) : null;
         if (!is_string($value)) {
-            $value = $request->getQueryParams()['environment'] ?? 'test';
+            $value = $request->getQueryParams()['environment'] ?? 'production';
         }
 
         return in_array($value, ['test', 'production'], true) ? $value : null;

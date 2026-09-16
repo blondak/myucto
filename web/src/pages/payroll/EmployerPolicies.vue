@@ -75,12 +75,140 @@ function newPolicy(): PayrollEmployerPolicyPayload {
     home_office_policy: 'not_used',
     travel_expense_policy: 'not_used',
     leave_entitlement_weeks: 5,
+    // Prázdné výchozí sazby příplatků: firma je nemá sjednané, dokud je
+    // nevyplní. Nula by znamenala „sjednáno nula procent", což u zákonného
+    // příplatku není totéž — proto null.
+    ...emptySurcharges(),
     automatic_posting_enabled: false,
     delivery_channel: 'disabled',
     delivery_verified_on: null,
     source_kind: 'manual',
     source_reference: null,
     row_version: 0,
+  }
+}
+
+/** Výchozí sazby příplatků § 114 až § 118 (migrace 1846). */
+const SURCHARGE_KINDS = [
+  'overtime',
+  'holiday',
+  'night',
+  'weekend',
+  'difficult_environment',
+] as const
+
+type SurchargeFields = Pick<
+  PayrollEmployerPolicyPayload,
+  'overtime_rate_bp' | 'holiday_rate_bp' | 'night_rate_bp' | 'weekend_rate_bp'
+  | 'difficult_environment_rate_bp'
+  | 'overtime_fixed_hourly_minor' | 'holiday_fixed_hourly_minor'
+  | 'night_fixed_hourly_minor' | 'weekend_fixed_hourly_minor'
+  | 'difficult_environment_fixed_hourly_minor'
+>
+
+/**
+ * Zadávaná podoba sazeb: procento v procentech, pevná částka v korunách.
+ * Na drátě jdou bázové body a haléře (celá čísla), převádí se až při uložení —
+ * viz `surchargePayload()`.
+ */
+type SurchargeKind = (typeof SURCHARGE_KINDS)[number]
+type SurchargeForm = 'percent' | 'fixed'
+
+const surchargeForms = ref<Record<SurchargeKind, SurchargeForm>>({
+  overtime: 'percent',
+  holiday: 'percent',
+  night: 'percent',
+  weekend: 'percent',
+  difficult_environment: 'percent',
+})
+/*
+ * Unie `string | number`: `v-model` nad `<input type="number">` převádí hodnotu
+ * sám na číslo, takže model nese jednou prázdný řetězec a jednou číslo. Týž
+ * důvod jako u sazeb na kartě vztahu.
+ */
+const surchargeValues = ref<Record<SurchargeKind, string | number>>({
+  overtime: '',
+  holiday: '',
+  night: '',
+  weekend: '',
+  difficult_environment: '',
+})
+
+/** Číslo z formuláře, nebo `null` u prázdného pole. Čárka i tečka projdou. */
+function surchargeNumber(raw: string | number): number | null {
+  const normalized = String(raw ?? '').trim().replace(',', '.')
+  if (normalized === '') return null
+  const value = Number(normalized)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+/** Celá čísla na drát: procento → bázové body, koruny → haléře. */
+function surchargePayload(): SurchargeFields {
+  const result = emptySurcharges()
+  for (const kind of SURCHARGE_KINDS) {
+    const value = surchargeNumber(surchargeValues.value[kind])
+    if (value === null) continue
+    if (surchargeForms.value[kind] === 'fixed') {
+      result[`${kind}_fixed_hourly_minor`] = Math.round(value * 100)
+    } else {
+      result[`${kind}_rate_bp`] = Math.round(value * 100)
+    }
+  }
+  return result
+}
+
+/** Uložené sazby zpět do formuláře; způsob se pozná podle vyplněného pole. */
+function fillSurcharges(source: SurchargeFields) {
+  for (const kind of SURCHARGE_KINDS) {
+    const fixed = source[`${kind}_fixed_hourly_minor`]
+    const rate = source[`${kind}_rate_bp`]
+    if (fixed !== null) {
+      surchargeForms.value[kind] = 'fixed'
+      surchargeValues.value[kind] = String(fixed / 100)
+    } else {
+      surchargeForms.value[kind] = 'percent'
+      surchargeValues.value[kind] = rate === null ? '' : String(rate / 100)
+    }
+  }
+}
+
+/** Sazba mimo podporovaný rozsah — server ji odmítne, tohle je včasná věta. */
+const surchargeInvalid = computed(() => SURCHARGE_KINDS.some((kind) => {
+  const raw = String(surchargeValues.value[kind] ?? '').trim()
+  if (raw === '') return false
+  const value = surchargeNumber(raw)
+  if (value === null) return true
+  return surchargeForms.value[kind] === 'fixed' ? value > 1000 : value > 500
+}))
+
+function emptySurcharges(): SurchargeFields {
+  return {
+    overtime_rate_bp: null,
+    holiday_rate_bp: null,
+    night_rate_bp: null,
+    weekend_rate_bp: null,
+    difficult_environment_rate_bp: null,
+    overtime_fixed_hourly_minor: null,
+    holiday_fixed_hourly_minor: null,
+    night_fixed_hourly_minor: null,
+    weekend_fixed_hourly_minor: null,
+    difficult_environment_fixed_hourly_minor: null,
+  }
+}
+
+function surchargesOf(policy: PayrollEmployerPolicy): SurchargeFields {
+  return {
+    overtime_rate_bp: policy.overtime_rate_bp,
+    holiday_rate_bp: policy.holiday_rate_bp,
+    night_rate_bp: policy.night_rate_bp,
+    weekend_rate_bp: policy.weekend_rate_bp,
+    difficult_environment_rate_bp: policy.difficult_environment_rate_bp,
+    overtime_fixed_hourly_minor: policy.overtime_fixed_hourly_minor,
+    holiday_fixed_hourly_minor: policy.holiday_fixed_hourly_minor,
+    night_fixed_hourly_minor: policy.night_fixed_hourly_minor,
+    weekend_fixed_hourly_minor: policy.weekend_fixed_hourly_minor,
+    difficult_environment_fixed_hourly_minor:
+      policy.difficult_environment_fixed_hourly_minor,
   }
 }
 
@@ -135,6 +263,9 @@ const problems = computed<string[]>(() => {
   }
   if ((form.value.source_reference?.length ?? 0) > 255) {
     list.push(t('payroll.employer.policies.validation_fields.source_reference'))
+  }
+  if (surchargeInvalid.value) {
+    list.push(t('payroll.employer.policies.surcharges_invalid'))
   }
   const verifiedOn = nullable(form.value.delivery_verified_on)
   if (verifiedOn !== null && !/^\d{4}-\d{2}-\d{2}$/.test(verifiedOn)) {
@@ -216,6 +347,12 @@ function policyIsEffective(policy: PayrollEmployerPolicy): boolean {
     && (policy.valid_to === null || policy.valid_to >= effectiveOn.value)
 }
 
+/** Sazby z právě účinné verze, ze kterých vychází nová. */
+function currentEffectivePolicy(): SurchargeFields | null {
+  const current = policies.value.find(policyIsEffective)
+  return current === undefined ? null : surchargesOf(current)
+}
+
 function openNew() {
   editingId.value = null
   form.value = {
@@ -235,6 +372,8 @@ function openNew() {
       ? payrollStartDate.value
       : effectiveOn.value,
   }
+  // Nová verze vychází z té platné, aby účetní neopisovala sazby znovu.
+  fillSurcharges(currentEffectivePolicy() ?? emptySurcharges())
   saveError.value = ''
   conflict.value = false
   showValidation.value = false
@@ -253,6 +392,7 @@ function edit(policy: PayrollEmployerPolicy) {
     home_office_policy: policy.home_office_policy,
     travel_expense_policy: policy.travel_expense_policy,
     leave_entitlement_weeks: policy.leave_entitlement_weeks,
+    ...surchargesOf(policy),
     automatic_posting_enabled: policy.automatic_posting_enabled,
     delivery_channel: policy.delivery_channel,
     delivery_verified_on: policy.delivery_verified_on,
@@ -260,6 +400,7 @@ function edit(policy: PayrollEmployerPolicy) {
     source_reference: policy.source_reference,
     row_version: policy.row_version,
   }
+  fillSurcharges(surchargesOf(policy))
   saveError.value = ''
   conflict.value = false
   showValidation.value = false
@@ -366,6 +507,7 @@ async function save() {
   try {
     const payload: PayrollEmployerPolicyPayload = {
       ...form.value,
+      ...surchargePayload(),
       valid_to: nullable(form.value.valid_to),
       delivery_verified_on: nullable(form.value.delivery_verified_on),
       source_reference: nullable(form.value.source_reference),
@@ -800,6 +942,59 @@ onMounted(async () => {
           />
         </div>
       </div>
+
+      <!--
+        Výchozí sazby příplatků § 114 až § 118 (migrace 1846). Platí pro vztahy
+        BEZ vlastního sjednání — to na kartě vztahu má vždycky přednost.
+      -->
+      <fieldset class="mt-6" data-test="policy-surcharges">
+        <legend class="text-sm font-semibold text-neutral-900">
+          {{ t('payroll.employer.policies.surcharges_title') }}
+        </legend>
+        <p class="mt-1 text-xs text-neutral-500">
+          {{ t('payroll.employer.policies.surcharges_hint') }}
+        </p>
+        <div class="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div v-for="kind in SURCHARGE_KINDS" :key="kind">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">
+              {{ t(`payroll.people.surcharge_policy.kinds.${kind}`) }}
+            </span>
+            <select
+              v-model="surchargeForms[kind]"
+              :data-test="`policy-surcharge-form-${kind}`"
+              :aria-label="t('payroll.employer.policies.surcharges_form_label')"
+              :disabled="!canWrite"
+              class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            >
+              <option value="percent">
+                {{ t('payroll.employer.policies.surcharges_form_percent') }}
+              </option>
+              <option value="fixed">
+                {{ t('payroll.employer.policies.surcharges_form_fixed') }}
+              </option>
+            </select>
+            <div class="mt-1 flex items-center gap-2">
+              <input
+                v-model="surchargeValues[kind]"
+                :data-test="`policy-surcharge-value-${kind}`"
+                type="number"
+                min="0"
+                step="0.01"
+                :disabled="!canWrite"
+                class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+              >
+              <span class="shrink-0 text-sm text-neutral-500">
+                {{ surchargeForms[kind] === 'fixed'
+                  ? t('payroll.employer.policies.surcharges_unit')
+                  : t('payroll.employer.policies.surcharges_percent_unit') }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <p class="mt-2 text-xs text-neutral-500">
+          {{ t('payroll.employer.policies.surcharges_statutory_note') }}
+        </p>
+      </fieldset>
 
       <fieldset class="mt-6">
         <legend class="text-sm font-semibold text-neutral-900">

@@ -11,6 +11,7 @@ vi.mock('vue-i18n', () => ({
 
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 import type { MoneyS3Run } from '@/api/moneyS3'
+import type { PohodaRun } from '@/api/pohoda'
 
 function run(overrides: Partial<NonNullable<MoneyS3Run['protocol']>> = {}, status: MoneyS3Run['status'] = 'completed'): MoneyS3Run {
   return {
@@ -93,5 +94,45 @@ describe('MoneyS3Protocol', () => {
 
     expect(wrapper.text()).toContain('money_s3.protocol.failure')
     expect(wrapper.text()).toContain('money_s3.protocol.automation_left_off')
+  })
+
+  it('s prefixem pohoda bere texty z jmenného prostoru POHODY', () => {
+    const pohodaRun: PohodaRun = {
+      id: 3,
+      job_id: 4,
+      mode: 'dry_run',
+      status: 'completed_with_warnings',
+      agenda_ico: '12345678',
+      agenda_year: 2026,
+      pohoda_version: null,
+      created_at: '2026-09-10 10:00:00',
+      finished_at: '2026-09-10 10:05:00',
+      protocol: {
+        mode: 'dry_run',
+        status: 'completed_with_warnings',
+        failure: null,
+        steps: [{ key: 'internal_tax_documents', status: 'ok', counts: { tax_documents_sale: 2 }, messages: [] }],
+        reconciliation: [{
+          year: 2026,
+          period_id: 1,
+          ok: false,
+          checks: [{ key: 'pohoda_journal', ok: false }],
+          journal_diffs: [{ account: '311', myucto: [0, 100, 100], money: [0, 120, 120] }],
+          documents: [{ key: 'bank', documents: 50, journal: 50, ok: true, other_accounts: 2 }],
+          unmapped_accounts: [{ account: '395100', name: 'Vnitřní zúčtování', balance: 10 }],
+        }],
+        orphans: [{ type: 'invoice', document_no: 'FV-0001', id: 8 }],
+      },
+    }
+    const wrapper = mount(MoneyS3Protocol, { props: { run: pohodaRun, prefix: 'pohoda' } })
+    const text = wrapper.text()
+
+    expect(text).toContain('pohoda.steps.internal_tax_documents')
+    expect(text).toContain('pohoda.protocol.col_money')
+    expect(text).toContain('12345678 · 2026')
+    expect(text).toContain('FV-0001')
+    expect(text).not.toContain('undefined')
+    expect(text).not.toContain('money_s3.')
+    expect(wrapper.find('[data-testid="unmapped-accounts"]').text()).toContain('395100')
   })
 })

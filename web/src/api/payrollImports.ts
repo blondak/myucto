@@ -243,7 +243,8 @@ export interface RegistrationApplyResult {
 
 export type AttendanceUnit = 'hours' | 'excel_duration' | 'amount' | 'text'
 export type AttendanceMeaning =
-  | 'ignore' | 'person_name' | 'personal_number' | 'birth_number' | 'relation_label'
+  | 'ignore' | 'person_name' | 'personal_number' | 'birth_number' | 'birth_date' | 'health_insurer_code'
+  | 'relation_label'
   | 'department' | 'cost_center' | 'position' | 'weekly_hours' | 'start_end_note' | 'monthly_wage'
   | 'worked_hours' | 'overtime_hours' | 'night_hours' | 'weekend_hours' | 'holiday_work_hours'
   | 'afternoon_hours' | 'fund_hours'
@@ -447,10 +448,35 @@ export interface AttendanceSampleUpgrade {
   components: AttendanceProfileComponent[]
 }
 
+/** Jiný import, který už v období založil platné mzdové vstupy. */
+export interface AttendanceOtherSource {
+  attendance_import_id: number | null
+  input_import_id: number
+  files: string[]
+  active_inputs: number
+  created_at: string
+}
+
+/**
+ * Kontroly před použitím dávky: období podle názvů souborů a listů a vstupy
+ * téhož období z jiného importu. Nález musí účetní před použitím potvrdit.
+ */
+export interface AttendanceSourceChecks {
+  period: {
+    selected: string
+    detected: { period: string; sources: string[] }[]
+    mismatch: boolean
+  }
+  other_sources: AttendanceOtherSource[]
+  requires_confirmation: boolean
+}
+
 export interface AttendancePreview {
   period: string
   content_hash: string
   profile: AttendancePreviewProfile
+  /** Starší server kontroly neposílá. */
+  source_checks?: AttendanceSourceChecks
   files: AttendanceFileInfo[]
   sheets: AttendanceSheet[]
   unrecognized_columns: AttendanceUnrecognizedColumn[]
@@ -500,6 +526,8 @@ export interface AttendanceApplyPayload {
   create_deductions?: boolean
   components?: AttendanceProfileComponent[] | null
   profile_id?: number | null
+  /** Účetní potvrdila nález kontrol období a dvojích vstupů (`source_checks`). */
+  confirm_source_checks?: boolean
 }
 
 /** Výsledek zápisu srážek z podkladů (dohody o srážce na měsíc). */

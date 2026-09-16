@@ -77,6 +77,7 @@ final class DocumentBackfill
               WHERE i.supplier_id = :sid
                 AND i.status NOT IN ('draft','cancelled')
                 AND i.invoice_type IN (" . implode(', ', $invoiceTypePlaceholders) . "){$dateWhere}"
+                . ' AND ' . OpeningBalanceDocuments::notInOpeningSql('invoice', 'i')
                 . ($settlementsOnly
                     ? " AND EXISTS (
                             SELECT 1 FROM invoices parent
@@ -104,6 +105,7 @@ final class DocumentBackfill
               WHERE pi.supplier_id = :sid
                 AND pi.status IN ('received','booked','paid'){$dateWhere}
                 AND pi.document_kind <> 'advance'"
+                . ' AND ' . OpeningBalanceDocuments::notInOpeningSql('purchase_invoice', 'pi')
                 . ($settlementsOnly
                     ? " AND EXISTS (
                             SELECT 1 FROM purchase_invoices adv

@@ -17,11 +17,36 @@ final class PayrollEmployerPolicyRepository
         payday_month_offset, payday_business_day_rule,
         balance_rounding_mode, home_office_policy, travel_expense_policy,
         leave_entitlement_weeks,
+        overtime_rate_bp, holiday_rate_bp, night_rate_bp, weekend_rate_bp,
+        difficult_environment_rate_bp,
+        overtime_fixed_hourly_minor, holiday_fixed_hourly_minor,
+        night_fixed_hourly_minor, weekend_fixed_hourly_minor,
+        difficult_environment_fixed_hourly_minor,
         automatic_posting_enabled,
         delivery_channel, delivery_verified_on, source_kind,
         source_reference, created_by, updated_by, row_version,
         created_at, updated_at
         SQL;
+
+    /**
+     * Výchozí sazby příplatků § 114 až § 118 (migrace 1846).
+     *
+     * Pořadí je závazné: {@see writeValues()} skládá hodnoty pozičně a
+     * {@see update()} z nich uřízne první prvek, takže přehození sloupce tady
+     * by tiše zapsalo sazbu do jiného druhu příplatku.
+     */
+    private const SURCHARGE_FIELDS = [
+        'overtime_rate_bp',
+        'holiday_rate_bp',
+        'night_rate_bp',
+        'weekend_rate_bp',
+        'difficult_environment_rate_bp',
+        'overtime_fixed_hourly_minor',
+        'holiday_fixed_hourly_minor',
+        'night_fixed_hourly_minor',
+        'weekend_fixed_hourly_minor',
+        'difficult_environment_fixed_hourly_minor',
+    ];
 
     public function __construct(
         private readonly Connection $db,
@@ -168,10 +193,16 @@ final class PayrollEmployerPolicyRepository
                      payday_month_offset, payday_business_day_rule,
                      balance_rounding_mode, home_office_policy,
                      travel_expense_policy, leave_entitlement_weeks,
+                     overtime_rate_bp, holiday_rate_bp, night_rate_bp,
+                     weekend_rate_bp, difficult_environment_rate_bp,
+                     overtime_fixed_hourly_minor, holiday_fixed_hourly_minor,
+                     night_fixed_hourly_minor, weekend_fixed_hourly_minor,
+                     difficult_environment_fixed_hourly_minor,
                      automatic_posting_enabled, delivery_channel,
                      delivery_verified_on, source_kind, source_reference,
                      created_by, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                         ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             );
             $stmt->execute($this->writeValues(
                 $supplierId,
@@ -261,6 +292,16 @@ final class PayrollEmployerPolicyRepository
                         home_office_policy = ?,
                         travel_expense_policy = ?,
                         leave_entitlement_weeks = ?,
+                        overtime_rate_bp = ?,
+                        holiday_rate_bp = ?,
+                        night_rate_bp = ?,
+                        weekend_rate_bp = ?,
+                        difficult_environment_rate_bp = ?,
+                        overtime_fixed_hourly_minor = ?,
+                        holiday_fixed_hourly_minor = ?,
+                        night_fixed_hourly_minor = ?,
+                        weekend_fixed_hourly_minor = ?,
+                        difficult_environment_fixed_hourly_minor = ?,
                         automatic_posting_enabled = ?,
                         delivery_channel = ?,
                         delivery_verified_on = ?,
@@ -403,6 +444,13 @@ final class PayrollEmployerPolicyRepository
             array_key_exists('leave_entitlement_weeks', $data)
                 ? self::requiredInt($data, 'leave_entitlement_weeks')
                 : 4,
+        ];
+        // Výchozí sazby příplatků v závazném pořadí (viz SURCHARGE_FIELDS).
+        foreach (self::SURCHARGE_FIELDS as $field) {
+            $values[] = self::nullableInt($data, $field);
+        }
+        $values = [
+            ...$values,
             (int) self::requiredBool($data, 'automatic_posting_enabled'),
             self::requiredString($data, 'delivery_channel'),
             self::nullableString($data, 'delivery_verified_on'),
@@ -468,6 +516,11 @@ final class PayrollEmployerPolicyRepository
             'automatic_posting_enabled',
         );
         foreach (['created_by', 'updated_by'] as $field) {
+            $row[$field] = self::nullableInt($row, $field);
+        }
+        // Sazby příplatků jsou čísla, ne řetězce: ovladač je vrací textem
+        // a klient by pak porovnával "2500" s 2500.
+        foreach (self::SURCHARGE_FIELDS as $field) {
             $row[$field] = self::nullableInt($row, $field);
         }
 

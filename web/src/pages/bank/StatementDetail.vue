@@ -498,6 +498,11 @@ const statementActions = computed<ActionItem[]>(() => {
       <p v-if="statement.balance_calculation.status === 'mismatch'" class="text-danger-600 mt-1">
         {{ t('bank.balance_difference', { amount: formatMoney(statement.balance_calculation.difference, statement.currency ?? 'CZK') }) }}
       </p>
+      <!-- Zůstatek z bankovního avíza proti součtu evidovaných pohybů: rozdíl znamená
+           nenačtený (nebo přebývající) pohyb a nesmí zůstat tichý. -->
+      <p v-if="statement.balance_calculation.unexplained_difference" class="text-danger-600 mt-1" data-testid="balance-unexplained">
+        {{ t('bank.balance_difference', { amount: formatMoney(statement.balance_calculation.unexplained_difference, statement.currency ?? 'CZK') }) }}
+      </p>
       <p class="text-neutral-500 mt-1">{{ t('bank.gpc_calculated_hint') }}</p>
     </div>
 

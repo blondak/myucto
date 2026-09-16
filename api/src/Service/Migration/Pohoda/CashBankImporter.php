@@ -1,0 +1,583 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Migration\Pohoda;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\PohodaImportRepository;
+use MyInvoice\Repository\SupplierBankAccountRepository;
+use MyInvoice\Service\Bank\StatementBalanceService;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Migration\MoneyS3\AccountCode;
+use PDO;
+
+/**
+ * Pokladny a pokladní doklady (`32_pokladny.xml`, `28_pokladna.xml`), bankovní účty
+ * a pohyby (`31_bankovni_ucty.xml`, `29_banka.xml`).
+ *
+ * Pohoda na rozdíl od Money vede skutečné bankovní výpisy (`statementNumber`), takže
+ * výpis v MyÚčtu = výpis z Pohody (zdroj `import`). Stav účtu na začátku roku je
+ * otevírací zápis analytiky 221 v deníku, dál se počítá po pohybech.
+ */
+final class CashBankImporter
+{
+    public const STEP_CASH = 'cash';
+    public const STEP_BANK = 'bank';
+
+    private const BUCKETS = ['Low' => 12.0, 'High' => 21.0, '3' => 10.0];
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PohodaImportRepository $map,
+        private readonly SupplierBankAccountRepository $bankAccounts,
+    ) {}
+
+    public function importCash(PohodaContext $ctx): void
+    {
+        $p = $ctx->protocol;
+        $pdo = $this->db->pdo();
+
+        $registers = [];
+        foreach ($ctx->export->records('cash_registers', 'cashRegister') as $r) {
+            $h = PohodaXml::get($r, 'cashRegisterHeader');
+            $code = PohodaXml::text($h, 'ids');
+            if ($code !== '') {
+                $registers[$code] = ['name' => PohodaXml::text($h, 'name') ?: $code, 'account' => AccountCode::fromMoney(PohodaXml::text($h, 'account/ids'))];
+            }
+        }
+        $vouchers = iterator_to_array($ctx->export->records('cash', 'voucher'), false);
+        // Pokladna bez účtu v číselníku: účet 211 z deníku jejích dokladů.
+        $votes = [];
+        foreach ($vouchers as $r) {
+            $h = PohodaXml::get($r, 'voucherHeader');
+            $code = PohodaXml::text($h, 'cashAccount/ids');
+            $account = $ctx->cashAccountsByNumber[PohodaXml::text($h, 'number/numberRequested')] ?? null;
+            if ($account !== null) {
+                $votes[$code][$account] = ($votes[$code][$account] ?? 0) + 1;
+            }
+            $registers[$code] ??= ['name' => $code, 'account' => null];
+        }
+        $registerIds = [];
+        foreach ($registers as $code => $reg) {
+            if ($reg['account'] === null && isset($votes[$code])) {
+                arsort($votes[$code]);
+                $reg['account'] = (string) array_key_first($votes[$code]);
+            }
+            if (!isset($votes[$code]) && $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CASH_REGISTER, $code) === null) {
+                continue; // pokladna bez dokladů v roce se nezakládá
+            }
+            $registerIds[$code] = $this->ensureRegister($ctx, $code, $reg['name'], $reg['account']);
+        }
+
+        $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_CASH_DOCUMENT);
+        $ruleExists = $pdo->prepare('SELECT 1 FROM posting_rules WHERE supplier_id = ? AND rule_key = ? LIMIT 1');
+        $numberTaken = $pdo->prepare('SELECT 1 FROM cash_documents WHERE supplier_id = ? AND doc_number = ? LIMIT 1');
+        $insert = $pdo->prepare(
+            'INSERT INTO cash_documents
+                (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
+                 partner_name, partner_ic, partner_dic, description, vat_mode, total_amount, currency_code,
+                 rule_key, status, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "CZK", ?, "posted", ?)'
+        );
+        $insertVat = $pdo->prepare(
+            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction) VALUES (?, ?, ?, ?, ?)'
+        );
+
+        $periodStart = (string) ($ctx->period['starts_on'] ?? sprintf('%04d-01-01', $ctx->year()));
+        foreach ($vouchers as $r) {
+            $h = PohodaXml::get($r, 'voucherHeader');
+            $number = PohodaXml::text($h, 'number/numberRequested');
+            $issue = PohodaXml::date($h, 'date') ?? PohodaXml::date($h, 'datePayment');
+            if ($number === '' || $issue === null) {
+                $p->warn(self::STEP_CASH, 'number_or_date_missing', "Pokladní doklad {$number} nemá číslo nebo datum, nepřevzat.");
+                continue;
+            }
+            // Doklad bez zaúčtování k začátku období (počáteční stav pokladny, doklady přelomu
+            // roku) je v počátečních stavech - naváže se na otevírací zápis.
+            $inOpening = PohodaXml::text($h, 'accounting/accountingType') === 'withoutAccounting' && $issue <= $periodStart;
+            $key = 'cash|' . $number . '|' . $issue;
+            if (isset($existing[$key])) {
+                $ctx->cashDocuments[$number] = $existing[$key];
+                if ($inOpening) {
+                    $ctx->openingCash[$existing[$key]] = true;
+                }
+                $p->count(self::STEP_CASH, 'existing');
+                continue;
+            }
+            $registerId = $registerIds[PohodaXml::text($h, 'cashAccount/ids')] ?? null;
+            if ($registerId === null) {
+                $p->warn(self::STEP_CASH, 'register_missing', "Pokladní doklad {$number} nemá pokladnu, nepřevzat.");
+                continue;
+            }
+            $summary = PohodaXml::get($r, 'voucherSummary/homeCurrency');
+            $lines = self::vatBuckets($summary);
+            $total = round(PohodaXml::num($summary, 'priceNone') + array_sum(array_map(static fn (array $l): float => $l['base'] + $l['vat'], $lines))
+                + PohodaXml::num($summary, 'round/priceRound'), 2);
+            if ($total === 0.0) {
+                $p->count(self::STEP_CASH, 'zero_amount');
+                continue;
+            }
+            // Záporný příjem je výdej a naopak (vratka) - jen tak sedí 211 na deník.
+            $isOut = (PohodaXml::text($h, 'voucherType') === 'expense') !== ($total < 0);
+            $sign = $total < 0 ? -1 : 1;
+            $classCode = PohodaXml::text($h, 'classificationVAT/ids');
+            $vatLines = [];
+            $deduction = 'full';
+            $withVat = array_values(array_filter($lines, static fn (array $l): bool => abs($l['vat']) >= 0.005));
+            if ($withVat !== []) {
+                if ($isOut) {
+                    $res = $ctx->vat->purchase($classCode);
+                    if ($res !== null && $res['in_return'] && !$res['reverse']) {
+                        $vatLines = $withVat;
+                        $deduction = $res['deduction'];
+                    } elseif ($res === null || $res['in_return']) {
+                        $p->warn(self::STEP_CASH, 'cash_vat_review', "Pokladní doklad {$number}: členění DPH „{$classCode}“ převod nepřebírá, DPH doplňte ručně.", ['document_no' => $number]);
+                    }
+                } else {
+                    $res = $ctx->vat->sale($classCode, max(array_column($withVat, 'rate')));
+                    if ($res !== null && $res['in_return'] && $res['code'] === null) {
+                        $vatLines = $withVat;
+                    } else {
+                        $p->warn(self::STEP_CASH, 'cash_vat_review', "Pokladní doklad {$number}: členění DPH „{$classCode}“ převod nepřebírá, DPH doplňte ručně.", ['document_no' => $number]);
+                    }
+                }
+            }
+            $numberText = mb_substr($number, 0, 30);
+            $numberTaken->execute([$ctx->supplierId, $numberText]);
+            if ($numberTaken->fetchColumn() !== false) {
+                $numberText = mb_substr($number . '/' . substr($issue, 0, 4), 0, 30);
+            }
+            $rule = mb_substr(PohodaXml::text($h, 'accounting/ids'), 0, 64);
+            $ruleKey = null;
+            if ($rule !== '') {
+                $ruleExists->execute([$ctx->supplierId, $rule]);
+                $ruleKey = $ruleExists->fetchColumn() !== false ? $rule : null;
+            }
+            $partner = PartnerImporter::snapshot(PohodaXml::get($h, 'partnerIdentity'));
+            // Doklad bez zaúčtování (počáteční stav pokladny, doklady přelomu roku v PS) není
+            // prodej ani nákup - pokladní kniha ho potřebuje kvůli zůstatku, tržby ne.
+            $withoutAccounting = PohodaXml::text($h, 'accounting/accountingType') === 'withoutAccounting';
+            if ($withoutAccounting) {
+                $p->count(self::STEP_CASH, 'without_accounting');
+            }
+            $insert->execute([
+                $ctx->supplierId,
+                $registerId,
+                $isOut ? 'out' : 'in',
+                $withoutAccounting ? 'other' : ($isOut ? 'purchase' : 'sale'),
+                $numberText,
+                $issue,
+                PohodaXml::date($h, 'dateTax') ?? $issue,
+                $partner['name'] !== '' ? mb_substr($partner['name'], 0, 255) : null,
+                $partner['ico'] !== '' ? $partner['ico'] : null,
+                $partner['dic'] !== '' ? mb_substr($partner['dic'], 0, 20) : null,
+                mb_substr(PohodaXml::text($h, 'text') ?: $number, 0, 255),
+                $vatLines === [] ? 'none' : 'vat',
+                abs($total),
+                $ruleKey,
+                $ctx->userOrNull(),
+            ]);
+            $id = (int) $pdo->lastInsertId();
+            foreach ($vatLines as $line) {
+                $insertVat->execute([$id, $line['rate'], round($sign * $line['base'], 2), round($sign * $line['vat'], 2), $deduction]);
+            }
+            if ($vatLines !== []) {
+                $p->count(self::STEP_CASH, 'with_vat');
+            }
+            $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_CASH_DOCUMENT, $key, $id, $ctx->runId);
+            $ctx->cashDocuments[$number] = $id;
+            if ($inOpening) {
+                $ctx->openingCash[$id] = true;
+            }
+            $p->count(self::STEP_CASH, 'created');
+        }
+        $p->finish(self::STEP_CASH);
+    }
+
+    public function importBank(PohodaContext $ctx): void
+    {
+        $p = $ctx->protocol;
+        $pdo = $this->db->pdo();
+
+        $accounts = [];
+        foreach ($ctx->export->records('bank_accounts', 'bankAccount') as $r) {
+            $h = PohodaXml::get($r, 'bankAccountHeader');
+            $code = PohodaXml::text($h, 'ids');
+            $number = ltrim(PohodaXml::text($h, 'numberAccount'), '0') === '' ? '' : PohodaXml::text($h, 'numberAccount');
+            $accounts[$code] = [
+                'number' => $number,
+                'bank' => PohodaXml::text($h, 'codeBank'),
+                'iban' => str_replace(' ', '', PohodaXml::text($h, 'IBAN')),
+                'label' => trim(PohodaXml::text($h, 'nameBank') . ' ' . $code),
+                'analytic' => AccountCode::fromMoney(PohodaXml::text($h, 'analyticAccount/ids')),
+            ];
+        }
+
+        $byStatement = [];
+        $openingDocs = [];
+        $count = 0;
+        $periodStart = (string) ($ctx->period['starts_on'] ?? sprintf('%04d-01-01', $ctx->year()));
+        foreach ($ctx->export->records('bank', 'bank') as $r) {
+            $h = PohodaXml::get($r, 'bankHeader');
+            $code = PohodaXml::text($h, 'account/ids') ?: 'BANKA';
+            $date = PohodaXml::date($h, 'datePayment') ?? PohodaXml::date($h, 'dateStatement');
+            if ($date === null) {
+                $p->warn(self::STEP_BANK, 'date_missing', 'Bankovní doklad ' . PohodaXml::text($h, 'number') . ' nemá datum, nepřevzat.');
+                continue;
+            }
+            if (self::isOpeningBalance($h, $date, $periodStart)) {
+                $openingDocs[$code] = ($openingDocs[$code] ?? 0) + StatementBalanceService::cents(number_format(self::amount($r), 2, '.', ''));
+                $p->count(self::STEP_BANK, 'opening_balances');
+                continue;
+            }
+            $statement = PohodaXml::text($h, 'statementNumber/statementNumber') ?: ('m' . substr($date, 5, 2));
+            $byStatement[$code][$statement][] = $r;
+            $count++;
+        }
+        if (!$ctx->dryRun) {
+            $this->registerAccounts($ctx, $accounts, array_keys($byStatement));
+        }
+
+        $existingStatements = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_BANK_STATEMENT);
+        $existingTx = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_BANK_TRANSACTION);
+        $insertStatement = $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, source, file_name, file_hash, account_number, bank_code, currency, statement_number,
+                 statement_date, transaction_count, imported_by)
+             VALUES (?, "import", ?, ?, ?, ?, "CZK", ?, ?, 0, ?)'
+        );
+        $insertTx = $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (source, source_ref, statement_id, posted_at, amount, currency, variable_symbol, constant_symbol,
+                 specific_symbol, counterparty_account, counterparty_bank, counterparty_name, description, bank_ref,
+                 import_fingerprint)
+             VALUES ("statement", ?, ?, ?, ?, "CZK", ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $touchStatement = $pdo->prepare(
+            'UPDATE bank_statements SET transaction_count = transaction_count + ?, statement_date = GREATEST(statement_date, ?) WHERE id = ? AND supplier_id = ?'
+        );
+        $setBalances = $pdo->prepare(
+            'UPDATE bank_statements SET prev_balance = ?, curr_balance = ?, credit_total = ?, debit_total = ? WHERE id = ? AND supplier_id = ?'
+        );
+        $ledgerOpening = $pdo->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND e.period_id = ? AND l.account_id = ? AND e.source_type = 'opening'"
+        );
+
+        $done = 0;
+        $seenKeys = [];
+        ksort($byStatement);
+        foreach ($byStatement as $code => $statements) {
+            // Zůstatky navazují chronologicky podle data výpisu (nejpozdější datum výpisu jeho
+            // dokladů): výpis bez čísla (`mNN`) tak patří mezi číslované, ne za ně, a číslovaný
+            // výpis s jedním starším dokladem nepředběhne předchozí výpisy.
+            $sortDate = [];
+            foreach ($statements as $statementNo => $rows) {
+                $dates = [];
+                foreach ($rows as $r) {
+                    $dates[] = PohodaXml::date($r, 'bankHeader/dateStatement') ?? PohodaXml::date($r, 'bankHeader/datePayment');
+                }
+                $dates = array_filter($dates);
+                $sortDate[$statementNo] = $dates === [] ? '9999-12-31' : max($dates);
+            }
+            uksort($statements, static fn (string|int $a, string|int $b): int => ($sortDate[$a] <=> $sortDate[$b]) ?: strnatcmp((string) $a, (string) $b));
+            $meta = $accounts[$code] ?? ['number' => '', 'bank' => '', 'iban' => '', 'label' => $code, 'analytic' => null];
+            $running = null;
+            $accountId = $meta['analytic'] !== null ? ($ctx->accountIds[$meta['analytic']] ?? null) : null;
+            if ($accountId !== null && $ctx->period !== null) {
+                $ledgerOpening->execute([$ctx->supplierId, $ctx->period['id'], $accountId]);
+                $running = StatementBalanceService::cents(number_format((float) $ledgerOpening->fetchColumn(), 2, '.', ''));
+                if (isset($openingDocs[$code]) && $openingDocs[$code] !== $running) {
+                    $p->warn(self::STEP_BANK, 'opening_mismatch', sprintf(
+                        'Počáteční stav bankovního účtu %s v Pohodě (%s Kč) nesedí s počátečním stavem jeho analytiky v deníku (%s Kč), výpisy navazují na deník.',
+                        $code, number_format($openingDocs[$code] / 100, 2, ',', ' '), number_format($running / 100, 2, ',', ' '),
+                    ));
+                }
+            } elseif (isset($openingDocs[$code])) {
+                $running = $openingDocs[$code];
+            } else {
+                $p->warn(self::STEP_BANK, 'account_without_analytic', "Bankovní účet {$code} nemá v Pohodě analytiku 221, výpisy jsou bez počátečního stavu.");
+            }
+
+            foreach ($statements as $statementNo => $rows) {
+                $dates = [];
+                foreach ($rows as $r) {
+                    $dates[] = PohodaXml::date($r, 'bankHeader/dateStatement') ?? PohodaXml::date($r, 'bankHeader/datePayment');
+                }
+                $dates = array_filter($dates);
+                sort($dates);
+                $lastDate = $dates[count($dates) - 1] ?? sprintf('%04d-12-31', $ctx->year());
+
+                $mapKey = 'stmt|' . $code . '|' . $ctx->year() . '|' . $statementNo;
+                $statementId = $existingStatements[$mapKey] ?? null;
+                $isNewStatement = $statementId === null;
+                if ($isNewStatement) {
+                    $label = sprintf('%s %s/%d', $code, $statementNo, $ctx->year());
+                    $insertStatement->execute([
+                        $ctx->supplierId,
+                        sprintf('pohoda-%s.import', preg_replace('/[^A-Za-z0-9_-]/', '_', $label)),
+                        hash('sha256', 'pohoda|' . $ctx->supplierId . '|' . $mapKey),
+                        mb_substr($meta['number'] !== '' ? $meta['number'] : $code, 0, 40),
+                        $meta['bank'] !== '' ? mb_substr($meta['bank'], 0, 4) : null,
+                        mb_substr($label, 0, 20),
+                        $lastDate,
+                        $ctx->userOrNull(),
+                    ]);
+                    $statementId = (int) $pdo->lastInsertId();
+                    $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_BANK_STATEMENT, $mapKey, $statementId, $ctx->runId);
+                    $p->count(self::STEP_BANK, 'statements');
+                }
+
+                $added = 0;
+                $credit = 0;
+                $debit = 0;
+                foreach ($rows as $r) {
+                    $h = PohodaXml::get($r, 'bankHeader');
+                    $number = PohodaXml::text($h, 'number');
+                    $date = PohodaXml::date($h, 'datePayment') ?? (string) PohodaXml::date($h, 'dateStatement');
+                    $amount = self::amount($r);
+                    $cents = StatementBalanceService::cents(number_format($amount, 2, '.', ''));
+                    if ($cents >= 0) {
+                        $credit += $cents;
+                    } else {
+                        $debit -= $cents;
+                    }
+                    // Pohoda pustí dva pohyby se stejným číslem i datem (ruční doklad vedle
+                    // importovaného výpisu); druhý dostane pořadí, oba jsou skutečné.
+                    $txKey = 'bank|' . $code . '|' . $number . '|' . $date;
+                    $seenKeys[$txKey] = ($seenKeys[$txKey] ?? 0) + 1;
+                    if ($seenKeys[$txKey] > 1) {
+                        $txKey .= '#' . $seenKeys[$txKey];
+                        $p->count(self::STEP_BANK, 'duplicate_numbers');
+                    }
+                    if (isset($existingTx[$txKey])) {
+                        $ctx->bankTransactions[$number][] = ['id' => $existingTx[$txKey], 'date' => $date];
+                        $p->count(self::STEP_BANK, 'existing');
+                        continue;
+                    }
+                    [$vs, $description] = self::symbolAndDescription($h);
+                    $partner = PartnerImporter::snapshot(PohodaXml::get($h, 'partnerIdentity'));
+                    $counterName = $partner['name'] !== '' ? $partner['name'] : PohodaXml::text($h, 'note');
+                    $constant = PohodaXml::text($h, 'symConst');
+                    $specific = PohodaXml::text($h, 'symSpec');
+                    $insertTx->execute([
+                        mb_substr($number, 0, 190),
+                        $statementId,
+                        $date,
+                        number_format($amount, 2, '.', ''),
+                        $vs,
+                        preg_match('/^\d{1,10}$/', $constant) === 1 && ltrim($constant, '0') !== '' ? $constant : null,
+                        preg_match('/^\d{1,20}$/', $specific) === 1 && ltrim($specific, '0') !== '' ? $specific : null,
+                        mb_substr(PohodaXml::text($h, 'paymentAccount/accountNo'), 0, 40) ?: null,
+                        mb_substr(PohodaXml::text($h, 'paymentAccount/bankCode'), 0, 4) ?: null,
+                        $counterName !== '' ? mb_substr($counterName, 0, 190) : null,
+                        $description,
+                        mb_substr($number, 0, 40),
+                        hash('sha256', 'pohoda|' . $ctx->supplierId . '|' . $txKey),
+                    ]);
+                    $id = (int) $pdo->lastInsertId();
+                    $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
+                    $ctx->bankTransactions[$number][] = ['id' => $id, 'date' => $date];
+                    $added++;
+                    $p->count(self::STEP_BANK, 'transactions');
+                    if (++$done % 500 === 0) {
+                        $ctx->report(self::STEP_BANK, $done, $count);
+                    }
+                }
+                if ($added > 0) {
+                    $touchStatement->execute([$added, $lastDate, $statementId, $ctx->supplierId]);
+                }
+                if ($running !== null && $isNewStatement) {
+                    $closing = $running + $credit - $debit;
+                    $setBalances->execute([
+                        number_format($running / 100, 2, '.', ''),
+                        number_format($closing / 100, 2, '.', ''),
+                        number_format($credit / 100, 2, '.', ''),
+                        number_format($debit / 100, 2, '.', ''),
+                        $statementId, $ctx->supplierId,
+                    ]);
+                    $running = $closing;
+                } elseif ($running !== null) {
+                    $running += $credit - $debit;
+                }
+            }
+        }
+        $p->finish(self::STEP_BANK);
+    }
+
+    /**
+     * Částka pohybu: součet rekapitulace, výdej se znaménkem minus. Příjem se zápornou
+     * částkou (vratka odchozí platby) zůstává záporný.
+     */
+    private static function amount(array $r): float
+    {
+        $summary = PohodaXml::get($r, 'bankSummary/homeCurrency');
+        $total = PohodaXml::num($summary, 'priceNone') + PohodaXml::num($summary, 'priceLowSum')
+            + PohodaXml::num($summary, 'priceHighSum') + PohodaXml::num($summary, 'price3Sum') + PohodaXml::num($summary, 'round/priceRound');
+        $sign = PohodaXml::text($r, 'bankHeader/bankType') === 'expense' ? -1 : 1;
+        return round($sign * $total, 2);
+    }
+
+    /**
+     * Variabilní symbol pohybu: platný má nejvýš 10 číslic (vodicí nuly se nepočítají).
+     * Jiný obsah pole zůstane v popisu pohybu.
+     *
+     * @return array{0:?string,1:?string}
+     */
+    private static function symbolAndDescription(mixed $h): array
+    {
+        $raw = PohodaXml::text($h, 'symVar');
+        $description = PohodaXml::text($h, 'text');
+        $valid = $raw === '' || (ctype_digit($raw) && strlen(ltrim($raw, '0')) <= VariableSymbolNormalizer::MAX_LENGTH);
+        if (!$valid) {
+            $description = trim($description . ' (ref. ' . $raw . ')');
+        }
+        return [
+            $valid && $raw !== '' && ltrim($raw, '0') !== '' ? $raw : null,
+            $description !== '' ? mb_substr($description, 0, 255) : null,
+        ];
+    }
+
+    /** @return list<array{rate:float,base:float,vat:float}> */
+    private static function vatBuckets(mixed $summary): array
+    {
+        $out = [];
+        foreach (self::BUCKETS as $bucket => $default) {
+            $base = round(PohodaXml::num($summary, 'price' . $bucket), 2);
+            $vat = round(PohodaXml::num($summary, 'price' . $bucket . 'VAT'), 2);
+            $rate = PohodaXml::attr($summary, 'price' . $bucket . 'VAT', 'rate');
+            if ($base !== 0.0 || $vat !== 0.0) {
+                $out[] = ['rate' => is_numeric($rate) ? (float) $rate : $default, 'base' => $base, 'vat' => $vat];
+            }
+        }
+        return $out;
+    }
+
+    private function ensureRegister(PohodaContext $ctx, string $code, string $name, ?string $account): int
+    {
+        $mapped = $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CASH_REGISTER, $code);
+        if ($mapped !== null) {
+            return $mapped;
+        }
+        $pdo = $this->db->pdo();
+        $account = $account !== null && isset($ctx->accountIds[$account]) ? $account : null;
+        if ($account !== null) {
+            $stmt = $pdo->prepare('SELECT id FROM cash_registers WHERE supplier_id = ? AND account_code = ? LIMIT 1');
+            $stmt->execute([$ctx->supplierId, $account]);
+            $found = $stmt->fetchColumn();
+            if ($found !== false) {
+                return (int) $found;
+            }
+        }
+        $nameTaken = $pdo->prepare('SELECT 1 FROM cash_registers WHERE supplier_id = ? AND name = ? LIMIT 1');
+        $nameTaken->execute([$ctx->supplierId, mb_substr($name, 0, 100)]);
+        if ($nameTaken->fetchColumn() !== false) {
+            $name .= ' (Pohoda ' . $code . ')';
+        }
+        $pdo->prepare('INSERT INTO cash_registers (supplier_id, name, account_code, currency_code, is_active) VALUES (?, ?, ?, "CZK", 1)')
+            ->execute([$ctx->supplierId, mb_substr($name, 0, 100), $account ?? '211']);
+        $id = (int) $pdo->lastInsertId();
+        $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_CASH_REGISTER, $code, $id, $ctx->runId);
+        $ctx->protocol->count(self::STEP_CASH, 'registers');
+        return $id;
+    }
+
+    /**
+     * Doklad „Počáteční stav bankovního účtu", který POHODA zakládá na začátku roku: bez
+     * čísla, bez výpisu a bez zaúčtování. Není to pohyb na účtu, ale jeho počáteční stav
+     * (ten nese deník), do výpisů se proto nepřebírá.
+     */
+    private static function isOpeningBalance(mixed $h, string $date, string $periodStart): bool
+    {
+        return $date === $periodStart
+            && PohodaXml::text($h, 'number') === ''
+            && PohodaXml::text($h, 'statementNumber/statementNumber') === ''
+            && PohodaXml::text($h, 'accounting/accountingType') === 'withoutAccounting';
+    }
+
+    /**
+     * Vlastní bankovní účty z Pohody do evidence účtů firmy (se zachováním analytiky 221)
+     * a mezi účty firmy v měnách: první použitý účet doplní korunovou měnu bez čísla účtu,
+     * každý další použitý účet dostane vlastní řádek, jinak by ho tab Účty ani zůstatky
+     * banky neukázaly.
+     *
+     * @param array<string,array{number:string,bank:string,iban:string,label:string,analytic:?string}> $accounts
+     * @param list<string> $used kódy účtů s pohyby v roce
+     */
+    private function registerAccounts(PohodaContext $ctx, array $accounts, array $used): void
+    {
+        $pdo = $this->db->pdo();
+        $registered = [];
+        foreach ($accounts as $code => $a) {
+            if ($a['number'] === '' && $a['iban'] === '') {
+                continue;
+            }
+            $id = $this->bankAccounts->registerImported(
+                $ctx->supplierId,
+                $a['number'] !== '' ? $a['number'] : $a['iban'],
+                $a['bank'] !== '' ? $a['bank'] : null,
+                $a['iban'] !== '' ? $a['iban'] : null,
+                'CZK',
+                $a['label'],
+                $a['analytic'] !== null && str_starts_with($a['analytic'], '221.') ? substr($a['analytic'], 4) : null,
+            );
+            if ($id !== null) {
+                $registered[$code] = $id;
+            }
+            $ctx->protocol->count(self::STEP_BANK, $id !== null ? 'accounts_registered' : 'accounts_rejected');
+        }
+        $primary = null;
+        foreach ($used as $code) {
+            if (($accounts[$code]['number'] ?? '') !== '') {
+                $primary = $accounts[$code];
+                break;
+            }
+        }
+        if ($primary !== null) {
+            $pdo->prepare(
+                "UPDATE currencies SET account_number = ?, bank_code = ?, iban = COALESCE(iban, ?)
+                  WHERE supplier_id = ? AND code = 'CZK' AND (account_number IS NULL OR account_number = '')"
+            )->execute([$primary['number'], $primary['bank'] ?: null, $primary['iban'] ?: null, $ctx->supplierId]);
+        }
+
+        $known = [];
+        $existing = $pdo->prepare("SELECT id, account_number, bank_code FROM currencies WHERE supplier_id = ? AND COALESCE(account_number, '') <> ''");
+        $existing->execute([$ctx->supplierId]);
+        foreach ($existing->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $known[self::accountKey((string) $row['account_number'], (string) $row['bank_code'])] = (int) $row['id'];
+        }
+        $insert = $pdo->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default, account_number, bank_code, iban)
+             VALUES (?, 'CZK', ?, 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 0, ?, ?, ?)"
+        );
+        $link = $pdo->prepare('UPDATE supplier_bank_accounts SET currency_id = ? WHERE id = ? AND supplier_id = ? AND currency_id IS NULL');
+        foreach ($used as $code) {
+            $a = $accounts[$code] ?? null;
+            if ($a === null || $a['number'] === '' || !isset($registered[$code])) {
+                continue;
+            }
+            $key = self::accountKey($a['number'], $a['bank']);
+            if (!isset($known[$key])) {
+                $insert->execute([
+                    $ctx->supplierId,
+                    mb_substr($a['label'], 0, 60),
+                    mb_substr($a['number'], 0, 30),
+                    $a['bank'] !== '' ? mb_substr($a['bank'], 0, 4) : null,
+                    $a['iban'] !== '' ? mb_substr($a['iban'], 0, 34) : null,
+                ]);
+                $known[$key] = (int) $pdo->lastInsertId();
+                $ctx->protocol->count(self::STEP_BANK, 'accounts_added');
+            }
+            $link->execute([$known[$key], $registered[$code], $ctx->supplierId]);
+        }
+    }
+
+    /** Porovnání čísla účtu bez oddělovačů a úvodních nul (`19-123/0100` = `0000190000123`). */
+    private static function accountKey(string $number, string $bank): string
+    {
+        return ltrim((string) preg_replace('/\D/', '', $number), '0') . '/' . ltrim(trim($bank), '0');
+    }
+}

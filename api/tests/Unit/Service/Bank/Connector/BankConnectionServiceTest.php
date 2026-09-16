@@ -241,6 +241,25 @@ final class BankConnectionServiceTest extends TestCase
         self::assertSame(0, $importer->calls);
     }
 
+    public function testUnexpectedFailureKeepsCauseForDiagnostics(): void
+    {
+        $connector = new SyncConnector(static function (): string {
+            throw new \RuntimeException('KB+ výpis KM: neplatný záznam 075.');
+        });
+        $importer = new RecordingStatementImporter(static fn (): array => self::importResult());
+        $h = $this->harness($connector, $importer, $this->connection());
+        $h['connections']->expects(self::once())->method('recordSyncError')->with(1, 101, 'bank_sync_failed');
+
+        try {
+            $h['service']->sync(1, 11);
+            self::fail('Neočekávaná chyba se musí propagovat jako bank_sync_failed.');
+        } catch (BankConnectorOperationException $e) {
+            self::assertSame('bank_sync_failed', $e->errorCode);
+            self::assertInstanceOf(\RuntimeException::class, $e->getPrevious());
+            self::assertSame('KB+ výpis KM: neplatný záznam 075.', $e->getPrevious()->getMessage());
+        }
+    }
+
     /**
      * KB ADAA vrací 429 při opakovaném stažení nezměněných dat dřív než za
      * 61 minut. Cron běží po 30 minutách, takže spojení s takovým odstupem

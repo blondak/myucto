@@ -121,7 +121,7 @@ describe('payroll REGZEC event API', () => {
       .resolves.toEqual({ event: { id: 42 }, proposal_id: 7 })
     expect(m.post).toHaveBeenCalledWith(
       '/payroll/submissions/registration/5/changes/7/file',
-      { environment: 'test' },
+      { environment: 'production' },
     )
   })
 

@@ -232,7 +232,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
     await flushPromises()
 
-    expect(m.freeze).toHaveBeenCalledWith(18, expect.any(String))
+    expect(m.freeze).toHaveBeenCalledWith(18, expect.any(String), 'test')
     expect(m.dryRun).toHaveBeenCalledWith(77, 'test', 4)
     expect(wrapper.text()).toContain('jmhz_dry_run_valid')
     expect(wrapper.find('pre').exists()).toBe(false)

@@ -300,6 +300,37 @@ final class MoneyS3Uploads
     }
 
     /**
+     * Nové nahrání uvolní místo: z nečinných záloh firmy nechá jen naposledy použité tak,
+     * aby jich i s novou bylo nejvýš `$max`, starší smaže. Zálohu, se kterou právě pracuje
+     * job, nechá. False = místo není, všechny zálohy se zpracovávají.
+     */
+    public static function makeRoom(int $supplierId, int $max): bool
+    {
+        $idle = [];
+        $busy = 0;
+        foreach (glob(self::base($supplierId) . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
+            if (preg_match(self::TOKEN_PATTERN, basename($dir)) !== 1) {
+                continue;
+            }
+            if (self::isBusy($dir)) {
+                $busy++;
+            } else {
+                $idle[$dir] = self::lastActivity($dir);
+            }
+        }
+        arsort($idle);
+        $keep = max(0, $max - 1 - $busy);
+        foreach (array_keys($idle) as $dir) {
+            if ($keep > 0) {
+                $keep--;
+                continue;
+            }
+            self::removeTree($dir, $supplierId);
+        }
+        return $busy < $max;
+    }
+
+    /**
      * Denní úklid ({@see api/bin/cron-cleanup.php}) nahraných záloh všech firem.
      * Rozbalená agenda je celé účetnictví firmy — nesmí na disku čekat, až ji uklidí
      * další upload téže firmy, který nemusí přijít nikdy.

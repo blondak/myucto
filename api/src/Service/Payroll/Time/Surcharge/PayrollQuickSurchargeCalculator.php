@@ -71,7 +71,8 @@ final class PayrollQuickSurchargeCalculator
      * @return array{
      *   available:bool, reason:?string, section:string, component_code:string,
      *   basis:string, basis_hourly_minor:?int, rate_basis_points:?int,
-     *   rate_is_agreed:bool, requires_factors:bool, default_factors:?int
+     *   rate_is_agreed:bool, requires_factors:bool, default_factors:?int,
+     *   agreed_fixed_hourly_minor:?int
      * }
      */
     public function availability(
@@ -94,6 +95,10 @@ final class PayrollQuickSurchargeCalculator
             'rate_is_agreed' => $effective['agreed'],
             'requires_factors' => $requiresFactors,
             'default_factors' => $policy->difficultEnvironmentFactors,
+            // Je-li sjednaná pevná částka, počítá se z ní, ne ze sazby. Formulář
+            // ji musí dostat, jinak by ukazoval procenta, podle kterých se
+            // nepočítá.
+            'agreed_fixed_hourly_minor' => $policy->agreedFixedHourlyMinor($kind),
         ];
 
         $reason = $this->unavailableReason($kind, $policy, $basisHourly);
@@ -205,15 +210,32 @@ final class PayrollQuickSurchargeCalculator
         $effective = $policy->effectiveRate($kind, $ruleset);
         $weighted = self::multiplyExactly($milliHours, $factors);
 
+        // Pevná částka za hodinu (migrace 1845) nahrazuje hodinovou sazbu, ne
+        // celý vzorec. Počítat to tu jinak než v docházce by znamenalo dvě čísla
+        // na týž nárok podle toho, kterou obrazovkou se hodiny zadaly.
+        $fixedHourly = $policy->agreedFixedHourlyMinor($kind);
+        $statutoryHourly = self::hourlyFromRate($basisHourly, $effective['rate']);
+        $belowStatutory = $fixedHourly !== null && $fixedHourly < $statutoryHourly;
+        // Podlézt smí jen § 116 a § 118; jinde je „nejméně" kogentní, takže se
+        // dopočítá zákonná částka — vyplatit nižší sjednanou by byl nedoplatek.
+        $appliedHourly = $belowStatutory && !$kind->allowsLowerAgreedRate()
+            ? $statutoryHourly
+            : $fixedHourly;
+
         // Jeden zlomek, jedno zaokrouhlení — jako {@see PayrollSurchargeLine}.
         // Jmenovatel je 1 000, protože se násobí MILIhodinami; tamní 60 patří
         // k minutám. Dvě zaokrouhlení (nejdřív hodinová sazba, pak násobek) by
         // se přes sto hodin měsíčně sečetla v neprospěch zaměstnance.
-        $numerator = self::multiplyExactly(
-            self::multiplyExactly($basisHourly, $effective['rate']->numerator),
-            $weighted,
-        );
-        $denominator = self::multiplyExactly($effective['rate']->denominator, 1_000);
+        if ($appliedHourly === null) {
+            $numerator = self::multiplyExactly(
+                self::multiplyExactly($basisHourly, $effective['rate']->numerator),
+                $weighted,
+            );
+            $denominator = self::multiplyExactly($effective['rate']->denominator, 1_000);
+        } else {
+            $numerator = self::multiplyExactly($appliedHourly, $weighted);
+            $denominator = 1_000;
+        }
         $amount = RoundingMode::HalfUp->roundFraction($numerator, $denominator);
 
         return [
@@ -238,6 +260,11 @@ final class PayrollQuickSurchargeCalculator
                 'weighted_milli_hours' => $weighted,
                 'rate_basis_points' => self::basisPoints($effective['rate']),
                 'rate_is_agreed' => $effective['agreed'],
+                // Sjednaná vs. použitá hodinová částka se liší právě tehdy,
+                // když sjednání nedosáhlo kogentního minima.
+                'agreed_fixed_hourly_minor' => $fixedHourly,
+                'applied_fixed_hourly_minor' => $appliedHourly,
+                'below_statutory' => $belowStatutory,
                 'compensation_mode' => $policy->mode($kind)->value,
                 'ruleset_id' => $ruleset->version->id,
                 'ruleset_content_hash' => $ruleset->version->contentHash,
@@ -324,6 +351,15 @@ final class PayrollQuickSurchargeCalculator
         }
 
         return $this->minimumWageCache[$periodStart];
+    }
+
+    /** Zákonná hodinová částka příplatku ze základu a sazby, půl nahoru. */
+    private static function hourlyFromRate(int $basisHourlyMinor, DecimalRate $rate): int
+    {
+        return RoundingMode::HalfUp->roundFraction(
+            self::multiplyExactly($basisHourlyMinor, $rate->numerator),
+            $rate->denominator,
+        );
     }
 
     private static function basisPoints(DecimalRate $rate): int

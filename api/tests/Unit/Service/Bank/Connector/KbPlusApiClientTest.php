@@ -489,6 +489,33 @@ final class KbPlusApiClientTest extends TestCase
         self::assertLessThan(21, count($history));
     }
 
+    /**
+     * Produkce 15. 9. 2026: ruční načtení Basic čekalo na výpis až 120 s a IIS
+     * (FastCGI activityTimeout 70 s) proces zabil, UI dostalo holou 500.
+     * Webový požadavek proto celé stažení výpisu utne pod limitem IIS.
+     */
+    public function testInteractiveStatementWaitEndsWellBeforeIisTimeout(): void
+    {
+        $history = [];
+        $clock = new \Symfony\Component\Clock\MockClock('2026-09-16T10:00:00+02:00');
+        $startedAt = $clock->now()->getTimestamp();
+        $client = $this->client(array_map(fn (): Response => new Response(200, ['Content-Type' => 'application/json'], $this->json([
+            'status' => 'PENDING', 'statementId' => 'SYNTHETIC-STATEMENT-4', 'pollingInterval' => 10,
+        ])), range(0, 20)), $history, $clock, KbPlusApiClient::INTERACTIVE_STATEMENT_DURATION_SECONDS);
+
+        try {
+            $client->statements(self::ACCESS_TOKEN, self::ACCOUNT_ID, '2026-09-15', '2026-09-15');
+            self::fail('Nedokončený výpis se nesmí vydávat za prázdné období.');
+        } catch (BankConnectorException $e) {
+            self::assertSame('kb_plus_statement_pending', $e->errorCode);
+        }
+        self::assertLessThanOrEqual(
+            KbPlusApiClient::INTERACTIVE_STATEMENT_DURATION_SECONDS,
+            $clock->now()->getTimestamp() - $startedAt,
+        );
+        self::assertSame([20.0, 10.0], array_map(static fn (array $transfer): float => $transfer['options']['timeout'], $history));
+    }
+
     public function testListsStatementAccountsForBasicConsent(): void
     {
         $history = [];
@@ -518,14 +545,20 @@ final class KbPlusApiClientTest extends TestCase
     }
 
     /** @param list<mixed> $queue @param array<int,array<string,mixed>> $history */
-    private function client(array $queue, array &$history = []): KbPlusApiClient
-    {
+    private function client(
+        array $queue,
+        array &$history = [],
+        ?\Symfony\Component\Clock\MockClock $clock = null,
+        ?int $statementDurationSeconds = null,
+    ): KbPlusApiClient {
         $mock = new MockHandler($queue);
         $stack = HandlerStack::create($mock);
         $stack->push(Middleware::history($history));
         return new KbPlusApiClient(
             new Client(['handler' => $stack]),
-            new \Symfony\Component\Clock\MockClock('2026-09-14T12:42:00.123+02:00'),
+            $clock ?? new \Symfony\Component\Clock\MockClock('2026-09-14T12:42:00.123+02:00'),
+            new \Psr\Log\NullLogger(),
+            $statementDurationSeconds,
         );
     }
 

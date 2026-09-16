@@ -122,6 +122,12 @@ function policy(): PayrollEmploymentSurchargePolicy {
     night_rate_bp: null,
     weekend_rate_bp: null,
     difficult_environment_rate_bp: null,
+    // Sjednání procentem — pevná částka za hodinu (migrace 1845) je prázdná.
+    overtime_fixed_hourly_minor: null,
+    holiday_fixed_hourly_minor: null,
+    night_fixed_hourly_minor: null,
+    weekend_fixed_hourly_minor: null,
+    difficult_environment_fixed_hourly_minor: null,
     agreement_reference: 'KS čl. 12',
     note: null,
     row_version: 1,

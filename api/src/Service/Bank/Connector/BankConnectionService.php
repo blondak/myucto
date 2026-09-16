@@ -261,7 +261,7 @@ final class BankConnectionService
                 throw $e;
             } catch (\Throwable $e) {
                 $this->connections->recordSyncError($supplierId, $connectionId, 'bank_sync_failed');
-                throw new BankConnectorOperationException('bank_sync_failed');
+                throw new BankConnectorOperationException('bank_sync_failed', [], $e);
             }
         });
     }

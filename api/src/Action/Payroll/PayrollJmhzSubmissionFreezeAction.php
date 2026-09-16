@@ -42,7 +42,7 @@ final class PayrollJmhzSubmissionFreezeAction
             return $denied;
         }
         $body = (array) ($request->getParsedBody() ?? []);
-        $environment = $body['environment'] ?? 'test';
+        $environment = $body['environment'] ?? 'production';
         if (!in_array($environment, ['test', 'production'], true)) {
             return $this->invalid($response, 'Prostředí musí být test nebo production.');
         }

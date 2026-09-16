@@ -71,6 +71,18 @@ function policy(overrides: Partial<PayrollEmployerPolicy> = {}): PayrollEmployer
     home_office_policy: 'not_used',
     travel_expense_policy: 'not_used',
     leave_entitlement_weeks: 5,
+    // Firma nemá sjednané výchozí sazby příplatků (migrace 1846) — vztahy pak
+    // dostanou zákonné minimum.
+    overtime_rate_bp: null,
+    holiday_rate_bp: null,
+    night_rate_bp: null,
+    weekend_rate_bp: null,
+    difficult_environment_rate_bp: null,
+    overtime_fixed_hourly_minor: null,
+    holiday_fixed_hourly_minor: null,
+    night_fixed_hourly_minor: null,
+    weekend_fixed_hourly_minor: null,
+    difficult_environment_fixed_hourly_minor: null,
     automatic_posting_enabled: false,
     delivery_channel: 'disabled',
     delivery_verified_on: null,
@@ -126,6 +138,74 @@ async function mountComponent(canWrite = true, policies = [policy()], total = po
   await flushPromises()
   return wrapper
 }
+
+/*
+ * Výchozí sazby příplatků § 114 až § 118 na úrovni firmy (migrace 1846).
+ *
+ * Firma s dvěma sty lidmi nezadá kolektivní sazbu dvěstěkrát, takže se zadává
+ * jednou tady a vztah bez vlastního sjednání ji zdědí. Na drátě jdou CELÁ
+ * čísla — bázové body a haléře — protože desetinné číslo přes JSON a ovladač
+ * databáze není zaručeně v kanonickém tvaru.
+ */
+describe('EmployerPolicies — výchozí sazby příplatků', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('pošle procento jako bázové body', async () => {
+    const wrapper = await mountComponent(true, [])
+
+    await wrapper.find('[data-test="policy-surcharge-value-overtime"]').setValue('30')
+    const save = wrapper.findAll('button').find(button => button.text().includes('common.save'))
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.createEmployerPolicy).toHaveBeenCalledWith(expect.objectContaining({
+      overtime_rate_bp: 3000,
+      overtime_fixed_hourly_minor: null,
+    }))
+    wrapper.unmount()
+  })
+
+  it('pošle pevnou částku v haléřích a procento k témuž druhu vynuluje', async () => {
+    const wrapper = await mountComponent(true, [])
+
+    await wrapper.find('[data-test="policy-surcharge-form-weekend"]').setValue('fixed')
+    await wrapper.find('[data-test="policy-surcharge-value-weekend"]').setValue('42')
+    const save = wrapper.findAll('button').find(button => button.text().includes('common.save'))
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.createEmployerPolicy).toHaveBeenCalledWith(expect.objectContaining({
+      weekend_fixed_hourly_minor: 4200,
+      weekend_rate_bp: null,
+    }))
+    wrapper.unmount()
+  })
+
+  /** Uložená pevná částka se musí vrátit v korunách a s předvybraným způsobem. */
+  it('načte uloženou sazbu zpět do formuláře', async () => {
+    const wrapper = await mountComponent(true, [policy({
+      night_rate_bp: null,
+      night_fixed_hourly_minor: 3500,
+      overtime_rate_bp: 3000,
+    })])
+
+    const edit = wrapper.findAll('button').find(button => button.text().includes('common.edit'))
+    await edit!.trigger('click')
+    await flushPromises()
+
+    const nightForm = wrapper.get('[data-test="policy-surcharge-form-night"]')
+    expect((nightForm.element as HTMLSelectElement).value).toBe('fixed')
+    expect(
+      (wrapper.get('[data-test="policy-surcharge-value-night"]').element as HTMLInputElement).value,
+    ).toBe('35')
+    expect(
+      (wrapper.get('[data-test="policy-surcharge-value-overtime"]').element as HTMLInputElement).value,
+    ).toBe('30')
+    wrapper.unmount()
+  })
+})
 
 describe('EmployerPolicies', () => {
   beforeEach(() => {

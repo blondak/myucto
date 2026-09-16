@@ -782,7 +782,7 @@ final class InvoiceImporter
         $stmt = $this->db->pdo()->prepare("SELECT total_with_vat FROM {$table} WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
-        $money = round((float) $r['CelkemSDPH'], 2);
+        $money = self::expectedTotal($r);
         if ($stored === false || abs((float) $stored - $money) < 0.005) {
             return;
         }
@@ -791,6 +791,51 @@ final class InvoiceImporter
             'Doklad %s (%d) se v Money od převodu změnil (celkem %s → %s). V MyÚčtu zůstává beze změny, upravte ho ručně.',
             $docNo, $year, number_format((float) $stored, 2, ',', ' '), number_format($money, 2, ',', ' ')
         ), ['document_no' => $docNo, 'year' => $year, 'id' => $id]);
+    }
+
+    /**
+     * Celkem dokladu tak, jak ho převod uloží ({@see amounts()}): součet sazeb, rozdíl do 1 Kč
+     * proti `CelkemSDPH` je zaokrouhlení. Konečná faktura po odpočtu zálohy má v `CelkemSDPH`
+     * celou cenu, ale v sazbách jen doplatek — převedený doklad nese doplatek, takže porovnávat
+     * se musí s ním, ne se syrovým `CelkemSDPH`. Bez vedlejších účinků.
+     *
+     * @param array<string,mixed> $r
+     */
+    private static function expectedTotal(array $r): float
+    {
+        $sumBase = 0.0;
+        $sumVat = 0.0;
+        $any = false;
+        $slots = [['Zaklad_0', null, []]];
+        for ($i = 1; $i <= self::RATE_SLOTS; $i++) {
+            $slots[] = ['Zaklad_' . $i, 'SazbaDPH' . $i, ['DPH_' . $i, 'DPH' . $i]];
+        }
+        foreach ($slots as [$baseField, $rateField, $vatFields]) {
+            $base = round((float) ($r[$baseField] ?? 0), 2);
+            if ($base === 0.0) {
+                continue;
+            }
+            $any = true;
+            $rate = $rateField === null ? 0.0 : (float) ($r[$rateField] ?? 0);
+            $vat = null;
+            foreach ($vatFields as $vatField) {
+                if (array_key_exists($vatField, $r)) {
+                    $vat = round((float) $r[$vatField], 2);
+                    break;
+                }
+            }
+            $sumBase += $base;
+            $sumVat += $vat ?? round($base * $rate / 100, 2);
+        }
+        $moneyTotal = array_key_exists('CelkemSDPH', $r) ? round((float) $r['CelkemSDPH'], 2) : null;
+        if (!$any) {
+            return $moneyTotal ?? 0.0;
+        }
+        $total = round(round($sumBase, 2) + round($sumVat, 2), 2);
+        if ($moneyTotal !== null && abs($moneyTotal - $total) >= 0.005 && abs(round($moneyTotal - $total, 2)) <= self::ROUNDING_LIMIT) {
+            return $moneyTotal;
+        }
+        return $total;
     }
 
     /** @param list<string> $reasons */

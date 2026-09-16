@@ -182,13 +182,6 @@ final class CashBankImporter
                 ];
             }
         }
-        // Zkouška nanečisto účet firmy nedoplňuje: zámek řádku měny by v její transakci
-        // blokoval vystavování dokladů firmy (cizí klíč na měnu) až do konce zkoušky.
-        if (!$ctx->options->isDryRun()) {
-            $this->fillOwnAccount($ctx->supplierId, $accounts);
-            $this->registerBankAccounts($ctx, $accounts);
-        }
-
         $byStatement = [];
         foreach ($ctx->backup->rowsAcrossYears('BankKnih') as $r) {
             $year = $ctx->yearOf($r);
@@ -201,6 +194,18 @@ final class CashBankImporter
 
         ksort($byStatement);
         $txKeys = self::documentKeys($byStatement);
+
+        // Zkouška nanečisto účet firmy nedoplňuje: zámek řádku měny by v její transakci
+        // blokoval vystavování dokladů firmy (cizí klíč na měnu) až do konce zkoušky.
+        if (!$ctx->options->isDryRun()) {
+            $this->fillOwnAccount($ctx->supplierId, $accounts);
+            $registered = $this->registerBankAccounts($ctx, $accounts);
+            $used = [];
+            foreach (array_keys($byStatement) as $statementKey) {
+                $used[explode('|', (string) $statementKey, 2)[1]] = true;
+            }
+            $this->linkCompanyAccounts($ctx, $accounts, array_keys($used), $registered);
+        }
 
         $existingStatements = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_STATEMENT);
         $existingTx = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION);
@@ -372,16 +377,20 @@ final class CashBankImporter
     }
 
     /**
-     * Částka pohybu v měně účtu a v Kč. Výdej = odchozí platba (minus). Pohyb účtu v cizí
-     * měně nese Money ve valutách (`ValutyKUhr`), `Celkem` je přepočet v Kč.
+     * Částka pohybu v měně účtu a v Kč. Výdej = odchozí platba (minus). Záporná částka směr
+     * otáčí: storno výdeje (vrácený poplatek, `Vydej` a záporné `Celkem`) jsou peníze, které
+     * na účet přišly — tak je zaúčtuje i deník Money. Pohyb účtu v cizí měně nese Money ve
+     * valutách (`ValutyKUhr`), `Celkem` je přepočet v Kč.
      *
      * @param array<string,mixed> $r
      * @return array{0:float,1:float} [částka v měně účtu, částka v Kč]
      */
-    private static function transactionAmount(array $r, string $currency): array
+    public static function transactionAmount(array $r, string $currency): array
     {
-        $sign = ((int) ($r['Vydej'] ?? 0)) === 1 ? -1 : 1;
-        $czk = round(abs((float) ($r['Celkem'] ?? 0)), 2);
+        $celkem = (float) ($r['Celkem'] ?? 0);
+        $negative = $celkem < 0 || ($celkem === 0.0 && (float) ($r['ValutyKUhr'] ?? 0) < 0);
+        $sign = (((int) ($r['Vydej'] ?? 0)) === 1 ? -1 : 1) * ($negative ? -1 : 1);
+        $czk = round(abs($celkem), 2);
         if ($currency === 'CZK') {
             return [$sign * $czk, $sign * $czk];
         }
@@ -617,16 +626,18 @@ final class CashBankImporter
      * primárního účtu Money (`PrimUcet`), název z popisu účtu.
      *
      * @param array<string,array{number:string,bank:string,iban:string,primary:string,currency:string,label:string}> $accounts
+     * @return array<string,int> kód účtu v Money => supplier_bank_accounts.id (účet cizí firmy chybí)
      */
-    private function registerBankAccounts(ImportContext $ctx, array $accounts): void
+    private function registerBankAccounts(ImportContext $ctx, array $accounts): array
     {
+        $registered = [];
         foreach ($accounts as $code => $a) {
             $number = $a['number'] !== '' ? $a['number'] : $a['iban'];
             if ($number === '') {
                 continue;
             }
             $primary = AccountCode::fromMoney($a['primary']);
-            $this->bankAccounts->registerImported(
+            $id = $this->bankAccounts->registerImported(
                 $ctx->supplierId,
                 $number,
                 $a['bank'] !== '' ? $a['bank'] : null,
@@ -635,7 +646,73 @@ final class CashBankImporter
                 $a['label'] !== '' ? $a['label'] : 'Účet ' . $code,
                 $primary !== null && str_starts_with($primary, '221.') ? substr($primary, 4) : null,
             );
+            if ($id !== null) {
+                $registered[(string) $code] = $id;
+            }
         }
+        return $registered;
+    }
+
+    /**
+     * Každý vlastní účet s pohyby patří mezi účty firmy (tab Účty, zůstatky banky). Účet,
+     * který na měně firmy ještě není, dostane vlastní řádek měny (jen první doplní prázdnou
+     * výchozí měnu, {@see fillOwnAccount()}), a evidence účtů firmy se na něj naváže.
+     * Účet se porovnává bez oddělovačů a úvodních nul spolu s kódem banky, takže opakovaný
+     * převod řádky nezdvojí.
+     *
+     * @param array<string,array{number:string,bank:string,iban:string,currency:string,label:string}> $accounts
+     * @param list<string> $used kódy účtů Money s pohyby v převáděných letech
+     * @param array<string,int> $registered kód účtu v Money => supplier_bank_accounts.id
+     */
+    private function linkCompanyAccounts(ImportContext $ctx, array $accounts, array $used, array $registered): void
+    {
+        $pdo = $this->db->pdo();
+        $known = [];
+        $byCode = [];
+        $existing = $pdo->prepare('SELECT id, code, account_number, bank_code, symbol, name_cs, name_en FROM currencies WHERE supplier_id = ?');
+        $existing->execute([$ctx->supplierId]);
+        foreach ($existing->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $byCode[(string) $row['code']] ??= $row;
+            if ((string) ($row['account_number'] ?? '') !== '') {
+                $known[self::accountKey((string) $row['account_number'], (string) $row['bank_code'])] = (int) $row['id'];
+            }
+        }
+        $insert = $pdo->prepare(
+            'INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default, account_number, bank_code, iban)
+             VALUES (?, ?, ?, ?, ?, ?, 2, 1, 0, ?, ?, ?)'
+        );
+        $link = $pdo->prepare('UPDATE supplier_bank_accounts SET currency_id = ? WHERE id = ? AND supplier_id = ? AND currency_id IS NULL');
+        foreach ($used as $code) {
+            $a = $accounts[$code] ?? null;
+            if ($a === null || $a['number'] === '' || !isset($registered[$code])) {
+                continue;
+            }
+            $key = self::accountKey($a['number'], $a['bank']);
+            if (!isset($known[$key])) {
+                $base = $byCode[$a['currency']] ?? null;
+                $czk = $a['currency'] === 'CZK';
+                $insert->execute([
+                    $ctx->supplierId,
+                    $a['currency'],
+                    mb_substr($a['label'] !== '' ? $a['label'] : 'Účet ' . $code, 0, 60),
+                    $base['symbol'] ?? ($czk ? 'Kč' : $a['currency']),
+                    $base['name_cs'] ?? ($czk ? 'Česká koruna' : $a['currency']),
+                    $base['name_en'] ?? ($czk ? 'Czech Koruna' : $a['currency']),
+                    mb_substr($a['number'], 0, 30),
+                    $a['bank'] !== '' ? mb_substr($a['bank'], 0, 4) : null,
+                    $a['iban'] !== '' ? mb_substr($a['iban'], 0, 34) : null,
+                ]);
+                $known[$key] = (int) $pdo->lastInsertId();
+                $ctx->protocol->count(self::STEP_BANK, 'accounts_added');
+            }
+            $link->execute([$known[$key], $registered[$code], $ctx->supplierId]);
+        }
+    }
+
+    /** Porovnání čísla účtu bez oddělovačů a úvodních nul (`19-123/0100` = `0000190000123`). */
+    public static function accountKey(string $number, string $bank): string
+    {
+        return ltrim((string) preg_replace('/\D/', '', $number), '0') . '/' . ltrim(trim($bank), '0');
     }
 
     /**

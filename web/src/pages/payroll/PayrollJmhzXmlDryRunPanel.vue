@@ -149,6 +149,7 @@ async function run(payrollRun: PayrollRun) {
     const preparation = await payrollApi.freezeJmhzPreparation(
       id,
       crypto.randomUUID(),
+      'test',
     )
     const result = await payrollApi.jmhzXmlDryRun(
       preparation.id,

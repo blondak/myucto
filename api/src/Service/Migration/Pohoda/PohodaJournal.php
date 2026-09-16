@@ -1,0 +1,135 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Migration\Pohoda;
+
+use MyInvoice\Service\Migration\MoneyS3\AccountCode;
+
+/**
+ * Pravidla čtení účetního deníku Pohody (`01_ucetni_denik.xml`, `act:accountingItem`)
+ * na jednom místě - používá je import deníku, vazby dokladů i rekonciliace.
+ *
+ * **Strany zápisu jsou v Pohodě pojmenované obráceně:** `act:credit` je strana MD
+ * a `act:debit` strana Dal (accountancy.xsd: credit = „MD.", debit = „DAL."). Přijatá
+ * faktura má tedy `credit` 518 a `debit` 321, bankovní příjem od odběratele `credit` 221
+ * a `debit` 311.
+ *
+ * Zdroj zápisu (`act:source`) je v exportu český název agendy.
+ */
+final class PohodaJournal
+{
+    public const OPENING = 'Počáteční stavy účtů';
+    public const ISSUED = 'Vydané faktury';
+    public const RECEIVED = 'Přijaté faktury';
+    public const RECEIVABLE = 'Ostatní pohledávky';
+    public const COMMITMENT = 'Ostatní závazky';
+    public const BANK = 'Banka';
+    public const CASH = 'Pokladna';
+    public const INTERNAL = 'Interní doklady';
+    public const ASSETS = 'Dlouhodobý majetek';
+
+    /** Klíč otevíracího zápisu roku (počáteční stavy tvoří jediný zápis). */
+    public const OPENING_KEY = 'PS';
+
+    public static function source(array $item): string
+    {
+        return PohodaXml::text($item, 'source');
+    }
+
+    public static function number(array $item): string
+    {
+        return PohodaXml::text($item, 'number/numberRequested');
+    }
+
+    public static function isOpening(array $item): bool
+    {
+        return self::source($item) === self::OPENING;
+    }
+
+    /**
+     * Uzávěrkové zápisy roku (konečné stavy na 702, převod výsledku přes 710). Převod je
+     * nepřebírá - rok uzavírá průvodce uzávěrkou MyÚčta, stejně jako u Money S3.
+     */
+    public static function isYearEndClosing(array $item): bool
+    {
+        $source = mb_strtolower(self::source($item));
+        return str_contains($source, 'konečné stavy') || str_contains($source, 'uzávěr') || str_contains($source, 'závěrk');
+    }
+
+    /** Doklad v deníku: řádky se stejným zdrojem, číslem a datem. */
+    public static function groupKey(array $item): string
+    {
+        if (self::isOpening($item)) {
+            return self::OPENING_KEY;
+        }
+        return self::source($item) . '|' . self::number($item) . '|' . (PohodaXml::date($item, 'date') ?? '');
+    }
+
+    /** Zdroj zápisu → `journal_entries.source_type`. */
+    public static function sourceType(string $source): string
+    {
+        return match ($source) {
+            self::ISSUED => 'invoice',
+            self::RECEIVED => 'purchase_invoice',
+            self::BANK => 'bank',
+            self::CASH => 'cash',
+            default => 'manual', // interní doklady, ostatní pohledávky a závazky, majetek
+        };
+    }
+
+    /**
+     * Čistý účetní účinek řádku: kladná částka jde MD `credit` / D `debit`, záporná
+     * obráceně. `null` = bez účinku (nulová částka, chybějící účet, stejný účet na obou
+     * stranách - Pohoda tak vede třeba vyměření DPH v cizí měně na 349/349).
+     *
+     * @return array{debit:string,credit:string,amount:float}|null
+     */
+    public static function effect(array $item): ?array
+    {
+        $amount = round(PohodaXml::num($item, 'homeCurrency/priceSum'), 2);
+        $md = PohodaXml::text($item, 'accounting/credit');
+        $d = PohodaXml::text($item, 'accounting/debit');
+        if ($amount === 0.0 || $md === '' || $d === '' || $md === $d) {
+            return null;
+        }
+        if ($amount < 0) {
+            return ['debit' => $d, 'credit' => $md, 'amount' => -$amount];
+        }
+        return ['debit' => $md, 'credit' => $d, 'amount' => $amount];
+    }
+
+    /**
+     * Předvaha přímo z deníku Pohody po syntetických účtech: netto PS (počáteční stavy),
+     * obrat (ostatní řádky bez uzávěrky) a KS.
+     *
+     * @return array<string,array{0:float,1:float,2:float}>
+     */
+    public static function trialBalance(PohodaExport $export): array
+    {
+        $out = [];
+        foreach ($export->records('journal', 'accountingItem') as $item) {
+            if (self::isYearEndClosing($item)) {
+                continue;
+            }
+            $effect = self::effect($item);
+            if ($effect === null) {
+                continue;
+            }
+            $slot = self::isOpening($item) ? 0 : 1;
+            foreach ([[$effect['debit'], 1], [$effect['credit'], -1]] as [$code, $sign]) {
+                $syn = AccountCode::synthetic($code);
+                if ($syn === null) {
+                    continue;
+                }
+                $out[$syn] ??= [0.0, 0.0, 0.0];
+                $out[$syn][$slot] += $sign * $effect['amount'];
+            }
+        }
+        foreach ($out as $syn => $v) {
+            $out[$syn] = [round($v[0], 2), round($v[1], 2), round($v[0] + $v[1], 2)];
+        }
+        ksort($out, SORT_STRING);
+        return $out;
+    }
+}

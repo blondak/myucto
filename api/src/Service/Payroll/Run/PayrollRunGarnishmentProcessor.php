@@ -310,6 +310,28 @@ final class PayrollRunGarnishmentProcessor
         $totals = self::row($person['totals'] ?? null, 'result.person.totals');
         $grossCashPayable = self::int($totals, 'cash_payable_minor');
         $grossEnforcementBase = self::int($totals, 'enforcement_base_minor');
+        /*
+         * NEPENĚŽNÍ příjem se ze základu srážek vyjímá.
+         *
+         * Zdanitelný nepeněžní příjem (stravování, benefit) vstupuje do základu
+         * daně i pojistného, ale VYPLÁCÍ se v naturáliích — `cash_payable` je
+         * u něj nula, kdežto `enforcement_base` nese celou částku. Základ srážek
+         * tím přeroste peněžní výplatu a rozdíl `cash_payable − enforcement_base`
+         * vyjde ZÁPORNÝ, takže se níž nepozná od rozporu podkladů a osoba spadne
+         * do ručního posouzení.
+         *
+         * Srazit přitom nejde nic: § 299 OSŘ postihuje příjem, který se
+         * zaměstnanci vyplácí, a z obědu se exekuci neodvede. Nepeněžní část se
+         * proto ze základu odečte — je to rozdíl `source_amount − cash_payable`,
+         * tedy doložené číslo, ne odhad. Kontrola pod tím zůstává: skutečný
+         * rozpor (základ větší než peněžní výplata i po odečtení naturálií) se
+         * pořád pozná a pořád zastaví běh.
+         */
+        $sourceAmount = self::intOrNull($totals, 'source_amount_minor');
+        $nonCash = $sourceAmount === null ? 0 : max(0, $sourceAmount - $grossCashPayable);
+        if ($nonCash > 0) {
+            $grossEnforcementBase = max(0, $grossEnforcementBase - $nonCash);
+        }
         $cashPayable = $grossCashPayable;
         $enforcementBase = $grossEnforcementBase;
         $statutoryUnavailable = false;
@@ -459,6 +481,22 @@ final class PayrollRunGarnishmentProcessor
             throw new \UnexpectedValueException("{$key} musí být celé číslo.");
         }
         return $value;
+    }
+
+    /**
+     * Nepovinný celočíselný údaj souhrnu.
+     *
+     * `null` znamená „souhrn tenhle klíč nenese", ne nulu: starší snímky
+     * `source_amount_minor` neměly a nepeněžní část se z nich odvodit nedá.
+     * Takový snímek se proto musí počítat přesně jako dřív.
+     *
+     * @param array<string,mixed> $data
+     */
+    private static function intOrNull(array $data, string $key): ?int
+    {
+        $value = $data[$key] ?? null;
+
+        return is_int($value) ? $value : null;
     }
 
     /** @param array<string,mixed> $data */

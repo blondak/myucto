@@ -23,6 +23,8 @@ final class AttendanceRuleSuggester
         ['/cist(a|y) (mzda|prijem)|k vyplate|^cista$/', 'reference_net', null],
         ['/osobni cislo|^os\.? ?c(\.|islo)?$|^osc$|cislo zamestnance|kod zamestnance|personal number/', 'personal_number', null],
         ['/rodne cislo|^r\.? ?c\.?$/', 'birth_number', null],
+        ['/datum narozeni|^narozen/', 'birth_date', null],
+        ['/zdravotni pojistovn|^pojistovna$|kod pojistovny|^zp$/', 'health_insurer_code', null],
         ['/jmeno|prijmeni|zamestnanec|^osoba$|^pracovnik$|^name$|^employee$/', 'person_name', null],
         ['/(druh|typ).*(pomer|vztah|smlouv)|pracovni pomer|pracovnepravni/', 'relation_label', null],
         ['/oddeleni|utvar|department/', 'department', null],

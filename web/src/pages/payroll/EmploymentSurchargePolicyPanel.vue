@@ -84,13 +84,46 @@ const kinds = ref<PayrollSurchargeKindInfo[]>([])
 const statutoryDefault = ref<PayrollEmploymentSurchargePolicies['statutory_default'] | null>(null)
 
 /** Pořadí polí odpovídá payloadu API; klíč je druh příplatku. */
-const RATE_FIELDS: { kind: PayrollSurchargeKind, field: keyof PayrollEmploymentSurchargePolicyPayload }[] = [
-  { kind: 'overtime', field: 'overtime_rate_bp' },
-  { kind: 'holiday', field: 'holiday_rate_bp' },
-  { kind: 'night', field: 'night_rate_bp' },
-  { kind: 'weekend', field: 'weekend_rate_bp' },
-  { kind: 'difficult_environment', field: 'difficult_environment_rate_bp' },
+/*
+ * Klíče jsou úzké literály, ne `keyof` payloadu: payload dědí z
+ * `Record<string, unknown>`, takže `keyof` je prostě `string` a indexovat jím
+ * konkrétní objekt sazeb nejde.
+ */
+type SurchargeRateField =
+  | 'overtime_rate_bp'
+  | 'holiday_rate_bp'
+  | 'night_rate_bp'
+  | 'weekend_rate_bp'
+  | 'difficult_environment_rate_bp'
+
+type SurchargeFixedField =
+  | 'overtime_fixed_hourly_minor'
+  | 'holiday_fixed_hourly_minor'
+  | 'night_fixed_hourly_minor'
+  | 'weekend_fixed_hourly_minor'
+  | 'difficult_environment_fixed_hourly_minor'
+
+const RATE_FIELDS: {
+  kind: PayrollSurchargeKind
+  field: SurchargeRateField
+  fixedField: SurchargeFixedField
+}[] = [
+  { kind: 'overtime', field: 'overtime_rate_bp', fixedField: 'overtime_fixed_hourly_minor' },
+  { kind: 'holiday', field: 'holiday_rate_bp', fixedField: 'holiday_fixed_hourly_minor' },
+  { kind: 'night', field: 'night_rate_bp', fixedField: 'night_fixed_hourly_minor' },
+  { kind: 'weekend', field: 'weekend_rate_bp', fixedField: 'weekend_fixed_hourly_minor' },
+  {
+    kind: 'difficult_environment',
+    field: 'difficult_environment_rate_bp',
+    fixedField: 'difficult_environment_fixed_hourly_minor',
+  },
 ]
+
+/** Nejvýše 1 000 Kč za hodinu — táž mez jako CHECK v migraci 1845. */
+const FIXED_HOURLY_MAXIMUM_MINOR = 100_000
+
+/** Způsob sjednání JEDNOHO druhu: procentem, nebo pevnou částkou za hodinu. */
+type SurchargeAgreementForm = 'percent' | 'fixed'
 
 const OVERTIME_MODES: PayrollSurchargeCompensationMode[] = [
   'surcharge',
@@ -133,6 +166,10 @@ interface PolicyForm {
    * na číslo — model tedy nese jednou řetězec (prázdné pole) a jednou číslo.
    */
   rates: Record<PayrollSurchargeKind, string | number>
+  /** Pevná částka se ZADÁVÁ v korunách, ukládá v haléřích (viz `toMinor`). */
+  fixed: Record<PayrollSurchargeKind, string | number>
+  /** Který ze dvou způsobů se u druhu sjednává. Obojí naráz server odmítne. */
+  forms: Record<PayrollSurchargeKind, SurchargeAgreementForm>
   agreement_reference: string
   note: string
 }
@@ -150,6 +187,20 @@ function newForm(): PolicyForm {
       night: '',
       weekend: '',
       difficult_environment: '',
+    },
+    fixed: {
+      overtime: '',
+      holiday: '',
+      night: '',
+      weekend: '',
+      difficult_environment: '',
+    },
+    forms: {
+      overtime: 'percent',
+      holiday: 'percent',
+      night: 'percent',
+      weekend: 'percent',
+      difficult_environment: 'percent',
     },
     agreement_reference: '',
     note: '',
@@ -182,6 +233,27 @@ function toPercent(basisPoints: number | null | undefined): string {
   return String(basisPoints / 100)
 }
 
+/**
+ * Koruny z formuláře na haléře (75 Kč/h = 7500).
+ *
+ * Týž důvod jako u bázových bodů: na drátě jde celé číslo, protože desetinná
+ * částka by se přes JSON a ovladač databáze vracela v tvaru, na který je
+ * serverová aritmetika citlivá.
+ */
+function toMinor(amount: string | number): number | null {
+  const normalized = String(amount ?? '').trim().replace(',', '.')
+  if (normalized === '') return null
+  const value = Number(normalized)
+  if (!Number.isFinite(value)) return null
+  return Math.round(value * 100)
+}
+
+/** Opačný převod pro zobrazení: 7500 → „75". */
+function toMajor(minor: number | null | undefined): string {
+  if (minor === null || minor === undefined) return ''
+  return String(minor / 100)
+}
+
 function kindInfo(kind: PayrollSurchargeKind): PayrollSurchargeKindInfo | undefined {
   return kinds.value.find(info => info.kind === kind)
 }
@@ -193,15 +265,30 @@ function statutoryPercent(kind: PayrollSurchargeKind): string {
 /**
  * Sazby, které jsou pod zákonným minimem u druhu, kde se podlézt NESMÍ.
  * Slouží jen k upozornění — o přijetí rozhoduje server.
+ *
+ * Týká se JEN sjednání procentem. U pevné částky se zákonné minimum odvíjí od
+ * průměrného výdělku konkrétního člověka, který prohlížeč nezná — táž částka je
+ * u jednoho nad minimem a u druhého pod ním, takže varovat tady by znamenalo
+ * hádat. Posoudí to výpočet a rozdíl vykáže na výplatní pásce.
  */
 const belowStatutory = computed(() => RATE_FIELDS
   .map(entry => entry.kind)
   .filter((kind) => {
     const info = kindInfo(kind)
     if (!info || info.allows_lower_agreed_rate) return false
+    if (form.value.forms[kind] !== 'percent') return false
     const agreed = toBasisPoints(form.value.rates[kind])
     return agreed !== null && agreed < info.statutory_rate_basis_points
   }))
+
+/** Pevná částka musí být kladná a v rozsahu, který server přijme. */
+const fixedValid = computed(() => RATE_FIELDS.every((entry) => {
+  if (form.value.forms[entry.kind] !== 'fixed') return true
+  const raw = String(form.value.fixed[entry.kind] ?? '').trim()
+  if (raw === '') return true
+  const minor = toMinor(raw)
+  return minor !== null && minor > 0 && minor <= FIXED_HOURLY_MAXIMUM_MINOR
+}))
 
 const factorsValid = computed(() => {
   const raw = String(form.value.difficult_environment_factors ?? '').trim()
@@ -221,7 +308,10 @@ const validToValid = computed(() => {
   if (raw === '') return true
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) && raw >= form.value.valid_from
 })
-const valid = computed(() => validFromValid.value && factorsValid.value && validToValid.value)
+const valid = computed(() => validFromValid.value
+  && factorsValid.value
+  && validToValid.value
+  && fixedValid.value)
 
 const saveDisabled = computed(() => saving.value || !valid.value)
 const saveDisabledReason = computed(() => {
@@ -229,6 +319,7 @@ const saveDisabledReason = computed(() => {
   if (!validFromValid.value) return t('payroll.people.surcharge_policy.valid_from_required')
   if (!factorsValid.value) return t('payroll.people.surcharge_policy.factors_invalid')
   if (!validToValid.value) return t('payroll.people.surcharge_policy.valid_to_invalid')
+  if (!fixedValid.value) return t('payroll.people.surcharge_policy.fixed_invalid')
   return ''
 })
 
@@ -266,6 +357,13 @@ function policyRatePercent(
   return toPercent(policy[entry.field] as number | null)
 }
 
+function policyFixedMajor(
+  policy: PayrollEmploymentSurchargePolicy,
+  entry: { fixedField: keyof PayrollEmploymentSurchargePolicyPayload },
+): string {
+  return toMajor(policy[entry.fixedField] as number | null)
+}
+
 /** Obsah sjednání z uložené verze do formuláře; účinnost si volající řeší sám. */
 function fillFrom(policy: PayrollEmploymentSurchargePolicy) {
   form.value.overtime_mode = policy.overtime_mode
@@ -274,7 +372,13 @@ function fillFrom(policy: PayrollEmploymentSurchargePolicy) {
     ? ''
     : String(policy.difficult_environment_factors)
   for (const entry of RATE_FIELDS) {
+    const fixed = policyFixedMajor(policy, entry)
     form.value.rates[entry.kind] = policyRatePercent(policy, entry)
+    form.value.fixed[entry.kind] = fixed
+    // Způsob se ODVOZUJE z toho, které pole je vyplněné — obojí naráz uložené
+    // být nemůže. Prázdná verze (zákonné minimum) zůstává na procentu, protože
+    // to je tvar, ve kterém zákon sazbu udává.
+    form.value.forms[entry.kind] = fixed === '' ? 'percent' : 'fixed'
   }
   form.value.agreement_reference = policy.agreement_reference ?? ''
   form.value.note = policy.note ?? ''
@@ -342,15 +446,36 @@ async function save() {
   saving.value = true
   try {
     const factors = String(form.value.difficult_environment_factors ?? '').trim()
+    // Z dvojice se posílá VŽDY jen jedno; to druhé jde jako null, aby přepnutí
+    // způsobu u opravy skutečně zrušilo předchozí sjednání. Ponechaná stará
+    // hodnota by znamenala vyplněné obojí, což server i databáze odmítnou.
+    // Klíče se vypisují ručně. Odvodit je z RATE_FIELDS přes Pick/Omit nejde:
+    // payload dědí z `Record<string, unknown>`, takže odvozený typ má klíče
+    // jen v unii a při rozbalení z něj kontrole nezbude nic.
+    const rates = {
+      overtime_rate_bp: null as number | null,
+      holiday_rate_bp: null as number | null,
+      night_rate_bp: null as number | null,
+      weekend_rate_bp: null as number | null,
+      difficult_environment_rate_bp: null as number | null,
+      overtime_fixed_hourly_minor: null as number | null,
+      holiday_fixed_hourly_minor: null as number | null,
+      night_fixed_hourly_minor: null as number | null,
+      weekend_fixed_hourly_minor: null as number | null,
+      difficult_environment_fixed_hourly_minor: null as number | null,
+    }
+    for (const entry of RATE_FIELDS) {
+      const usesFixed = form.value.forms[entry.kind] === 'fixed'
+      rates[entry.field] = usesFixed ? null : toBasisPoints(form.value.rates[entry.kind])
+      rates[entry.fixedField] = usesFixed ? toMinor(form.value.fixed[entry.kind]) : null
+    }
+    // Sjednání se skládá přímo do payloadu, ne přes mezitímní objekt: payload
+    // dědí z `Record<string, unknown>`, takže `Omit`/`Pick` nad ním ztrácejí
+    // známé klíče a rozbalení mezikroku by pro typovou kontrolu bylo prázdné.
     const agreed = {
       overtime_mode: form.value.overtime_mode,
       holiday_mode: form.value.holiday_mode,
       difficult_environment_factors: factors === '' ? null : Number(factors),
-      overtime_rate_bp: toBasisPoints(form.value.rates.overtime),
-      holiday_rate_bp: toBasisPoints(form.value.rates.holiday),
-      night_rate_bp: toBasisPoints(form.value.rates.night),
-      weekend_rate_bp: toBasisPoints(form.value.rates.weekend),
-      difficult_environment_rate_bp: toBasisPoints(form.value.rates.difficult_environment),
       agreement_reference: form.value.agreement_reference.trim() || null,
       note: form.value.note.trim() || null,
     }
@@ -360,11 +485,13 @@ async function save() {
       const payload: PayrollEmploymentSurchargePolicyPayload = {
         valid_from: form.value.valid_from,
         ...agreed,
+        ...rates,
       }
       await payrollApi.createEmploymentSurchargePolicy(props.employmentId, payload)
     } else {
       const payload: PayrollEmploymentSurchargePolicyUpdatePayload = {
         ...agreed,
+        ...rates,
         row_version: editingVersion.value,
       }
       const updated = await payrollApi.updateEmploymentSurchargePolicy(
@@ -510,9 +637,21 @@ onMounted(load)
         · {{ t('payroll.people.surcharge_policy.holiday_mode') }}: {{ modeLabel(currentPolicy.holiday_mode) }}
       </p>
       <ul class="mt-1 space-y-0.5 text-neutral-600">
+        <!--
+          Pevná částka se ukazuje v korunách za hodinu, ne v procentech — jinak
+          by u takto sjednaného druhu zůstalo prázdno a vypadalo by to, že
+          sjednáno není nic.
+        -->
         <li v-for="entry in RATE_FIELDS" :key="entry.kind">
           {{ kindLabel(entry.kind) }}:
-          <span v-if="policyRatePercent(currentPolicy, entry) !== ''">
+          <span
+            v-if="policyFixedMajor(currentPolicy, entry) !== ''"
+            :data-test="`surcharge-policy-current-fixed-${entry.kind}`"
+          >
+            {{ policyFixedMajor(currentPolicy, entry) }}
+            {{ t('payroll.people.surcharge_policy.fixed_unit') }}
+          </span>
+          <span v-else-if="policyRatePercent(currentPolicy, entry) !== ''">
             {{ policyRatePercent(currentPolicy, entry) }} %
           </span>
           <span v-else>{{ t('payroll.people.surcharge_policy.rate_statutory_used') }}</span>
@@ -632,10 +771,27 @@ onMounted(load)
       <p class="text-xs text-neutral-500">{{ t('payroll.people.surcharge_policy.rates_hint') }}</p>
 
       <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label v-for="entry in RATE_FIELDS" :key="entry.kind" class="text-xs text-neutral-600">
-          {{ kindLabel(entry.kind) }}
-          <span class="text-neutral-400">({{ kindInfo(entry.kind)?.section }})</span>
+        <div v-for="entry in RATE_FIELDS" :key="entry.kind" class="text-xs text-neutral-600">
+          <span class="block">
+            {{ kindLabel(entry.kind) }}
+            <span class="text-neutral-400">({{ kindInfo(entry.kind)?.section }})</span>
+          </span>
+          <!--
+            Přepínač je u KAŽDÉHO druhu zvlášť, ne jeden pro celou zásadu:
+            přesčas procentem a víkend pevnou částkou je běžná kombinace.
+          -->
+          <select
+            v-model="form.forms[entry.kind]"
+            :data-test="`surcharge-policy-form-${entry.kind}`"
+            :aria-label="t('payroll.people.surcharge_policy.form_label')"
+            :disabled="!canWrite"
+            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+          >
+            <option value="percent">{{ t('payroll.people.surcharge_policy.form_percent') }}</option>
+            <option value="fixed">{{ t('payroll.people.surcharge_policy.form_fixed') }}</option>
+          </select>
           <input
+            v-if="form.forms[entry.kind] === 'percent'"
             v-model="form.rates[entry.kind]"
             :data-test="`surcharge-policy-rate-${entry.kind}`"
             type="number"
@@ -644,7 +800,21 @@ onMounted(load)
             :disabled="!canWrite"
             class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
           >
-          <span class="mt-1 block text-neutral-500">
+          <div v-else class="mt-1 flex items-center gap-2">
+            <input
+              v-model="form.fixed[entry.kind]"
+              :data-test="`surcharge-policy-fixed-${entry.kind}`"
+              type="number"
+              min="0"
+              step="0.01"
+              :disabled="!canWrite"
+              class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+            >
+            <span class="shrink-0 text-neutral-500">
+              {{ t('payroll.people.surcharge_policy.fixed_unit') }}
+            </span>
+          </div>
+          <span v-if="form.forms[entry.kind] === 'percent'" class="mt-1 block text-neutral-500">
             {{ t('payroll.people.surcharge_policy.statutory_minimum', { rate: statutoryPercent(entry.kind) }) }}
             <template v-if="kindInfo(entry.kind)?.allows_lower_agreed_rate">
               · {{ t('payroll.people.surcharge_policy.lower_allowed') }}
@@ -653,8 +823,19 @@ onMounted(load)
               · {{ t('payroll.people.surcharge_policy.lower_forbidden') }}
             </template>
           </span>
-        </label>
+          <!--
+            U pevné částky se zákonné minimum ukázat NEDÁ: odvíjí se od průměrného
+            výdělku konkrétního člověka, takže táž částka je u jednoho nad minimem
+            a u druhého pod ním. Posoudí to výpočet.
+          -->
+          <span v-else class="mt-1 block text-neutral-500">
+            {{ t('payroll.people.surcharge_policy.fixed_statutory_note') }}
+          </span>
+        </div>
       </div>
+      <p class="mt-2 text-xs text-neutral-500">
+        {{ t('payroll.people.surcharge_policy.fixed_hint') }}
+      </p>
 
       <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="text-xs text-neutral-600">

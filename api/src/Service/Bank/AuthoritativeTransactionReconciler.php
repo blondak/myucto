@@ -47,9 +47,7 @@ final class AuthoritativeTransactionReconciler
             }
         }
         $matches = [];
-        $reverse = [];
         $strong = [];
-        foreach ($known as $index => $id) $reverse[$id][] = $index;
         foreach ($transactions as $index => $tx) {
             if (isset($known[$index])) continue;
             $possible = array_values(array_filter($byDateAmount[self::dateAmount($tx)] ?? [], static fn (array $row): bool =>
@@ -61,23 +59,44 @@ final class AuthoritativeTransactionReconciler
             foreach ($exact !== [] ? $exact : $possible as $row) {
                 $id = (int) $row['id'];
                 $matches[$index][] = $id;
-                $reverse[$id][] = $index;
                 $strong[$index][$id] = self::strong($tx, $row);
             }
         }
+        // Dvě legitimní platby téhož dne, částky a VS (typicky dva samostatné převody
+        // se shodným symbolem) jsou obsahově NEROZLIŠITELNÉ — každá z nich odpovídá
+        // oběma dříve uloženým pohybům. Dřív se tahle N:M shoda brala jako neřešitelná
+        // nejednoznačnost a shodila celé načtení, takže se přestaly načítat i pohyby,
+        // které v evidenci ještě vůbec nebyly. Kandidáti prošli compatible(), takže na
+        // tom, KTERÝ ze zaměnitelných pohybů se spáruje s kterým, nezáleží; stačí držet
+        // pravidlo „jeden uložený pohyb převezme nejvýš jeden načtený". Spáruje se tedy
+        // N ku M podle pořadí a přebytek (N > M) se založí jako nový pohyb — což je
+        // přesně ta druhá platba, která se dřív ztratila. Přebytek uložených (M > N)
+        // zůstává nedotčený.
+        $order = array_keys($matches);
+        // Nejdřív nejvíc omezené pohyby: kdyby si pohyb se dvěma kandidáty vzal ten
+        // jediný, který potřebuje jiný pohyb s kandidátem jediným, založil by se ten
+        // druhý znovu jako duplicita.
+        usort($order, static fn (int $a, int $b): int => count($matches[$a]) <=> count($matches[$b]) ?: $a <=> $b);
         $result = $known;
         $review = [];
-        foreach ($matches as $index => $ids) {
-            if (count($ids) !== 1 || count($reverse[$ids[0]]) !== 1) {
-                throw new StatementReconciliationException();
+        $claimed = array_fill_keys(array_values($known), true);
+        foreach ($order as $index) {
+            $picked = null;
+            foreach ($matches[$index] as $id) {
+                if (!isset($claimed[$id])) {
+                    $picked = $id;
+                    break;
+                }
             }
-            if (!$strong[$index][$ids[0]]) {
+            if ($picked === null) continue;
+            $claimed[$picked] = true;
+            if (!$strong[$index][$picked]) {
                 $tx = $transactions[$index];
-                $existing = $byId[$ids[0]];
+                $existing = $byId[$picked];
                 $key = hash('sha256', json_encode([
                     $supplierId, $accountKey, $currency, $source,
                     $fingerprints[$index] ?? null,
-                    self::confirmationIdentity($tx), $ids[0], (int) $existing['statement_id'],
+                    self::confirmationIdentity($tx), $picked, (int) $existing['statement_id'],
                     $existing['import_fingerprint'] ?? null, self::confirmationIdentity($existing),
                 ], JSON_THROW_ON_ERROR));
                 if (!in_array($key, $confirmations, true)) {
@@ -86,7 +105,7 @@ final class AuthoritativeTransactionReconciler
                         'posted_at' => $tx['posted_at'],
                         'amount' => number_format((float) $tx['amount'], 2, '.', ''),
                         'currency' => $currency,
-                        'existing_transaction_id' => $ids[0],
+                        'existing_transaction_id' => $picked,
                         'existing_statement_id' => (int) $existing['statement_id'],
                         'description' => (string) ($tx['description'] ?? ''),
                         'existing_description' => (string) ($existing['description'] ?? ''),
@@ -97,7 +116,7 @@ final class AuthoritativeTransactionReconciler
                     ];
                 }
             }
-            $result[$index] = $ids[0];
+            $result[$index] = $picked;
         }
         if ($review !== []) throw new StatementReconciliationException($review);
         return $result;

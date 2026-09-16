@@ -70,6 +70,32 @@ trait PayrollActionSupport
         return is_string($value) && trim($value) !== '' ? (int) $value : null;
     }
 
+    /**
+     * Odeslání podání prostředí NEODHADUJE. U čtení a přípravy je výchozí
+     * hodnota pohodlí; u odeslání by znamenala, že chybějící parametr rozhodne,
+     * jestli zpráva odejde skutečnému úřadu.
+     */
+    private function missingSendEnvironment(Request $request, Response $response): ?Response
+    {
+        $body = $request->getParsedBody();
+        $value = is_array($body) ? ($body['environment'] ?? null) : null;
+        if (!is_string($value) || $value === '') {
+            $value = $request->getQueryParams()['environment'] ?? null;
+        }
+        if (is_string($value) && $value !== '') {
+            return null;
+        }
+
+        return Json::error(
+            $response,
+            'environment_required',
+            'U odeslání podání je prostředí povinné: test, nebo production.',
+            400,
+        )
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
     private function requirePermission(
         Request $request,
         Response $response,

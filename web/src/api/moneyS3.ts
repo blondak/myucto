@@ -1,4 +1,7 @@
 import { api } from './client'
+import { uploadChunked as uploadChunkedTo, type ChunkedUploadProgress } from './chunkedUpload'
+
+export { retryDelay } from './chunkedUpload'
 
 /**
  * Průvodce „Přechod z Money S3" — záloha agendy, náhled, sestavy z Money ke kontrole,
@@ -139,76 +142,18 @@ export interface MoneyS3StartParams {
 }
 
 const BASE = '/admin/imports/money-s3'
-const CHUNK_ATTEMPTS = 5
-const MAX_RETRY_WAIT_MS = 60_000
-
-function wait(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-function isRetryable(status: number): boolean {
-  return status === 0 || status === 408 || status === 429 || status >= 500
-}
 
 /**
- * Pauza před dalším pokusem. U 429 podle `Retry-After`: server ví, kdy se okno
- * limitu uvolní, a pevná krátká pauza by padla do téhož okna.
+ * Záloha agendy má stovky megabajtů až gigabajty, posílá se proto po částech
+ * (sdílený helper v chunkedUpload.ts). Po poslední části server zálohu zpracuje
+ * na pozadí (stav přes `show`).
  */
-export function retryDelay(error: any, attempt: number): number {
-  const retryAfter = Number(error?.response?.headers?.['retry-after'])
-  if (Number(error?.response?.status) === 429 && Number.isFinite(retryAfter) && retryAfter > 0) {
-    return Math.min(retryAfter * 1000, MAX_RETRY_WAIT_MS)
-  }
-  return 1000 * attempt
-}
-
-/**
- * Záloha agendy má stovky megabajtů až gigabajty — víc, než PHP a webserver přijmou
- * jedním požadavkem. Posílá se proto po částech; každá část se při výpadku nebo
- * limitu požadavků zopakuje a 409 od serveru říká, kolik dat už má, takže se naváže
- * bez duplicit. Po poslední části server zálohu zpracuje na pozadí (stav přes `show`);
- * `complete` je na serveru idempotentní, takže se smí zopakovat taky.
- */
-async function uploadChunked(
+function uploadChunked(
   file: File,
-  onProgress?: (sent: number, total: number) => void,
+  onProgress?: ChunkedUploadProgress,
   onStarted?: (token: string) => void,
 ): Promise<{ token: string; job_id: number | null }> {
-  const init = (await api.post<{ token: string; chunk_size: number }>(`${BASE}/uploads/chunked`, { file_name: file.name, size: file.size })).data
-  onStarted?.(init.token)
-  let offset = 0
-  onProgress?.(0, file.size)
-  while (offset < file.size) {
-    const start = offset
-    const end = Math.min(file.size, start + init.chunk_size)
-    for (let attempt = 1; ; attempt++) {
-      try {
-        const fd = new FormData()
-        fd.append('offset', String(start))
-        fd.append('chunk', file.slice(start, end), file.name)
-        offset = (await api.post<{ received: number }>(`${BASE}/uploads/${init.token}/chunks`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })).data.received
-        break
-      } catch (error: any) {
-        const status = Number(error?.response?.status ?? 0)
-        const received = Number(error?.response?.data?.error?.received)
-        if (status === 409 && Number.isFinite(received) && received !== start) {
-          offset = received
-          break
-        }
-        if (!isRetryable(status) || attempt >= CHUNK_ATTEMPTS) throw error
-        await wait(retryDelay(error, attempt))
-      }
-    }
-    onProgress?.(offset, file.size)
-  }
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return (await api.post<{ token: string; job_id: number | null }>(`${BASE}/uploads/${init.token}/complete`, {})).data
-    } catch (error: any) {
-      if (!isRetryable(Number(error?.response?.status ?? 0)) || attempt >= CHUNK_ATTEMPTS) throw error
-      await wait(retryDelay(error, attempt))
-    }
-  }
+  return uploadChunkedTo(BASE, file, onProgress, onStarted)
 }
 
 export const moneyS3Api = {

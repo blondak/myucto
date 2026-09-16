@@ -129,7 +129,69 @@ final class AttendanceImportService
         );
 
         return self::public($this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta))
-            + ['upgrade_available' => self::sampleUpgrade($modifiedSamples)];
+            + [
+                'upgrade_available' => self::sampleUpgrade($modifiedSamples),
+                'source_checks' => $this->sourceChecks($supplierId, $periodStart, $files, $read['sheets']),
+            ];
+    }
+
+    /**
+     * Kontroly před použitím dávky, které chrání před dvojími vstupy:
+     *
+     *  - období podle názvů souborů a listů („11-2025", „Mzdy 11-25", „1125")
+     *    proti vybranému období. Výchozí období je pracovní měsíc mezd, takže
+     *    podklady za starší měsíc by se jinak tiše zapsaly do špatného měsíce;
+     *  - platné vstupy téhož období z jiného importu (jiná sada souborů, převod
+     *    z POHODY / PAMICA). Opakované použití týchž souborů se nepočítá, to
+     *    zdvojení nevyrobí.
+     *
+     * @param list<array{name:string,content:string,sha256:string,extension:string}> $files
+     * @param list<AttendanceSheet> $sheets
+     * @return array{period:array{selected:string,detected:list<array{period:string,sources:list<string>}>,mismatch:bool},other_sources:list<array<string,mixed>>,requires_confirmation:bool}
+     */
+    private function sourceChecks(int $supplierId, string $periodStart, array $files, array $sheets): array
+    {
+        $selected = substr($periodStart, 0, 7);
+        $names = array_map(static fn (array $file): string => $file['name'], $files);
+        foreach ($sheets as $sheet) {
+            $names[] = $sheet->name;
+        }
+        $detected = [];
+        foreach (AttendancePeriodDetector::detect($names) as $period => $sources) {
+            $detected[] = ['period' => $period, 'sources' => $sources];
+        }
+        $mismatch = array_diff(array_column($detected, 'period'), [$selected]) !== [];
+
+        $current = array_map(static fn (array $file): string => $file['sha256'], $files);
+        sort($current);
+        $other = [];
+        foreach ($this->imports->activeInputSources($supplierId, $periodStart) as $source) {
+            $hashes = [];
+            $fileNames = [];
+            foreach ($source['files'] as $file) {
+                $fileNames[] = (string) ($file['name'] ?? '');
+                if (is_string($file['sha256'] ?? null)) {
+                    $hashes[] = $file['sha256'];
+                }
+            }
+            sort($hashes);
+            if ($hashes !== [] && $hashes === $current) {
+                continue;
+            }
+            $other[] = [
+                'attendance_import_id' => $source['attendance_import_id'],
+                'input_import_id' => $source['input_import_id'],
+                'files' => $fileNames,
+                'active_inputs' => $source['active_inputs'],
+                'created_at' => $source['created_at'],
+            ];
+        }
+
+        return [
+            'period' => ['selected' => $selected, 'detected' => $detected, 'mismatch' => $mismatch],
+            'other_sources' => $other,
+            'requires_confirmation' => $mismatch || $other !== [],
+        ];
     }
 
     /**
@@ -154,6 +216,12 @@ final class AttendanceImportService
         bool $approveCleanTimeMonths = false,
         bool $materializeAbsenceCompensations = false,
         bool $createDeductions = false,
+        /*
+         * Potvrzení kontrol období a dvojích vstupů ({@see self::sourceChecks()}).
+         * `null` = volající kontroly neřeší (převod z POHODY, skripty), `false` =
+         * dávku s nálezem nepoužít a vrátit nález, `true` = účetní nález potvrdila.
+         */
+        ?bool $sourceChecksConfirmed = null,
     ): array {
         if ($approveCleanTimeMonths && !$writeTimeSummary) {
             throw new \InvalidArgumentException(
@@ -167,6 +235,12 @@ final class AttendanceImportService
         }
         $periodStart = $this->period($period);
         $read = $this->readFiles($files);
+        if ($sourceChecksConfirmed === false) {
+            $checks = $this->sourceChecks($supplierId, $periodStart, $files, $read['sheets']);
+            if ($checks['requires_confirmation']) {
+                throw new AttendanceSourceConfirmationRequired($checks);
+            }
+        }
         [$validated, $profileComponents, $profileMeta] = $this->resolveMapping(
             $supplierId,
             $read['sheets'],
@@ -435,14 +509,15 @@ final class AttendanceImportService
     }
 
     /**
-     * Rodná čísla z podkladů podle klíče osoby. Klient zná jen maskovanou
-     * podobu, takže je při zakládání osob doplní server ze stejných souborů
-     * a stejného mapování, ze kterých vznikl náhled.
+     * Osobní údaje z podkladů podle klíče osoby: rodné číslo, datum narození
+     * a kód zdravotní pojišťovny. Klient zná rodné číslo jen maskované a
+     * ostatní údaje vůbec, takže je při zakládání osob doplní server ze
+     * stejných souborů a stejného mapování, ze kterých vznikl náhled.
      *
      * @param list<array{name:string,content:string,sha256:string,extension:string}> $files
-     * @return array<string,string>
+     * @return array<string,array<string,string>>
      */
-    private function birthNumbersFromFiles(
+    private function personDataFromFiles(
         int $supplierId,
         string $periodStart,
         array $files,
@@ -459,15 +534,17 @@ final class AttendanceImportService
             $components,
         );
         $computed = $this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta);
-        $numbers = [];
+        $data = [];
         foreach ($computed['persons'] as $person) {
-            $birthNumber = $person['_birth_number'] ?? null;
-            if (is_string($birthNumber) && trim($birthNumber) !== '') {
-                $numbers[(string) $person['key']] = trim($birthNumber);
+            foreach (['birth_number' => '_birth_number', 'birth_date' => '_birth_date', 'health_insurer_code' => '_health_insurer_code'] as $field => $internal) {
+                $value = $person[$internal] ?? null;
+                if (is_string($value) && trim($value) !== '') {
+                    $data[(string) $person['key']][$field] = trim($value);
+                }
             }
         }
 
-        return $numbers;
+        return $data;
     }
 
     /**
@@ -498,9 +575,9 @@ final class AttendanceImportService
                 'Najednou lze založit nejvýše ' . self::MAX_PERSONS_PER_REQUEST . ' osob. Rozdělte je na víc kroků.',
             );
         }
-        $birthNumbers = $files === null
+        $personData = $files === null
             ? []
-            : $this->birthNumbersFromFiles($supplierId, $periodStart, $files, $rules, $profileId, $components);
+            : $this->personDataFromFiles($supplierId, $periodStart, $files, $rules, $profileId, $components);
         $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
         $results = [];
         foreach ($persons as $item) {
@@ -509,8 +586,10 @@ final class AttendanceImportService
                 if (!is_array($item)) {
                     throw new \InvalidArgumentException('Údaje osoby nemají platný tvar.');
                 }
-                if (in_array($item['birth_number'] ?? null, [null, ''], true) && isset($birthNumbers[$key])) {
-                    $item['birth_number'] = $birthNumbers[$key];
+                foreach ($personData[$key] ?? [] as $field => $value) {
+                    if (in_array($item[$field] ?? null, [null, ''], true)) {
+                        $item[$field] = $value;
+                    }
                 }
                 $created = $this->license->mutatePayrollEmployees(
                     fn (): array => $this->createPerson($supplierId, $item, $today, $userId, $ip, $userAgent),
@@ -865,6 +944,9 @@ final class AttendanceImportService
     /**
      * Kolik údajů profil v souborech rozpozná: listy s osobami a v nich
      * sloupce, které výslovně zná (ne automatický návrh, ne „ignorovat").
+     * List, na kterém profil nezná ani jeden sloupec, se nepočítá - jinak by
+     * profil jiného systému (třeba převod z POHODY) vyhrál nad prázdným výběrem
+     * jen díky osobám, které našel automatický návrh.
      *
      * @param list<array<string,mixed>> $mappedSheets
      */
@@ -875,11 +957,14 @@ final class AttendanceImportService
             if ($sheet['person_column'] === null || $sheet['data_rows'] === 0) {
                 continue;
             }
-            ++$score;
+            $known = 0;
             foreach ($sheet['columns'] as $binding) {
                 if ($binding['rule_source'] === 'profile' && $binding['meaning'] !== AttendanceMeaning::IGNORE) {
-                    ++$score;
+                    ++$known;
                 }
+            }
+            if ($known > 0) {
+                $score += 1 + $known;
             }
         }
 
@@ -1407,6 +1492,8 @@ final class AttendanceImportService
             'first_name' => $item['first_name'] ?? null,
             'last_name' => $item['last_name'] ?? null,
             'birth_number' => $item['birth_number'] ?? null,
+            'birth_date' => $item['birth_date'] ?? null,
+            'health_insurer_code' => $item['health_insurer_code'] ?? null,
             'relation_type' => $item['relation_type'] ?? null,
             'planned_start_on' => $item['planned_start_on'] ?? null,
             'weekly_hours' => $weeklyHours,

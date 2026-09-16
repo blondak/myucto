@@ -45,6 +45,7 @@ final class CashBackfill
             "SELECT id, doc_number, doc_type, purpose, issue_date, tax_date, total_amount, description
                FROM cash_documents
               WHERE supplier_id = :sid AND status = 'posted' AND journal_entry_id IS NULL{$where}
+                AND " . OpeningBalanceDocuments::notInOpeningSql('cash', 'cash_documents') . "
            ORDER BY issue_date, id"
         );
         $stmt->execute($bind);

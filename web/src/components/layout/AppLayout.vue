@@ -785,6 +785,7 @@ const navSections = computed<NavSection[]>(() => {
           // Převod celé agendy z Money S3 — protějšek exportu: data dovnitř. I pro firmu
           // v daňové evidenci (převod ji přepne).
           { to: '/imports/money-s3', label: t('nav.money_s3_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
+          { to: '/imports/pohoda', label: t('nav.pohoda_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
           // Podklady k incidentu a rozcestník podpory — vlastní skupina na konci.
           { to: '/admin/diagnostics',   label: t('nav.diagnostics'),           icon: ICONS.diagnostics, dividerBefore: true },
           { to: '/admin/support',       label: t('nav.support'),               icon: ICONS.help },

@@ -312,7 +312,9 @@ Měsíční import má tři kroky:
    Osoby, které v evidenci chybí, můžete samostatným tlačítkem založit; měsíční
    mzda z mzdového výměru v podkladech se přitom předvyplní jako pravidelná
    hrubá mzda vztahu a nástup z poznámky („nový nástup 15. 6. 2026“) jako den
-   nástupu. Automatické založení při použití se týká jen osob s osobním nebo
+   nástupu. Mají-li podklady sloupce s významem **Datum narození** a
+   **Zdravotní pojišťovna (kód)**, založená osoba je dostane rovnou; kód
+   pojišťovny je třímístný (například 111). Automatické založení při použití se týká jen osob s osobním nebo
    rodným číslem, pokud je podklady (typicky CSV mezd) obsahují. Osoba bez čísel
    bývá jinak zapsané jméno někoho z evidence, třeba po změně příjmení, proto
    zůstane k ruční volbě. Uvádějí-li podklady ukončení, spárovaná osoba dostane
@@ -321,6 +323,15 @@ Měsíční import má tři kroky:
    ze které pocházejí, a pro kontrolu i hrubou a čistou mzdu z mzdového exportu.
    Chybí-li ve firmě mzdová složka, kterou profil používá, import ji na
    potvrzení založí jako jednorázovou složku.
+
+**Kontrola období a dvojích vstupů.** Výchozí období je pracovní měsíc mezd,
+ne měsíc podkladů. Import proto pozná měsíc z názvů souborů a listů
+(„podklady 11-2025", list „Mzdy 11-25", soubor „1125.xlsx", „dochazka-2025-11")
+a když se liší od vybraného období, upozorní na to hned nad náhledem. Souhrn
+navíc ukáže, že období už má platné mzdové vstupy z jiného importu, třeba
+z převodu mezd z POHODY / PAMICA nebo z jiné sady souborů; použitím by vznikly
+dvojí vstupy. V obou případech se dávka použije, až nález výslovně potvrdíte.
+Opakované použití týchž souborů se za jiný import nepovažuje.
 
 **Měsíční mzda z podkladů.** Obsahují-li podklady měsíční mzdu (mzdový výměr),
 souhrn ukáže tabulku **Měsíční mzda z podkladů**: původní mzdu ze sjednaných
@@ -368,7 +379,19 @@ správně. Náhled nad podklady pro stovky zaměstnanců trvá jednotky sekund.
 jiný sloupec téhož listu danou hodnotu, například *Odměny → úkolová mzda, když
 oddělení = výroba*. Ostatní řádky dostanou další pravidlo pro tentýž sloupec.
 Vzor GIRITON takto čte sloupec odměn: ve výrobě jako úkolovou mzdu, jinde jako
-odměnu.
+odměnu. Sloupec „Suma hodinovky NOC" výpočetního listu čte jako příplatek za
+noční práci, ne jako druhou hodinovou mzdu.
+
+**Zdanitelná část stravování.** Sloupec hlavního seznamu s hodnotou jídla nad
+osvobozený limit (v sešitech GIRITON „Součet z Výpočet pro socku") se přenáší na
+složku **Zdanitelná část stravování**. Je to nepeněžní příjem: zvyšuje hrubou
+mzdu i vyměřovací základy na sociální a zdravotní pojištění, ale nevyplácí se.
+Druhá strana téhož plnění, srážka za obědy, jde z čisté mzdy a zůstává
+samostatně, takže se nic nepočítá dvakrát. V měsíčním hlášení má složka výchozí
+zařazení **10328 úhrn zúčtované mzdy**: plnění je součástí hrubé mzdy a obou
+vyměřovacích základů, a detailní uzel, který by nepeněžnímu stravování odpovídal
+přesněji, číselník cílů nenabízí. Bez zařazení by přitom nešlo zmrazit měsíční
+hlášení.
 
 Použitím vznikne dávka importu s měsíčním souhrnem hodin po pracovních
 vztazích a s původem každé hodnoty. Peněžní částky se volitelně založí jako

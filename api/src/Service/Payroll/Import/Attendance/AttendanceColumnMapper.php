@@ -324,6 +324,8 @@ final class AttendanceColumnMapper
             // Rodné číslo do náhledu nepatří ani tehdy, když sloupec zatím nikdo nenamapoval.
             if ($meaning === 'birth_number' || preg_match('/^\d{6}\s*\/?\s*\d{3,4}$/', $text) === 1) {
                 $text = '••••••/••••';
+            } elseif ($meaning === 'birth_date') {
+                $text = '••. ••. ••••';
             }
             $samples[] = $text;
         }

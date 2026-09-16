@@ -98,6 +98,9 @@ final class PayrollSicknessCaseAction
         if ($denied !== null) {
             return $denied;
         }
+        if (($missing = $this->missingSendEnvironment($request, $response)) !== null) {
+            return $missing;
+        }
 
         return $this->run($response, function () use ($request, $args): array {
             $supplierId = $this->currentSupplierId($request);
@@ -349,7 +352,7 @@ final class PayrollSicknessCaseAction
     {
         $body = (array) ($request->getParsedBody() ?? []);
         $value = $body['environment']
-            ?? ($request->getQueryParams()['environment'] ?? 'test');
+            ?? ($request->getQueryParams()['environment'] ?? 'production');
         if (!in_array($value, ['test', 'production'], true)) {
             throw new \InvalidArgumentException(
                 'Prostředí musí být test nebo production.',

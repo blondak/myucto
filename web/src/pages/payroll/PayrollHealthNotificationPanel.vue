@@ -47,6 +47,8 @@ import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import { appIsoDate } from '@/utils/date'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
+import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
+import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 const DUTY_KINDS: HealthDutyKind[] = [
   'employment_start',
@@ -76,6 +78,11 @@ const { t } = useI18n()
 const { submissionStatusLabel } = usePayrollLabels()
 const auth = useAuthStore()
 const tbl = useTablePrefs('payroll-health-notifications', COLUMNS)
+const {
+  request: sendConfirmRequest,
+  confirmProductionSend,
+  settle: settleSendConfirm,
+} = useProductionSendConfirm()
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 
@@ -382,6 +389,11 @@ async function downloadBulk() {
 async function enqueueIsds() {
   const result = prepared.value
   if (!result || !canQueueIsds.value) return
+  const confirmed = await confirmProductionSend(
+    'production',
+    t('payroll.production_send.health_overview', { insurer: result.insurer_code }),
+  )
+  if (!confirmed) return
   isdsError.value = ''
   isdsResult.value = null
   isdsGateway.value = null
@@ -415,6 +427,11 @@ async function enqueueIsds() {
 async function enqueueBulkIsds() {
   const result = preparedBulk.value
   if (!result || !canQueueBulkIsds.value) return
+  const confirmed = await confirmProductionSend(
+    'production',
+    t('payroll.production_send.health_bulk', { insurer: result.insurer_code }),
+  )
+  if (!confirmed) return
   isdsBulkError.value = ''
   isdsBulkResult.value = null
   isdsBulkGateway.value = null
@@ -1489,5 +1506,11 @@ onMounted(() => {
         </div>
       </div>
     </section>
+    <ProductionSendConfirmDialog
+      v-if="sendConfirmRequest"
+      :message="sendConfirmRequest.message"
+      @confirm="settleSendConfirm(true)"
+      @cancel="settleSendConfirm(false)"
+    />
   </section>
 </template>

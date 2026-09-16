@@ -4,6 +4,7 @@ export type ManualChapterRule = [RegExp, string]
 
 export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/imports\/money-s3(?:\/|$)/, '103_Prechod_z_Money_S3'],
+  [/^\/imports\/pohoda(?:\/|$)/, '107_Prechod_z_POHODY'],
   [/^\/accounting\/setup-assistant(?:\/|$)/, '65_Sablony'],
   [/^\/admin\/bank-rule-templates(?:\/|$)/, '65_Sablony'],
   [/^\/templates(?:\/|$)/, '65_Sablony'],

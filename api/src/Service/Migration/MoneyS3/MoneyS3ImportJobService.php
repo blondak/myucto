@@ -173,10 +173,16 @@ final class MoneyS3ImportJobService
                 MoneyS3Uploads::purge($supplierId, $token);
             }
         } catch (\Throwable $e) {
-            if ($runId !== null) {
-                $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => $e->getMessage(), 'steps' => []]);
+            if ($e instanceof MoneyS3Exception) {
+                $message = $e->getMessage();
+            } else {
+                error_log(sprintf('Money S3: převod zálohy %s firmy %d selhal: %s', $token, $supplierId, (string) $e));
+                $message = 'Převod z Money S3 selhal na neočekávané chybě, podrobnosti jsou v logu serveru.';
             }
-            $this->jobs->markFailed($jobId, $e->getMessage());
+            if ($runId !== null) {
+                $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => $message, 'steps' => []]);
+            }
+            $this->jobs->markFailed($jobId, $message);
         }
     }
 

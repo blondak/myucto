@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Settings;
 
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
 
 final class PayrollEmployerPolicyService
 {
@@ -214,6 +215,30 @@ final class PayrollEmployerPolicyService
         }
         $result['delivery_verified_on'] = $deliveryVerifiedOn;
 
+        /*
+         * Výchozí sazby příplatků § 114 až § 118 (migrace 1846).
+         *
+         * Nepovinné: prázdné pole znamená „firma výchozí sazbu nemá" a použije
+         * se zákonné minimum. Meze i vzájemné vyloučení procenta a pevné částky
+         * jsou tytéž jako u sjednání na vztahu — dvojí pravidla pro tentýž údaj
+         * by se dřív nebo později rozešla.
+         */
+        foreach (PayrollSurchargeKind::all() as $kind) {
+            $rateField = "{$kind->value}_rate_bp";
+            $fixedField = "{$kind->value}_fixed_hourly_minor";
+            $rate = $this->nullableBounded($input, $rateField, 50_000);
+            $fixed = $this->nullableBounded($input, $fixedField, 100_000);
+            if ($rate !== null && $fixed !== null) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Příplatek %s lze nastavit buď procentem, nebo pevnou částkou na hodinu, '
+                    . 'ne obojím zároveň.',
+                    $kind->section(),
+                ));
+            }
+            $result[$rateField] = $rate;
+            $result[$fixedField] = $fixed;
+        }
+
         $rawSourceReference = $input['source_reference'] ?? null;
         if ($rawSourceReference !== null && !is_string($rawSourceReference)) {
             throw new \InvalidArgumentException(
@@ -231,6 +256,30 @@ final class PayrollEmployerPolicyService
             : $sourceReference;
 
         return $result;
+    }
+
+    /**
+     * Nepovinné kladné celé číslo se stropem, nebo `null`.
+     *
+     * Nula se odmítá schválně: „sjednáno nula procent" není totéž co
+     * „nesjednáno" a u příplatku by to znamenalo vyplatit nic tam, kde zákon
+     * přiznává minimum.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function nullableBounded(array $input, string $field, int $maximum): ?int
+    {
+        $value = $input[$field] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_int($value) || $value < 1 || $value > $maximum) {
+            throw new \InvalidArgumentException(
+                "Pole {$field} musí být celé číslo od 1 do {$maximum}, nebo prázdné.",
+            );
+        }
+
+        return $value;
     }
 
     /** @param array<string,mixed> $input */

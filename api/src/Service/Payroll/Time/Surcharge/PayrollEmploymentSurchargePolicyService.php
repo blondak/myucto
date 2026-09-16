@@ -43,6 +43,25 @@ final class PayrollEmploymentSurchargePolicyService
         'difficult_environment_rate_bp' => PayrollSurchargeKind::DifficultEnvironment,
     ];
 
+    /**
+     * Pevná částka za hodinu v haléřích (migrace 1845).
+     *
+     * Vedle sazby, ne místo ní: u každého druhu se sjednává buď jedno, nebo
+     * druhé, a rozhodnutí je per druh — § 114 procentem a § 118 pevnou částkou
+     * je zcela běžná kombinace.
+     */
+    private const FIXED_FIELDS = [
+        'overtime_fixed_hourly_minor' => PayrollSurchargeKind::Overtime,
+        'holiday_fixed_hourly_minor' => PayrollSurchargeKind::Holiday,
+        'night_fixed_hourly_minor' => PayrollSurchargeKind::Night,
+        'weekend_fixed_hourly_minor' => PayrollSurchargeKind::Weekend,
+        'difficult_environment_fixed_hourly_minor' =>
+            PayrollSurchargeKind::DifficultEnvironment,
+    ];
+
+    /** Táž mez jako CHECK v migraci 1845 — 1 000 Kč za hodinu. */
+    private const FIXED_HOURLY_MAXIMUM_MINOR = 100_000;
+
     public function __construct(
         private readonly PayrollSurchargeRepository $repository,
         private readonly PayrollRulesetProvider $rulesets,
@@ -217,25 +236,42 @@ final class PayrollEmploymentSurchargePolicyService
         foreach (self::RATE_FIELDS as $field => $kind) {
             $rates[$kind->value] = self::nullableInt($input, $field);
         }
+        $fixed = [];
+        foreach (self::FIXED_FIELDS as $field => $kind) {
+            $fixed[$kind->value] = self::nullableInt(
+                $input,
+                $field,
+                self::FIXED_HOURLY_MAXIMUM_MINOR,
+            );
+        }
 
         // Postaví se doménový objekt, a teprve když projde, uloží se. Tohle je
         // JEDINÉ místo, kde se kogentní podlaha kontroluje — kdyby se dala
         // obejít z API, byla by celá kontrola jen dekorace.
-        PayrollSurchargePolicy::agreed($overtime, $holiday, $factors, $rates, $ruleset);
+        PayrollSurchargePolicy::agreed(
+            $overtime,
+            $holiday,
+            $factors,
+            $rates,
+            $ruleset,
+            $fixed,
+        );
 
-        return [
+        $agreed = [
             'overtime_mode' => $overtime->value,
             'holiday_mode' => $holiday->value,
             'difficult_environment_factors' => $factors,
-            'overtime_rate_bp' => $rates[PayrollSurchargeKind::Overtime->value],
-            'holiday_rate_bp' => $rates[PayrollSurchargeKind::Holiday->value],
-            'night_rate_bp' => $rates[PayrollSurchargeKind::Night->value],
-            'weekend_rate_bp' => $rates[PayrollSurchargeKind::Weekend->value],
-            'difficult_environment_rate_bp' =>
-                $rates[PayrollSurchargeKind::DifficultEnvironment->value],
             'agreement_reference' => self::nullableString($input, 'agreement_reference', 191),
             'note' => self::nullableString($input, 'note', 500),
         ];
+        foreach (self::RATE_FIELDS as $field => $kind) {
+            $agreed[$field] = $rates[$kind->value];
+        }
+        foreach (self::FIXED_FIELDS as $field => $kind) {
+            $agreed[$field] = $fixed[$kind->value];
+        }
+
+        return $agreed;
     }
 
     /** @param array<string,mixed> $input */
@@ -281,7 +317,7 @@ final class PayrollEmploymentSurchargePolicyService
     }
 
     /** @param array<string,mixed> $input */
-    private static function nullableInt(array $input, string $field): ?int
+    private static function nullableInt(array $input, string $field, int $maximum = 50_000): ?int
     {
         $value = $input[$field] ?? null;
         if ($value === null || $value === '') {
@@ -291,8 +327,8 @@ final class PayrollEmploymentSurchargePolicyService
         if (!is_int($number)) {
             throw new \InvalidArgumentException("{$field} musí být nezáporné celé číslo.");
         }
-        if ($number > 50_000) {
-            // Táž mez jako CHECK v migraci 1624 — proti překlepu o řád.
+        if ($number > $maximum) {
+            // Táž mez jako CHECK v migraci 1624, resp. 1845 — proti překlepu o řád.
             throw new \InvalidArgumentException("{$field} překračuje podporovaný rozsah.");
         }
 

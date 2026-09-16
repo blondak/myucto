@@ -35,7 +35,9 @@ import {
   filesFingerprint,
   guessRelationType,
   isValidPeriod,
+  mismatchedPeriods,
   personCanBeCreated,
+  sourceConfirmationMissing,
   personsWithoutEmploymentCount,
   pruneManualLinks,
   type ManualLinks,
@@ -127,9 +129,15 @@ const loadBlockedReason = computed(() => {
   if (files.value.length === 0) return t('payroll_imports.attendance.reason.no_files')
   return ''
 })
+// Nález kontrol období a dvojích vstupů potvrzuje účetní u každého náhledu znovu.
+const confirmSourceChecks = ref(false)
+watch(preview, () => { confirmSourceChecks.value = false })
+const sourceChecks = computed(() => preview.value?.source_checks ?? null)
+const detectedPeriods = computed(() => mismatchedPeriods(sourceChecks.value).map(item => formatPeriod(item)).join(', '))
 const applyBlockedReason = computed(() => {
   if (!preview.value) return t('payroll_imports.attendance.reason.no_preview')
   if (profileStale.value) return t('payroll_imports.attendance.reason.profile_changed')
+  if (sourceConfirmationMissing(sourceChecks.value, confirmSourceChecks.value)) return t('payroll_imports.attendance.reason.source_confirmation')
   if (links.value.length === 0 && !(autoCreateMissingPersons.value && showAutoCreateOption.value)) {
     return t('payroll_imports.attendance.reason.nothing_to_apply')
   }
@@ -336,6 +344,7 @@ async function apply() {
       write_time_summary: writeTimeSummary.value,
       approve_clean_time_months: writeTimeSummary.value && approveCleanTimeMonths.value && props.canApproveTime === true,
       materialize_absence_compensations: writeTimeSummary.value && materializeAbsenceCompensations.value,
+      confirm_source_checks: confirmSourceChecks.value,
     })
     result.value = response
     if (response.replayed) toast.warning(t('payroll_imports.attendance.summary.replayed_toast', { id: response.batch.id }))
@@ -460,6 +469,10 @@ async function approveTimeMonths() {
         </button>
       </div>
 
+      <p v-if="detectedPeriods" role="alert" data-testid="attendance-period-banner" class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700">
+        {{ t('payroll_imports.attendance.source_checks.period_banner', { detected: detectedPeriods, selected: formatPeriod(sourceChecks?.period.selected ?? period) }) }}
+      </p>
+
       <AttendanceRecognitionStrip :preview="preview" can-edit @edit-mapping="editMapping" />
 
       <!-- 2. Osoby -->
@@ -509,6 +522,24 @@ async function approveTimeMonths() {
                 <span v-if="check.kind" class="text-neutral-500"> ({{ kindLabel(check.kind) }})</span>
               </li>
             </ul>
+          </div>
+          <div v-if="sourceChecks?.requires_confirmation" role="alert" class="mb-4 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-700" data-testid="attendance-source-checks">
+            <p class="font-medium">{{ t('payroll_imports.attendance.source_checks.title') }}</p>
+            <p v-if="detectedPeriods" class="mt-1" data-testid="attendance-source-period">
+              {{ t('payroll_imports.attendance.source_checks.period_mismatch', { detected: detectedPeriods, selected: formatPeriod(sourceChecks.period.selected) }) }}
+            </p>
+            <div v-if="sourceChecks.other_sources.length" class="mt-1" data-testid="attendance-source-other">
+              <p>{{ t('payroll_imports.attendance.source_checks.other_sources', { period: formatPeriod(sourceChecks.period.selected) }) }}</p>
+              <ul class="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+                <li v-for="source in sourceChecks.other_sources" :key="`${source.input_import_id}-${source.attendance_import_id ?? 0}`">
+                  {{ t('payroll_imports.attendance.source_checks.other_source', { files: source.files.join(', '), count: source.active_inputs, date: source.created_at.slice(0, 10) }) }}
+                </li>
+              </ul>
+            </div>
+            <label class="mt-2 flex items-start gap-2 text-neutral-800">
+              <input v-model="confirmSourceChecks" type="checkbox" data-testid="attendance-confirm-source-checks" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
+              <span class="font-medium">{{ t('payroll_imports.attendance.source_checks.confirm') }}</span>
+            </label>
           </div>
           <p v-if="missingEmploymentCount > 0" class="mb-3 text-xs text-neutral-600">
             {{ t('payroll_imports.attendance.summary.missing_employment_note', { count: missingEmploymentCount }) }}

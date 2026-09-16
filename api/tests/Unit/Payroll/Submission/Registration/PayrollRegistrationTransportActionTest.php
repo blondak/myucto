@@ -62,6 +62,25 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         self::assertSame('validation_failed', $this->json($response)['error']['code']);
     }
 
+    public function testSendWithoutEnvironmentIsRejected(): void
+    {
+        $transport = $this->createMock(PayrollRegistrationTransportService::class);
+        $transport->expects(self::never())->method('send');
+        $access = $this->createStub(PayrollModuleAccess::class);
+        $access->method('isEnabled')->willReturn(true);
+        $request = $this->request('session')
+            ->withHeader('Idempotency-Key', 'environment-must-be-explicit');
+
+        $response = (new PayrollRegistrationTransportAction(
+            $transport,
+            $access,
+            $this->gate('active'),
+        ))->send($request, new Response(), ['submissionId' => '42']);
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertSame('environment_required', $this->json($response)['error']['code']);
+    }
+
     public function testOneAccountantCanExplicitlyTriggerOneScopedSend(): void
     {
         $transport = $this->createMock(PayrollRegistrationTransportService::class);

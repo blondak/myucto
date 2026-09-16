@@ -376,6 +376,48 @@ final class PayrollAttendanceImportRepository
         return $result;
     }
 
+    /**
+     * Platné mzdové vstupy období, které založil import: dávka docházky
+     * (i převod mezd z POHODY / PAMICA, který jde touž cestou) nebo jiný
+     * import vstupů. Zrušené vstupy se nepočítají.
+     *
+     * @return list<array{attendance_import_id:?int,input_import_id:int,files:list<array<string,mixed>>,active_inputs:int,created_at:string}>
+     */
+    public function activeInputSources(int $supplierId, string $periodStart): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT input_import.id AS input_import_id, input_import.source_name, input_import.created_at,
+                    batch.id AS attendance_import_id, batch.files_json, COUNT(pi.id) AS active_inputs
+               FROM payroll_inputs pi
+               JOIN payroll_input_imports input_import
+                 ON input_import.supplier_id = pi.supplier_id AND input_import.id = pi.import_id
+               LEFT JOIN payroll_attendance_imports batch
+                 ON batch.supplier_id = input_import.supplier_id AND batch.input_import_id = input_import.id
+              WHERE pi.supplier_id = ? AND pi.period_start = ? AND pi.status IN ('draft', 'approved', 'locked')
+              GROUP BY input_import.id, input_import.source_name, input_import.created_at, batch.id, batch.files_json
+              ORDER BY input_import.id, batch.id"
+        );
+        $stmt->execute([$supplierId, $periodStart]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $raw) {
+            $row = PayrollTimeValue::row($raw, 'attendance_input_source');
+            $files = $row['files_json'] === null
+                ? [['name' => (string) $row['source_name'], 'sha256' => null]]
+                : json_decode((string) $row['files_json'], true, 16, JSON_THROW_ON_ERROR);
+            $result[] = [
+                'attendance_import_id' => $row['attendance_import_id'] === null
+                    ? null
+                    : PayrollTimeValue::int($row['attendance_import_id'], 'attendance_import_id'),
+                'input_import_id' => PayrollTimeValue::int($row['input_import_id'] ?? null, 'input_import_id'),
+                'files' => is_array($files) ? array_values($files) : [],
+                'active_inputs' => PayrollTimeValue::int($row['active_inputs'] ?? null, 'active_inputs'),
+                'created_at' => (string) $row['created_at'],
+            ];
+        }
+
+        return $result;
+    }
+
     /** @return array<string,mixed>|null */
     public function batch(int $supplierId, int $importId): ?array
     {

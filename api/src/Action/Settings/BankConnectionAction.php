@@ -113,7 +113,27 @@ final class BankConnectionAction
             return Json::ok($response, $result);
         } catch (BankConnectorOperationException $e) {
             return $this->operationError($response, $e);
+        } catch (\Throwable $e) {
+            // Výjimka mimo bankovní operaci (zámek, databáze) by jinak skončila
+            // v obecném handleru Slimu bez kódu a UI by ukázalo holé HTTP 500.
+            $this->diagnostics->error('bank_connection_sync_crashed', self::failureContext($e));
+            return Json::error(
+                $response,
+                'bank_sync_failed',
+                'Načtení z banky se na serveru nepodařilo dokončit. Stav napojení se nezměnil; zkuste to později.',
+                500,
+            );
         }
+    }
+
+    /** @return array<string,mixed> */
+    private static function failureContext(\Throwable $e): array
+    {
+        return [
+            'exception' => $e::class,
+            'message' => mb_substr($e->getMessage(), 0, 500),
+            'file' => basename($e->getFile()) . ':' . $e->getLine(),
+        ];
     }
 
     private function denied(Request $request, Response $response, AccessLevel $minimum): ?Response
@@ -125,11 +145,13 @@ final class BankConnectionAction
 
     private function operationError(Response $response, BankConnectorOperationException $e): Response
     {
-        $this->diagnostics->warning('bank_connection_operation_failed', ['code' => $e->errorCode]);
+        $cause = $e->getPrevious();
+        $this->diagnostics->warning('bank_connection_operation_failed', ['code' => $e->errorCode]
+            + ($cause !== null ? ['cause' => self::failureContext($cause)] : []));
         $status = match ($e->errorCode) {
             'connection_not_found' => 404,
             'bank_connection_busy', 'bank_rate_limited', 'history_gap',
-            'statement_reconciliation_required' => 409,
+            'statement_reconciliation_required', 'kb_plus_statement_pending' => 409,
             'provider_required', 'provider_not_implemented', 'provider_account_mismatch',
             'token_required', 'token_invalid', 'account_inactive', 'account_currency_missing',
             'statement_account_mismatch', 'account_changed_revalidation_required',

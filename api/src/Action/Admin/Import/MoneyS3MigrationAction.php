@@ -59,6 +59,8 @@ final class MoneyS3MigrationAction
     /** Část zálohy: pod `upload_max_filesize`, IIS `maxAllowedContentLength` i nginx `client_max_body_size`. */
     public const CHUNK_BYTES = 8 * 1024 * 1024;
     private const BACKUP_EXTENSIONS = ['lz', 'zip'];
+    /** Nahraných záloh firmy najednou (nové nahrání smaže nejstarší nečinnou). */
+    private const MAX_ACTIVE_UPLOADS = 3;
 
     public function __construct(
         private readonly ImportJobRepository $jobs,
@@ -93,6 +95,9 @@ final class MoneyS3MigrationAction
         }
 
         MoneyS3Uploads::purgeStale($supplierId);
+        if (!MoneyS3Uploads::makeRoom($supplierId, self::MAX_ACTIVE_UPLOADS)) {
+            return Json::error($response, 'too_many_uploads', 'Firma má rozpracovaných příliš mnoho záloh, počkejte na dokončení běžícího zpracování.', 429);
+        }
         $token = MoneyS3Uploads::newToken();
         $dir = MoneyS3Uploads::dir($supplierId, $token);
         if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
@@ -153,6 +158,9 @@ final class MoneyS3MigrationAction
         }
 
         MoneyS3Uploads::purgeStale($supplierId);
+        if (!MoneyS3Uploads::makeRoom($supplierId, self::MAX_ACTIVE_UPLOADS)) {
+            return Json::error($response, 'too_many_uploads', 'Firma má rozpracovaných příliš mnoho záloh, počkejte na dokončení běžícího zpracování.', 429);
+        }
         $token = MoneyS3Uploads::newToken();
         $dir = MoneyS3Uploads::dir($supplierId, $token);
         if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
@@ -224,6 +232,15 @@ final class MoneyS3MigrationAction
         $token = (string) ($args['token'] ?? '');
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
+        // Rozbalení zálohy je drahé (gigabajty na disk) - u firmy běží nejvýš jedno najednou.
+        $this->jobs->reapStale($supplierId, MoneyS3ImportJobService::SOURCE);
+        foreach ($this->jobs->listForTenant($supplierId, MoneyS3ImportJobService::SOURCE, limit: 20) as $existing) {
+            if (in_array($existing['status'], ['queued', 'running'], true) && MoneyS3ImportJobService::isPrepareJob($existing)
+                && (string) ($existing['params']['token'] ?? '') !== $token) {
+                return Json::error($response, 'already_processing', 'Jiná záloha Money S3 se právě zpracovává, počkejte na její dokončení.', 409,
+                    ['existing_job_id' => $existing['id']]);
+            }
+        }
         try {
             $result = MoneyS3Uploads::withUploadLock($supplierId, $token, function () use ($request, $supplierId, $token, $userId): array {
                 $state = MoneyS3Uploads::state($supplierId, $token);

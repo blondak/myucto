@@ -33,6 +33,8 @@ import { loadPayrollJmhzOptions } from '@/composables/usePayrollJmhzOptions'
 import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
 import { fieldSelector, revealField } from '@/utils/revealField'
 import DateInput from '@/components/ui/DateInput.vue'
+import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
+import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 const props = defineProps<{
   employmentId: number
@@ -41,12 +43,17 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const {
+  request: sendConfirmRequest,
+  confirmProductionSend,
+  settle: settleSendConfirm,
+} = useProductionSendConfirm()
 const busy = ref(false)
 const error = ref('')
 const preview = ref<PayrollRegistrationPreview | null>(null)
 const submission = ref<PayrollRegistrationSubmission | null>(null)
 const showXml = ref(false)
-const environment = ref<PayrollJmhzTransportEnvironment>('test')
+const environment = ref<PayrollJmhzTransportEnvironment>('production')
 const transport = ref<PayrollJmhzTransportPoll | null>(null)
 const transportBusy = ref<'send' | 'poll' | 'close' | null>(null)
 const transportMessage = ref('')
@@ -1526,6 +1533,11 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
 
 async function send(): Promise<void> {
   if (!submission.value || !props.canWrite) return
+  const confirmed = await confirmProductionSend(
+    environment.value,
+    t('payroll.production_send.registration', { agenda: submission.value.agenda_code }),
+  )
+  if (!confirmed || !submission.value || transportBusy.value !== null) return
   transportBusy.value = 'send'
   error.value = ''
   transportMessage.value = ''
@@ -3653,5 +3665,11 @@ async function copyXml(): Promise<void> {
     >
       {{ error }}
     </p>
+    <ProductionSendConfirmDialog
+      v-if="sendConfirmRequest"
+      :message="sendConfirmRequest.message"
+      @confirm="settleSendConfirm(true)"
+      @cancel="settleSendConfirm(false)"
+    />
   </section>
 </template>

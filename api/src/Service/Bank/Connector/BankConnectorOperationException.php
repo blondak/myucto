@@ -10,7 +10,8 @@ final class BankConnectorOperationException extends \RuntimeException
     public function __construct(
         public readonly string $errorCode,
         public readonly array $details = [],
+        ?\Throwable $previous = null,
     ) {
-        parent::__construct($errorCode);
+        parent::__construct($errorCode, 0, $previous);
     }
 }

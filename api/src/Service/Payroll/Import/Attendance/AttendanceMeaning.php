@@ -38,6 +38,8 @@ final class AttendanceMeaning
         'person_name',
         'personal_number',
         'birth_number',
+        'birth_date',
+        'health_insurer_code',
         'relation_label',
         'department',
         'cost_center',

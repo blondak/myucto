@@ -307,6 +307,21 @@ if (!$dryRun) {
     $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
 }
 
+// Značky „ukázka už byla založena" (vzor importu docházky, ukázkové napojení integrací)
+// zůstávají se supplierem, ale ukázky samotné reset smazal. Bez vynulování by se po
+// resetu už nikdy znovu nezaložily.
+if ($keepUsersSupplier) {
+    $markers = $pdo->query("SHOW COLUMNS FROM supplier LIKE '%\\_sample\\_seeded\\_at'")->fetchAll(\PDO::FETCH_COLUMN);
+    foreach ($markers as $column) {
+        if ($dryRun) {
+            echo "  RESET    supplier.{$column}\n";
+            continue;
+        }
+        $pdo->exec("UPDATE supplier SET `{$column}` = NULL");
+        echo "  ✓ supplier.{$column} vynulováno\n";
+    }
+}
+
 // PDF cache + storage cleanup — vč. přijaté faktury archive + XSD (necháváme)
 $dirs = [
     \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices'),

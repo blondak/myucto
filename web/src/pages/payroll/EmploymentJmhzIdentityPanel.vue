@@ -29,7 +29,7 @@ const initialDate = computed(() => {
   return today
 })
 
-const environment = ref<PayrollRegzelEnvironment>('test')
+const environment = ref<PayrollRegzelEnvironment>('production')
 const onDate = ref(initialDate.value)
 const validFrom = ref(props.startDate ?? initialDate.value)
 const personIdentifier = ref('')

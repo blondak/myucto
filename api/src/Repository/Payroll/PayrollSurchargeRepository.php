@@ -111,6 +111,46 @@ final class PayrollSurchargeRepository
             : PayrollTimeValue::row($row, 'payroll_employment_surcharge_policy');
     }
 
+    /**
+     * Firemní výchozí sazby příplatků účinné k danému dni (migrace 1846).
+     *
+     * `null` znamená, že firma k tomu dni nemá účinnou mzdovou politiku;
+     * prázdné sloupce v ní znamenají, že výchozí sazbu nesjednala. Obojí vede
+     * na zákonné minimum, ale je to jiný stav a volající je rozlišuje.
+     *
+     * Překryv politik se tu ZÁMĚRNĚ neřeší výjimkou jako v
+     * {@see PayrollEmployerPolicyRepository::findEffective()}: výpočet
+     * příplatku není místo, kde se má běh zastavit na nastavení. Bere se
+     * poslední účinná a o překryvu už mluví nastavení zaměstnavatele.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function employerSurchargeDefaults(int $supplierId, string $effectiveOn): ?array
+    {
+        if (!$this->db->hasTable('payroll_employer_policies')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT overtime_rate_bp, holiday_rate_bp, night_rate_bp,
+                    weekend_rate_bp, difficult_environment_rate_bp,
+                    overtime_fixed_hourly_minor, holiday_fixed_hourly_minor,
+                    night_fixed_hourly_minor, weekend_fixed_hourly_minor,
+                    difficult_environment_fixed_hourly_minor
+               FROM payroll_employer_policies
+              WHERE supplier_id = ?
+                AND valid_from <= ?
+                AND (valid_to IS NULL OR valid_to >= ?)
+              ORDER BY valid_from DESC, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $effectiveOn, $effectiveOn]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false
+            ? null
+            : PayrollTimeValue::row($row, 'payroll_employer_policy_surcharges');
+    }
+
     public function employmentExists(int $supplierId, int $employmentId): bool
     {
         $stmt = $this->db->pdo()->prepare(
@@ -196,8 +236,11 @@ final class PayrollSurchargeRepository
                     (supplier_id, employment_id, valid_from, overtime_mode, holiday_mode,
                      difficult_environment_factors, overtime_rate_bp, holiday_rate_bp,
                      night_rate_bp, weekend_rate_bp, difficult_environment_rate_bp,
+                     overtime_fixed_hourly_minor, holiday_fixed_hourly_minor,
+                     night_fixed_hourly_minor, weekend_fixed_hourly_minor,
+                     difficult_environment_fixed_hourly_minor,
                      agreement_reference, note, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -211,6 +254,11 @@ final class PayrollSurchargeRepository
                 $data['night_rate_bp'] ?? null,
                 $data['weekend_rate_bp'] ?? null,
                 $data['difficult_environment_rate_bp'] ?? null,
+                $data['overtime_fixed_hourly_minor'] ?? null,
+                $data['holiday_fixed_hourly_minor'] ?? null,
+                $data['night_fixed_hourly_minor'] ?? null,
+                $data['weekend_fixed_hourly_minor'] ?? null,
+                $data['difficult_environment_fixed_hourly_minor'] ?? null,
                 $data['agreement_reference'] ?? null,
                 $data['note'] ?? null,
                 $userId,
@@ -287,6 +335,11 @@ final class PayrollSurchargeRepository
                         night_rate_bp = ?,
                         weekend_rate_bp = ?,
                         difficult_environment_rate_bp = ?,
+                        overtime_fixed_hourly_minor = ?,
+                        holiday_fixed_hourly_minor = ?,
+                        night_fixed_hourly_minor = ?,
+                        weekend_fixed_hourly_minor = ?,
+                        difficult_environment_fixed_hourly_minor = ?,
                         agreement_reference = ?,
                         note = ?,
                         row_version = row_version + 1
@@ -301,6 +354,11 @@ final class PayrollSurchargeRepository
                 $data['night_rate_bp'] ?? null,
                 $data['weekend_rate_bp'] ?? null,
                 $data['difficult_environment_rate_bp'] ?? null,
+                $data['overtime_fixed_hourly_minor'] ?? null,
+                $data['holiday_fixed_hourly_minor'] ?? null,
+                $data['night_fixed_hourly_minor'] ?? null,
+                $data['weekend_fixed_hourly_minor'] ?? null,
+                $data['difficult_environment_fixed_hourly_minor'] ?? null,
                 $data['agreement_reference'] ?? null,
                 $data['note'] ?? null,
                 $supplierId,

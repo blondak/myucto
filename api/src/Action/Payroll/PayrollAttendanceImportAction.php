@@ -12,6 +12,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSourceConfirmationRequired;
 use MyInvoice\Service\Payroll\Import\ImportFiles;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService;
@@ -91,7 +92,10 @@ final class PayrollAttendanceImportAction
                 ($body['approve_clean_time_months'] ?? false) === true,
                 ($body['materialize_absence_compensations'] ?? false) === true,
                 ($body['create_deductions'] ?? false) === true,
+                ($body['confirm_source_checks'] ?? false) === true,
             );
+        } catch (AttendanceSourceConfirmationRequired $e) {
+            return Json::error($response, 'source_confirmation_required', $e->getMessage(), 409, ['source_checks' => $e->checks]);
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }

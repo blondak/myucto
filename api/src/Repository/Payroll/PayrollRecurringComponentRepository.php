@@ -309,9 +309,20 @@ final class PayrollRecurringComponentRepository
                         AS employment_suspended_in_month,
                     component.code AS component_code,
                     component.name AS component_name,
+                    component.component_kind AS component_kind,
                     component.is_active AS component_is_active,
                     component.valid_from AS component_valid_from,
-                    component.valid_to AS component_valid_to
+                    component.valid_to AS component_valid_to,
+                    -- Zdroj docházky měsíce rozhoduje, ČÍM se měří nepřítomnost:
+                    -- měsíc ze souhrnu importu nemá směny, takže se krátí podle
+                    -- měsíčních součtů hodin, ne podle rozvržených směn.
+                    (
+                        SELECT time_month.work_source
+                          FROM payroll_time_months time_month
+                         WHERE time_month.supplier_id = recurring.supplier_id
+                           AND time_month.employment_id = recurring.employment_id
+                           AND time_month.period_start = ?
+                    ) AS time_work_source
                FROM payroll_recurring_components recurring
                JOIN effective_employment employment
                  ON employment.supplier_id = recurring.supplier_id
@@ -338,12 +349,16 @@ final class PayrollRecurringComponentRepository
               FOR UPDATE'
         );
         $stmt->execute([
+            // Pořadí odpovídá výskytu `?` v dotazu: účinný stav (1), okno
+            // událostí (2), firma v CTE (1), účinná měsíční mzda (2), zdroj
+            // docházky měsíce (1), firma a účinnost předpisu (5).
             $periodEnd,
             $periodStart,
             $periodEnd,
             $supplierId,
             $periodEnd,
             $periodEnd,
+            $periodStart,
             $supplierId,
             $periodEnd,
             $periodStart,

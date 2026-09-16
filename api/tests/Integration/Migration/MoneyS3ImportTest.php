@@ -609,6 +609,47 @@ final class MoneyS3ImportTest extends TestCase
     }
 
     /**
+     * Storno výdeje v bance (vrácený poplatek) má v Money `Vydej` = 1 a zápornou částku —
+     * peníze na účet přišly, pohyb je kladný. Rozdíl dokladu proti deníku, který je už
+     * v samotném Money (kurzový rozdíl zaúčtovaný mimo účet banky, dobropis s jinou částkou
+     * v deníku), rekonciliace vysvětlí rozdílem v Money a převod kvůli němu neselže.
+     */
+    public function testBankStornoIsIncomingAndDifferencesAlreadyInMoneyAreExplained(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/diff.lz', SyntheticAgenda::filesWithMoneyDifferences());
+        $backup = Ms3Backup::extract($this->tmp . '/diff.lz', $this->tmp . '/diff');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $amount = $this->db->pdo()->prepare(
+            'SELECT t.amount FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id WHERE s.supplier_id = ? AND t.source_ref = ?'
+        );
+        $amount->execute([$supplierId, 'BV25002']);
+        self::assertSame(30.0, (float) $amount->fetchColumn());
+
+        $year2025 = array_column($protocol->get('reconciliation'), null, 'year')[2025];
+        self::assertTrue($year2025['ok'], (string) json_encode($year2025, JSON_UNESCAPED_UNICODE));
+        $documents = array_column($year2025['documents'], null, 'key');
+        self::assertSame([['document_no' => 'BV25003', 'difference' => -0.72]], $documents['bank']['source_differences'] ?? null);
+        self::assertSame([['document_no' => 'DV25001', 'difference' => 10.0]], $documents['issued_invoices']['source_differences'] ?? null);
+
+        // Opakovaný převod z téže zálohy nehlásí nic jako změněné v Money — ani konečnou
+        // fakturu po odpočtu zálohy, kde `CelkemSDPH` nese celou cenu a doklad jen doplatek.
+        $again = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $changed = [];
+        foreach ($again->toArray()['steps'] ?? [] as $step) {
+            foreach ($step['messages'] ?? [] as $m) {
+                if ($m['code'] === 'changed_in_money') {
+                    $changed[] = $m['text'];
+                }
+            }
+        }
+        self::assertSame([], $changed);
+    }
+
+    /**
      * Doklad k ruční kontrole, který Money v historickém roce vůbec nezaúčtovalo, se nepřevádí —
      * v uzavřeném roce by jen visel jako koncept. V posledním roce (RC-2025-001) zůstává ke
      * kontrole. Zálohová faktura (ZF24001) koncept není: převede se jako nezaúčtovaná záloha.
@@ -736,6 +777,80 @@ final class MoneyS3ImportTest extends TestCase
         $stmt->execute([$supplierId]);
         self::assertSame([['amount' => -100.0, 'links' => 1], ['amount' => -40.0, 'links' => 1]],
             array_map(static fn (array $r): array => ['amount' => (float) $r['amount'], 'links' => (int) $r['links']], $stmt->fetchAll(PDO::FETCH_ASSOC)));
+    }
+
+    /**
+     * Každý vlastní účet s pohyby má v tabu Účty svůj řádek (měnu s číslem účtu) navázaný
+     * na evidenci účtů firmy; jen první doplní prázdnou výchozí měnu. Opakovaný převod
+     * řádky nezdvojí.
+     */
+    public function testEveryUsedBankAccountGetsItsOwnCompanyAccount(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT a.account_number, c.account_number AS currency_account
+               FROM supplier_bank_accounts a
+               LEFT JOIN currencies c ON c.id = a.currency_id AND c.supplier_id = a.supplier_id
+              WHERE a.supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        self::assertNotEmpty($rows);
+        foreach ($rows as $row) {
+            self::assertSame((string) $row['account_number'], (string) $row['currency_account'], 'Účet ' . $row['account_number'] . ' nemá řádek v tabu Účty.');
+        }
+        $czk = $this->rowCount('currencies', $supplierId, "code = 'CZK'");
+        self::assertSame(count($rows), $czk);
+
+        $this->import($supplierId);
+        self::assertSame($czk, $this->rowCount('currencies', $supplierId, "code = 'CZK'"));
+    }
+
+    /**
+     * Pohyb, který Money zaúčtovalo bez faktury (poplatek, vratka), je vyřízený - výpis
+     * nesvítí jako nedopárovaný. Úhrady faktur zůstávají spárované.
+     */
+    public function testBankTransactionsBookedWithoutInvoiceAreResolved(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT t.match_status, t.match_reason,
+                    EXISTS (SELECT 1 FROM journal_entry_document_links k WHERE k.supplier_id = s.supplier_id AND k.doc_type = 'bank' AND k.doc_id = t.id) AS booked
+               FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+              WHERE s.supplier_id = ?"
+        );
+        $stmt->execute([$supplierId]);
+        $byStatus = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $key = $row['match_status'] . '|' . ($row['match_reason'] ?? '') . '|' . $row['booked'];
+            $byStatus[$key] = ($byStatus[$key] ?? 0) + 1;
+        }
+        self::assertArrayNotHasKey('unmatched||1', $byStatus, json_encode($byStatus));
+        self::assertGreaterThan(0, $byStatus['ignored|money_s3_booked|1'] ?? 0, json_encode($byStatus));
+        self::assertGreaterThan(0, $byStatus['manual||1'] ?? 0, json_encode($byStatus));
+    }
+
+    /** Pokladní doklad hradící dvě faktury si ponechá vazbu na první, druhá ji nepřepíše. */
+    public function testCashDocumentPayingTwoInvoicesKeepsFirstLink(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithCashPayingTwoInvoices());
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT pi.vendor_invoice_number FROM cash_documents c JOIN purchase_invoices pi ON pi.id = c.purchase_invoice_id
+              WHERE c.supplier_id = ? AND c.description LIKE 'Kancelářské%'"
+        );
+        $stmt->execute([$supplierId]);
+        self::assertSame('DF-2025-110', $stmt->fetchColumn(), $this->explain($protocol));
+        $payments = array_column($protocol->toArray()['steps'], null, 'key')['payments']['counts'] ?? [];
+        self::assertSame(1, $payments['cash_multi_invoice'] ?? 0, json_encode($payments));
     }
 
     /** Pozdější záznam daňové evidence v historii režimů nesmí převedené roky vrátit do DE. */

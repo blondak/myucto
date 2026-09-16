@@ -21,8 +21,8 @@ describe('navigace podle RBAC oprávnění', () => {
   it('nabízí importy podle utilities.import, ne podle superadmin role', () => {
     expect(appLayout).not.toContain("...(isAdmin ? [{ to: '/invoices/import'")
     expect(appLayout).not.toContain("...(isAdmin ? [{ to: '/purchase-invoices/import'")
-    // Import vydaných, import přijatých a průvodce „Přechod z Money S3".
-    expect(appLayout.match(/permission: 'utilities\.import' as PermissionKey, access: 'write'/g)).toHaveLength(3)
+    // Import vydaných, import přijatých a průvodci „Přechod z Money S3" a „Přechod z POHODA".
+    expect(appLayout.match(/permission: 'utilities\.import' as PermissionKey, access: 'write'/g)).toHaveLength(4)
   })
 
   it('nabízí firemní sekci i staff roli a její položky pak filtruje podle práv', () => {

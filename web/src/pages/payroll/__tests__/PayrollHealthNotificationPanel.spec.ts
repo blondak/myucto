@@ -573,6 +573,17 @@ describe('PayrollHealthNotificationPanel', () => {
     )
   })
 
+  // Ostré odeslání se ptá; dialog se teleportuje do <body>, ne do wrapperu.
+  async function confirmProductionSend(): Promise<void> {
+    const buttons = document.querySelectorAll<HTMLButtonElement>(
+      '[data-test="production-send-confirm-yes"]',
+    )
+    const button = buttons[buttons.length - 1]
+    expect(button).toBeDefined()
+    button!.click()
+    await flushPromises()
+  }
+
   it('platnou větu připraví do ISDS, ale netvrdí, že byla odeslána', async () => {
     m.prepare.mockResolvedValue({
       submission_id: 57,
@@ -642,6 +653,8 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(isdsButton.attributes('disabled')).toBeUndefined()
     await isdsButton.trigger('click')
     await flushPromises()
+    expect(m.enqueueIsds).not.toHaveBeenCalled()
+    await confirmProductionSend()
 
     expect(m.enqueueIsds).toHaveBeenCalledWith(57, '205')
     const result = wrapper.get('[data-test="health-prepare-isds-result"]')
@@ -726,6 +739,7 @@ describe('PayrollHealthNotificationPanel', () => {
     await flushPromises()
     await wrapper.get('[data-test="health-prepare-isds"]').trigger('click')
     await flushPromises()
+    await confirmProductionSend()
 
     // Kanál mobile_key nabídne přímo tlačítko — ne odkaz do fronty.
     expect(wrapper.find('a[href="/admin/databox?tab=outbox"]').exists()).toBe(false)
@@ -805,6 +819,7 @@ describe('PayrollHealthNotificationPanel', () => {
     await flushPromises()
     await wrapper.get('[data-test="health-prepare-isds"]').trigger('click')
     await flushPromises()
+    await confirmProductionSend()
 
     expect(m.gatewayStart).toHaveBeenCalledWith(91)
     expect(assign).not.toHaveBeenCalled()
@@ -1062,6 +1077,8 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(isdsButton.attributes('disabled')).toBeUndefined()
     await isdsButton.trigger('click')
     await flushPromises()
+    expect(m.enqueueBulkIsds).not.toHaveBeenCalled()
+    await confirmProductionSend()
 
     expect(m.enqueueBulkIsds).toHaveBeenCalledWith(62, '205')
     const result = wrapper.get('[data-test="health-prepare-bulk-isds-result"]')

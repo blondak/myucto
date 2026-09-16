@@ -84,4 +84,42 @@ final class PayrollJmhzTransportQualificationGateTest extends TestCase
             $payload['error']['code'] ?? null,
         );
     }
+
+    public function testJmhzDispatchWithoutEnvironmentIsRejected(): void
+    {
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::never())->method('send');
+        $access = $this->createStub(PayrollModuleAccess::class);
+        $access->method('isEnabled')->willReturn(true);
+        $states = $this->createStub(PayrollModuleStateRepository::class);
+        $states->method('get')->willReturn(['status' => 'active']);
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/payroll/submissions/42/transport/send')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 11)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 9, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+            ->withHeader('Idempotency-Key', 'environment-must-be-explicit')
+            ->withParsedBody(['variable_symbol' => '1234567890']);
+        $action = new PayrollJmhzTransportAction(
+            $dispatch,
+            new JmhzProtocolExplainer(),
+            $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            $access,
+            new PayrollProductionGate($states),
+            new PayrollSubmissionAttemptDeletionService(
+                $this->createStub(Connection::class),
+                $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            ),
+            $this->createStub(ActivityLogger::class),
+            $this->createStub(IpMatcher::class),
+            new PayrollImportedJmhzProtocolRepository($this->createStub(Connection::class)),
+        );
+
+        $response = $action->send($request, new Response(), ['submissionId' => '42']);
+        $payload = json_decode((string) $response->getBody(), true);
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertIsArray($payload);
+        self::assertSame('environment_required', $payload['error']['code'] ?? null);
+    }
 }

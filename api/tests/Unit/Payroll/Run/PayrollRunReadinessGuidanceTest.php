@@ -64,6 +64,29 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         self::assertSame('/payroll/people?person=11&employment=22&panel=employment_terms&field=social_part_time_discount_reason', $transition[0]->remediationPath);
     }
 
+    /**
+     * Měsíce zpracované v předchozím programu patří do počátečních stavů, ne do
+     * mzdových běhů. Kontrola je proto musí odmítnout dřív, než z nich vyrobí
+     * dvě stě nálezů o chybějící docházce a vstupech.
+     */
+    public function testPeriodBeforeTheFirstPayrollMonthIsRefusedOutright(): void
+    {
+        $precedes = static fn (?string $start, string $period): bool => self::invoke(
+            PayrollRunReadinessService::class,
+            'periodPrecedesModuleStart',
+            [$start, $period],
+        );
+
+        self::assertTrue($precedes('2026-11', '2026-06-01'));
+        self::assertTrue($precedes('2026-06-01', '2026-05-01'));
+        // Měsíc, kterým vedení mezd začíná, se počítá normálně.
+        self::assertFalse($precedes('2026-06', '2026-06-01'));
+        self::assertFalse($precedes('2026-06', '2026-07-01'));
+        // Bez nastaveného začátku se nic neodmítá — modul se tak choval vždy.
+        self::assertFalse($precedes(null, '2026-06-01'));
+        self::assertFalse($precedes('', '2026-06-01'));
+    }
+
     private static function invoke(string $class, string $method, array $arguments): mixed
     {
         $reflection = new \ReflectionClass($class);

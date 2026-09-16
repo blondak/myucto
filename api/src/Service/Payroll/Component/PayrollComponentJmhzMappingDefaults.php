@@ -75,6 +75,15 @@ final class PayrollComponentJmhzMappingDefaults
         // Příplatek za ztížené pracovní prostředí vlastní detailní uzel v JMHZ
         // nemá, zůstává tedy na sběrném součtu příplatků.
         'PRIPLATEK_ZTIZENE_PROSTREDI' => '10332',
+        /*
+         * Zdanitelná část stravování: nepeněžní plnění, které je součástí hrubé mzdy
+         * a vstupuje do vyměřovacích základů na sociální i zdravotní pojištění, takže
+         * do úhrnu zúčtované mzdy patří. Detailní uzel pod 10328 pro ně katalog cílů
+         * nemá (10329 jsou tarifní mzdy, 10330 a 10331 odměny, 10332 příplatky), proto
+         * sběrný součet. Prázdné zařazení tu není možné nechat: složka chodí z importu
+         * docházky každý měsíc a bez zařazení nejde zmrazit měsíční hlášení.
+         */
+        'STRAVOVANI_ZDANITELNE' => '10328',
         // Náhrady mzdy zúčtované; náhrada při DPN má vlastní detailní uzel.
         'NAHRADA_MZDY' => '10337',
         'NAHRADA_MZDY_DOVOLENA' => '10338',

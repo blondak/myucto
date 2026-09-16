@@ -26,6 +26,20 @@ final class PayrollRunReadinessImpactTest extends TestCase
     }
 
     /**
+     * Měsíc před prvním mzdovým obdobím firmy zastavuje stejně jako chybějící
+     * politika: běh za něj nejde ani založit, takže cokoli mírnějšího by účetní
+     * pustilo do slepé uličky.
+     */
+    public function testPeriodBeforeModuleStartStopsTheRun(): void
+    {
+        $described = PayrollRunReadinessImpact::describe('period_before_module_start');
+
+        self::assertSame(PayrollRunReadinessImpact::IMPACT_BLOCKING, $described['impact']);
+        self::assertSame('blocker', $described['severity']);
+        self::assertSame(PayrollRunReadinessImpact::SCOPE_SETUP, $described['scope']);
+    }
+
+    /**
      * Chybějící identifikátory od ČSSZ NEJSOU blokátor. Přiděluje je ČSSZ, ne
      * účetní, doplní se kdykoli před podáním a s mzdovým výpočtem nemají nic
      * společného. Navíc pro ně existuje legální alternativa: `identifikaceType`

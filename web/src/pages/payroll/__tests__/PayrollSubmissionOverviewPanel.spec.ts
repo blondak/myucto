@@ -214,6 +214,17 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
    * Kanál `mobile_key` musí nabídnout tlačítko rovnou na kartě — ne jen
    * přesměrovat do odchozí fronty, kde by účetní musela hledat, co dál.
    */
+  // Ostré odeslání se ptá; dialog se teleportuje do <body>, ne do wrapperu.
+  async function confirmProductionSend(): Promise<void> {
+    const buttons = document.querySelectorAll<HTMLButtonElement>(
+      '[data-test="production-send-confirm-yes"]',
+    )
+    const button = buttons[buttons.length - 1]
+    expect(button).toBeDefined()
+    button!.click()
+    await flushPromises()
+  }
+
   it('u kanálu mobile_key nabídne odeslání rovnou na kartě přehledu', async () => {
     m.runs.mockResolvedValue([{ revision_status: 'approved', revision_id: 12 }])
     m.healthPaymentOverviews.mockResolvedValue({
@@ -286,6 +297,7 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     await flushPromises()
     await wrapper.get('[data-test="health-overview-send-isds"]').trigger('click')
     await flushPromises()
+    await confirmProductionSend()
 
     // Kanál mobile_key nabídne přímo tlačítko na kartě, žádné přesměrování.
     expect(wrapper.find('[data-test="health-overview-send-isds"]').exists()).toBe(false)
@@ -392,6 +404,8 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
 
     await wrapper.get('[data-test="health-batch-send"]').trigger('click')
     await flushPromises()
+    expect(m.enqueueHealthIsds).not.toHaveBeenCalled()
+    await confirmProductionSend()
 
     expect(m.enqueueHealthIsds).toHaveBeenCalledTimes(2)
     expect(m.enqueueHealthIsds).toHaveBeenCalledWith(57, '205')

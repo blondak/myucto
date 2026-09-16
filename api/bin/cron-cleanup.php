@@ -178,6 +178,8 @@ $report['scan_attach_staging'] = (new ScanStagingCleaner($connection))->purge();
 
 // 8) Nahrané zálohy agend Money S3 — rozbalené účetnictví firmy, týden bez práce s ní.
 $report['money_s3_uploads'] = \MyInvoice\Service\Migration\MoneyS3\MoneyS3Uploads::purgeStaleAll();
+// 8b) Nahrané exporty z POHODY - totéž, celé účetnictví firmy v XML.
+$report['pohoda_uploads'] = \MyInvoice\Service\Migration\Pohoda\PohodaUploads::purgeStaleAll();
 
 // Pročisti cron_runs — drž max 500 posledních záznamů na skript.
 $report['cron_runs_purged'] = CronRun::purgeOld($pdo, 500);

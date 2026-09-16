@@ -56,9 +56,16 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 // čte přehled vedle dokladů, kde je všude „31.07.2026" — dvojí tvar na jedné
 // stránce se čte jako dvě různá data.
 import { formatDate, formatDateTime, formatPeriod, formatUtcDateTime } from '@/composables/useFormat'
+import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
+import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const {
+  request: sendConfirmRequest,
+  confirmProductionSend,
+  settle: settleSendConfirm,
+} = useProductionSendConfirm()
 
 const ENVIRONMENTS: PayrollJmhzTransportEnvironment[] = ['production', 'test']
 
@@ -1019,6 +1026,16 @@ async function dispatchReady(
     || submission.outbox_id !== null
     || (channel === 'vrep' && !variableSymbolValid.value)
   ) return
+  const confirmed = await confirmProductionSend(
+    environment.value,
+    t(
+      channel === 'vrep'
+        ? 'payroll.production_send.jmhz_vrep'
+        : 'payroll.production_send.jmhz_isds',
+      { id: submission.submission_id },
+    ),
+  )
+  if (!confirmed || busy.value) return
 
   readyDispatchPending.value = { id: submission.submission_id, channel }
   actionError.value = ''
@@ -2441,5 +2458,11 @@ onMounted(loadVariableSymbols)
         />
       </div>
     </template>
+    <ProductionSendConfirmDialog
+      v-if="sendConfirmRequest"
+      :message="sendConfirmRequest.message"
+      @confirm="settleSendConfirm(true)"
+      @cancel="settleSendConfirm(false)"
+    />
   </section>
 </template>

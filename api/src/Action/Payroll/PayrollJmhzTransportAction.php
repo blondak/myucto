@@ -74,6 +74,9 @@ final class PayrollJmhzTransportAction
         if ($idempotencyKey === '') {
             return $this->invalid($response, 'Hlavička Idempotency-Key je povinná.');
         }
+        if (($missing = $this->missingSendEnvironment($request, $response)) !== null) {
+            return $missing;
+        }
         // Datovou větu klient NEPOSÍLÁ. Odesílá se výhradně ZMRAZENÝ artefakt
         // z archivu — jediný dokument, který prošel XSD i katalogem kontrol a
         // na jehož otisk se odvolává ledger. Dokud se sem `payload_xml` bralo
@@ -483,7 +486,7 @@ final class PayrollJmhzTransportAction
         $body = $request->getParsedBody();
         $value = is_array($body) ? ($body['environment'] ?? null) : null;
         if (!is_string($value)) {
-            $value = $request->getQueryParams()['environment'] ?? 'test';
+            $value = $request->getQueryParams()['environment'] ?? 'production';
         }
 
         return in_array($value, ['test', 'production'], true) ? $value : null;

@@ -93,7 +93,7 @@ describe('EmploymentJmhzIdentityPanel', () => {
     await openPanel(wrapper)
 
     expect(m.get).toHaveBeenCalledTimes(1)
-    expect(m.get).toHaveBeenCalledWith(17, 'test', expect.any(String))
+    expect(m.get).toHaveBeenCalledWith(17, 'production', expect.any(String))
     expect(wrapper.find('[data-test="jmhz-identity-form"]').exists()).toBe(true)
   })
 
@@ -104,7 +104,7 @@ describe('EmploymentJmhzIdentityPanel', () => {
     await wrapper.get('[data-test="jmhz-employment-identifier"]').setValue('200000000000000000002')
     await wrapper.get('[data-test="jmhz-identity-confirmed"]').setValue(true)
 
-    await wrapper.get('[data-test="jmhz-identity-environment"] [data-test="environment-switch-production"]')
+    await wrapper.get('[data-test="jmhz-identity-environment"] [data-test="environment-switch-test"]')
       .trigger('click')
     await flushPromises()
 
@@ -114,7 +114,7 @@ describe('EmploymentJmhzIdentityPanel', () => {
       .toBe('')
     expect((wrapper.get('[data-test="jmhz-identity-confirmed"]').element as HTMLInputElement).checked)
       .toBe(false)
-    expect(m.get).toHaveBeenLastCalledWith(17, 'production', expect.any(String))
+    expect(m.get).toHaveBeenLastCalledWith(17, 'test', expect.any(String))
   })
 
   it('uloží oba identifikátory bez povinného odkazu na zdroj a znovu načte jen masky', async () => {
@@ -130,7 +130,7 @@ describe('EmploymentJmhzIdentityPanel', () => {
     await flushPromises()
 
     expect(m.save).toHaveBeenCalledWith(17, {
-      environment: 'test',
+      environment: 'production',
       person_external_identifier: '1000000001',
       employment_external_identifier: '200000000000000000002',
       valid_from: '2026-08-01',
@@ -166,7 +166,7 @@ describe('EmploymentJmhzIdentityPanel', () => {
     await flushPromises()
 
     expect(m.save).toHaveBeenCalledWith(17, {
-      environment: 'test',
+      environment: 'production',
       person_external_identifier: '1000000002',
       employment_external_identifier: null,
       valid_from: '2026-08-01',

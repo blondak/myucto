@@ -72,12 +72,54 @@ final class PayrollSurchargeMigrationTest extends TestCase
         self::assertStringNotContainsString('BETWEEN 1 AND 10000', $sql);
     }
 
+    /**
+     * Pevná částka za hodinu přibývá VEDLE sazby, a jako NULL.
+     *
+     * Kdyby sloupce byly NOT NULL nebo se doplňovaly, změnila by migrace
+     * výpočet u všech dosavadních procentních sjednání — tedy u hotových mezd.
+     */
+    public function testFixedHourlyColumnsAreNullableAndDoNotBackfill(): void
+    {
+        $sql = $this->migration('1845_payroll_surcharge_fixed_hourly_amounts.sql');
+
+        foreach ([
+            'overtime_fixed_hourly_minor',
+            'holiday_fixed_hourly_minor',
+            'night_fixed_hourly_minor',
+            'weekend_fixed_hourly_minor',
+            'difficult_environment_fixed_hourly_minor',
+        ] as $column) {
+            self::assertStringContainsString(
+                "ADD COLUMN IF NOT EXISTS {$column} INT UNSIGNED NULL",
+                $sql,
+            );
+        }
+        self::assertStringNotContainsString('UPDATE payroll_employment_surcharge_policies', $sql);
+        self::assertStringNotContainsString('NOT NULL DEFAULT', $sql);
+    }
+
+    /**
+     * Procento a pevná částka u téhož druhu se vylučují. Kdyby bylo vyplněné
+     * obojí, musel by si výpočet vybrat, které z nich je to sjednané.
+     */
+    public function testPercentAndFixedAmountExcludeEachOther(): void
+    {
+        $sql = $this->migration('1845_payroll_surcharge_fixed_hourly_amounts.sql');
+
+        self::assertStringContainsString(
+            'CHECK (
+        (overtime_rate_bp IS NULL OR overtime_fixed_hourly_minor IS NULL)',
+            $sql,
+        );
+    }
+
     /** CHECK se musí nejdřív zahodit — MariaDB u něj `IF NOT EXISTS` nemá. */
     public function testConstraintsAreIdempotent(): void
     {
         foreach ([
             '1624_payroll_employment_surcharge_policies.sql',
             '1625_payroll_time_entry_difficulty_factors.sql',
+            '1845_payroll_surcharge_fixed_hourly_amounts.sql',
         ] as $file) {
             $sql = $this->migration($file);
             $added = substr_count($sql, 'ADD CONSTRAINT');

@@ -241,6 +241,86 @@ final class PayrollRunGarnishmentOrderTest extends TestCase
         );
     }
 
+    /**
+     * Zdanitelný NEPENĚŽNÍ příjem (stravování) zvedá základ daně i pojistného,
+     * ale nevyplácí se v penězích. Základ srážek tím přeroste peněžní výplatu
+     * a bez odečtení naturálií by osoba spadla do ručního posouzení — přestože
+     * z obědu se exekuci odvést nedá (§ 299 OSŘ postihuje vyplácený příjem).
+     */
+    public function testNonCashBenefitDoesNotInflateTheEnforcementBase(): void
+    {
+        $result = $this->processor()->calculate(
+            $this->snapshot(),
+            $this->nonCashBaseResult(),
+        );
+        $person = $result['people'][0];
+
+        // Základ je peněžní výplata, ne peníze plus oběd.
+        self::assertSame(
+            self::NET_BEFORE_DEDUCTIONS,
+            $person['enforcement']['input']['income']['garnishable_minor_units'],
+        );
+        self::assertNotContains(
+            'income:cash_payable_enforcement_base_inconsistent',
+            $person['enforcement']['result']['issues'] ?? [],
+        );
+    }
+
+    /**
+     * NEGATIVNÍ test: kontrola rozporu podkladů zůstává. Základ vyšší než
+     * peněžní výplata i po odečtení naturálií je pořád vada, ne naturálie.
+     */
+    public function testInconsistentBaseWithoutNonCashStillBlocks(): void
+    {
+        $base = $this->nonCashBaseResult();
+        // Souhrn bez nepeněžní části: `source_amount` se rovná peněžní výplatě,
+        // ale základ srážek je přesto vyšší — to naturáliemi vysvětlit nelze.
+        $base['people'][0]['totals']['source_amount_minor'] = 4_000_000;
+        $base['people'][0]['totals']['cash_payable_minor'] = 4_000_000;
+        $base['people'][0]['totals']['enforcement_base_minor'] = 4_500_000;
+
+        $person = $this->processor()->calculate($this->snapshot(), $base)['people'][0];
+
+        self::assertContains(
+            'income:cash_payable_enforcement_base_inconsistent',
+            $person['enforcement']['result']['issues'] ?? [],
+        );
+    }
+
+    /**
+     * Osoba s peněžní mzdou 40 000 Kč a nepeněžním stravováním 600 Kč:
+     * `source_amount` nese obojí, `cash_payable` jen peníze, základ srážek
+     * obojí — přesně tvar, který vyrábí zdanitelné stravování.
+     *
+     * @return array<string,mixed>
+     */
+    private function nonCashBaseResult(): array
+    {
+        $base = $this->baseResult(null);
+        $base['people'][0]['totals'] = [
+            'source_amount_minor' => 4_060_000,
+            'cash_payable_minor' => 4_000_000,
+            'enforcement_base_minor' => 4_060_000,
+        ];
+        // Zákonný výsledek musí být u osoby i v kořeni, jinak se čistá mzda
+        // nedosadí (`requires_net_pay`) a počítalo by se z hrubých čísel —
+        // tedy z jiné větve, než na které vada vznikla.
+        $base['statutory'] = ['status' => 'calculated'];
+        $base['people'][0]['statutory'] = [
+            'person_reference' => 'employee:' . self::EMPLOYEE_ID,
+            'status' => 'calculated',
+            'net_payable_minor_units' => self::NET_BEFORE_DEDUCTIONS,
+            'net_pay' => [
+                'net_before_deductions_minor_units' => self::NET_BEFORE_DEDUCTIONS,
+                'deducted_minor_units' => 0,
+                'net_payable_minor_units' => self::NET_BEFORE_DEDUCTIONS,
+                'deductions' => [],
+            ],
+        ];
+
+        return $base;
+    }
+
     /** @return array<string,mixed> */
     private function overdrawnBaseResult(): array
     {

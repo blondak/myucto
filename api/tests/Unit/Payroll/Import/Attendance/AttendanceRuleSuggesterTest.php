@@ -18,6 +18,9 @@ final class AttendanceRuleSuggesterTest extends TestCase
         yield ['Zaměstnanec', 'person_name', null];
         yield ['Osobní číslo', 'personal_number', null];
         yield ['Rodné číslo', 'birth_number', null];
+        yield ['Datum narození', 'birth_date', null];
+        yield ['Zdravotní pojišťovna', 'health_insurer_code', null];
+        yield ['ZP', 'health_insurer_code', null];
         yield ['Druh poměru', 'relation_label', null];
         yield ['Oddělení', 'department', null];
         yield ['Středisko', 'cost_center', null];

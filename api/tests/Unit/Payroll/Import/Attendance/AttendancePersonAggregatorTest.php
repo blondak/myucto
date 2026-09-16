@@ -46,6 +46,39 @@ final class AttendancePersonAggregatorTest extends TestCase
         self::assertSame(1, $sheets['podklady.xlsx#Přehled']['person_column']);
     }
 
+    /**
+     * Datum narození z textu i z buňky s datem skončí jako YYYY-MM-DD, kód
+     * pojišťovny jako text. Obojí zůstává jen interní, do náhledu nejde.
+     */
+    public function testBirthDateAndHealthInsurerFromSourceData(): void
+    {
+        $persons = $this->byKey($this->pipeline(AttendanceFixture::scenarioWithPersonalData())['persons']);
+
+        self::assertSame('1990-05-01', $persons['jana testovaci']['_birth_date']);
+        self::assertSame('211', $persons['jana testovaci']['_health_insurer_code']);
+        self::assertSame('1985-03-12', $persons['petr zkusebni']['_birth_date']);
+        self::assertSame('111', $persons['petr zkusebni']['_health_insurer_code']);
+        self::assertNull($persons['eva pokusna']['_birth_date']);
+        self::assertNull($persons['eva pokusna']['_health_insurer_code']);
+
+        $serial = (new \DateTimeImmutable('1899-12-30'))->diff(new \DateTimeImmutable('1992-02-29'))->days;
+        $workbook = AttendanceFixture::xlsx([
+            'Osoby' => [
+                'rows' => [
+                    1 => ['A' => 'Jméno', 'B' => 'Datum narození', 'C' => 'ZP'],
+                    2 => ['A' => 'Test Datový', 'B' => $serial, 'C' => 205],
+                    3 => ['A' => 'Test Chybný', 'B' => '31. 2. 1990', 'C' => null],
+                ],
+                'formats' => ['B2' => 'd.m.yyyy'],
+            ],
+        ]);
+        $persons = $this->byKey($this->pipeline([AttendanceFixture::file('osoby.xlsx', $workbook)])['persons']);
+
+        self::assertSame('1992-02-29', $persons['datovy test']['_birth_date']);
+        self::assertSame('205', $persons['datovy test']['_health_insurer_code']);
+        self::assertNull($persons['chybny test']['_birth_date'], 'Neexistující datum se nepoužije.');
+    }
+
     public function testHoursDurationsAndEmptyCells(): void
     {
         $persons = $this->byKey($this->pipeline(AttendanceFixture::scenario())['persons']);

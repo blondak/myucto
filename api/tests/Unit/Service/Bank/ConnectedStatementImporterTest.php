@@ -390,7 +390,7 @@ final class ConnectedStatementImporterTest extends TestCase
         $content = $this->transferGpc();
         $parsed = new GpcParser()->parse($content);
         $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
-        $this->matcher->expects(self::exactly(2))->method('matchBatch')->willReturn([]);
+        $this->matcher->expects(self::exactly(3))->method('matchBatch')->willReturn([]);
         $this->importer->import($content, 'synthetic.gpc', null, 1);
         try {
             $this->importer->importConnectedParsed($parsed, 'synthetic-first', 'synthetic.json', null, 1, 10);
@@ -401,13 +401,15 @@ final class ConnectedStatementImporterTest extends TestCase
         $this->importer->importConnectedParsed($parsed, 'synthetic-first', 'synthetic.json', null, 1, 10, 'bank_api', $keys);
         $parsed['transactions'][] = $parsed['transactions'][0];
         $parsed['transactions'][1]['bank_ref'] = 'SYNTHETIC-ANOTHER-PAYMENT';
-        try {
-            $this->importer->importConnectedParsed($parsed, 'synthetic-next', 'synthetic.json', null, 1, 10, 'bank_api', $keys);
-            self::fail('An alias must not absorb another payment.');
-        } catch (\MyInvoice\Service\Bank\StatementReconciliationException $e) {
-            self::assertSame([], $e->candidates);
-            self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
-        }
+
+        // Potvrzený alias smí převzít právě jeden načtený pohyb. Druhá platba téhož
+        // dne a částky se za něj proto nesmí schovat — založí se jako samostatný
+        // pohyb. Dřív se místo toho shodilo celé načtení a platba se ztratila.
+        $result = $this->importer->importConnectedParsed($parsed, 'synthetic-next', 'synthetic.json', null, 1, 10, 'bank_api', $keys);
+
+        self::assertSame(1, $result['transactions']);
+        self::assertSame(1, $result['skipped_duplicates']);
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
     }
 
     public function testAmbiguousBatchRollsBackRatherThanMergingRepeatedPayments(): void
@@ -491,23 +493,91 @@ final class ConnectedStatementImporterTest extends TestCase
         return $cases;
     }
 
-    public function testMatchingDescriptionsCannotMergeTwoRepeatedPayments(): void
+    /**
+     * Dvě opakované platby se shodným popisem proti JEDNOMU dříve uloženému pohybu.
+     * Sdílet ho nesmí — jedna ho převezme, druhá se založí jako samostatný pohyb.
+     */
+    public function testRepeatedPaymentsPairOneMovementAndStoreTheSurplus(): void
     {
         $stored = new GpcParser()->parse($this->transferGpc());
         $stored['transactions'] = [$stored['transactions'][0]];
         $stored['transactions'][0]['description'] = 'TEST SHOP Praha 123 karta 1234';
-        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
+        $this->matcher->expects(self::exactly(2))->method('matchBatch')->willReturn([]);
         $this->importer->importConnectedParsed($stored, 'synthetic-original', 'synthetic.txt', null, 1, 10, 'gpc');
         $incoming = $stored;
         $incoming['transactions'][0]['bank_ref'] = 'SYNTHETIC-FIRST';
         $incoming['transactions'][] = array_replace($incoming['transactions'][0], ['bank_ref' => 'SYNTHETIC-SECOND']);
-        try {
-            $this->importer->importConnectedParsed($incoming, 'synthetic-ambiguous', 'synthetic.txt', null, 1, 10);
-            self::fail('Two payments must not share one movement.');
-        } catch (\MyInvoice\Service\Bank\StatementReconciliationException $e) {
-            self::assertSame([], $e->candidates);
-            self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
-        }
+
+        $result = $this->importer->importConnectedParsed($incoming, 'synthetic-ambiguous', 'synthetic.txt', null, 1, 10);
+
+        self::assertSame(1, $result['transactions']);
+        self::assertSame(1, $result['skipped_duplicates']);
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+    }
+
+    /**
+     * Dva samostatné převody téhož dne, téže částky a se shodným variabilním symbolem
+     * (produkční hlášení: 2× 10 000 Kč, VS 1). Nejde o duplicitu — načíst se musí oba
+     * a opakované načtení překrývajícího se výpisu je nesmí zdvojit.
+     */
+    public function testTwoIdenticalSameDayPaymentsAreStoredOnceEachAcrossOverlappingStatements(): void
+    {
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+
+        $first = $this->importer->importConnectedParsed($this->repeatedPayments(), 'synthetic-repeated-1', 'repeated-1.gpc', null, 1, 10, 'gpc');
+
+        self::assertSame(2, $first['transactions']);
+        self::assertSame(0, $first['skipped_duplicates']);
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+        self::assertSame(20000.0, (float) $this->pdo->query('SELECT SUM(amount) FROM bank_transactions')->fetchColumn());
+
+        $before = $this->pdo->query('SELECT * FROM bank_transactions ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+        $overlap = $this->importer->importConnectedParsed($this->repeatedPayments(), 'synthetic-repeated-2', 'repeated-2.gpc', null, 1, 10, 'gpc');
+
+        self::assertSame(0, $overlap['transactions']);
+        self::assertSame(2, $overlap['skipped_duplicates']);
+        self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions ORDER BY id')->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * ČSOB: první z dvojice shodných plateb dorazí avízem (bank_api), denní výpis
+     * banky (gpc) pak nese obě. Dřív skončil celý import chybou „nejednoznačná
+     * duplicita" a druhá platba se nenačetla nikdy — v evidenci zůstal jeden pohyb
+     * proti bankovnímu zůstatku za dva.
+     */
+    public function testBankStatementAddsTheSecondIdenticalPaymentMissingFromTheAdvice(): void
+    {
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $advice = $this->repeatedPayments();
+        $advice['transactions'] = [array_replace($advice['transactions'][0], ['bank_ref' => 'CSOB-ADVICE-1'])];
+        $this->importer->importConnectedParsed($advice, 'synthetic-advice', 'advice.json', null, 1, 10, 'bank_api');
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+
+        $statement = $this->importer->importConnectedParsed($this->repeatedPayments(), 'synthetic-csob-gpc', 'csob.gpc', null, 1, 10, 'gpc');
+
+        self::assertSame(1, $statement['transactions']);
+        self::assertSame(1, $statement['skipped_duplicates']);
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+        self::assertSame(20000.0, (float) $this->pdo->query('SELECT SUM(amount) FROM bank_transactions')->fetchColumn());
+    }
+
+    /** Dva shodné příchozí převody 10 000 se stejným VS téhož dne, bez bankovní reference. */
+    private function repeatedPayments(): array
+    {
+        $movement = [
+            'posted_at' => '2026-09-14', 'amount' => 10000.0, 'currency' => 'EUR',
+            'variable_symbol' => '1', 'constant_symbol' => null, 'specific_symbol' => null,
+            'counterparty_account' => '0000000112866706', 'counterparty_bank' => '2250',
+            'counterparty_name' => 'SYNTHETIC', 'description' => 'Vlastni prevod',
+            'bank_ref' => null,
+        ];
+        return [
+            'header' => [
+                'account_number' => '1000000005', 'statement_date' => '2026-09-14', 'statement_number' => '001',
+                'prev_balance' => null, 'curr_balance' => null, 'debit_total' => null, 'credit_total' => null,
+            ],
+            'transactions' => [$movement, $movement],
+        ];
     }
 
     public static function conflictingDescriptions(): array

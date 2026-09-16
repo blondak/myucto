@@ -25,6 +25,26 @@ use MyInvoice\Service\Payroll\Calculation\RoundingMode;
  * {@see \MyInvoice\Service\Payroll\Absence\SicknessCompensationCalculator}.
  * `CalculationStep` se používá tam, kde je přesný: na odvození HODINOVÉ sazby
  * příplatku, které se čte na výplatní pásce.
+ *
+ * ── Procento, nebo PEVNÁ ČÁSTKA ─────────────────────────────────────────────
+ *
+ * Sjednat jde obojí (viz {@see PayrollSurchargePolicy}) a liší se jen tím, jak
+ * vznikne HODINOVÁ sazba příplatku: u procenta se spočítá ze základu, u pevné
+ * částky je sjednaná rovnou. Násobení minutami a jedno zaokrouhlení na konci je
+ * pak u obou totéž.
+ *
+ * ── Zákonné minimum u pevné částky ──────────────────────────────────────────
+ *
+ * Tady, a nikde jinde. Zásada sama porovnat nemůže, protože zákonné minimum je
+ * podíl z průměrného výdělku konkrétního člověka, a ten se zjistí až ve mzdě —
+ * táž sjednaná čtyřicetikoruna je nad minimem u jednoho a pod ním u druhého.
+ *
+ * Když je sjednaná částka nižší než zákonná, počítá se ZÁKONNÁ. Není to
+ * velkorysost: u § 114, § 115 a § 117 je „nejméně" kogentní a nižší sjednání je
+ * v tom rozsahu neplatné, takže vyplatit míň by byl nedoplatek. U § 116 a § 118
+ * se nižší sjednat SMÍ — tam se tedy ctí sjednaná částka a nic se nedopočítává.
+ * V obou případech ale řádek nese `belowStatutory`, aby účtárna viděla, že se
+ * sjednané číslo a vyplacené číslo rozešly, a mohla sjednání opravit.
  */
 final readonly class PayrollSurchargeLine implements JsonSerializable
 {
@@ -47,11 +67,20 @@ final readonly class PayrollSurchargeLine implements JsonSerializable
         public CalculationStep $hourlySurchargeStep,
         public array $segments,
         public array $waivedSegments,
+        /** Sjednaná pevná částka za hodinu, nebo `null` u sazby v procentech. */
+        public ?int $agreedFixedHourlyMinor = null,
+        /** Sjednaná pevná částka nedosáhla zákonného minima. */
+        public bool $belowStatutory = false,
+        /** Hodinová částka, na kterou se skutečně počítalo. */
+        public ?int $appliedFixedHourlyMinor = null,
     ) {}
 
     /**
      * @param list<PayrollSurchargeSegment> $segments
      * @param list<array<string,mixed>> $waivedSegments
+     * @param int|null $agreedFixedHourlyMinor sjednaná pevná částka v haléřích za
+     *        hodinu; je-li zadaná, `$rate` slouží už jen jako zákonné minimum,
+     *        proti kterému se poměřuje
      */
     public static function calculate(
         PayrollSurchargeKind $kind,
@@ -61,6 +90,7 @@ final readonly class PayrollSurchargeLine implements JsonSerializable
         bool $rateIsAgreed,
         array $segments,
         array $waivedSegments = [],
+        ?int $agreedFixedHourlyMinor = null,
     ): self {
         if ($basisHourlyMinor <= 0) {
             throw PayrollSurchargeException::of(
@@ -69,6 +99,15 @@ final readonly class PayrollSurchargeLine implements JsonSerializable
                     'Příplatek %s nelze spočítat: %s musí být kladný.',
                     $kind->section(),
                     $basis->label(),
+                ),
+            );
+        }
+        if ($agreedFixedHourlyMinor !== null && $agreedFixedHourlyMinor <= 0) {
+            throw PayrollSurchargeException::of(
+                'fixed_hourly_invalid',
+                sprintf(
+                    'Sjednaná pevná částka příplatku %s musí být kladná.',
+                    $kind->section(),
                 ),
             );
         }
@@ -102,12 +141,45 @@ final readonly class PayrollSurchargeLine implements JsonSerializable
             RoundingMode::HalfUp,
         );
 
-        $numerator = self::multiplyExactly(
-            self::multiplyExactly($basisHourlyMinor, $rate->numerator),
-            $weighted,
-        );
-        $denominator = self::multiplyExactly($rate->denominator, 60);
-        $amount = RoundingMode::HalfUp->roundFraction($numerator, $denominator);
+        if ($agreedFixedHourlyMinor === null) {
+            $numerator = self::multiplyExactly(
+                self::multiplyExactly($basisHourlyMinor, $rate->numerator),
+                $weighted,
+            );
+            $denominator = self::multiplyExactly($rate->denominator, 60);
+
+            return new self(
+                $kind,
+                $basis,
+                $basisHourlyMinor,
+                $rate,
+                $rateIsAgreed,
+                $minutes,
+                $weighted,
+                $numerator,
+                $denominator,
+                RoundingMode::HalfUp,
+                RoundingMode::HalfUp->roundFraction($numerator, $denominator),
+                $hourlyStep,
+                $trace,
+                $waivedSegments,
+            );
+        }
+
+        // Zákonné minimum v haléřích za hodinu. Porovnává se AŽ TADY, protože
+        // dřív se neví, z jakého základu se počítá — u § 117 je to minimální
+        // mzda, u ostatních průměrný výdělek konkrétního člověka.
+        $statutoryHourlyMinor = $hourlyStep->outputMinorUnits;
+        $belowStatutory = $agreedFixedHourlyMinor < $statutoryHourlyMinor;
+        // Podlézt smí jen § 116 a § 118. Jinde je „nejméně" kogentní, takže se
+        // dopočítá zákonná částka — vyplatit sjednanou nižší by byl nedoplatek.
+        $appliedHourlyMinor = $belowStatutory && !$kind->allowsLowerAgreedRate()
+            ? $statutoryHourlyMinor
+            : $agreedFixedHourlyMinor;
+
+        // Týž tvar zlomku jako u procenta: násobí se MINUTAMI a dělí šedesáti,
+        // aby se zaokrouhlovalo jednou za měsíc, ne po hodinách.
+        $numerator = self::multiplyExactly($appliedHourlyMinor, $weighted);
 
         return new self(
             $kind,
@@ -118,12 +190,15 @@ final readonly class PayrollSurchargeLine implements JsonSerializable
             $minutes,
             $weighted,
             $numerator,
-            $denominator,
+            60,
             RoundingMode::HalfUp,
-            $amount,
+            RoundingMode::HalfUp->roundFraction($numerator, 60),
             $hourlyStep,
             $trace,
             $waivedSegments,
+            $agreedFixedHourlyMinor,
+            $belowStatutory,
+            $appliedHourlyMinor,
         );
     }
 
@@ -164,6 +239,11 @@ final readonly class PayrollSurchargeLine implements JsonSerializable
             'amount_minor' => $this->amountMinor,
             'hourly_surcharge_minor' => $this->hourlySurchargeStep->outputMinorUnits,
             'hourly_surcharge_step' => $this->hourlySurchargeStep->jsonSerialize(),
+            // Sjednaná vs. použitá hodinová částka se liší právě tehdy, když
+            // sjednání nedosáhlo kogentního minima. Na pásce musí být vidět obojí.
+            'agreed_fixed_hourly_minor' => $this->agreedFixedHourlyMinor,
+            'applied_fixed_hourly_minor' => $this->appliedFixedHourlyMinor,
+            'below_statutory' => $this->belowStatutory,
             'segments' => $this->segments,
             'waived_segments' => $this->waivedSegments,
         ];

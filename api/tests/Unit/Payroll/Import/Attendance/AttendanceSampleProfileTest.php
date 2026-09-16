@@ -13,6 +13,7 @@ use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfile;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSheetAnalyzer;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceText;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceWorkbookReader;
+use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -32,6 +33,48 @@ final class AttendanceSampleProfileTest extends TestCase
             count(AttendanceSampleProfile::components()),
             AttendanceProfileComponents::validate(AttendanceSampleProfile::components()),
         );
+    }
+
+    /**
+     * Složka vzoru musí mít zařazení pro JMHZ: bez něj nejde zmrazit měsíční
+     * hlášení a účetní by ho musela doplňovat ručně. Buď je složka deklarovaná
+     * ve vzoru (druh určí zařazení), nebo je ve výchozím číselníku složek.
+     */
+    public function testEveryComponentOfTheSampleHasJmhzTarget(): void
+    {
+        /*
+         * Žádná složka vzoru nesmí zůstat bez zařazení: chodí z importu každý měsíc
+         * a bez zařazení nejde zmrazit měsíční hlášení. Zdanitelná část stravování
+         * má proto vlastní složku číselníku se sběrným uzlem 10328, ne obecný
+         * nepeněžní příjem, u kterého zařazení rozhoduje účetní.
+         */
+        $declared = array_column(AttendanceSampleProfile::components(), null, 'code');
+        foreach (AttendanceSampleProfile::rules() as $rule) {
+            $code = $rule['component_code'] ?? null;
+            if ($rule['meaning'] !== 'component' || $code === null || $code === AttendanceRules::AUTO_COMPONENT) {
+                continue;
+            }
+            $target = isset($declared[$code])
+                ? PayrollComponentJmhzMappingDefaults::targetFor(
+                    $code,
+                    (string) $declared[$code]['kind'],
+                    'one_off',
+                    'included',
+                )
+                : PayrollComponentJmhzMappingDefaults::targetForCode($code);
+            self::assertNotNull($target, "Složka {$code} nemá zařazení pro JMHZ.");
+        }
+        self::assertSame('10331', PayrollComponentJmhzMappingDefaults::targetFor('ODMENA_KONTEJNERY', 'bonus', 'one_off', 'included'));
+        // Sloupce, které bývají prázdné, ale s částkou by jinak vyrobily nezařazenou složku.
+        foreach (['ODMENA_SENIOR' => '10331', 'DOPLATEK_MZDY' => '10329', 'MZDA_SKOLENI' => '10329'] as $code => $expected) {
+            self::assertArrayHasKey($code, $declared, "Složka {$code} není ve vzoru deklarovaná.");
+            self::assertSame($expected, PayrollComponentJmhzMappingDefaults::targetFor(
+                $code,
+                (string) $declared[$code]['kind'],
+                'one_off',
+                'included',
+            ));
+        }
     }
 
     public function testSampleMapsTheWholeStructureWithoutConflictsOrExtraPersons(): void
@@ -73,10 +116,13 @@ final class AttendanceSampleProfileTest extends TestCase
         self::assertSame([
             'DOCH_PREMIE_ZA_BALENI' => 70_000,
             'MZDA_HODINOVA_DOCH' => 2_352_000,
-            'MZDA_HODINOVA_NOC' => 172_900,
             'MZDA_UKOLOVA' => 1_292_900,
             'PRIPLATEK_BOZP' => 170_000,
+            // „Suma hodinovky NOC" je příplatek za noční práci, ne druhá hodinová mzda.
+            'PRIPLATEK_NOCNI' => 172_900,
             'PRIPLATKY_K_HODINOVE' => 673_800,
+            // Zdanitelná část stravování: nepeněžní příjem do hrubé mzdy.
+            'STRAVOVANI_ZDANITELNE' => 61_000,
         ], $components);
         // Obědy placené zaměstnancem jsou srážka z čisté mzdy, ne mzdová složka.
         self::assertSame(['net_meal_deduction' => 29_000], array_column($jana['deductions'], 'amount_minor', 'meaning'));
@@ -94,8 +140,14 @@ final class AttendanceSampleProfileTest extends TestCase
         self::assertSame('2026-06-03', $karel['end_on']);
         self::assertNull($karel['start_on']);
 
-        // Kopie jmen s nulami, součty a sazby v hlavičce složku nevyrobí.
+        // Kopie jmen s nulami, součty, stropy sazeb ani kontrolní sloupce složku nevyrobí.
         self::assertSame(['DOCH_PREMIE_ZA_BALENI' => 'Prémie za balení'], $result['auto_components']);
+        foreach ($persons as $person) {
+            foreach ($person['components'] as $component) {
+                self::assertStringNotContainsStringIgnoringCase('MAX', (string) $component['component_code']);
+                self::assertStringNotContainsStringIgnoringCase('KONTROLA', (string) $component['component_code']);
+            }
+        }
     }
 
     public function testPersonColumnWithoutLabelGetsPlaceholderEvenWhenNamesCarryNumbers(): void
@@ -162,15 +214,18 @@ final class AttendanceSampleProfileTest extends TestCase
                         'G' => 'Suma hodinovky vč. přesčasů', 'H' => 'Suma hodinovky NOC', 'I' => 'Suma hodinovky NOC',
                         'J' => 'Prémie za balení', 'K' => 'Součet mzdy', 'L' => 'paušál', 'M' => '140',
                         'N' => 'Příplatky k hodinové mzdě',
+                        // Strop sazby pro výpočet v sešitu, ne částka k výplatě.
+                        'O' => 'max příplatek za přesčas +100', 'P' => 'Kontrola příplatků VÝPOČET',
                     ],
                     2 => [
                         'A' => 'Jana Nováková', 'B' => 176, 'C' => 32.6, 'D' => 160.5, 'E' => 16, 'F' => 12929,
                         'G' => 23520, 'H' => 1729, 'I' => 999, 'J' => 700, 'K' => 25249, 'L' => 'Petr Svoboda',
-                        'M' => 5 * $day, 'N' => 6738,
+                        'M' => 5 * $day, 'N' => 6738, 'O' => 900, 'P' => 1500,
                     ],
                     3 => [
                         'A' => 'Petr Svoboda', 'B' => 176, 'C' => 0, 'D' => 150, 'E' => 0, 'F' => 0,
                         'G' => 21000, 'H' => 0, 'I' => 0, 'J' => 0, 'K' => 21000, 'L' => 0, 'M' => 0, 'N' => 0,
+                        'O' => 0, 'P' => 0,
                     ],
                     // Technik: úkol je jen v hlavním seznamu, výpočet ho nemá (prázdná buňka, ne nula).
                     4 => ['A' => 'Karel Technik', 'B' => 176, 'D' => 20],

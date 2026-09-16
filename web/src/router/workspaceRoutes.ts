@@ -69,6 +69,15 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
           return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
         },
       },
+      // Průvodce „Přechod z POHODA" — převod účetního roku z XML exportu POHODY.
+      {
+        path: 'imports/pohoda', name: 'imports-pohoda',
+        component: () => import('@/pages/imports/PohodaMigration.vue'), meta: { requiresSupplier: true },
+        beforeEnter: () => {
+          const auth = useAuthStore()
+          return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
+        },
+      },
       { path: 'purchase-invoices/payment-orders',  name: 'purchase-invoices-payment-orders', component: () => import('@/pages/purchase-invoices/PaymentOrders.vue') },
       // AI import přijaté faktury (§12b) — extrakční flow vytažený z admin Integrations
       // (?tab=ai zůstává jen nastavení brány). Oprávnění purchase_invoices.scan zrcadlí

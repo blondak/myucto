@@ -19,7 +19,8 @@ final class PendingBackfillCounter
 
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM cash_documents
-              WHERE supplier_id = ? AND status = 'posted' AND journal_entry_id IS NULL{$cashDate}"
+              WHERE supplier_id = ? AND status = 'posted' AND journal_entry_id IS NULL{$cashDate}
+                AND " . OpeningBalanceDocuments::notInOpeningSql('cash', 'cash_documents')
         );
         $stmt->execute($from !== null ? [$supplierId, $from] : [$supplierId]);
         $cashDocuments = (int) $stmt->fetchColumn();
@@ -29,6 +30,7 @@ final class PendingBackfillCounter
             "SELECT COUNT(*) FROM invoices i
               WHERE i.supplier_id = ? AND i.status NOT IN ('draft','cancelled')
                 AND i.invoice_type IN ({$invoiceTypePlaceholders}){$docDate}
+                AND " . OpeningBalanceDocuments::notInOpeningSql('invoice', 'i') . "
                 AND NOT EXISTS (SELECT 1 FROM journal_entries je
                                  WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice'
                                    AND je.source_id = i.id AND je.reversed_by IS NULL)"
@@ -42,6 +44,7 @@ final class PendingBackfillCounter
             "SELECT COUNT(*) FROM purchase_invoices pi
               WHERE pi.supplier_id = ? AND pi.status IN ('received','booked','paid'){$docDate}
                 AND pi.document_kind <> 'advance'
+                AND " . OpeningBalanceDocuments::notInOpeningSql('purchase_invoice', 'pi') . "
                 AND NOT EXISTS (SELECT 1 FROM journal_entries je
                                  WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice'
                                    AND je.source_id = pi.id AND je.reversed_by IS NULL)"

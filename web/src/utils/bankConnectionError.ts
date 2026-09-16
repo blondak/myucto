@@ -49,8 +49,17 @@ export function bankConnectionErrorMessage(error: unknown, t: (key: string) => s
     payment_order_items_not_payable: 'payable', payment_order_date_expired: 'date',
     payment_submission_unavailable: 'payment_unavailable',
     kb_plus_statements_unavailable: 'kb_plus_statements', kb_plus_statement_pending: 'kb_plus_statement_pending',
+    bank_sync_failed: 'server',
   }
   const key = keys[apiErrorCode(error)]
-  if (!key) return apiErrorMessage(error, fallback)
+  // Bez strukturované chyby (HTML stránka IIS po timeoutu, výpadek sítě) by
+  // apiErrorMessage vrátil text axiosu „Request failed with status code 500“.
+  if (!key) return (error as any)?.response?.data?.error ? apiErrorMessage(error, fallback) : fallback
   return t(`bank_connection.error_${providerKeys[provider]?.[key] ?? key}`)
+}
+
+/** Záložní text načtení pohybů, když server nevrátil strukturovanou chybu. */
+export function bankSyncFallback(error: unknown, t: (key: string) => string, provider = ''): string {
+  if (!(error as any)?.response) return t('bank_connection.error_network')
+  return t(provider === 'kb_plus' ? 'bank_connection.error_server_kb_plus' : 'bank_connection.error_server')
 }

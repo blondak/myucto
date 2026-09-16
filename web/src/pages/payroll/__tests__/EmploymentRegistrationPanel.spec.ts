@@ -226,9 +226,30 @@ function mountPanel(canWrite = true) {
           props: ['to'],
           template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
         },
+        Modal: {
+          props: ['title', 'widthClass'],
+          template: '<div data-test="modal"><slot /><slot name="footer" /></div>',
+        },
       },
     },
   })
+}
+
+function preparedSubmission(environment: 'test' | 'production') {
+  return {
+    submission_id: 12,
+    obligation_id: 3,
+    part_id: 4,
+    artifact_id: 6,
+    status: 'ready',
+    row_version: 3,
+    environment,
+    agenda_code: 'PREZEC26',
+    interaction: 'limited_pre_registration',
+    artifact_sha256: 'b'.repeat(64),
+    created: true,
+    deadline,
+  }
 }
 
 function rejection(code: string, message: string) {
@@ -314,8 +335,8 @@ describe('EmploymentRegistrationPanel', () => {
     await wrapper.get('[data-test="registration-prepare"]').trigger('click')
     await flushPromises()
 
-    expect(m.preview).toHaveBeenCalledWith(5, 'test')
-    expect(m.prepare).toHaveBeenCalledWith(5, 'test')
+    expect(m.preview).toHaveBeenCalledWith(5, 'production')
+    expect(m.prepare).toHaveBeenCalledWith(5, 'production')
     expect(m.saveA1Profile.mock.invocationCallOrder[0])
       .toBeLessThan(m.preview.mock.invocationCallOrder[0])
     expect(m.preview.mock.invocationCallOrder[0])
@@ -638,10 +659,15 @@ describe('EmploymentRegistrationPanel', () => {
     const actions = wrapper.get('[data-test="registration-transport-actions"]')
     await actions.get('button').trigger('click')
     await flushPromises()
+    expect(m.send).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="production-send-confirm-message"]').text())
+      .toContain('payroll.production_send.registration')
+    await wrapper.get('[data-test="production-send-confirm-yes"]').trigger('click')
+    await flushPromises()
 
     expect(m.send).toHaveBeenCalledWith(
       12,
-      'test',
+      'production',
       '00000000-0000-4000-8000-000000000001',
     )
     expect(m.poll).not.toHaveBeenCalled()
@@ -650,23 +676,68 @@ describe('EmploymentRegistrationPanel', () => {
 
     await actions.get('button').trigger('click')
     await flushPromises()
-    expect(m.poll).toHaveBeenCalledWith(87, 'test')
+    expect(m.poll).toHaveBeenCalledWith(87, 'production')
     expect(m.close).not.toHaveBeenCalled()
 
     await actions.get('button').trigger('click')
     await flushPromises()
-    expect(m.close).toHaveBeenCalledWith(87, 'test')
+    expect(m.close).toHaveBeenCalledWith(87, 'production')
     expect(wrapper.get('[data-test="registration-transport-result"]').text())
       .toContain('registration.closed')
   })
 
-  it('uses the selected production environment throughout the manual flow', async () => {
+  it('does not send to production when the confirmation is cancelled', async () => {
+    m.prepare.mockResolvedValue(preparedSubmission('production'))
     const wrapper = mountPanel()
-    await wrapper.get('[data-test="registration-environment"]').setValue('production')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-transport-actions"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="production-send-confirm-no"]').trigger('click')
+    await flushPromises()
+
+    expect(m.send).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="production-send-confirm"]').exists()).toBe(false)
+  })
+
+  it('sends to the test environment without a production confirmation', async () => {
+    m.prepare.mockResolvedValue(preparedSubmission('test'))
+    m.send.mockResolvedValue({
+      agenda_code: 'PREZEC26',
+      submission_class: 'CSSZ_PREZEC',
+      payload_sha256: 'b'.repeat(64),
+      acknowledgement: { correlation_id: 'CID-1', poll_interval_seconds: 30, gateway_timestamp: null },
+      settled: false,
+      attempt: { id: 87, status: 'awaiting_protocol', closed_at: null },
+    })
+    const wrapper = mountPanel()
+    await wrapper.get('[data-test="registration-environment"]').setValue('test')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-transport-actions"] button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="production-send-confirm"]').exists()).toBe(false)
+    expect(m.send).toHaveBeenCalledWith(12, 'test', expect.any(String))
+  })
+
+  it('defaults to production and uses an explicitly selected test environment', async () => {
+    const wrapper = mountPanel()
+    const select = wrapper.get('[data-test="registration-environment"]')
+    expect((select.element as HTMLSelectElement).value).toBe('production')
+
+    await select.setValue('test')
     await wrapper.get('[data-test="registration-preview"]').trigger('click')
     await flushPromises()
 
-    expect(m.preview).toHaveBeenCalledWith(5, 'production')
+    expect(m.preview).toHaveBeenCalledWith(5, 'test')
   })
 
   it('after reload resumes the stored attempt without sending it again', async () => {
@@ -695,7 +766,7 @@ describe('EmploymentRegistrationPanel', () => {
     await wrapper.get('[data-test="registration-prepare"]').trigger('click')
     await flushPromises()
 
-    expect(m.status).toHaveBeenCalledWith(12, 'test')
+    expect(m.status).toHaveBeenCalledWith(12, 'production')
     expect(m.send).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="registration-transport-actions"]').text())
       .toContain('registration.poll')
@@ -742,11 +813,11 @@ describe('EmploymentRegistrationPanel', () => {
     await wrapper.get('[data-test="registration-event-select"]').setValue('91')
     await wrapper.get('[data-test="registration-preview"]').trigger('click')
     await flushPromises()
-    expect(m.preview).toHaveBeenCalledWith(5, 'test', 91)
+    expect(m.preview).toHaveBeenCalledWith(5, 'production', 91)
 
     await wrapper.get('[data-test="registration-prepare"]').trigger('click')
     await flushPromises()
-    expect(m.prepare).toHaveBeenCalledWith(5, 'test', 91)
+    expect(m.prepare).toHaveBeenCalledWith(5, 'production', 91)
   })
 
   it('creates an A5 source, selects it and previews the exact event', async () => {
@@ -783,13 +854,13 @@ describe('EmploymentRegistrationPanel', () => {
     await flushPromises()
 
     expect(m.approveEvent).toHaveBeenCalledWith(5, expect.objectContaining({
-      environment: 'test',
+      environment: 'production',
       interaction: 'variable_symbol_transfer',
       effective_on: '2026-08-26',
       source_reference: 'transfer-decision-4',
       new_variable_symbol: '9990005678',
     }))
-    expect(m.preview).toHaveBeenCalledWith(5, 'test', 92)
+    expect(m.preview).toHaveBeenCalledWith(5, 'production', 92)
   })
 
   it('requires an explicit no-show confirmation for A8 and binds the source submission', async () => {

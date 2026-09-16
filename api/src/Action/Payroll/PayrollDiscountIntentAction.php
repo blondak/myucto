@@ -250,7 +250,7 @@ final class PayrollDiscountIntentAction
     {
         $body = (array) ($request->getParsedBody() ?? []);
         $value = $body['environment']
-            ?? ($request->getQueryParams()['environment'] ?? 'test');
+            ?? ($request->getQueryParams()['environment'] ?? 'production');
         if (!in_array($value, ['test', 'production'], true)) {
             throw new \InvalidArgumentException(
                 'Prostředí musí být test nebo production.',

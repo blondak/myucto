@@ -26,6 +26,8 @@ export interface BankStatement {
     confirmed_closing?: number | null
     bank_statement_id?: number | null
     difference?: number | null
+    /** Rozdíl mezi zůstatkem hlášeným bankou (avízo) a zůstatkem dopočteným z evidovaných pohybů — nenačtený nebo přebývající pohyb. */
+    unexplained_difference?: number | null
     credit?: number
     debit?: number
     transaction_count?: number

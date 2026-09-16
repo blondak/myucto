@@ -452,6 +452,87 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda s pastmi z reálných záloh v roce 2025:
+     *   - storno výdeje v bance (vrácený poplatek): `Vydej` = 1 a záporná částka, peníze na
+     *     účet přišly (BV25002, v deníku 568/221 zápornou částkou),
+     *   - úhrada, kterou Money zaúčtovalo na 221 jinou částkou, než nese bankovní doklad
+     *     (kurzový rozdíl 0,72 Kč zaúčtovaný mimo účet banky, BV25003),
+     *   - dobropis, jehož celkem se v Money liší od zápisu v deníku o 10 Kč (DV25001).
+     * Poslední dva rozdíly jsou už v Money — rekonciliace je má vysvětlit, ne shodit.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithMoneyDifferences(): array
+    {
+        $files = self::files();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $append('ROK.002/UcOsnova.DAT', self::CHART_FIELDS, [['Ucet' => '663000', 'Nazev' => 'Kurzové zisky']]);
+        $append('ROK.002/UcDenik.DAT', self::JOURNAL_FIELDS, [
+            ['Cislo' => 40, 'Zdroj' => 'BK', 'Doklad' => 'BV25002', 'Datum' => '2025-09-15', 'Popis' => 'Storno poplatku', 'UcMD' => '568000', 'UcD' => '221001', 'Castka' => -30.0],
+            ['Cislo' => 41, 'Zdroj' => 'BK', 'Doklad' => 'BV25003', 'Datum' => '2025-09-20', 'Popis' => 'Úhrada licence', 'UcMD' => '321000', 'UcD' => '221001', 'Castka' => 24.26],
+            ['Cislo' => 42, 'Zdroj' => 'BK', 'Doklad' => 'BV25003', 'Datum' => '2025-09-20', 'Popis' => 'Kurzový rozdíl při úhradě', 'UcMD' => '321000', 'UcD' => '663000', 'Castka' => 0.72],
+            ['Cislo' => 43, 'Zdroj' => 'FV', 'Doklad' => 'DV25001', 'Datum' => '2025-10-01', 'DatPlnDPH' => '2025-10-01', 'Popis' => 'Dobropis poradenství', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => -1010.0],
+            ['Cislo' => 44, 'Zdroj' => 'FV', 'Doklad' => 'DV25001', 'Datum' => '2025-10-01', 'DatPlnDPH' => '2025-10-01', 'Popis' => 'Dobropis poradenství', 'UcMD' => '311000', 'UcD' => '343200', 'Castka' => -210.0],
+            ['Cislo' => 45, 'Zdroj' => 'FP', 'Doklad' => 'FP25006', 'Datum' => '2025-10-10', 'DatPlnDPH' => '2025-10-10', 'Popis' => 'Doplatek po záloze', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 529.0],
+            ['Cislo' => 46, 'Zdroj' => 'FP', 'Doklad' => 'FP25006', 'Datum' => '2025-10-10', 'DatPlnDPH' => '2025-10-10', 'Popis' => 'Doplatek po záloze', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => 111.0],
+        ]);
+        // Konečná faktura po odpočtu zálohy: `CelkemSDPH` nese celou cenu, sazby jen doplatek
+        // (`SumZaloha`) — převedený doklad má doplatek, opakovaný převod ho nesmí hlásit jako změněný.
+        $append('ROK.002/PFaktury.DAT', self::PURCHASE_FIELDS, [[
+            'D_ICO' => self::VENDOR_ICO, 'D_DIC' => 'CZ' . self::VENDOR_ICO, 'D_Nazev' => 'Dodavatel Alfa s.r.o.',
+            'D_Ulice' => 'Vzorová 1', 'D_Mesto' => 'Praha', 'D_Psc' => '110 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_PURCHASE, 'Uhrada' => 'převodem',
+            'Doklad' => 'FP25006', 'PrijatDokl' => 'DF-2025-060', 'VarSymbol' => '2025060',
+            'Vystaveno' => '2025-10-10', 'DatUcPr' => '2025-10-10', 'PlnenoDPH' => '2025-10-10', 'Splatno' => '2025-10-24', 'Doruceno' => '2025-10-10',
+            'Zaklad_2' => 529.0, 'DPH_2' => 111.0, 'CelkemSDPH' => 14192.0, 'Popis' => 'Doplatek po záloze',
+        ]]);
+        $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [
+            ['Doklad' => 'BV25002', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-09-15', 'DatPlat' => '2025-09-15', 'Celkem' => -30.0, 'Popis' => 'Storno poplatku', 'Vypis' => 9],
+            ['Doklad' => 'BV25003', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-09-20', 'DatPlat' => '2025-09-20', 'Celkem' => 24.98, 'Popis' => 'Úhrada licence', 'Vypis' => 10],
+        ]);
+        $append('ROK.002/VFaktury.DAT', self::ISSUED_FIELDS, [[
+            'O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Beta a.s.',
+            'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+            'Dobropis' => 1, 'Doklad' => 'DV25001', 'VarSymbol' => '2025002',
+            'Vystaveno' => '2025-10-01', 'DatUcPr' => '2025-10-01', 'PlnenoDPH' => '2025-10-01', 'Splatno' => '2025-10-15',
+            'Zaklad_2' => -1000.0, 'DPH_2' => -210.0, 'CelkemSDPH' => -1210.0, 'Popis' => 'Dobropis poradenství',
+        ]]);
+        return $files;
+    }
+
+    /**
+     * Agenda, ve které jeden pokladní doklad (PV25001, 800 Kč) hradí dvě přijaté faktury
+     * (FP25010 a FP25011 po 400 Kč). Faktury Money nezaúčtovalo, jde jen o vazbu úhrady.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithCashPayingTwoInvoices(): array
+    {
+        $files = self::files();
+        $table = strtoupper(pathinfo('ROK.002/PFaktury.DAT', PATHINFO_FILENAME));
+        $existing = iterator_to_array(Ms3Table::fromString($files['ROK.002/PFaktury.DAT'], $table)->rows(), false);
+        $rows = [];
+        foreach (['FP25010' => 'DF-2025-110', 'FP25011' => 'DF-2025-111'] as $doc => $vendorDoc) {
+            $rows[] = [
+                'D_ICO' => self::VENDOR_ICO, 'D_DIC' => 'CZ' . self::VENDOR_ICO, 'D_Nazev' => 'Dodavatel Alfa s.r.o.',
+                'D_Ulice' => 'Vzorová 1', 'D_Mesto' => 'Praha', 'D_Psc' => '110 00',
+                'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_PURCHASE, 'Uhrada' => 'hotově',
+                'Doklad' => $doc, 'PrijatDokl' => $vendorDoc, 'VarSymbol' => substr($vendorDoc, -3) . '2025',
+                'Vystaveno' => '2025-01-30', 'DatUcPr' => '2025-01-30', 'PlnenoDPH' => '2025-01-30', 'Splatno' => '2025-02-10', 'Doruceno' => '2025-01-30',
+                'Zaklad_2' => 330.58, 'DPH_2' => 69.42, 'CelkemSDPH' => 400.0,
+                'Uhrazeno' => '2025-02-01', 'UDoklad' => 'PV25001', 'Popis' => 'Hotovostní nákup',
+            ];
+        }
+        $files['ROK.002/PFaktury.DAT'] = Ms3FixtureWriter::table(self::PURCHASE_FIELDS, array_merge($existing, $rows));
+        return $files;
+    }
+
+    /**
      * Záloha agendy z daných souborů (varianty agendy pro jednotlivé testy).
      *
      * @param array<string,string> $files

@@ -128,7 +128,7 @@ final class MoneyS3Reconciler
             $checks[] = ['key' => 'money_report', 'ok' => $reportDiffs === [] && $parsed['accounts'] !== []];
         }
 
-        $documents = $this->documentsAgainstJournal($ctx, $periodId);
+        $documents = $this->documentsAgainstJournal($ctx, $year, $periodId);
         foreach ($documents as $d) {
             $checks[] = ['key' => 'documents_' . $d['key'], 'ok' => $d['ok']];
         }
@@ -162,9 +162,9 @@ final class MoneyS3Reconciler
     /**
      * Doklady převedené z Money proti zápisům, na které jsou navázané.
      *
-     * @return list<array{key:string,documents:float,journal:float,ok:bool,other_accounts?:int}>
+     * @return list<array{key:string,documents:float,journal:float,ok:bool,other_accounts?:int,source_differences?:list<array{document_no:string,difference:float}>}>
      */
-    private function documentsAgainstJournal(ImportContext $ctx, int $periodId): array
+    private function documentsAgainstJournal(ImportContext $ctx, int $year, int $periodId): array
     {
         $pdo = $this->db->pdo();
         $scalar = static function (string $sql, array $params) use ($pdo): float {
@@ -245,8 +245,174 @@ final class MoneyS3Reconciler
 
         $out = [];
         foreach ($rows as [$key, $documents, $journal]) {
-            $out[] = ['key' => $key, 'documents' => $documents, 'journal' => $journal, 'ok' => abs($documents - $journal) < 0.005,
+            $row = ['key' => $key, 'documents' => $documents, 'journal' => $journal, 'ok' => abs($documents - $journal) < 0.005,
                 'other_accounts' => $other[$key] ?? 0];
+            $out[] = $row['ok'] ? $row : $this->explainBySource($ctx, $year, $periodId, $row);
+        }
+        return $out;
+    }
+
+    /**
+     * Druh dokladu v kontrole dokladů proti deníku: tabulka, částka dokladu, druh v mapě,
+     * typ vazby, účet a znaménko řádku (jako ve {@see documentsAgainstJournal()}).
+     */
+    private const SOURCES = [
+        'purchase_invoices' => ['purchase_invoices', 'd.total_with_vat', 'purchase_invoice', 'purchase_invoice', '321', true],
+        'issued_invoices' => ['invoices', 'd.total_with_vat', 'invoice', 'invoice', '311', false],
+        'cash' => ['cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', 'cash', '211', false],
+    ];
+
+    /**
+     * Rozdíl dokladů proti deníku, který je už v samotném Money: doklad nese jinou částku než
+     * jeho zápis v deníku Money (kurzový rozdíl zaúčtovaný mimo účet dokladu, dobropis v deníku
+     * přepočtený jiným kurzem). MyÚčto obojí převzalo věrně — převod sedí a rozdíl se vypíše po
+     * dokladech (`source_differences`). Vysvětlený je jen zápis, jehož rozdíl v MyÚčtu je na
+     * haléř stejný jako rozdíl téhož dokladu v Money; cokoli jiného zůstává chybou.
+     *
+     * @param array{key:string,documents:float,journal:float,ok:bool,other_accounts:int} $row
+     * @return array<string,mixed>
+     */
+    private function explainBySource(ImportContext $ctx, int $year, int $periodId, array $row): array
+    {
+        $entries = $this->entryDifferences($ctx->supplierId, $periodId, $row['key']);
+        if ($entries === []) {
+            return $row;
+        }
+        $money = $this->moneyDifferences($ctx, $year, $row['key'], array_column($entries, 'document_no'));
+        $explained = [];
+        $total = 0.0;
+        foreach ($entries as $e) {
+            $m = $money[$e['document_no']] ?? null;
+            if ($m === null || abs($m) < 0.005 || abs($m - $e['difference']) >= 0.005) {
+                return $row;
+            }
+            $explained[] = ['document_no' => $e['document_no'], 'difference' => round($e['difference'], 2)];
+            $total += $e['difference'];
+        }
+        if (abs(round($row['documents'] - $row['journal'], 2) - round($total, 2)) >= 0.005) {
+            return $row;
+        }
+        $row['ok'] = true;
+        $row['source_differences'] = $explained;
+        return $row;
+    }
+
+    /**
+     * Zápisy období, u kterých převedené doklady nesedí na účet dokladu v zápisu.
+     *
+     * @return list<array{document_no:string,difference:float}>
+     */
+    private function entryDifferences(int $supplierId, int $periodId, string $key): array
+    {
+        if ($key === 'bank') {
+            $linked = "FROM journal_entry_document_links k
+                         JOIN bank_transactions t ON t.id = k.doc_id
+                         JOIN bank_statements s ON s.id = t.statement_id
+                        WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank' AND s.currency = 'CZK'
+                          AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = e.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = t.id)";
+            $sql = "SELECT e.document_no,
+                           (SELECT COALESCE(SUM(t.amount), 0) {$linked}) AS docs,
+                           (SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+                              FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+                             WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND a.account_code LIKE '221%') AS journal
+                      FROM journal_entries e
+                     WHERE e.supplier_id = ? AND e.period_id = ? AND EXISTS (SELECT 1 {$linked})";
+        } else {
+            $spec = self::SOURCES[$key] ?? null;
+            if ($spec === null) {
+                return [];
+            }
+            [$table, $expr, $kind, $docType, $prefix, $creditPositive] = $spec;
+            $sign = $creditPositive ? "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END" : "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END";
+            $linked = "FROM journal_entry_document_links k
+                         JOIN {$table} d ON d.id = k.doc_id AND d.supplier_id = k.supplier_id
+                        WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = '{$docType}'
+                          AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = '{$kind}' AND m.target_id = d.id)";
+            $sql = "SELECT e.document_no,
+                           (SELECT COALESCE(SUM({$expr}), 0) {$linked}) AS docs,
+                           (SELECT COALESCE(SUM({$sign}), 0)
+                              FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+                             WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND a.account_code LIKE '{$prefix}%') AS journal
+                      FROM journal_entries e
+                     WHERE e.supplier_id = ? AND e.period_id = ? AND EXISTS (SELECT 1 {$linked})
+                       AND (SELECT COUNT(DISTINCT l2.side) FROM journal_entry_lines l2
+                              JOIN chart_of_accounts a2 ON a2.id = l2.account_id AND a2.supplier_id = l2.supplier_id
+                             WHERE l2.supplier_id = e.supplier_id AND l2.entry_id = e.id AND a2.account_code LIKE '{$prefix}%') = 1";
+        }
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute([$supplierId, $periodId]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            $diff = round((float) $r['docs'] - (float) $r['journal'], 2);
+            if (abs($diff) >= 0.005) {
+                $out[] = ['document_no' => trim((string) $r['document_no']), 'difference' => $diff];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Rozdíl dokladu proti jeho zápisu přímo v Money (částka dokladu − účet dokladu v deníku),
+     * po číslech dokladů roku.
+     *
+     * @param list<string> $docNos
+     * @return array<string,float>
+     */
+    private function moneyDifferences(ImportContext $ctx, int $year, string $key, array $docNos): array
+    {
+        $wanted = array_flip(array_filter($docNos, static fn (string $n): bool => $n !== ''));
+        if ($wanted === []) {
+            return [];
+        }
+        [$prefix, $creditPositive] = $key === 'bank' ? ['221', false] : [self::SOURCES[$key][4], self::SOURCES[$key][5]];
+        $journal = [];
+        foreach ($ctx->backup->rowsAcrossYears('UcDenik') as $r) {
+            $doc = trim((string) ($r['Doklad'] ?? ''));
+            if (!isset($wanted[$doc]) || $ctx->yearOf($r) !== $year || Ms3Journal::isYearEndClosing($r) || Ms3Journal::isOpening($r)) {
+                continue;
+            }
+            $effect = Ms3Journal::effect($r);
+            if ($effect === null) {
+                continue;
+            }
+            $net = (str_starts_with($effect['debit'], $prefix) ? $effect['amount'] : 0.0) - (str_starts_with($effect['credit'], $prefix) ? $effect['amount'] : 0.0);
+            $journal[$doc] = ($journal[$doc] ?? 0.0) + ($creditPositive ? -$net : $net);
+        }
+        $amounts = [];
+        $add = static function (string $doc, float $amount) use (&$amounts): void {
+            $amounts[$doc] = ($amounts[$doc] ?? 0.0) + $amount;
+        };
+        $tables = match ($key) {
+            'bank' => ['BankKnih'],
+            'issued_invoices' => ['VFaktury', 'KnihPohl'],
+            'purchase_invoices' => ['PFaktury'],
+            'cash' => ['PoklKnih'],
+            default => [],
+        };
+        foreach ($tables as $table) {
+            foreach ($ctx->backup->rowsAcrossYears($table) as $r) {
+                $doc = trim((string) ($r['Doklad'] ?? ''));
+                if (!isset($wanted[$doc]) || $ctx->yearOf($r) !== $year || !empty($r['FlagDel'])) {
+                    continue;
+                }
+                if ($table === 'BankKnih') {
+                    $currency = strtoupper(trim((string) ($r['Mena'] ?? '')));
+                    if ($currency !== '' && !in_array($currency, ['CZK', 'KČ', 'KC'], true)) {
+                        continue;
+                    }
+                    $add($doc, CashBankImporter::transactionAmount($r, 'CZK')[0]);
+                } elseif ($table === 'PoklKnih') {
+                    $celkem = (float) ($r['Celkem'] ?? 0);
+                    $isOut = (((int) ($r['Vydej'] ?? 0)) === 1) !== ($celkem < 0);
+                    $add($doc, ($isOut ? -1 : 1) * round(abs($celkem), 2));
+                } else {
+                    $add($doc, round((float) ($r[$table === 'KnihPohl' ? 'Celkem' : 'CelkemSDPH'] ?? 0), 2));
+                }
+            }
+        }
+        $out = [];
+        foreach ($amounts as $doc => $amount) {
+            $out[$doc] = round($amount - ($journal[$doc] ?? 0.0), 2);
         }
         return $out;
     }

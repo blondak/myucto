@@ -951,6 +951,11 @@ final class PayrollQuickInputRepository
             $employmentIdsOnPage,
             $ruleset,
         );
+        $employerDefault = $this->surcharges->policyForEmployer(
+            $supplierId,
+            $periodStart,
+            $ruleset,
+        );
         $claims = $this->surchargeClaims->sourcesForPeriod(
             $supplierId,
             $periodStart,
@@ -969,7 +974,10 @@ final class PayrollQuickInputRepository
                 $periodStart,
                 $periodEnd,
                 $ruleset,
-                $policies[$employmentId] ?? PayrollSurchargePolicy::statutoryDefault(),
+                // Vztah bez vlastního sjednání dědí firemní výchozí sazby
+                // (migrace 1846); teprve pod nimi platí zákonné minimum.
+                // Čte se JEDNOU pro celou stránku, ne po řádcích.
+                $policies[$employmentId] ?? $employerDefault,
                 $claims[$employmentId] ?? [],
             );
         }
@@ -1042,6 +1050,22 @@ final class PayrollQuickInputRepository
                             self::nullableColumn($row, 'difficult_environment_rate_bp'),
                     ],
                     $ruleset,
+                    // Pevná částka za hodinu (migrace 1845) musí do rychlého
+                    // zadání stejně jako sazba. Bez ní by se týž nárok počítal
+                    // na dvou obrazovkách jinak: docházka podle sjednaných
+                    // 42 Kč/h, rychlý vstup podle zákonných deseti procent.
+                    [
+                        PayrollSurchargeKind::Overtime->value =>
+                            self::nullableColumn($row, 'overtime_fixed_hourly_minor'),
+                        PayrollSurchargeKind::Holiday->value =>
+                            self::nullableColumn($row, 'holiday_fixed_hourly_minor'),
+                        PayrollSurchargeKind::Night->value =>
+                            self::nullableColumn($row, 'night_fixed_hourly_minor'),
+                        PayrollSurchargeKind::Weekend->value =>
+                            self::nullableColumn($row, 'weekend_fixed_hourly_minor'),
+                        PayrollSurchargeKind::DifficultEnvironment->value =>
+                            self::nullableColumn($row, 'difficult_environment_fixed_hourly_minor'),
+                    ],
                 );
             } catch (\ValueError | \InvalidArgumentException) {
                 // Zásada je v databázi vadná. Výchozí zákonná zásada je tu
@@ -2247,18 +2271,34 @@ final class PayrollQuickInputRepository
         }
         $effective = $policy->effectiveRate(PayrollSurchargeKind::Overtime, $ruleset);
 
+        // Pevná částka za hodinu (migrace 1845) nahrazuje hodinovou sazbu.
+        // Zákonné minimum § 114 je kogentní, takže nižší sjednaná částka se
+        // dorovnává — jinak by rychlé zadání vyplatilo míň než docházka.
+        $fixedHourly = $policy->agreedFixedHourlyMinor(PayrollSurchargeKind::Overtime);
+        $statutoryHourly = RoundingMode::HalfUp->roundFraction(
+            self::multiplyExactly($rate, $effective['rate']->numerator),
+            $effective['rate']->denominator,
+        );
+        $belowStatutory = $fixedHourly !== null && $fixedHourly < $statutoryHourly;
+        $appliedHourly = $belowStatutory ? $statutoryHourly : $fixedHourly;
+
         // Příplatková polovina: `PV × čitatel × hodiny / (jmenovatel × 1000)`.
         // Jedním zlomkem, aby se nezaokrouhlovalo dvakrát — stejně jako
         // {@see \MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeLine}.
         $premium = $mode === PayrollSurchargeCompensationMode::CompensatoryTimeOff
             ? 0
-            : RoundingMode::HalfUp->roundFraction(
-                self::multiplyExactly(
-                    self::multiplyExactly($rate, $effective['rate']->numerator),
-                    $hours,
-                ),
-                self::multiplyExactly($effective['rate']->denominator, 1_000),
-            );
+            : ($appliedHourly === null
+                ? RoundingMode::HalfUp->roundFraction(
+                    self::multiplyExactly(
+                        self::multiplyExactly($rate, $effective['rate']->numerator),
+                        $hours,
+                    ),
+                    self::multiplyExactly($effective['rate']->denominator, 1_000),
+                )
+                : RoundingMode::HalfUp->roundFraction(
+                    self::multiplyExactly($appliedHourly, $hours),
+                    1_000,
+                ));
 
         $fundMinutes = $this->fund->minutes($supplierId, $employmentId, $period);
         if ($fundMinutes === null) {
@@ -2280,6 +2320,9 @@ final class PayrollQuickInputRepository
             'compensation_mode' => $mode->value,
             'premium_basis_points' => self::basisPoints($effective['rate']),
             'premium_rate_is_agreed' => $effective['agreed'],
+            'agreed_fixed_hourly_minor' => $fixedHourly,
+            'applied_fixed_hourly_minor' => $appliedHourly,
+            'below_statutory' => $belowStatutory,
             'ruleset_id' => $ruleset->version->id,
             'ruleset_content_hash' => $ruleset->version->contentHash,
             'rounding' => 'half-up-minor-unit',

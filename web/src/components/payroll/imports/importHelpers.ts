@@ -12,6 +12,7 @@ import type {
   AttendanceProfileExport,
   AttendanceRule,
   AttendanceSheet,
+  AttendanceSourceChecks,
   AttendanceUnit,
   AttendanceUnrecognizedColumn,
   ImportFilePayload,
@@ -262,8 +263,9 @@ export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeani
   {
     key: 'identity',
     meanings: [
-      'person_name', 'personal_number', 'birth_number', 'relation_label', 'department',
-      'cost_center', 'position', 'weekly_hours', 'start_end_note', 'monthly_wage',
+      'person_name', 'personal_number', 'birth_number', 'birth_date', 'health_insurer_code',
+      'relation_label', 'department', 'cost_center', 'position', 'weekly_hours', 'start_end_note',
+      'monthly_wage',
     ],
   },
   {
@@ -298,8 +300,8 @@ export const PROFILE_COMPONENT_KINDS: AttendanceProfileComponentKind[] = [
 export const AUTO_COMPONENT_CODE = '*'
 
 const TEXT_MEANINGS = new Set<AttendanceMeaning>([
-  'person_name', 'personal_number', 'birth_number', 'relation_label', 'department',
-  'cost_center', 'position', 'start_end_note', 'monthly_wage',
+  'person_name', 'personal_number', 'birth_number', 'birth_date', 'health_insurer_code', 'relation_label',
+  'department', 'cost_center', 'position', 'start_end_note', 'monthly_wage',
 ])
 const MONEY_MEANINGS = new Set<AttendanceMeaning>([
   'component', 'net_meal_deduction', 'net_other_deduction', 'reference_gross', 'reference_net',
@@ -868,6 +870,20 @@ export function autoPersonCreateDefaults(period: string): PersonCreateDefaults {
 
 export function isValidPeriod(period: string): boolean {
   return firstDayOfPeriod(period) !== ''
+}
+
+/**
+ * Použití dávky čeká na potvrzení kontrol období a dvojích vstupů. Starší
+ * server kontroly neposílá, pak se nic nepotvrzuje.
+ */
+export function sourceConfirmationMissing(checks: AttendanceSourceChecks | null | undefined, confirmed: boolean): boolean {
+  return checks?.requires_confirmation === true && !confirmed
+}
+
+/** Období podkladů podle názvů, která se liší od vybraného (pro upozornění). */
+export function mismatchedPeriods(checks: AttendanceSourceChecks | null | undefined): string[] {
+  if (!checks?.period.mismatch) return []
+  return checks.period.detected.map(item => item.period).filter(period => period !== checks.period.selected)
 }
 
 export function chunk<T>(items: readonly T[], size: number): T[][] {

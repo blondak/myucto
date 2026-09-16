@@ -196,6 +196,58 @@ protože jen tato dvě ustanovení dovolují sjednat jinou minimální výši. U
 § 115 a § 117 je zákonné „nejméně" tvrdá podlaha a aplikace nižší sjednanou
 sazbu vůbec neuloží.
 
+#### Procentem, nebo pevnou částkou za hodinu
+
+Příplatek jde sjednat dvojím způsobem a **volíte u každého druhu zvlášť**:
+
+- **procentem** z průměrného výdělku (u § 117 ze základní sazby minimální mzdy);
+- **pevnou částkou za hodinu** — například „přesčas 75 Kč/h, víkend 42 Kč/h".
+
+Pevná částka se hodí tam, kde ji máte takto napsanou ve mzdovém výměru nebo
+v kolektivní smlouvě: zaměstnanec si ji přečte rovnou a nemusí čekat, až se
+spočítá čtvrtletní průměr. Příplatek se pak počítá jako **sjednaná částka krát
+odpracované hodiny** daného druhu. Obojí u téhož druhu naráz sjednat nelze —
+přepínač **Způsob sjednání** vybírá jedno z toho; kombinovat druhy navzájem ale
+můžete, tedy přesčas procentem a víkend pevnou částkou.
+
+> **Zákonné minimum platí i u pevné částky.** Je-li sjednaná částka nižší než
+> zákonné minimum, aplikace u přesčasu (§ 114), svátku (§ 115) a ztíženého
+> prostředí (§ 117) **dopočítá zákonné minimum** a vyplatí je; u noční práce
+> (§ 116) a víkendu (§ 118) ctí sjednanou částku, protože tam zákon nižší
+> sjednání dovoluje. V obou případech je rozdíl mezi sjednanou a vyplacenou
+> hodinovou částkou vidět na výplatní pásce, abyste sjednání mohli opravit.
+
+#### Kde se sazba nastavuje: firma, nebo vztah
+
+Sazby se zadávají na **dvou úrovních** a platí pravidlo „konkrétnější vyhrává":
+
+| Úroveň | Kde | Pro koho platí |
+|---|---|---|
+| Firemní výchozí | Mzdy → Nastavení zaměstnavatele → Mzdové politiky | Pro všechny vztahy, které nemají vlastní sjednání |
+| Sjednání na vztahu | Karta pracovního vztahu → Zásady příplatků | Jen pro ten jeden vztah; **přebíjí** firemní výchozí |
+
+Platí-li ve firmě jedna kolektivní smlouva, zadejte sazby **jednou na úrovni
+firmy**. Zadávat je u každého z dvou set lidí zvlášť nedává smysl a při změně
+smlouvy by se na někoho zapomnělo. Kartu vztahu použijte jen tam, kde se
+sjednání od firemního liší — typicky u vedoucích (§ 114 odst. 3) nebo
+u jednotlivě dohodnutých podmínek.
+
+Firemní zásada se **verzuje podle platnosti** stejně jako zbytek mzdové
+politiky: nová kolektivní smlouva je nová verze od data účinnosti, stará
+zůstává v historii a mzdy spočítané podle ní se nemění.
+
+> **Není-li sazba nikde**, platí zákonné minimum ze sady pravidel. Prázdné pole
+> tedy neznamená „bez příplatku", ale „podle zákona".
+
+Na výplatní pásce a ve stopě výpočtu je vidět, **odkud sazba přišla** — ze
+sjednání na vztahu, z firemní zásady, nebo ze zákona. Bez toho by nešlo
+zodpovědět, proč příplatek vyšel zrovna takhle.
+
+Na rozdíl od procenta se pevná částka **nedá posoudit dopředu**: zákonné
+minimum je podíl z průměrného výdělku konkrétního člověka, takže táž
+čtyřicetikoruna je u jednoho nad minimem a u druhého pod ním. Formulář proto
+u pevné částky zákonné minimum nezobrazuje a vyhodnotí se až ve mzdě.
+
 #### Náhradní volno místo příplatku
 
 Zákon ho zná jen u přesčasu (§ 114) a u svátku (§ 115); u ostatních tří

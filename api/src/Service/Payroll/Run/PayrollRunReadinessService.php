@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use PDO;
@@ -55,6 +56,9 @@ final class PayrollRunReadinessService
         private readonly PayrollEmployerPolicyRepository $employerPolicies,
         private readonly PayrollPeopleRepository $people,
         private readonly PayrollRunJmhzReadinessProbe $jmhzProbe,
+        // První mzdové období firmy. Starší měsíc se nekontroluje, jen odmítne —
+        // viz `moduleStartFinding()`.
+        private readonly PayrollModuleStateRepository $moduleState,
     ) {}
 
     /**
@@ -81,6 +85,35 @@ final class PayrollRunReadinessService
     ): array {
         $findings = [];
         $snapshot = null;
+
+        /*
+         * Měsíc PŘED prvním mzdovým obdobím firmy končí hned a jediným nálezem.
+         *
+         * ── Co bylo špatně ──────────────────────────────────────────────────
+         * Kontrola nevěděla nic o tom, odkdy firma vede mzdy v MyÚčtu. Po
+         * převodu z předchozího programu, který zpracoval leden až srpen, tak
+         * seznam běhů u každého staršího měsíce vypsal dvě stě nálezů — chybí
+         * docházka, chybí vstupy, chybí registrace — a účetní je četla jako
+         * práci, kterou má udělat. Přitom mzdový běh za takový měsíc NEJDE ani
+         * založit: `assertModuleAvailable()` ho odmítne jako období, které
+         * předchází aktivaci modulu. Nálezy tedy popisovaly data, která se
+         * nikdy počítat nebudou.
+         *
+         * Starší měsíce patří do počátečních stavů kumulací
+         * ({@see \MyInvoice\Service\Payroll\PayrollOpeningBalanceService}), ne
+         * do mzdových běhů.
+         */
+        $moduleStartFinding = $this->moduleStartFinding($supplierId, $periodStart);
+        if ($moduleStartFinding !== null) {
+            return [
+                'period_start' => $periodStart,
+                'payment_date' => $paymentDate,
+                'office_id' => $officeId,
+                'ready' => false,
+                'has_findings' => true,
+                'findings' => [$moduleStartFinding],
+            ];
+        }
 
         // Zaměstnavatelská politika se ověřuje PRVNÍ a zvlášť: bez ní snapshot
         // vůbec nevznikne (builder hodí výjimku), takže by se všechny ostatní
@@ -267,6 +300,63 @@ final class PayrollRunReadinessService
                 $people,
             ),
         );
+    }
+
+    /**
+     * Nález „období předchází prvnímu mzdovému období firmy", nebo `null`.
+     *
+     * Fail-soft jako zbytek služby: když se stav modulu nepodaří přečíst,
+     * kontrola pokračuje po staru. Zamlčet měsíc kvůli chybě čtení by bylo
+     * horší než ho zkontrolovat zbytečně.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function moduleStartFinding(int $supplierId, string $periodStart): ?array
+    {
+        try {
+            $startPeriod = $this->moduleState->get($supplierId)['start_period'];
+        } catch (\Throwable) {
+            return null;
+        }
+        if (!self::periodPrecedesModuleStart($startPeriod, $periodStart)) {
+            return null;
+        }
+
+        return self::finding(
+            'period_before_module_start',
+            sprintf(
+                'Období %s předchází prvnímu mzdovému období, které vedete v MyÚčtu (%s). '
+                . 'Mzdový běh za něj nejde založit. Měsíce zpracované v předchozím programu '
+                . 'patří do počátečních stavů kumulací u zaměstnanců, ne do mzdových běhů. '
+                . 'Pokud má tenhle měsíc spočítat MyÚčto, změňte první mzdové období '
+                . 'v Mzdy → Aktivace mzdové agendy.',
+                substr($periodStart, 0, 7),
+                (string) $startPeriod,
+            ),
+            '/payroll',
+            1,
+            [],
+        );
+    }
+
+    /**
+     * Je období starší než první mzdové období firmy?
+     *
+     * `null` (firma začátek nemá nastavený) znamená „nevíme", a to nikdy
+     * neodmítá: bez nastaveného začátku se choval modul odjakživa tak, že
+     * počítá cokoli.
+     */
+    private static function periodPrecedesModuleStart(
+        ?string $startPeriod,
+        string $periodStart,
+    ): bool {
+        if ($startPeriod === null || $startPeriod === '') {
+            return false;
+        }
+
+        // `start_period` chodí z repozitáře jako `YYYY-MM`, období jako
+        // `YYYY-MM-DD`; porovnává se proto na společných sedmi znacích.
+        return substr($periodStart, 0, 7) < substr($startPeriod, 0, 7);
     }
 
     /**

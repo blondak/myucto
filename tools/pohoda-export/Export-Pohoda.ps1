@@ -41,6 +41,16 @@
 .PARAMETER TimeoutMinut
     Jak dlouho nejvýš čekat na export jedné agendy (výchozí 60 minut).
 
+.PARAMETER DataDir
+    Složka s datovými soubory POHODY (.mdb), když ji skript nenajde sám. Z datového souboru
+    se čte majetek a mzdy, které XML export neobsahuje (Export-PohodaMdb.ps1).
+
+.PARAMETER SqlServer
+    Instance SQL serveru u POHODA SQL (výchozí .\POHODA).
+
+.PARAMETER BezMajetkuAMezd
+    Majetek a mzdy z datového souboru nevytahovat.
+
 .EXAMPLE
     .\Export-Pohoda.ps1 -Uzivatel Admin -Rok 2026
 
@@ -55,7 +65,10 @@ param(
     [int[]]$Rok,
     [string]$PohodaExe,
     [string]$Vystup,
-    [int]$TimeoutMinut = 60
+    [int]$TimeoutMinut = 60,
+    [string]$DataDir,
+    [string]$SqlServer,
+    [switch]$BezMajetkuAMezd
 )
 
 $ErrorActionPreference = 'Stop'
@@ -271,6 +284,30 @@ function Read-Response([string]$Path) {
     [pscustomobject]@{ Stav = $stav; Zaznamu = $count; Poznamka = ($notes -join ' | ') }
 }
 
+<#
+    Datový soubor agendy pro majetek a mzdy: u POHODY s .mdb soubor ve složce dat, u POHODA SQL
+    databáze na SQL serveru. Vrací $null, když se datový soubor nepodařilo najít.
+#>
+function Find-PohodaData($Unit) {
+    if ($Unit.Soubor -notmatch '\.mdb$') {
+        $server = '.\POHODA'
+        if ($SqlServer) { $server = $SqlServer }
+        return @{ SqlServer = $server; Databaze = $Unit.Soubor }
+    }
+    $dirs = New-Object System.Collections.Generic.List[string]
+    if ($DataDir) { $dirs.Add($DataDir) }
+    $dirs.Add((Join-Path (Split-Path $script:PohodaPath) 'Data'))
+    foreach ($root in @($env:ProgramData, (Join-Path $env:PUBLIC 'Documents'))) {
+        if (-not $root) { continue }
+        Get-ChildItem (Join-Path $root 'STORMWARE') -Directory -ErrorAction SilentlyContinue | ForEach-Object { $dirs.Add((Join-Path $_.FullName 'Data')) }
+    }
+    foreach ($d in $dirs) {
+        $candidate = Join-Path $d $Unit.Soubor
+        if (Test-Path $candidate) { return @{ Mdb = $candidate } }
+    }
+    return $null
+}
+
 # --- start ---
 
 if ($PohodaExe) { $script:PohodaPath = $PohodaExe } else { $script:PohodaPath = Find-PohodaExe }
@@ -365,6 +402,30 @@ foreach ($unit in ($selected | Sort-Object Rok)) {
         $color = 'Green'
         if ($row.Stav -ne 'ok') { $color = 'Yellow' }
         Write-Host ("  {0,-38} {1,-8} {2,8} záznamů  {3,5}s  {4}" -f $a.Popis, $row.Stav, $row.Zaznamu, [int]$sw.Elapsed.TotalSeconds, $row.Poznamka) -ForegroundColor $color
+        $summary.Add([pscustomobject]$row)
+    }
+
+    # Majetek a mzdy XML export POHODY nemá - čtou se z datového souboru agendy.
+    if (-not $BezMajetkuAMezd) {
+        $row = [ordered]@{ Ico = $unit.Ico; Rok = $unit.Rok; Soubor = '90_majetek.xml, 91_mzdy.xml'; Agenda = 'Majetek a mzdy z datového souboru'; Stav = ''; Zaznamu = 0; Velikost_kB = 0; Poznamka = '' }
+        try {
+            $source = Find-PohodaData $unit
+            if ($null -eq $source) {
+                throw "Datový soubor $($unit.Soubor) jsem nenašel. Zadejte složku dat parametrem -DataDir, nebo spusťte Export-PohodaMdb.ps1 samostatně."
+            }
+            $mdbScript = Join-Path $PSScriptRoot 'Export-PohodaMdb.ps1'
+            if ($source.Mdb) { & $mdbScript -Mdb $source.Mdb -Vystup $unitDir | Out-Host }
+            else { & $mdbScript -SqlServer $source.SqlServer -Databaze $source.Databaze -Vystup $unitDir | Out-Host }
+            $files = @(Get-ChildItem $unitDir -Filter '9?_*.xml' -ErrorAction SilentlyContinue)
+            $row.Stav = 'ok'
+            $row.Soubor = ($files | ForEach-Object { $_.Name }) -join ', '
+            $row.Velikost_kB = [math]::Round((($files | Measure-Object Length -Sum).Sum) / 1KB)
+            if ($files.Count -eq 0) { $row.Poznamka = 'majetek ani mzdy v datovém souboru nejsou' }
+        } catch {
+            $row.Stav = 'chyba'
+            $row.Poznamka = $_.Exception.Message
+            Write-Host ("  {0,-38} chyba    {1}" -f $row.Agenda, $row.Poznamka) -ForegroundColor Yellow
+        }
         $summary.Add([pscustomobject]$row)
     }
 }

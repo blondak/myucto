@@ -827,7 +827,11 @@
         "1840_payroll_component_jmhz_legacy_package_adoption.sql",
         "1841_clear_pending_totp_secrets.sql",
         "1842_exact_time_billing.sql",
-        "1843_email_profile_oauth_token_length.sql"
+        "1843_email_profile_oauth_token_length.sql",
+        "1844_pohoda_migration.sql",
+        "1845_payroll_surcharge_fixed_hourly_amounts.sql",
+        "1846_payroll_employer_surcharge_defaults.sql",
+        "1847_payroll_component_jmhz_stravovani_mapping.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -4834,7 +4838,7 @@
                 "result_path": "varchar(255) NULL DEFAULT NULL",
                 "result_size": "bigint(20) unsigned NULL DEFAULT NULL",
                 "skipped_count": "int(10) unsigned NOT NULL DEFAULT 0",
-                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import') NOT NULL",
+                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import') NOT NULL",
                 "started_at": "timestamp NULL DEFAULT NULL",
                 "status": "enum('queued','running','completed','failed','cancelled','completed_with_warnings') NOT NULL DEFAULT 'queued'",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -8318,9 +8322,17 @@
                 "created_by": "int(10) unsigned NULL DEFAULT NULL",
                 "delivery_channel": "varchar(32) NOT NULL",
                 "delivery_verified_on": "date NULL DEFAULT NULL",
+                "difficult_environment_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
+                "difficult_environment_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
+                "holiday_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
+                "holiday_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
                 "home_office_policy": "varchar(32) NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "leave_entitlement_weeks": "smallint(5) unsigned NOT NULL DEFAULT 4",
+                "night_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
+                "night_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
+                "overtime_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
+                "overtime_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
                 "payday_business_day_rule": "varchar(32) NOT NULL",
                 "payday_day": "tinyint(3) unsigned NOT NULL",
                 "payday_month_offset": "tinyint(3) unsigned NOT NULL DEFAULT 1",
@@ -8332,7 +8344,9 @@
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "updated_by": "int(10) unsigned NULL DEFAULT NULL",
                 "valid_from": "date NOT NULL",
-                "valid_to": "date NULL DEFAULT NULL"
+                "valid_to": "date NULL DEFAULT NULL",
+                "weekend_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
+                "weekend_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
@@ -8356,6 +8370,9 @@
                 "chk_payroll_employer_policy_rounding": "`balance_rounding_mode` in ('exact_minor_units','nearest_crown','up_to_crown')",
                 "chk_payroll_employer_policy_row_version": "`row_version` > 0",
                 "chk_payroll_employer_policy_source": "`source_kind` in ('manual','import','migration','system')",
+                "chk_payroll_employer_policy_surcharge_fixed": "(`overtime_fixed_hourly_minor` is null or `overtime_fixed_hourly_minor` between 1 and 100000) and (`holiday_fixed_hourly_minor` is null or `holiday_fixed_hourly_minor` between 1 and 100000) and (`night_fixed_hourly_minor` is null or `night_fixed_hourly_minor` between 1 and 100000) and (`weekend_fixed_hourly_minor` is null or `weekend_fixed_hourly_minor` between 1 and 100000) and (`difficult_environment_fixed_hourly_minor` is null or `difficult_environment_fixed_hourly_minor` between 1 and 100000)",
+                "chk_payroll_employer_policy_surcharge_one_form": "(`overtime_rate_bp` is null or `overtime_fixed_hourly_minor` is null) and (`holiday_rate_bp` is null or `holiday_fixed_hourly_minor` is null) and (`night_rate_bp` is null or `night_fixed_hourly_minor` is null) and (`weekend_rate_bp` is null or `weekend_fixed_hourly_minor` is null) and (`difficult_environment_rate_bp` is null or `difficult_environment_fixed_hourly_minor` is null)",
+                "chk_payroll_employer_policy_surcharge_rates": "(`overtime_rate_bp` is null or `overtime_rate_bp` between 1 and 50000) and (`holiday_rate_bp` is null or `holiday_rate_bp` between 1 and 50000) and (`night_rate_bp` is null or `night_rate_bp` between 1 and 50000) and (`weekend_rate_bp` is null or `weekend_rate_bp` between 1 and 50000) and (`difficult_environment_rate_bp` is null or `difficult_environment_rate_bp` between 1 and 50000)",
                 "chk_payroll_employer_policy_travel": "`travel_expense_policy` in ('not_used','manual_review','configured')"
             }
         },
@@ -8635,13 +8652,17 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "difficult_environment_factors": "tinyint(3) unsigned NULL DEFAULT NULL",
+                "difficult_environment_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
                 "difficult_environment_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
                 "employment_id": "bigint(20) unsigned NOT NULL",
+                "holiday_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
                 "holiday_mode": "enum('compensatory_time_off','surcharge') NOT NULL DEFAULT 'compensatory_time_off'",
                 "holiday_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "night_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
                 "night_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
                 "note": "varchar(500) NULL DEFAULT NULL",
+                "overtime_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
                 "overtime_mode": "enum('surcharge','compensatory_time_off','included_in_wage') NOT NULL DEFAULT 'surcharge'",
                 "overtime_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
@@ -8649,6 +8670,7 @@
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "valid_from": "date NOT NULL",
                 "valid_to": "date NULL DEFAULT NULL",
+                "weekend_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
                 "weekend_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL"
             },
             "indexes": {
@@ -8664,7 +8686,9 @@
             },
             "checks": {
                 "chk_payroll_surcharge_policy_factors": "`difficult_environment_factors` is null or `difficult_environment_factors` >= 1",
+                "chk_payroll_surcharge_policy_fixed_hourly": "(`overtime_fixed_hourly_minor` is null or `overtime_fixed_hourly_minor` between 1 and 100000) and (`holiday_fixed_hourly_minor` is null or `holiday_fixed_hourly_minor` between 1 and 100000) and (`night_fixed_hourly_minor` is null or `night_fixed_hourly_minor` between 1 and 100000) and (`weekend_fixed_hourly_minor` is null or `weekend_fixed_hourly_minor` between 1 and 100000) and (`difficult_environment_fixed_hourly_minor` is null or `difficult_environment_fixed_hourly_minor` between 1 and 100000)",
                 "chk_payroll_surcharge_policy_interval": "`valid_to` is null or `valid_to` >= `valid_from`",
+                "chk_payroll_surcharge_policy_one_form": "(`overtime_rate_bp` is null or `overtime_fixed_hourly_minor` is null) and (`holiday_rate_bp` is null or `holiday_fixed_hourly_minor` is null) and (`night_rate_bp` is null or `night_fixed_hourly_minor` is null) and (`weekend_rate_bp` is null or `weekend_fixed_hourly_minor` is null) and (`difficult_environment_rate_bp` is null or `difficult_environment_fixed_hourly_minor` is null)",
                 "chk_payroll_surcharge_policy_rates": "(`overtime_rate_bp` is null or `overtime_rate_bp` between 1 and 50000) and (`holiday_rate_bp` is null or `holiday_rate_bp` between 1 and 50000) and (`night_rate_bp` is null or `night_rate_bp` between 1 and 50000) and (`weekend_rate_bp` is null or `weekend_rate_bp` between 1 and 50000) and (`difficult_environment_rate_bp` is null or `difficult_environment_rate_bp` between 1 and 50000)",
                 "chk_payroll_surcharge_policy_row_version": "`row_version` > 0"
             }
@@ -15277,6 +15301,59 @@
             },
             "checks": {
                 "signature_config_json": "json_valid(`signature_config_json`)"
+            }
+        },
+        "pohoda_import_map": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "kind": "varchar(32) NOT NULL COLLATE utf8mb4_bin",
+                "pohoda_key": "varchar(190) NOT NULL COLLATE utf8mb4_bin",
+                "run_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "target_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, kind, pohoda_key)",
+                "ix_pohoda_import_map_target": "BTREE (supplier_id, kind, target_id)"
+            },
+            "foreign_keys": {
+                "fk_pohoda_import_map_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "pohoda_imports": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "agenda_ico": "varchar(20) NULL DEFAULT NULL",
+                "agenda_year": "smallint(5) unsigned NULL DEFAULT NULL",
+                "automation_restored_at": "timestamp NULL DEFAULT NULL",
+                "automation_snapshot": "longtext NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "export_sha256": "char(64) NULL DEFAULT NULL",
+                "finished_at": "timestamp NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "job_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "mode": "enum('dry_run','import') NOT NULL",
+                "pohoda_version": "varchar(60) NULL DEFAULT NULL",
+                "protocol": "longtext NULL DEFAULT NULL",
+                "status": "enum('running','completed','completed_with_warnings','failed','cancelled') NOT NULL DEFAULT 'running'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_pohoda_imports_supplier": "BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_pohoda_imports_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "protocol": "`protocol` is null or json_valid(`protocol`)"
             }
         },
         "posting_rules": {

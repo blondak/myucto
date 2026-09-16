@@ -138,6 +138,13 @@ final class PayrollComponentDefaults
                 ['NAHRADA_KONKURENCNI_DOLOZKA', 'Náhrada za konkurenční doložku', 'competitive_clause', 'monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
                 ['DOPLATEK_MZDY', 'Doplatek mzdy za minulé období', 'backpay', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['NEPENEZNI_PRIJEM', 'Nepeněžní příjem', 'non_cash', 'non_monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                // Zdanitelná část závodního stravování: hodnota jídla nad osvobozený limit
+                // § 6 odst. 9 písm. b) ZDP. Klasifikace je shodná s obecným nepeněžním
+                // příjmem (zdaňuje se, vstupuje do obou vyměřovacích základů, nevyplácí se),
+                // ale má vlastní kód, aby mohla mít výchozí zařazení do JMHZ. Obecný
+                // NEPENEZNI_PRIJEM ho mít nesmí: nese i plnění, která do úhrnu zúčtované
+                // mzdy nepatří, a default by je tam tiše přidal všem firmám.
+                ['STRAVOVANI_ZDANITELNE', 'Zdanitelná část stravování', 'non_cash', 'non_monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 // § 6 odst. 9 písm. b) ZDP. Limit je ZA SMĚNU (70 % horní hranice
                 // stravného za cestu 5 až 12 hodin), ne za rok — roční strop složky
                 // ho nevyjádří, proto ho drží koš `meal_per_shift`: ruleset dá

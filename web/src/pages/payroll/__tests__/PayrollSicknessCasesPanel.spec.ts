@@ -367,6 +367,17 @@ describe('PayrollSicknessCasesPanel', () => {
   })
 
   /** Kliknutí musí opravdu volat API, ne jen překreslit lištu. */
+  // Ostré odeslání se ptá; dialog se teleportuje do <body>, ne do wrapperu.
+  async function confirmProductionSend(): Promise<void> {
+    const buttons = document.querySelectorAll<HTMLButtonElement>(
+      '[data-test="production-send-confirm-yes"]',
+    )
+    const button = buttons[buttons.length - 1]
+    expect(button).toBeDefined()
+    button!.click()
+    await flushPromises()
+  }
+
   it('zařadí podání do fronty voláním serveru', async () => {
     m.list.mockResolvedValue(listResponse(
       [sicknessCase({ status: 'prepared', nempri_submission_id: 44 })],
@@ -392,7 +403,11 @@ describe('PayrollSicknessCasesPanel', () => {
     // prošla i tehdy, kdyby se k ní uživatel nikdy nedostal.
     const dispatch = actionsOf(wrapper, 'dispatch-nempri')
     expect(dispatch?.show).toBe(true)
-    await dispatch!.run!()
+    const pending = dispatch!.run!()
+    await flushPromises()
+    expect(m.dispatch).not.toHaveBeenCalled()
+    await confirmProductionSend()
+    await pending
     await flushPromises()
 
     expect(m.dispatch).toHaveBeenCalledWith('production', 7, 'nempri')

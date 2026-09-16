@@ -236,7 +236,13 @@ final class MoneyS3Importer
                     }
                     $protocol->finish($key);
                 } catch (\Throwable $e) {
-                    $protocol->error($key, $e instanceof MoneyS3Exception ? $e->errorCode : 'unexpected', $e->getMessage());
+                    if ($e instanceof MoneyS3Exception) {
+                        $protocol->error($key, $e->errorCode, $e->getMessage());
+                    } else {
+                        // Text výjimky (SQL, cesty) do protokolu viditelného v UI nepatří.
+                        error_log(sprintf('Money S3: krok %s převodu firmy %d selhal: %s', $key, $supplierId, (string) $e));
+                        $protocol->error($key, 'unexpected', 'Krok převodu selhal na neočekávané chybě, podrobnosti jsou v logu serveru.');
+                    }
                     $protocol->fail($key);
                     break;
                 }

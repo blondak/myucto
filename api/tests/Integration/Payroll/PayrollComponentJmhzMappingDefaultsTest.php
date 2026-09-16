@@ -129,6 +129,9 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
             'PRIPLATEK_VIKEND' => '10335',
             'PRIPLATEK_SVATEK' => '10336',
             'PRIPLATEK_ZTIZENE_PROSTREDI' => '10332',
+            // Nepeněžní stravování je součástí hrubé mzdy i obou vyměřovacích
+            // základů, detailní uzel pro ně katalog nemá, proto sběrný součet.
+            'STRAVOVANI_ZDANITELNE' => '10328',
             'NAHRADA_MZDY' => '10337',
             'NAHRADA_MZDY_DOVOLENA' => '10338',
             'NAHRADA_MZDY_DPN' => '10342',

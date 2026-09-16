@@ -37,6 +37,8 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
+import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
+import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 /*
  * `mode` je zároveň `agenda_group` pro server. Skupina `other` je záchytná:
@@ -61,6 +63,11 @@ const {
   validationStageLabel,
   verificationStatusLabel,
 } = usePayrollLabels()
+const {
+  request: sendConfirmRequest,
+  confirmProductionSend,
+  settle: settleSendConfirm,
+} = useProductionSendConfirm()
 const loading = ref(true)
 const error = ref('')
 const healthError = ref('')
@@ -522,6 +529,11 @@ async function downloadHealth(overview: PayrollHealthPaymentOverview) {
 }
 
 async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
+  const confirmed = await confirmProductionSend(
+    environment.value,
+    t('payroll.production_send.health_overview', { insurer: overview.insurer.code }),
+  )
+  if (!confirmed) return
   // Jednotlivé a dávkové odeslání jsou dvě větve téhož; kdyby si každá držela
   // vlastní hlášku, zůstaly by na stránce viset dvě identické červené lišty.
   healthError.value = ''
@@ -582,6 +594,11 @@ async function sendSelectedHealthViaDataBox() {
     selectedHealthKeys.value.has(healthOverviewKey(overview)),
   )
   if (selected.length === 0) return
+  const confirmed = await confirmProductionSend(
+    environment.value,
+    t('payroll.production_send.health_batch', { count: selected.length }),
+  )
+  if (!confirmed) return
   healthBatchError.value = ''
   healthError.value = ''
   healthBatchQueuedIds.value = []
@@ -1567,4 +1584,10 @@ onMounted(load)
         </div>
       </div>
     </div>
+  <ProductionSendConfirmDialog
+    v-if="sendConfirmRequest"
+    :message="sendConfirmRequest.message"
+    @confirm="settleSendConfirm(true)"
+    @cancel="settleSendConfirm(false)"
+  />
 </template>

@@ -337,6 +337,7 @@ final class StatementBalanceService
             if ($amount >= 0) $credit += $amount; else $debit -= $amount;
             $transactions[] = $row;
         }
+        $unexplained = null;
         $closing = $opening === null ? null : $opening + $credit - $debit;
         if ($closing === null && $confirmed !== null && !empty($selected['has_csob_advice'])) {
             $closing = $confirmed;
@@ -357,6 +358,13 @@ final class StatementBalanceService
                 if (self::compareAdvice($membership, $adviceCheckpoint) > 0) {
                     $adviceClosing += self::cents($row['amount']);
                 }
+            }
+            // Banka v avízu hlásí svůj vlastní zůstatek. Liší-li se od zůstatku
+            // dopočteného z evidovaných pohybů, něco v evidenci chybí (nebo přebývá) —
+            // typicky pohyb, který se nenačetl. Dřív se rozdíl jen tiše spolkl
+            // zahozením počátečního stavu a výpis tvářil, že je vše v pořádku.
+            if ($closing !== null && $adviceClosing !== null && $closing !== $adviceClosing) {
+                $unexplained = $adviceClosing - $closing;
             }
             if ($closing !== $adviceClosing) $opening = null;
             $closing = $adviceClosing;
@@ -395,6 +403,7 @@ final class StatementBalanceService
             'confirmed_closing' => $confirmed === null ? null : $confirmed / 100,
             'bank_statement_id' => $bankStatementId,
             'difference' => $difference === null ? null : $difference / 100,
+            'unexplained_difference' => $unexplained === null ? null : $unexplained / 100,
             'status' => $closing === null ? 'missing_anchor' : ($checkpointMismatch ? 'mismatch' : ($confirmed === null ? 'calculated' : 'confirmed')),
             'transactions' => $transactions];
     }

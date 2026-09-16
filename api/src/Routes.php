@@ -2432,6 +2432,16 @@ final class Routes
         $app->post   ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}/start', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'start']);
         $app->get    ('/api/admin/imports/money-s3/runs', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'runs']);
         $app->get    ('/api/admin/imports/money-s3/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'run']);
+        // Průvodce „Přechod z POHODA" - XML export (ZIP), náhled, zkouška nanečisto, převod, protokoly, exportní nástroj.
+        $app->post   ('/api/admin/imports/pohoda/uploads/chunked', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'initChunked']);
+        $app->post   ('/api/admin/imports/pohoda/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'chunk']);
+        $app->post   ('/api/admin/imports/pohoda/uploads/{token:[a-f0-9]{16}}/complete', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'complete']);
+        $app->get    ('/api/admin/imports/pohoda/uploads/{token:[a-f0-9]{16}}', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'show']);
+        $app->post   ('/api/admin/imports/pohoda/uploads/{token:[a-f0-9]{16}}/start', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'start']);
+        $app->get    ('/api/admin/imports/pohoda/runs', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'runs']);
+        $app->get    ('/api/admin/imports/pohoda/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'run']);
+        $app->get    ('/api/admin/imports/pohoda/tool', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'tool']);
+        $app->get    ('/api/admin/imports/pohoda/tool/download', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'toolDownload']);
 
         // Kompletní export dat firmy (H-14) — DB + PDF doklady + přílohy do jednoho
         // archivu s manifestem a kontrolními součty. Běží na pozadí

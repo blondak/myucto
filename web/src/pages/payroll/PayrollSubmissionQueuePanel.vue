@@ -45,12 +45,19 @@ import {
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatDateTime, formatPeriod, formatUtcDateTime } from '@/composables/useFormat'
+import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
+import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 const props = defineProps<{ environment: PayrollRegzelEnvironment }>()
 const emit = defineEmits<{ 'update:environment': [PayrollRegzelEnvironment] }>()
 
 const { t } = useI18n()
 const { submissionAgendaLabel, submissionStatusLabel, submissionKindLabel } = usePayrollLabels()
+const {
+  request: sendConfirmRequest,
+  confirmProductionSend,
+  settle: settleSendConfirm,
+} = useProductionSendConfirm()
 
 /*
  * Stránka je velká schválně: při stovce zaměstnanců je „vybrat vše" nad
@@ -219,6 +226,11 @@ async function sendMany(ids: number[]): Promise<void> {
   if (ids.length === 0 || batch.value !== null) {
     return
   }
+  const confirmed = await confirmProductionSend(
+    props.environment,
+    t('payroll.production_send.queue', { count: ids.length }),
+  )
+  if (!confirmed || batch.value !== null) return
   batchResult.value = null
   batch.value = { done: 0, totalCount: ids.length }
   let sent = 0
@@ -721,5 +733,11 @@ void load()
         @update:page="(value: number) => { offset = (value - 1) * PAGE_SIZE; void load() }"
       />
     </template>
+    <ProductionSendConfirmDialog
+      v-if="sendConfirmRequest"
+      :message="sendConfirmRequest.message"
+      @confirm="settleSendConfirm(true)"
+      @cancel="settleSendConfirm(false)"
+    />
   </section>
 </template>

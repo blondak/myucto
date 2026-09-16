@@ -286,6 +286,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'PROVIZE',
             'REKREACE_VOLNY_CAS',
             'SOUKROME_VOZIDLO',
+            'STRAVOVANI_ZDANITELNE',
             'VZDELAVANI',
             'ZDRAVOTNI_BENEFIT',
         ], $codes);

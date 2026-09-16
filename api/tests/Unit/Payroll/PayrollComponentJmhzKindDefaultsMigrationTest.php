@@ -18,7 +18,17 @@ use PHPUnit\Framework\TestCase;
  */
 final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
 {
-    private const MIGRATION = '1839_payroll_component_jmhz_kind_default_mappings.sql';
+    /**
+     * Seznam kódů drží víc migrací: 1839 doplnila výchozí číselník, další pak
+     * jednotlivé složky, které do číselníku přibyly později. Shodu se zdrojem
+     * pravdy ({@see PayrollComponentJmhzMappingDefaults}) musí dávat dohromady.
+     *
+     * @var list<string>
+     */
+    private const MIGRATIONS = [
+        '1839_payroll_component_jmhz_kind_default_mappings.sql',
+        '1847_payroll_component_jmhz_stravovani_mapping.sql',
+    ];
 
     /** @var list<string> component_kind z payroll_component_definitions (migrace 1501) */
     private const KINDS = [
@@ -66,12 +76,16 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
     {
         $expected = [
             'MZDA_HODINOVA_DOCH' => '10329',
-            'MZDA_HODINOVA_NOC' => '10329',
+            'PRIPLATEK_NOCNI' => '10334',
             'PRIPLATKY_K_HODINOVE' => '10332',
             'PRIPLATEK_ODPOLEDNI' => '10332',
             'PRIPLATEK_BOZP' => '10332',
+            'ODMENA_KONTEJNERY' => '10331',
             'ODMENA_MIMORADNA' => '10331',
             'ODMENA_HOTOVOSTNI' => '10331',
+            'ODMENA_SENIOR' => '10331',
+            'DOPLATEK_MZDY' => '10329',
+            'MZDA_SKOLENI' => '10329',
         ];
         $actual = [];
         foreach (AttendanceSampleProfile::components() as $component) {
@@ -217,8 +231,12 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
 
     private static function sql(): string
     {
-        $sql = file_get_contents(dirname(__DIR__, 4) . '/db/migrations/' . self::MIGRATION);
-        self::assertIsString($sql);
+        $sql = '';
+        foreach (self::MIGRATIONS as $migration) {
+            $part = file_get_contents(dirname(__DIR__, 4) . '/db/migrations/' . $migration);
+            self::assertIsString($part, "Migrace {$migration} chybí.");
+            $sql .= $part . "\n";
+        }
 
         // Komentáře pryč — hlídá se SQL, ne to, co o sobě tvrdí.
         return (string) preg_replace('/^\s*--.*$/m', '', $sql);

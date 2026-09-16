@@ -88,13 +88,19 @@ final class PayrollSurchargeCalculator
                 );
             }
             $effective = $policy->effectiveRate($kind, $ruleset);
+            // Pevná částka se sazbě nekonkuruje, jen ji nahradí jako zdroj
+            // HODINOVÉ částky; sazba zůstává zákonným minimem, proti kterému se
+            // sjednané číslo poměřuje (viz PayrollSurchargeLine).
+            $fixedHourly = $policy->agreedFixedHourlyMinor($kind);
             $line = PayrollSurchargeLine::calculate(
                 $kind,
                 $basis,
                 $basisHourly,
-                $effective['rate'],
+                $fixedHourly === null ? $effective['rate'] : $ruleset->statutoryRate($kind),
                 $effective['agreed'],
                 $kindSegments,
+                [],
+                $fixedHourly,
             );
             $lines[] = $line;
             $total += $line->amountMinor;

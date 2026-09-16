@@ -160,6 +160,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 104. [REST API](104_API.md)
 105. [Licence a aktivace](105_Licence_a_aktivace.md)
 106. [MCP server (napojení AI asistenta)](106_MCP_server.md)
+107. [Přechod z POHODY a PAMICA](107_Prechod_z_POHODY.md)
 
 ### Reference
 

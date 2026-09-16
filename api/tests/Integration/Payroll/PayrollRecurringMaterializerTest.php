@@ -392,6 +392,175 @@ final class PayrollRecurringMaterializerTest extends TestCase
         self::assertSame(0, $result['manual_review_count']);
     }
 
+    /*
+     * ── Krácení základní mzdy za nepřítomnost ───────────────────────────────
+     *
+     * Mzda přísluší za vykonanou práci (§ 109 odst. 1 ZP). Předpis, který za
+     * měsíc s dovolenou vyplatí plnou sjednanou částku, zaplatí tutéž dobu
+     * podruhé — jednou mzdou a jednou náhradou. Čísla jsou z doloženého případu:
+     * sjednáno 40 000 Kč, fond června 176 h, odpracováno 128 h.
+     */
+    public function testBaseWageIsProratedByAbsenceHours(): void
+    {
+        $componentId = $this->createComponent('MZDA_MESICNI_REK', componentKind: 'base_wage');
+        $this->createWorkCalendar();
+        // 48 h dovolené ze 176 h fondu, tedy odpracováno 128 h.
+        $this->createImportSummaryMonth(['fund_hours' => 176_000, 'vacation_hours' => 48_000, 'worked_hours' => 128_000]);
+        $this->createRecurring($componentId, amountMinor: 4_000_000);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            self::PERIOD,
+            $this->userId,
+        );
+
+        self::assertSame(1, $result['created_count'], (string) json_encode($result['manual_review']));
+        // 40 000 × 128/176 = 29 090,90 → nahoru na celé koruny (§ 142 odst. 2).
+        self::assertSame(
+            2_909_100,
+            PayrollTimeValue::rows($result['created'], 'created')[0]['amount_minor'],
+        );
+        // Auditní stopa musí doložit, ZE KTERÉHO fondu a kterých hodin to vyšlo.
+        $input = $this->fetchInput('recurring:' . $this->lastRecurringId);
+        self::assertStringContainsString('monthly_wage_proration.v1', (string) $input['source_snapshot_json']);
+    }
+
+    /** Odpracovaný celý měsíc se krátit nesmí — sjednaná částka zůstává. */
+    public function testFullyWorkedMonthKeepsTheAgreedAmount(): void
+    {
+        $componentId = $this->createComponent('MZDA_MESICNI_REK', componentKind: 'base_wage');
+        $this->createWorkCalendar();
+        $this->createImportSummaryMonth(['fund_hours' => 176_000, 'worked_hours' => 176_000]);
+        $this->createRecurring($componentId, amountMinor: 4_000_000);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            self::PERIOD,
+            $this->userId,
+        );
+
+        self::assertSame(1, $result['created_count']);
+        self::assertSame(
+            4_000_000,
+            PayrollTimeValue::rows($result['created'], 'created')[0]['amount_minor'],
+        );
+    }
+
+    /**
+     * Krátí se JEN základní mzda. Pevný měsíční příspěvek nepřísluší za
+     * odpracovanou dobu, takže poměr odpracovaných hodin na něj nesedí —
+     * krácením by se z benefitu stala mzda.
+     */
+    public function testNonBaseWageComponentIsNotProrated(): void
+    {
+        $componentId = $this->createComponent('PRISPEVEK_REK');
+        $this->createWorkCalendar();
+        $this->createImportSummaryMonth(['fund_hours' => 176_000, 'vacation_hours' => 48_000, 'worked_hours' => 128_000]);
+        $this->createRecurring($componentId, amountMinor: 150_000);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            self::PERIOD,
+            $this->userId,
+        );
+
+        self::assertSame(1, $result['created_count']);
+        self::assertSame(
+            150_000,
+            PayrollTimeValue::rows($result['created'], 'created')[0]['amount_minor'],
+        );
+    }
+
+    /**
+     * Bez pracovního kalendáře se fond neví, takže se poměrná část NEODHADUJE.
+     * Vrátit plnou sjednanou mzdu by bylo horší než nevrátit nic: číslo vypadá
+     * hotově a nikdo ho už nezkontroluje.
+     */
+    public function testBaseWageWithoutTimeBasisFailsClosed(): void
+    {
+        $componentId = $this->createComponent('MZDA_MESICNI_REK', componentKind: 'base_wage');
+        $this->createImportSummaryMonth(['fund_hours' => 176_000, 'vacation_hours' => 48_000, 'worked_hours' => 128_000]);
+        $this->createRecurring($componentId, amountMinor: 4_000_000);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            self::PERIOD,
+            $this->userId,
+        );
+
+        self::assertSame(0, $result['created_count']);
+        self::assertSame(1, $result['manual_review_count']);
+        self::assertStringContainsString(
+            'kalendář',
+            PayrollTimeValue::rows($result['manual_review'], 'manual_review')[0]['reason'],
+        );
+        self::assertSame(0, $this->countInputs());
+    }
+
+    /** Mon-Pá po osmi hodinách: červen 2026 má 22 pracovních dnů, tedy 176 h. */
+    private function createWorkCalendar(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_work_calendars
+                (supplier_id, employment_id, name, timezone_name, schedule_type,
+                 week_pattern, weekly_minutes, valid_from, created_by)
+             VALUES (?, ?, "Test", "Europe/Prague", "regular",
+                     ?, 2400, "2026-01-01", ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            '{"1":480,"2":480,"3":480,"4":480,"5":480,"6":0,"7":0}',
+            $this->userId,
+        ]);
+    }
+
+    /**
+     * Měsíc docházky ze souhrnu importu. Takový měsíc nemá směny, takže
+     * nepřítomnost nese jen měsíční součet hodin v milihodinách.
+     *
+     * @param array<string,int> $values
+     */
+    private function createImportSummaryMonth(array $values): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_time_months
+                (supplier_id, employment_id, period_start, status, work_source, revision_no)
+             VALUES (?, ?, "2026-06-01", "open", "import_summary", 1)'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $timeMonthId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO payroll_attendance_imports
+                (supplier_id, period_start, source_system, content_sha256,
+                 files_json, rules_json, person_count, metric_count, created_by)
+             VALUES (?, "2026-06-01", "giriton", ?, "[]", "{}", 1, 1, ?)'
+        )->execute([
+            $this->supplierId,
+            random_bytes(32),
+            $this->userId,
+        ]);
+        $importId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO payroll_time_month_import_summaries
+                (supplier_id, time_month_id, time_month_revision_no, employment_id,
+                 period_start, attendance_import_id, values_json, worked_days,
+                 sources_json, content_sha256, created_by)
+             VALUES (?, ?, 1, ?, "2026-06-01", ?, ?, 20, "{}", ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $timeMonthId,
+            $this->employmentId,
+            $importId,
+            (string) json_encode($values),
+            str_repeat('a', 64),
+            $this->userId,
+        ]);
+    }
+
+    private int $lastRecurringId = 0;
+
     private function createRecurring(
         int $componentId,
         ?int $amountMinor = null,
@@ -425,7 +594,8 @@ final class PayrollRecurringMaterializerTest extends TestCase
             $this->userId,
             $this->userId,
         ]);
-        return (int) $pdo->lastInsertId();
+        $this->lastRecurringId = (int) $pdo->lastInsertId();
+        return $this->lastRecurringId;
     }
 
     /** @return array{0:int,1:int} */
@@ -451,8 +621,11 @@ final class PayrollRecurringMaterializerTest extends TestCase
         return [$employeeId, (int) $pdo->lastInsertId()];
     }
 
-    private function createComponent(string $code, bool $isActive = true): int
-    {
+    private function createComponent(
+        string $code,
+        bool $isActive = true,
+        string $componentKind = 'bonus',
+    ): int {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_component_definitions
                 (supplier_id, code, name, component_kind, value_kind,
@@ -463,7 +636,7 @@ final class PayrollRecurringMaterializerTest extends TestCase
                  jmhz_treatment, statistics_treatment,
                  accounting_debit_code, accounting_credit_code,
                  valid_from, is_active)
-             VALUES (?, ?, ?, "bonus", "monetary", "regular", "included",
+             VALUES (?, ?, ?, ?, "monetary", "regular", "included",
                      "included", "included", "included", "included",
                      "included", "included", "included", "included",
                      "521", "331", "2026-01-01", ?)'
@@ -471,6 +644,7 @@ final class PayrollRecurringMaterializerTest extends TestCase
             $this->supplierId,
             $code,
             "Opakovaná {$code}",
+            $componentKind,
             $isActive ? 1 : 0,
         ]);
         return (int) $this->db->pdo()->lastInsertId();

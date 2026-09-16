@@ -246,6 +246,17 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(wrapper.find('[data-test="transport-group-71"]').exists()).toBe(true)
   })
 
+  // Ostré odeslání se ptá; dialog se teleportuje do <body>, ne do wrapperu.
+  async function confirmProductionSend(): Promise<void> {
+    const buttons = document.querySelectorAll<HTMLButtonElement>(
+      '[data-test="production-send-confirm-yes"]',
+    )
+    const button = buttons[buttons.length - 1]
+    expect(button).toBeDefined()
+    button!.click()
+    await flushPromises()
+  }
+
   it('připravené storno odešle přes VREP podle jeho vlastního ID', async () => {
     m.jmhzTransportHistory.mockResolvedValue({
       environment: 'production',
@@ -269,6 +280,8 @@ describe('PayrollTransportHistoryPanel', () => {
 
     await wrapper.get('[data-test="transport-ready-vrep-91"]').trigger('click')
     await flushPromises()
+    expect(m.sendJmhzTransport).not.toHaveBeenCalled()
+    await confirmProductionSend()
 
     expect(m.sendJmhzTransport).toHaveBeenCalledWith(
       91,
@@ -302,6 +315,8 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(m.enqueueJmhzIsds).not.toHaveBeenCalled()
     await wrapper.get('[data-test="transport-ready-isds-91"]').trigger('click')
     await flushPromises()
+    expect(m.enqueueJmhzIsds).not.toHaveBeenCalled()
+    await confirmProductionSend()
 
     expect(m.enqueueJmhzIsds).toHaveBeenCalledWith(91, 'production')
     expect(m.gatewayStartPayroll).not.toHaveBeenCalled()
@@ -335,6 +350,7 @@ describe('PayrollTransportHistoryPanel', () => {
 
     await wrapper.get('[data-test="transport-ready-isds-91"]').trigger('click')
     await flushPromises()
+    await confirmProductionSend()
 
     expect(m.gatewayStartPayroll).toHaveBeenCalledWith(77)
     expect(wrapper.find('[data-test="transport-ready-gateway-91"]').exists()).toBe(true)

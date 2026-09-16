@@ -116,6 +116,9 @@ final class PayrollJmhzIsdsAction
         if (($denied = $this->authorize($request, $response)) !== null) {
             return $denied;
         }
+        if (($missing = $this->missingSendEnvironment($request, $response)) !== null) {
+            return $missing;
+        }
         $environment = $this->environment($request);
         if ($environment === null) {
             return $this->invalid($response, 'Prostředí musí být test nebo production.');
@@ -213,7 +216,7 @@ final class PayrollJmhzIsdsAction
         $body = $request->getParsedBody();
         $value = is_array($body) ? ($body['environment'] ?? null) : null;
         if (!is_string($value)) {
-            $value = $request->getQueryParams()['environment'] ?? 'test';
+            $value = $request->getQueryParams()['environment'] ?? 'production';
         }
 
         return in_array($value, ['test', 'production'], true) ? $value : null;

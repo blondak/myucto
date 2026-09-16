@@ -38,7 +38,7 @@ final class PayrollJmhzXmlDryRunAction
         if (($denied = $this->authorize($request, $response)) !== null) {
             return $denied;
         }
-        $environment = $request->getQueryParams()['environment'] ?? 'test';
+        $environment = $request->getQueryParams()['environment'] ?? 'production';
         if (!in_array($environment, ['test', 'production'], true)) {
             return Json::error(
                 $response,

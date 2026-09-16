@@ -110,6 +110,21 @@ final class PayrollSurchargeService
         return $this->policy($supplierId, $employmentId, $effectiveOn, $ruleset);
     }
 
+    /**
+     * Firemní výchozí zásada příplatků k danému dni.
+     *
+     * Veřejná kvůli rychlému měsíčnímu vstupu: ten čte zásady pro celou stránku
+     * jedním dotazem a firemní výchozí potřebuje jednou, ne u každého řádku.
+     * Bez toho by týž vztah dostal na dvou obrazovkách jinou sazbu.
+     */
+    public function policyForEmployer(
+        int $supplierId,
+        string $effectiveOn,
+        PayrollSurchargeRuleset $ruleset,
+    ): PayrollSurchargePolicy {
+        return $this->employerDefault($supplierId, $effectiveOn, $ruleset);
+    }
+
     private function policy(
         int $supplierId,
         int $employmentId,
@@ -118,7 +133,9 @@ final class PayrollSurchargeService
     ): PayrollSurchargePolicy {
         $row = $this->repository->policy($supplierId, $employmentId, $effectiveOn);
         if ($row === null) {
-            return PayrollSurchargePolicy::statutoryDefault();
+            // Vztah nemá vlastní sjednání — platí firemní výchozí sazby
+            // (migrace 1846) a teprve pod nimi zákonné minimum.
+            return $this->employerDefault($supplierId, $effectiveOn, $ruleset);
         }
 
         $overtime = PayrollSurchargeCompensationMode::tryFrom(
@@ -147,7 +164,52 @@ final class PayrollSurchargeService
                     $this->nullableInt($row, 'difficult_environment_rate_bp'),
             ],
             $ruleset,
+            // Pevná částka za hodinu (migrace 1845). Starší řádky ji mají NULL,
+            // takže se u nich nezmění vůbec nic.
+            [
+                PayrollSurchargeKind::Overtime->value =>
+                    $this->nullableInt($row, 'overtime_fixed_hourly_minor'),
+                PayrollSurchargeKind::Holiday->value =>
+                    $this->nullableInt($row, 'holiday_fixed_hourly_minor'),
+                PayrollSurchargeKind::Night->value =>
+                    $this->nullableInt($row, 'night_fixed_hourly_minor'),
+                PayrollSurchargeKind::Weekend->value =>
+                    $this->nullableInt($row, 'weekend_fixed_hourly_minor'),
+                PayrollSurchargeKind::DifficultEnvironment->value =>
+                    $this->nullableInt($row, 'difficult_environment_fixed_hourly_minor'),
+            ],
         );
+    }
+
+    /**
+     * Firemní výchozí sazby, nebo zákonné minimum, když je firma nesjednala.
+     *
+     * Vrací se VŽDY platná zásada, ne `null`: chybějící firemní sazba není
+     * chyba, jen znamená, že se použije zákon.
+     */
+    private function employerDefault(
+        int $supplierId,
+        string $effectiveOn,
+        PayrollSurchargeRuleset $ruleset,
+    ): PayrollSurchargePolicy {
+        $row = $this->repository->employerSurchargeDefaults($supplierId, $effectiveOn);
+        if ($row === null) {
+            return PayrollSurchargePolicy::statutoryDefault();
+        }
+        $rates = [];
+        $fixed = [];
+        foreach (PayrollSurchargeKind::all() as $kind) {
+            $rates[$kind->value] = $this->nullableInt($row, "{$kind->value}_rate_bp");
+            $fixed[$kind->value] = $this->nullableInt($row, "{$kind->value}_fixed_hourly_minor");
+        }
+
+        $policy = PayrollSurchargePolicy::employerDefault($rates, $fixed, $ruleset);
+
+        // Firemní politika bez jediné sazby je totéž co žádná: ať se na pásce
+        // neobjeví „firemní zásada" tam, kde ve skutečnosti platí zákon.
+        return $policy->hasAnyAgreedRate()
+            ? $policy
+            : PayrollSurchargePolicy::statutoryDefault();
     }
 
     /** @param array<string,mixed> $row */

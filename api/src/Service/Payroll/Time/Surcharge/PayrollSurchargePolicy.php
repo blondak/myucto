@@ -22,19 +22,54 @@ use MyInvoice\Service\Payroll\Calculation\DecimalRate;
  * příplatku". § 114, § 115 a § 117 mají kogentní „nejméně" a podlézt se nedá —
  * hlídá to {@see assertAgreedRateIsLawful()} už při stavbě objektu, ne až ve
  * výpočtu, aby neplatná zásada nemohla v databázi vůbec vzniknout.
+ *
+ * ── Procento, nebo PEVNÁ ČÁSTKA na hodinu ───────────────────────────────────
+ *
+ * Příplatek jde sjednat dvojím způsobem a volí se u KAŽDÉHO DRUHU zvlášť:
+ * procentem z průměrného výdělku, nebo pevnou částkou za hodinu („přesčas
+ * 75 Kč/h"). Pevná částka je v praxi častější, protože si ji zaměstnanec přečte
+ * na mzdovém výměru a nemusí čekat, až se spočítá čtvrtletní průměr.
+ *
+ * Obojí u téhož druhu naráz sjednat NELZE: kdyby bylo vyplněné procento i
+ * částka, musel by si výpočet vybrat, které z nich je to sjednané, a člověk by
+ * na pásce našel číslo, které ve smlouvě nestojí.
+ *
+ * Kogentní podlaha platí u obou stejně, ale POZNÁ SE JINDY. Procento se dá
+ * porovnat se zákonnou sazbou hned tady, protože obojí je zlomek. Pevná částka
+ * se s ní porovnat NEDÁ: zákonné minimum je podíl z průměrného výdělku
+ * KONKRÉTNÍHO člověka, takže 42 Kč/h je nad minimem u toho, kdo má průměr
+ * 400 Kč/h, a pod ním u toho, kdo má 500 Kč/h. Táž zásada je tedy pro jednoho
+ * dost a pro druhého málo a při stavbě objektu, kde se o žádném člověku neví,
+ * to rozhodnout nelze. Posuzuje to proto až {@see PayrollSurchargeLine} nad
+ * skutečným základem — a nepadá, nýbrž zákonné minimum dopočítá a rozdíl
+ * vykáže. Sjednat podlezenou částku smí totiž jen § 116 a § 118; u ostatních
+ * druhů je to vada sjednání, kterou musí vidět účtárna, ne tichý nedoplatek.
  */
 final readonly class PayrollSurchargePolicy
 {
     /**
      * @param array<string,int> $agreedRateBasisPoints klíč = hodnota {@see PayrollSurchargeKind}
+     * @param array<string,int> $agreedFixedHourlyMinor týž klíč; haléře za hodinu
      */
     private function __construct(
         public PayrollSurchargeCompensationMode $overtimeMode,
         public PayrollSurchargeCompensationMode $holidayMode,
         public ?int $difficultEnvironmentFactors,
         private array $agreedRateBasisPoints,
+        private array $agreedFixedHourlyMinor,
         public bool $isStatutoryDefault,
+        /**
+         * ODKUD sazba přišla: `employment` ze sjednání na vztahu, `employer`
+         * z firemních zásad, `statutory` ze zákona. Účetní musí u příplatku
+         * poznat důvod — bez toho je „proč vyšel zrovna takhle" nezodpověditelné.
+         */
+        public string $source = self::SOURCE_STATUTORY,
     ) {}
+
+    /** Zdroj sjednání: vztah přebíjí firmu a firma přebíjí zákonné minimum. */
+    public const SOURCE_EMPLOYMENT = 'employment';
+    public const SOURCE_EMPLOYER = 'employer';
+    public const SOURCE_STATUTORY = 'statutory';
 
     /**
      * Zásada, kterou určuje sám zákon, když u vztahu není nic sjednáno.
@@ -61,12 +96,15 @@ final readonly class PayrollSurchargePolicy
             PayrollSurchargeCompensationMode::CompensatoryTimeOff,
             null,
             [],
+            [],
             true,
         );
     }
 
     /**
      * @param array<string,int|null> $agreedRateBasisPoints
+     * @param array<string,int|null> $agreedFixedHourlyMinor pevná částka v haléřích
+     *        za hodinu; u téhož druhu se vylučuje se sazbou v procentech
      */
     public static function agreed(
         PayrollSurchargeCompensationMode $overtimeMode,
@@ -74,6 +112,8 @@ final readonly class PayrollSurchargePolicy
         ?int $difficultEnvironmentFactors,
         array $agreedRateBasisPoints,
         PayrollSurchargeRuleset $ruleset,
+        array $agreedFixedHourlyMinor = [],
+        string $source = self::SOURCE_EMPLOYMENT,
     ): self {
         if ($holidayMode === PayrollSurchargeCompensationMode::IncludedInWage) {
             throw new InvalidArgumentException(
@@ -102,13 +142,76 @@ final readonly class PayrollSurchargePolicy
             $rates[$kind->value] = $basisPoints;
         }
 
+        $fixed = [];
+        foreach ($agreedFixedHourlyMinor as $key => $amountMinor) {
+            if ($amountMinor === null) {
+                continue;
+            }
+            $kind = PayrollSurchargeKind::tryFrom((string) $key);
+            if ($kind === null) {
+                throw new InvalidArgumentException("Neznámý druh příplatku {$key}.");
+            }
+            if ($amountMinor <= 0) {
+                throw new InvalidArgumentException(
+                    'Sjednaná pevná částka příplatku musí být kladná.',
+                );
+            }
+            // Obojí naráz by znamenalo dvě různá čísla na týž nárok a výpočet by
+            // si musel jedno vybrat. Táž mez drží i CHECK v migraci 1845.
+            if (isset($rates[$kind->value])) {
+                throw new InvalidArgumentException(sprintf(
+                    'Příplatek %s lze sjednat buď procentem, nebo pevnou částkou na hodinu, '
+                    . 'ne obojím zároveň.',
+                    $kind->section(),
+                ));
+            }
+            $fixed[$kind->value] = $amountMinor;
+        }
+
         return new self(
             $overtimeMode,
             $holidayMode,
             $difficultEnvironmentFactors,
             $rates,
+            $fixed,
             false,
+            $source,
         );
+    }
+
+    /**
+     * Firemní výchozí sazby pro vztah, který vlastní sjednání NEMÁ.
+     *
+     * Režimy odměnění (§ 114 odst. 3, § 115 odst. 1) zůstávají zákonné: to, jestli
+     * se za přesčas dává příplatek nebo náhradní volno, se sjednává s konkrétním
+     * člověkem, ne plošně. Firemní úroveň nese jen SAZBY — tedy kolik, ne jestli.
+     *
+     * @param array<string,int|null> $rateBasisPoints
+     * @param array<string,int|null> $fixedHourlyMinor
+     */
+    public static function employerDefault(
+        array $rateBasisPoints,
+        array $fixedHourlyMinor,
+        PayrollSurchargeRuleset $ruleset,
+        ?int $difficultEnvironmentFactors = null,
+    ): self {
+        $statutory = self::statutoryDefault();
+
+        return self::agreed(
+            $statutory->overtimeMode,
+            $statutory->holidayMode,
+            $difficultEnvironmentFactors,
+            $rateBasisPoints,
+            $ruleset,
+            $fixedHourlyMinor,
+            self::SOURCE_EMPLOYER,
+        );
+    }
+
+    /** Nese zásada vůbec nějakou sjednanou sazbu, nebo je celá prázdná? */
+    public function hasAnyAgreedRate(): bool
+    {
+        return $this->agreedRateBasisPoints !== [] || $this->agreedFixedHourlyMinor !== [];
     }
 
     public function mode(PayrollSurchargeKind $kind): PayrollSurchargeCompensationMode
@@ -140,6 +243,17 @@ final readonly class PayrollSurchargePolicy
     public function agreedRateBasisPoints(PayrollSurchargeKind $kind): ?int
     {
         return $this->agreedRateBasisPoints[$kind->value] ?? null;
+    }
+
+    /**
+     * Sjednaná pevná částka za hodinu v haléřích, nebo `null`.
+     *
+     * `null` NENÍ nula: znamená „pevná částka sjednána není", takže se použije
+     * sazba v procentech, a když není ani ta, zákonné minimum.
+     */
+    public function agreedFixedHourlyMinor(PayrollSurchargeKind $kind): ?int
+    {
+        return $this->agreedFixedHourlyMinor[$kind->value] ?? null;
     }
 
     /**

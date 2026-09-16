@@ -1950,8 +1950,23 @@ export type PayrollSurchargeCompensationMode =
   | 'compensatory_time_off'
   | 'included_in_wage'
 
+/**
+ * Pevná částka příplatku za hodinu v haléřích (migrace 1845).
+ *
+ * Vedle sazby v procentech, ne místo ní: u každého druhu se sjednává buď jedno,
+ * nebo druhé. `null` u obou znamená zákonné minimum.
+ */
+interface PayrollSurchargeFixedHourlyFields {
+  overtime_fixed_hourly_minor: number | null
+  holiday_fixed_hourly_minor: number | null
+  night_fixed_hourly_minor: number | null
+  weekend_fixed_hourly_minor: number | null
+  difficult_environment_fixed_hourly_minor: number | null
+}
+
 /** Jedna verze sjednané zásady příplatků na pracovním vztahu (migrace 1624). */
-export interface PayrollEmploymentSurchargePolicy extends Record<string, unknown> {
+export interface PayrollEmploymentSurchargePolicy
+  extends Record<string, unknown>, PayrollSurchargeFixedHourlyFields {
   id: number
   employment_id: number
   valid_from: string
@@ -1969,7 +1984,8 @@ export interface PayrollEmploymentSurchargePolicy extends Record<string, unknown
   row_version: number
 }
 
-export interface PayrollEmploymentSurchargePolicyPayload extends Record<string, unknown> {
+export interface PayrollEmploymentSurchargePolicyPayload
+  extends Record<string, unknown>, PayrollSurchargeFixedHourlyFields {
   valid_from: string
   overtime_mode: PayrollSurchargeCompensationMode
   holiday_mode: Exclude<PayrollSurchargeCompensationMode, 'included_in_wage'>
@@ -1990,7 +2006,8 @@ export interface PayrollEmploymentSurchargePolicyPayload extends Record<string, 
  * verzi, jejíž konec je z ní odvozený. Jiná účinnost znamená novou verzi, ne
  * opravu — server hodnotu z těla ignoruje.
  */
-export interface PayrollEmploymentSurchargePolicyUpdatePayload extends Record<string, unknown> {
+export interface PayrollEmploymentSurchargePolicyUpdatePayload
+  extends Record<string, unknown>, PayrollSurchargeFixedHourlyFields {
   overtime_mode: PayrollSurchargeCompensationMode
   holiday_mode: Exclude<PayrollSurchargeCompensationMode, 'included_in_wage'>
   difficult_environment_factors: number | null
@@ -2063,6 +2080,12 @@ export interface PayrollQuickSurchargeState {
   average_snapshot_version: number | null
   rate_basis_points: number | null
   rate_is_agreed: boolean
+  /**
+   * Sjednaná pevná částka za hodinu v haléřích (migrace 1845). Je-li vyplněná,
+   * počítá se z ní, ne ze sazby — `rate_basis_points` pak drží jen zákonné
+   * minimum, proti kterému se částka poměřuje.
+   */
+  agreed_fixed_hourly_minor: number | null
   requires_factors: boolean
   default_factors: number | null
   hours_milli: number | null
@@ -4380,6 +4403,24 @@ export interface PayrollEmployerPolicy {
   home_office_policy: PayrollOptionalPolicyState
   travel_expense_policy: PayrollOptionalPolicyState
   leave_entitlement_weeks: number
+  /**
+   * Výchozí sazby zákonných příplatků § 114 až § 118 pro celou firmu
+   * (migrace 1846). Procento v bázových bodech, pevná částka v haléřích za
+   * hodinu — u jednoho druhu vždy jen jedno z obojího.
+   *
+   * `null` znamená „firma výchozí sazbu nemá": vztah bez vlastního sjednání
+   * pak dostane zákonné minimum. Sjednání na vztahu má přednost vždycky.
+   */
+  overtime_rate_bp: number | null
+  holiday_rate_bp: number | null
+  night_rate_bp: number | null
+  weekend_rate_bp: number | null
+  difficult_environment_rate_bp: number | null
+  overtime_fixed_hourly_minor: number | null
+  holiday_fixed_hourly_minor: number | null
+  night_fixed_hourly_minor: number | null
+  weekend_fixed_hourly_minor: number | null
+  difficult_environment_fixed_hourly_minor: number | null
   /**
    * Jediný přepínač automatiky, který něco dělá: schválená revize se zaúčtuje
    * sama. Vypnutý znamená „účetní si zaúčtování vyvolá sama", ne „neúčtuje se".
@@ -7199,7 +7240,7 @@ export const payrollApi = {
   freezeJmhzPreparation: (
     revisionId: number,
     idempotencyKey: string,
-    environment: 'test' | 'production' = 'test',
+    environment: 'test' | 'production' = 'production',
   ) => api.post<PayrollJmhzPreparation>(
     `/payroll/submissions/jmhz-preparation/${revisionId}`,
     { environment },
@@ -7207,7 +7248,7 @@ export const payrollApi = {
   ).then(response => response.data),
   jmhzXmlDryRun: (
     preparationId: number,
-    environment: 'test' | 'production' = 'test',
+    environment: 'test' | 'production' = 'production',
     officeId?: number | null,
   ) => api.get<PayrollJmhzXmlDryRun>(
     `/payroll/submissions/jmhz-xml-dry-run/${preparationId}`,
@@ -7232,7 +7273,7 @@ export const payrollApi = {
   ).then(response => response.data),
   previewEmploymentRegistration: (
     employmentId: number,
-    environment: 'test' | 'production' = 'test',
+    environment: 'test' | 'production' = 'production',
     eventId?: number | null,
   ) => api.get<PayrollRegistrationPreview>(
     `/payroll/submissions/registration/${employmentId}`,
@@ -7240,7 +7281,7 @@ export const payrollApi = {
   ).then(response => response.data),
   prepareEmploymentRegistration: (
     employmentId: number,
-    environment: 'test' | 'production' = 'test',
+    environment: 'test' | 'production' = 'production',
     eventId?: number | null,
   ) => api.post<PayrollRegistrationSubmission>(
     `/payroll/submissions/registration/${employmentId}`,
@@ -7290,7 +7331,7 @@ export const payrollApi = {
    */
   detectEmploymentRegistrationChanges: (
     employmentId: number,
-    environment: PayrollJmhzTransportEnvironment = 'test',
+    environment: PayrollJmhzTransportEnvironment = 'production',
   ) => api.post<PayrollRegistrationChangeDetection>(
     `/payroll/submissions/registration/${employmentId}/changes`,
     { environment },
@@ -7298,7 +7339,7 @@ export const payrollApi = {
   fileEmploymentRegistrationChange: (
     employmentId: number,
     proposalId: number,
-    environment: PayrollJmhzTransportEnvironment = 'test',
+    environment: PayrollJmhzTransportEnvironment = 'production',
   ) => api.post<{ event: PayrollRegistrationEvent; proposal_id: number }>(
     `/payroll/submissions/registration/${employmentId}/changes/${proposalId}/file`,
     { environment },
@@ -7307,14 +7348,14 @@ export const payrollApi = {
     employmentId: number,
     proposalId: number,
     note: string,
-    environment: PayrollJmhzTransportEnvironment = 'test',
+    environment: PayrollJmhzTransportEnvironment = 'production',
   ) => api.post<{ proposal_id: number; status: string }>(
     `/payroll/submissions/registration/${employmentId}/changes/${proposalId}/dismiss`,
     { environment, note },
   ).then(response => response.data),
   employmentRegistrationEvents: (
     employmentId: number,
-    environment: PayrollJmhzTransportEnvironment = 'test',
+    environment: PayrollJmhzTransportEnvironment = 'production',
   ) => api.get<{ items: PayrollRegistrationEvent[] }>(
     `/payroll/submissions/registration/${employmentId}/events`,
     { params: { environment } },

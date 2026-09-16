@@ -89,6 +89,7 @@
     "payroll_travel",
     "period_filter",
     "permissions",
+    "pohoda",
     "portal",
     "portfolio",
     "price_list",
@@ -184,6 +185,7 @@
       "payroll_travel",
       "period_filter",
       "permissions",
+      "pohoda",
       "portal",
       "portfolio",
       "price_list",
@@ -393,6 +395,10 @@
     "imports-money-s3": [
       "imports",
       "money_s3"
+    ],
+    "imports-pohoda": [
+      "imports",
+      "pohoda"
     ],
     "purchase-invoices-payment-orders": [
       "bank_connection",

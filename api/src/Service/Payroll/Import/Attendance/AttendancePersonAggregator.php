@@ -319,6 +319,8 @@ final class AttendancePersonAggregator
         );
 
         $birthNumber = isset($identity['_birth_conflict']) ? null : ($identity['birth_number'] ?? null);
+        $birthDate = self::isoDate((string) ($identity['birth_date'] ?? ''));
+        $insurerCode = trim((string) ($identity['health_insurer_code'] ?? ''));
         $person = [
             'key' => $key,
             'display_name' => (string) $group[0]['name'],
@@ -340,6 +342,8 @@ final class AttendancePersonAggregator
             'warnings' => array_values(array_unique($warnings)),
             '_name_key' => $nameKey,
             '_birth_number' => $birthNumber,
+            '_birth_date' => $birthDate,
+            '_health_insurer_code' => $insurerCode === '' ? null : $insurerCode,
             '_metrics' => $internalMetrics,
             '_components' => $internalComponents,
             '_deductions' => $internalDeductions,
@@ -467,11 +471,43 @@ final class AttendancePersonAggregator
                 }
             }
         }
+        if ($meaning === 'birth_date' && $cell->kind === AttendanceCell::NUMBER) {
+            return self::excelDate((float) $cell->number) ?? '';
+        }
         if ($cell->kind === AttendanceCell::ERROR) {
             return '';
         }
 
         return trim((string) preg_replace('/\s+/u', ' ', $cell->textValue()));
+    }
+
+    /** Pořadové číslo dne z Excelu (1900 systém) jako YYYY-MM-DD. */
+    private static function excelDate(float $serial): ?string
+    {
+        $days = (int) floor($serial);
+        if ($days < 1 || $days > 2958465) {
+            return null;
+        }
+
+        return (new \DateTimeImmutable('1899-12-30'))->modify("+{$days} days")->format('Y-m-d');
+    }
+
+    /**
+     * Datum z textu podkladů: „1. 5. 1990", „01.05.1990" nebo „1990-05-01".
+     * Nečitelné nebo neexistující datum se nepoužije.
+     */
+    public static function isoDate(string $value): ?string
+    {
+        $value = trim($value);
+        if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$/D', $value, $match) === 1) {
+            [$year, $month, $day] = [(int) $match[1], (int) $match[2], (int) $match[3]];
+        } elseif (preg_match('/^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})(?:\s.*)?$/D', $value, $match) === 1) {
+            [$day, $month, $year] = [(int) $match[1], (int) $match[2], (int) $match[3]];
+        } else {
+            return null;
+        }
+
+        return checkdate($month, $day, $year) ? sprintf('%04d-%02d-%02d', $year, $month, $day) : null;
     }
 
     /** @return array{value:int}|array{error:string} */
