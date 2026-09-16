@@ -133,11 +133,28 @@ function checkState(c: PortfolioCompany): CheckState | undefined {
   return checks.value[c.supplier_id]
 }
 
-/** Pilulka „kontrola": červená u chyb, jantarová u varování, zelená když nic. */
-function checkBadgeClass(s: PortfolioCheckSummary): string {
-  if (s.errors > 0) return 'bg-danger-50 text-danger-600 ring-danger-500/20'
-  if (s.warnings > 0) return 'bg-warning-50 text-warning-600 ring-warning-500/20'
-  return 'bg-success-50 text-success-600 ring-success-500/20'
+/** Hotový souhrn firmy, nebo null (načítá se, spadlo, daňová evidence). */
+function checkSummaryOf(c: PortfolioCompany): PortfolioCheckSummary | null {
+  const s = checks.value[c.supplier_id]
+  return s?.status === 'done' ? s.summary : null
+}
+
+/** Pruh kontroly: červený u chyb, jantarový u varování, zelený když nic. */
+function checkBandClass(s: PortfolioCheckSummary): string {
+  if (s.errors > 0) return 'border-danger-500/30 bg-danger-50 text-danger-600'
+  if (s.warnings > 0) return 'border-warning-500/30 bg-warning-50 text-warning-600'
+  return 'border-success-500/30 bg-success-50 text-success-600'
+}
+
+/** Kolik nálezů se vejde do pruhu, než se z něj stane zeď textu. */
+const BAND_FINDING_LIMIT = 6
+
+function visibleFindings(s: PortfolioCheckSummary) {
+  return s.findings.slice(0, BAND_FINDING_LIMIT)
+}
+
+function hiddenFindingCount(s: PortfolioCheckSummary): number {
+  return Math.max(0, s.findings.length - BAND_FINDING_LIMIT)
 }
 
 /** „3 chyby · 7 varování", nebo „Kontrola v pořádku", když nic nesvítí. */
@@ -215,16 +232,8 @@ function periodBadgeClass(status: string): string {
                 <span v-if="c.period_status" class="inline-flex items-center px-2 py-0.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap" :class="periodBadgeClass(c.period_status.status)">
                   {{ c.period_status.fiscal_year }} · {{ t('portfolio.period_status_' + c.period_status.status) }}
                 </span>
-                <!-- Krátká sumarizace měsíční kontroly; detail je v popupu. -->
                 <span v-if="checkState(c)?.status === 'loading'" class="text-neutral-400">{{ t('portfolio.check_loading') }}</span>
                 <span v-else-if="checkState(c)?.status === 'error'" class="text-neutral-400">{{ t('portfolio.check_failed') }}</span>
-                <button v-else-if="checkState(c)?.status === 'done' && (checkState(c) as { summary: PortfolioCheckSummary | null }).summary"
-                  type="button" data-testid="check-badge"
-                  class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap hover:brightness-95"
-                  :class="checkBadgeClass((checkState(c) as { summary: PortfolioCheckSummary }).summary)"
-                  @click="openCheck = c">
-                  {{ checkSummaryLabel((checkState(c) as { summary: PortfolioCheckSummary }).summary) }}
-                </button>
               </div>
             </div>
             <button type="button" class="cursor-pointer inline-flex items-center gap-1.5 px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg whitespace-nowrap shadow-sm"
@@ -232,6 +241,37 @@ function periodBadgeClass(status: string): string {
               {{ t('portfolio.open_company') }} →
             </button>
           </header>
+
+          <!-- Účetní kontrola: pruh přes celou šířku karty. Pilulka „4 varování"
+               v hlavičce neřekla, CO nesedí — a právě to účetní z rozcestníku
+               potřebuje vědět dřív, než firmu vůbec otevře. -->
+          <div v-if="checkSummaryOf(c)" class="pl-6 pr-5 pb-4">
+            <div class="rounded-lg border px-3 py-2.5" :class="checkBandClass(checkSummaryOf(c)!)">
+              <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <span class="text-[11px] uppercase tracking-wide font-semibold">
+                  {{ t('portfolio.check_band_title') }} · {{ checkSummaryLabel(checkSummaryOf(c)!) }}
+                </span>
+                <button type="button" data-testid="check-badge"
+                  class="cursor-pointer text-xs font-medium hover:underline whitespace-nowrap" @click="openCheck = c">
+                  {{ t('portfolio.check_detail') }} →
+                </button>
+              </div>
+              <div v-if="checkSummaryOf(c)!.findings.length" class="flex flex-wrap gap-1.5 mt-2">
+                <button v-for="f in visibleFindings(checkSummaryOf(c)!)" :key="f.key" type="button"
+                  class="cursor-pointer inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-surface border border-neutral-200 hover:border-primary-300 text-xs text-neutral-700 text-left"
+                  :title="checkLabel(f.key)" @click="openMonthlyCheck(c)">
+                  <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="f.severity === 'error' ? 'bg-danger-500' : 'bg-warning-500'" aria-hidden="true"></span>
+                  <span>{{ checkLabel(f.key) }}</span>
+                  <span class="font-semibold tabular-nums">{{ f.count }}</span>
+                </button>
+                <button v-if="hiddenFindingCount(checkSummaryOf(c)!) > 0" type="button"
+                  class="cursor-pointer inline-flex items-center px-2 py-1 rounded-md text-xs text-neutral-500 hover:text-primary-600"
+                  @click="openCheck = c">
+                  {{ t('portfolio.check_more', { n: hiddenFindingCount(checkSummaryOf(c)!) }) }}
+                </button>
+              </div>
+            </div>
+          </div>
 
           <!-- Co je potřeba udělat -->
           <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 pl-6 pr-5 pb-5">
@@ -285,7 +325,7 @@ function periodBadgeClass(status: string): string {
     <!-- Co v měsíční kontrole té firmy nesedí. Jen klíče a počty — na nálezy vede
          proklik do měsíční kontroly, kde je celý kontext i opravy. -->
     <Modal v-if="openCheck" :title="t('portfolio.check_modal_title', { company: openCheck.company_name })"
-      width-class="max-w-xl" @close="openCheck = null">
+      width-class="max-w-3xl" @close="openCheck = null">
       <template v-if="openCheckSummary">
         <p class="text-xs text-neutral-500 mb-3">
           {{ openCheckSummary.period.fiscal_year }} · {{ openCheckSummary.range_from }} – {{ openCheckSummary.range_to }}
@@ -299,7 +339,7 @@ function periodBadgeClass(status: string): string {
           <li v-for="f in openCheckSummary.findings" :key="f.key" class="flex items-center py-2">
             <span class="flex items-center gap-2 min-w-0 flex-1">
               <span class="w-2 h-2 rounded-full shrink-0" :class="f.severity === 'error' ? 'bg-danger-500' : 'bg-warning-500'" aria-hidden="true"></span>
-              <span class="truncate" :title="checkLabel(f.key)">{{ checkLabel(f.key) }}</span>
+              <span>{{ checkLabel(f.key) }}</span>
             </span>
             <span class="font-mono tabular-nums text-neutral-600 shrink-0 w-12 pl-4 text-right">{{ f.count }}</span>
           </li>
