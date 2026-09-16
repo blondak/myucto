@@ -85,12 +85,15 @@ final class PayrollForeignPermitApiTest extends TestCase
     public function testEffectiveHistoryUsesAnAuthoritativeCompanyDmsDocumentAndReportsExpiry(): void
     {
         $documentId = $this->document($this->supplierId, 'company');
+        // Stav se počítá proti dnešku (zápis si bere `today`), takže platnost
+        // musí být relativní. Pevné datum jednou provždy vyprší a test spadne.
+        $expiringUntil = (new \DateTimeImmutable('today'))->modify('+10 days')->format('Y-m-d');
         $response = $this->create([
             'permit_kind' => 'residence',
             'permit_label' => 'Syntetické povolení k pobytu',
             'issuing_country_code' => 'CZ',
             'effective_from' => '2026-01-01',
-            'valid_until' => '2026-09-15',
+            'valid_until' => $expiringUntil,
             'document_id' => $documentId,
         ], '2026-08-20');
 
@@ -108,7 +111,7 @@ final class PayrollForeignPermitApiTest extends TestCase
             'permit_label' => 'Syntetické pracovní oprávnění',
             'issuing_country_code' => 'CZ',
             'effective_from' => '2026-01-01',
-            'valid_until' => '2026-09-15',
+            'valid_until' => $expiringUntil,
             'document_id' => $documentId,
         ], '2026-08-20');
         self::assertSame(200, $reused->getStatusCode(), (string) $reused->getBody());
