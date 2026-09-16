@@ -281,6 +281,50 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame(4, $this->rows('payroll_statutory_accumulator_openings', $supplierId));
     }
 
+    /**
+     * Regrese: účty, které založil starší běh převodu (ten ověřovat ještě neuměl), musí
+     * opakovaný převod doplnit. Dřív krok skončil holým `return []`, jakmile osoba nějaký
+     * účet měla — ověření se proto nedoplnilo NIKDY a opakovaný import, kterým to jde
+     * přirozeně zkusit, nechal evidenci přesně tak, jak byla. Ověřený účet je přitom
+     * podmínka bankovního příkazu (mezera `payout_account`).
+     */
+    public function testRepeatedImportVerifiesAccountsLeftUnverifiedByEarlierRun(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $verified = $this->scalar(
+            'SELECT COUNT(*) FROM payroll_person_accounts WHERE supplier_id = ? AND verification_source IS NOT NULL',
+            [$supplierId],
+        );
+        self::assertGreaterThan(0, $verified, $this->explain($protocol));
+
+        // Stav instalace po starším převodu: účty jsou založené, ověření u nich chybí.
+        $this->db->pdo()
+            ->prepare('UPDATE payroll_person_accounts SET verification_source = NULL, verified_on = NULL, verified_by = NULL WHERE supplier_id = ?')
+            ->execute([$supplierId]);
+        self::assertSame(0, $this->scalar(
+            'SELECT COUNT(*) FROM payroll_person_accounts WHERE supplier_id = ? AND verification_source IS NOT NULL',
+            [$supplierId],
+        ));
+
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame($verified, $this->scalar(
+            'SELECT COUNT(*) FROM payroll_person_accounts WHERE supplier_id = ? AND verification_source IS NOT NULL',
+            [$supplierId],
+        ), $this->explain($again));
+        // Datum nese den poslední výplaty z PAMICA, ne den opakovaného převodu.
+        self::assertSame(1, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_person_accounts
+              WHERE supplier_id = ? AND verification_source = 'user_verified'
+                AND verified_on = '2026-03-10' AND verified_by = ?",
+            [$supplierId, $this->userId],
+        ), $this->explain($again));
+    }
+
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->payrollSupplier();

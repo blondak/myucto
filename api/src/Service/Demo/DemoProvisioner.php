@@ -10,7 +10,6 @@ use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\JournalEntryTemplateRepository;
 use MyInvoice\Repository\RoleRepository;
 use MyInvoice\Repository\UserSupplierRepository;
-use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Sample\SampleDataGenerator;
@@ -30,26 +29,6 @@ final class DemoProvisioner
         private readonly SampleDataGenerator $sampleGenerator,
         private readonly SampleDataService $sampleData,
     ) {}
-
-    /**
-     * Práva na mzdy pro demo roli. `payroll.person.read_sensitive` tu záměrně
-     * není: ukázka nemá důvod odhalovat rodná čísla ani u syntetických dat.
-     */
-    private const PAYROLL_READ_PERMISSIONS = [
-        'payroll',
-        'payroll.settings',
-        'payroll.post',
-        'payroll.payments',
-        'payroll.submissions',
-        'payroll.enforcement',
-        'payroll.enforcement.cooperation',
-        'payroll.insolvency',
-        'payroll.reports',
-        'payroll.rulesets',
-        'payroll.documents',
-        'payroll.retention',
-        'payroll.erasure',
-    ];
 
     /** @return array{role_id:int,user_id:int,supplier_ids:list<int>,generated:list<int>,refreshed:list<int>,skipped:list<int>} */
     public function provision(bool $refreshSample = false): array
@@ -159,48 +138,26 @@ final class DemoProvisioner
         }
     }
 
+    /**
+     * Demo účet jede na systémové roli `superadmin`.
+     *
+     * Ukázka má smysl jen tehdy, když návštěvník uvidí VŠECHNO — sklad, mzdy,
+     * účetnictví i systémovou správu — a může otevřít každý formulář. Původní
+     * kopie role `readonly` tenhle účel sabotovala: UI se na stovkách míst ptá
+     * `auth.canWrite(...)`, takže read-only roli zmizelo i tlačítko „Upravit
+     * kartu" u skladové položky a nikdo nepoznal, co aplikace vlastně umí.
+     *
+     * Bezpečnost tím netrpí, protože zápis nikdy nedržela role:
+     * `DemoReadOnlyMiddleware` sedí v pipeline PŘED `PermissionMiddleware`
+     * (viz rozpis pořadí v `Bootstrap`), roli vůbec nečte a každou non-GET
+     * metodu mimo login/logout odmítne 403 `demo_read_only`. Superadmin tedy
+     * odemkne zobrazení, ale ne ukládání.
+     */
     private function ensureRole(): int
     {
-        $readonly = $this->roles->findBySystemKey('readonly');
-        $demo = null;
-        foreach ($this->roles->list() as $role) {
-            if (mb_strtolower((string) $role['name']) === 'demo') {
-                if ($demo !== null) throw new \RuntimeException('V databázi je více rolí se jménem Demo.');
-                $demo = $this->roles->find((int) $role['id']);
-            }
-        }
-        if ($readonly === null) throw new \RuntimeException('Systémová role readonly nebyla nalezena.');
-        $permissions = (array) $readonly['permissions'];
-        $permissions['settings.branding'] = AccessLevel::READ->value;
-        // Bez tohohle klíče vrátí GET /settings/currencies 403 a záložka „Měny a účty"
-        // v ukázce spadne hned při mountu. Zápis stejně drží DemoReadOnlyMiddleware.
-        $permissions['settings.bank_accounts'] = AccessLevel::READ->value;
-        // Mzdy nejsou v systémové roli readonly, takže by je demo účet vůbec
-        // neviděl — router i navigace je schovávají za práva níže. Všechno jen
-        // ke čtení; zápis stejně drží DemoReadOnlyMiddleware.
-        foreach (self::PAYROLL_READ_PERMISSIONS as $key) {
-            $permissions[$key] = AccessLevel::READ->value;
-        }
-
-        if ($demo === null) {
-            return (int) $this->roles->create('Demo', 'staff', $permissions)['id'];
-        }
-        if (($demo['system_key'] ?? null) !== null || ($demo['role_type'] ?? null) !== 'staff') {
-            throw new \RuntimeException('Jméno Demo už používá nekompatibilní role.');
-        }
-        $currentPermissions = (array) $demo['permissions'];
-        ksort($permissions);
-        ksort($currentPermissions);
-        if (!$demo['is_active'] || $currentPermissions !== $permissions) {
-            $demo = $this->roles->update(
-                (int) $demo['id'],
-                'Demo',
-                true,
-                $permissions,
-                (string) $demo['updated_at'],
-            );
-        }
-        return (int) $demo['id'];
+        $superadmin = $this->roles->findBySystemKey('superadmin');
+        if ($superadmin === null) throw new \RuntimeException('Systémová role superadmin nebyla nalezena.');
+        return (int) $superadmin['id'];
     }
 
     private function ensureUser(int $roleId): int
@@ -221,7 +178,7 @@ final class DemoProvisioner
         if ($rows === []) {
             $insert = $this->db->pdo()->prepare(
                 'INSERT INTO users (email, password_hash, totp_secret, totp_enabled, name, role, role_id, locale, is_active)
-                 VALUES (?, ?, NULL, 0, ?, \'readonly\', ?, \'cs\', 1)'
+                 VALUES (?, ?, NULL, 0, ?, \'admin\', ?, \'cs\', 1)'
             );
             $insert->execute([$email, $this->passwords->hash($password), 'MyÚčto Demo', $roleId]);
             return (int) $this->db->pdo()->lastInsertId();
@@ -248,7 +205,7 @@ final class DemoProvisioner
             $update = $this->db->pdo()->prepare(
                 'UPDATE users
                     SET email = ?, password_hash = COALESCE(?, password_hash), totp_secret = NULL, totp_enabled = 0,
-                        name = ?, role = \'readonly\', role_id = ?, locale = \'cs\', is_active = 1
+                        name = ?, role = \'admin\', role_id = ?, locale = \'cs\', is_active = 1
                   WHERE id = ?'
             );
             $update->execute([$email, $newHash, 'MyÚčto Demo', $roleId, (int) $user['id']]);

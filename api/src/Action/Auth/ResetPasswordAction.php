@@ -90,7 +90,12 @@ final class ResetPasswordAction
             $pdo->commit();
         } catch (\PDOException $e) {
             $pdo->rollBack();
-            return Json::error($response, 'reset_failed', $e->getMessage(), 500);
+            // Endpoint je anonymní, takže text výjimky ven nesmí: `PDOException`
+            // nese SQLSTATE, jméno tabulky i fragment dotazu — a nezávisle na
+            // `app.debug`, takže by to teklo i z produkce. Detail patří do logu,
+            // volajícímu stačí, že se změna nepovedla.
+            error_log('Reset hesla selhal: ' . $e->getMessage());
+            return Json::error($response, 'reset_failed', 'Heslo se nepodařilo změnit.', 500);
         }
 
         // Invaliduj všechny aktivní sessions

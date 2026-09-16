@@ -227,6 +227,12 @@ final class ApiScopeMiddleware implements MiddlewareInterface
 
         // 2) Scope
         if (in_array($method, self::READ_METHODS, true)
+            // `/api/catalog/exports` tu je SCHVÁLNĚ, i když vrací 202 a staví frontu:
+            // `CatalogExportAction::create()` vyžaduje `eshop` jen na úrovni READ a
+            // výsledkem je asynchronní čtení dat, která token přečte i jinudy. Řádek
+            // ve frontě není business mutace. Že tutéž cestu vyjímá i
+            // DemoReadOnlyMiddleware, tenhle závěr nemění — tam jde o to, aby veřejná
+            // ukázka nezakládala úlohy na pozadí, ne o úroveň oprávnění.
             || ($method === 'POST' && (in_array($path, ['/api/catalog/products/batch', '/api/catalog/prices/batch', '/api/catalog/exports', '/api/stock/items/quote'], true)
                 || preg_match('#^/api/stock/items/[0-9]+/neighbors$#', $path) === 1
                 || preg_match('#^/api/stock/intrastat/(preview|export)$#', $path) === 1))) {

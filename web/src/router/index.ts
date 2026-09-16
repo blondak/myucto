@@ -201,8 +201,6 @@ const companyAdminRouteNames = new Set(['admin-price-list', 'admin-price-list-ne
 // `requiresAuth` a `mfaSetupOnly` je sama gate: koho MFA nečeká, toho guard níž
 // pošle z té stránky pryč.
 const selfServiceRouteNames = new Set(['profile-password', 'setup-totp', 'isds-gateway-callback'])
-const demoCreateRouteNames = new Set(['invoice-new', 'purchase-invoice-new', 'client-new', 'accounting-journal-new'])
-const demoReadOnlyRouteNames = new Set(['admin-settings', 'admin-branding', 'admin-codebooks', 'admin-tax-constants'])
 const commercialOnlyRouteNames = new Set([
   'accounting-activation',
   'automation-cockpit',
@@ -457,8 +455,7 @@ export async function authorizationGuard(
 
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
   if (superadminOnly && !auth.isSuperadmin) {
-    const demoReadOnlyRoute = auth.isDemo && typeof to.name === 'string' && demoReadOnlyRouteNames.has(to.name)
-    if (!demoReadOnlyRoute) return denyFallback(to.name, auth)
+    return denyFallback(to.name, auth)
   }
 
   const adminPlusOnly = to.matched.some((r) => r.meta.adminPlusOnly)
@@ -479,9 +476,7 @@ export async function authorizationGuard(
       && !auth.can(permissionMeta.permission, permissionMeta.access ?? 'read'))
     || additionalPermissionDenied
   ) {
-    const demoCreateRoute = auth.isDemo && typeof to.name === 'string' && demoCreateRouteNames.has(to.name)
-    const demoReadOnlyRoute = auth.isDemo && typeof to.name === 'string' && demoReadOnlyRouteNames.has(to.name)
-    if (!demoCreateRoute && !demoReadOnlyRoute) return denyFallback(to.name, auth)
+    return denyFallback(to.name, auth)
   }
   const selfServiceRoute = mfaSetupRoute
     || (typeof to.name === 'string' && selfServiceRouteNames.has(to.name))

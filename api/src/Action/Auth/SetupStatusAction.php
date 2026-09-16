@@ -36,7 +36,11 @@ final class SetupStatusAction
 
     public function __invoke(Request $request, Response $response): Response
     {
-        $demoEnabled = (bool) $this->config->get('demo.enabled', false);
+        // Přihlašovací údaje ukázky se vydávají ANONYMNĚ, takže `demo.enabled` sám
+        // nestačí: instance, která ten příznak zdědí z cizího cfg nad ostrou
+        // databází, by rozdávala funkční přístup k reálným datům. Platí proto
+        // tytéž dvě pojistky, kterými se řídí provisioning (assertSafeTarget()).
+        $demoEnabled = (bool) $this->config->get('demo.enabled', false) && $this->demoTargetMatches();
         $demoEmail = $demoEnabled ? trim((string) $this->config->get('demo.login_email', '')) : '';
         $demoPassword = $demoEnabled ? (string) $this->config->get('demo.login_password', '') : '';
 
@@ -64,5 +68,23 @@ final class SetupStatusAction
                 'password'    => $demoPassword,
             ],
         ]);
+    }
+
+    /**
+     * Běží tahle instalace opravdu jako ukázka? Shoda `app.url` s `demo.expected_host`
+     * a `db.name` s `demo.expected_database` — záměrně stejné dvě podmínky, jaké
+     * vynucuje {@see \MyInvoice\Service\Demo\DemoProvisioner::assertSafeTarget()}.
+     * Prázdná očekávaná hodnota se bere jako neshoda, ať se pojistka nedá obejít
+     * tím, že se konfigurace prostě nevyplní.
+     */
+    private function demoTargetMatches(): bool
+    {
+        $expectedHost = strtolower(trim((string) $this->config->get('demo.expected_host', '')));
+        $actualHost = strtolower((string) (parse_url((string) $this->config->get('app.url', ''), PHP_URL_HOST) ?: ''));
+        $expectedDatabase = trim((string) $this->config->get('demo.expected_database', ''));
+        $actualDatabase = trim((string) $this->config->get('db.name', ''));
+
+        return $expectedHost !== '' && $expectedHost === $actualHost
+            && $expectedDatabase !== '' && $expectedDatabase === $actualDatabase;
     }
 }

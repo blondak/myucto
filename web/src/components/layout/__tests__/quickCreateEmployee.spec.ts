@@ -46,13 +46,13 @@ describe('rychlé zakládání zaměstnance v „+"', () => {
     expect(appLayout).toContain('].filter(action => canCreate({')
   })
 
-  it('v demu položka není — zápisy jsou tam blokované, formulář by nešel odeslat', () => {
-    const demo = appLayout.slice(appLayout.indexOf('if (auth.isDemo && !clientExperience.value) return ['))
-    const demoBlock = demo.slice(0, demo.indexOf('\n  ]'))
-    expect(demoBlock).not.toContain('/payroll/people?new=1')
-    // Ani výjimka v canCreate pro demo ji nepropustí.
-    const canCreateDemo = appLayout.slice(appLayout.indexOf('if (auth.isDemo && ['), appLayout.indexOf('].includes(item.newTo)) return true'))
-    expect(canCreateDemo).not.toContain('/payroll/people')
+  it('v demu položka JE — ukázka musí být vidět celá, uložení zastaví až backend', () => {
+    // Demo jede na systémové roli superadmin (DemoProvisioner::ensureRole), takže
+    // quickActions ani canCreate už žádnou vlastní demo větev nemají a zkratka se
+    // řídí stejným `canCreate` jako u kohokoli jiného. Zápis drží výhradně
+    // DemoReadOnlyMiddleware (403 demo_read_only), ne schovaná tlačítka.
+    expect(appLayout).not.toContain('auth.isDemo && !clientExperience.value')
+    expect(appLayout).not.toContain('if (auth.isDemo && [')
   })
 
   it('registruje se mezi zkratky skupiny create sama, bez další ruční položky', () => {

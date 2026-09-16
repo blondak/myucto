@@ -646,14 +646,18 @@ final class PohodaPayrollPeopleWriter
         }
         $current = $this->profiles->get($supplierId, $employeeId)
             ?? throw new \DomainException('osobní karta zaměstnance nebyla nalezena.');
-        if ($current['accounts'] !== []) {
-            return [];
-        }
         $today = date('Y-m-d');
-        $from = min(is_string($record['start']) ? $record['start'] : $today, $today);
         // Den poslední mzdy, kterou PAMICA na účet vyplatila. Nese ho popisek účtu, protože
         // pole pro odkaz na zdroj ověření tabulka výplatních účtů nemá.
         $paidOn = is_string($record['accounts_paid_on']) ? $record['accounts_paid_on'] : null;
+        // Účty z dřívějšího běhu se nezakládají znovu — ověřit se ale musí. Dřív tu bylo
+        // holé `return []`, což znamenalo, že převod spuštěný znovu nad už převedenou
+        // firmou ověření NIKDY nedoplnil: krok skončil dřív, než se k němu dostal. Přesně
+        // to potkalo instalace, kde účty založil starší běh, který ověřovat ještě neuměl.
+        if ($current['accounts'] !== []) {
+            return $this->verifyAccounts($supplierId, $employeeId, $paidOn, $userId);
+        }
+        $from = min(is_string($record['start']) ? $record['start'] : $today, $today);
         $rows = [];
         foreach ($accounts as $index => $account) {
             // Účet, který PAMICA vede jako neaktivní, mzdu nedostával: není aktivní ani tady
@@ -687,22 +691,40 @@ final class PohodaPayrollPeopleWriter
             'identifiers' => [],
             'accounts' => $rows,
         ]), $current['row_version'], $userId, null, null);
-        $counts = ['payout_accounts' => count($rows)];
-        // Ověření účtu: na účet předchozí mzdový systém opakovaně vyplácel mzdu, a to je
-        // věcný doklad, ne domněnka. Zdroj `user_verified` je z přípustných hodnot nejbližší
-        // (převod ani migrace mezi nimi nejsou) a původ nese popisek účtu, protože pole pro
-        // odkaz na zdroj tabulka účtů nemá. Datum je den poslední výplaty z PAMICA.
-        if ($userId === null || $paidOn === null) {
-            $this->accountsToVerify += count($rows);
-            return $counts;
-        }
+        return ['payout_accounts' => count($rows)]
+            + $this->verifyAccounts($supplierId, $employeeId, $paidOn, $userId);
+    }
+
+    /**
+     * Ověření účtu: na účet předchozí mzdový systém opakovaně vyplácel mzdu, a to je
+     * věcný doklad, ne domněnka. Zdroj `user_verified` je z přípustných hodnot nejbližší
+     * (převod ani migrace mezi nimi nejsou) a původ nese popisek účtu, protože pole pro
+     * odkaz na zdroj tabulka účtů nemá. Datum je den poslední výplaty z PAMICA.
+     *
+     * Je to samostatný krok schválně: pouští se i nad účty, které založil dřívější běh,
+     * takže opakovaný převod dovede evidenci doplnit místo aby ji nechal, jak byla.
+     *
+     * @return array<string,int>
+     */
+    private function verifyAccounts(int $supplierId, int $employeeId, ?string $paidOn, ?int $userId): array
+    {
         $saved = $this->profiles->get($supplierId, $employeeId);
+        $unverified = array_values(array_filter(
+            $saved['accounts'] ?? [],
+            static fn (array $account): bool => $account['verification_source'] === null,
+        ));
+        if ($unverified === []) {
+            return [];
+        }
+        // Bez přihlášeného uživatele nebo bez dokladu o výplatě ověřit nejde: `verified_by`
+        // i `verified_on` jsou povinné společně (trigger z migrace 1271).
+        if ($userId === null || $paidOn === null) {
+            $this->accountsToVerify += count($unverified);
+            return [];
+        }
         $verified = 0;
         $pending = 0;
-        foreach ($saved['accounts'] as $account) {
-            if ($account['verification_source'] !== null) {
-                continue;
-            }
+        foreach ($unverified as $account) {
             // Neaktivní účet ověřit nejde a ani nemá čím: v PAMICA je jen veden, mzda na něj
             // nechodila. Zůstane k rozhodnutí účetní.
             if ($account['is_active'] !== true) {
@@ -726,6 +748,7 @@ final class PohodaPayrollPeopleWriter
         }
         $this->accountsVerified += $verified;
         $this->accountsToVerify += $pending;
+        $counts = [];
         if ($verified > 0) {
             $counts['payout_accounts_verified'] = $verified;
         }

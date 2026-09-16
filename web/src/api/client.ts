@@ -148,6 +148,19 @@ api.interceptors.response.use(
       void forbiddenPermissionHandler?.()
     }
 
+    // Demo režim odmítá mutace globálně (DemoReadOnlyMiddleware), takže hláška
+    // patří sem, ne do jednotlivých formulářů. Dokud ji uměla jen hrstka
+    // obrazovek přes `blockDemoMutation()`, zůstalo všude jinde tlačítko bez
+    // odezvy — návštěvník nepoznal, jestli se uložilo, nebo aplikace spadla.
+    //
+    // Text se překládá až v AppLayoutu, stejně jako u `session-locked` níž:
+    // `createI18n` běží při importu `@/i18n`, takže tahat ho sem znamená vtáhnout
+    // ho do KAŽDÉHO testu, který se dotkne API klienta — a ty vue-i18n mockují
+    // částečně, takže se rozbilo 36 testových souborů hned při načtení modulu.
+    if (status === 403 && code === 'demo_read_only') {
+      window.dispatchEvent(new CustomEvent('myinvoice:demo-read-only'))
+    }
+
     // 503 config_missing / bootstrap_failed = backend není nakonfigurovaný
     // (chybí cfg.php nebo nelze do DB). Zobrazíme fullscreen overlay s návodem,
     // ať uživatel nedostane jen prázdný login form bez vysvětlení.

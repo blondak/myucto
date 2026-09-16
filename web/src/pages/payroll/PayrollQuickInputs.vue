@@ -1680,10 +1680,11 @@ onMounted(() => {
           </ul>
         </div>
         <!--
-          Tabulka má vlastní posuv, aby hlavička, první sloupec se jménem
-          a součtový řádek zůstaly vidět i při mnoha sloupcích složek.
+          Posuv je jen VODOROVNÝ, kvůli `min-w-[1120px]` a zmrazenému sloupci se
+          jménem (`sticky left-0`). Svislý strop tu být nesmí: stránka má jediný
+          posuvník, ne tabulku skrolující uvnitř sebe pod vlastní patičkou.
         -->
-        <div id="quick-surcharge-columns" data-layout="desktop" class="hidden max-h-[75vh] overflow-auto lg:block">
+        <div id="quick-surcharge-columns" data-layout="desktop" class="hidden overflow-x-auto lg:block">
           <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead class="sticky top-0 z-20 bg-surface">
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">

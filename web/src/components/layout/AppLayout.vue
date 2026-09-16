@@ -575,9 +575,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/monthly-report',   label: t('nav.accounting_monthly_report'),   icon: ICONS.reports },
         // Mzdová rekapitulace zůstává ZDE záměrně: položky nejdou přetáhnout mezi
         // sekcemi (useNavOrder), takže přesun do Nástrojů by byl nevratný.
-        // V demu je skrytá — počítá odvody za konkrétního poplatníka a na sdílených
-        // ukázkových datech nedává smysl.
-        ...(auth.isDemo ? [] : [{ to: '/accounting/payroll', label: t('nav.accounting_payroll'), icon: ICONS.users }]),
+        { to: '/accounting/payroll', label: t('nav.accounting_payroll'), icon: ICONS.users },
         // Majetek a Drobný majetek se přesunuly do sekce Nákup (pořizují se přijatou
         // fakturou), pořád ale jen pro firmy s aktivním účetnictvím — viz tam.
       ],
@@ -714,15 +712,7 @@ const navSections = computed<NavSection[]>(() => {
     key: 'company',
     title: t('nav.section_company'),
     accent: 'warning',
-    items: auth.isDemo ? [
-      { to: '/admin/settings', label: t('nav.settings'), icon: ICONS.settings },
-      { to: '/admin/branding', label: t('nav.branding'), icon: ICONS.branding, permission: 'settings.branding' as PermissionKey },
-      { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'), icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
-      // MCP server je v demu záměrně vidět: stránka jen čte (návod, přehled nástrojů,
-      // log volání) a je to jedna z věcí, kvůli kterým si zájemce demo pouští.
-      // Vydat token v demu nejde, mutace zastaví DemoReadOnlyMiddleware.
-      { to: '/profile/mcp-server', label: t('nav.mcp_server'), icon: ICONS.mcp, permission: 'profile.tokens' as PermissionKey },
-    ] : [
+    items: [
       { to: '/admin/settings',              label: t('nav.settings'),        icon: ICONS.settings },
       { to: '/admin/integrations',          label: t('nav.integrations'),    icon: ICONS.api_tokens },
       { to: '/admin/integrations?tab=ai',   label: t('nav.ai_settings'),     icon: ICONS.ai },
@@ -734,7 +724,7 @@ const navSections = computed<NavSection[]>(() => {
     ],
   })
 
-  if (isAdmin || isAdminPlus || auth.isDemo) {
+  if (isAdmin || isAdminPlus) {
     // Systém — globální nastavení a licenční agenda v jednom menu.
     sections.push({
       key: 'system_global',
@@ -742,10 +732,6 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'neutral',
       items: [
         ...(supplierStore.hasMultiple ? [{ to: '/portfolio', label: t('nav.portfolio'), icon: ICONS.stock_warehouses }] : []),
-        ...(auth.isDemo ? [
-        { to: '/admin/codebooks?scope=global', label: t('nav.codebooks_global'), icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
-        { to: '/admin/tax-constants', label: t('codebooks.tab_tax_constants'), icon: ICONS.tax_optimizer, permission: 'settings.company' as PermissionKey },
-      ] : [
         ...(isAdmin ? [
           { to: '/admin/codebooks?scope=global', label: t('nav.codebooks_global'), icon: ICONS.codebooks },
           { to: '/admin/tax-constants', label: t('codebooks.tab_tax_constants'), icon: ICONS.tax_optimizer },
@@ -774,9 +760,14 @@ const navSections = computed<NavSection[]>(() => {
             accent: 'warning' as const,
             attention: hostingAttention.value,
           }] : []),
-          { to: '/activation/license',  label: t('nav.license'),               icon: ICONS.approvals, dividerBefore: true },
-          { to: '/activation/terms',    label: t('nav.terms'),                 icon: ICONS.documents },
-          { to: '/activation/purchase', label: t('nav.purchase_subscription'), icon: ICONS.coin },
+          // Licenční agenda je jediná výjimka z „demo vidí všechno": ukázková
+          // instance má vlastní služební licenci a její tarif, klíč ani nabídka
+          // předplatného o produktu nic neříkají — jen matou.
+          ...(auth.isDemo ? [] : [
+            { to: '/activation/license',  label: t('nav.license'),               icon: ICONS.approvals, dividerBefore: true },
+            { to: '/activation/terms',    label: t('nav.terms'),                 icon: ICONS.documents },
+            { to: '/activation/purchase', label: t('nav.purchase_subscription'), icon: ICONS.coin },
+          ]),
           // Kompletní export dat firmy — stažení všeho v jednom archivu (H-14).
           { to: '/admin/instance-export', label: t('nav.instance_export'),     icon: ICONS.exports, dividerBefore: true },
           // Automatické zálohy ke stažení — protějšek exportu: ne balíček na vyžádání,
@@ -796,12 +787,11 @@ const navSections = computed<NavSection[]>(() => {
         // Manuál je poslední položka Systému — v novém tabu, ať člověk nepřijde
         // o rozdělanou práci.
         { to: '/manual', label: t('nav.manual'), icon: ICONS.documents, external: true },
-      ]),
       ],
     })
   }
 
-  if (!isAdmin && !isAdminPlus && !auth.isDemo) {
+  if (!isAdmin && !isAdminPlus) {
     const nonAdminSystemItems: NavItem[] = []
     if (supplierStore.hasMultiple) {
       nonAdminSystemItems.push({ to: '/portfolio', label: t('nav.portfolio'), icon: ICONS.stock_warehouses })
@@ -879,8 +869,8 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
     items: section.items.filter(item => {
       if (item.external) return true
       const permission = navPermission(item)
-      if (item.to.startsWith('/admin/settings') || item.to.startsWith('/admin/integrations')) return auth.isDemo || auth.canWrite('settings.company.write')
-      if (item.to.startsWith('/admin/branding')) return auth.isDemo ? auth.canRead('settings.branding') : auth.canWrite('settings.branding')
+      if (item.to.startsWith('/admin/settings') || item.to.startsWith('/admin/integrations')) return auth.canWrite('settings.company.write')
+      if (item.to.startsWith('/admin/branding')) return auth.canWrite('settings.branding')
       if (item.to.startsWith('/admin/electronic-signatures')) return auth.canWrite('settings.signing')
       if (item.to.startsWith('/admin/databox')) return auth.canWrite('settings.signing')
       if (item.to.startsWith('/admin/suppliers')) return auth.isSuperadmin || auth.isAdminPlusRole
@@ -892,13 +882,6 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
 
 function canCreate(item: NavItem): boolean {
   if (!item.newTo) return false
-  if (auth.isDemo && [
-    '/invoices/new',
-    '/purchase-invoices/new',
-    '/clients/new',
-    '/clients/new?role=vendor',
-    '/accounting/journal/new',
-  ].includes(item.newTo)) return true
   if (item.newPermission) return auth.canWrite(item.newPermission)
   const path = item.newTo
   if (path.startsWith('/invoices')) return auth.canWrite('invoices.create')
@@ -1084,14 +1067,6 @@ const activeSectionAccent = computed<string>(() => {
 
 /** Rychlé zkratky v topbaru (desktop) — ikony navazují na menu (ICONS). */
 const quickActions = computed(() => {
-  if (auth.isDemo && !clientExperience.value) return [
-    { to: '/invoices/new', label: t('nav.quick_invoice'), icon: ICONS.invoices },
-    { to: '/purchase-invoices/new', label: t('nav.quick_purchase'), icon: ICONS.purchase },
-    { to: '/clients/new', label: t('nav.quick_client'), icon: ICONS.clients },
-    { to: '/clients/new?role=vendor', label: t('nav.quick_vendor'), icon: ICONS.suppliers },
-    { to: '/logbook?tab=fuel&new=fuel', label: t('nav.quick_fueling'), icon: ICONS.fuel },
-    { to: '/accounting/journal/new', label: t('nav.quick_journal'), icon: ICONS.accounting },
-  ]
   const actions = [
     { to: '/invoices/new',          label: t('nav.quick_invoice'),   icon: ICONS.invoices },
     { to: '/invoices/new?type=proforma', label: t('nav.quick_proforma'), icon: ICONS.proforma },
@@ -1134,7 +1109,7 @@ const quickActions = computed(() => {
   // AI z něj udělá draft). Nejde o zakládací route, takže `canCreate` by ji
   // vyhodila; gate je stejný jako u položky v menu — právo `purchase_invoices.scan`
   // (zrcadlí BE check v AiExtractPdfAction, readonly ji nevidí).
-  if (!clientExperience.value && !auth.isDemo && auth.canWrite('purchase_invoices.scan')) {
+  if (!clientExperience.value && auth.canWrite('purchase_invoices.scan')) {
     const purchaseIdx = actions.findIndex(a => a.to === '/purchase-invoices/new')
     const aiImport = { to: '/purchase-invoices/ai-import', label: t('nav.ai_import'), icon: ICONS.ai }
     if (purchaseIdx === -1) actions.push(aiImport)
@@ -1415,10 +1390,22 @@ const licenseBanner = computed<{ variant: 'primary' | 'warning' | 'danger'; text
 })
 
 const versionInfo = ref<PublicVersion | null>(null)
+
+/*
+ * Ukázkový režim: mutaci odmítne backend (403 `demo_read_only`) a interceptor
+ * v `api/client.ts` o tom vyšle událost. Překlad se dělá až tady schválně —
+ * `createI18n` se nesmí dostat do HTTP klienta, jinak se vtáhne do každého testu,
+ * který klienta jen naimportuje.
+ */
+function demoReadOnly(): void {
+  toast.info(t('demo.read_only'))
+}
+
 onMounted(async () => {
   void ensurePrefsLoaded()   // F5: prefetch per-user UI stavu (filtry + preference tabulek)
   void keyboardShortcuts.load()
   window.addEventListener('keydown', onGlobalShortcut)
+  window.addEventListener('myinvoice:demo-read-only', demoReadOnly)
   window.addEventListener('resize', scheduleDesktopStateUpdate)
   footerResizeObserver = new ResizeObserver(() => {
     appFooterHeight.value = appFooter.value?.getBoundingClientRect().height ?? 0
@@ -1443,6 +1430,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalShortcut)
+  window.removeEventListener('myinvoice:demo-read-only', demoReadOnly)
   window.removeEventListener('resize', scheduleDesktopStateUpdate)
   footerResizeObserver?.disconnect()
   desktopResizeObserver?.disconnect()
@@ -1544,7 +1532,7 @@ onBeforeUnmount(() => {
                   <div class="font-medium text-neutral-900 truncate">{{ auth.user?.name }}</div>
                   <div class="text-xs text-neutral-500 truncate">{{ auth.user?.email }}</div>
                 </div>
-                <template v-if="!auth.isDemo">
+                <template>
                   <WorkspaceNavLink to="/profile/password" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
                     <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 1 1 2 2m4 0a6 6 0 1 1-7.7 5.75L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.6a1 1 0 0 1 .3-.7l6-6A6 6 0 0 1 21 9z"/></svg>
                     {{ t('auth.change_password_title') }}

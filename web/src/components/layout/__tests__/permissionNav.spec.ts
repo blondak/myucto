@@ -27,7 +27,7 @@ describe('navigace podle RBAC oprávnění', () => {
 
   it('nabízí firemní sekci i staff roli a její položky pak filtruje podle práv', () => {
     const companyAt = appLayout.indexOf("key: 'company'")
-    const adminSystemGateAt = appLayout.indexOf('if (isAdmin || isAdminPlus || auth.isDemo) {', companyAt)
+    const adminSystemGateAt = appLayout.indexOf('if (isAdmin || isAdminPlus) {', companyAt)
 
     expect(companyAt).toBeGreaterThan(-1)
     expect(adminSystemGateAt).toBeGreaterThan(companyAt)
@@ -125,7 +125,7 @@ describe('navigace podle RBAC oprávnění', () => {
   })
 
   it('ukazuje Dodavatele v Systému superadminovi a roli Admin Plus', () => {
-    expect(appLayout).toContain('if (isAdmin || isAdminPlus || auth.isDemo)')
+    expect(appLayout).toContain('if (isAdmin || isAdminPlus)')
     expect(appLayout).toContain("...((isAdmin || isAdminPlus) ? [{ to: '/admin/suppliers'")
     expect(appLayout).toContain("if (item.to.startsWith('/admin/suppliers')) return auth.isSuperadmin || auth.isAdminPlusRole")
   })
