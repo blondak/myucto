@@ -4051,6 +4051,7 @@ final class BankStatementAction
         $newlyPartial = 0;
         $stillUnmatched = 0;
         $takenOver = 0;
+        $superseded = 0;
         $matchIds = [];
         foreach ($txIds as $txId) {
             // Nejdřív cross-source dedup: pokud tatáž platba visí spárovaná na
@@ -4066,6 +4067,11 @@ final class BankStatementAction
                 $this->bankPosting->handleTransaction((int) $txId, $userId ?: null);
                 continue;
             }
+
+            // Nespárované avízo nemá co předat, takže ho převzetí výš minulo — pro
+            // karetní výdaje a poplatky je tohle jediná cesta, jak se zbavit dvojího
+            // řádku po importu GPC za období pokryté i avízy (#76).
+            if ($this->reconciler->supersedeUnmatchedEmailNotice((int) $txId) !== null) $superseded++;
 
             $matchIds[] = (int) $txId;
         }
@@ -4101,6 +4107,7 @@ final class BankStatementAction
             'newly_partial'    => $newlyPartial,
             'still_unmatched'  => $stillUnmatched,
             'taken_over'       => $takenOver,
+            'superseded'       => $superseded,
         ], $ip, $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, [
@@ -4109,6 +4116,7 @@ final class BankStatementAction
             'newly_partial'   => $newlyPartial,
             'still_unmatched' => $stillUnmatched,
             'taken_over'      => $takenOver,
+            'superseded'      => $superseded,
         ]);
     }
 }

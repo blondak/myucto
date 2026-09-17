@@ -730,6 +730,29 @@ nejednoznačné — aplikace nechá párování na tobě.
 > 🛈 Karetní **blokace** se může od finálně zúčtované částky lišit. Pak se
 > částky neshodují, převzetí neproběhne a platbu je potřeba přepárovat ručně.
 
+### 30.6.2 Nespárovaná avíza
+
+Karetní výdaje, bankovní poplatky a výběry se nemají s čím párovat, takže
+zůstanou v avízu jako nespárované a předchozí odstavec na ně nedosáhne —
+převzít u nich není co. Aby tentýž pohyb nezůstal v seznamu dvakrát, označí je
+import výpisu (a stejně tak tlačítko **Přepárovat výpis**) za **nahrazené
+oficiálním výpisem**: avízo dostane stav *Ignorováno* s poznámkou a v evidenci
+zůstane jediný pohyb — ten z výpisu. Kolik avíz se takhle odklidilo, ukáže
+hlášení po přepárování.
+
+Podmínky jsou přísnější než u převzetí, protože tu chybí doklad, na kterém by
+se dvojice potkala:
+
+- částka musí sedět **na haléř** (žádná tolerance na kurz blokace),
+- avízo nesmí nic nést — žádnou evidovanou úhradu, mzdový signál ani zálohu na
+  daň,
+- den avíza musí spadat do **období, které importovaný výpis opravdu pokrývá**
+  (jinak by výpis od 3. do 30. „nahradil" avízo z 1., které v něm vůbec není),
+- kandidát musí být **právě jeden**; dvě nerozlišitelná avíza zůstanou obě.
+
+Nic se nepřepojuje, takže je to vratné: v detailu pohybu zruš ignorování a
+avízo se vrátí mezi nespárované.
+
 ## 30.7 Cron pro e-mailová avíza
 
 Pro automatické zpracování nastav samostatný cron:

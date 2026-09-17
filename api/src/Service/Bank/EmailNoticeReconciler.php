@@ -33,6 +33,12 @@ use PDO;
  *      výpisu, měnu, částku na haléř, datové okno a jednoznačnost kandidáta.
  * Úroveň 3 je nutná pro karetní avíza typu „Blokace", která VS ani protiúčet
  * nenesou — bez ní platba zůstane viset na avízu, a to se nikdy neúčtuje.
+ *
+ * Převzetí ale ze své podstaty potřebuje, CO převzít: avízo spárované a navázané na
+ * doklad. Karetní výdaje, poplatky a výběry se nemají s čím párovat, takže tudy nikdy
+ * neprojdou a po importu GPC by tentýž pohyb zůstal v evidenci dvakrát. Na ty je
+ * supersedeUnmatchedEmailNotice() — nepřepojuje nic, jen nespárované avízo označí za
+ * nahrazené oficiálním výpisem (`ignored`), a to jen za přísnějších podmínek.
  */
 final class EmailNoticeReconciler
 {
@@ -52,6 +58,36 @@ final class EmailNoticeReconciler
      */
     private const CARD_FX_TOLERANCE_RATIO = 0.05;
 
+    /** Čím je dvojice držená pohromadě — viz twinIdentity(). */
+    private const IDENTITY_VS = 'vs';
+    private const IDENTITY_COUNTERPARTY = 'counterparty';
+    private const IDENTITY_CARD = 'card';
+
+    /** Poznámka u avíza, které nahradil oficiální výpis (viditelná v detailu pohybu). */
+    private const SUPERSEDED_NOTE = 'Nahrazeno oficiálním bankovním výpisem — tentýž pohyb je v evidenci pod výpisem.';
+
+    /**
+     * Vazby, kterými pohyb „něco drží". Nespárované avízo, které je v kterékoli z nich,
+     * NEsmí být označeno za nahrazené — cizí záznam by pak ukazoval na ignorovaný pohyb.
+     * Metadata (audit, návrhy párování/zaúčtování, otisky importu) tu záměrně nejsou:
+     * ta pohyb jen popisují a ignorováním se nic neutne.
+     *
+     * @var list<array{0:string,1:string}> [tabulka, sloupec s bank_transactions.id]
+     */
+    private const NOTICE_STATE_LINKS = [
+        ['invoice_payments', 'bank_transaction_id'],
+        ['payment_matches', 'bank_transaction_id'],
+        ['gopay_clearings', 'bank_transaction_id'],
+        ['gopay_clearings', 'payout_match_transaction_id'],
+        ['payroll_payment_matches', 'bank_transaction_id'],
+        ['tax_advance_schedules', 'matched_transaction_id'],
+        ['bank_transfer_matches', 'in_transaction_id'],
+        ['bank_transfer_matches', 'out_transaction_id'],
+        ['purchase_invoice_submissions', 'bank_transaction_id'],
+        ['document_requests', 'bank_transaction_id'],
+        ['fuelings', 'source_bank_transaction_id'],
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly GoPayService $gopay,
@@ -67,37 +103,14 @@ final class EmailNoticeReconciler
     {
         $pdo = $this->db->pdo();
 
-        $stmt = $pdo->prepare(
-            'SELECT bt.amount, bt.posted_at, bt.variable_symbol, bt.currency,
-                    bt.counterparty_account, bt.source,
-                    bs.account_number AS stmt_account, bs.bank_code AS stmt_bank,
-                    bs.currency AS stmt_currency, bs.supplier_id AS stmt_supplier_id
-               FROM bank_transactions bt
-               JOIN bank_statements   bs ON bs.id = bt.statement_id
-              WHERE bt.id = ?'
-        );
-        $stmt->execute([$gpcTxId]);
-        $gpc = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($gpc === false || (string) $gpc['source'] !== 'statement') {
-            return null; // dedup je jen směrem GPC ← avízo
+        $context = $this->authoritativeContext($pdo, $gpcTxId);
+        if ($context === null) {
+            return null;
         }
+        [$gpc, $supplierId] = $context;
 
         $amount      = (float) $gpc['amount'];
         $gpcVsDigits = VariableSymbolNormalizer::digits((string) ($gpc['variable_symbol'] ?? ''));
-        $gpcCcy      = $this->effectiveCurrency($gpc['currency'] ?? null, $gpc['stmt_currency'] ?? null);
-        $gpcAccount  = (string) ($gpc['stmt_account'] ?? '');
-
-        // Tenant scope: supplier odvodíme z účtu GPC výpisu (stejně jako StatementMatcher).
-        // Bez jednoznačného supplierа NEpřebíráme nic — převzetí smí hýbat jen platbami
-        // patřícími témuž tenantovi (currencies.account_number nemá UNIQUE → účet teoreticky
-        // může sdílet víc supplierů; bez scope by šlo přetáhnout párování cizího tenanta).
-        $supplierId = (int) ($gpc['stmt_supplier_id'] ?? 0);
-        if ($supplierId === 0) {
-            $supplierId = $this->resolveSupplierId($pdo, $gpcAccount, (string) ($gpc['stmt_bank'] ?? ''));
-        }
-        if ($supplierId === 0) {
-            return null;
-        }
 
         // Karetní pohyb: ani VS, ani protiúčet. Jen pro něj se níž povolí kurzová
         // odchylka částky (blokace × zúčtování) — u identifikovatelné platby by
@@ -154,58 +167,14 @@ final class EmailNoticeReconciler
 
         $matches = [];
         foreach ($rows as $r) {
-            // Shoda účtu (= stejný supplier; oba sloupce jsou account_number).
-            if (!AccountNumberNormalizer::equals($gpcAccount, (string) ($r['stmt_account'] ?? ''))) {
+            if (!$this->sameOwnAccount($gpc, $r) || !$this->sameCurrency($gpc, $r)) {
                 continue;
             }
-            $gpcBank = trim((string) ($gpc['stmt_bank'] ?? ''));
-            $candidateBank = trim((string) ($r['stmt_bank'] ?? ''));
-            if ($gpcBank !== '' && $candidateBank !== '' && $gpcBank !== $candidateBank) {
+            $identity = self::twinIdentity($gpc, $r, $gpcVsDigits);
+            if ($identity === null) {
                 continue;
             }
-            // Měna — když obě známe, musí sedět (null = legacy, nevyřazuje).
-            $candCcy = $this->effectiveCurrency($r['currency'] ?? null, $r['stmt_currency'] ?? null);
-            if ($gpcCcy !== null && $candCcy !== null && strtoupper($gpcCcy) !== strtoupper($candCcy)) {
-                continue;
-            }
-            // VS: má-li GPC tx variabilní symbol, vyžaduj číselnou shodu.
-            $symmetricCard = false;
-            if ($gpcVsDigits !== '') {
-                if (VariableSymbolNormalizer::digits((string) ($r['variable_symbol'] ?? '')) !== $gpcVsDigits) {
-                    continue;
-                }
-            } else {
-                // POZOR: `$gpcAccount` je číslo účtu VÝPISU a používá ho kontrola výš
-                // v každé iteraci — protiúčet proto drž v samostatné proměnné.
-                // Porovnáváme NORMALIZOVANĚ: GPC u karetních pohybů plní protiúčet
-                // samými nulami (`0000000000000000`), což je „žádná protistrana",
-                // ne účet — surové `!== ''` by shodilo symetrickou větev níž.
-                $gpcCounterparty  = AccountNumberNormalizer::normalize((string) ($gpc['counterparty_account'] ?? ''));
-                $candCounterparty = AccountNumberNormalizer::normalize((string) ($r['counterparty_account'] ?? ''));
-                $candVsDigits     = VariableSymbolNormalizer::digits((string) ($r['variable_symbol'] ?? ''));
-
-                if ($candCounterparty !== '' || $candVsDigits !== '') {
-                    // Avízo něco identifikujícího nese → drž se shody protiúčtu (jako dosud).
-                    if ($gpcCounterparty === '' || $candCounterparty === ''
-                        || !AccountNumberNormalizer::equals($gpcCounterparty, $candCounterparty)
-                    ) {
-                        continue;
-                    }
-                } elseif ($gpcCounterparty !== '') {
-                    // Avízo je bez identity, ale GPC protistranu zná → jde nejspíš o běžný
-                    // převod, ne o tentýž karetní pohyb. Nepřebíráme (asymetrie = slabá shoda).
-                    continue;
-                } else {
-                    // Zbývá symetrický případ: ani jedna strana nemá VS ani protiúčet — přesně
-                    // takhle vypadá karetní platba (avízo „Blokace" × GPC řádek karty). Identitu
-                    // tu nese shoda účtu výpisu, měny, částky, datového okna, tenantа
-                    // a hlavně JEDNOZNAČNOST kandidáta (count($pool) === 1 níž). Bez téhle
-                    // větve by karetní úhrady zůstaly na avízu napořád — a avízo se nikdy
-                    // neúčtuje, takže platební noha (vč. kurzového rozdílu) nikdy nedoteče
-                    // do deníku.
-                    $symmetricCard = true;
-                }
-            }
+            $symmetricCard = $identity === self::IDENTITY_CARD;
 
             $candAmount = (float) $r['amount'];
             $exact = abs($candAmount - $amount) <= self::AMOUNT_TOLERANCE;
@@ -229,6 +198,214 @@ final class EmailNoticeReconciler
         }
 
         return $this->transfer($pdo, $gpcTxId, $pool[0], $supplierId, $amount);
+    }
+
+    /**
+     * NESPÁROVANÉ avízo × autoritativní výpis (#76).
+     *
+     * takeOverFromEmailNotice() umí jen to, co se dá PŘENÉST: potřebuje avízo se
+     * spárováním a vazbou na doklad. Karetní výdaje, poplatky a výběry se ale nemají
+     * s čím párovat — zůstanou v avízu jako `unmatched` a po importu GPC za totéž
+     * období je tentýž pohyb v evidenci dvakrát. Přenášet tu není co; avízo se proto
+     * jen označí jako nahrazené (`ignored` + `ignore_note`), takže zmizí ze seznamu
+     * nespárovaných pohybů a v evidenci zůstane jediný — ten z oficiálního výpisu.
+     *
+     * Protože se nic nepřepojuje, je celá operace vratná: „Zrušit ignorování" vrátí
+     * avízo do `unmatched` (BankTransactionReleaseService).
+     *
+     * Oproti převzetí je identita slabší (chybí doklad, na kterém by se dvojice
+     * potkala), takže jsou podmínky přísnější:
+     *   - částka na haléř — ŽÁDNÁ kurzová tolerance (ta smí jen tam, kde dvojici
+     *     drží pohromadě spárovaná faktura),
+     *   - avízo nesmí nic nést: ani párování, ani žádnou z vazeb NOTICE_STATE_LINKS,
+     *   - datum avíza musí padnout do období POKRYTÉHO autoritativním výpisem —
+     *     jinak by výpis za 3.–30. mohl „nahradit" avízo z 1., které v něm vůbec
+     *     není, a pohyb by z evidence zmizel,
+     *   - právě jeden kandidát; 0 i >1 = neděláme nic.
+     *
+     * @return int|null id avíza označeného za nahrazené (null = nebylo co nahradit)
+     */
+    public function supersedeUnmatchedEmailNotice(int $authoritativeTxId): ?int
+    {
+        $pdo = $this->db->pdo();
+
+        $context = $this->authoritativeContext($pdo, $authoritativeTxId);
+        if ($context === null) {
+            return null;
+        }
+        [$authoritative, $supplierId] = $context;
+
+        $amount = (float) $authoritative['amount'];
+        $vsDigits = VariableSymbolNormalizer::digits((string) ($authoritative['variable_symbol'] ?? ''));
+
+        // Období pokryté autoritativním výpisem. Bez něj nemá smysl tvrdit, že tentýž
+        // pohyb ve výpisu JE — a nahrazení je pak tichá ztráta řádku, ne deduplikace.
+        $period = $pdo->prepare(
+            'SELECT MIN(bt.posted_at) AS covered_from, MAX(bt.posted_at) AS covered_to
+               FROM bank_transactions bt WHERE bt.statement_id = ?'
+        );
+        $period->execute([(int) $authoritative['statement_id']]);
+        $covered = $period->fetch(PDO::FETCH_ASSOC) ?: [];
+        if (empty($covered['covered_from']) || empty($covered['covered_to'])) {
+            return null;
+        }
+
+        $unused = implode(' ', array_map(
+            static fn (array $link): string => sprintf(
+                'AND NOT EXISTS (SELECT 1 FROM %s x WHERE x.%s = bt.id)',
+                $link[0],
+                $link[1],
+            ),
+            self::NOTICE_STATE_LINKS,
+        ));
+
+        $cand = $pdo->prepare(
+            "SELECT bt.id, bt.variable_symbol, bt.counterparty_account, bt.currency,
+                    bt.amount, bt.posted_at, bt.statement_id,
+                    bs.account_number AS stmt_account, bs.bank_code AS stmt_bank, bs.currency AS stmt_currency
+               FROM bank_transactions bt
+               JOIN bank_statements   bs ON bs.id = bt.statement_id
+              WHERE bt.source = 'email_notice' AND bs.source = 'email_notice'
+                AND bs.supplier_id = ?
+                AND bt.id <> ?
+                AND bt.match_status = 'unmatched'
+                AND bt.matched_invoice_id IS NULL
+                AND ABS(bt.amount - ?) <= ?
+                AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND DATE_ADD(?, INTERVAL ? DAY)
+                AND bt.posted_at BETWEEN ? AND ?
+                " . $unused
+        );
+        $cand->execute([
+            $supplierId,
+            $authoritativeTxId,
+            number_format($amount, 2, '.', ''),
+            self::AMOUNT_TOLERANCE,
+            $authoritative['posted_at'], self::DATE_WINDOW_DAYS,
+            $authoritative['posted_at'], self::DATE_WINDOW_DAYS,
+            $covered['covered_from'], $covered['covered_to'],
+        ]);
+
+        $matches = [];
+        foreach ($cand->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            if (!$this->sameOwnAccount($authoritative, $row) || !$this->sameCurrency($authoritative, $row)) {
+                continue;
+            }
+            if (self::twinIdentity($authoritative, $row, $vsDigits) === null) {
+                continue;
+            }
+            $matches[] = (int) $row['id'];
+        }
+        if (count($matches) !== 1) {
+            return null;
+        }
+
+        $pdo->prepare(
+            "UPDATE bank_transactions SET match_status = 'ignored', ignore_note = ? WHERE id = ?"
+        )->execute([self::SUPERSEDED_NOTE, $matches[0]]);
+
+        return $matches[0];
+    }
+
+    /**
+     * Autoritativní pohyb (řádek oficiálního výpisu) + jeho tenant.
+     *
+     * Dedup jede VÝHRADNĚ směrem „oficiální výpis ← sekundární zdroj", takže cokoliv
+     * jiného než `bt.source = 'statement'` tudy neprojde. Supplier bereme z výpisu,
+     * a když ho nenese (starší data), odvodíme ho z čísla účtu — bez jednoznačného
+     * tenanta neděláme nic (currencies.account_number nemá UNIQUE, takže bez scope
+     * by šlo sáhnout na data cizího supplieru).
+     *
+     * @return array{0:array<string,mixed>,1:int}|null
+     */
+    private function authoritativeContext(PDO $pdo, int $txId): ?array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT bt.amount, bt.posted_at, bt.variable_symbol, bt.currency,
+                    bt.counterparty_account, bt.source, bt.statement_id,
+                    bs.account_number AS stmt_account, bs.bank_code AS stmt_bank,
+                    bs.currency AS stmt_currency, bs.supplier_id AS stmt_supplier_id
+               FROM bank_transactions bt
+               JOIN bank_statements   bs ON bs.id = bt.statement_id
+              WHERE bt.id = ?'
+        );
+        $stmt->execute([$txId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || (string) $row['source'] !== 'statement') {
+            return null;
+        }
+
+        $supplierId = (int) ($row['stmt_supplier_id'] ?? 0);
+        if ($supplierId === 0) {
+            $supplierId = $this->resolveSupplierId(
+                $pdo,
+                (string) ($row['stmt_account'] ?? ''),
+                (string) ($row['stmt_bank'] ?? ''),
+            );
+        }
+
+        return $supplierId === 0 ? null : [$row, $supplierId];
+    }
+
+    /** Týž vlastní účet (oba sloupce jsou account_number výpisu) i kód banky. */
+    private function sameOwnAccount(array $authoritative, array $candidate): bool
+    {
+        if (!AccountNumberNormalizer::equals(
+            (string) ($authoritative['stmt_account'] ?? ''),
+            (string) ($candidate['stmt_account'] ?? ''),
+        )) {
+            return false;
+        }
+        $bank = trim((string) ($authoritative['stmt_bank'] ?? ''));
+        $candidateBank = trim((string) ($candidate['stmt_bank'] ?? ''));
+        return $bank === '' || $candidateBank === '' || $bank === $candidateBank;
+    }
+
+    /** Měna — když ji známe na obou stranách, musí sedět (null = legacy, nevyřazuje). */
+    private function sameCurrency(array $authoritative, array $candidate): bool
+    {
+        $currency = $this->effectiveCurrency($authoritative['currency'] ?? null, $authoritative['stmt_currency'] ?? null);
+        $candidateCurrency = $this->effectiveCurrency($candidate['currency'] ?? null, $candidate['stmt_currency'] ?? null);
+        return $currency === null || $candidateCurrency === null
+            || strtoupper($currency) === strtoupper($candidateCurrency);
+    }
+
+    /**
+     * Nese sekundární pohyb identitu autoritativního? Vrací, ČÍM je dvojice držená
+     * pohromadě, nebo null, když to není tentýž pohyb.
+     *
+     * Tři úrovně (viz i docblok třídy):
+     *   1. autoritativní pohyb má VS → musí číselně sedět,
+     *   2. VS nemá, ale sekundární nese VS nebo protiúčet → shoda protiúčtu;
+     *      asymetrie (sekundární bez identity, autoritativní s protiúčtem) je slabá
+     *      shoda a neprojde — nejspíš jde o běžný převod, ne o tentýž karetní pohyb,
+     *   3. ani jedna strana nemá VS ani protiúčet → karetní tvar. Identitu nese shoda
+     *      účtu výpisu, měny, částky, datového okna, tenanta a jednoznačnost kandidáta
+     *      u volajícího.
+     *
+     * POZOR: porovnává se NORMALIZOVANĚ — GPC u karetních pohybů plní protiúčet
+     * samými nulami (`0000000000000000`), což je „žádná protistrana", ne účet;
+     * surové `!== ''` by shodilo třetí úroveň.
+     */
+    private static function twinIdentity(array $authoritative, array $candidate, string $authoritativeVsDigits): ?string
+    {
+        if ($authoritativeVsDigits !== '') {
+            return VariableSymbolNormalizer::digits((string) ($candidate['variable_symbol'] ?? '')) === $authoritativeVsDigits
+                ? self::IDENTITY_VS
+                : null;
+        }
+
+        $authoritativeCounterparty = AccountNumberNormalizer::normalize((string) ($authoritative['counterparty_account'] ?? ''));
+        $candidateCounterparty = AccountNumberNormalizer::normalize((string) ($candidate['counterparty_account'] ?? ''));
+        $candidateVsDigits = VariableSymbolNormalizer::digits((string) ($candidate['variable_symbol'] ?? ''));
+
+        if ($candidateCounterparty !== '' || $candidateVsDigits !== '') {
+            return $authoritativeCounterparty !== '' && $candidateCounterparty !== ''
+                && AccountNumberNormalizer::equals($authoritativeCounterparty, $candidateCounterparty)
+                    ? self::IDENTITY_COUNTERPARTY
+                    : null;
+        }
+
+        return $authoritativeCounterparty === '' ? self::IDENTITY_CARD : null;
     }
 
     /**
@@ -322,14 +499,12 @@ final class EmailNoticeReconciler
         ]);
         $matches = [];
         $vs = VariableSymbolNormalizer::digits((string) ($secondary['variable_symbol'] ?? ''));
-        $currency = $this->effectiveCurrency($secondary['currency'] ?? null, $secondary['stmt_currency'] ?? null);
         foreach ($candidates->fetchAll(PDO::FETCH_ASSOC) ?: [] as $candidate) {
-            if (!AccountNumberNormalizer::equals((string) $secondary['stmt_account'], (string) $candidate['stmt_account'])) continue;
-            $bank = trim((string) ($secondary['stmt_bank'] ?? ''));
-            $candidateBank = trim((string) ($candidate['stmt_bank'] ?? ''));
-            if ($bank !== '' && $candidateBank !== '' && $bank !== $candidateBank) continue;
-            $candidateCurrency = $this->effectiveCurrency($candidate['currency'] ?? null, $candidate['stmt_currency'] ?? null);
-            if ($currency !== null && $candidateCurrency !== null && strtoupper($currency) !== strtoupper($candidateCurrency)) continue;
+            if (!$this->sameOwnAccount($secondary, $candidate) || !$this->sameCurrency($secondary, $candidate)) continue;
+            // ZÁMĚRNĚ bez twinIdentity(): tady je autoritativní stranou KANDIDÁT, ne
+            // $secondary, takže role jsou prohozené. Symetrická karetní větev tu navíc
+            // nemá co dělat — iDoklad je vlastní evidence dokladů, ne bankovní avízo,
+            // a shoda „účet + částka + datum" by na ignorování cizího pohybu nestačila.
             if ($vs !== '') {
                 if ($vs !== VariableSymbolNormalizer::digits((string) ($candidate['variable_symbol'] ?? ''))) continue;
             } else {

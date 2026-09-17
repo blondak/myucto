@@ -17591,6 +17591,7 @@
     "rematch_running": "Matching…",
     "rematch_confirm": "Re-run automatic matching on all unmatched transactions of this statement? Useful when you've added purchase or sales invoices after the statement was imported.",
     "rematch_done": "Re-matched: {matched} newly matched, {partial} partial, {remaining} still unmatched.",
+    "rematch_superseded": "Unmatched e-mail notices superseded by the official statement: {count}. You can find them among ignored transactions.",
     "rematch_failed": "Re-match failed",
     "manual_match_title": "Manually match",
     "gopay_match": {

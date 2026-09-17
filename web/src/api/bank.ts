@@ -491,8 +491,10 @@ export const bankApi = {
       `/bank-transactions/${txId}/create-purchase-invoice`, { vendor_id: vendorId },
     ).then(r => r.data),
   rematch: (statementId: number) =>
-    api.post<{ considered: number; newly_matched: number; newly_partial: number; still_unmatched: number }>(
-      `/bank-statements/${statementId}/rematch`, {}).then(r => r.data),
+    api.post<{
+      considered: number; newly_matched: number; newly_partial: number
+      still_unmatched: number; taken_over: number; superseded: number
+    }>(`/bank-statements/${statementId}/rematch`, {}).then(r => r.data),
   scan: () => api.post<{ scanned: number; imported: number; duplicate: number; errors: number }>(
     '/bank-statements/scan', {},
   ).then(r => r.data),

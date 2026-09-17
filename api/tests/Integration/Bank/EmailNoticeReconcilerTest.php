@@ -140,10 +140,10 @@ final class EmailNoticeReconcilerTest extends TestCase
      *
      * @return array{0:int,1:int} [statementId, txId]
      */
-    private function insertStatementWithTx(string $source, float $amount, string $vs, string $tag, ?string $bankCode = null): array
+    private function insertStatementWithTx(string $source, float $amount, string $vs, string $tag, ?string $bankCode = null, ?string $postedAt = null): array
     {
         $pdo = $this->db->pdo();
-        $d = '2099-06-15';
+        $d = $postedAt ?? '2099-06-15';
         // `supplier_id` je POVINNÝ: kandidátní dotaz reconcileru ho od SEC-01 tenant
         // scopingu (5f5c7183, migrace 1136) filtruje tvrdě — `bs.supplier_id = ?`.
         // Bez něj zůstane NULL, `NULL = 1` není nikdy true, kandidátů je nula a převzetí
@@ -888,6 +888,77 @@ final class EmailNoticeReconcilerTest extends TestCase
 
         self::assertNull($result, 'Dvě stejné blokace = nejednoznačné, nepřebírat.');
         self::assertSame(0, $this->paymentCountForTx($gpcTx));
+    }
+
+    // ── Nespárované avízo nahrazené oficiálním výpisem (#76) ─────────────────
+
+    /**
+     * Karetní výdaj bez VS a protiúčtu dorazil avízem a nemá se s čím spárovat.
+     * Import GPC za totéž období ho musí označit za nahrazený, jinak je tentýž pohyb
+     * v seznamu dvakrát a uživatel ho odklízí ručně.
+     */
+    public function testSupersedesUnmatchedCardNotice(): void
+    {
+        [, $emailTx] = $this->insertStatementWithTx('email_notice', -1499.00, '', 'sup-e');
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', -1499.00, '', 'sup-g');
+
+        self::assertSame($emailTx, $this->reconciler->supersedeUnmatchedEmailNotice($gpcTx));
+        self::assertSame('ignored', $this->matchStatus($emailTx));
+        self::assertNotSame('', (string) $this->ignoreNote($emailTx));
+        // Autoritativní pohyb zůstává nedotčený — nahrazuje se avízo, ne výpis.
+        self::assertSame('unmatched', $this->matchStatus($gpcTx));
+    }
+
+    /**
+     * Výpis, který den avíza vůbec nepokrývá (avíza se zapnula dřív, než začíná
+     * importované období), nesmí avízo nahradit — ten pohyb v něm není a zmizel by
+     * z evidence úplně.
+     */
+    public function testKeepsUnmatchedNoticeOutsideStatementPeriod(): void
+    {
+        [, $emailTx] = $this->insertStatementWithTx('email_notice', -1499.00, '', 'sup-out-e', null, '2099-06-12');
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', -1499.00, '', 'sup-out-g', null, '2099-06-15');
+
+        self::assertNull($this->reconciler->supersedeUnmatchedEmailNotice($gpcTx));
+        self::assertSame('unmatched', $this->matchStatus($emailTx));
+    }
+
+    /** Dvě nerozlišitelná avíza na jeden řádek výpisu → nejednoznačné, nesahat na ně. */
+    public function testKeepsAmbiguousUnmatchedNotices(): void
+    {
+        [, $emailTx1] = $this->insertStatementWithTx('email_notice', -1499.00, '', 'sup-amb-e1');
+        [, $emailTx2] = $this->insertStatementWithTx('email_notice', -1499.00, '', 'sup-amb-e2');
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', -1499.00, '', 'sup-amb-g');
+
+        self::assertNull($this->reconciler->supersedeUnmatchedEmailNotice($gpcTx));
+        self::assertSame('unmatched', $this->matchStatus($emailTx1));
+        self::assertSame('unmatched', $this->matchStatus($emailTx2));
+    }
+
+    /**
+     * `unmatched` neznamená „nic na tom nevisí": úhrada přijaté faktury se vede
+     * v payment_matches a match_status zůstat nespárovaný může. Takové avízo se
+     * nesmí ignorovat — cizí záznam by ukazoval na odklizený pohyb.
+     */
+    public function testKeepsUnmatchedNoticeCarryingPayableMatch(): void
+    {
+        [, $emailTx] = $this->insertStatementWithTx('email_notice', -1499.00, '', 'sup-link-e');
+        $this->insertPaymentMatch($emailTx, $this->insertPurchaseInvoice(1499.00), 1499.00);
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', -1499.00, '', 'sup-link-g');
+
+        self::assertNull($this->reconciler->supersedeUnmatchedEmailNotice($gpcTx));
+        self::assertSame('unmatched', $this->matchStatus($emailTx));
+    }
+
+    private function matchStatus(int $txId): string
+    {
+        return (string) $this->db->pdo()->query("SELECT match_status FROM bank_transactions WHERE id = $txId")->fetchColumn();
+    }
+
+    private function ignoreNote(int $txId): ?string
+    {
+        $note = $this->db->pdo()->query("SELECT ignore_note FROM bank_transactions WHERE id = $txId")->fetchColumn();
+        return $note === false || $note === null ? null : (string) $note;
     }
 
     /**

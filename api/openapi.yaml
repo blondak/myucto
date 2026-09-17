@@ -5134,6 +5134,11 @@ paths:
         výpisu přes `/bank-statements/upload`, nebo když uživatel ex-post doplnil
         faktury, které by se daly napárovat.
 
+        Před párováním proběhne deduplikace proti sekundárním zdrojům (e-mailová
+        avíza, iDoklad): spárované avízo předá párování pohybu z výpisu, nespárované
+        se označí za nahrazené. Oficiální výpis je zdroj pravdy, takže tentýž pohyb
+        zůstane v evidenci jen jednou.
+
         Projde transakce výpisu ve stavu `unmatched` a `auto_partial` a pro každou
         zkusí najít fakturu podle:
         - variabilního symbolu (přesný match) — preferovaná cesta,
@@ -5168,6 +5173,17 @@ paths:
                   still_unmatched:
                     type: integer
                     description: Po přepárování stále nespárované.
+                  taken_over:
+                    type: integer
+                    description: |
+                      Pohyby, které převzaly párování z dříve spárovaného e-mailového
+                      avíza nebo iDokladu místo dvojího započtení téže platby.
+                  superseded:
+                    type: integer
+                    description: |
+                      Nespárovaná e-mailová avíza označená za nahrazená tímto výpisem
+                      (stav `ignored`) — typicky karetní výdaje a poplatky, které se
+                      nemají s čím párovat.
         '404': { description: "Výpis nenalezen nebo nepatří current supplier" }
 
   /api/v1/bank-statements/{id}/match-suggestions:
@@ -26372,6 +26388,11 @@ components:
             a `statement_id` míří na původní výpis.
         parsed_transactions: { type: integer, description: Počet pohybů nalezených v souboru. }
         skipped_duplicates: { type: integer, description: Pohyby přeskočené jako již evidované. }
+        superseded_notices:
+          type: integer
+          description: |
+            Nespárovaná e-mailová avíza označená za nahrazená tímto výpisem. Týž pohyb
+            je pak v evidenci jen jednou — z výpisu; avízo dostane stav `ignored`.
         warnings:
           type: array
           description: "Např. `transactions_skipped_as_duplicate` při překryvu výpisů."

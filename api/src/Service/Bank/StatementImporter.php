@@ -42,7 +42,7 @@ final class StatementImporter
      *   (lookup podle account_number — folder scan, jednoznačný účet).
      *
      * @return array{statement_id:int, transactions:int, matched:int, duplicate:bool,
-     *               parsed_transactions:int, skipped_duplicates:int,
+     *               parsed_transactions:int, skipped_duplicates:int, superseded_notices:int,
      *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int}>}
      */
     public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null, array $reconciliationConfirmations = []): array
@@ -161,7 +161,7 @@ final class StatementImporter
                 $this->bankPosting?->handleTransaction($txId, $userId);
             }
         }
-        $this->processTransactions($pendingIds, $userId);
+        $result['superseded_notices'] = $this->processTransactions($pendingIds, $userId)['superseded'];
         $update = $pdo->prepare('UPDATE bank_statements SET matched_count = ? WHERE id = ?');
         foreach (array_unique($affectedStatements) as $statementId) {
             $matched = (int) $pdo->query("SELECT COUNT(*) FROM bank_transactions bt WHERE " . StatementTransactionScope::sql((int) $statementId) . " AND bt.match_status IN ('auto_exact', 'auto_partial', 'manual')")->fetchColumn();
@@ -384,7 +384,10 @@ final class StatementImporter
             $matchIds[] = $txId;
         }
 
-        $matched = $deferProcessing ? 0 : $this->processTransactions($matchIds, $userId);
+        $processed = $deferProcessing
+            ? ['matched' => 0, 'superseded' => 0]
+            : $this->processTransactions($matchIds, $userId);
+        $matched = $processed['matched'];
 
         $pdo->prepare('UPDATE bank_statements SET matched_count = ?, transaction_count = ? WHERE id = ?')
             ->execute([$matched, $inserted, $statementId]);
@@ -424,14 +427,17 @@ final class StatementImporter
             'duplicate'           => false,
             'parsed_transactions' => $parsedCount,
             'skipped_duplicates'  => $skipped,
+            'superseded_notices'  => $processed['superseded'],
             'warnings'            => $warnings,
         ];
     }
 
-    private function processTransactions(array $transactionIds, ?int $userId): int
+    /** @return array{matched:int,superseded:int} */
+    private function processTransactions(array $transactionIds, ?int $userId): array
     {
-        if ($transactionIds === []) return 0;
+        if ($transactionIds === []) return ['matched' => 0, 'superseded' => 0];
         $matched = 0;
+        $superseded = 0;
         $matchIds = [];
         foreach ($transactionIds as $txId) {
             $takeover = $this->reconciler->takeOverFromEmailNotice($txId);
@@ -439,9 +445,13 @@ final class StatementImporter
                 $matched++;
                 if ($takeover['match_status'] === 'auto_exact') $this->matcher->match($txId);
                 $this->bankPosting?->handleTransaction($txId, $userId);
-            } else {
-                $matchIds[] = $txId;
+                continue;
             }
+            // Nespárované avízo se nemá s čím párovat, takže ho převzetí výš minulo —
+            // bez tohohle kroku by tentýž karetní výdaj / poplatek zůstal v evidenci
+            // dvakrát (#76). Nic se nepřepojuje, avízo se jen označí za nahrazené.
+            if ($this->reconciler->supersedeUnmatchedEmailNotice($txId) !== null) $superseded++;
+            $matchIds[] = $txId;
         }
         foreach ($this->matcher->matchBatch($matchIds) as $txId => $result) {
             if (in_array($result['status'], ['auto_exact', 'auto_partial'], true)) {
@@ -449,7 +459,7 @@ final class StatementImporter
             }
             $this->bankPosting?->handleTransaction((int) $txId, $userId, !empty($result['requires_review']));
         }
-        return $matched;
+        return ['matched' => $matched, 'superseded' => $superseded];
     }
 
     private function transactionIdentities(array $transactions, string $accountNumber, ?string $accountBankCode, ?string $accountCurrency, ?string $statementCurrency): array

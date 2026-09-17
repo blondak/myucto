@@ -17591,6 +17591,7 @@
     "rematch_running": "Páruji…",
     "rematch_confirm": "Přepárovat všechny nespárované transakce tohoto výpisu? Spustí znovu automatické párování — užitečné, pokud jsi ex-post doplnil(a) přijaté nebo vystavené faktury.",
     "rematch_done": "Přepárováno: {matched} nově spárováno, {partial} částečně, {remaining} stále bez páru.",
+    "rematch_superseded": "Nespárovaná avíza nahrazená oficiálním výpisem: {count}. Najdete je mezi ignorovanými pohyby.",
     "rematch_failed": "Přepárování selhalo",
     "manual_match_title": "Ručně spárovat",
     "gopay_match": {

@@ -313,6 +313,9 @@ async function rematchStatement() {
       partial: r.newly_partial,
       remaining: r.still_unmatched,
     }))
+    // Nahrazená avíza jsou samostatná zpráva: netýkají se párování, ale toho, že ze
+    // seznamu zmizely duplicitní řádky - bez vysvětlení by to mátlo.
+    if (r.superseded > 0) toast.info(t('bank.rematch_superseded', { count: r.superseded }))
     await load()
   } catch (e: any) {
     toast.error(apiErrorMessage(e, t('bank.rematch_failed')))
