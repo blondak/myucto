@@ -35,6 +35,35 @@ final class PayrollInputExportFormatterTest extends TestCase
         self::assertSame('06/2026', PayrollInputExportFormatter::periodLabel('2026-06-01'));
     }
 
+    /**
+     * Rozsahový export se nesmí tvářit jako jeden měsíc — ani v hlavičce, ani
+     * v názvu souboru. Osmiměsíční sestava označená „06/2026" je tvrzení
+     * o obsahu, které v exportu nikdo nemá jak ověřit.
+     */
+    public function testPeriodRangeIsVisibleInTheLabelAndInTheFilename(): void
+    {
+        self::assertSame(
+            '01/2026 – 08/2026',
+            PayrollInputExportFormatter::periodLabel('2026-01-01', '2026-08-01'),
+        );
+        self::assertSame(
+            '2026-01_2026-08',
+            PayrollInputExportFormatter::periodSlug('2026-01-01', '2026-08-01'),
+        );
+
+        // Rozsah o jednom měsíci je pořád jeden měsíc; „06/2026 – 06/2026"
+        // by jen mátlo.
+        self::assertSame(
+            '06/2026',
+            PayrollInputExportFormatter::periodLabel('2026-06-01', '2026-06-01'),
+        );
+        self::assertSame(
+            '2026-06',
+            PayrollInputExportFormatter::periodSlug('2026-06-01', '2026-06-01'),
+        );
+        self::assertSame('2026-06', PayrollInputExportFormatter::periodSlug('2026-06-01'));
+    }
+
     public function testFormulaLikeTextIsDetected(): void
     {
         foreach (['=A1', '+420', '-2', '@SUM(A1)', "\tx", "\rx"] as $value) {

@@ -89,6 +89,26 @@ poslat odkazem. Volba **Zobrazení** seskupí vstupy podle zaměstnance nebo pod
 složky i se součty; skupina se rozbalí kliknutím a **Otevřít v seznamu** z ní
 udělá filtr.
 
+Jakmile je seznam zúžený na jeden pracovní vztah (odkaz z karty zaměstnance),
+objeví se vedle pole **Mzdové období** přepínač **Rozsah**: *Měsíc*, *Rok*
+a *Vše*. Rozsah se drží v adrese, takže ho obnovení stránky ani sdílený odkaz
+neztratí, a zrušení zúžení ho vrátí na *Měsíc*. Nad rozsahem přibude
+v **Zobrazení** volba **Po obdobích** — jeden řádek na měsíc od nejnovějšího,
+odkud se tlačítkem **Otevřít měsíc** skočí zpátky do editovatelného období.
+Seznam jednotlivých vstupů je v rozsahu řazený od nejnovějšího období a přibude
+v něm sloupec **Období**, aby šlo poznat, ke kterému měsíci řádek patří.
+Export do Excelu i PDF stáhne celý rozsah; hlavička sestavy i název souboru
+nesou skutečné rozpětí stažených vstupů. Hromadné schválení a zrušení se nad
+rozsahem nenabízí:
+pracují vždy nad jedním obdobím, takže by jedno kliknutí sáhlo i na měsíce,
+které jsou na obrazovce jen jako historie. Pro ně přepni rozsah zpátky na
+*Měsíc*.
+
+Záložka **Pravidelné předpisy** ukazuje vždy celou historii předpisů bez
+ohledu na vybrané mzdové období; přepínač rozsahu tam proto není. Co platí
+dnes, poznáš ve sloupci **Stav**: *Platný*, *Naplánovaný*, *Ukončený*
+a *Vypnutý* se rozlišují podle účinnosti, ne jen podle zapnutého příznaku.
+
 Souhrnný pruh ukazuje počet vstupů, součet částek a počet konceptů za **celý
 filtr**, ne za zobrazenou stránku. Tlačítko **Schválit N odpovídajících
 filtru** schválí všechny koncepty ve filtru bez ohledu na jejich počet a už

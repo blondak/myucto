@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { workSummaryRemediation } from './payrollRemediation'
 import { revealField } from '@/utils/revealField'
+import { formatPeriod } from '@/composables/useFormat'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
@@ -11,6 +12,8 @@ import {
   type PayrollOvertimeProtectionKind,
   type PayrollTimeCategory,
   type PayrollTimeEntry,
+  type PayrollTimeHistory,
+  type PayrollTimeHistoryItem,
   type PayrollTimeImportPreview,
   type PayrollTimeOverview,
   type PayrollTimeOverviewItem,
@@ -34,6 +37,13 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
+import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePicker.vue'
+import {
+  payrollPeriodRange,
+  payrollPeriodScopeFromQuery,
+  payrollPeriodScopeToQuery,
+  type PayrollPeriodScope,
+} from '@/pages/payroll/payrollPeriodScope'
 import PayrollFileDropzone, {
   type PayrollFileRejectReason,
 } from '@/components/payroll/PayrollFileDropzone.vue'
@@ -275,11 +285,98 @@ const focusName = computed(() =>
 )
 function clearFocus() {
   focusEmploymentId.value = null
-  const query = { ...route.query }
+  // Historie bez zúžení nedává smysl — byl by to součin lidí a měsíců. Zrušení
+  // filtru proto vrací rozsah na měsíc, jinak by na obrazovce zůstal výpis,
+  // ke kterému už není čí.
+  scope.value = 'month'
+  const query = payrollPeriodScopeToQuery(route.query, 'month')
   delete query.employment
   void router.replace({ query })
   offset.value = 0
   void load()
+}
+
+/**
+ * Rozsah výpisu: měsíc (zadávání), rok nebo celá historie (čtení).
+ *
+ * Rozsah, jeho klíč v adrese i převod na meze měsíců žijí ve sdíleném
+ * `payrollPeriodScope` — stejný přepínač používají i ostatní mzdové agendy
+ * zúžené na jeden vztah a dvě vlastní definice „co je rok" by se rozešly.
+ */
+const HISTORY_PAGE_SIZE = 12
+
+const scope = ref(payrollPeriodScopeFromQuery(route.query))
+const history = ref<PayrollTimeHistory | null>(null)
+const historyLoading = ref(false)
+// Stejný důvod jako u `loadFailed`: nenačtená historie a prázdná historie
+// vypadají na obrazovce stejně, dokud se nerozliší.
+const historyFailed = ref(false)
+const historyOffset = ref(0)
+const historyPage = computed(() => Math.floor(historyOffset.value / HISTORY_PAGE_SIZE) + 1)
+/** Rozsah jde nabídnout jen tehdy, když je jasné, čí historii ukázat. */
+const scopeAvailable = computed(() => focusEmploymentId.value !== null)
+const historyVisible = computed(() => scopeAvailable.value && scope.value !== 'month')
+/** Rok volby „Rok" se bere z vybraného období, ne z kalendáře. */
+const scopeYear = computed(() => period.value.slice(0, 4))
+
+function setScope(next: PayrollPeriodScope) {
+  if (scope.value === next) return
+  scope.value = next
+  historyOffset.value = 0
+  void router.replace({ query: payrollPeriodScopeToQuery(route.query, next) })
+  if (next !== 'month') void loadHistory()
+}
+
+async function loadHistory() {
+  const employmentId = focusEmploymentId.value
+  if (employmentId === null) return
+  const range = payrollPeriodRange(scope.value, period.value)
+  historyLoading.value = true
+  historyFailed.value = false
+  try {
+    history.value = await payrollApi.timeHistory(employmentId, {
+      ...(range === null ? {} : { from: range.from, to: range.to }),
+      limit: HISTORY_PAGE_SIZE,
+      offset: historyOffset.value,
+    })
+  } catch (error: any) {
+    historyFailed.value = true
+    toast.error(error?.response?.data?.error?.message || t('payroll.time.history.load_failed'))
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function goToHistoryPage(nextPage: number) {
+  historyOffset.value = Math.max(0, (nextPage - 1) * HISTORY_PAGE_SIZE)
+  void loadHistory()
+}
+
+/**
+ * Stav měsíce v historii se čte STEJNĚ jako v přehledu: schválený, nedokončený,
+ * jinak otevřený. Kdyby si historie pořadí prohodila, tentýž měsíc by měl na
+ * dvou obrazovkách jiný odznak.
+ */
+function historyStatusKey(month: PayrollTimeHistoryItem): 'approved' | 'incomplete' | 'open' {
+  if (month.month.status === 'approved') return 'approved'
+  return month.summary.incomplete ? 'incomplete' : 'open'
+}
+
+function historyStatusClass(month: PayrollTimeHistoryItem): string {
+  const key = historyStatusKey(month)
+  if (key === 'approved') return 'bg-success-50 text-success-600'
+  return key === 'incomplete' ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'
+}
+
+/** Řádek historie vede zpátky do zadávání — na TEN měsíc, ne na dnešek. */
+function openHistoryMonth(monthPeriod: string) {
+  period.value = monthPeriod
+  scope.value = 'month'
+  historyOffset.value = 0
+  const query = payrollPeriodScopeToQuery(route.query, 'month')
+  query.period = monthPeriod
+  void router.replace({ query })
+  reload()
 }
 // Hromadné schválení pracuje s tím, co je na obrazovce — se zúžením tedy
 // s jedním člověkem, ne se všemi, které schovává filtr.
@@ -400,6 +497,13 @@ function goToPage(nextPage: number) {
 function reload() {
   offset.value = 0
   void load()
+  // V rozsahu „Rok" určuje vybrané období, o který rok jde — přepnutí měsíce
+  // proto musí přenačíst i historii, jinak by hlavička hlásila jiný rok, než
+  // jaký je ve výpisu.
+  if (historyVisible.value) {
+    historyOffset.value = 0
+    void loadHistory()
+  }
 }
 
 /*
@@ -1936,6 +2040,9 @@ function clearApproveError() {
 
 onMounted(() => {
   void load()
+  // Rozsah z adresy platí hned při otevření — sdílený odkaz na historii nesmí
+  // skončit u měsíční mřížky.
+  if (historyVisible.value) void loadHistory()
 })
 </script>
 
@@ -1951,11 +2058,15 @@ onMounted(() => {
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
           {{ t('payroll.time.overtime.averaging_action') }}
         </button>
-        <button v-if="canWrite" :class="btnOutline('neutral')" @click="importOpen = !importOpen">
+        <!--
+          Import i řádkové zadání pracují s JEDNÍM měsícem, takže v historii
+          nemají co nabídnout — tlačítko bez cílového měsíce je past.
+        -->
+        <button v-if="canWrite && !historyVisible" :class="btnOutline('neutral')" @click="importOpen = !importOpen">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
           {{ t('payroll.time.import.button') }}
         </button>
-        <button v-if="canWrite" :class="btnFilled('primary')" @click="openEditor()">
+        <button v-if="canWrite && !historyVisible" :class="btnFilled('primary')" @click="openEditor()">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>
           {{ t('payroll.time.add') }}
         </button>
@@ -1968,16 +2079,33 @@ onMounted(() => {
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.period') }}</span>
           <input v-model="period" type="month" class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm" @change="reload">
         </label>
-        <label class="inline-flex h-9 items-center gap-2 text-sm text-neutral-700">
+        <!--
+          Rozsah se nabízí jen u zúžení na jeden vztah: historie celé firmy je
+          součin lidí a měsíců, který nikdo nepřečte. Přepínač je sdílený se
+          zbytkem mzdových agend, ne vlastní kopie téhož.
+        -->
+        <div v-if="scopeAvailable" class="block">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.agendas.scope.label') }}</span>
+          <PayrollPeriodScopePicker
+            :model-value="scope"
+            :year="scopeYear"
+            @update:model-value="setScope"
+          />
+        </div>
+        <button v-if="historyVisible" :class="btnOutline('neutral')" :disabled="historyLoading" @click="loadHistory">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
+          {{ t('payroll.time.reload') }}
+        </button>
+        <label v-if="!historyVisible" class="inline-flex h-9 items-center gap-2 text-sm text-neutral-700">
           <input v-model="incompleteOnly" type="checkbox" class="rounded border-neutral-300 text-payroll-600" @change="reload">
           {{ t('payroll.time.incomplete_only') }}
         </label>
-        <button :class="btnOutline('neutral')" :disabled="loading" @click="load">
+        <button v-if="!historyVisible" :class="btnOutline('neutral')" :disabled="loading" @click="load">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
           {{ t('payroll.time.reload') }}
         </button>
         <button
-          v-if="canApprove && selectedEmploymentIds.length > 0"
+          v-if="!historyVisible && canApprove && selectedEmploymentIds.length > 0"
           data-test="bulk-approve-open"
           :class="btnFilled('success')"
           :disabled="saving"
@@ -2225,7 +2353,7 @@ onMounted(() => {
       (editor + karty níž) a mřížka se nabídne větou.
     -->
     <section
-      v-if="!loading && !loadFailed && gridRows.length > 0"
+      v-if="!historyVisible && !loading && !loadFailed && gridRows.length > 0"
       class="hidden rounded-xl border border-neutral-200 bg-surface shadow-sm md:block"
       data-test="payroll-time-grid"
     >
@@ -2374,12 +2502,117 @@ onMounted(() => {
       </div>
     </section>
     <p
-      v-if="!loading && !loadFailed && gridRows.length > 0"
+      v-if="!historyVisible && !loading && !loadFailed && gridRows.length > 0"
       class="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 md:hidden"
       data-test="grid-mobile-note"
     >{{ t('payroll.time.grid.mobile_note') }}</p>
 
-    <div v-if="loading" class="space-y-3">
+    <!--
+      ─── Historie po měsících ──────────────────────────────────────────────
+      Čtení, ne zadávání: řádek je celý měsíc se stejnými součty, jaké ukazuje
+      spodní tabulka v rozsahu „Měsíc". Zpátky k zadávání vede „Otevřít měsíc".
+    -->
+    <section
+      v-if="historyVisible"
+      class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+      data-test="payroll-time-history"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 p-4">
+        <div>
+          <h2 class="font-semibold text-neutral-900">{{ t('payroll.time.history.title') }}</h2>
+          <p class="mt-1 max-w-prose text-sm text-neutral-500">{{ t('payroll.time.history.subtitle') }}</p>
+        </div>
+        <p v-if="history" class="text-xs text-neutral-500" data-test="history-range">
+          {{ t('payroll.time.history.range', {
+            from: formatPeriod(history.range.from),
+            to: formatPeriod(history.range.to),
+          }) }}
+        </p>
+      </div>
+
+      <div v-if="historyLoading" class="space-y-3 p-4">
+        <div v-for="index in 4" :key="index" class="h-12 animate-pulse rounded-lg bg-neutral-100" />
+      </div>
+      <EmptyState
+        v-else-if="historyFailed"
+        variant="failed"
+        data-test="history-failed"
+        :message="t('payroll.time.history.load_failed')"
+        @action="loadHistory"
+      />
+      <div v-else-if="!history?.items.length" class="p-8 text-center">
+        <h3 class="font-semibold text-neutral-900">{{ t('payroll.time.history.empty') }}</h3>
+        <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.time.history.empty_hint') }}</p>
+      </div>
+      <template v-else>
+        <div class="hidden overflow-x-auto md:block">
+          <table data-test="payroll-time-history-table" class="min-w-full divide-y divide-neutral-200 text-sm">
+            <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+              <th class="px-4 py-3">{{ t('payroll.time.history.period') }}</th>
+              <th class="px-4 py-3">{{ t('payroll.time.columns.fund') }}</th>
+              <th class="px-4 py-3">{{ t('payroll.time.columns.plan') }}</th>
+              <th class="px-4 py-3">{{ t('payroll.time.columns.actual') }}</th>
+              <th class="px-4 py-3">{{ t('payroll.time.columns.difference') }}</th>
+              <th class="px-4 py-3">{{ t('payroll.time.columns.status') }}</th>
+              <th class="px-4 py-3">{{ t('payroll.time.history.records') }}</th>
+              <th class="px-4 py-3 text-right">{{ t('payroll.time.columns.actions') }}</th>
+            </tr></thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="month in history.items" :key="month.period" :data-test="`history-row-${month.period}`">
+                <td class="px-4 py-3 font-medium text-neutral-900">{{ formatPeriod(month.period) }}</td>
+                <td class="px-4 py-3">{{ formatPayrollMinutes(month.summary.fund_minutes) }}</td>
+                <td class="px-4 py-3">{{ formatPayrollMinutes(month.summary.planned_minutes) }}</td>
+                <td class="px-4 py-3">{{ formatPayrollMinutes(month.summary.actual_minutes) }}</td>
+                <td class="px-4 py-3" :class="month.summary.difference_minutes === 0 ? 'text-success-600' : 'text-warning-700'">{{ formatPayrollMinutes(month.summary.difference_minutes) }}</td>
+                <td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="historyStatusClass(month)">{{ t(`payroll.time.status.${historyStatusKey(month)}`) }}</span></td>
+                <td class="px-4 py-3 text-xs text-neutral-500">{{ t('payroll.time.history.records_value', { shifts: month.shift_count, entries: month.entry_count }) }}</td>
+                <td class="px-4 py-3">
+                  <div class="flex flex-wrap justify-end gap-2">
+                    <button
+                      :class="btnOutline('neutral')"
+                      :data-test="`history-open-${month.period}`"
+                      @click="openHistoryMonth(month.period)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>
+                      {{ t('payroll.time.history.open_month') }}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="space-y-3 p-4 md:hidden">
+          <article v-for="month in history.items" :key="month.period" class="rounded-lg border border-neutral-200 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <h3 class="font-semibold text-neutral-900">{{ formatPeriod(month.period) }}</h3>
+              <span class="rounded-full px-2 py-1 text-xs font-medium" :class="historyStatusClass(month)">{{ t(`payroll.time.status.${historyStatusKey(month)}`) }}</span>
+            </div>
+            <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.fund') }}</dt><dd>{{ formatPayrollMinutes(month.summary.fund_minutes) }}</dd></div>
+              <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.plan') }}</dt><dd>{{ formatPayrollMinutes(month.summary.planned_minutes) }}</dd></div>
+              <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ formatPayrollMinutes(month.summary.actual_minutes) }}</dd></div>
+              <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ formatPayrollMinutes(month.summary.difference_minutes) }}</dd></div>
+            </dl>
+            <div class="mt-4 flex flex-wrap gap-2">
+              <button :class="btnOutline('neutral')" @click="openHistoryMonth(month.period)">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>
+                {{ t('payroll.time.history.open_month') }}
+              </button>
+            </div>
+          </article>
+        </div>
+        <PaginationBar
+          embedded
+          :page="historyPage"
+          :per-page="12"
+          :total="history.total"
+          @update:page="goToHistoryPage"
+        />
+      </template>
+    </section>
+
+    <div v-else-if="loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-28 animate-pulse rounded-xl bg-neutral-100" />
     </div>
     <EmptyState

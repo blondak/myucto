@@ -192,6 +192,162 @@ final class PayrollInputsFilterBatchApiTest extends TestCase
         self::assertSame([3], array_column($byComponent['facets']['imports'], 'count'));
     }
 
+    /**
+     * Karta zaměstnance čte vstupy jako historii vztahu, ne jako jeden měsíc.
+     * Bez `period_to` musí zůstat výpis doslova měsíční — včetně nabídky filtru,
+     * která se jinak počítá za celé zvolené období.
+     */
+    public function testPeriodRangeListsEveryMonthWhileASingleMonthStaysUnchanged(): void
+    {
+        $april = $this->insertDrafts($this->alfa, $this->bonusA, 1, 1_000, null, '2026-04-01')[0];
+        $may = $this->insertDrafts($this->alfa, $this->bonusB, 1, 2_000, null, '2026-05-01')[0];
+        $june = $this->insertDrafts($this->alfa, $this->bonusA, 1, 4_000)[0];
+        $this->insertDrafts($this->beta, $this->bonusA, 1, 8_000, null, '2026-05-01');
+
+        $single = $this->listInputs([
+            'period' => '2026-05',
+            'employment_id' => (string) $this->alfa[1],
+        ]);
+        self::assertSame([$may], $this->ids($single));
+        self::assertNull($single['filter']['period_to']);
+        self::assertSame(1, $single['summary']['total']);
+        self::assertSame(2_000, $single['summary']['amount_total_minor']);
+        self::assertSame(
+            [$this->bonusB],
+            array_column($single['facets']['components'], 'id'),
+        );
+
+        $range = $this->listInputs([
+            'period' => '2026-04',
+            'period_to' => '2026-06',
+            'employment_id' => (string) $this->alfa[1],
+        ]);
+        self::assertSame([$april, $may, $june], $this->ids($range));
+        self::assertSame('2026-06', $range['filter']['period_to']);
+        self::assertSame(3, $range['total']);
+        self::assertSame(3, $range['summary']['draft_total']);
+        self::assertSame(7_000, $range['summary']['amount_total_minor']);
+        self::assertSame(
+            [$this->bonusA, $this->bonusB],
+            array_column($range['facets']['components'], 'id'),
+            'Nabídka filtru se počítá za celý rozsah, ne za jeho první měsíc.',
+        );
+
+        // Ostatní filtry se nad rozsahem chovají stejně jako nad měsícem.
+        self::assertSame(
+            [$april, $june],
+            $this->ids($this->listInputs([
+                'period' => '2026-04',
+                'period_to' => '2026-06',
+                'employment_id' => (string) $this->alfa[1],
+                'component_code' => 'SYN_FLT_A',
+            ])),
+        );
+    }
+
+    /**
+     * Nad rozsahem se historie čte odzadu — nejnovější období nahoře, stejně
+     * jako u seskupení `period`. Dokud se řadilo jen podle jména, vztahu
+     * a složky, osm měsíců téže složky se v seznamu promíchalo podle `input.id`
+     * a řádek nešlo zařadit do měsíce. Jediný měsíc se řadí dál jako dřív.
+     */
+    public function testPeriodRangeListsTheNewestMonthFirst(): void
+    {
+        $april = $this->insertDrafts($this->alfa, $this->bonusA, 1, 1_000, null, '2026-04-01')[0];
+        $may = $this->insertDrafts($this->alfa, $this->bonusB, 1, 2_000, null, '2026-05-01')[0];
+        $juneA = $this->insertDrafts($this->alfa, $this->bonusA, 1, 4_000)[0];
+        $juneB = $this->insertDrafts($this->alfa, $this->bonusB, 1, 5_000)[0];
+
+        $range = $this->listInputs([
+            'period' => '2026-04',
+            'period_to' => '2026-06',
+            'employment_id' => (string) $this->alfa[1],
+        ]);
+        self::assertSame([$juneA, $juneB, $may, $april], $this->idsInOrder($range));
+        self::assertSame(
+            ['2026-06-01', '2026-06-01', '2026-05-01', '2026-04-01'],
+            array_map(
+                static fn (array $row): string => (string) ($row['period_start'] ?? ''),
+                PayrollTimeValue::rows((array) $range['inputs'], 'inputs'),
+            ),
+        );
+
+        // Bez rozsahu zůstává řazení uvnitř měsíce podle složky, ne podle id.
+        $single = $this->listInputs([
+            'period' => '2026-06',
+            'employment_id' => (string) $this->alfa[1],
+        ]);
+        self::assertSame([$juneA, $juneB], $this->idsInOrder($single));
+    }
+
+    public function testGroupingByPeriodReturnsOneRowPerMonthNewestFirst(): void
+    {
+        $this->insertDrafts($this->alfa, $this->bonusA, 2, 1_000, null, '2026-04-01');
+        $this->insertDrafts($this->alfa, $this->bonusB, 1, 5_000, null, '2026-05-01');
+        $this->insertDrafts($this->alfa, $this->bonusA, 3, 2_000);
+        $this->insertDrafts($this->beta, $this->bonusA, 1, 9_000, null, '2026-05-01');
+
+        $grouped = $this->listInputs([
+            'period' => '2026-04',
+            'period_to' => '2026-06',
+            'group_by' => 'period',
+            'employment_id' => (string) $this->alfa[1],
+        ]);
+
+        self::assertSame([], $grouped['inputs']);
+        self::assertSame('period', $grouped['group_by']);
+        self::assertSame(3, $grouped['group_total']);
+        self::assertSame(
+            [
+                ['key' => 202606, 'label' => '2026-06', 'secondary' => null, 'count' => 3, 'draft_count' => 3, 'amount_minor' => 6_000],
+                ['key' => 202605, 'label' => '2026-05', 'secondary' => null, 'count' => 1, 'draft_count' => 1, 'amount_minor' => 5_000],
+                ['key' => 202604, 'label' => '2026-04', 'secondary' => null, 'count' => 2, 'draft_count' => 2, 'amount_minor' => 2_000],
+            ],
+            $grouped['groups'],
+        );
+    }
+
+    public function testInvalidPeriodRangeIsRejected(): void
+    {
+        foreach ([
+            ['period' => '2026-06', 'period_to' => '2026-05'],
+            ['period' => '2026-06', 'period_to' => '2026-6'],
+            ['period' => '2026-06', 'period_to' => 'letos'],
+        ] as $query) {
+            $response = $this->inputs->list(
+                $this->request('GET', '/api/payroll/inputs')->withQueryParams($query),
+                new Response(),
+            );
+            self::assertSame(422, $response->getStatusCode(), json_encode($query, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    /**
+     * Hromadné akce zůstávají měsíční: přes rozsah by jedno kliknutí sáhlo
+     * i na měsíce, které má uživatel na obrazovce jen jako historii.
+     */
+    public function testBatchActionsRefuseAPeriodRange(): void
+    {
+        $this->insertDrafts($this->alfa, $this->bonusA, 2, 1_000, null, '2026-05-01');
+        $this->insertDrafts($this->alfa, $this->bonusA, 2, 1_000);
+        $body = ['period' => '2026-05', 'filter' => ['period_to' => '2026-06']];
+
+        $approve = $this->inputs->approveBatch(
+            $this->request('POST', '/api/payroll/inputs/approve-batch')->withParsedBody($body),
+            new Response(),
+        );
+        self::assertSame(422, $approve->getStatusCode(), (string) $approve->getBody());
+
+        $cancel = $this->inputs->cancelBatch(
+            $this->request('POST', '/api/payroll/inputs/cancel-batch')->withParsedBody($body),
+            new Response(),
+        );
+        self::assertSame(422, $cancel->getStatusCode(), (string) $cancel->getBody());
+
+        self::assertSame(2, $this->countStatus($this->alfa[1], 'draft', '2026-05-01'));
+        self::assertSame(2, $this->countStatus($this->alfa[1], 'draft'));
+    }
+
     public function testInvalidFilterValuesAreRejected(): void
     {
         foreach ([
@@ -367,8 +523,14 @@ final class PayrollInputsFilterBatchApiTest extends TestCase
      * @param array{int,int} $person
      * @return list<int>
      */
-    private function insertDrafts(array $person, int $componentId, int $count, int $amountMinor, ?int $importId = null): array
-    {
+    private function insertDrafts(
+        array $person,
+        int $componentId,
+        int $count,
+        int $amountMinor,
+        ?int $importId = null,
+        string $periodStart = self::PERIOD_START,
+    ): array {
         $pdo = $this->db->pdo();
         $values = [];
         $params = [];
@@ -380,7 +542,7 @@ final class PayrollInputsFilterBatchApiTest extends TestCase
                 $person[0],
                 $person[1],
                 $componentId,
-                self::PERIOD_START,
+                $periodStart,
                 $amountMinor,
                 $importId === null ? 'manual' : 'import',
                 $importId === null ? null : 'syn-import-' . $componentId . '-' . $index,
@@ -431,13 +593,16 @@ final class PayrollInputsFilterBatchApiTest extends TestCase
         return (int) $pdo->lastInsertId();
     }
 
-    private function countStatus(int $employmentId, string $status): int
-    {
+    private function countStatus(
+        int $employmentId,
+        string $status,
+        string $periodStart = self::PERIOD_START,
+    ): int {
         $stmt = $this->db->pdo()->prepare(
             'SELECT COUNT(*) FROM payroll_inputs
               WHERE supplier_id = ? AND employment_id = ? AND period_start = ? AND status = ?'
         );
-        $stmt->execute([$this->supplierId, $employmentId, self::PERIOD_START, $status]);
+        $stmt->execute([$this->supplierId, $employmentId, $periodStart, $status]);
 
         return (int) $stmt->fetchColumn();
     }
@@ -547,6 +712,18 @@ final class PayrollInputsFilterBatchApiTest extends TestCase
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
 
         return $this->json($response);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<int>
+     */
+    private function idsInOrder(array $payload): array
+    {
+        return array_map(
+            static fn (array $row): int => (int) ($row['id'] ?? 0),
+            PayrollTimeValue::rows((array) $payload['inputs'], 'inputs'),
+        );
     }
 
     /**

@@ -1671,6 +1671,7 @@ onMounted(async () => {
             ref="personProfilePanel"
             :person-id="expandedId"
             :can-write="auth.canWrite('payroll.person.write')"
+            :can-read-sensitive="auth.canRead('payroll.person.read_sensitive')"
             :relation-types="details[expandedId].relation_types"
             @saved="updatePersonProfile"
           />
@@ -1747,6 +1748,7 @@ onMounted(async () => {
           :employment="employment"
           :can-write="auth.canWrite('payroll.employment.write')"
           :can-write-person="auth.canWrite('payroll.person.write')"
+          :can-read-sensitive="auth.canRead('payroll.person.read_sensitive')"
           :can-read-documents="auth.canRead('payroll.documents')"
           :can-write-documents="auth.canWrite('payroll.documents')"
           :payroll-start-period="payrollStartPeriod"

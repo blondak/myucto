@@ -142,7 +142,14 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
                 return true;
             }
         }
-        foreach (['/sensitive-reveal', '/download-grant', '/jmhz-protocol-reverify'] as $suffix) {
+        // `/reveal` je vlastní položka, ne zkrácení `/sensitive-reveal`: tam je
+        // před slovem pomlčka, takže jeden suffix obě cesty nepokryje.
+        foreach ([
+            '/sensitive-reveal',
+            '/reveal',
+            '/download-grant',
+            '/jmhz-protocol-reverify',
+        ] as $suffix) {
             if (str_ends_with($path, $suffix)) {
                 return true;
             }

@@ -132,6 +132,76 @@ final class PayrollJmhzIdentityActionTest extends TestCase
         self::assertNull($productionJson['identity']['employment_external_identifier']);
     }
 
+    /**
+     * Odkrytí je jiná třída operace než zápis: nestačí na ně právo měnit vztah,
+     * ale ani nesmí stačit pouhé otevření karty. Proto tu jede celá brána
+     * najednou — session, jemné právo a povinný důvod.
+     */
+    public function testRevealNeedsSessionFinePermissionAndReason(): void
+    {
+        $saved = $this->action->put(
+            $this->request('PUT', $this->validBody()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+
+        $bearer = $this->action->reveal(
+            $this->request('POST', $this->revealBody(), authMethod: 'bearer'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->json($bearer)['error']['code']);
+
+        $employmentWriter = new EffectiveRole(
+            73,
+            'Mzdová účetní bez práva na citlivé údaje',
+            'staff',
+            true,
+            [
+                'payroll' => AccessLevel::WRITE->value,
+                'payroll.person.write' => AccessLevel::WRITE->value,
+                'payroll.employment.write' => AccessLevel::WRITE->value,
+            ],
+        );
+        $forbidden = $this->action->reveal(
+            $this->request('POST', $this->revealBody(), role: $employmentWriter),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(403, $forbidden->getStatusCode());
+        self::assertSame('forbidden', $this->json($forbidden)['error']['code']);
+
+        $reader = $this->sensitiveReader();
+        $shortReason = $this->revealBody();
+        $shortReason['reason'] = 'krátké';
+        $rejected = $this->action->reveal(
+            $this->request('POST', $shortReason, role: $reader),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $rejected->getStatusCode());
+        self::assertSame('validation_failed', $this->json($rejected)['error']['code']);
+
+        $revealed = $this->action->reveal(
+            $this->request('POST', $this->revealBody(), role: $reader),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $revealed->getStatusCode(), (string) $revealed->getBody());
+        self::assertSame('private, no-store', $revealed->getHeaderLine('Cache-Control'));
+        $json = $this->json($revealed);
+        self::assertSame(
+            '1000000001',
+            $json['reveal']['person_external_identifier']['value'],
+        );
+        self::assertSame(
+            '200000000000000000002',
+            $json['reveal']['employment_external_identifier']['value'],
+        );
+    }
+
     public function testWriteRequiresSessionActorAndBothPermissions(): void
     {
         $bearer = $this->action->put(
@@ -250,6 +320,27 @@ final class PayrollJmhzIdentityActionTest extends TestCase
             'source_reference' => null,
             'evidence_confirmed' => true,
         ];
+    }
+
+    /** @return array<string,mixed> */
+    private function revealBody(): array
+    {
+        return [
+            'environment' => 'test',
+            'on_date' => '2026-08-04',
+            'reason' => 'Porovnání s protokolem o přijetí registrace.',
+        ];
+    }
+
+    private function sensitiveReader(): EffectiveRole
+    {
+        return new EffectiveRole(
+            74,
+            'Citlivý mzdový čtenář',
+            'staff',
+            true,
+            ['payroll.person.read_sensitive' => AccessLevel::READ->value],
+        );
     }
 
     /** @param array<string,mixed>|null $body @param array<string,string> $query */

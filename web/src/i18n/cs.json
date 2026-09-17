@@ -1408,8 +1408,34 @@
         "title": "Seznam je zúžený na {name}.",
         "missing": "Zúžení (č. {name}) nedalo v tomto výběru žádný záznam — vztah ani osoba k firmě nepatří, v daném období neexistovali, nebo odkaz zestaral.",
         "missing_named": "Seznam je zúžený na {name}, ale v tomto výběru nezbyl žádný záznam — vztah ani osoba k firmě nepatří, v daném období neexistovali, nebo odkaz zestaral.",
+        "empty_named": "Seznam je zúžený na {name}. V tomto výběru zatím nemá žádný záznam — odkaz je v pořádku.",
         "unknown_person": "vybraného zaměstnance",
         "clear": "Zrušit zúžení"
+      },
+      "scope": {
+        "label": "Rozsah",
+        "legend": "Rozsah období",
+        "month": "Měsíc",
+        "year": "Rok",
+        "all": "Vše",
+        "month_hint": "Jen vybrané období.",
+        "year_hint": "Celý rok vybraného období.",
+        "all_hint": "Celá historie tohoto pracovního vztahu.",
+        "all_periods": "všechna období"
+      },
+      "history": {
+        "title": "Historie po měsících",
+        "subtitle": "Jeden řádek na měsíc; rozkliknutím se ukáže rozpad na jednotlivé vstupy.",
+        "month_count": "Měsíců: {n}",
+        "period": "Období",
+        "count": "Vstupů",
+        "draft_count": "Z toho konceptů",
+        "amount": "Částka celkem",
+        "open_month": "Otevřít měsíc",
+        "detail": "Rozpad",
+        "load_failed": "Historii se nepodařilo načíst.",
+        "empty_title": "V tomto rozsahu není žádný mzdový vstup",
+        "empty_description": "Zkuste širší rozsah, nebo zadejte vstupy v měsíčním pohledu."
       }
     },
     "rulesets": {
@@ -2953,7 +2979,17 @@
         "delete_failed": "Pravidelný předpis nelze smazat. Pokud už vytvořil mzdový vstup, ukončete jeho platnost nebo jej deaktivujte.",
         "materialize": "Převést do měsíce",
         "materialized": "Vytvořeno {created_count}, již existovalo {replayed_count}, ruční kontrola {manual_review_count}.",
-        "materialize_failed": "Pravidelné předpisy se nepodařilo převést do měsíce."
+        "materialize_failed": "Pravidelné předpisy se nepodařilo převést do měsíce.",
+        "all_periods": "Seznam ukazuje celou historii předpisů bez ohledu na vybrané období; co platí dnes, poznáte podle stavu.",
+        "empty": "Zatím tu není žádný pravidelný předpis",
+        "empty_focused": "Tento pracovní vztah nemá žádný pravidelný předpis",
+        "empty_hint": "Předpisem se zadává složka, která se opakuje každý měsíc — třeba příspěvek na stravování nebo osobní ohodnocení.",
+        "state": {
+          "current": "Platný",
+          "scheduled": "Naplánovaný",
+          "expired": "Ukončený",
+          "inactive": "Vypnutý"
+        }
       },
       "inputs": {
         "title": "Měsíční mzdové vstupy",
@@ -3024,9 +3060,12 @@
           "group_none": "Jednotlivé vstupy",
           "group_employee": "Podle zaměstnance",
           "group_component": "Podle složky",
+          "group_period": "Po obdobích",
           "clear": "Zrušit filtry"
         },
         "summary": "{total} vstupů · {amount} · {drafts} konceptů",
+        "range_summary": "Rozsah: {period} — zobrazuje se historie tohoto pracovního vztahu.",
+        "batch_range_blocked": "Hromadné schvalování a rušení jede vždy nad jedním obdobím, proto se v rozsahu nenabízí. Přepněte rozsah na Měsíc a vyberte konkrétní období.",
         "approve_matching": "Schválit {count} odpovídajících filtru",
         "cancel_matching": "Zrušit {count} konceptů",
         "cancel_matching_confirm": "Zrušit {count} konceptů odpovídajících filtru? Zmizí ze seznamu a přestanou blokovat mzdový běh. Vrátit to nejde.",
@@ -3131,6 +3170,7 @@
         "maximum": "Maximální částka (Kč)",
         "note": "Poznámka",
         "quantity": "Množství",
+        "period": "Období",
         "source_period": "Zdrojové období",
         "external_id": "Externí identifikátor",
         "source": "Zdroj",
@@ -3630,6 +3670,18 @@
       "reopened": "Měsíc byl auditovaně znovu otevřen.",
       "reopen_failed": "Měsíc se nepodařilo znovu otevřít.",
       "reopen_reason_required": "Vyplňte důvod opravy. Zapíše se do auditní stopy měsíce.",
+      "history": {
+        "title": "Historie po měsících",
+        "subtitle": "Souhrny za jednotlivé měsíce vztahu. Zadávat a opravovat docházku jde v rozsahu „Měsíc“.",
+        "period": "Období",
+        "records": "Záznamy",
+        "records_value": "{shifts} směn · {entries} zápisů",
+        "open_month": "Otevřít měsíc",
+        "empty": "Pro zvolený rozsah nejsou žádné měsíce",
+        "empty_hint": "Zvolte jiný rok nebo přepněte rozsah na „Vše“.",
+        "load_failed": "Historii docházky se nepodařilo načíst.",
+        "range": "Rozsah {from} až {to}"
+      },
       "jmhz": {
         "title": "Potvrzení pracovního souhrnu JMHZ",
         "hint": "Čísla jsou předvyplněná z evidence. Zkontrolujte je a potvrďte — aplikace je sama nezaokrouhluje ani nedopočítává.",
@@ -4275,6 +4327,9 @@
         "accounts_title": "Bankovní cíle výplaty",
         "mask_hint": "Citlivé údaje se zobrazují jen maskovaně. Novou hodnotu zadejte pouze při změně.",
         "current_masked": "Aktuální maskovaná hodnota",
+        "reveal": "Zobrazit",
+        "hide": "Skrýt",
+        "reveal_failed": "Údaje se nepodařilo zobrazit.",
         "keep_masked": "Ponechte prázdné beze změny",
         "add_identity": "Přidat jméno",
         "add_address": "Přidat adresu",
@@ -4601,6 +4656,9 @@
         "confirm_required": "Zaškrtněte potvrzení, že hodnoty odpovídají podkladu ČSSZ.",
         "permission_required": "K uložení potřebujete oprávnění měnit osobu i pracovní vztah.",
         "correct": "Opravit",
+        "reveal": "Zobrazit",
+        "hide": "Skrýt",
+        "reveal_failed": "Plnou hodnotu identifikátoru se nepodařilo zobrazit.",
         "correction_hint": "Opravujete ručně opsané číslo. Původní hodnota se zahodí a nahradí tím, co uložíte. Už odeslaná podání zůstávají beze změny."
       },
       "openings": {
@@ -24821,8 +24879,8 @@
       "messages_truncated": "dalších zpráv",
       "people_not_found": "vztahů bez protějšku ve firmě",
       "people_failed": "údajů nezapsáno",
-      "children": "vyživovaných dětí s daňovým zvýhodněním",
-      "children_without_credit": "dětí bez nároku u tohoto zaměstnance",
+      "children": "dětí s daňovým zvýhodněním",
+      "children_without_credit": "osob s dítětem bez nároku k ručnímu doplnění",
       "identity": "osob s doplněným občanstvím a místem narození",
       "person_card": "osobních karet s adresou a kontaktem",
       "tax_residence": "daňových rezidencí",

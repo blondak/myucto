@@ -19751,10 +19751,14 @@ paths:
       summary: Měsíční mzdové vstupy
       description: >-
         Zrušené vstupy se nevypisují. `summary` a `facets` se počítají za celý
-        filtr (resp. celý měsíc), ne za stránku. S `group_by` vrací místo
-        jednotlivých vstupů souhrnné řádky (`groups`), stránkované po skupinách.
+        filtr (resp. celé zvolené období), ne za stránku. S `group_by` vrací
+        místo jednotlivých vstupů souhrnné řádky (`groups`), stránkované po
+        skupinách. S `period_to` se místo jednoho měsíce vypíše rozsah měsíců
+        `period`–`period_to` včetně; `group_by=period` ho svine na řádek na
+        měsíc, od nejnovějšího.
       parameters:
         - { name: period, in: query, required: true, description: Měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: period_to, in: query, description: 'Poslední měsíc rozsahu YYYY-MM (včetně). Bez něj se vypisuje jen měsíc `period`.', schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
         - { name: employment_id, in: query, schema: { type: integer, format: int64 } }
         - { name: employee_id, in: query, schema: { type: integer, format: int64 } }
         - { name: q, in: query, description: Hledání ve jméně zaměstnance a v osobním čísle (kódu vztahu), schema: { type: string, maxLength: 100 } }
@@ -19763,7 +19767,7 @@ paths:
         - { name: source_kind, in: query, description: 'Zdroje oddělené čárkou (manual, recurring, time, absence, import, correction, travel)', schema: { type: string } }
         - { name: status, in: query, description: 'Stavy oddělené čárkou (draft, approved, locked)', schema: { type: string } }
         - { name: import_id, in: query, description: Importní dávka vstupů (payroll_input_imports), schema: { type: integer, format: int64 } }
-        - { name: group_by, in: query, schema: { type: string, enum: [employee, component] } }
+        - { name: group_by, in: query, schema: { type: string, enum: [employee, component, period] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
@@ -19911,6 +19915,31 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PayrollTimeOverview' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/time/history:
+    get:
+      tags: [Payroll]
+      summary: Historie docházky jednoho vztahu po měsících
+      description: |
+        Měsíce sestupně (nejnovější první) se stejnými součty, jaké za týž měsíc
+        vrací `/payroll/time/month`. Bez `from`/`to` jde rozsah od měsíce nástupu
+        po měsíc ukončení, nejdál po aktuální měsíc, rozšířený o měsíce, ve
+        kterých vztah v docházce něco má.
+      parameters:
+        - { name: employment_id, in: query, required: true, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, description: První měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: to, in: query, description: Poslední měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 12, default: 12 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Historie docházky po měsících
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PayrollTimeHistory' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/payroll/time/entries:
@@ -22474,14 +22503,14 @@ components:
             draft_total: { type: integer, minimum: 0 }
             amount_total_minor: { type: integer }
             draft_amount_total_minor: { type: integer }
-        group_by: { type: [string, "null"], enum: [employee, component, null] }
+        group_by: { type: [string, "null"], enum: [employee, component, period, null] }
         groups:
           type: [array, "null"]
           items:
             type: object
             required: [key, label, count, draft_count, amount_minor]
             properties:
-              key: { type: integer, format: int64, description: ID zaměstnance nebo mzdové složky }
+              key: { type: integer, format: int64, description: 'ID zaměstnance nebo mzdové složky; u `group_by=period` měsíc jako YYYYMM (popisek je YYYY-MM)' }
               label: { type: string }
               secondary: { type: [string, "null"] }
               count: { type: integer, minimum: 0 }
@@ -22636,6 +22665,44 @@ components:
         total: { type: integer, minimum: 0 }
         limit: { type: integer, minimum: 1 }
         offset: { type: integer, minimum: 0 }
+
+    PayrollTimeHistory:
+      type: object
+      required: [employment, items, total, limit, offset, range]
+      additionalProperties: true
+      properties:
+        employment: { type: object, additionalProperties: true }
+        items:
+          type: array
+          items:
+            type: object
+            required: [period, month, summary, shift_count, entry_count]
+            additionalProperties: true
+            properties:
+              period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+              month: { type: object, additionalProperties: true }
+              summary:
+                type: object
+                required: [fund_minutes, planned_minutes, actual_minutes, difference_minutes, category_minutes, incomplete]
+                additionalProperties: true
+                properties:
+                  fund_minutes: { type: integer }
+                  planned_minutes: { type: integer }
+                  actual_minutes: { type: integer }
+                  difference_minutes: { type: integer }
+                  category_minutes: { type: object, additionalProperties: { type: integer } }
+                  incomplete: { type: boolean }
+              shift_count: { type: integer, minimum: 0 }
+              entry_count: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1, maximum: 12 }
+        offset: { type: integer, minimum: 0 }
+        range:
+          type: object
+          required: [from, to]
+          properties:
+            from: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+            to: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
 
     PayrollAbsenceWrite:
       type: object

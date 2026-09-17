@@ -28,6 +28,9 @@ final class PayrollInputExportService
     public const XLSX_MAX_ROWS = 20000;
     /** Strop tiskové sestavy: nad ním je PDF nečitelné a mPDF pomalé. */
     public const PDF_MAX_ROWS = 5000;
+    /** Rozsah bez jediného vstupu — pojmenovat ho měsícem by lhalo. */
+    private const EMPTY_RANGE_LABEL = 'bez vstupů';
+    private const EMPTY_RANGE_SLUG = 'bez-vstupu';
 
     public function __construct(
         private readonly PayrollInputRepository $inputs,
@@ -81,7 +84,7 @@ final class PayrollInputExportService
 
         return [
             'bytes' => $this->pdfRenderer->render($data),
-            'filename' => self::filename($filter, 'pdf'),
+            'filename' => (string) $context['filename_pdf'],
             'mime' => 'application/pdf',
             'row_count' => $data['row_count'],
         ];
@@ -91,17 +94,26 @@ final class PayrollInputExportService
      * Hlavička exportu: firma, období, filtr, počet a součet za celý filtr.
      *
      * @return array{entity:array{name:string,ico:?string,address:string},period_start:string,
-     *   period_label:string,filter_lines:list<array{label:string,value:string}>,row_count:int,
-     *   amount_total_minor:int,exported_at:string,filename_xlsx:string}
+     *   period_end:?string,period_label:string,
+     *   filter_lines:list<array{label:string,value:string}>,row_count:int,
+     *   amount_total_minor:int,exported_at:string,filename_xlsx:string,
+     *   filename_pdf:string}
      */
     public function context(int $supplierId, PayrollInputFilter $filter): array
     {
         $summary = $this->inputs->summary($supplierId, $filter);
+        // Období sestavy se odvozuje ze SKUTEČNÝCH řádků, ne z mezí filtru:
+        // rozsah „vše" chodí jako 1990-01…2099-12, protože `period` je povinné,
+        // a takový sentinel v hlavičce ani v názvu souboru nemá co dělat.
+        $span = $filter->periodEnd === null
+            ? null
+            : $this->inputs->periodSpan($supplierId, $filter);
 
         return [
             'entity' => $this->entity($supplierId),
-            'period_start' => $filter->periodStart,
-            'period_label' => PayrollInputExportFormatter::periodLabel($filter->periodStart),
+            'period_start' => $span['from'] ?? $filter->periodStart,
+            'period_end' => $span === null ? null : $span['to'],
+            'period_label' => self::periodLabel($filter, $span),
             'filter_lines' => PayrollInputExportFormatter::filterLines(
                 $filter,
                 $this->inputs->exportFilterLabels($supplierId, $filter),
@@ -109,7 +121,8 @@ final class PayrollInputExportService
             'row_count' => $summary['total'],
             'amount_total_minor' => $summary['amount_total_minor'],
             'exported_at' => (new \DateTimeImmutable())->format('d.m.Y H:i'),
-            'filename_xlsx' => self::filename($filter, 'xlsx'),
+            'filename_xlsx' => self::filename($filter, 'xlsx', $span),
+            'filename_pdf' => self::filename($filter, 'pdf', $span),
         ];
     }
 
@@ -244,8 +257,37 @@ final class PayrollInputExportService
         ];
     }
 
-    private static function filename(PayrollInputFilter $filter, string $extension): string
+    /**
+     * Popisek období sestavy.
+     *
+     * @param array{from:string,to:string}|null $span skutečné rozpětí řádků
+     */
+    private static function periodLabel(PayrollInputFilter $filter, ?array $span): string
     {
-        return 'mzdove-vstupy-' . substr($filter->periodStart, 0, 7) . '.' . $extension;
+        if ($span !== null) {
+            return PayrollInputExportFormatter::periodLabel($span['from'], $span['to']);
+        }
+        // Jediný měsíc je plnohodnotný údaj i bez řádků: sestava „za 06/2026,
+        // žádný vstup" dává smysl. Prázdný ROZSAH ale žádné rozpětí nemá a meze
+        // filtru u „vše" jsou technický sentinel (1990-01…2099-12), který by
+        // tvrdil, že se hledalo v datech, jaká nikdy neexistovala.
+        return $filter->periodEnd === null
+            ? PayrollInputExportFormatter::periodLabel($filter->periodStart)
+            : self::EMPTY_RANGE_LABEL;
+    }
+
+    /** @param array{from:string,to:string}|null $span skutečné rozpětí řádků */
+    private static function filename(
+        PayrollInputFilter $filter,
+        string $extension,
+        ?array $span,
+    ): string {
+        $slug = match (true) {
+            $span !== null => PayrollInputExportFormatter::periodSlug($span['from'], $span['to']),
+            $filter->periodEnd === null => PayrollInputExportFormatter::periodSlug($filter->periodStart),
+            default => self::EMPTY_RANGE_SLUG,
+        };
+
+        return 'mzdove-vstupy-' . $slug . '.' . $extension;
     }
 }

@@ -28,6 +28,17 @@ final class PayrollTimeService
      */
     public const BATCH_MAX_CELLS = 500;
 
+    /**
+     * Kolik měsíců historie se vejde do jednoho požadavku.
+     *
+     * Každý měsíc stojí několik dotazů (verze kalendáře, jejich výjimky,
+     * směny, zápisy, stav měsíce), takže rok je horní hranice toho, co má
+     * smysl postavit naráz — a zároveň přesně ten výřez, kvůli kterému se
+     * historie otevírá.
+     */
+    public const HISTORY_MAX_LIMIT = 12;
+    public const HISTORY_DEFAULT_LIMIT = 12;
+
     private const CATEGORIES = [
         'regular',
         'overtime',
@@ -63,35 +74,33 @@ final class PayrollTimeService
             throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
         }
         [$periodStart, $periodEnd, $startsAtUtc, $endsAtUtc] = $this->periodBounds($period);
-        $employments = $this->repository->employments($supplierId, $periodStart, $periodEnd);
         // Zúžení na jeden vztah padá STEJNĚ brzy jako „jen nedokončené"
-        // a stránkování — před stavbou řádků. Dokud běželo v prohlížeči nad
-        // načtenou stránkou, vztah z jiné strany se tiše neprojevil: lišta
-        // zmizela a seznam zůstal celý, což vypadá jako prázdný výsledek,
-        // ne jako nefunkční filtr.
-        if ($employmentId !== null) {
-            $employments = array_values(array_filter(
-                $employments,
-                fn (array $employment): bool => PayrollTimeValue::int(
-                    $employment['id'] ?? null,
-                    'id',
-                ) === $employmentId,
-            ));
-        }
+        // a stránkování — a od zavedení historie po měsících rovnou do SQL.
+        // Dokud běželo v prohlížeči nad načtenou stránkou, vztah z jiné strany
+        // se tiše neprojevil: lišta zmizela a seznam zůstal celý, což vypadá
+        // jako prázdný výsledek, ne jako nefunkční filtr. Filtr v PHP tu už
+        // není schválně — druhé místo, kde se zúžení rozhoduje, by se s tím
+        // v SQL dřív nebo později rozešlo.
+        $employments = $this->repository->employments(
+            $supplierId,
+            $periodStart,
+            $periodEnd,
+            $employmentId,
+        );
         $shifts = $this->groupByEmployment(
             $this->startingInPeriod(
-                $this->repository->shifts($supplierId, $startsAtUtc, $endsAtUtc),
+                $this->repository->shifts($supplierId, $startsAtUtc, $endsAtUtc, $employmentId),
                 $period,
             ),
         );
         $entries = $this->groupByEmployment(
             $this->startingInPeriod(
-                $this->repository->entries($supplierId, $startsAtUtc, $endsAtUtc),
+                $this->repository->entries($supplierId, $startsAtUtc, $endsAtUtc, $employmentId),
                 $period,
             ),
         );
         $states = [];
-        foreach ($this->repository->monthStates($supplierId, $periodStart) as $state) {
+        foreach ($this->repository->monthStates($supplierId, $periodStart, $employmentId) as $state) {
             $states[PayrollTimeValue::int($state['employment_id'] ?? null, 'employment_id')] = $state;
         }
 
@@ -178,95 +187,20 @@ final class PayrollTimeService
         $items = [];
         foreach ($employments as $employment) {
             $employmentId = PayrollTimeValue::int($employment['id'] ?? null, 'id');
-            $calendarVersions = $this->repository->calendars(
+            [$fundMinutes, $calendarDto] = $this->fundMinutesForMonth(
                 $supplierId,
                 $employmentId,
+                $period,
                 $periodStart,
                 $periodEnd,
             );
-            $calendarDto = null;
-            $fundMinutes = 0;
-            if ($calendarVersions !== []) {
-                $combinedDays = [];
-                foreach ($calendarVersions as $version) {
-                    $overrides = $this->repository->calendarDays(
-                        $supplierId,
-                        PayrollTimeValue::int($version['id'] ?? null, 'id'),
-                        $periodStart,
-                        $periodEnd,
-                    );
-                    $calendarMonth = $this->fund->month(
-                        $period,
-                        $this->weekPattern($version['week_pattern'] ?? null),
-                        $overrides,
-                    );
-                    foreach ($calendarMonth['days'] as $day) {
-                        $date = PayrollTimeValue::string($day['date'] ?? null, 'date');
-                        $validFrom = PayrollTimeValue::string(
-                            $version['valid_from'] ?? null,
-                            'valid_from',
-                        );
-                        if ($date < $validFrom) {
-                            continue;
-                        }
-                        $validTo = $version['valid_to'] ?? null;
-                        if ($validTo !== null
-                            && $date > PayrollTimeValue::string($validTo, 'valid_to')
-                        ) {
-                            continue;
-                        }
-                        $combinedDays[$date] = $day;
-                    }
-                }
-                ksort($combinedDays);
-                foreach ($combinedDays as $day) {
-                    $fundMinutes += PayrollTimeValue::int(
-                        $day['planned_minutes'] ?? null,
-                        'planned_minutes',
-                    );
-                }
-                $latestCalendar = $calendarVersions[array_key_last($calendarVersions)];
-                $calendarDto = $latestCalendar + [
-                    'fund_minutes' => $fundMinutes,
-                    'days' => array_values($combinedDays),
-                    'versions' => array_map(
-                        static fn (array $version): array => [
-                            'id' => $version['id'],
-                            'name' => $version['name'],
-                            'valid_from' => $version['valid_from'],
-                            'valid_to' => $version['valid_to'],
-                            'row_version' => $version['row_version'],
-                        ],
-                        $calendarVersions,
-                    ),
-                ];
-            }
 
-            $employmentShifts = $shifts[$employmentId] ?? [];
-            $employmentEntries = $entries[$employmentId] ?? [];
-            $plannedMinutes = 0;
-            foreach ($employmentShifts as &$shift) {
-                $minutes = $this->netMinutes($shift);
-                $shift['net_minutes'] = $minutes;
-                $shift['starts_at'] = $this->displayInstant($shift, 'starts_at_utc');
-                $shift['ends_at'] = $this->displayInstant($shift, 'ends_at_utc');
-                $plannedMinutes += $minutes;
-            }
-            unset($shift);
-
-            $categories = array_fill_keys(self::CATEGORIES, 0);
-            foreach ($employmentEntries as &$entry) {
-                $minutes = $this->netMinutes($entry);
-                $entry['net_minutes'] = $minutes;
-                $entry['starts_at'] = $this->displayInstant($entry, 'starts_at_utc');
-                $entry['ends_at'] = $this->displayInstant($entry, 'ends_at_utc');
-                $category = PayrollTimeValue::string($entry['category'] ?? null, 'category');
-                if (array_key_exists($category, $categories)) {
-                    $categories[$category] += $minutes;
-                }
-            }
-            unset($entry);
-            $actualMinutes = $categories['regular'] + $categories['overtime'];
+            [$employmentShifts, $plannedMinutes] = $this->summarizeShifts(
+                $shifts[$employmentId] ?? [],
+            );
+            [$employmentEntries, $categories, $actualMinutes] = $this->summarizeEntries(
+                $entries[$employmentId] ?? [],
+            );
             $incomplete = $incompleteFlags[$employmentId];
 
             $state = $states[$employmentId] ?? [
@@ -340,6 +274,335 @@ final class PayrollTimeService
             'limit' => $limit,
             'offset' => $offset,
         ];
+    }
+
+    /**
+     * Fond pracovní doby měsíce z verzí kalendáře plus DTO nejnovější verze.
+     *
+     * Vytaženo z {@see overview()} kvůli {@see history()}: ořez dnů podle
+     * `valid_from`/`valid_to` je jediné místo, kde se rozhoduje, kolik hodin
+     * měsíc „měl". Druhá kopie by se s touhle rozešla při první opravě a
+     * historie by ukazovala jiná čísla než tentýž měsíc v přehledu.
+     *
+     * @return array{int,?array<string,mixed>}
+     */
+    private function fundMinutesForMonth(
+        int $supplierId,
+        int $employmentId,
+        string $period,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $calendarVersions = $this->repository->calendars(
+            $supplierId,
+            $employmentId,
+            $periodStart,
+            $periodEnd,
+        );
+        if ($calendarVersions === []) {
+            return [0, null];
+        }
+
+        $fundMinutes = 0;
+        $combinedDays = [];
+        foreach ($calendarVersions as $version) {
+            $overrides = $this->repository->calendarDays(
+                $supplierId,
+                PayrollTimeValue::int($version['id'] ?? null, 'id'),
+                $periodStart,
+                $periodEnd,
+            );
+            $calendarMonth = $this->fund->month(
+                $period,
+                $this->weekPattern($version['week_pattern'] ?? null),
+                $overrides,
+            );
+            foreach ($calendarMonth['days'] as $day) {
+                $date = PayrollTimeValue::string($day['date'] ?? null, 'date');
+                $validFrom = PayrollTimeValue::string(
+                    $version['valid_from'] ?? null,
+                    'valid_from',
+                );
+                if ($date < $validFrom) {
+                    continue;
+                }
+                $validTo = $version['valid_to'] ?? null;
+                if ($validTo !== null
+                    && $date > PayrollTimeValue::string($validTo, 'valid_to')
+                ) {
+                    continue;
+                }
+                $combinedDays[$date] = $day;
+            }
+        }
+        ksort($combinedDays);
+        foreach ($combinedDays as $day) {
+            $fundMinutes += PayrollTimeValue::int(
+                $day['planned_minutes'] ?? null,
+                'planned_minutes',
+            );
+        }
+        $latestCalendar = $calendarVersions[array_key_last($calendarVersions)];
+
+        return [$fundMinutes, $latestCalendar + [
+            'fund_minutes' => $fundMinutes,
+            'days' => array_values($combinedDays),
+            'versions' => array_map(
+                static fn (array $version): array => [
+                    'id' => $version['id'],
+                    'name' => $version['name'],
+                    'valid_from' => $version['valid_from'],
+                    'valid_to' => $version['valid_to'],
+                    'row_version' => $version['row_version'],
+                ],
+                $calendarVersions,
+            ),
+        ]];
+    }
+
+    /**
+     * Plánované minuty ze směn; řádky se doplní o čistou dobu a místní časy.
+     *
+     * @param list<array<string,mixed>> $employmentShifts
+     * @return array{list<array<string,mixed>>,int}
+     */
+    private function summarizeShifts(array $employmentShifts): array
+    {
+        $plannedMinutes = 0;
+        foreach ($employmentShifts as &$shift) {
+            $minutes = $this->netMinutes($shift);
+            $shift['net_minutes'] = $minutes;
+            $shift['starts_at'] = $this->displayInstant($shift, 'starts_at_utc');
+            $shift['ends_at'] = $this->displayInstant($shift, 'ends_at_utc');
+            $plannedMinutes += $minutes;
+        }
+        unset($shift);
+
+        return [$employmentShifts, $plannedMinutes];
+    }
+
+    /**
+     * Minuty po kategoriích a skutečně odpracovaná doba ze zápisů.
+     *
+     * Skutečnost je součet BĚŽNÉ PRÁCE A PŘESČASU; noční, víkend, svátek a
+     * ztížené prostředí jsou příznaky nad toutéž dobou, takže by se přičtením
+     * počítaly dvakrát.
+     *
+     * @param list<array<string,mixed>> $employmentEntries
+     * @return array{list<array<string,mixed>>,array<string,int>,int}
+     */
+    private function summarizeEntries(array $employmentEntries): array
+    {
+        $categories = array_fill_keys(self::CATEGORIES, 0);
+        foreach ($employmentEntries as &$entry) {
+            $minutes = $this->netMinutes($entry);
+            $entry['net_minutes'] = $minutes;
+            $entry['starts_at'] = $this->displayInstant($entry, 'starts_at_utc');
+            $entry['ends_at'] = $this->displayInstant($entry, 'ends_at_utc');
+            $category = PayrollTimeValue::string($entry['category'] ?? null, 'category');
+            if (array_key_exists($category, $categories)) {
+                $categories[$category] += $minutes;
+            }
+        }
+        unset($entry);
+
+        return [
+            $employmentEntries,
+            $categories,
+            $categories['regular'] + $categories['overtime'],
+        ];
+    }
+
+    /**
+     * Historie docházky JEDNOHO vztahu po měsících, sestupně a stránkovaně.
+     *
+     * Proč samostatná cesta a ne „přehled za dvanáct měsíců": přehled staví na
+     * každý řádek náhled JMHZ a stav limitů přesčasu, což je u roku zpětně
+     * práce navíc, kterou nikdo nečte. Historie je čtení — stejná čísla, jaká
+     * pro tentýž měsíc vrátí {@see overview()}, protože je počítají TYTÉŽ
+     * metody ({@see fundMinutesForMonth()}, {@see summarizeShifts()},
+     * {@see summarizeEntries()}, {@see looksIncomplete()}).
+     *
+     * @param ?string $from první měsíc `YYYY-MM`; null = od nástupu vztahu
+     * @param ?string $to poslední měsíc `YYYY-MM`; null = po ukončení nebo dnešek
+     * @return array<string,mixed>
+     */
+    public function history(
+        int $supplierId,
+        int $employmentId,
+        ?string $from,
+        ?string $to,
+        int $limit = self::HISTORY_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        if ($employmentId <= 0) {
+            throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
+        }
+        // Strop je tvrdý i tady: každý měsíc historie stojí několik dotazů
+        // (kalendář, jeho výjimky, směny, zápisy, stav měsíce), takže „vypiš
+        // celou historii" nesmí jít objednat ani jiným volajícím než akcí.
+        $limit = max(1, min(self::HISTORY_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+        $employment = $this->repository->employment($supplierId, $employmentId);
+        if ($employment === null) {
+            // Cizí vztah se od neexistujícího nesmí poznat: prázdný výpis by
+            // potvrdil, že id v jiné firmě existuje.
+            throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen.');
+        }
+
+        [$rangeFrom, $rangeTo] = $this->historyRange($supplierId, $employment, $from, $to);
+        $periods = [];
+        if ($rangeFrom <= $rangeTo) {
+            $cursor = $this->periodCursor($rangeTo);
+            $first = $this->periodCursor($rangeFrom);
+            while ($cursor >= $first) {
+                $periods[] = $cursor->format('Y-m');
+                $cursor = $cursor->modify('-1 month');
+            }
+        }
+
+        $items = [];
+        foreach (array_slice($periods, $offset, $limit) as $period) {
+            $items[] = $this->historyMonth($supplierId, $employmentId, $period);
+        }
+
+        return [
+            'employment' => $employment,
+            'items' => $items,
+            'total' => count($periods),
+            'limit' => $limit,
+            'offset' => $offset,
+            'range' => ['from' => $rangeFrom, 'to' => $rangeTo],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function historyMonth(int $supplierId, int $employmentId, string $period): array
+    {
+        [$periodStart, $periodEnd, $startsAtUtc, $endsAtUtc] = $this->periodBounds($period);
+        [$fundMinutes, $calendarDto] = $this->fundMinutesForMonth(
+            $supplierId,
+            $employmentId,
+            $period,
+            $periodStart,
+            $periodEnd,
+        );
+        [$employmentShifts, $plannedMinutes] = $this->summarizeShifts(
+            $this->startingInPeriod(
+                $this->repository->shifts($supplierId, $startsAtUtc, $endsAtUtc, $employmentId),
+                $period,
+            ),
+        );
+        [$employmentEntries, $categories, $actualMinutes] = $this->summarizeEntries(
+            $this->startingInPeriod(
+                $this->repository->entries($supplierId, $startsAtUtc, $endsAtUtc, $employmentId),
+                $period,
+            ),
+        );
+        $states = $this->repository->monthStates($supplierId, $periodStart, $employmentId);
+        $state = $states[0] ?? [
+            'id' => null,
+            'supplier_id' => $supplierId,
+            'employment_id' => $employmentId,
+            'period_start' => $periodStart,
+            'status' => 'open',
+            'revision_no' => 1,
+            'row_version' => 0,
+            'approved_at' => null,
+            'reopened_at' => null,
+            'reopen_reason' => null,
+        ];
+
+        return [
+            'period' => $period,
+            'month' => $state,
+            'summary' => [
+                'fund_minutes' => $fundMinutes,
+                'planned_minutes' => $plannedMinutes,
+                'actual_minutes' => $actualMinutes,
+                'difference_minutes' => $actualMinutes - $plannedMinutes,
+                'category_minutes' => $categories,
+                // „Má kalendář?" se tu pozná z téhož dotazu, který počítá fond
+                // (`calendars()`), zatímco přehled na to má hromadný dotaz přes
+                // celou stránku (`employmentIdsWithCalendar()`). Podmínka je
+                // v obou stejná, jen jednou pro jeden vztah a jednou pro sto.
+                'incomplete' => $this->looksIncomplete(
+                    $calendarDto !== null,
+                    $employmentShifts,
+                    $employmentEntries,
+                ),
+            ],
+            'shift_count' => count($employmentShifts),
+            'entry_count' => count($employmentEntries),
+        ];
+    }
+
+    /**
+     * Rozsah historie: od měsíce nástupu po měsíc ukončení, nejdál po dnešek.
+     *
+     * Rozšiřuje se o měsíce, ve kterých vztah něco v docházce má
+     * ({@see PayrollTimeRepository::dataPeriodEdges()}). Převzatá evidence
+     * z migrace umí ležet mimo interval vztahu a takový měsíc by jinak ve
+     * výpisu tiše chyběl, přestože v něm hodiny jsou.
+     *
+     * @param array<string,mixed> $employment
+     * @return array{string,string}
+     */
+    private function historyRange(
+        int $supplierId,
+        array $employment,
+        ?string $from,
+        ?string $to,
+    ): array {
+        $today = (new \DateTimeImmutable('now', new \DateTimeZone('Europe/Prague')))
+            ->format('Y-m');
+        $started = $employment['actual_start_date'] ?? $employment['start_date'] ?? null;
+        $ended = $employment['end_date'] ?? null;
+        $rangeFrom = is_string($started) ? substr($started, 0, 7) : $today;
+        $rangeTo = is_string($ended) ? min(substr($ended, 0, 7), $today) : $today;
+
+        $edges = $this->repository->dataPeriodEdges(
+            $supplierId,
+            PayrollTimeValue::int($employment['id'] ?? null, 'id'),
+        );
+        $withData = [];
+        foreach (['min', 'max'] as $bound) {
+            $value = $edges['months'][$bound];
+            if (is_string($value)) {
+                $withData[] = substr($value, 0, 7);
+            }
+        }
+        foreach ($edges['instants'] as $instant) {
+            $withData[] = substr($this->displayInstant($instant, 'starts_at_utc'), 0, 7);
+        }
+        if ($withData !== []) {
+            $rangeFrom = min($rangeFrom, min($withData));
+            $rangeTo = max($rangeTo, max($withData));
+        }
+
+        // Výslovně zadaný výřez rozsah jen ZUŽUJE: „od ledna" nesmí historii
+        // natáhnout před nástup ani za dnešek.
+        if ($from !== null) {
+            $rangeFrom = max($rangeFrom, $this->periodCursor($from)->format('Y-m'));
+        }
+        if ($to !== null) {
+            $rangeTo = min($rangeTo, $this->periodCursor($to)->format('Y-m'));
+        }
+
+        return [$rangeFrom, $rangeTo];
+    }
+
+    private function periodCursor(string $period): \DateTimeImmutable
+    {
+        $start = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            $period . '-01',
+            new \DateTimeZone('Europe/Prague'),
+        );
+        if ($start === false || $start->format('Y-m') !== $period) {
+            throw new \InvalidArgumentException('Měsíc musí být ve formátu YYYY-MM.');
+        }
+        return $start;
     }
 
     /**

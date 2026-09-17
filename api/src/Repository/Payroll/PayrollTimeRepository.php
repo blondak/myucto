@@ -36,14 +36,23 @@ final class PayrollTimeRepository
      * `planned`/`preregistered` se vypíše jen tehdy, když nástup spadá do období
      * nebo před něj — kdo ještě nenastoupil, v docházce za období nemá co dělat.
      *
+     * `$employmentId` zužuje výpis už v SQL. Dokud se zužovalo až v PHP nad
+     * načteným měsícem, tahal se kvůli jednomu člověku celý seznam firmy —
+     * u historie po měsících by se ta práce opakovala dvanáctkrát.
+     *
      * @param string $periodEnd první den následujícího měsíce (výlučná hranice)
      * @return list<array<string,mixed>>
      */
-    public function employments(int $supplierId, string $periodStart, string $periodEnd): array
-    {
+    public function employments(
+        int $supplierId,
+        string $periodStart,
+        string $periodEnd,
+        ?int $employmentId = null,
+    ): array {
         $periodLastDay = (new \DateTimeImmutable($periodEnd))
             ->modify('-1 day')
             ->format('Y-m-d');
+        $narrowing = $employmentId === null ? '' : ' AND employment.id = ?';
         $stmt = $this->db->pdo()->prepare(
             'WITH effective_employment AS (
                     SELECT employment.*,
@@ -84,7 +93,7 @@ final class PayrollTimeRepository
                                 employment.start_date
                             ) <= ?
                         )
-                    )
+                    )' . $narrowing . '
               ORDER BY employee.full_name, employment.code, employment.id'
         );
         $stmt->execute([
@@ -93,17 +102,32 @@ final class PayrollTimeRepository
             $periodEnd,
             $periodStart,
             $periodLastDay,
+            ...($employmentId === null ? [] : [$employmentId]),
         ]);
         return self::rows($stmt);
     }
 
-    /** @return array<string,mixed>|null */
+    /**
+     * Vztah bez ohledu na období — pro kontrolu příslušnosti k firmě.
+     *
+     * `actual_start_date` a jméno tu jsou kvůli historii po měsících: rozsah
+     * začíná měsícem SKUTEČNÉHO nástupu (sjednaný den se posouvá) a hlavička
+     * výpisu ukazuje člověka, ne id.
+     *
+     * @return array<string,mixed>|null
+     */
     public function employment(int $supplierId, int $employmentId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, employee_id, code, relation_type, status, start_date, end_date
-               FROM payroll_employments
-              WHERE supplier_id = ? AND id = ?'
+            'SELECT employment.id, employment.employee_id, employment.code,
+                    employment.relation_type, employment.status,
+                    employment.start_date, employment.actual_start_date,
+                    employment.end_date, employee.full_name
+               FROM payroll_employments employment
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = employment.supplier_id
+                AND employee.id = employment.employee_id
+              WHERE employment.supplier_id = ? AND employment.id = ?'
         );
         $stmt->execute([$supplierId, $employmentId]);
         return self::row($stmt);
@@ -223,6 +247,7 @@ final class PayrollTimeRepository
         int $supplierId,
         string $startsAtUtc,
         string $endsAtUtc,
+        ?int $employmentId = null,
     ): array {
         [$candidateStart, $candidateEnd] = self::candidateBounds(
             $startsAtUtc,
@@ -234,10 +259,16 @@ final class PayrollTimeRepository
               WHERE supplier_id = ?
                 AND status <> 'superseded'
                 AND starts_at_utc >= ?
-                AND starts_at_utc < ?
-              ORDER BY starts_at_utc, id"
+                AND starts_at_utc < ?"
+            . ($employmentId === null ? '' : ' AND employment_id = ?') . '
+              ORDER BY starts_at_utc, id'
         );
-        $stmt->execute([$supplierId, $candidateStart, $candidateEnd]);
+        $stmt->execute([
+            $supplierId,
+            $candidateStart,
+            $candidateEnd,
+            ...($employmentId === null ? [] : [$employmentId]),
+        ]);
         return self::rows($stmt);
     }
 
@@ -246,6 +277,7 @@ final class PayrollTimeRepository
         int $supplierId,
         string $startsAtUtc,
         string $endsAtUtc,
+        ?int $employmentId = null,
     ): array {
         [$candidateStart, $candidateEnd] = self::candidateBounds(
             $startsAtUtc,
@@ -257,23 +289,100 @@ final class PayrollTimeRepository
               WHERE supplier_id = ?
                 AND status <> 'superseded'
                 AND starts_at_utc >= ?
-                AND starts_at_utc < ?
-              ORDER BY starts_at_utc, id"
+                AND starts_at_utc < ?"
+            . ($employmentId === null ? '' : ' AND employment_id = ?') . '
+              ORDER BY starts_at_utc, id'
         );
-        $stmt->execute([$supplierId, $candidateStart, $candidateEnd]);
+        $stmt->execute([
+            $supplierId,
+            $candidateStart,
+            $candidateEnd,
+            ...($employmentId === null ? [] : [$employmentId]),
+        ]);
         return self::rows($stmt);
     }
 
     /** @return list<array<string,mixed>> */
-    public function monthStates(int $supplierId, string $periodStart): array
-    {
+    public function monthStates(
+        int $supplierId,
+        string $periodStart,
+        ?int $employmentId = null,
+    ): array {
         $stmt = $this->db->pdo()->prepare(
             'SELECT *
                FROM payroll_time_months
               WHERE supplier_id = ? AND period_start = ?'
+            . ($employmentId === null ? '' : ' AND employment_id = ?')
         );
-        $stmt->execute([$supplierId, $periodStart]);
+        $stmt->execute([
+            $supplierId,
+            $periodStart,
+            ...($employmentId === null ? [] : [$employmentId]),
+        ]);
         return self::rows($stmt);
+    }
+
+    /**
+     * Krajní měsíce, ve kterých vztah vůbec něco v docházce má.
+     *
+     * Historie po měsících jede primárně od nástupu po ukončení, jenže
+     * převzatá evidence z migrace umí ležet i mimo ten interval (doklad za
+     * měsíc před sjednaným nástupem, doběh po ukončení). Kdyby se rozsah
+     * počítal jen z dat vztahu, takový měsíc by ve výpisu tiše chyběl.
+     *
+     * Měsíc směny a zápisu se určuje z MÍSTNÍHO času (`timezone_name`),
+     * stejně jako všude jinde v docházce — proto se vrací krajní řádky
+     * a převod dělá volající, ne SQL.
+     *
+     * @return array{
+     *     months:array{min:?string,max:?string},
+     *     instants:list<array{starts_at_utc:string,timezone_name:string}>
+     * }
+     */
+    public function dataPeriodEdges(int $supplierId, int $employmentId): array
+    {
+        $months = $this->db->pdo()->prepare(
+            'SELECT MIN(period_start) AS min_period, MAX(period_start) AS max_period
+               FROM payroll_time_months
+              WHERE supplier_id = ? AND employment_id = ?'
+        );
+        $months->execute([$supplierId, $employmentId]);
+        $bounds = $months->fetch(PDO::FETCH_ASSOC);
+
+        $instants = [];
+        foreach (['payroll_shifts', 'payroll_time_entries'] as $table) {
+            foreach (['ASC', 'DESC'] as $direction) {
+                $edge = $this->db->pdo()->prepare(
+                    "SELECT starts_at_utc, timezone_name
+                       FROM {$table}
+                      WHERE supplier_id = ?
+                        AND employment_id = ?
+                        AND status <> 'superseded'
+                      ORDER BY starts_at_utc {$direction}
+                      LIMIT 1"
+                );
+                $edge->execute([$supplierId, $employmentId]);
+                $row = $edge->fetch(PDO::FETCH_ASSOC);
+                if (is_array($row)) {
+                    $instants[] = [
+                        'starts_at_utc' => (string) $row['starts_at_utc'],
+                        'timezone_name' => (string) $row['timezone_name'],
+                    ];
+                }
+            }
+        }
+
+        return [
+            'months' => [
+                'min' => is_array($bounds) && is_string($bounds['min_period'] ?? null)
+                    ? $bounds['min_period']
+                    : null,
+                'max' => is_array($bounds) && is_string($bounds['max_period'] ?? null)
+                    ? $bounds['max_period']
+                    : null,
+            ],
+            'instants' => $instants,
+        ];
     }
 
     /** @return array<string,mixed>|null */

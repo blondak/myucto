@@ -28,6 +28,14 @@ defineProps<{
    * vzít, posílá id vztahu.
    */
   named?: boolean
+  /**
+   * Vztah je známý, jen v tomhle výřezu nic nemá.
+   *
+   * Je to něco JINÉHO než slepé zúžení: „odkaz zestaral, vztah k firmě
+   * nepatří" by o platném odkazu lhalo a poslalo uživatele hledat chybu tam,
+   * kde žádná není. Prázdno se proto pojmenuje, ale bez obvinění odkazu.
+   */
+  empty?: boolean
 }>()
 
 defineEmits<{ clear: [] }>()
@@ -45,7 +53,9 @@ const { t } = useI18n()
         ? t(named
           ? 'payroll.agendas.focus.missing_named'
           : 'payroll.agendas.focus.missing', { name })
-        : t('payroll.agendas.focus.title', { name }) }}
+        : t(empty
+          ? 'payroll.agendas.focus.empty_named'
+          : 'payroll.agendas.focus.title', { name }) }}
     </span>
     <button
       type="button"

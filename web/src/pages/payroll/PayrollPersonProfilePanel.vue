@@ -18,6 +18,7 @@ import {
   type PayrollPersonIdentifierType,
   type PayrollPersonProfile,
   type PayrollPersonProfilePayload,
+  type PayrollPersonSensitiveReveal,
   type PayrollPersonSex,
   type PayrollRelationType,
   type PayrollSecureDeliveryChannel,
@@ -39,6 +40,8 @@ const props = defineProps<{
   personId: number
   canWrite: boolean
   relationTypes?: PayrollRelationType[]
+  // Oprávnění chodí propem stejně jako `canWrite` — komponenta o store nic neví.
+  canReadSensitive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -183,6 +186,13 @@ const payoutWarnings = ref<string[]>([])
 const profile = ref<PayrollPersonProfile | null>(null)
 const tab = ref<Tab>('identity')
 const verifyingAccountId = ref<number | null>(null)
+/**
+ * Odkryté citlivé hodnoty. Server je vrací v jedné odpovědi a každé odkrytí
+ * zapisuje do auditní stopy, takže se čtou jednou pro celou kartu — dotaz na
+ * každý řádek zvlášť by stopu zaplnil dotazy na totéž.
+ */
+const revealing = ref(false)
+const revealed = ref<PayrollPersonSensitiveReveal | null>(null)
 const verificationForms = reactive<Record<number, VerificationForm>>({})
 const form = reactive<ProfileForm>({
   profile_status: 'setup',
@@ -818,6 +828,54 @@ function clearPlaintextInputs() {
   for (const row of form.accounts) row.bank_account = ''
 }
 
+/**
+ * Odkrytí a zpětné zakrytí uložených hodnot.
+ *
+ * Maskovaná hodnota se dřív odkrýt nedala vůbec, takže kdo potřeboval znát celé
+ * číslo účtu, musel ho přepsat — a tím ho i změnit. Odpověď pokrývá celou kartu
+ * najednou, proto tlačítka u jednotlivých řádků přepínají jeden společný stav.
+ */
+async function toggleReveal() {
+  if (revealed.value !== null) {
+    revealed.value = null
+    return
+  }
+  if (revealing.value) return
+  revealing.value = true
+  try {
+    revealed.value = await payrollApi.revealPersonSensitive(props.personId)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.profile.reveal_failed')))
+  } finally {
+    revealing.value = false
+  }
+}
+
+/** Zobrazovaná hodnota: odkrytá, jinak maskovaná. Neuložený řádek odkrýt nejde. */
+function accountValue(row: AccountFormRow): string {
+  const plain = row.id === undefined
+    ? undefined
+    : revealed.value?.accounts.find(item => item.id === row.id)
+
+  return plain?.bank_account ?? row.bank_account_masked
+}
+
+function identifierValue(row: IdentifierFormRow): string {
+  const plain = row.id === undefined
+    ? undefined
+    : revealed.value?.identifiers.find(item => item.id === row.id)
+
+  return plain?.value ?? row.value_masked
+}
+
+function contactValue(row: ContactFormRow): string {
+  const plain = row.id === undefined
+    ? undefined
+    : revealed.value?.contacts.find(item => item.id === row.id)
+
+  return plain?.value ?? row.value_masked
+}
+
 async function load() {
   loading.value = true
   try {
@@ -951,6 +1009,9 @@ async function save() {
   try {
     const saved = await payrollApi.savePersonProfile(props.personId, payload())
     hydrate(saved)
+    // Odkrytá hodnota po zápisu nemusí platit, takže se zahodí a případně
+    // načte znovu.
+    revealed.value = null
     emit('saved', saved)
     toast.success(t('payroll.people.profile.saved'))
     // Výplatní pravidla se odesílají AŽ TEĎ, jedním společným „Uložit" v hlavičce
@@ -1377,7 +1438,21 @@ onMounted(load)
             <article v-for="(row, index) in form.contacts" :key="row.id ?? `new-contact-${index}`" :class="cardClass">
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label :class="labelClass">{{ t('payroll.people.profile.contact_type_label') }}<SearchableSelect v-model="row.contact_type" class="mt-1" :options="contactTypeOptions" :clearable="false" :disabled="!canWrite || Boolean(row.id)" accent="payroll" /></label>
-                <div v-if="row.value_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.value_masked }}</p></div>
+                <div v-if="row.value_masked">
+                  <span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span>
+                  <p class="mt-2 break-all font-mono text-sm text-neutral-800" data-test="profile-contact-value">{{ contactValue(row) }}</p>
+                  <button
+                    v-if="canReadSensitive === true && row.id"
+                    type="button"
+                    :class="[btnOutlineSm('neutral'), 'mt-2']"
+                    :disabled="revealing"
+                    data-test="profile-contact-reveal"
+                    @click="toggleReveal"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>
+                    {{ revealed ? t('payroll.people.profile.hide') : t('payroll.people.profile.reveal') }}
+                  </button>
+                </div>
                 <label v-if="canWrite" :class="[labelClass, 'sm:col-span-2']">{{ t('payroll.people.profile.new_value') }} <RequiredMark v-if="!row.id" /><input v-model="row.value" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : ''" :data-a1-field="index === 0 ? 'contact.value' : undefined"></label>
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_primary" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.primary_contact') }}</label>
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_active" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.active') }}</label>
@@ -1396,7 +1471,21 @@ onMounted(load)
             <article v-for="(row, index) in form.identifiers" :key="row.id ?? `new-identifier-${index}`" :class="cardClass">
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label :class="labelClass">{{ t('payroll.people.profile.identifier_type_label') }}<SearchableSelect v-model="row.identifier_type" class="mt-1" :options="identifierTypeOptions" :clearable="false" :disabled="!canWrite || Boolean(row.id)" accent="payroll" /></label>
-                <div v-if="row.value_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.value_masked }}</p></div>
+                <div v-if="row.value_masked">
+                  <span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span>
+                  <p class="mt-2 break-all font-mono text-sm text-neutral-800" data-test="profile-identifier-value">{{ identifierValue(row) }}</p>
+                  <button
+                    v-if="canReadSensitive === true && row.id"
+                    type="button"
+                    :class="[btnOutlineSm('neutral'), 'mt-2']"
+                    :disabled="revealing"
+                    data-test="profile-identifier-reveal"
+                    @click="toggleReveal"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>
+                    {{ revealed ? t('payroll.people.profile.hide') : t('payroll.people.profile.reveal') }}
+                  </button>
+                </div>
                 <label v-if="canWrite" :class="[labelClass, 'sm:col-span-2']">{{ t('payroll.people.profile.new_value') }} <RequiredMark v-if="!row.id" /><input v-model="row.value" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : ''" :data-a1-field="index === 0 ? 'identifier.value' : undefined"></label>
               </div>
               <div v-if="canWrite" class="mt-3 flex items-center justify-end gap-2"><span v-if="row.deleted" class="text-xs text-danger-600">{{ t('common.deleted') }}</span><button v-if="row.deleted" type="button" :class="btnOutlineSm('neutral')" @click="restoreRow(form.identifiers, index)">{{ t('common.undo') }}</button><button v-else type="button" :class="btnOutlineSm('danger')" @click="removeRow(form.identifiers, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
@@ -1447,7 +1536,21 @@ onMounted(load)
                 <label :class="labelClass">{{ t('payroll.people.profile.account_allocation') }} <RequiredMark /><input v-model.number="row.allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><DateInput v-model="row.effective_from" required :disabled="!canWrite" :class="inputClass" /></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<DateInput v-model="row.effective_to" :disabled="!canWrite" :class="inputClass" /></label>
-                <div v-if="row.bank_account_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.bank_account_masked }}</p></div>
+                <div v-if="row.bank_account_masked">
+                  <span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span>
+                  <p class="mt-2 break-all font-mono text-sm text-neutral-800" data-test="profile-account-value">{{ accountValue(row) }}</p>
+                  <button
+                    v-if="canReadSensitive === true && row.id"
+                    type="button"
+                    :class="[btnOutlineSm('neutral'), 'mt-2']"
+                    :disabled="revealing"
+                    data-test="profile-account-reveal"
+                    @click="toggleReveal"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>
+                    {{ revealed ? t('payroll.people.profile.hide') : t('payroll.people.profile.reveal') }}
+                  </button>
+                </div>
                 <label v-if="canWrite" :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.new_bank_account') }} <RequiredMark v-if="!row.id" /><input v-model="row.bank_account" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : t('payroll.people.profile.bank_account_placeholder')" data-test="bank-account-plaintext" :data-a1-field="index === 0 ? 'payout.bank_account' : undefined"></label>
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_active" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.active') }}</label>
               </div>

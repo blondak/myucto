@@ -15,14 +15,19 @@ import type {
  * dávku musí otevřít přesně tentýž výřez, a obnovení stránky ho nesmí zahodit.
  */
 
-export type PayrollInputGroupBy = 'employee' | 'component'
+/**
+ * `period` (řádek na měsíc) dává smysl jen nad rozsahem měsíců — nad jedním
+ * obdobím by vyrobil jedinou skupinu. Volající ho proto nabízí až při zúžení
+ * na jeden vztah s rozsahem; tady je jen povolenou hodnotou, ať přežije adresu.
+ */
+export type PayrollInputGroupBy = 'employee' | 'component' | 'period'
 export type PayrollInputFilterStatus = Exclude<PayrollInputStatus, 'cancelled'>
 
 export const PAYROLL_INPUT_FILTER_STATUSES: readonly PayrollInputFilterStatus[] = ['draft', 'approved', 'locked']
 export const PAYROLL_INPUT_SOURCE_KINDS: readonly PayrollInputSourceKind[] = [
   'manual', 'recurring', 'time', 'absence', 'import', 'correction', 'travel',
 ]
-const GROUP_BY: readonly PayrollInputGroupBy[] = ['employee', 'component']
+const GROUP_BY: readonly PayrollInputGroupBy[] = ['employee', 'component', 'period']
 
 /**
  * Zdroje, u kterých jde koncept upravit přímo v seznamu.

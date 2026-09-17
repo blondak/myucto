@@ -1298,6 +1298,12 @@ final class Routes
                 '/jmhz/identities/{employmentId:[0-9]+}',
                 [PayrollJmhzIdentityAction::class, 'put'],
             );
+            // Odkrytí plné hodnoty OIČ / ID PPV. POST kvůli povinnému důvodu
+            // v těle a auditní stopě, ne kvůli zápisu do evidence.
+            $g->post(
+                '/jmhz/identities/{employmentId:[0-9]+}/reveal',
+                [PayrollJmhzIdentityAction::class, 'reveal'],
+            );
             // Našeptávač klasifikace zaměstnání ČSÚ — hledání běží na serveru,
             // do prohlížeče jde jen shoda (viz PayrollCzIscoAction).
             $g->get('/cz-isco', [PayrollCzIscoAction::class, 'search']);
@@ -1884,6 +1890,7 @@ final class Routes
                 [PayrollHealthInsuranceIsdsAction::class, 'enqueue'],
             );
             $g->get('/time/month', [PayrollTimeAction::class, 'month']);
+            $g->get('/time/history', [PayrollTimeAction::class, 'history']);
             $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);
             $g->post('/time/shifts', [PayrollTimeAction::class, 'shift']);
             $g->post('/time/entries', [PayrollTimeAction::class, 'entry']);

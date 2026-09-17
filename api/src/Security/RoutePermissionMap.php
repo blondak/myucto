@@ -205,6 +205,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/jmhz/municipalities$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/identities/[0-9]+$#', 'payroll', AccessLevel::READ],
         ['PUT', '#^/api/payroll/jmhz/identities/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Odkrytí plné hodnoty identifikátorů — táž třída operace jako
+        // `sensitive-reveal` u osoby, tedy jemné právo, ne `payroll.employment.write`.
+        ['POST', '#^/api/payroll/jmhz/identities/[0-9]+/reveal$#', 'payroll.person.read_sensitive', AccessLevel::READ],
         // Klasifikace zaměstnání ČSÚ je veřejná referenční data, ne data nájemce —
         // stejná úroveň jako sousední našeptávač obcí.
         ['GET', '#^/api/payroll/cz-isco$#', 'payroll', AccessLevel::READ],
@@ -216,6 +219,7 @@ final class RoutePermissionMap
         // Totéž právo jako založení vztahu (POST /people/{id}/employments výše).
         ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time/month$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/time/history$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/time/calendars/[0-9]+$#', 'payroll.time.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/time/(shifts|entries(?:/batch)?|imports(?:/preview)?)$#', 'payroll.time.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/approve$#', 'payroll.approve', AccessLevel::WRITE],

@@ -24,9 +24,11 @@ use Psr\Log\LoggerInterface;
  *   GET /api/payroll/inputs/export.pdf?period=YYYY-MM&…filtr
  *
  * Filtr má tytéž parametry jako výpis (`q`, `employee_id`, `employment_id`,
- * `component_id`, `component_code`, `source_kind`, `status`, `import_id`);
- * `group_by` export ignoruje, mění jen pohled na stránce. Právo je stejné jako
- * na čtení výpisu, stahuje se jen v přihlášené relaci.
+ * `component_id`, `component_code`, `source_kind`, `status`, `import_id`)
+ * včetně rozsahu měsíců `period_to` — historie jednoho vztahu se stahuje
+ * stejně jako se čte. Hlavička i název souboru pak nesou celý rozsah, ne jen
+ * jeho začátek. `group_by` export ignoruje, mění jen pohled na stránce. Právo
+ * je stejné jako na čtení výpisu, stahuje se jen v přihlášené relaci.
  */
 final class PayrollInputsExportAction
 {

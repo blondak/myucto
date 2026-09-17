@@ -48,6 +48,7 @@ const props = defineProps<{
   employment: PayrollEmployment
   canWrite: boolean
   canWritePerson?: boolean
+  canReadSensitive?: boolean
   canReadDocuments?: boolean
   canWriteDocuments?: boolean
   // Období, od kterého firma vede mzdy v MyÚčtu (`payroll_module_state.start_period`).
@@ -1733,6 +1734,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       :end-date="employment.end_date"
       :can-write-employment="canWrite"
       :can-write-person="canWritePerson === true"
+      :can-read-sensitive="canReadSensitive === true"
     />
 
     <EmploymentDimensionsPanel

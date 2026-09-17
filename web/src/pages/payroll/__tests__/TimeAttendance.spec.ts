@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { formatPeriod } from '@/composables/useFormat'
 
 const m = vi.hoisted(() => ({
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
   timeMonth: vi.fn(),
+  timeHistory: vi.fn(),
   saveTimeEntry: vi.fn(),
   saveTimeEntryBatch: vi.fn(),
   previewTimeImport: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     timeMonth: m.timeMonth,
+    timeHistory: m.timeHistory,
     saveTimeEntry: m.saveTimeEntry,
     saveTimeEntryBatch: m.saveTimeEntryBatch,
     previewTimeImport: m.previewTimeImport,
@@ -119,11 +122,37 @@ function row(employmentId: number, fullName: string) {
   }
 }
 
+/** Jeden měsíc historie — tatáž čísla, jaká pro ten měsíc vrací přehled. */
+function historyMonth(period: string) {
+  return {
+    period,
+    month: { status: 'open', row_version: 1 },
+    summary: {
+      fund_minutes: 9_600,
+      planned_minutes: 9_600,
+      actual_minutes: 9_120,
+      difference_minutes: -480,
+      category_minutes: {},
+      incomplete: false,
+    },
+    shift_count: 20,
+    entry_count: 19,
+  }
+}
+
 describe('TimeAttendance', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
     m.timeMonth.mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 })
+    m.timeHistory.mockResolvedValue({
+      employment: { id: 0, full_name: '', code: '', start_date: null, actual_start_date: null },
+      items: [],
+      total: 0,
+      limit: 12,
+      offset: 0,
+      range: { from: '2026-01', to: '2026-01' },
+    })
     m.previewTimeImport.mockResolvedValue({
       supported: true,
       total_rows: 1,
@@ -1041,6 +1070,106 @@ describe('TimeAttendance', () => {
     const notice = wrapper.find('[data-test="payroll-focus-notice"]')
     expect(notice.exists()).toBe(true)
     expect(notice.text()).toContain('payroll.agendas.focus.missing')
+    m.routeQuery = {}
+  })
+
+  /**
+   * Rozsah (Měsíc / Rok / Vše) dává smysl jen tehdy, když je jasné, čí historii
+   * ukázat — u celé firmy by to byl součin lidí a měsíců.
+   */
+  it('nabídne přepínač rozsahu jen u zúžení na jeden vztah', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [row(12, 'Syntetická osoba A')],
+      total: 1,
+      limit: 25,
+      offset: 0,
+      employment_id: null,
+    })
+    const wide = mount(TimeAttendance)
+    await flushPromises()
+    expect(wide.find('[data-test="payroll-scope-picker"]').exists()).toBe(false)
+    wide.unmount()
+
+    m.routeQuery = { employment: '77' }
+    m.timeMonth.mockResolvedValue({
+      items: [row(77, 'Syntetická osoba Z')],
+      total: 1,
+      limit: 25,
+      offset: 0,
+      employment_id: 77,
+    })
+    const narrowed = mount(TimeAttendance)
+    await flushPromises()
+    expect(narrowed.find('[data-test="payroll-scope-picker"]').exists()).toBe(true)
+    narrowed.unmount()
+    m.routeQuery = {}
+  })
+
+  /**
+   * „Rok" nahradí měsíční zadávání výpisem historie a „Otevřít měsíc" vrátí
+   * uživatele do zadávání na TEN měsíc, ne na ten, ze kterého odešel.
+   */
+  it('v rozsahu Rok ukáže historii místo mřížky a vrátí se na vybraný měsíc', async () => {
+    m.routeQuery = { employment: '77' }
+    m.timeMonth.mockResolvedValue({
+      items: [{ ...row(77, 'Syntetická osoba Z'), entries: [] }],
+      total: 1,
+      limit: 25,
+      offset: 0,
+      employment_id: 77,
+    })
+    m.timeHistory.mockResolvedValue({
+      employment: {
+        id: 77,
+        employee_id: 7,
+        code: 'SYN-77',
+        relation_type: 'employment',
+        status: 'active',
+        start_date: '2026-01-01',
+        actual_start_date: '2026-01-01',
+        end_date: null,
+        full_name: 'Syntetická osoba Z',
+      },
+      items: [historyMonth('2026-08'), historyMonth('2026-07')],
+      total: 2,
+      limit: 12,
+      offset: 0,
+      range: { from: '2026-01', to: '2026-08' },
+    })
+    const wrapper = mount(TimeAttendance, {
+      attachTo: document.body,
+      global: { stubs: { teleport: true, RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-test="payroll-time-grid"]').exists()).toBe(true)
+    expect(m.timeHistory).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="payroll-scope-year"]').trigger('click')
+    await flushPromises()
+
+    expect(m.timeHistory).toHaveBeenCalledWith(77, expect.objectContaining({
+      from: expect.stringMatching(/^\d{4}-01$/),
+      to: expect.stringMatching(/^\d{4}-12$/),
+      limit: 12,
+      offset: 0,
+    }))
+    expect(wrapper.find('[data-test="payroll-time-history"]').exists()).toBe(true)
+    // Mřížka i import pracují s jedním měsícem, takže v historii nemají co dělat.
+    expect(wrapper.find('[data-test="payroll-time-grid"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some(button => button.text() === 'payroll.time.import.button'))
+      .toBe(false)
+    // Období se v historii píše lidsky, stejně jako na ostatních mzdových
+    // stránkách — `data-test` drží strojový tvar, text ten čitelný.
+    expect(wrapper.find('[data-test="history-row-2026-07"]').text()).toContain(formatPeriod('2026-07'))
+
+    await wrapper.get('[data-test="history-open-2026-07"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payroll-time-history"]').exists()).toBe(false)
+    expect((wrapper.find('input[type="month"]').element as HTMLInputElement).value)
+      .toBe('2026-07')
+    expect(m.timeMonth).toHaveBeenLastCalledWith('2026-07', false, { limit: 25, offset: 0 }, 77)
+    wrapper.unmount()
     m.routeQuery = {}
   })
 })

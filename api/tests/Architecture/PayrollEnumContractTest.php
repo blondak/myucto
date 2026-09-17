@@ -268,6 +268,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollComponentInclusion'    => 'enum:MyInvoice\Service\Payroll\Component\PayrollComponentInclusion',
         'payroll.ts::PayrollInputStatus'           => 'db:payroll_inputs.status',
         'payroll.ts::PayrollInputSourceKind'       => 'db:payroll_inputs.source_kind',
+        // Seskupení výpisu vstupů — server jiné hodnoty odmítne (422), takže
+        // klient nesmí nabídnout ani o jednu navíc.
+        'payroll.ts::PayrollInputGroupBy'
+            => 'const:MyInvoice\Repository\Payroll\PayrollInputFilter::GROUP_BY',
         'payroll.ts::PayrollRecurringCalculationKind' => 'db:payroll_recurring_components.calculation_kind',
         'payroll.ts::PayrollRecurringAllocationRule'  => 'db:payroll_recurring_components.allocation_rule',
         'payroll.ts::PayrollTimeCategory'          => 'db:payroll_time_entries.category',

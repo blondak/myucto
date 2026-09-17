@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
+  type PayrollJmhzIdentityReveal,
   type PayrollJmhzIdentityStatus,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
@@ -18,6 +19,8 @@ const props = defineProps<{
   endDate: string | null
   canWriteEmployment: boolean
   canWritePerson: boolean
+  // Oprávnění chodí propem stejně jako `canWrite*` — panel o store nic neví.
+  canReadSensitive?: boolean
 }>()
 
 const { t } = useI18n()
@@ -44,6 +47,18 @@ const status = ref<PayrollJmhzIdentityStatus | null>(null)
  */
 const correctingPerson = ref(false)
 const correctingEmployment = ref(false)
+/*
+ * Maska odpoví jen na „je to vyplněné". Porovnat číslo s protokolem ČSSZ šlo
+ * dřív jedině přes „Opravit", tedy za cenu přepsání správné hodnoty.
+ *
+ * Server vydává obě čísla najednou (jeden důvod, jeden zápis do auditu), ale
+ * ukazuje se zvlášť to, co si účetní vyžádala — odkrýt druhé číslo jen proto,
+ * že přišlo v téže odpovědi, není nic, o co požádala.
+ */
+const revealed = ref<PayrollJmhzIdentityReveal | null>(null)
+const revealing = ref(false)
+const showPerson = ref(false)
+const showEmployment = ref(false)
 const loaded = ref(false)
 const loading = ref(false)
 const saving = ref(false)
@@ -85,6 +100,59 @@ function startEmploymentCorrection(): void {
   success.value = ''
 }
 
+/*
+ * Odkrytá hodnota platí k prostředí a dni, ke kterému se načetl stav. Jakmile
+ * se kterýkoli z nich pohne, ukazovalo by se číslo z jiného období.
+ */
+function forgetReveal(): void {
+  revealed.value = null
+  showPerson.value = false
+  showEmployment.value = false
+}
+
+const personValue = computed(() => {
+  const plain = revealed.value?.person_external_identifier
+  const masked = status.value?.person_external_identifier
+  if (!masked) return ''
+  return showPerson.value && plain && plain.id === masked.id
+    ? plain.value
+    : masked.value_masked
+})
+const employmentValue = computed(() => {
+  const plain = revealed.value?.employment_external_identifier
+  const masked = status.value?.employment_external_identifier
+  if (!masked) return ''
+  return showEmployment.value && plain && plain.id === masked.id
+    ? plain.value
+    : masked.value_masked
+})
+
+async function toggleReveal(target: 'person' | 'employment'): Promise<void> {
+  const shown = target === 'person' ? showPerson : showEmployment
+  if (shown.value) {
+    shown.value = false
+    if (!showPerson.value && !showEmployment.value) revealed.value = null
+    return
+  }
+  if (revealing.value) return
+  revealing.value = true
+  error.value = ''
+  try {
+    if (revealed.value === null) {
+      revealed.value = await payrollApi.revealJmhzIdentity(
+        props.employmentId,
+        environment.value,
+        onDate.value,
+      )
+    }
+    shown.value = true
+  } catch (cause) {
+    error.value = apiErrorMessage(cause, t('payroll.people.jmhz_identity.reveal_failed'))
+  } finally {
+    revealing.value = false
+  }
+}
+
 function cancelCorrection(): void {
   correctingPerson.value = false
   correctingEmployment.value = false
@@ -117,6 +185,7 @@ const saveDisabledReason = computed(() => {
 async function load(): Promise<void> {
   loaded.value = true
   status.value = null
+  forgetReveal()
   error.value = ''
   success.value = ''
   if (props.startDate === null) {
@@ -184,11 +253,13 @@ function openPanel(event: Event): void {
 
 watch(environment, () => {
   cancelCorrection()
+  forgetReveal()
   validFrom.value = props.startDate ?? initialDate.value
   if (loaded.value) void load()
 })
 watch(onDate, () => {
   evidenceConfirmed.value = false
+  forgetReveal()
   if (skipNextDateReload) {
     skipNextDateReload = false
     return
@@ -308,24 +379,40 @@ watch(() => [props.startDate, props.endDate], () => {
               {{ t('payroll.people.jmhz_identity.person_identifier') }}
             </p>
             <p v-if="status.person_external_identifier" class="mt-1 font-mono text-sm text-neutral-900">
-              {{ status.person_external_identifier.value_masked }}
+              {{ personValue }}
             </p>
             <p v-else class="mt-1 text-sm font-medium text-warning-700">
               {{ t('payroll.people.jmhz_identity.missing') }}
             </p>
-            <button
-              v-if="status.person_external_identifier && canWrite && !correctingPerson"
-              type="button"
-              :class="btnOutlineSm('neutral')"
-              class="mt-2"
-              data-test="jmhz-identity-correct-person"
-              @click="startPersonCorrection"
-            >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path :d="ICONS.edit" />
-              </svg>
-              {{ t('payroll.people.jmhz_identity.correct') }}
-            </button>
+            <div v-if="status.person_external_identifier" class="mt-2 flex flex-wrap gap-2">
+              <button
+                v-if="canReadSensitive === true"
+                type="button"
+                :class="btnOutlineSm('neutral')"
+                :disabled="revealing"
+                data-test="jmhz-identity-reveal-person"
+                @click="toggleReveal('person')"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.eye" />
+                </svg>
+                {{ showPerson
+                  ? t('payroll.people.jmhz_identity.hide')
+                  : t('payroll.people.jmhz_identity.reveal') }}
+              </button>
+              <button
+                v-if="canWrite && !correctingPerson"
+                type="button"
+                :class="btnOutlineSm('neutral')"
+                data-test="jmhz-identity-correct-person"
+                @click="startPersonCorrection"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.edit" />
+                </svg>
+                {{ t('payroll.people.jmhz_identity.correct') }}
+              </button>
+            </div>
           </div>
           <div
             class="scroll-mt-24 rounded-lg border border-neutral-200 bg-neutral-50 p-3"
@@ -335,24 +422,40 @@ watch(() => [props.startDate, props.endDate], () => {
               {{ t('payroll.people.jmhz_identity.employment_identifier') }}
             </p>
             <p v-if="status.employment_external_identifier" class="mt-1 font-mono text-sm text-neutral-900">
-              {{ status.employment_external_identifier.value_masked }}
+              {{ employmentValue }}
             </p>
             <p v-else class="mt-1 text-sm font-medium text-warning-700">
               {{ t('payroll.people.jmhz_identity.missing') }}
             </p>
-            <button
-              v-if="status.employment_external_identifier && canWrite && !correctingEmployment"
-              type="button"
-              :class="btnOutlineSm('neutral')"
-              class="mt-2"
-              data-test="jmhz-identity-correct-employment"
-              @click="startEmploymentCorrection"
-            >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path :d="ICONS.edit" />
-              </svg>
-              {{ t('payroll.people.jmhz_identity.correct') }}
-            </button>
+            <div v-if="status.employment_external_identifier" class="mt-2 flex flex-wrap gap-2">
+              <button
+                v-if="canReadSensitive === true"
+                type="button"
+                :class="btnOutlineSm('neutral')"
+                :disabled="revealing"
+                data-test="jmhz-identity-reveal-employment"
+                @click="toggleReveal('employment')"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.eye" />
+                </svg>
+                {{ showEmployment
+                  ? t('payroll.people.jmhz_identity.hide')
+                  : t('payroll.people.jmhz_identity.reveal') }}
+              </button>
+              <button
+                v-if="canWrite && !correctingEmployment"
+                type="button"
+                :class="btnOutlineSm('neutral')"
+                data-test="jmhz-identity-correct-employment"
+                @click="startEmploymentCorrection"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.edit" />
+                </svg>
+                {{ t('payroll.people.jmhz_identity.correct') }}
+              </button>
+            </div>
           </div>
         </div>
 

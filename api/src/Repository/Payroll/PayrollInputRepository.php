@@ -91,6 +91,14 @@ final class PayrollInputRepository
 
         $total = $this->summary($supplierId, $filter)['total'];
 
+        // Nad rozsahem měsíců se historie čte odzadu — nejnovější období nahoře,
+        // jako u seskupení `period`. Bez toho se osm měsíců téže složky
+        // promíchalo podle `input.id` a řádek nešlo zařadit do měsíce.
+        // U jediného měsíce je `period_start` konstanta, takže se řazení nemění.
+        $order = $filter->periodEnd === null
+            ? 'employee.full_name, employment.code, component.code, input.id'
+            : 'input.period_start DESC, employee.full_name, employment.code, component.code, input.id';
+
         $stmt = $this->db->pdo()->prepare(
             'SELECT input.*, employee.full_name AS employee_name,
                     employment.code AS employment_code,
@@ -101,7 +109,7 @@ final class PayrollInputRepository
                     component.value_kind
              ' . self::FILTER_FROM . '
               WHERE ' . $where['sql']
-            . ' ORDER BY employee.full_name, employment.code, component.code, input.id
+            . ' ORDER BY ' . $order . '
               LIMIT ? OFFSET ?'
         );
         $position = self::bindAll($stmt, $where['params']);
@@ -160,12 +168,46 @@ final class PayrollInputRepository
     }
 
     /**
-     * Souhrnné řádky podle zaměstnance nebo složky — stránkují se samy,
+     * SKUTEČNÉ rozpětí období řádků filtru; `null`, když filtr nevrací nic.
+     *
+     * Meze filtru na popisek období nestačí. Rozsah „vše" se posílá jako
+     * 1990-01…2099-12, protože `period` je na serveru povinné — je to technický
+     * sentinel, který v hlavičce sestavy ani v názvu souboru nemá co dělat.
+     * Rozpětí dat je navíc věcně přesnější: u pololetní historie řekne
+     * „01/2026 – 06/2026", ne meze, ve kterých se náhodou hledalo.
+     *
+     * @return array{from:string,to:string}|null
+     */
+    public function periodSpan(int $supplierId, PayrollInputFilter $filter): ?array
+    {
+        $where = $filter->where($supplierId);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MIN(input.period_start) AS period_from,
+                    MAX(input.period_start) AS period_to
+             ' . self::FILTER_FROM . '
+              WHERE ' . $where['sql']
+        );
+        self::bindAll($stmt, $where['params']);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row) || $row['period_from'] === null || $row['period_to'] === null) {
+            return null;
+        }
+
+        return [
+            'from' => (string) $row['period_from'],
+            'to' => (string) $row['period_to'],
+        ];
+    }
+
+    /**
+     * Souhrnné řádky podle zaměstnance, složky nebo období — stránkují se samy,
      * `total` je počet skupin.
      *
      * U pěti set lidí je to jediný způsob, jak projít měsíc bez listování dvaceti
      * stranami po pětadvaceti řádcích: jeden řádek na člověka, rozbalí se jen ten,
-     * u kterého je něco k řešení.
+     * u kterého je něco k řešení. Nad rozsahem měsíců dělá `period` totéž pro
+     * historii jednoho vztahu: řádek na měsíc, klíč `YYYYMM`, popisek `YYYY-MM`.
      *
      * @return array{items:list<array{key:int,label:string,secondary:?string,
      *   count:int,draft_count:int,amount_minor:int}>,total:int}
@@ -178,24 +220,40 @@ final class PayrollInputRepository
         int $offset = 0,
     ): array {
         if (!in_array($groupBy, PayrollInputFilter::GROUP_BY, true)) {
-            throw new \InvalidArgumentException('group_by smí být employee nebo component.');
+            throw new \InvalidArgumentException(
+                'group_by smí být employee, component nebo period.',
+            );
         }
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
         $where = $filter->where($supplierId);
-        [$key, $label, $secondary, $order] = $groupBy === 'employee'
-            ? [
+        // `$keySelect` je zvlášť, protože u období se seskupuje podle data, ale
+        // klíč musí zůstat celočíselný jako u ostatních skupin — prohlížeč má
+        // pro všechny skupiny jeden tvar řádku.
+        [$key, $keySelect, $label, $secondary, $order] = match ($groupBy) {
+            'employee' => [
+                'input.employee_id',
                 'input.employee_id',
                 'MIN(employee.full_name)',
                 'GROUP_CONCAT(DISTINCT employment.code ORDER BY employment.code SEPARATOR ", ")',
                 'label, group_key',
-            ]
-            : [
+            ],
+            'component' => [
+                'input.component_id',
                 'input.component_id',
                 'MIN(component.name)',
                 'MIN(component.code)',
                 'secondary, group_key',
-            ];
+            ],
+            // Nejnovější měsíc nahoře: historii vztahu čte člověk odzadu.
+            'period' => [
+                'input.period_start',
+                'EXTRACT(YEAR_MONTH FROM MIN(input.period_start))',
+                'DATE_FORMAT(MIN(input.period_start), "%Y-%m")',
+                'NULL',
+                'group_key DESC',
+            ],
+        };
 
         $count = $this->db->pdo()->prepare(
             'SELECT COUNT(DISTINCT ' . $key . ')
@@ -207,7 +265,7 @@ final class PayrollInputRepository
         $total = (int) $count->fetchColumn();
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . $key . ' AS group_key,
+            'SELECT ' . $keySelect . ' AS group_key,
                     ' . $label . ' AS label,
                     ' . $secondary . ' AS secondary,
                     COUNT(*) AS item_count,
@@ -246,13 +304,27 @@ final class PayrollInputRepository
      * filtrem — jinak by po výběru jedné složky zmizely ostatní a nešlo by
      * přidat druhou.
      *
+     * Rozsah měsíců se sem musí propsat ze stejného důvodu: nabídka počítaná jen
+     * z prvního měsíce by u historie vztahu zamlčela složky, které se objevily
+     * později, a uživatel by podle nich neměl jak filtrovat.
+     *
      * @return array{components:list<array{id:int,code:string,name:string,count:int}>,
      *   imports:list<array{id:int,source_name:string,created_at:string,count:int}>}
      */
-    public function facets(int $supplierId, string $periodStart, ?int $employmentId = null): array
-    {
+    public function facets(
+        int $supplierId,
+        string $periodStart,
+        ?int $employmentId = null,
+        ?string $periodEnd = null,
+    ): array {
+        $period = $periodEnd === null
+            ? 'input.period_start = ?'
+            : 'input.period_start BETWEEN ? AND ?';
         $narrowing = $employmentId === null ? '' : ' AND input.employment_id = ?';
         $params = [$supplierId, $periodStart];
+        if ($periodEnd !== null) {
+            $params[] = $periodEnd;
+        }
         if ($employmentId !== null) {
             $params[] = $employmentId;
         }
@@ -262,7 +334,7 @@ final class PayrollInputRepository
                JOIN payroll_component_definitions component
                  ON component.supplier_id = input.supplier_id
                 AND component.id = input.component_id
-              WHERE input.supplier_id = ? AND input.period_start = ?
+              WHERE input.supplier_id = ? AND ' . $period . '
                 AND input.status <> "cancelled"' . $narrowing . '
               GROUP BY component.id, component.code, component.name
               ORDER BY component.code'
@@ -274,7 +346,7 @@ final class PayrollInputRepository
                JOIN payroll_input_imports batch
                  ON batch.supplier_id = input.supplier_id
                 AND batch.id = input.import_id
-              WHERE input.supplier_id = ? AND input.period_start = ?
+              WHERE input.supplier_id = ? AND ' . $period . '
                 AND input.status <> "cancelled"' . $narrowing . '
               GROUP BY batch.id, batch.source_name, batch.created_at
               ORDER BY batch.created_at DESC, batch.id DESC'

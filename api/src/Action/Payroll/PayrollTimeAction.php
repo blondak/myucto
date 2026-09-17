@@ -74,6 +74,53 @@ final class PayrollTimeAction
         }
     }
 
+    /**
+     * Historie docházky jednoho vztahu po měsících.
+     *
+     * Zúžený seznam (jeden vztah) potřebuje listovat po měsících, ne přepínat
+     * měsíc po měsíci. `employment_id` je proto povinné — historie „celé firmy"
+     * by byla součin lidí a měsíců, který nikdo nepřečte.
+     */
+    public function history(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
+            true,
+        )) !== null) {
+            return $error;
+        }
+        $query = $request->getQueryParams();
+        try {
+            return Json::ok($response, $this->time->history(
+                $this->currentSupplierId($request),
+                self::narrowingId($query, 'employment_id') ?? 0,
+                self::optionalPeriod($query, 'from'),
+                self::optionalPeriod($query, 'to'),
+                max(1, min(
+                    PayrollTimeService::HISTORY_MAX_LIMIT,
+                    (int) ($query['limit'] ?? PayrollTimeService::HISTORY_DEFAULT_LIMIT),
+                )),
+                max(0, (int) ($query['offset'] ?? 0)),
+            ));
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $query
+     */
+    private static function optionalPeriod(array $query, string $key): ?string
+    {
+        $value = $query[$key] ?? null;
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
     /** @param array<string,string> $args */
     public function calendar(Request $request, Response $response, array $args): Response
     {

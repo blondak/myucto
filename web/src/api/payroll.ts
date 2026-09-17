@@ -1459,6 +1459,40 @@ export interface PayrollTimeOverview {
   offset: number
 }
 
+/**
+ * Jeden měsíc historie docházky jednoho vztahu.
+ *
+ * `summary` nese TÁŽ čísla, jaká za ten měsíc vrátí `timeMonth` — počítá je na
+ * serveru jedna sada metod, takže se dvě obrazovky téže evidence nerozejdou.
+ */
+export interface PayrollTimeHistoryItem {
+  period: string
+  month: PayrollTimeMonthState
+  summary: PayrollTimeOverviewItem['summary']
+  shift_count: number
+  entry_count: number
+}
+
+export interface PayrollTimeHistory {
+  employment: {
+    id: number
+    employee_id: number
+    code: string
+    relation_type: PayrollRelationType
+    status: string
+    start_date: string | null
+    actual_start_date: string | null
+    end_date: string | null
+    full_name: string
+  }
+  items: PayrollTimeHistoryItem[]
+  total: number
+  limit: number
+  offset: number
+  /** Rozsah, který server SKUTEČNĚ uplatnil — zadaný výřez ho jen zužuje. */
+  range: { from: string, to: string }
+}
+
 /** Jedna buňka měsíční mřížky docházky = jeden den jednoho vztahu v jedné kategorii. */
 export interface PayrollTimeBatchCell {
   employment_id: number
@@ -2356,6 +2390,9 @@ export interface PayrollInputsSummary {
   draft_amount_total_minor: number
 }
 
+/** Podle čeho server seskupuje výpis vstupů (`group_by`). */
+export type PayrollInputGroupBy = 'employee' | 'component' | 'period'
+
 export interface PayrollInputGroup {
   key: number
   label: string
@@ -2746,6 +2783,16 @@ export interface PayrollJmhzIdentityStatus {
   on_date: string
   person_external_identifier: PayrollJmhzExternalIdentifierStatus | null
   employment_external_identifier: PayrollJmhzExternalIdentifierStatus | null
+}
+
+export interface PayrollJmhzRevealedIdentifier {
+  id: number
+  value: string
+}
+
+export interface PayrollJmhzIdentityReveal {
+  person_external_identifier: PayrollJmhzRevealedIdentifier | null
+  employment_external_identifier: PayrollJmhzRevealedIdentifier | null
 }
 
 export interface PayrollJmhzIdentityPayload {
@@ -7219,6 +7266,27 @@ export const payrollApi = {
     `/payroll/jmhz/identities/${employmentId}`,
     payload,
   ).then(response => response.data.assigned),
+  /**
+   * Odkrytí plné hodnoty OIČ / ID PPV. Maska stačí na „je to vyplněné", ale ne
+   * na porovnání s protokolem ČSSZ — a jediná dřívější cesta k hodnotě vedla
+   * přes „Opravit", které ji přepíše.
+   *
+   * `reason` je povinný (10–500 znaků) a jde do auditní stopy. Kartě stačí
+   * konstantní důvod: kdo se dívá a kdy, plyne ze záznamu, a dialog na každé
+   * nahlédnutí by z běžné kontroly udělal obřad.
+   */
+  revealJmhzIdentity: (
+    employmentId: number,
+    environment: PayrollRegzelEnvironment,
+    onDate: string,
+  ) => api.post<{ reveal: PayrollJmhzIdentityReveal }>(
+    `/payroll/jmhz/identities/${employmentId}/reveal`,
+    {
+      environment,
+      on_date: onDate,
+      reason: 'Zobrazení identifikátorů ČSSZ na kartě pracovního vztahu',
+    },
+  ).then(response => response.data.reveal),
   confirmJmhzOrdinaryEvidence: (
     revisionId: number,
     employmentId: number,
@@ -8067,6 +8135,25 @@ export const payrollApi = {
         ...(employmentId ? { employment_id: employmentId } : {}),
       },
     }).then(response => response.data),
+  /**
+   * Historie docházky JEDNOHO vztahu po měsících, sestupně a stránkovaně.
+   *
+   * Strop stránky je na serveru dvanáct měsíců — každý měsíc stojí několik
+   * dotazů, takže „načti celou historii" se neobjednává.
+   */
+  timeHistory: (
+    employmentId: number,
+    params?: { from?: string, to?: string, limit?: number, offset?: number },
+  ) =>
+    api.get<PayrollTimeHistory>('/payroll/time/history', {
+      params: {
+        employment_id: employmentId,
+        ...(params?.from ? { from: params.from } : {}),
+        ...(params?.to ? { to: params.to } : {}),
+        ...(params?.limit ? { limit: params.limit } : {}),
+        ...(params?.offset ? { offset: params.offset } : {}),
+      },
+    }).then(response => response.data),
   saveTimeCalendar: (employmentId: number, payload: Record<string, unknown>) =>
     api.put<{ calendar: PayrollWorkCalendar }>(`/payroll/time/calendars/${employmentId}`, payload)
       .then(response => response.data.calendar),
@@ -8251,12 +8338,18 @@ export const payrollApi = {
    * `filters` jsou parametry z `payrollInputFilterParams()`; `groupBy` vrátí
    * místo řádků souhrnné skupiny stránkované po skupinách.
    */
+  /**
+   * `periodTo` rozšiřuje výpis z jednoho měsíce na rozsah (historie jednoho
+   * vztahu). Bez něj se nemění nic — server bere `period` jako přesnou shodu.
+   * Seskupení `period` dává jeden řádek na měsíc, nejnovější nahoře.
+   */
   inputs: (
     period: string,
     page?: PayrollPageParams,
     employmentId?: number,
     filters: Record<string, string | number> = {},
-    groupBy: 'employee' | 'component' | null = null,
+    groupBy: PayrollInputGroupBy | null = null,
+    periodTo?: string,
   ) =>
     api.get<{
       inputs: PayrollInput[]
@@ -8272,6 +8365,7 @@ export const payrollApi = {
         ...(employmentId ? { employment_id: employmentId } : {}),
         ...filters,
         ...(groupBy ? { group_by: groupBy } : {}),
+        ...(periodTo ? { period_to: periodTo } : {}),
       },
     }).then((response): PayrollInputsPage => ({
       items: response.data.inputs,
@@ -8284,6 +8378,9 @@ export const payrollApi = {
   /**
    * Stáhne CELÝ filtr výpisu jako XLSX nebo PDF, ne zobrazenou stránku.
    * `filters` jsou tytéž parametry jako u `inputs()`; seskupení export nemění.
+   * Rozsah měsíců se posílá jako `filters.period_to` — server ho přijímá
+   * a promítá do hlavičky i názvu souboru, takže ho musí unést i náhradní
+   * název, kdyby odpověď hlavičku `Content-Disposition` nenesla.
    */
   exportInputs: (
     format: 'xlsx' | 'pdf',
@@ -8294,9 +8391,11 @@ export const payrollApi = {
     const params = new URLSearchParams({ period })
     if (employmentId) params.set('employment_id', String(employmentId))
     for (const [key, value] of Object.entries(filters)) params.set(key, String(value))
+    const periodTo = filters.period_to === undefined ? '' : String(filters.period_to)
+    const span = periodTo === '' || periodTo === period ? period : `${period}_${periodTo}`
     return downloadApiFile(
       `/payroll/inputs/export.${format}?${params.toString()}`,
-      `mzdove-vstupy-${period}.${format}`,
+      `mzdove-vstupy-${span}.${format}`,
     ).then(() => undefined)
   },
   quickInputs: (period: string, page?: PayrollPageParams, employmentId?: number, q?: string) =>

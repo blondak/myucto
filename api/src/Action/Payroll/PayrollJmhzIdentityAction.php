@@ -7,8 +7,11 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\PermissionDenied;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Security\PayrollJmhzIdentifierRevealService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -20,7 +23,9 @@ final class PayrollJmhzIdentityAction
 
     public function __construct(
         private readonly PayrollRegistrationIdentityService $identities,
+        private readonly PayrollJmhzIdentifierRevealService $reveals,
         private readonly PayrollModuleAccess $access,
+        private readonly IpMatcher $ipMatcher,
     ) {}
 
     /** @param array{employmentId:string} $args */
@@ -129,6 +134,89 @@ final class PayrollJmhzIdentityAction
         return $this->noStore(Json::ok($response, [
             'assigned' => $assigned,
         ]));
+    }
+
+    /**
+     * Odkrytí plné hodnoty obou identifikátorů.
+     *
+     * Maska stačí na otázku „je to vyplněné", ale ne na porovnání s protokolem
+     * ČSSZ. Jediná dosavadní cesta k hodnotě vedla přes „Opravit", které číslo
+     * přepíše — nahlédnutí tak stálo zahození správné hodnoty.
+     *
+     * @param array{employmentId:string} $args
+     */
+    public function reveal(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response);
+        }
+        $error = null;
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.person.read_sensitive',
+            AccessLevel::READ,
+            $error,
+        )) {
+            return $error ?? throw new \LogicException('Chybí chybová odpověď.');
+        }
+        if (!$this->requirePayrollEnabled(
+            $request,
+            $response,
+            $this->access,
+            $error,
+        )) {
+            return $error ?? throw new \LogicException('Chybí chybová odpověď.');
+        }
+
+        try {
+            $body = $request->getParsedBody();
+            if (!is_array($body) || array_is_list($body)) {
+                throw new \InvalidArgumentException(
+                    'Tělo požadavku musí být objekt.',
+                );
+            }
+            $actor = $this->userId($request);
+            if ($actor === null) {
+                return $this->noStore(Json::error(
+                    $response,
+                    'unauthenticated',
+                    'Nepřihlášený uživatel.',
+                    401,
+                ));
+            }
+            $revealed = $this->reveals->reveal(
+                $this->currentSupplierId($request),
+                $this->employmentId($args),
+                $actor,
+                RequestAuthorization::effectiveRole($request),
+                $this->environment($body['environment'] ?? null),
+                $this->requiredString($body['on_date'] ?? null, 'on_date'),
+                $this->requiredString($body['reason'] ?? null, 'reason'),
+                $this->ipMatcher->clientIpFromRequest(
+                    $request->getServerParams(),
+                ),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (PermissionDenied) {
+            return $this->noStore(Json::error(
+                $response,
+                'forbidden',
+                'Pro tuto akci nemáš oprávnění.',
+                403,
+            ));
+        } catch (\OutOfBoundsException $exception) {
+            return $this->error($response, 'not_found', $exception, 404);
+        } catch (\InvalidArgumentException|\UnexpectedValueException $exception) {
+            return $this->error($response, 'validation_failed', $exception, 422);
+        } catch (\DomainException $exception) {
+            return $this->error($response, 'conflict', $exception, 409);
+        }
+
+        return $this->noStore(Json::ok($response, ['reveal' => $revealed]));
     }
 
     private function authorize(

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { personalNumberLabel } from './employmentLifecycleUi'
+import { personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
@@ -45,6 +45,7 @@ import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchS
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePicker.vue'
 import PayrollRiskySavingsPanel from '@/components/payroll/PayrollRiskySavingsPanel.vue'
 import PayrollInputRowActions from '@/components/payroll/PayrollInputRowActions.vue'
 import MultiSelectFilter from '@/components/ui/MultiSelectFilter.vue'
@@ -63,6 +64,12 @@ import {
   type PayrollInputFilterState,
 } from '@/pages/payroll/payrollInputFilters'
 import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
+import {
+  payrollPeriodRange,
+  payrollPeriodScopeFromQuery,
+  payrollPeriodScopeToQuery,
+  type PayrollPeriodScope,
+} from '@/pages/payroll/payrollPeriodScope'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -151,6 +158,14 @@ const recurringOffset = ref(0)
 const recurringPage = computed(() =>
   Math.floor(recurringOffset.value / recurringPageSize) + 1)
 const inputs = ref<PayrollInput[]>([])
+/*
+ * Sloupec s obdobím do výběru sloupců schválně NEPATŘÍ.
+ *
+ * V měsíčním pohledu by jen opakoval hodnotu z hlavičky stránky, takže by se
+ * v nabídce válel jako mrtvá volba. Nad rozsahem je naopak jediné, čím se řádky
+ * od sebe liší — vypnout ho by znamenalo rozbít právě to, kvůli čemu se rozsah
+ * zapíná. Zobrazuje se proto podle `rangeMode`, ne podle preferencí.
+ */
 const INPUT_COLUMNS: ColumnDef[] = [
   { key: 'employment', labelKey: 'payroll.components.fields.employment', required: true },
   { key: 'component', labelKey: 'payroll.components.fields.component', required: true },
@@ -182,16 +197,24 @@ const batchProgress = ref<number | null>(null)
 /** Právě stahovaný export; mezitím nejde spustit další. */
 const exportingInputs = ref<'xlsx' | 'pdf' | null>(null)
 
-/** Export stáhne celý filtr včetně zúžení na vztah, ne zobrazenou stránku. */
+/**
+ * Export stáhne celý filtr včetně zúžení na vztah, ne zobrazenou stránku —
+ * a při rozsahu i celý rozsah měsíců. Server `period_to` přijímá a promítá ho
+ * do hlavičky sestavy i do názvu souboru, takže stažené se jmenuje tím, co
+ * bylo na obrazovce.
+ */
 async function exportInputs(format: 'xlsx' | 'pdf') {
   if (exportingInputs.value !== null) return
   exportingInputs.value = format
+  const periodTo = listPeriodTo.value
   try {
     await payrollApi.exportInputs(
       format,
-      period.value,
+      periodTo === undefined ? period.value : listPeriod.value,
       focusEmploymentId.value ?? undefined,
-      inputFilterParams.value,
+      periodTo === undefined
+        ? inputFilterParams.value
+        : { ...inputFilterParams.value, period_to: periodTo },
     )
   } catch (error: any) {
     toast.error(apiErrorMessage(error, t('payroll.components.inputs.export_failed')))
@@ -230,7 +253,7 @@ const statusFilterOptions = computed(() => PAYROLL_INPUT_FILTER_STATUSES.map(sta
   value: status,
   label: t(`payroll.components.input_status.${status}`),
 })))
-const inputListEmpty = computed(() => inputFilters.value.groupBy === null
+const inputListEmpty = computed(() => effectiveGroupBy.value === null
   ? inputs.value.length === 0
   : inputGroups.value.length === 0)
 const inputsTotal = ref(0)
@@ -249,24 +272,131 @@ const employments = ref<PayrollEmploymentOption[]>([])
  * odkaz z bookmarku je slepý, ne rozbitý.
  */
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
+/*
+ * Rozsah období — jen na záložce vstupů a jen při zúžení na jeden vztah.
+ *
+ * Nad celou firmou by „vše" znamenalo vypsat roky práce všech zaměstnanců.
+ * Nad jedním člověkem je to naopak ta otázka, se kterou účetní na jeho kartu
+ * chodí („co bral loni"), a klikat se k odpovědi měsíc po měsíci je to samé
+ * jako ji nemít. Vybraný MĚSÍC (`period`) zůstává rozsahem nedotčený: visí na
+ * něm zakládání vstupů i „Převést do měsíce" na sousední záložce.
+ */
+const scope = ref<PayrollPeriodScope>(
+  payrollQueryId(route.query, 'employment') === null
+    ? 'month'
+    : payrollPeriodScopeFromQuery(route.query),
+)
+const scopeRange = computed(() => payrollPeriodRange(scope.value, period.value))
+/** Seznam vstupů čte rozsah měsíců, ne vybraný měsíc. */
+const rangeMode = computed(() =>
+  focusEmploymentId.value !== null && scopeRange.value !== null)
+/** Období, od kterého se čte (a které jde do exportu). */
+const listPeriod = computed(() => scopeRange.value?.from ?? period.value)
+/** Konec rozsahu pro server; `undefined` = jeden měsíc jako dosud. */
+const listPeriodTo = computed(() => rangeMode.value ? scopeRange.value?.to : undefined)
+
+/**
+ * Vztah zúžení poznaný ze SKUTEČNĚ NAČTENÝCH řádků.
+ *
+ * Nabídka vztahů se plní z `payrollAbsenceApi.context()`, která vynechává
+ * archivované a nenastoupivší vztahy. Dokud se jméno bralo jen z ní, vypadal
+ * odkaz z karty zaměstnance na takový vztah jako slepý — i když jeho předpisy
+ * seznam právě vypisoval. Řádky nesou jméno i osobní číslo a jejich existence
+ * zároveň dokazuje, že vztah k téhle firmě patří.
+ */
+const focusRow = computed(() => {
+  const id = focusEmploymentId.value
+  if (id === null) return null
+  return recurring.value.find(item => item.employment_id === id)
+    ?? inputs.value.find(item => item.employment_id === id)
+    ?? null
+})
 const focusName = computed(() => {
   const id = focusEmploymentId.value
   if (id === null) return null
   const employment = employments.value.find(item => item.employment_id === id)
-  return employment === undefined
-    ? t('payroll.agendas.focus.unknown_person')
-    : [employment.full_name, personalNumberLabel(t, employment.code)].filter(part => part !== '').join(' · ')
+  if (employment !== undefined) {
+    return [employment.full_name, personalNumberLabel(t, employment.code)]
+      .filter(part => part !== '').join(' · ')
+  }
+  const row = focusRow.value
+  if (row !== null) {
+    return [row.employee_name, personalNumberLabel(t, row.employment_code)]
+      .filter(part => part !== '').join(' · ')
+  }
+  return t('payroll.agendas.focus.unknown_person')
 })
-/**
- * Server zúžení uplatnil a nezbylo nic — ani opakovaná složka, ani vstup.
- * Tiché prázdno by tvrdilo „ten člověk tu nic nemá", i když je zúžení jen slepé.
- */
-const focusMissing = computed(() =>
+/** Server zúžení uplatnil a nezbylo nic — ani opakovaná složka, ani vstup. */
+const focusEmpty = computed(() =>
   focusEmploymentId.value !== null && !loading.value && !loadFailed.value
   && (
     (activeTab.value === 'inputs' && inputsTotal.value === 0 && !inputFiltersOn.value)
     || (activeTab.value === 'recurring' && recurringTotal.value === 0)
   ))
+/**
+ * Slepý odkaz se pozná jen tehdy, když se vztah nenašel NIKDE — ani v nabídce,
+ * ani v načtených řádcích.
+ *
+ * Prázdný seznam sám o sobě to neznamená: předpisy nemá každý a vstup v jednom
+ * měsíci taky ne. Věta „vztah ani osoba k firmě nepatří, nebo odkaz zestaral"
+ * o platném odkazu lže a uživatele pošle hledat chybu tam, kde žádná není.
+ */
+const focusMissing = computed(() => focusEmpty.value
+  && !employments.value.some(item => item.employment_id === focusEmploymentId.value)
+  && focusRow.value === null)
+
+/**
+ * Seskupení, se kterým se opravdu jede.
+ *
+ * „Po obdobích" má smysl jen nad rozsahem — nad jedním měsícem by vyrobilo
+ * jedinou skupinu. Z adresy (`group=period`) ale přijít může, takže se mimo
+ * rozsah tiše vrací na běžný seznam.
+ */
+const effectiveGroupBy = computed(() =>
+  inputFilters.value.groupBy === 'period' && !rangeMode.value
+    ? null
+    : inputFilters.value.groupBy)
+
+/**
+ * Hromadné akce (schválit/zrušit výběr i celý filtr) se nad rozsahem NENABÍZEJÍ.
+ *
+ * Server je nad rozsahem odmítá schválně (422): jedou přes všechny koncepty
+ * filtru, takže by jedno kliknutí sáhlo i na měsíce, které má uživatel na
+ * obrazovce jen jako historii. Tlačítka se proto skrývají, ne zašeďují —
+ * zašedlé tlačítko bez důvodu jen vyvolá otázku. Důvod říká jedna věta
+ * v souhrnu a cesta zpět je přepnout rozsah na Měsíc.
+ */
+const batchDisabledInRange = computed(() => rangeMode.value)
+
+function changeScope(next: PayrollPeriodScope): void {
+  if (scope.value === next) return
+  scope.value = next
+  // Výběr i rozbalené skupiny patří k předchozímu výřezu; nad jiným rozsahem
+  // by ukazovaly na řádky, které tam nejsou.
+  selectedInputIds.value = []
+  expandedGroups.value = {}
+  inputBatchFailures.value = []
+  inputsOffset.value = 0
+  void router.replace({ query: payrollPeriodScopeToQuery(route.query, next) })
+  loadInputsPage().catch((error: any) => {
+    toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
+  })
+}
+
+/** Proklik z měsíční skupiny zpátky do editovatelného měsíce. */
+function openPeriodGroup(period_: string): void {
+  period.value = period_
+  scope.value = 'month'
+  inputsOffset.value = 0
+  selectedInputIds.value = []
+  expandedGroups.value = {}
+  void router.replace({
+    query: { ...payrollPeriodScopeToQuery(route.query, 'month'), period: period_ },
+  })
+  loadInputsPage().catch((error: any) => {
+    toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
+  })
+}
 const chartAccounts = ref<PayrollAccountOption[]>([])
 const componentError = ref('')
 const jmhzError = ref('')
@@ -592,6 +722,49 @@ function formatMoney(value: number | null): string {
 // se jinak v seznamu lišily jen řetězci typu „legacy" a „ZAM-2".
 function relationLabel(type: string): string {
   return t(`payroll.people.relations.${type}`)
+}
+
+/**
+ * Období, které se právě čte — u rozsahu obě meze, ne jen jeho začátek.
+ *
+ * „Vše" se na server posílá jako dostatečně široký rozsah, protože `period` je
+ * povinné. Ty meze jsou ale technický detail: „leden 1990 – prosinec 2099"
+ * uživateli neřekne nic a vypadá jako rozbitá data. Pojmenuje se proto slovem.
+ */
+const listPeriodLabel = computed(() => {
+  if (!rangeMode.value) return formatPeriod(period.value)
+  if (scope.value === 'all') return t('payroll.agendas.scope.all_periods')
+  const range = scopeRange.value
+  return range === null
+    ? formatPeriod(period.value)
+    : `${formatPeriod(range.from)} – ${formatPeriod(range.to)}`
+})
+
+/**
+ * Stav pravidelného předpisu k dnešku.
+ *
+ * Seznam předpisů je celá historie vztahu, takže samotný příznak `is_active`
+ * nestačí: ukončený předpis s `is_active = 1` se v něm tvářil stejně jako ten,
+ * podle kterého se dnes počítá mzda. Naplánovaný, platný a ukončený jsou tři
+ * různé věci; vypnutý je nad nimi.
+ */
+type RecurringState = 'inactive' | 'scheduled' | 'expired' | 'current'
+
+function recurringState(item: PayrollRecurringComponent): RecurringState {
+  if (!item.is_active) return 'inactive'
+  const today = todayIso()
+  if (item.valid_from > today) return 'scheduled'
+  if (item.valid_to !== null && item.valid_to < today) return 'expired'
+  return 'current'
+}
+
+function recurringStateClass(item: PayrollRecurringComponent): string {
+  return {
+    current: 'bg-success-50 text-success-600',
+    scheduled: 'bg-payroll-50 text-payroll-700',
+    expired: 'bg-warning-50 text-warning-700',
+    inactive: 'bg-neutral-100 text-neutral-600',
+  }[recurringState(item)]
 }
 
 function selectedEmploymentChanged(target: InputForm | RecurringForm) {
@@ -1041,14 +1214,26 @@ async function loadRecurringPage() {
 async function fetchInputsPage() {
   const focused = focusEmploymentId.value ?? undefined
   const filters = inputFilterParams.value
-  const groupBy = inputFilters.value.groupBy
-  const request = () => payrollApi.inputs(
-    period.value,
-    { limit: inputsPageSize, offset: inputsOffset.value },
-    focused,
-    filters,
-    groupBy,
-  )
+  const groupBy = effectiveGroupBy.value
+  const periodTo = listPeriodTo.value
+  // Bez rozsahu se posílá přesně to, co dosud — `period_to` do dotazu vůbec
+  // nevstupuje, takže se měsíční pohled nemá jak změnit.
+  const request = () => periodTo === undefined
+    ? payrollApi.inputs(
+      period.value,
+      { limit: inputsPageSize, offset: inputsOffset.value },
+      focused,
+      filters,
+      groupBy,
+    )
+    : payrollApi.inputs(
+      listPeriod.value,
+      { limit: inputsPageSize, offset: inputsOffset.value },
+      focused,
+      filters,
+      groupBy,
+      periodTo,
+    )
   let page = await request()
   const count = groupBy === null ? page.total : (page.group_total ?? 0)
   const shown = groupBy === null ? page.items.length : (page.groups?.length ?? 0)
@@ -1141,7 +1326,11 @@ function setImportFilter(event: Event) {
 
 function setGroupBy(event: Event) {
   const value = (event.target as HTMLSelectElement).value
-  setInputFilters({ groupBy: value === 'employee' || value === 'component' ? value : null })
+  setInputFilters({
+    groupBy: value === 'employee' || value === 'component' || value === 'period'
+      ? value
+      : null,
+  })
 }
 
 function clearInputFilters() {
@@ -1159,11 +1348,14 @@ async function toggleGroup(group: PayrollInputGroup) {
   }
   expandedGroups.value = { ...expandedGroups.value, [key]: null }
   try {
-    const narrowing: Record<string, string | number> = inputFilters.value.groupBy === 'employee'
+    const groupBy = effectiveGroupBy.value
+    // Měsíční skupina se rozpadá na svůj měsíc, ne na rozsah — jinak by
+    // rozbalený srpen ukázal i červenec.
+    const narrowing: Record<string, string | number> = groupBy === 'employee'
       ? { employee_id: key }
-      : { component_id: String(key) }
+      : groupBy === 'component' ? { component_id: String(key) } : {}
     const page = await payrollApi.inputs(
-      period.value,
+      groupBy === 'period' ? group.label : period.value,
       { limit: GROUP_ITEMS_LIMIT, offset: 0 },
       focusEmploymentId.value ?? undefined,
       { ...inputFilterParams.value, ...narrowing },
@@ -1181,6 +1373,11 @@ async function toggleGroup(group: PayrollInputGroup) {
 
 /** Skupina jako filtr: celý výčet člověka nebo složky v běžném seznamu. */
 function openGroupAsFilter(group: PayrollInputGroup) {
+  // Měsíc není filtr, je to období — otevře se jako editovatelný měsíc.
+  if (effectiveGroupBy.value === 'period') {
+    openPeriodGroup(group.label)
+    return
+  }
   inputFilters.value = inputFilters.value.groupBy === 'employee'
     ? { ...inputFilters.value, groupBy: null, employeeId: group.key }
     : { ...inputFilters.value, groupBy: null, componentIds: [group.key] }
@@ -1411,6 +1608,10 @@ function reportInputBatch(result: PayrollInputBatchTotal, kind: 'approve' | 'can
  * víc server v jednom výčtu nevezme.
  */
 async function runInputBatch(kind: 'approve' | 'cancel', ids: number[] | null) {
+  // Pojistka k tomu, že se tlačítka nad rozsahem nezobrazují: hromadná akce
+  // jede vždy nad JEDNÍM obdobím (`period`), takže spuštěná nad rozsahem by
+  // buď sáhla na jiný měsíc, než je vidět, nebo by ji server odmítl.
+  if (batchDisabledInRange.value) return
   inputError.value = ''
   inputBatchFailures.value = []
   saving.value = true
@@ -1612,10 +1813,14 @@ watch(activeTab, () => {
 
 function clearFocus() {
   focusEmploymentId.value = null
+  // Rozsah bez zúžení nedává smysl — byla by to historie celé firmy.
+  scope.value = 'month'
   // Obojí se zúžením mění obsah, takže obě stránky musí zpět na začátek.
   recurringOffset.value = 0
   inputsOffset.value = 0
-  const query = { ...route.query }
+  selectedInputIds.value = []
+  expandedGroups.value = {}
+  const query = payrollPeriodScopeToQuery(route.query, 'month')
   delete query.employment
   void router.replace({ query })
   void load()
@@ -1636,6 +1841,21 @@ onMounted(load)
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.components.period') }}</span>
           <input v-model="period" type="month" class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm" @change="reloadPeriod">
         </label>
+        <!--
+          Rozsah se nabízí jen na záložce vstupů a jen při zúžení na jeden
+          vztah. Nad celou firmou by „Vše" znamenalo vypsat roky práce všech
+          zaměstnanců; u jednoho člověka je to naopak ta otázka, se kterou se
+          na jeho kartu chodí.
+        -->
+        <div v-if="activeTab === 'inputs' && focusEmploymentId !== null" class="block">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.agendas.scope.label') }}</span>
+          <PayrollPeriodScopePicker
+            :model-value="scope"
+            :year="period.slice(0, 4)"
+            :disabled="loading"
+            @update:model-value="changeScope"
+          />
+        </div>
         <button :class="btnOutline('neutral')" :disabled="loading" @click="load">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
           {{ t('payroll.components.reload') }}
@@ -1666,7 +1886,7 @@ onMounted(load)
               @keydown.esc="headerExportOpen = false"
             >
               <p class="border-b border-neutral-100 px-3 py-2 text-xs text-neutral-500">
-                {{ t('payroll.components.inputs.export_inputs_period', { period: formatPeriod(period) }) }}
+                {{ t('payroll.components.inputs.export_inputs_period', { period: listPeriodLabel }) }}
               </p>
               <button type="button" role="menuitem" data-testid="payroll-header-export-xlsx" class="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-neutral-700 hover:bg-neutral-50" @click="exportInputsFromHeader('xlsx')">
                 <svg class="h-4 w-4 shrink-0 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.table" /></svg>
@@ -1688,7 +1908,7 @@ onMounted(load)
       missing
       @clear="clearFocus"
     />
-    <PayrollFocusNotice v-else-if="focusName" :name="focusName" @clear="clearFocus" />
+    <PayrollFocusNotice v-else-if="focusName" :name="focusName" :empty="focusEmpty" @clear="clearFocus" />
 
     <nav
       class="mb-5 flex flex-wrap gap-1 border-b border-neutral-200"
@@ -1839,7 +2059,16 @@ onMounted(load)
 
       <section v-if="activeTab === 'recurring'" class="space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <div><h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.components.recurring.title') }}</h2><p class="text-sm text-neutral-500">{{ t('payroll.components.recurring.hint') }}</p></div>
+          <!--
+            Bez přepínače rozsahu schválně: server předpisy podle období
+            NEFILTRUJE, vrací celou historii vztahu. Ovládací prvek, který nic
+            nemění, je horší než žádný — místo něj to říká podnadpis.
+          -->
+          <div>
+            <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.components.recurring.title') }}</h2>
+            <p class="text-sm text-neutral-500">{{ t('payroll.components.recurring.hint') }}</p>
+            <p class="text-sm text-neutral-500" data-testid="payroll-recurring-all-periods">{{ t('payroll.components.recurring.all_periods') }}</p>
+          </div>
           <div class="flex flex-wrap gap-2">
             <button v-if="canWrite" :class="btnOutline('success')" :disabled="saving" @click="materializeRecurring"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.play" /></svg>{{ t('payroll.components.recurring.materialize') }}</button>
             <button v-if="canWrite" :class="btnFilled('primary')" @click="openNewRecurring"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.components.recurring.add') }}</button>
@@ -1868,9 +2097,24 @@ onMounted(load)
 
         <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
           <div class="hidden flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 md:flex"><ColumnPicker :ctrl="recurringTbl" /><DensityToggle :ctrl="recurringTbl" /></div>
-          <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="recurringTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th v-if="recurringTbl.isVisible('employment')" class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th v-if="recurringTbl.isVisible('component')" class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3">{{ t('payroll.components.fields.calculation') }}</th><th v-if="recurringTbl.isVisible('validity')" class="px-4 py-3">{{ t('payroll.components.fields.validity') }}</th><th v-if="recurringTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="recurringTbl.isVisible('actions')" class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="item in recurring" :key="item.id"><td v-if="recurringTbl.isVisible('employment')" class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employee_name }}</p><p class="text-xs text-neutral-500">{{ item.employment_code }}</p></td><td v-if="recurringTbl.isVisible('component')" class="px-4 py-3"><p>{{ item.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ item.component_code }}</p></td><td v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3"><p>{{ t(`payroll.components.calculation.${item.calculation_kind}`) }}</p><p class="text-xs text-neutral-500">{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</p></td><td v-if="recurringTbl.isVisible('validity')" class="px-4 py-3 text-xs">{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</td><td v-if="recurringTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(item.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></td><td v-if="recurringTbl.isVisible('actions')" class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite" data-testid="payroll-recurring-delete" :class="btnOutlineSm('danger')" :disabled="saving" @click="deleteRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.recurring.delete') }}</button></div></td></tr></tbody></table></div>
-          <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="item in recurring" :key="item.id" class="rounded-lg border border-neutral-200 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div><h3 class="font-semibold text-neutral-900">{{ item.employee_name }}</h3><p class="text-xs text-neutral-500">{{ item.employment_code }} · {{ item.component_code }}</p></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(item.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ item.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd>{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</dd></div><div class="col-span-2"><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.validity') }}</dt><dd>{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</dd></div></dl><div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button data-testid="payroll-recurring-delete" :class="btnOutlineSm('danger')" :disabled="saving" @click="deleteRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.recurring.delete') }}</button></div></article></div>
+          <!--
+            Prázdno se musí pojmenovat. Dokud tu nic nebylo, vypadal vztah bez
+            předpisů stejně jako neplatný odkaz — a lišta nahoře o něm tvrdila,
+            že „odkaz zestaral".
+          -->
+          <EmptyState
+            v-if="recurring.length === 0"
+            class="m-4"
+            data-testid="payroll-recurring-empty"
+            :title="t(focusEmploymentId === null
+              ? 'payroll.components.recurring.empty'
+              : 'payroll.components.recurring.empty_focused')"
+            :message="t('payroll.components.recurring.empty_hint')"
+          />
+          <div v-if="recurring.length > 0" data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="recurringTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th v-if="recurringTbl.isVisible('employment')" class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th v-if="recurringTbl.isVisible('component')" class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3">{{ t('payroll.components.fields.calculation') }}</th><th v-if="recurringTbl.isVisible('validity')" class="px-4 py-3">{{ t('payroll.components.fields.validity') }}</th><th v-if="recurringTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="recurringTbl.isVisible('actions')" class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="item in recurring" :key="item.id"><td v-if="recurringTbl.isVisible('employment')" class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employee_name }}</p><p class="text-xs text-neutral-500">{{ item.employment_code }}</p></td><td v-if="recurringTbl.isVisible('component')" class="px-4 py-3"><p>{{ item.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ item.component_code }}</p></td><td v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3"><p>{{ t(`payroll.components.calculation.${item.calculation_kind}`) }}</p><p class="text-xs text-neutral-500">{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</p></td><td v-if="recurringTbl.isVisible('validity')" class="px-4 py-3 text-xs">{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</td><td v-if="recurringTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="recurringStateClass(item)" :data-state="recurringState(item)">{{ t(`payroll.components.recurring.state.${recurringState(item)}`) }}</span></td><td v-if="recurringTbl.isVisible('actions')" class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite" data-testid="payroll-recurring-delete" :class="btnOutlineSm('danger')" :disabled="saving" @click="deleteRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.recurring.delete') }}</button></div></td></tr></tbody></table></div>
+          <div v-if="recurring.length > 0" data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="item in recurring" :key="item.id" class="rounded-lg border border-neutral-200 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div><h3 class="font-semibold text-neutral-900">{{ item.employee_name }}</h3><p class="text-xs text-neutral-500">{{ item.employment_code }} · {{ item.component_code }}</p></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="recurringStateClass(item)" :data-state="recurringState(item)">{{ t(`payroll.components.recurring.state.${recurringState(item)}`) }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ item.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd>{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</dd></div><div class="col-span-2"><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.validity') }}</dt><dd>{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</dd></div></dl><div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button data-testid="payroll-recurring-delete" :class="btnOutlineSm('danger')" :disabled="saving" @click="deleteRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.recurring.delete') }}</button></div></article></div>
           <PaginationBar
+            v-if="recurring.length > 0"
             embedded
             :page="recurringPage"
             :per-page="recurringPageSize"
@@ -1992,24 +2236,35 @@ onMounted(load)
               <option v-if="inputFilters.importId !== null && !inputFacets.imports.some(batch => batch.id === inputFilters.importId)" :value="inputFilters.importId">#{{ inputFilters.importId }}</option>
               <option v-for="batch in inputFacets.imports" :key="batch.id" :value="batch.id">{{ t('payroll.components.inputs.filters.import_option', { name: batch.source_name, date: batch.created_at.slice(0, 16), count: batch.count }) }}</option>
             </select>
-            <select :value="inputFilters.groupBy ?? ''" data-testid="payroll-inputs-group-by" :aria-label="t('payroll.components.inputs.filters.group_by')" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm" @change="setGroupBy">
+            <select :value="effectiveGroupBy ?? ''" data-testid="payroll-inputs-group-by" :aria-label="t('payroll.components.inputs.filters.group_by')" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm" @change="setGroupBy">
               <option value="">{{ t('payroll.components.inputs.filters.group_none') }}</option>
               <option value="employee">{{ t('payroll.components.inputs.filters.group_employee') }}</option>
               <option value="component">{{ t('payroll.components.inputs.filters.group_component') }}</option>
+              <!-- Řádek na měsíc dává smysl jen nad rozsahem; nad jedním obdobím by to byla jediná skupina. -->
+              <option v-if="rangeMode" value="period">{{ t('payroll.components.inputs.filters.group_period') }}</option>
             </select>
             <button v-if="inputFiltersOn" type="button" data-testid="payroll-inputs-filter-clear" :class="[btnOutline('neutral'), 'whitespace-nowrap']" @click="clearInputFilters">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
               {{ t('payroll.components.inputs.filters.clear') }}
             </button>
-            <span v-if="inputFilters.groupBy === null" class="ml-auto hidden items-center gap-2 md:inline-flex"><ColumnPicker :ctrl="inputsTbl" /><DensityToggle :ctrl="inputsTbl" /></span>
+            <span v-if="effectiveGroupBy === null" class="ml-auto hidden items-center gap-2 md:inline-flex"><ColumnPicker :ctrl="inputsTbl" /><DensityToggle :ctrl="inputsTbl" /></span>
           </div>
 
           <!--
             Souhrn a hromadné akce jsou za CELÝ filtr, ne za stránku — tlačítko
             zůstává, dokud filtr drží aspoň jeden koncept.
+
+            Nad rozsahem měsíců se hromadné akce nenabízejí vůbec: jedou přes
+            všechny koncepty filtru nad JEDNÍM obdobím, takže by jedno kliknutí
+            sáhlo na měsíce, které jsou na obrazovce jen jako historie. Radši
+            tlačítko schovat a říct proč, než ho zašedit bez vysvětlení.
           -->
           <div class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-2" data-testid="payroll-inputs-summary">
-            <p class="text-sm text-neutral-700">{{ t('payroll.components.inputs.summary', { total: summaryTotal, amount: formatMoney(summaryAmount), drafts: matchingDraftCount }) }}</p>
+            <p class="text-sm text-neutral-700">
+              {{ t('payroll.components.inputs.summary', { total: summaryTotal, amount: formatMoney(summaryAmount), drafts: matchingDraftCount }) }}
+              <span v-if="rangeMode" class="block text-xs text-neutral-500">{{ t('payroll.components.inputs.range_summary', { period: listPeriodLabel }) }}</span>
+              <span v-if="batchDisabledInRange && matchingDraftCount > 0" :class="[BTN_DISABLED_NOTE, 'block']" data-testid="payroll-inputs-batch-range-note">{{ t('payroll.components.inputs.batch_range_blocked') }}</span>
+            </p>
             <div class="flex flex-wrap items-center gap-2">
               <button type="button" data-testid="payroll-inputs-export-xlsx" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :disabled="exportingInputs !== null || summaryTotal === 0" :aria-busy="exportingInputs === 'xlsx'" :title="t('payroll.components.inputs.export_hint')" @click="exportInputs('xlsx')">
                 <svg v-if="exportingInputs === 'xlsx'" class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" /></svg>
@@ -2022,18 +2277,18 @@ onMounted(load)
                 {{ t('payroll.components.inputs.export_pdf') }}
               </button>
               <span v-if="batchProgress !== null" role="status" class="text-xs text-neutral-500">{{ t('payroll.components.inputs.batch_progress', { done: batchProgress }) }}</span>
-              <button v-if="canWrite && matchingDraftCount > 0" type="button" data-testid="payroll-inputs-cancel-matching" :class="[btnOutline('danger'), 'whitespace-nowrap']" :disabled="saving" @click="cancelMatchingInputs">
+              <button v-if="canWrite && matchingDraftCount > 0 && !batchDisabledInRange" type="button" data-testid="payroll-inputs-cancel-matching" :class="[btnOutline('danger'), 'whitespace-nowrap']" :disabled="saving" @click="cancelMatchingInputs">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>
                 {{ t('payroll.components.inputs.cancel_matching', { count: matchingDraftCount }) }}
               </button>
-              <button v-if="canApprove && matchingDraftCount > 0" type="button" data-testid="payroll-inputs-approve-all" :class="[btnFilled('success'), 'whitespace-nowrap']" :disabled="saving" @click="approveMatchingInputs">
+              <button v-if="canApprove && matchingDraftCount > 0 && !batchDisabledInRange" type="button" data-testid="payroll-inputs-approve-all" :class="[btnFilled('success'), 'whitespace-nowrap']" :disabled="saving" @click="approveMatchingInputs">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
                 {{ t('payroll.components.inputs.approve_matching', { count: matchingDraftCount }) }}
               </button>
             </div>
           </div>
 
-          <div v-if="selectedInputIds.length > 0" class="flex flex-wrap items-center gap-2 border-b border-payroll-200 bg-payroll-50 px-4 py-2" data-testid="payroll-inputs-selection">
+          <div v-if="selectedInputIds.length > 0 && !batchDisabledInRange" class="flex flex-wrap items-center gap-2 border-b border-payroll-200 bg-payroll-50 px-4 py-2" data-testid="payroll-inputs-selection">
             <span class="text-sm font-medium text-payroll-700">{{ t('payroll.components.inputs.selection_count', { count: selectedInputIds.length }) }}</span>
             <button v-if="canApprove" type="button" data-testid="payroll-inputs-approve-selected" :class="[btnOutline('success'), 'whitespace-nowrap']" :disabled="saving" @click="approveSelectedInputs">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
@@ -2075,9 +2330,9 @@ onMounted(load)
               <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.components.inputs.empty_hint') }}</p>
             </template>
           </div>
-          <template v-else-if="inputFilters.groupBy === null">
-            <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="inputsTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="w-10 px-4 py-3"><input v-if="pageDraftIds.length > 0" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-testid="payroll-inputs-select-page" :checked="allPageDraftsSelected" :aria-label="t('payroll.components.inputs.select_page')" @change="togglePageSelection"></th><th class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.amount') }}</th><th v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t('payroll.components.fields.source') }}</th><th v-if="inputsTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3">{{ t('payroll.components.fields.external_id') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="input in inputs" :key="input.id" :class="isInputSelected(input.id) ? 'bg-payroll-50/60' : ''"><td class="px-4 py-3"><input v-if="input.status === 'draft'" type="checkbox" class="rounded border-neutral-300 text-payroll-600" :data-testid="`payroll-input-select-${input.id}`" :checked="isInputSelected(input.id)" :aria-label="t('payroll.components.inputs.select_row')" @change="toggleInputSelection(input.id)"></td><td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ input.employee_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></td><td class="px-4 py-3"><p>{{ input.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ input.component_code }}</p></td><td class="px-4 py-3 font-medium">{{ formatMoney(input.amount_minor) }}</td><td v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t(`payroll.components.source.${input.source_kind}`) }}</td><td v-if="inputsTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="inputStatusClass(input.status)">{{ t(`payroll.components.input_status.${input.status}`) }}</span></td><td v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3 break-all font-mono text-xs text-neutral-500">{{ input.external_id ?? '—' }}</td><td class="px-4 py-3"><PayrollInputRowActions class="justify-end" :input="input" :can-write="canWrite" :can-approve="canApprove" :saving="saving" @edit="editInput" @cancel="cancelInput" @approve="approveInput" @reverse-benefit="reverseBenefitInput" /></td></tr></tbody></table></div>
-            <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="input in inputs" :key="input.id" class="rounded-lg border border-neutral-200 p-4" :class="isInputSelected(input.id) ? 'border-payroll-300 bg-payroll-50/60' : ''"><div class="flex flex-wrap items-start justify-between gap-2"><label class="flex items-start gap-2"><input v-if="input.status === 'draft'" type="checkbox" class="mt-1 rounded border-neutral-300 text-payroll-600" :checked="isInputSelected(input.id)" :aria-label="t('payroll.components.inputs.select_row')" @change="toggleInputSelection(input.id)"><span><span class="block font-semibold text-neutral-900">{{ input.employee_name }}</span><span class="block text-xs text-neutral-500">{{ relationLabel(input.relation_type) }} · {{ input.component_code }}</span><span class="block font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</span></span></label><span class="rounded-full px-2 py-1 text-xs font-medium" :class="inputStatusClass(input.status)">{{ t(`payroll.components.input_status.${input.status}`) }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ input.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd class="font-semibold">{{ formatMoney(input.amount_minor) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.source') }}</dt><dd>{{ t(`payroll.components.source.${input.source_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.external_id') }}</dt><dd class="break-all font-mono text-xs">{{ input.external_id ?? '—' }}</dd></div></dl><PayrollInputRowActions class="mt-4" :input="input" :can-write="canWrite" :can-approve="canApprove" :saving="saving" @edit="editInput" @cancel="cancelInput" @approve="approveInput" @reverse-benefit="reverseBenefitInput" /></article></div>
+          <template v-else-if="effectiveGroupBy === null">
+            <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="inputsTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="w-10 px-4 py-3"><input v-if="pageDraftIds.length > 0 && !batchDisabledInRange" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-testid="payroll-inputs-select-page" :checked="allPageDraftsSelected" :aria-label="t('payroll.components.inputs.select_page')" @change="togglePageSelection"></th><th v-if="rangeMode" class="px-4 py-3">{{ t('payroll.components.fields.period') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.amount') }}</th><th v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t('payroll.components.fields.source') }}</th><th v-if="inputsTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3">{{ t('payroll.components.fields.external_id') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="input in inputs" :key="input.id" :class="isInputSelected(input.id) ? 'bg-payroll-50/60' : ''"><td class="px-4 py-3"><input v-if="input.status === 'draft' && !batchDisabledInRange" type="checkbox" class="rounded border-neutral-300 text-payroll-600" :data-testid="`payroll-input-select-${input.id}`" :checked="isInputSelected(input.id)" :aria-label="t('payroll.components.inputs.select_row')" @change="toggleInputSelection(input.id)"></td><td v-if="rangeMode" class="px-4 py-3 whitespace-nowrap font-medium tabular-nums text-neutral-900" :data-testid="`payroll-input-period-${input.id}`">{{ formatPeriod(input.period_start) }}</td><td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ input.employee_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></td><td class="px-4 py-3"><p>{{ input.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ input.component_code }}</p></td><td class="px-4 py-3 font-medium">{{ formatMoney(input.amount_minor) }}</td><td v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t(`payroll.components.source.${input.source_kind}`) }}</td><td v-if="inputsTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="inputStatusClass(input.status)">{{ t(`payroll.components.input_status.${input.status}`) }}</span></td><td v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3 break-all font-mono text-xs text-neutral-500">{{ input.external_id ?? '—' }}</td><td class="px-4 py-3"><PayrollInputRowActions class="justify-end" :input="input" :can-write="canWrite" :can-approve="canApprove" :saving="saving" @edit="editInput" @cancel="cancelInput" @approve="approveInput" @reverse-benefit="reverseBenefitInput" /></td></tr></tbody></table></div>
+            <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="input in inputs" :key="input.id" class="rounded-lg border border-neutral-200 p-4" :class="isInputSelected(input.id) ? 'border-payroll-300 bg-payroll-50/60' : ''"><div class="flex flex-wrap items-start justify-between gap-2"><label class="flex items-start gap-2"><input v-if="input.status === 'draft' && !batchDisabledInRange" type="checkbox" class="mt-1 rounded border-neutral-300 text-payroll-600" :checked="isInputSelected(input.id)" :aria-label="t('payroll.components.inputs.select_row')" @change="toggleInputSelection(input.id)"><span><span class="block font-semibold text-neutral-900">{{ input.employee_name }}</span><span class="block text-xs text-neutral-500">{{ relationLabel(input.relation_type) }} · {{ input.component_code }}</span><span class="block font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</span></span></label><span class="rounded-full px-2 py-1 text-xs font-medium" :class="inputStatusClass(input.status)">{{ t(`payroll.components.input_status.${input.status}`) }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div v-if="rangeMode"><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.period') }}</dt><dd class="font-medium tabular-nums">{{ formatPeriod(input.period_start) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ input.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd class="font-semibold">{{ formatMoney(input.amount_minor) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.source') }}</dt><dd>{{ t(`payroll.components.source.${input.source_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.external_id') }}</dt><dd class="break-all font-mono text-xs">{{ input.external_id ?? '—' }}</dd></div></dl><PayrollInputRowActions class="mt-4" :input="input" :can-write="canWrite" :can-approve="canApprove" :saving="saving" @edit="editInput" @cancel="cancelInput" @approve="approveInput" @reverse-benefit="reverseBenefitInput" /></article></div>
           </template>
           <!--
             Seskupení: jeden řádek na člověka nebo složku se součty. U pěti set
@@ -2090,7 +2345,7 @@ onMounted(load)
                 <button type="button" class="flex min-w-0 cursor-pointer items-start gap-2 text-left" :aria-expanded="group.key in expandedGroups" @click="toggleGroup(group)">
                   <svg class="mt-0.5 h-4 w-4 shrink-0 text-neutral-400 transition-transform" :class="group.key in expandedGroups ? '' : '-rotate-90'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevron" /></svg>
                   <span class="min-w-0">
-                    <span class="block font-medium text-neutral-900">{{ group.label }}</span>
+                    <span class="block font-medium text-neutral-900">{{ effectiveGroupBy === 'period' ? formatPeriod(group.label) : group.label }}</span>
                     <span v-if="group.secondary" class="block font-mono text-[11px] text-neutral-400">{{ group.secondary }}</span>
                   </span>
                 </button>
@@ -2099,9 +2354,10 @@ onMounted(load)
                   <span v-if="group.draft_count > 0" class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700">{{ t('payroll.components.inputs.group_drafts', { count: group.draft_count }) }}</span>
                   <span v-else class="rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-600">{{ t('payroll.components.inputs.group_all_approved') }}</span>
                   <span class="font-semibold text-neutral-900">{{ formatMoney(group.amount_minor) }}</span>
-                  <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" @click="openGroupAsFilter(group)">
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.funnel" /></svg>
-                    {{ t('payroll.components.inputs.group_open') }}
+                  <!-- Měsíc se neotevírá jako filtr, ale jako editovatelné období. -->
+                  <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" :data-testid="`payroll-inputs-group-open-${group.key}`" @click="openGroupAsFilter(group)">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="effectiveGroupBy === 'period' ? ICONS.calendar : ICONS.funnel" /></svg>
+                    {{ effectiveGroupBy === 'period' ? t('payroll.agendas.history.open_month') : t('payroll.components.inputs.group_open') }}
                   </button>
                 </div>
               </div>
@@ -2110,10 +2366,10 @@ onMounted(load)
                 <template v-else>
                   <div v-for="input in expandedGroups[group.key] ?? []" :key="input.id" class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 py-2 last:border-b-0">
                     <label class="flex min-w-0 items-center gap-2 text-sm">
-                      <input v-if="input.status === 'draft'" type="checkbox" class="rounded border-neutral-300 text-payroll-600" :checked="isInputSelected(input.id)" :aria-label="t('payroll.components.inputs.select_row')" @change="toggleInputSelection(input.id)">
+                      <input v-if="input.status === 'draft' && !batchDisabledInRange" type="checkbox" class="rounded border-neutral-300 text-payroll-600" :checked="isInputSelected(input.id)" :aria-label="t('payroll.components.inputs.select_row')" @change="toggleInputSelection(input.id)">
                       <span class="min-w-0">
-                        <span class="block text-neutral-900">{{ inputFilters.groupBy === 'employee' ? input.component_name : input.employee_name }}</span>
-                        <span class="block font-mono text-[11px] text-neutral-400">{{ inputFilters.groupBy === 'employee' ? input.component_code : input.employment_code }} · {{ t(`payroll.components.source.${input.source_kind}`) }}</span>
+                        <span class="block text-neutral-900">{{ effectiveGroupBy === 'employee' ? input.component_name : input.employee_name }}</span>
+                        <span class="block font-mono text-[11px] text-neutral-400">{{ effectiveGroupBy === 'employee' ? input.component_code : input.employment_code }} · {{ t(`payroll.components.source.${input.source_kind}`) }}</span>
                       </span>
                     </label>
                     <div class="flex flex-wrap items-center gap-3">
@@ -2132,7 +2388,7 @@ onMounted(load)
             embedded
             :page="inputsPage"
             :per-page="inputsPageSize"
-            :total="inputFilters.groupBy === null ? inputsTotal : inputGroupTotal"
+            :total="effectiveGroupBy === null ? inputsTotal : inputGroupTotal"
             @update:page="goToInputsPage"
           />
         </section>

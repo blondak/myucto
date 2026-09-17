@@ -22,6 +22,14 @@ import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePicker.vue'
+import PayrollInputHistory from '@/components/payroll/PayrollInputHistory.vue'
+import {
+  payrollPeriodRange,
+  payrollPeriodScopeFromQuery,
+  payrollPeriodScopeToQuery,
+  type PayrollPeriodScope,
+} from '@/pages/payroll/payrollPeriodScope'
 import PayrollQuickFieldState from '@/components/payroll/PayrollQuickFieldState.vue'
 import PayrollQuickColumnMenu from '@/components/payroll/PayrollQuickColumnMenu.vue'
 import type { PayrollQuickColumnGroup } from '@/components/payroll/payrollQuickColumns'
@@ -169,6 +177,42 @@ const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
  * formuláře lidi, které uživatel nevidí.
  */
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
+
+/*
+ * Rozsah období — jen při zúžení na jeden vztah.
+ *
+ * Mřížka je ze své podstaty MĚSÍČNÍ: ukládá se `period` + řádky a server na ni
+ * váže zámek měsíce i kontroly. Rozsah ji proto nerozšiřuje, ale VYSTŘÍDÁ
+ * historií, která je ke čtení. Kdo přijde z karty zaměstnance, se totiž
+ * neptá „co zadám za srpen", ale „co tenhle člověk bral" — a na to měsíční
+ * mřížka odpovědět neumí, ani kdyby se v ní listovalo měsíc po měsíci.
+ */
+const scope = ref<PayrollPeriodScope>(
+  payrollQueryId(route.query, 'employment') === null
+    ? 'month'
+    : payrollPeriodScopeFromQuery(route.query),
+)
+const scopeRange = computed(() => payrollPeriodRange(scope.value, period.value))
+const historyMode = computed(() =>
+  focusEmploymentId.value !== null && scopeRange.value !== null)
+
+function changeScope(next: PayrollPeriodScope): void {
+  if (scope.value === next) return
+  scope.value = next
+  void router.replace({ query: payrollPeriodScopeToQuery(route.query, next) })
+}
+
+/** Proklik z historie zpět do editovatelného měsíce. */
+function openHistoryPeriod(next: string): void {
+  period.value = next
+  scope.value = 'month'
+  void router.replace({
+    query: { ...payrollPeriodScopeToQuery(route.query, 'month'), period: next },
+  })
+  offset.value = 0
+  void load()
+}
+
 /*
  * Lišta se zúžením musí být vidět i tehdy, když zúžení nedalo nic. Bez ní zůstane
  * prázdná tabulka a uživatel nemá jak poznat, že se dívá na zúžený seznam — ani
@@ -184,14 +228,22 @@ const focusName = computed(() => {
     ? rows.value[0].full_name
     : t('payroll.agendas.focus.unknown_person')
 })
-/** Server zúžení uplatnil a nezbylo nic — prázdno se musí pojmenovat, ne mlčet. */
+/**
+ * Server zúžení uplatnil a nezbylo nic — prázdno se musí pojmenovat, ne mlčet.
+ *
+ * V historii se ale mlčí schválně: ta se ptá na rozsah, ne na vybraný měsíc,
+ * a „v tomhle měsíci nic není" by pod tabulkou plnou měsíců znělo jako chyba.
+ */
 const focusMissing = computed(() =>
   focusEmploymentId.value !== null && !loading.value && !loadFailed.value
+  && !historyMode.value
   && loadedPeriod.value === period.value && rows.value.length === 0)
 
 function clearFocus(): void {
   focusEmploymentId.value = null
-  const query = { ...route.query }
+  // Historie bez zúžení nedává smysl — byla by to historie celé firmy.
+  scope.value = 'month'
+  const query = payrollPeriodScopeToQuery(route.query, 'month')
   delete query.employment
   void router.replace({ query })
   reload()
@@ -1407,6 +1459,17 @@ onMounted(() => {
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.quick_inputs.subtitle') }}</p>
       </div>
       <div class="flex flex-wrap items-end gap-2">
+        <!-- Rozsah se nabízí jen u jednoho člověka; nad celou firmou by „vše"
+             znamenalo vypsat roky práce všech zaměstnanců najednou. -->
+        <label v-if="focusEmploymentId !== null" class="block">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.agendas.scope.label') }}</span>
+          <PayrollPeriodScopePicker
+            :model-value="scope"
+            :year="period.slice(0, 4)"
+            :disabled="loading || saving"
+            @update:model-value="changeScope"
+          />
+        </label>
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.quick_inputs.period') }}</span>
           <input
@@ -1425,7 +1488,7 @@ onMounted(() => {
       </div>
     </header>
 
-    <div class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
+    <div v-if="!historyMode" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       <p>{{ t('payroll.quick_inputs.info') }}</p>
       <p class="mt-1 font-medium text-payroll-800">{{ t('payroll.quick_inputs.gross_preview_hint') }}</p>
     </div>
@@ -1459,7 +1522,7 @@ onMounted(() => {
     </div>
 
     <div
-      v-if="rows.length && hasInvalidRows"
+      v-if="rows.length && hasInvalidRows && !historyMode"
       class="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800"
       role="alert"
       data-testid="quick-payroll-validation-summary"
@@ -1481,10 +1544,23 @@ onMounted(() => {
     />
 
     <!--
+      Historie VYSTŘÍDÁ mřížku, neschovává se pod ni: mřížka je editace jednoho
+      měsíce, historie je čtení mnoha měsíců. Obojí naráz by na obrazovce
+      nechalo dvě různá období vedle sebe a částku by šlo zapsat do jiného,
+      než na které se člověk dívá.
+    -->
+    <PayrollInputHistory
+      v-if="historyMode && scopeRange && focusEmploymentId !== null"
+      :employment-id="focusEmploymentId"
+      :range="scopeRange"
+      @open="openHistoryPeriod"
+    />
+
+    <!--
       Prázdno po zúžení pojmenovává už lišta nad seznamem. Generický prázdný
       stav pod ní by totéž řekl podruhé, a ještě obecněji.
     -->
-    <section v-if="!focusMissing" class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
+    <section v-else-if="!focusMissing" class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <!--
         Lišta stojí MIMO přepínání načítání a prázdna: pole hledání se nesmí
         při každém dotazu zničit a vzít uživateli kurzor uprostřed psaní.
@@ -2584,7 +2660,7 @@ onMounted(() => {
       </template>
     </section>
 
-    <div v-if="rows.length" class="flex flex-wrap justify-end gap-2 lg:sticky lg:bottom-4">
+    <div v-if="rows.length && !historyMode" class="flex flex-wrap justify-end gap-2 lg:sticky lg:bottom-4">
       <RouterLink
         :to="{ name: 'payroll-runs' }"
         :class="[btnOutline('primary'), 'w-full sm:w-auto']"

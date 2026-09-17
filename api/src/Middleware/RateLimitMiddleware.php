@@ -381,11 +381,14 @@ final class RateLimitMiddleware implements MiddlewareInterface
         // Legitimní použití je jednotky případů denně (účetní si otevře kartu),
         // takže přísný vlastní bucket nikoho neomezí, ale hromadnou exfiltraci
         // zpomalí na viditelnou rychlost. Klíčem je uživatel, ne IP — právo
-        // `payroll.person.read_sensitive` je vázané na účet.
+        // `payroll.person.read_sensitive` je vázané na účet. Odkrytí OIČ / ID PPV
+        // na kartě vztahu sdílí TENTÝŽ bucket: je to stejná třída operace pod
+        // stejným právem, takže vlastní limit by dal obcházení druhou cestou.
         if ($userId > 0
             && $method === 'POST'
             && preg_match(
-                '#^/api/payroll/people/[0-9]+/sensitive-reveal$#',
+                '#^/api/payroll/(people/[0-9]+/sensitive-reveal'
+                . '|jmhz/identities/[0-9]+/reveal)$#',
                 $path,
             ) === 1
         ) {

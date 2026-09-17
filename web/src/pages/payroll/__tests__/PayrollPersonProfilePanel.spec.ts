@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   updatePersonPayoutRule: vi.fn(),
   deactivatePersonPayoutRule: vi.fn(),
   applyPersonPayoutRuleDefaults: vi.fn(),
+  revealPersonSensitive: vi.fn(),
   countries: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('@/api/payroll', () => ({
     updatePersonPayoutRule: mocks.updatePersonPayoutRule,
     deactivatePersonPayoutRule: mocks.deactivatePersonPayoutRule,
     applyPersonPayoutRuleDefaults: mocks.applyPersonPayoutRuleDefaults,
+    revealPersonSensitive: mocks.revealPersonSensitive,
   },
 }))
 
@@ -177,11 +179,12 @@ function payoutRulesResponse(rules: PayrollPayoutRule[] = [payoutRule()]): Payro
   }
 }
 
-async function mountedPanel() {
+async function mountedPanel(canReadSensitive = false) {
   const wrapper = mount(PayrollPersonProfilePanel, {
     props: {
       personId: 17,
       canWrite: true,
+      canReadSensitive,
     },
   })
   await flushPromises()
@@ -235,6 +238,14 @@ describe('PayrollPersonProfilePanel', () => {
       row_version: 3,
     })
     mocks.applyPersonPayoutRuleDefaults.mockResolvedValue(payoutRulesResponse())
+    mocks.revealPersonSensitive.mockResolvedValue({
+      employee_id: 17,
+      identifiers: [{ id: 4, identifier_type: 'birth_number', value: '9001011234' }],
+      contacts: [{ id: 3, contact_type: 'email', value: 'test@example.cz' }],
+      accounts: [{ id: 5, label: 'Výplata', bank_account: '1000000005/0100' }],
+      dependants: [],
+      addresses: [],
+    })
   })
 
   it('zobrazuje pouze maskované citlivé hodnoty', async () => {
@@ -247,6 +258,34 @@ describe('PayrollPersonProfilePanel', () => {
     await openPayout(wrapper)
     expect(wrapper.text()).toContain('••••••0005/0100')
     expect(wrapper.get<HTMLInputElement>('[data-test="bank-account-plaintext"]').element.value).toBe('')
+  })
+
+  /**
+   * Celé číslo účtu se dřív nedalo přečíst jinak než přepsáním — tedy změnou
+   * toho, co si uživatel jen chtěl ověřit.
+   */
+  it('odkryje po kliknutí na Zobrazit plné číslo účtu', async () => {
+    const wrapper = await mountedPanel(true)
+    await openPayout(wrapper)
+    expect(wrapper.get('[data-test="profile-account-value"]').text()).toBe('••••••0005/0100')
+
+    await wrapper.get('[data-test="profile-account-reveal"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.revealPersonSensitive).toHaveBeenCalledWith(17)
+    expect(wrapper.get('[data-test="profile-account-value"]').text()).toBe('1000000005/0100')
+
+    await wrapper.get('[data-test="profile-account-reveal"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="profile-account-value"]').text()).toBe('••••••0005/0100')
+  })
+
+  it('bez oprávnění na citlivé údaje tlačítko Zobrazit nenabídne', async () => {
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    expect(wrapper.find('[data-test="profile-account-reveal"]').exists()).toBe(false)
   })
 
   it('nezobrazuje uživateli technickou row_version', async () => {

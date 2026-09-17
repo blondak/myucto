@@ -154,10 +154,33 @@ final class PayrollInputExportFormatter
         return $text === '-0' ? '0' : $text;
     }
 
-    /** `2026-06-01` → `06/2026`. */
-    public static function periodLabel(string $periodStart): string
+    /**
+     * `2026-06-01` → `06/2026`; s rozsahem `01/2026 – 08/2026`.
+     *
+     * Rozsah se do popisku musí dostat celý. Filtr `period_to` export přijímá
+     * (čte se jím historie jednoho vztahu), ale hlavička odvozená jen ze
+     * začátku by osmiměsíční sestavu označila jako jediný měsíc — a to je
+     * tvrzení o obsahu, které v exportu nikdo nemá jak ověřit.
+     */
+    public static function periodLabel(string $periodStart, ?string $periodEnd = null): string
     {
-        return substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4);
+        $start = substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4);
+        if ($periodEnd === null || substr($periodEnd, 0, 7) === substr($periodStart, 0, 7)) {
+            return $start;
+        }
+
+        return $start . ' – ' . substr($periodEnd, 5, 2) . '/' . substr($periodEnd, 0, 4);
+    }
+
+    /** Období v názvu souboru: `2026-06`, u rozsahu `2026-01_2026-08`. */
+    public static function periodSlug(string $periodStart, ?string $periodEnd = null): string
+    {
+        $start = substr($periodStart, 0, 7);
+        if ($periodEnd === null || substr($periodEnd, 0, 7) === $start) {
+            return $start;
+        }
+
+        return $start . '_' . substr($periodEnd, 0, 7);
     }
 
     /**

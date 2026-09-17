@@ -35,6 +35,12 @@ final class PayrollInputsAction
         private readonly IpMatcher $ipMatcher,
     ) {}
 
+    /**
+     * Výpis mzdových vstupů: jeden měsíc (`period`), nebo rozsah měsíců
+     * (`period` + `period_to`) — na kartě zaměstnance se seznam čte jako
+     * historie vztahu, ne jako jeden měsíc. Se `group_by=period` se rozsah
+     * svine na řádek na měsíc.
+     */
     public function list(Request $request, Response $response): Response
     {
         if (($error = $this->authorize($request, $response, AccessLevel::READ, null, true)) !== null) {
@@ -56,7 +62,9 @@ final class PayrollInputsAction
             if ($groupBy !== null && $groupBy !== ''
                 && !in_array($groupBy, PayrollInputFilter::GROUP_BY, true)
             ) {
-                throw new \InvalidArgumentException('group_by smí být employee nebo component.');
+                throw new \InvalidArgumentException(
+                    'group_by smí být employee, component nebo period.',
+                );
             }
             $grouped = is_string($groupBy) && $groupBy !== '';
             $summary = $this->inputs->summary($supplierId, $filter);
@@ -66,7 +74,12 @@ final class PayrollInputsAction
             $groups = $grouped
                 ? $this->inputs->groups($supplierId, $filter, $groupBy, $limit, $offset)
                 : null;
-            $facets = $this->inputs->facets($supplierId, $filter->periodStart, $filter->employmentId);
+            $facets = $this->inputs->facets(
+                $supplierId,
+                $filter->periodStart,
+                $filter->employmentId,
+                $filter->periodEnd,
+            );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
@@ -263,6 +276,14 @@ final class PayrollInputsAction
      * Filtr hromadné akce: `period` + volitelné `filter` (tytéž klíče jako
      * výpis). Starší tvar `{period, employment_id}` platí dál.
      *
+     * Rozsah období (`period_to`) se tudy VĚDOMĚ nepustí a odmítne se jako
+     * chyba vstupu. Hromadné schválení a zrušení jede přes `approveByFilter()` /
+     * `cancelByFilter()`, tedy přes všechny koncepty odpovídající filtru —
+     * s rozsahem by jedno kliknutí sáhlo i na uzavřené měsíce, které uživatel
+     * má na obrazovce jen jako historii. Tiché ignorování by bylo horší než
+     * odmítnutí: prohlížeč by poslal rozsah, dostal 200 a nikde by se
+     * nedozvěděl, že se zpracoval jediný měsíc.
+     *
      * @param array<string,mixed> $body
      */
     private function batchFilter(array $body): PayrollInputFilter
@@ -272,6 +293,14 @@ final class PayrollInputsAction
             throw new \InvalidArgumentException('filter musí být objekt.');
         }
         /** @var array<string,mixed> $filter */
+        foreach ([$body['period_to'] ?? null, $filter['period_to'] ?? null] as $periodTo) {
+            if ($periodTo !== null && $periodTo !== '') {
+                throw new \InvalidArgumentException(
+                    'Hromadná akce jede vždy nad jedním obdobím; period_to tu není '
+                    . 'podporované.',
+                );
+            }
+        }
         if (!array_key_exists('employment_id', $filter) && array_key_exists('employment_id', $body)) {
             $filter['employment_id'] = $body['employment_id'];
         }

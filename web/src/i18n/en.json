@@ -1408,8 +1408,34 @@
         "title": "The list is narrowed to {name}.",
         "missing": "Narrowing (no. {name}) returned no record for this selection — the employment or person does not belong to this company, did not exist in the period, or the link is stale.",
         "missing_named": "The list is narrowed to {name}, but no record is left in this selection — the employment or person does not belong to this company, did not exist in the period, or the link is stale.",
+        "empty_named": "The list is narrowed to {name}. There is no record in this selection yet — the link itself is fine.",
         "unknown_person": "the selected employee",
         "clear": "Clear narrowing"
+      },
+      "scope": {
+        "label": "Range",
+        "legend": "Period range",
+        "month": "Month",
+        "year": "Year",
+        "all": "All",
+        "month_hint": "The selected period only.",
+        "year_hint": "The whole year of the selected period.",
+        "all_hint": "The complete history of this employment.",
+        "all_periods": "all periods"
+      },
+      "history": {
+        "title": "Monthly history",
+        "subtitle": "One row per month; expand a row for the individual inputs.",
+        "month_count": "Months: {n}",
+        "period": "Period",
+        "count": "Inputs",
+        "draft_count": "Of which drafts",
+        "amount": "Total amount",
+        "open_month": "Open month",
+        "detail": "Breakdown",
+        "load_failed": "The history could not be loaded.",
+        "empty_title": "No payroll input in this range",
+        "empty_description": "Try a wider range, or enter inputs in the monthly view."
       }
     },
     "rulesets": {
@@ -2953,7 +2979,17 @@
         "delete_failed": "The recurring assignment cannot be deleted. If it has already created a payroll input, end its validity or deactivate it.",
         "materialize": "Create monthly inputs",
         "materialized": "Created {created_count}, already existed {replayed_count}, manual review {manual_review_count}.",
-        "materialize_failed": "The recurring assignments could not be materialized."
+        "materialize_failed": "The recurring assignments could not be materialized.",
+        "all_periods": "The list shows the whole assignment history regardless of the selected period; the status column tells you what applies today.",
+        "empty": "No recurring assignment yet",
+        "empty_focused": "This employment has no recurring assignment",
+        "empty_hint": "An assignment defines a component that repeats every month — a meal contribution or a personal bonus, for example.",
+        "state": {
+          "current": "Effective",
+          "scheduled": "Scheduled",
+          "expired": "Ended",
+          "inactive": "Disabled"
+        }
       },
       "inputs": {
         "title": "Monthly payroll inputs",
@@ -3024,9 +3060,12 @@
           "group_none": "Individual inputs",
           "group_employee": "By employee",
           "group_component": "By component",
+          "group_period": "By period",
           "clear": "Clear filters"
         },
         "summary": "{total} inputs · {amount} · {drafts} drafts",
+        "range_summary": "Range: {period} — showing the history of this employment.",
+        "batch_range_blocked": "Bulk approval and cancellation always run over a single period, so they are not offered for a range. Switch the range back to Month and pick a period.",
         "approve_matching": "Approve {count} matching the filter",
         "cancel_matching": "Cancel {count} drafts",
         "cancel_matching_confirm": "Cancel {count} drafts matching the filter? They disappear from the list and stop blocking the payroll run. This cannot be undone.",
@@ -3131,6 +3170,7 @@
         "maximum": "Maximum amount (CZK)",
         "note": "Note",
         "quantity": "Quantity",
+        "period": "Period",
         "source_period": "Source period",
         "external_id": "External identifier",
         "source": "Source",
@@ -3630,6 +3670,18 @@
       "reopened": "The month was reopened with an audit trail.",
       "reopen_failed": "The month could not be reopened.",
       "reopen_reason_required": "Fill in the correction reason. It is written into the month audit trail.",
+      "history": {
+        "title": "Month-by-month history",
+        "subtitle": "Summaries of the individual months of this employment. Entering and correcting attendance stays in the “Month” range.",
+        "period": "Period",
+        "records": "Records",
+        "records_value": "{shifts} shifts · {entries} entries",
+        "open_month": "Open month",
+        "empty": "No months in the selected range",
+        "empty_hint": "Pick another year or switch the range to “All”.",
+        "load_failed": "The attendance history could not be loaded.",
+        "range": "Range {from} to {to}"
+      },
       "jmhz": {
         "title": "Confirm JMHZ work summary",
         "hint": "The figures are prefilled from the records. Check them and confirm — the app does not round or infer them.",
@@ -4275,6 +4327,9 @@
         "accounts_title": "Payroll bank targets",
         "mask_hint": "Sensitive data is only shown in masked form. Enter a new value only when changing it.",
         "current_masked": "Current masked value",
+        "reveal": "Show",
+        "hide": "Hide",
+        "reveal_failed": "The values could not be shown.",
         "keep_masked": "Leave blank to keep unchanged",
         "add_identity": "Add name",
         "add_address": "Add address",
@@ -4601,6 +4656,9 @@
         "confirm_required": "Tick the confirmation that the values match the ČSSZ record.",
         "permission_required": "Saving requires permission to edit both the person and the employment.",
         "correct": "Correct",
+        "reveal": "Show",
+        "hide": "Hide",
+        "reveal_failed": "The full identifier value could not be shown.",
         "correction_hint": "You are correcting a manually typed number. The previous value is discarded and replaced by what you save. Submissions already sent stay unchanged."
       },
       "openings": {
@@ -24821,8 +24879,8 @@
       "messages_truncated": "more messages",
       "people_not_found": "relations without a counterpart in the company",
       "people_failed": "details not written",
-      "children": "dependent children with the tax credit",
-      "children_without_credit": "children without a claim at this employer",
+      "children": "children with a tax credit",
+      "children_without_credit": "persons with a child without a credit to fill in",
       "identity": "persons with citizenship and birth place filled in",
       "person_card": "person cards with address and contact",
       "tax_residence": "tax residencies",

@@ -1140,6 +1140,109 @@ final readonly class PayrollRegistrationIdentityService
     }
 
     /**
+     * Plná hodnota obou identifikátorů k rozhodnému dni.
+     *
+     * Oprávnění, povinný důvod a auditní stopu drží
+     * {@see \MyInvoice\Service\Payroll\Security\PayrollJmhzIdentifierRevealService},
+     * který je jediným volajícím — tahle metoda sama nic z toho nekontroluje.
+     * Bydlí tady proto, aby odkrytí četlo TUTÉŽ evidenci a platilo pro něj
+     * stejné zúžení na dobu trvání vztahu jako pro maskovaný stav výš; druhá
+     * kopie těch pravidel by se rozešla při první změně.
+     *
+     * @return array{
+     *   employee_id:int,
+     *   person_external_identifier:?array{id:int,value:string},
+     *   employment_external_identifier:?array{id:int,value:string}
+     * }
+     */
+    public function jmhzIdentifierPlaintextAt(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+        string $onDate,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->environment($environment);
+        $this->date($onDate, 'Rozhodné datum');
+
+        $employment = $this->repository->employment(
+            $supplierId,
+            $employmentId,
+        );
+        if ($employment === null) {
+            throw new \OutOfBoundsException(self::EMPLOYMENT_NOT_FOUND);
+        }
+        if ($employment['start_date'] === null) {
+            throw new \InvalidArgumentException(self::fieldMessage(
+                'contract_start_on',
+                'chybí. Bez dne nástupu nejde určit, do jakého období '
+                . 'identifikátory od ČSSZ patří.',
+            ));
+        }
+        if ($onDate < $employment['start_date']
+            || ($employment['end_date'] !== null
+                && $onDate > $employment['end_date'])
+        ) {
+            throw new \InvalidArgumentException(self::DATE_OUTSIDE_EMPLOYMENT);
+        }
+
+        $person = $this->repository->personExternalIdAt(
+            $supplierId,
+            $employment['employee_id'],
+            $environment,
+            'ik_mpsv',
+            $onDate,
+        );
+        $employmentExternal = $this->repository->externalIdAt(
+            $supplierId,
+            $employmentId,
+            $environment,
+            'id_ppv',
+            $onDate,
+        );
+
+        return [
+            'employee_id' => $employment['employee_id'],
+            'person_external_identifier' => $person === null
+                ? null
+                : $this->plainExternalIdentifier($this->revealExternalIdentifier(
+                    $person,
+                    PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                    $supplierId,
+                    PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
+                )),
+            'employment_external_identifier' => $employmentExternal === null
+                ? null
+                : $this->plainExternalIdentifier($this->revealExternalIdentifier(
+                    $employmentExternal,
+                    PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                    $supplierId,
+                    PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
+                )),
+        ];
+    }
+
+    /**
+     * Do odpovědi jde jen identita řádku a hodnota. Původ, platnost ani otisk
+     * podkladu s odkrytím nesouvisí a maskovaný stav je už vydal.
+     *
+     * @param array{
+     *   id:int,identifier_type:string,value:string,valid_from:string,
+     *   valid_to:?string,source_kind:string,source_receipt_id:?int,
+     *   source_reference_hash:string,row_version:int
+     * } $identifier
+     * @return array{id:int,value:string}
+     */
+    private function plainExternalIdentifier(array $identifier): array
+    {
+        return [
+            'id' => $identifier['id'],
+            'value' => $identifier['value'],
+        ];
+    }
+
+    /**
      * Ruční doplnění z karty vztahu. Obě hodnoty se ukládají v jedné
      * transakci; již existující část dvojice lze vynechat.
      *
@@ -2105,13 +2208,15 @@ final readonly class PayrollRegistrationIdentityService
         array $stored,
         PayrollSensitiveField $field,
         int $supplierId,
+        PayrollRevealPurpose $purpose =
+            PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
     ): array {
         $plaintext = $this->sensitiveData->reveal(
             (string) $stored['value_ciphertext'],
             $field,
             $supplierId,
             (int) $stored['id'],
-            PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
+            $purpose,
         );
         $hash = $this->sensitiveData->lookupHash(
             $plaintext,

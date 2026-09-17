@@ -17,6 +17,24 @@ Zaměstnanec musí mít aktivní vztah a přiřazený pracovní režim. Uživate
 5. Vyřešte varování a schvalte měsíc; teprve schválením vzniknou zákonné
    příplatky a období je připravené pro mzdový běh.
 
+### 77.3.1 Historie po měsících
+
+Když je seznam zúžený na jeden pracovní vztah (například odkazem **Docházka**
+z karty zaměstnance), nabídne se vedle pole **Období** volba rozsahu
+**Měsíc / Rok / Vše**.
+
+- **Měsíc** je běžné zadávání: měsíční mřížka, import i hromadné schválení.
+- **Rok** a **Vše** přepnou obrazovku na čtení. Místo mřížky se vypíše historie
+  po měsících — každý řádek je jeden měsíc s fondem, plánem, skutečností,
+  rozdílem a stavem, tedy stejnými čísly, jaká za ten měsíc ukazuje rozsah
+  **Měsíc**. Delší historie se listuje po stránkách.
+- Rok volby **Rok** se řídí vybraným obdobím: přepnutím pole **Období** na jiný
+  rok se přepne i výpis.
+- Tlačítkem **Otevřít měsíc** se z řádku vrátíte do zadávání na zvolený měsíc.
+
+Zvolený rozsah je součástí adresy, takže obnovení stránky ani sdílený odkaz ho
+nezahodí. Zrušením zúžení na jeden vztah se rozsah vrací na **Měsíc**.
+
 ## 77.4 Import docházky z CSV nebo XLSX
 
 Tlačítko **Import** slouží pro docházkové systémy i vlastní tabulku. CSV a XLSX

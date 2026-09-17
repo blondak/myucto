@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 /**
- * Filtr seznamu mzdových vstupů jednoho měsíce.
+ * Filtr seznamu mzdových vstupů jednoho měsíce nebo rozsahu měsíců.
  *
  * Tentýž filtr čte seznam, jeho souhrn i hromadné schválení a zrušení. Kdyby
  * si každá cesta skládala podmínky sama, „Schválit 480 odpovídajících filtru"
@@ -29,7 +29,7 @@ final class PayrollInputFilter
         'correction',
         'travel',
     ];
-    public const GROUP_BY = ['employee', 'component'];
+    public const GROUP_BY = ['employee', 'component', 'period'];
     private const Q_MAX_LENGTH = 100;
     private const LIST_MAX_ITEMS = 200;
 
@@ -38,6 +38,8 @@ final class PayrollInputFilter
      * @param list<string> $componentCodes
      * @param list<string> $sourceKinds
      * @param list<string> $statuses prázdné = všechny kromě zrušených
+     * @param ?string $periodEnd poslední měsíc rozsahu (`YYYY-MM-01`);
+     *   null = jediný měsíc `$periodStart`
      */
     public function __construct(
         public readonly string $periodStart,
@@ -49,6 +51,7 @@ final class PayrollInputFilter
         public readonly array $sourceKinds = [],
         public readonly array $statuses = [],
         public readonly ?int $importId = null,
+        public readonly ?string $periodEnd = null,
     ) {
         if ($employmentId !== null && $employmentId <= 0) {
             throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
@@ -58,6 +61,13 @@ final class PayrollInputFilter
         }
         if ($importId !== null && $importId <= 0) {
             throw new \InvalidArgumentException('Importní dávka musí být kladné číslo.');
+        }
+        // Obrácený rozsah by se ve WHERE ztratil jako prázdný výsledek — a to
+        // vypadá stejně jako legitimně prázdný měsíc.
+        if ($periodEnd !== null && $periodEnd < $periodStart) {
+            throw new \InvalidArgumentException(
+                'period_to nesmí být dřív než period.',
+            );
         }
     }
 
@@ -109,6 +119,7 @@ final class PayrollInputFilter
             $sourceKinds,
             $statuses,
             self::optionalId($params['import_id'] ?? null, 'import_id'),
+            self::optionalPeriod($params['period_to'] ?? null, 'period_to'),
         );
     }
 
@@ -132,6 +143,7 @@ final class PayrollInputFilter
             $this->sourceKinds,
             ['draft'],
             $this->importId,
+            $this->periodEnd,
         );
     }
 
@@ -143,8 +155,13 @@ final class PayrollInputFilter
      */
     public function where(int $supplierId): array
     {
-        $sql = 'input.supplier_id = ? AND input.period_start = ?';
-        $params = [$supplierId, $this->periodStart];
+        if ($this->periodEnd === null) {
+            $sql = 'input.supplier_id = ? AND input.period_start = ?';
+            $params = [$supplierId, $this->periodStart];
+        } else {
+            $sql = 'input.supplier_id = ? AND input.period_start BETWEEN ? AND ?';
+            $params = [$supplierId, $this->periodStart, $this->periodEnd];
+        }
         if ($this->statuses === []) {
             $sql .= ' AND input.status <> "cancelled"';
         } else {
@@ -191,6 +208,9 @@ final class PayrollInputFilter
     {
         return [
             'period' => substr($this->periodStart, 0, 7),
+            'period_to' => $this->periodEnd === null
+                ? null
+                : substr($this->periodEnd, 0, 7),
             'employment_id' => $this->employmentId,
             'employee_id' => $this->employeeId,
             'q' => $this->q,
@@ -259,6 +279,23 @@ final class PayrollInputFilter
         }
 
         return $ids;
+    }
+
+    /** Měsíc `YYYY-MM` na první den měsíce — tvar, ve kterém je uložený sloupec. */
+    private static function optionalPeriod(mixed $value, string $name): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_string($value)) {
+            throw new \InvalidArgumentException("{$name} musí být měsíc YYYY-MM.");
+        }
+        $date = \DateTimeImmutable::createFromFormat('!Y-m', $value);
+        if ($date === false || $date->format('Y-m') !== $value) {
+            throw new \InvalidArgumentException("{$name} musí být měsíc YYYY-MM.");
+        }
+
+        return $value . '-01';
     }
 
     private static function optionalId(mixed $value, string $name): ?int

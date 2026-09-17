@@ -156,6 +156,88 @@ final class PayrollInputsExportApiTest extends TestCase
         self::assertSame($this->sorted([...$alfaA, ...$alfaB]), $this->rowKeys($grouped));
     }
 
+    /**
+     * Export přes rozsah měsíců (historie jednoho vztahu) musí obsahovat všechny
+     * měsíce rozsahu a NESMÍ se tvářit jako jediný měsíc: hlavička i název
+     * souboru odvozené jen ze začátku rozsahu tvrdily „06/2026" o sestavě za
+     * půl roku.
+     */
+    public function testRangeExportCoversEveryMonthAndNamesTheWholeRange(): void
+    {
+        $june = $this->insertDrafts($this->alfa, $this->bonusA, 1, 10_000);
+        $march = $this->insertDrafts($this->alfa, $this->bonusA, 1, 30_000, null, null, '2026-03-01');
+        $january = $this->insertDrafts($this->alfa, $this->bonusB, 1, 20_000, null, null, '2026-01-01');
+        // Měsíc před rozsahem do sestavy patřit nesmí.
+        $this->insertDrafts($this->alfa, $this->bonusB, 1, 90_000, null, null, '2025-12-01');
+
+        $range = ['period' => '2026-01', 'period_to' => '2026-06'];
+        $book = $this->exportXlsx($range);
+        self::assertSame(
+            $this->sorted([...$january, ...$march, ...$june]),
+            $this->rowKeys($this->inputsSheet($book)),
+        );
+        self::assertSame('01/2026 – 06/2026', $this->infoValue($book, 'Období'));
+        self::assertStringContainsString(
+            'mzdove-vstupy-2026-01_2026-06.xlsx',
+            $this->callExport('xlsx', $range)->getHeaderLine('Content-Disposition'),
+        );
+        self::assertStringContainsString(
+            'mzdove-vstupy-2026-01_2026-06.pdf',
+            $this->callExport('pdf', $range)->getHeaderLine('Content-Disposition'),
+        );
+
+        // Bez rozsahu zůstává všechno při starém — jeden měsíc, jeden popisek.
+        $single = $this->exportXlsx([]);
+        self::assertSame($june, $this->rowKeys($this->inputsSheet($single)));
+        self::assertSame('06/2026', $this->infoValue($single, 'Období'));
+        self::assertStringContainsString(
+            'mzdove-vstupy-2026-06.xlsx',
+            $this->callExport('xlsx', [])->getHeaderLine('Content-Disposition'),
+        );
+
+        // Obrácený rozsah je chyba vstupu, ne tiše prázdná sestava.
+        self::assertSame(
+            422,
+            $this->callExport('xlsx', ['period' => '2026-06', 'period_to' => '2026-01'])->getStatusCode(),
+        );
+    }
+
+    /**
+     * Rozsah „vše" se na server posílá jako dokořán otevřené meze, protože
+     * `period` je povinné. Ty meze jsou technický sentinel — do hlavičky
+     * sestavy ani do názvu souboru nepatří. Období se proto odvozuje ze
+     * SKUTEČNÝCH řádků, což je i věcně přesnější.
+     */
+    public function testWideRangeIsLabelledByTheRealDataSpanNotBySentinelBounds(): void
+    {
+        $this->insertDrafts($this->alfa, $this->bonusA, 1, 10_000, null, null, '2026-02-01');
+        $this->insertDrafts($this->alfa, $this->bonusB, 1, 20_000, null, null, '2026-05-01');
+
+        $wide = ['period' => '1990-01', 'period_to' => '2099-12'];
+        self::assertSame('02/2026 – 05/2026', $this->infoValue($this->exportXlsx($wide), 'Období'));
+        $disposition = $this->callExport('xlsx', $wide)->getHeaderLine('Content-Disposition');
+        self::assertStringContainsString('mzdove-vstupy-2026-02_2026-05.xlsx', $disposition);
+        self::assertStringNotContainsString('1990', $disposition);
+        self::assertStringNotContainsString('2099', $disposition);
+
+        // Rozsah, ve kterém nic není, žádné rozpětí nemá — meze filtru by
+        // tvrdily, že sestava pokrývá devadesátá léta.
+        $empty = ['period' => '1990-01', 'period_to' => '1999-12'];
+        self::assertSame('bez vstupů', $this->infoValue($this->exportXlsx($empty), 'Období'));
+        self::assertStringContainsString(
+            'mzdove-vstupy-bez-vstupu.xlsx',
+            $this->callExport('xlsx', $empty)->getHeaderLine('Content-Disposition'),
+        );
+
+        // Jediný měsíc je plnohodnotný údaj i bez vstupů; tam se nic nemění.
+        $quiet = ['period' => '2026-09'];
+        self::assertSame('09/2026', $this->infoValue($this->exportXlsx($quiet), 'Období'));
+        self::assertStringContainsString(
+            'mzdove-vstupy-2026-09.xlsx',
+            $this->callExport('xlsx', $quiet)->getHeaderLine('Content-Disposition'),
+        );
+    }
+
     public function testFormulaLikeNamesAreExportedAsLiteralText(): void
     {
         $gama = $this->insertDrafts($this->gama, $this->bonusB, 1, 7_000)[0];
@@ -353,8 +435,10 @@ final class PayrollInputsExportApiTest extends TestCase
         int $amountMinor,
         ?int $importId = null,
         ?int $supplierId = null,
+        ?string $periodStart = null,
     ): array {
         $supplierId ??= $this->supplierId;
+        $periodStart ??= self::PERIOD_START;
         $pdo = $this->db->pdo();
         $values = [];
         $params = [];
@@ -366,7 +450,7 @@ final class PayrollInputsExportApiTest extends TestCase
                 $person[0],
                 $person[1],
                 $componentId,
-                self::PERIOD_START,
+                $periodStart,
                 $amountMinor,
                 $importId === null ? 'manual' : 'import',
                 $importId === null ? null : 'syn-export-' . $componentId . '-' . $index,

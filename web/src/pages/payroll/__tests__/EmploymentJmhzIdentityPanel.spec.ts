@@ -4,12 +4,14 @@ import { flushPromises, mount } from '@vue/test-utils'
 const m = vi.hoisted(() => ({
   get: vi.fn(),
   save: vi.fn(),
+  reveal: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     jmhzIdentity: m.get,
     saveJmhzIdentity: m.save,
+    revealJmhzIdentity: m.reveal,
   },
 }))
 
@@ -57,7 +59,11 @@ const complete = {
   },
 }
 
-function mountPanel(canWriteEmployment = true, canWritePerson = true) {
+function mountPanel(
+  canWriteEmployment = true,
+  canWritePerson = true,
+  canReadSensitive = false,
+) {
   return mount(EmploymentJmhzIdentityPanel, {
     props: {
       employmentId: 17,
@@ -65,6 +71,7 @@ function mountPanel(canWriteEmployment = true, canWritePerson = true) {
       endDate: null,
       canWriteEmployment,
       canWritePerson,
+      canReadSensitive,
     },
   })
 }
@@ -84,6 +91,58 @@ describe('EmploymentJmhzIdentityPanel', () => {
       person_external_identifier: { created: true },
       employment_external_identifier: { created: true },
     })
+    m.reveal.mockResolvedValue({
+      person_external_identifier: { id: 71, value: '1000000001' },
+      employment_external_identifier: { id: 72, value: '200000000000000000002' },
+    })
+  })
+
+  /*
+   * Bez „Zobrazit" vedla k hodnotě jediná cesta — „Opravit", které ji přepíše.
+   * Porovnat číslo s protokolem ČSSZ tak stálo zahození správné hodnoty.
+   */
+  it('odkryje jen ten identifikátor, o který si uživatel řekl', async () => {
+    m.get.mockResolvedValue(complete)
+    const wrapper = mountPanel(true, true, true)
+    await openPanel(wrapper)
+
+    await wrapper.get('[data-test="jmhz-identity-reveal-person"]').trigger('click')
+    await flushPromises()
+
+    expect(m.reveal).toHaveBeenCalledWith(17, 'production', expect.any(String))
+    expect(wrapper.text()).toContain('1000000001')
+    expect(wrapper.text()).not.toContain('200000000000000000002')
+
+    await wrapper.get('[data-test="jmhz-identity-reveal-person"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('1000000001')
+    expect(wrapper.text()).toContain('******0001')
+  })
+
+  it('bez práva na citlivé údaje tlačítko vůbec nenabídne', async () => {
+    m.get.mockResolvedValue(complete)
+    const wrapper = mountPanel()
+    await openPanel(wrapper)
+
+    expect(wrapper.find('[data-test="jmhz-identity-reveal-person"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="jmhz-identity-reveal-employment"]').exists()).toBe(false)
+  })
+
+  /* Odkrytá hodnota patří k prostředí a dni, ke kterému se načetl stav. */
+  it('po přepnutí prostředí odkrytou hodnotu zahodí', async () => {
+    m.get.mockResolvedValue(complete)
+    const wrapper = mountPanel(true, true, true)
+    await openPanel(wrapper)
+    await wrapper.get('[data-test="jmhz-identity-reveal-employment"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('200000000000000000002')
+
+    await wrapper.get('[data-test="jmhz-identity-environment"] [data-test="environment-switch-test"]')
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('200000000000000000002')
+    expect(wrapper.text()).toContain('******************0002')
   })
 
   it('načte identifikátory až po vědomém otevření panelu', async () => {

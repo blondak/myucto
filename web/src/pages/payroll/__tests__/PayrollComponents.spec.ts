@@ -403,8 +403,12 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
-  /** Prázdné zúžení se pojmenuje větou, ne tichou prázdnou tabulkou. */
-  it('names an empty narrowing', async () => {
+  /**
+   * Prázdné zúžení se pojmenuje větou, ne tichou prázdnou tabulkou — ale
+   * u ZNÁMÉHO vztahu bez obviňování odkazu. Vztah 12 je v nabídce, takže
+   * „odkaz zestaral, vztah k firmě nepatří" by o něm lhalo.
+   */
+  it('names an empty narrowing without blaming the link when the relation is known', async () => {
     m.routeQuery = { employment: '12' }
     m.inputs.mockResolvedValue({ total: 0, items: [] })
     const wrapper = mount(PayrollComponents)
@@ -412,7 +416,207 @@ describe('PayrollComponents', () => {
 
     const notice = wrapper.find('[data-test="payroll-focus-notice"]')
     expect(notice.exists()).toBe(true)
-    expect(notice.text()).toContain('payroll.agendas.focus.missing')
+    expect(notice.text()).toContain('payroll.agendas.focus.empty_named')
+    expect(notice.text()).not.toContain('payroll.agendas.focus.missing')
+    wrapper.unmount()
+  })
+
+  /** Vztah, který nikde není, je opravdu slepý odkaz — ten se pojmenovat musí. */
+  it('still reports a narrowing to an unknown relation as a blind link', async () => {
+    m.routeQuery = { employment: '999' }
+    m.inputs.mockResolvedValue({ total: 0, items: [] })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payroll-focus-notice"]').text())
+      .toContain('payroll.agendas.focus.missing')
+    wrapper.unmount()
+  })
+
+  /**
+   * Nabídka vztahů (`/payroll/time/context`) vynechává archivované a
+   * nenastoupivší vztahy, takže odkaz z karty zaměstnance na takový vztah v ní
+   * není. Předpisy přesto existují a server je vrací — seznam je musí vypsat
+   * a lišta nesmí tvrdit, že odkaz zestaral.
+   */
+  it('lists recurring assignments of a relation missing from the offer without calling the link stale', async () => {
+    m.routeQuery = { employment: '48', tab: 'recurring' }
+    m.recurringComponents.mockResolvedValue({
+      recurring_components: [{
+        id: 77,
+        employee_id: 40,
+        employment_id: 48,
+        employee_name: 'Syntetická Archivní',
+        employment_code: 'SYN-ARCH',
+        component_id: 5,
+        component_name: 'Syntetická odměna',
+        component_code: 'SYN_BONUS',
+        calculation_kind: 'fixed_amount',
+        amount_minor: 25000,
+        rate_basis_points: null,
+        valid_from: '2024-01-01',
+        valid_to: '2025-12-31',
+        allocation_rule: 'full_month',
+        maximum_amount_minor: null,
+        note: null,
+        is_active: true,
+        row_version: 1,
+      }],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="payroll-focus-notice"]')
+    expect(notice.text()).toContain('payroll.agendas.focus.title')
+    expect(notice.text()).not.toContain('payroll.agendas.focus.missing')
+    expect(wrapper.get('[data-layout="desktop"]').text()).toContain('SYN-ARCH')
+    // Předpis skončil loni — v celé historii se nesmí tvářit jako platný.
+    expect(wrapper.get('[data-layout="desktop"]').find('[data-state]').attributes('data-state'))
+      .toBe('expired')
+    expect(wrapper.find('[data-testid="payroll-recurring-all-periods"]').exists()).toBe(true)
+    // Server předpisy podle období nefiltruje, takže přepínač rozsahu by tu
+    // byl ovládací prvek, který nic nedělá.
+    expect(wrapper.find('[data-test="payroll-scope-picker"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /**
+   * Rozsah se nabízí jen při zúžení na jeden vztah a mění DOTAZ, ne jen pohled:
+   * server dostane `period_to`, jinak by přepínač jen přebarvil tlačítko.
+   */
+  it('sends the month range to the server and to the export while narrowed to one relation', async () => {
+    m.routeQuery = { employment: '12', period: '2026-06', scope: 'year' }
+    const page = await m.inputs()
+    m.inputs.mockResolvedValue({
+      ...page,
+      summary: { total: 3, draft_total: 0, amount_total_minor: 25000, draft_amount_total_minor: 0 },
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payroll-scope-picker"]').exists()).toBe(true)
+    expect(m.inputs).toHaveBeenLastCalledWith(
+      '2026-01',
+      { limit: 100, offset: 0 },
+      12,
+      {},
+      null,
+      '2026-12',
+    )
+
+    await wrapper.get('[data-testid="payroll-inputs-export-xlsx"]').trigger('click')
+    await flushPromises()
+    expect(m.exportInputs).toHaveBeenLastCalledWith('xlsx', '2026-01', 12, { period_to: '2026-12' })
+
+    // Zpátky na měsíc: dotaz je zase jednoměsíční, bez `period_to`.
+    await wrapper.get('[data-test="payroll-scope-month"]').trigger('click')
+    await flushPromises()
+    expect(m.inputs).toHaveBeenLastCalledWith(
+      '2026-06',
+      { limit: 100, offset: 0 },
+      12,
+      {},
+      null,
+    )
+    wrapper.unmount()
+  })
+
+  /**
+   * Meze rozsahu „vše" jsou technický sentinel (1990-01…2099-12; server období
+   * vyžaduje vždy). Do textu na obrazovce se nesmí dostat — „leden 1990 –
+   * prosinec 2099" uživateli neřekne nic a vypadá jako rozbitá data.
+   */
+  it('never shows the sentinel bounds of the whole-history range', async () => {
+    m.routeQuery = { employment: '12', period: '2026-06', scope: 'all' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { listPeriodLabel: string }
+
+    expect(vm.listPeriodLabel).toBe('payroll.agendas.scope.all_periods')
+    expect(wrapper.text()).not.toContain('1990')
+    expect(wrapper.text()).not.toContain('2099')
+
+    // Rok je konkrétní rozpětí, to se vypsat má.
+    await wrapper.get('[data-test="payroll-scope-year"]').trigger('click')
+    await flushPromises()
+    expect(vm.listPeriodLabel).toBe('leden 2026 – prosinec 2026')
+
+    // A měsíční pohled ukazuje dál jen vybraný měsíc.
+    await wrapper.get('[data-test="payroll-scope-month"]').trigger('click')
+    await flushPromises()
+    expect(vm.listPeriodLabel).toBe('červen 2026')
+    wrapper.unmount()
+  })
+
+  /**
+   * V rozsahu je na obrazovce osm měsíců pod sebou. Bez sloupce s obdobím
+   * nejde poznat, který řádek patří kam — desítky řádků téže složky se liší
+   * jen částkou. V měsíčním pohledu by sloupec jen opakoval hlavičku.
+   */
+  it('shows the period column only over a range', async () => {
+    const base = (await m.inputs()).items[0]
+    m.inputs.mockReset()
+    m.inputs.mockResolvedValue({
+      total: 2,
+      items: [
+        { ...base, id: 31, period_start: '2026-06-01', amount_minor: 25000 },
+        { ...base, id: 32, period_start: '2026-02-01', amount_minor: 27000 },
+      ],
+    })
+    m.routeQuery = { employment: '12', period: '2026-06', scope: 'year' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const desktop = wrapper.get('[data-layout="desktop"]')
+    expect(desktop.text()).toContain('payroll.components.fields.period')
+    expect(wrapper.get('[data-testid="payroll-input-period-31"]').text()).toBe('červen 2026')
+    expect(wrapper.get('[data-testid="payroll-input-period-32"]').text()).toBe('únor 2026')
+    expect(wrapper.get('[data-layout="mobile"]').text()).toContain('únor 2026')
+
+    await wrapper.get('[data-test="payroll-scope-month"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-input-period-31"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /** Bez zúžení se rozsah nenabízí — nad celou firmou by „Vše" byl výpis roků všech lidí. */
+  it('does not offer the range without a narrowing', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payroll-scope-picker"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /**
+   * Hromadné akce server nad rozsahem odmítá (422) schválně — jedou nad jedním
+   * obdobím. Tlačítko se proto nad rozsahem nenabízí vůbec a místo něj je
+   * věta, proč tam není.
+   */
+  it('hides the bulk actions over a range and says why', async () => {
+    m.routeQuery = { employment: '12', period: '2026-06', scope: 'all' }
+    const page = await m.inputs()
+    m.inputs.mockResolvedValue({
+      ...page,
+      summary: { total: 12, draft_total: 4, amount_total_minor: 25000, draft_amount_total_minor: 25000 },
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-inputs-approve-all"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payroll-inputs-cancel-matching"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payroll-inputs-select-page"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payroll-inputs-batch-range-note"]').text())
+      .toContain('payroll.components.inputs.batch_range_blocked')
+
+    // Po návratu na měsíc jsou hromadné akce zpátky.
+    await wrapper.get('[data-test="payroll-scope-month"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-inputs-approve-all"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-inputs-batch-range-note"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
