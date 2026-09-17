@@ -1209,16 +1209,34 @@ final class KontrolniHlaseniBuilder
     }
 
     /**
-     * Kód členského státu z prefixu VAT ID, nebo '' když prefix není kód členského státu.
+     * Kód členského státu z prefixu VAT ID, nebo '' když prefix není kód členského státu
+     * anebo hodnota vůbec nevypadá jako DIČ.
      * Slouží dodavateli se sídlem mimo EU, který je přesto registrovaný k DPH v některém
      * členském státě — `k_stat` je „kód státu, který přidělil DIČ registrace k DPH“,
      * takže se řídí registrací, ne sídlem.
+     *
+     * Public static: totéž pravidlo potřebuje AI import přijatých dokladů
+     * ({@see \MyInvoice\Service\Import\AiPdfExtractor::vatIdCountryCandidate}), kde
+     * rozhoduje, jestli přijatá služba půjde na ř. 5, nebo na ř. 12. Kopie pravidla
+     * v importu by se rozešla s touhle tabulkou členských států z dphkh1.xsd — a právě
+     * podle ní se pak plní VetaA2 téhož dokladu.
+     *
+     * Tvarová kontrola není kosmetika: `clients.dic` plní i AI extrakce a formát DIČ se
+     * jen VARUJE, neblokuje ({@see \MyInvoice\Service\Validation::clientWarnings}), takže do pole doteče
+     * i volný text — „DEutschland s.r.o.“ po stržení oddělovačů začíná na `DE`. Bez
+     * kontroly by z toho vznikla vymyšlená identifikace ve VetaA2. Tvar vychází z formátů
+     * DIČ členských států: národní část je 2–12 alfanumerických znaků, obsahuje číslici
+     * a před první číslicí smí stát nejvýš dvojice písmen (AT `U…`, FR dvouznakový
+     * kontrolní prefix) — slovo ani slovo s číslicí uvnitř tím neprojde.
      */
-    private static function euVatIdPrefix(?string $vatId): string
+    public static function euVatIdPrefix(?string $vatId): string
     {
         $s = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim((string) $vatId))) ?? '';
         $prefix = substr($s, 0, 2);
-        return strlen($s) > 2 && in_array($prefix, self::KH_MEMBER_STATE_CODES, true) ? $prefix : '';
+        if (!in_array($prefix, self::KH_MEMBER_STATE_CODES, true)) {
+            return '';
+        }
+        return preg_match('/^(?=[A-Z0-9]{2,12}$)[A-Z]{0,2}\d[A-Z0-9]*$/D', substr($s, 2)) === 1 ? $prefix : '';
     }
 
     /**

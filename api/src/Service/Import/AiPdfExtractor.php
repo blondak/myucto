@@ -12,6 +12,7 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PublicAuthorityFeeText;
@@ -790,9 +791,12 @@ final class AiPdfExtractor
         // český plátce, je DŮVOD reverse charge, ne důvod k vyřazení z DPH. (Tuzemský
         // neplátce sem nespadá: inferReverseCharge je u CZ dodavatele false.)
         if ($reverseCharge) {
-            $country = $this->vendorCountryInfo($vendorId);
             $nature = strtolower(trim((string) ($data['supply_nature'] ?? '')));
             $isGoods = $nature === 'goods';
+            // Přednost prefixu DIČ před zemí sídla jen u SLUŽEB (§ 9 odst. 1 se řídí
+            // registrací k DPH). U zboží rozhoduje fyzický pohyb — pořízení z JČS (§ 16)
+            // vs. dovoz (§ 20/§ 23) — o kterém registrace dodavatele nevypovídá nic.
+            $country = $this->vendorCountryInfo($vendorId, preferVatIdCountry: !$isGoods);
             // Služba: EU → 24e (ř.5), 3. země → 24 (ř.12). Zboží: EU → 23 (ř.3), 3. země → 25 (ř.7).
             $rcClassification = $country['is_eu']
                 ? ($isGoods ? '23' : '24e')
@@ -840,10 +844,26 @@ final class AiPdfExtractor
                 '24e' => 'přijetí služby z EU — ř. 5 + ř. 43',
                 '25'  => 'dovoz zboží ze 3. země — ř. 7 + ř. 43',
             ];
+            // Rozejde-li se země sídla se státem, který dodavateli přidělil DIČ, nesmí to
+            // zůstat jen v logu: doklad kvůli tomu mění řádek přiznání i větu v KH A.2
+            // a platnost registrace umí ověřit (VIES) jen uživatel.
+            $vatIdCountryNote = '';
+            if ($country['iso2'] !== $country['address_iso2']) {
+                $vatIdCountryNote = sprintf(
+                    ' Dodavatel má adresu mimo EU (%s), ale DIČ registrace k DPH v členském státě %s'
+                    . ' — plnění proto jde na ř. 5 a do KH A.2 pod státem %s, ne na ř. 12 jako'
+                    . ' plnění ze 3. země. Ověřte, že jde o platnou registraci k DPH.',
+                    $country['address_iso2'] !== '' ? $country['address_iso2'] : 'země neuvedena',
+                    $country['iso2'],
+                    $country['iso2'],
+                );
+            }
+
             $rcWarning = 'Reverse charge (' . $rcLabels[$rcClassification] . '): položkám byla'
                 . sprintf(' nastavena tuzemská sazba DPH %g %% a klasifikace ', $rcRate) . $rcClassification
                 . ' — daň se samovyměří až v DPH výkazech, částka k úhradě zůstává bez DPH.'
                 . $duzpNote
+                . $vatIdCountryNote
                 . ' Zkontrolujte povahu plnění (zboží = kód 23/25, služba = kód 24/24e).';
             $this->logger->info('AI extractor: reverse charge defaults applied', [
                 'vendor_id' => $vendorId,
@@ -2008,19 +2028,25 @@ final class AiPdfExtractor
      * (pořízení z JČS vs. dovoz ze 3. země). Při selhání lookupu bezpečný default
      * (prázdné iso2 → chová se jako CZ, žádná RC automatika).
      *
-     * Pro EU členství má PŘEDNOST prefix DIČ před zemí sídla: mimoevropská firma
-     * fakturující přes registraci k DPH v JČS (Anthropic, GitHub aj. — adresa v USA,
-     * DIČ `IE…`) je z pohledu § 9 odst. 1 osobou registrovanou v JČS, takže patří na
-     * ř. 5 (kód 24e), ne na ř. 12 jako plnění ze 3. země. Kandidát z prefixu se ověřuje
-     * proti číselníku zemí, takže non-Union OSS prefix `EU…` správně nematchne.
+     * `$preferVatIdCountry` zapíná přednost prefixu DIČ před zemí sídla a smí ho zapnout
+     * JEN větev SLUŽEB: podle § 9 odst. 1 je rozhodná registrace k DPH uvedená na
+     * dokladu, takže mimoevropská firma fakturující přes registraci v JČS (adresa mimo
+     * EU, DIČ `IE…`) patří na ř. 5 (kód 24e), ne na ř. 12 jako plnění ze 3. země.
      *
-     * Prefix `CZ` se záměrně NEuplatní: přepis na tuzemsko by vypnul i samotnou
-     * detekci reverse charge ({@see inferReverseCharge}), což je mimo rozsah téhle
-     * úvahy — zůstává adresní chování.
+     * U ZBOŽÍ se přepínač NEZAPÍNÁ: pořízení z JČS (§ 16) a dovoz (§ 20/§ 23) se liší
+     * fyzickým pohybem zboží, o kterém prefix DIČ neříká nic. Navíc klasifikace `23`
+     * u volajícího přepisuje `tax_date` dopočteným DUZP dle § 25 a na to datum se váže
+     * ČNB kurz — chybné překlopení by posunulo i zdaňovací období a kurz.
      *
-     * @return array{iso2:string, is_eu:bool}
+     * {@see inferReverseCharge} volá bez přepínače záměrně: potřebuje jen test
+     * `iso2 !== 'CZ'`, na který registrace v jiném členském státě nemá vliv.
+     *
+     * `address_iso2` nese zemi sídla i po překlopení — volající podle rozdílu upozorní
+     * uživatele na dokladu.
+     *
+     * @return array{iso2:string, is_eu:bool, address_iso2:string}
      */
-    private function vendorCountryInfo(int $vendorId): array
+    private function vendorCountryInfo(int $vendorId, bool $preferVatIdCountry = false): array
     {
         try {
             $stmt = $this->db->pdo()->prepare(
@@ -2033,51 +2059,51 @@ final class AiPdfExtractor
             if ($row !== false && $row !== null) {
                 $iso2 = strtoupper((string) $row['iso2']);
                 $isEu = (bool) $row['is_eu'];
-                if (!$isEu) {
+                if ($preferVatIdCountry && !$isEu) {
                     $candidate = self::vatIdCountryCandidate((string) ($row['dic'] ?? ''));
-                    if ($candidate !== null && $candidate !== 'CZ' && $this->isEuCountry($candidate)) {
+                    // Prefix `CZ` se záměrně neuplatní: přepis na tuzemsko by vypnul
+                    // i samotnou detekci reverse charge, což je mimo rozsah téhle úvahy.
+                    if ($candidate !== null && $candidate !== 'CZ') {
                         $this->logger->info('AI extractor: země pro RC klasifikaci z prefixu DIČ (přednost před adresou)', [
                             'vendor_id'    => $vendorId,
                             'address_iso2' => $iso2,
                             'vat_iso2'     => $candidate,
                         ]);
-                        return ['iso2' => $candidate, 'is_eu' => true];
+                        return ['iso2' => $candidate, 'is_eu' => true, 'address_iso2' => $iso2];
                     }
                 }
 
-                return ['iso2' => $iso2, 'is_eu' => $isEu];
+                return ['iso2' => $iso2, 'is_eu' => $isEu, 'address_iso2' => $iso2];
             }
         } catch (\Throwable) {
             // fall through na bezpečný default
         }
-        return ['iso2' => '', 'is_eu' => false];
+        return ['iso2' => '', 'is_eu' => false, 'address_iso2' => ''];
     }
 
     /**
-     * Kandidát na ISO2 kód země z prefixu DIČ (VAT ID): dvě úvodní písmena, řecké
-     * `EL` normalizované na `GR`. Bez písmenného prefixu (čistě číselné DIČ, prázdná
-     * hodnota) vrací null. Členství kandidáta v EU ověřuje volající proti číselníku
-     * zemí — tahle metoda je čistá string logika.
+     * ISO2 kód členského státu, který dodavateli přidělil DIČ, nebo null když prefix
+     * není kódem členského státu (`EU…` non-Union OSS, `GB…` po Brexitu) anebo hodnota
+     * vůbec nevypadá jako DIČ.
+     *
+     * Pravidlo ani tabulku členských států tu NEDUPLIKUJEME — obojí drží
+     * {@see KontrolniHlaseniBuilder::euVatIdPrefix}, odkud je bere i VetaA2 kontrolního
+     * hlášení („kód státu, který přidělil DIČ registrace k DPH“). Zařazení dokladu
+     * do přiznání a jeho věta ve výkazu se tak nemůžou rozejít.
+     *
+     * `XI` (Severní Irsko) se ZÁMĚRNĚ neuplatní: Protokol o Irsku/Severním Irsku drží
+     * NI v režimu EU jen pro ZBOŽÍ, pro služby je třetí zemí — a tahle metoda rozhoduje
+     * právě o službách. Řecko se překládá z DPH kódu `EL` na ISO `GR`, protože volající
+     * pracuje s `countries.iso2`.
      */
     public static function vatIdCountryCandidate(string $dic): ?string
     {
-        $prefix = strtoupper(substr(trim($dic), 0, 2));
-        if (!preg_match('/^[A-Z]{2}$/', $prefix)) {
+        $prefix = KontrolniHlaseniBuilder::euVatIdPrefix($dic);
+        if ($prefix === '' || $prefix === 'XI') {
             return null;
         }
 
         return $prefix === 'EL' ? 'GR' : $prefix;
-    }
-
-    /** Je ISO2 kód v číselníku zemí veden jako členský stát EU? */
-    private function isEuCountry(string $iso2): bool
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT 1 FROM countries WHERE iso2 = ? AND COALESCE(is_eu, 0) = 1 LIMIT 1'
-        );
-        $stmt->execute([$iso2]);
-
-        return $stmt->fetchColumn() !== false;
     }
 
     /**

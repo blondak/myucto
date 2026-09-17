@@ -50,6 +50,8 @@ final class AiPdfExtractorUnitTest extends TestCase
     private $isdocParser;
     /** @var IsdocToPurchaseInvoiceMapper&\PHPUnit\Framework\MockObject\MockObject */
     private $isdocMapper;
+    /** @var Connection&\PHPUnit\Framework\MockObject\MockObject */
+    private $conn;
 
     protected function setUp(): void
     {
@@ -68,6 +70,7 @@ final class AiPdfExtractorUnitTest extends TestCase
         // Plánovač je `final` (nejde doubleovat) — složíme reálný nad mockovaným
         // spojením. Testované privátní metody na něj nesahají, takže se nikdy nezeptá DB.
         $conn = $this->createMock(Connection::class);
+        $this->conn = $conn;
         $planner = new \MyInvoice\Service\Oss\OssItemPlanner(
             $conn,
             new \MyInvoice\Service\Oss\OssItemDeriver($conn, new \MyInvoice\Service\Oss\OssRateCodebook($conn)),
@@ -1005,43 +1008,141 @@ final class AiPdfExtractorUnitTest extends TestCase
         self::assertNull($ref->invoke($this->extractor, ''));
     }
 
+    // ── vendorCountryInfo: registrace k DPH vs. sídlo ──────────────────────
+    // Mimoevropská firma fakturující přes registraci k DPH v jiném členském státě
+    // (adresa mimo EU, DIČ `IE…`) je pro § 9 odst. 1 osobou registrovanou v JČS:
+    // přijatá SLUŽBA patří na ř. 5 (kód 24e), ne na ř. 12. U ZBOŽÍ o tom prefix DIČ
+    // nerozhoduje — pořízení z JČS (§ 16) vs. dovoz (§ 20/§ 23) se liší fyzickým
+    // pohybem zboží, takže tam přednost prefixu neplatí.
+    //
+    // Všechna DIČ v testech jsou syntetická (repo je veřejné).
+
+    /**
+     * @return iterable<string, array{0:string, 1:bool, 2:?string, 3:bool, 4:string, 5:bool}>
+     */
+    public static function vendorCountryCases(): iterable
+    {
+        // [ iso2 sídla, is_eu sídla, dic, je to služba?, očekávané iso2, očekávané is_eu ]
+        yield 'sluzba: adresa US + irske DIC → registrace v JCS (r. 5)' => ['US', false, 'IE1234567X', true, 'IE', true];
+        yield 'zbozi: adresa US + irske DIC → zustava 3. zemi (dovoz)' => ['US', false, 'IE1234567X', false, 'US', false];
+        yield 'sluzba: rakouske DIC s pismenem U'                      => ['US', false, 'ATU12345678', true, 'AT', true];
+        yield 'sluzba: recke EL se preklada na ISO GR'                 => ['US', false, 'EL123456789', true, 'GR', true];
+        yield 'sluzba: non-Union OSS prefix EU neni clensky stat'      => ['US', false, 'EU372000000', true, 'US', false];
+        yield 'sluzba: GB po Brexitu neni clensky stat'                => ['GB', false, 'GB123456789', true, 'GB', false];
+        yield 'sluzba: XI (Severni Irsko) je pro sluzby 3. zemi'       => ['US', false, 'XI123456789', true, 'US', false];
+        yield 'sluzba: tuzemsky prefix CZ se neuplatni'                => ['US', false, 'CZ12345678', true, 'US', false];
+        yield 'sluzba: samotne "IE" bez narodni casti neni DIC'        => ['US', false, 'IE', true, 'US', false];
+        yield 'sluzba: volny text v poli DIC neprepne zarazeni'        => ['US', false, 'DEutschland s.r.o.', true, 'US', false];
+        yield 'sluzba: obchodni jmeno s cislici take neprojde'         => ['US', false, 'DEUTSCHLAND12', true, 'US', false];
+        yield 'sluzba: bez DIC rozhoduje adresa'                       => ['US', false, null, true, 'US', false];
+        yield 'sluzba: prazdne DIC rozhoduje adresa'                   => ['US', false, '   ', true, 'US', false];
+        yield 'sluzba: sidlo v EU zustava sidlem (zadny prepis)'       => ['DE', true, 'DE123456789', true, 'DE', true];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('vendorCountryCases')]
+    public function testVendorCountryInfo_prefersVatIdRegistrationOnlyForServices(
+        string $addressIso2,
+        bool $addressIsEu,
+        ?string $dic,
+        bool $isService,
+        string $expectedIso2,
+        bool $expectedIsEu,
+    ): void {
+        $this->givenVendor($addressIso2, $addressIsEu, $dic);
+
+        $info = $this->invokeVendorCountryInfo(1, $isService);
+
+        self::assertSame($expectedIso2, $info['iso2']);
+        self::assertSame($expectedIsEu, $info['is_eu']);
+    }
+
+    public function testVendorCountryInfo_euMembershipDoesNotDependOnEditableCodebook(): void
+    {
+        // `countries.is_eu` je číselník, který si zákazník může v administraci přepsat.
+        // Zákonné zařazení do přiznání na něm viset nesmí: seznam členských států drží
+        // KontrolniHlaseniBuilder (tabulka z dphkh1.xsd), stejně jako pro KH A.2.
+        $this->givenVendor('US', false, 'IE1234567X', codebook: [
+            ['iso2' => 'US', 'is_eu' => 0],
+            ['iso2' => 'IE', 'is_eu' => 0], // přepsaný/rozbitý číselník
+        ]);
+
+        $info = $this->invokeVendorCountryInfo(1, true);
+
+        self::assertSame('IE', $info['iso2']);
+        self::assertTrue($info['is_eu']);
+    }
+
+    public function testVendorCountryInfo_keepsSeatCountryForTheDocumentWarning(): void
+    {
+        // Rozdíl sídlo × stát registrace musí jít vyčíst i po překlopení — volající
+        // na něj upozorňuje uživatele varováním na dokladu (ne jen INFO logem).
+        $this->givenVendor('US', false, 'IE1234567X');
+
+        $info = $this->invokeVendorCountryInfo(1, true);
+
+        self::assertSame('US', $info['address_iso2']);
+        self::assertSame('IE', $info['iso2']);
+    }
+
+    public function testVendorCountryInfo_unknownVendorFallsBackToSafeDefault(): void
+    {
+        $this->givenVendor('US', false, 'IE1234567X');
+
+        $info = $this->invokeVendorCountryInfo(999, true);
+
+        self::assertSame('', $info['iso2']);
+        self::assertFalse($info['is_eu']);
+        self::assertSame('', $info['address_iso2']);
+    }
+
+    /**
+     * Dodavatel #1 nad in-memory číselníkem zemí. Výchozí číselník je ZÁMĚRNĚ úplný
+     * (IE/DE/GR/AT tam jsou a jsou vedené jako EU) — jinak by se testy o prefixu DIČ
+     * mohly „splnit" jen tím, že daná země v číselníku chybí.
+     *
+     * @param list<array{iso2:string, is_eu:int}>|null $codebook
+     */
+    private function givenVendor(string $addressIso2, bool $addressIsEu, ?string $dic, ?array $codebook = null): void
+    {
+        $pdo = new \PDO('sqlite::memory:', null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+        $pdo->exec('CREATE TABLE countries (id INTEGER PRIMARY KEY, iso2 TEXT, is_eu INTEGER)');
+        $pdo->exec('CREATE TABLE clients (id INTEGER PRIMARY KEY, country_id INTEGER, dic TEXT)');
+
+        $rows = $codebook ?? [
+            ['iso2' => 'US', 'is_eu' => 0],
+            ['iso2' => 'IE', 'is_eu' => 1],
+            ['iso2' => 'DE', 'is_eu' => 1],
+            ['iso2' => 'GR', 'is_eu' => 1],
+            ['iso2' => 'AT', 'is_eu' => 1],
+            ['iso2' => 'CZ', 'is_eu' => 1],
+            ['iso2' => 'GB', 'is_eu' => 0],
+        ];
+        $ins = $pdo->prepare('INSERT INTO countries (id, iso2, is_eu) VALUES (?, ?, ?)');
+        $seatId = null;
+        $id = 0;
+        foreach ($rows as $r) {
+            $id++;
+            $isSeat = $r['iso2'] === $addressIso2;
+            $ins->execute([$id, $r['iso2'], $isSeat ? ($addressIsEu ? 1 : 0) : $r['is_eu']]);
+            if ($isSeat && $seatId === null) {
+                $seatId = $id;
+            }
+        }
+        self::assertNotNull($seatId, "Číselník testu neobsahuje zemi sídla {$addressIso2}.");
+        $pdo->prepare('INSERT INTO clients (id, country_id, dic) VALUES (1, ?, ?)')->execute([$seatId, $dic]);
+
+        $this->conn->method('pdo')->willReturn($pdo);
+    }
+
+    /** @return array{iso2:string, is_eu:bool, address_iso2:string} */
+    private function invokeVendorCountryInfo(int $vendorId, bool $isService): array
+    {
+        $ref = new \ReflectionMethod($this->extractor, 'vendorCountryInfo');
+
+        return $ref->invoke($this->extractor, $vendorId, $isService);
+    }
+
     // ── Helper: reflection invokers ────────────────────────────────────────
-
-    // ── vatIdCountryCandidate ───────────────────────────────────────────────
-    // Prefix DIČ jako kandidát země pro RC klasifikaci — mimoevropská firma
-    // fakturující přes registraci v JČS (Anthropic, GitHub: adresa USA, DIČ IE…)
-    // patří na ř. 5 (24e), ne na ř. 12. Členství kandidáta v EU ověřuje volající
-    // proti číselníku zemí, tady se testuje jen čistá string logika.
-
-    public function testVatIdCandidate_irish_dic_returns_ie(): void
-    {
-        self::assertSame('IE', AiPdfExtractor::vatIdCountryCandidate('IE4276970QH'));
-    }
-
-    public function testVatIdCandidate_greek_el_prefix_maps_to_gr(): void
-    {
-        self::assertSame('GR', AiPdfExtractor::vatIdCountryCandidate('EL123456789'));
-    }
-
-    public function testVatIdCandidate_without_letter_prefix_returns_null(): void
-    {
-        self::assertNull(AiPdfExtractor::vatIdCountryCandidate('123456789'));
-        self::assertNull(AiPdfExtractor::vatIdCountryCandidate(''));
-        self::assertNull(AiPdfExtractor::vatIdCountryCandidate('   '));
-        self::assertNull(AiPdfExtractor::vatIdCountryCandidate('1E234'));
-    }
-
-    public function testVatIdCandidate_oss_eu_prefix_is_left_to_country_lookup(): void
-    {
-        // Non-Union OSS DIČ „EU372…" vrátí kandidáta 'EU' — ten v číselníku zemí
-        // neexistuje, takže vendorCountryInfo přepnutí na EU neprovede.
-        self::assertSame('EU', AiPdfExtractor::vatIdCountryCandidate('EU372012345'));
-    }
-
-    public function testVatIdCandidate_trims_and_uppercases(): void
-    {
-        self::assertSame('IE', AiPdfExtractor::vatIdCountryCandidate('  ie6388047V '));
-    }
 
     private function invokeResolvePricesInclVat(array $data, string $documentKind): bool
     {

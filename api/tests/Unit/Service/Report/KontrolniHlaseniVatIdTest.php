@@ -74,6 +74,14 @@ final class KontrolniHlaseniVatIdTest extends TestCase
             '3. země s OSS číslem'      => ['US', false, 'EU372041333', $none],
             '3. země s vlastním číslem' => ['US', false, 'US12-3456789', $none],
             'GB po Brexitu'             => ['GB', false, 'GB123456789', $none],
+            // `clients.dic` plní i AI extrakce a formát DIČ se jen VARUJE, neblokuje
+            // (Validation::clientWarnings), takže do pole doteče i volný text. Po stržení
+            // oddělovačů začíná „DEutschland s.r.o." na kód členského státu — bez tvarové
+            // kontroly by z toho vznikla vymyšlená identifikace ve VetaA2 (a v AI importu
+            // překlopení plnění mezi řádky přiznání).
+            'volný text v poli DIČ'     => ['US', false, 'DEutschland s.r.o.', $none],
+            'obchodní jméno s číslicí'  => ['US', false, 'DEUTSCHLAND12', $none],
+            '3. země s DIČ jen prefix'  => ['US', false, 'IE', $none],
             '3. země bez VAT ID'        => ['US', false, null, $none],
             'EU neplátce (bez VAT ID)'  => ['DE', true,  null, $none],
             'EU s prázdným VAT ID'      => ['DE', true,  '   ', $none],

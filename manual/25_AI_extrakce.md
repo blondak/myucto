@@ -130,21 +130,26 @@ bez DPH), doklad automaticky daňově připraví:
 
 - AI klasifikuje **povahu plnění** (zboží / služba) přímo z dokladu (VIN a vozidlo
   → zboží; SaaS, licence, API → služba).
-- Položky dostanou **tuzemskou sazbu 21 %** a klasifikační kód: **23** (zboží
-  z EU → ř. 3 + ř. 43, KH A.2), **24** (služba), **25** (zboží ze 3. země).
-  Částka k úhradě se nemění — daň zůstává na dokladu nulová, samovyměří se až
-  ve výkazech.
-- O tom, zda jde o **EU, nebo 3. zemi**, rozhoduje přednostně **prefix DIČ**
-  dodavatele a teprve potom země sídla: firma s mimoevropskou adresou fakturující
-  přes registraci k DPH v jiném členském státě (typicky Anthropic či GitHub
-  s irským `IE…` DIČ) je osobou registrovanou v JČS, takže služba od ní patří na
-  ř. 5 (kód **24e**), ne na ř. 12. Non-Union OSS prefix `EU…` členským státem
-  není a zůstává 3. zemí; tuzemský prefix `CZ` se neuplatní.
+- Položky dostanou **tuzemskou sazbu 21 %** a klasifikační kód: **23** (pořízení
+  zboží z EU → ř. 3 + ř. 43, KH A.2), **24e** (služba z EU → ř. 5 + ř. 43, KH A.2),
+  **24** (služba ze 3. země → ř. 12 + ř. 43), **25** (dovoz zboží ze 3. země →
+  ř. 7 + ř. 43). Částka k úhradě se nemění — daň zůstává na dokladu nulová,
+  samovyměří se až ve výkazech.
+- U **služeb** rozhoduje o tom, jestli jde o plnění z EU, nebo ze 3. země,
+  **registrace dodavatele k DPH**, ne jeho adresa. Fakturuje-li firma se sídlem
+  mimo EU přes registraci v některém členském státě (na dokladu má například DIČ
+  začínající `IE`), je to osoba registrovaná v jiném členském státě a služba od ní
+  patří na ř. 5 (kód **24e**), ne na ř. 12. Doklad na to upozorní varováním —
+  ověř, že jde o platnou registraci k DPH.
+- U **zboží** se registrace dodavatele neuplatní a rozhoduje **odkud bylo zboží
+  odesláno**: z jiného členského státu jde o pořízení z EU (kód 23), ze 3. země
+  o dovoz (kód 25). Zkontroluj to na dokladu a případně kód změň.
 - U **pořízení zboží z EU** se dopočítá zákonné **DUZP dle § 25** (15. den
   měsíce po dodání, pokud doklad nebyl vystaven dříve) a k němu se naváže
   **kurz ČNB** — pozdě vystavená faktura tak spadne do správného DPH období.
 - Do dokladu se zapíše **informační varování** s rekapitulací, co se nastavilo
-  — zkontroluj hlavně zboží vs. služba a případně změň kód (23 ↔ 24).
+  — zkontroluj hlavně zboží vs. služba a případně změň kód (zboží 23/25,
+  služba 24/24e).
 
 Detail daňové logiky viz [§ 23.2.7](23_Prijate_faktury.md#2327-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba).
 
