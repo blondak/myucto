@@ -240,7 +240,11 @@ final class InvoiceImporter
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
         );
         // Převedená faktura není OSS: Money S3 v záloze místo plnění pro OSS nedrží,
-        // a kdyby šlo o OSS, podané přiznání za ten rok už je v Money.
+        // a kdyby šlo o OSS, podané přiznání za ten rok už je v Money. Je to ZÁMĚRNÁ
+        // odlišnost od převodu z Pohody, kde členění mimo přiznání prochází
+        // {@see \MyInvoice\Service\Migration\OssMigrationPolicy} - Pohoda na rozdíl od
+        // Money nese na položce sazbu státu spotřeby i měrnou jednotku, takže je z čeho
+        // rozhodovat. Sjednotit to jde teprve tehdy, až půjde z Money zjistit totéž.
         $insertItem = $pdo->prepare(
             'INSERT INTO invoice_items
                 (invoice_id, description, quantity, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,

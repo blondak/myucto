@@ -24873,6 +24873,8 @@
       "without_document": "úhrad bez dokladu",
       "suffixed": "čísel s příponou roku",
       "review": "konceptů k ruční kontrole",
+      "oss_items": "řádků v režimu OSS",
+      "oss_manual_review": "řádků OSS k ručnímu posouzení",
       "changed": "změněno v POHODĚ, ponecháno",
       "without_accounting": "dokladů bez zaúčtování (počáteční stav)",
       "opening_balances": "dokladů počátečního stavu účtu",

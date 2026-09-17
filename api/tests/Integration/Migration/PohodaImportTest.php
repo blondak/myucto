@@ -257,6 +257,166 @@ final class PohodaImportTest extends TestCase
         self::assertSame(3, $this->rows('small_assets', $supplierId));
     }
 
+    /**
+     * Doklad v režimu OSS (členění mimo přiznání, sazba státu spotřeby, odběratel bez DIČ)
+     * se převezme jako OSS plnění, ne jako koncept k ruční kontrole. U e-shopu prodávajícího
+     * do EU jde o stovky až tisíce dokladů ročně - ručně neprůchodné.
+     */
+    public function testOssDocumentIsTakenOverAsOssSupplyNotAsDraft(): void
+    {
+        $supplierId = $this->supplier();
+        $this->enableOss($supplierId);
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, false, true));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $row = $this->ossDocument($supplierId);
+        self::assertNotNull($row, 'Doklad v režimu OSS se nepřevedl. ' . $this->explain($protocol));
+        self::assertNotSame('draft', $row['status'], 'OSS doklad nesmí skončit jako koncept. ' . $this->explain($protocol));
+        self::assertNull($row['vat_classification_code'], 'Do českého přiznání OSS plnění nepatří.');
+        self::assertSame(1, (int) $row['oss_applicable']);
+        self::assertSame(SyntheticPohodaExport::OSS_COUNTRY, $row['oss_consumer_country']);
+        self::assertSame('standard', $row['oss_rate_type']);
+        // Jednotka „ks" je záměrně neutrální a firma nemá CZ-NACE ani výchozí typ na kartě,
+        // takže typ plnění spadne na fallback „služba" - a protokol na to upozorní.
+        self::assertSame('services', $row['oss_supply_type']);
+        self::assertSame(0, (int) $row['oss_needs_manual_review']);
+        self::assertContains('oss_item_warning', $this->messageCodes($protocol), $this->explain($protocol));
+        // Sazba se napárovala ve státě spotřeby, ne v tuzemsku - jinak by slovenská daň
+        // seděla na české sazbě a doklad by nešlo ani otevřít v editoru.
+        self::assertSame(SyntheticPohodaExport::OSS_COUNTRY, $row['rate_country']);
+        self::assertSame('23.00', (string) $row['vat_rate_snapshot']);
+
+        self::assertSame(1, self::stepCounts($protocol, 'issued_invoices')['oss_items'] ?? 0, $this->explain($protocol));
+        self::assertSame(0, self::stepCounts($protocol, 'issued_invoices')['review'] ?? 0, $this->explain($protocol));
+    }
+
+    /**
+     * Bez zapnutého režimu OSS se cizí daň do tuzemského přiznání nepustí ani omylem.
+     * Doklad se nepřevezme (23 % není tuzemská sazba, takže není na co řádek navázat),
+     * ale zbytek agendy doteče a protokol jednou za běh řekne, co zapnout.
+     */
+    public function testOssDocumentIsRefusedWhenOssModeIsOff(): void
+    {
+        $supplierId = $this->supplier();
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, false, true));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+
+        self::assertNull($this->ossDocument($supplierId), 'Cizí daň nesmí do tuzemské větve.');
+        $codes = $this->messageCodes($protocol);
+        self::assertContains('oss_setup', $codes, $this->explain($protocol));
+        self::assertContains('unknown_vat_rate', $codes, $this->explain($protocol));
+        // Ostatní doklady agendy převod dotáhne - jeden vadný doklad ho nesmí zastavit.
+        self::assertSame(1, $this->rows('invoices', $supplierId, "varsymbol = '26FV0001'"), $this->explain($protocol));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "varsymbol = '26PF0001'"), $this->explain($protocol));
+    }
+
+    /**
+     * Firma, která má zahraniční sazbu omylem založenou se zemí CZ (formulář ji tak
+     * předvyplňuje), a vypnutý režim OSS: doklad projde jako koncept k ruční kontrole
+     * a důvod konečně říká, co doplnit. Přesně tenhle stav nahlásil zákazník.
+     */
+    public function testOssDocumentBecomesDraftWithActionableReasonWhenRateLooksDomestic(): void
+    {
+        $supplierId = $this->supplier();
+        $this->domesticRate(SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, false, true));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+
+        $row = $this->ossDocument($supplierId);
+        self::assertNotNull($row, $this->explain($protocol));
+        self::assertSame('draft', $row['status']);
+        self::assertSame(0, (int) $row['oss_applicable']);
+        self::assertNull($row['vat_classification_code'], 'Do českého přiznání nepatří ani jako koncept.');
+
+        $reason = $this->reviewMessage($protocol);
+        self::assertNotNull($reason, $this->explain($protocol));
+        self::assertStringContainsString('OSS', $reason, 'Hláška musí pojmenovat příčinu, ne jen konstatovat členění.');
+    }
+
+    /** @return list<string> */
+    private function messageCodes(ImportProtocol $protocol): array
+    {
+        $codes = [];
+        foreach ($protocol->toArray()['steps'] as $step) {
+            foreach ($step['messages'] ?? [] as $m) {
+                $codes[] = $m['code'];
+            }
+        }
+
+        return $codes;
+    }
+
+    /** Doklad OSS i s položkou a sazbou, na kterou se navázal. @return ?array<string,mixed> */
+    private function ossDocument(int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.status, i.vat_classification_code, it.oss_applicable, it.oss_consumer_country, it.oss_rate_type,
+                    it.oss_supply_type, it.oss_needs_manual_review, it.vat_rate_snapshot, r.country AS rate_country
+               FROM invoices i
+               JOIN invoice_items it ON it.invoice_id = i.id
+               JOIN vat_rates r ON r.id = it.vat_rate_id
+              WHERE i.supplier_id = ? AND i.varsymbol = ?'
+        );
+        $stmt->execute([$supplierId, SyntheticPohodaExport::OSS_DOCUMENT]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return $row === false ? null : $row;
+    }
+
+    private function enableOss(int $supplierId): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE supplier SET oss_enabled = 1, oss_identification_country = 'CZ', oss_return_currency = 'EUR',
+                    oss_valid_from = '2025-01-01', oss_valid_to = NULL WHERE id = ?"
+        )->execute([$supplierId]);
+    }
+
+    /** Sazba státu spotřeby v číselníku DPH sazeb - bez ní se řádek nemá na co navázat. */
+    private function foreignRate(string $country, float $rate): void
+    {
+        $this->rate($country . '-' . (int) $rate, $rate, $country);
+    }
+
+    /** Táž sazba omylem založená jako tuzemská - nejčastější chyba při zakládání sazeb. */
+    private function domesticRate(float $rate): void
+    {
+        $this->rate('CZ-' . (int) $rate, $rate, 'CZ');
+    }
+
+    private function rate(string $code, float $rate, string $country): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT id FROM vat_rates WHERE code = ?');
+        $stmt->execute([$code]);
+        if ($stmt->fetchColumn() !== false) {
+            return;
+        }
+        $pdo->prepare(
+            'INSERT INTO vat_rates (code, rate_percent, country, label_cs, label_en, is_default, is_reverse_charge, valid_from, valid_to, display_order)
+             VALUES (?, ?, ?, ?, ?, 0, 0, "2025-01-01", NULL, 900)'
+        )->execute([$code, $rate, $country, $code, $code]);
+    }
+
+    /** Text hlášky „doklad převzat jako koncept k ruční kontrole". */
+    private function reviewMessage(ImportProtocol $protocol): ?string
+    {
+        foreach ($protocol->toArray()['steps'] as $step) {
+            foreach ($step['messages'] ?? [] as $m) {
+                if ($m['code'] === 'needs_review') {
+                    return (string) $m['text'];
+                }
+            }
+        }
+
+        return null;
+    }
+
     /** Export cizí firmy se do téhle nevmíchá. */
     public function testExportOfAnotherCompanyIsRefused(): void
     {

@@ -33,14 +33,23 @@ final class SyntheticPohodaExport
     /** Karta majetku v tabulkách POHODY (`90_majetek.xml`) a její odpisy v deníku. */
     public const ASSET_NUMBER = '25IM0001';
 
+    /** Doklad v režimu OSS (`$withOss`): 1 000 Kč + SK 23 %, odběratel bez DIČ na Slovensku. */
+    public const OSS_DOCUMENT = '26FV0002';
+    public const OSS_COUNTRY = 'SK';
+    public const OSS_RATE = 23.0;
+
     /**
      * Zapíše export do `$root` (kořen jako rozbalený ZIP) a vrátí složku agendy.
      *
      * `$withAssets`: navíc majetek z datového souboru POHODY - stroj za 120 000 Kč
      * zařazený 15. 1. 2025, odpisová skupina 1, účetně 24 měsíců po 5 000 Kč od ledna
      * 2025; počáteční stavy 022/082 a odpisy leden až březen 2026 v deníku.
+     *
+     * `$withOss`: navíc doklad v režimu OSS tak, jak ho vede POHODA - členění `UN` mimo
+     * přiznání, sazba státu spotřeby (SK 23 %), odběratel bez IČ a DIČ se slovenskou
+     * adresou, měna EUR. V deníku 311/604 a 311/343.090.
      */
-    public static function write(string $root, bool $withAssets = false): string
+    public static function write(string $root, bool $withAssets = false, bool $withOss = false): string
     {
         $dir = rtrim($root, '/\\') . '/' . self::ICO . '_' . self::YEAR;
         if (!is_dir($dir)) {
@@ -49,7 +58,7 @@ final class SyntheticPohodaExport
         self::file($root . '/00_ucetni_jednotky.xml', '<acu:listAccountingUnit version="1.1"><acu:itemAccountingUnit><acu:unitType>doubleEntry</acu:unitType>'
             . '<acu:year>' . self::YEAR . '</acu:year><acu:unitIdentity><typ:address><typ:company>' . self::NAME . '</typ:company><typ:ico>' . self::ICO . '</typ:ico></typ:address></acu:unitIdentity>'
             . '<acu:dataFile>StwPh_' . self::ICO . '_' . self::YEAR . '.mdb</acu:dataFile></acu:itemAccountingUnit></acu:listAccountingUnit>');
-        foreach (self::files($withAssets) as $name => $body) {
+        foreach (self::files($withAssets, $withOss) as $name => $body) {
             self::file($dir . '/' . $name, $body);
         }
         if ($withAssets) {
@@ -94,7 +103,7 @@ final class SyntheticPohodaExport
     }
 
     /** @return array<string,string> soubor => obsah listu */
-    private static function files(bool $withAssets = false): array
+    private static function files(bool $withAssets = false, bool $withOss = false): array
     {
         $journal = self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '221001', '701000', '2026-01-01')
             . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '701000', '411000', '2026-01-01')
@@ -115,8 +124,17 @@ final class SyntheticPohodaExport
             $journal .= self::entry('Přijaté faktury', '26PF0002', 'Nářadí', 1200, '518000', '321001', '2026-02-05')
                 . self::entry('Přijaté faktury', '26PF0002', 'DPH', 252, '343011', '321001', '2026-02-05');
         }
+        if ($withOss) {
+            $journal .= self::entry('Vydané faktury', '26FV0002', 'Zboží na dálku SK', 1000, '311001', '604000', '2026-02-10')
+                . self::entry('Vydané faktury', '26FV0002', 'DPH OSS', 230, '311001', '343090', '2026-02-10');
+        }
 
         $accounts = '';
+        if ($withOss) {
+            foreach (['604000' => 'Tržby za zboží', '343090' => 'DPH OSS'] as $code => $name) {
+                $accounts .= '<lst:itemAccount id="' . $code . '" code="' . $code . '" name="' . $name . '"/>';
+            }
+        }
         if ($withAssets) {
             foreach (['022001' => 'Stroje', '042000' => 'Pořízení majetku', '082001' => 'Oprávky ke strojům', '551000' => 'Odpisy'] as $code => $name) {
                 $accounts .= '<lst:itemAccount id="' . $code . '" code="' . $code . '" name="' . $name . '"/>';
@@ -155,6 +173,24 @@ final class SyntheticPohodaExport
             . '<inv:liquidation><typ:amountHome>500</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
             . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>500</typ:priceNone><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT>'
             . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary></lst:invoice>';
+
+        // Prodej zboží na dálku koncovému zákazníkovi na Slovensko: vlastní členění mimo
+        // české přiznání, sazba státu spotřeby, odběratel bez IČ a DIČ, doklad v EUR.
+        // Přesně takhle se OSS v POHODĚ vede.
+        if ($withOss) {
+            $issued .= '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::OSS_DOCUMENT . '</typ:numberRequested></inv:number>'
+                . '<inv:symVar>260002</inv:symVar><inv:date>2026-02-10</inv:date><inv:dateTax>2026-02-10</inv:dateTax><inv:dateAccounting>2026-02-10</inv:dateAccounting><inv:dateDue>2026-02-24</inv:dateDue>'
+                . '<inv:classificationVAT><typ:ids>UN</typ:ids></inv:classificationVAT><inv:text>Prodej zboží na dálku - SK</inv:text>'
+                . '<inv:partnerIdentity><typ:address><typ:name>Jana</typ:name><typ:surname>Testovacia</typ:surname><typ:city>Bratislava</typ:city>'
+                . '<typ:street>Testovacia 1</typ:street><typ:zip>81101</typ:zip><typ:country><typ:ids>SK</typ:ids></typ:country></typ:address></inv:partnerIdentity>'
+                . '<inv:liquidation><typ:amountHome>1230</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
+                . '<inv:invoiceDetail><inv:invoiceItem><inv:text>Zboží</inv:text><inv:quantity>1.0</inv:quantity><inv:unit>ks</inv:unit><inv:rateVAT value="23">high</inv:rateVAT>'
+                . '<inv:homeCurrency><typ:unitPrice>1000</typ:unitPrice><typ:price>1000</typ:price><typ:priceVAT>230</typ:priceVAT><typ:priceSum>1230</typ:priceSum></inv:homeCurrency></inv:invoiceItem></inv:invoiceDetail>'
+                . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>0</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
+                . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>1000</typ:priceHigh><typ:priceHighVAT rate="23">230</typ:priceHighVAT>'
+                . '<typ:priceHighSum>1230</typ:priceHighSum><typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency>'
+                . '<inv:foreignCurrency><typ:currency><typ:ids>EUR</typ:ids></typ:currency><typ:rate>25</typ:rate><typ:priceSum>49.20</typ:priceSum></inv:foreignCurrency></inv:invoiceSummary></lst:invoice>';
+        }
 
         $received = '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType><inv:number><typ:numberRequested>26PF0001</typ:numberRequested></inv:number>'
             . '<inv:symVar>2026007</inv:symVar><inv:originalDocument>D-2026-7</inv:originalDocument><inv:date>2026-01-12</inv:date><inv:dateTax>2026-01-12</inv:dateTax>'

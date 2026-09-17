@@ -134,6 +134,7 @@ v 32bitovém.
 | adresář | klienti, párování podle IČO |
 | předkontace | pravidla zaúčtování se zkratkou z POHODY |
 | přijaté a vydané faktury | doklady se stavem zaúčtováno nebo uhrazeno; doklad nejisté daňové povahy jako koncept k ruční kontrole |
+| vydané doklady s členěním mimo přiznání a s daní | plnění v režimu OSS včetně země spotřeby a typu sazby |
 | interní daňové doklady | daňové doklady k platbě a samovyměření DPH u přijatých faktur |
 | pokladny a pokladní doklady | pokladny a zaúčtované pokladní doklady |
 | bankovní účty a bankovní doklady | výpisy podle čísla výpisu v POHODĚ, bankovní pohyby |
@@ -169,11 +170,40 @@ a doklady se k němu jen připojí podle čísla dokladu. Z dokladu je proto vid
 jeho zápis a naopak a automatika už doklad znovu nezaúčtuje. Uzávěrkové zápisy
 se nepřebírají. Doklad s datem mimo převáděný rok se zaúčtuje k hranici období.
 
+**Doklady v režimu OSS.** Vydaná faktura, jejíž členění DPH stojí mimo přiznání
+a přesto nese daň, je typicky prodej koncovému zákazníkovi do jiného členského
+státu — v POHODĚ se vede vlastní zkratkou členění bez řádku přiznání, sazbou
+státu spotřeby a odběratelem bez DIČ. Převod takový doklad převezme rovnou jako
+[OSS plnění](45_OSS.md): nastaví na řádcích příznak OSS, zemi spotřeby a typ
+sazby a doklad vstoupí do OSS přiznání, ne do českého. Rozhoduje o tom stejné
+pravidlo jako u všech ostatních cest ([§ 45.4](45_OSS.md#454-jak-vznika-oss-radek)),
+tedy číselník sazeb členských států.
+
+Aby to fungovalo, musí být před převodem splněné dvě věci:
+
+- firma má **zapnutý režim OSS** ([§ 45.3.1](45_OSS.md#4531-zapnuti-rezimu-a-platnost-registrace))
+  s platností pokrývající převáděný rok,
+- v číselníku DPH sazeb jsou **sazby států spotřeby** se správným státem
+  ([§ 45.3.2](45_OSS.md#4532-sazby-dph-pro-cizi-zeme-hlidej-pole-stat) — formulář
+  předvyplňuje `CZ`, což je nejčastější příčina, proč se doklad nepřevede).
+
+Když některá chybí, řekne to protokol jednou větou hned u prvního takového
+dokladu. Doklady, u kterých sazbu není na co navázat, převod nepřevezme a vypíše
+je jmenovitě; po doplnění nastavení stačí převod zopakovat, doplní se jen ony.
+Typ plnění (zboží/služba) se odvozuje z měrné jednotky, karty odběratele a CZ-NACE
+— u e-shopu se zbožím proto před převodem vyplňte
+[výchozí typ plnění na kartě odběratele](45_OSS.md#4534-vychozi-nastaveni-na-karte-odberatele)
+nebo převažující činnost firmy, jinak řádky spadnou na výchozí „služba" (protokol
+na to upozorní).
+
 **Doklady k ruční kontrole.** Fakturu, jejíž daňovou povahu export spolehlivě
 neurčuje, převod převezme jako koncept, například doklad s daní bez členění
 DPH, doklad s neznámým členěním nebo samovyměření bez interního dokladu.
 Koncept nevstoupí do přiznání k DPH, kontrolního hlášení ani do účtování.
 Protokol ho vypíše i s důvodem. Po opravě klasifikace DPH ho potvrďte.
+U dokladů, které vypadaly na OSS a nerozhodlo se o nich, důvod rovnou říká, co
+doplnit; hromadně je pak dorovná akce
+[Nastavit OSS](14_Faktury.md#1432-hromadne-nastaveni-oss) v seznamu faktur.
 
 Pohledávky, závazky a interní doklady mimo přiznání k DPH zůstanou jen jako
 zápisy v deníku, samostatný doklad z nich nevzniká.

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Pohoda;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
+use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Stats\StatsRecomputer;
 
 /**
@@ -38,6 +39,12 @@ use MyInvoice\Service\Stats\StatsRecomputer;
  * **Doklad, jehož daňovou povahu z Pohody spolehlivě neznáme, se převezme jako koncept
  * k ruční kontrole.** Doklad minulého období (Pohoda přenáší neuhrazené doklady do nové
  * agendy) se převezme kvůli saldu a párování úhrad, v deníku roku zápis nemá.
+ *
+ * **Vydaný doklad s členěním mimo přiznání, který nese daň, je typicky plnění v režimu
+ * OSS** (e-shop prodávající koncovým zákazníkům do EU: vlastní zkratka členění bez řádku
+ * přiznání, sazba státu spotřeby, odběratel bez DIČ). Rozhoduje o tom {@see OssMigrationPolicy},
+ * tedy táž autorita jako u ostatních vstupních kanálů; konceptem zůstane jen řádek, který
+ * neprojde ani tudy.
  */
 final class InvoiceImporter
 {
@@ -85,7 +92,7 @@ final class InvoiceImporter
     /** Přihrádky rekapitulace a jejich výchozí sazba, když export `@rate` nenese. */
     private const BUCKETS = ['Low' => 12.0, 'High' => 21.0, '3' => 10.0];
 
-    /** @var array<string,int> */
+    /** @var array<string,?int> `null` = sazba v číselníku není; drží se taky, ať se marný dotaz neopakuje u každého dokladu */
     private array $rateCache = [];
 
     /** @var array<string,\PDOStatement> */
@@ -96,6 +103,7 @@ final class InvoiceImporter
         private readonly PohodaImportRepository $map,
         private readonly PartnerImporter $partners,
         private readonly StatsRecomputer $stats,
+        private readonly OssMigrationPolicy $oss,
     ) {}
 
     public function importIssued(PohodaContext $ctx): void
@@ -211,7 +219,6 @@ final class InvoiceImporter
             return;
         }
         $type = $kind === 'invoice' && $amounts['gross_total'] < 0 ? 'credit_note' : $kind;
-        $review = $class['reasons'] !== [];
         $previous = $this->isPreviousPeriod($ctx, $doc);
         $number = $this->freeNumber('invoices', $ctx->supplierId, $doc['number'], (int) substr($doc['issue'], 0, 4));
         if ($number === null) {
@@ -220,6 +227,10 @@ final class InvoiceImporter
         }
         $snapshot = PartnerImporter::snapshot(PohodaXml::get($doc['h'], 'partnerIdentity'));
         $clientId = $this->partners->resolvePartner($ctx, $snapshot);
+        if (!$this->rateIssuedItems($ctx, $step, $doc, $amounts, $class, $clientId, $snapshot)) {
+            return;
+        }
+        $review = $class['reasons'] !== [];
         $notes = [];
         if ($snapshot['dic'] !== '' && $ctx->vat->forcesA5($doc['vat_class']) && abs($amounts['total']) > self::KH_LIMIT) {
             // Pohoda doklad vykázala v KH A.5 (odběratel bez DIČ plátce) - MyÚčto rozhoduje
@@ -271,10 +282,13 @@ final class InvoiceImporter
         }
         $id = (int) $this->db->pdo()->lastInsertId();
         foreach ($amounts['items'] as $i => $item) {
+            $oss = $item['oss'] ?? OssMigrationPolicy::DOMESTIC_COLUMNS;
             $insertItem->execute([
                 $id, $item['description'], $item['quantity'], $item['unit'] ?? 'ks', $item['unit_price'],
                 $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
                 $item['code'] ?? $class['code'],
+                $oss['oss_applicable'], $oss['oss_consumer_country'], $oss['oss_rate_type'],
+                $oss['oss_supply_type'], $oss['oss_needs_manual_review'],
             ]);
         }
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
@@ -341,6 +355,12 @@ final class InvoiceImporter
                 $doc['tax'] = $sa['date'] ?? $doc['tax'];
                 $p->count($step, 'self_assessed');
             }
+        }
+        // Přijatá strana OSS nezná (režim je pro plnění, která poskytujeme), takže se sazba
+        // páruje tuzemsky - jen až tady, protože `amounts()` ji kvůli vydané větvi nechává
+        // nenapárovanou. Nenalezená sazba je pořád tvrdá chyba celého běhu jako dřív.
+        foreach ($amounts['items'] as $i => $item) {
+            $amounts['items'][$i]['rate_id'] ??= $this->rateId((float) $item['rate'], $doc['tax'] ?? $doc['issue']);
         }
         $type = $kind === 'invoice' && $amounts['gross_total'] < 0 ? 'credit_note' : $kind;
         $review = $class['reasons'] !== [];
@@ -469,7 +489,6 @@ final class InvoiceImporter
     private function amounts(PohodaContext $ctx, string $step, array $doc, array $r, string $prefix): array
     {
         $summary = PohodaXml::get($r, $prefix . 'Summary/homeCurrency');
-        $taxDate = $doc['tax'] ?? $doc['issue'];
         $rates = ['none' => 0.0];
         $buckets = [];
         $none = round(PohodaXml::num($summary, 'priceNone'), 2);
@@ -567,7 +586,9 @@ final class InvoiceImporter
             $advanceItems++;
         }
         foreach ($items as &$item) {
-            $item['rate_id'] = $this->rateId($item['rate'], $taxDate);
+            // Sazba se páruje až v zapisující větvi: u OSS řádku se hledá ve STÁTĚ SPOTŘEBY,
+            // a dokud není rozhodnuto o místě plnění, není známá země, ve které se má hledat.
+            $item['rate_id'] = null;
             $item['code'] = null;
         }
         unset($item);
@@ -608,6 +629,102 @@ final class InvoiceImporter
     }
 
     /**
+     * Sazba a režim OSS na řádcích vydaného dokladu. `false` = doklad nelze zapsat.
+     *
+     * Běží až tady, protože potřebuje odběratele (zemi a DIČ), a ten je znám teprve po
+     * `resolvePartner()`. Doklad, jehož členění stojí mimo přiznání a přesto nese daň,
+     * projde politikou převodu ({@see OssMigrationPolicy}); ostatní řádky se párují
+     * tuzemsky přesně jako dosud.
+     *
+     * Sazba, kterou nejde napárovat ani jednou cestou, doklad PŘESKOČÍ s chybou v
+     * protokolu. Dřív shodila celý běh výjimkou - jenže u agendy, kde takových dokladů
+     * bývají stovky, je „převod spadl na prvním z nich" ta nejhorší z možných odpovědí:
+     * uživatel nezjistí ani kolik jich je, ani co všechno mu chybí v číselníku.
+     *
+     * @param array<string,mixed> $doc
+     * @param array{items:list<array<string,mixed>>,vat:float} $amounts MĚNÍ SE: řádky dostanou sazbu a OSS sloupce
+     * @param array{reasons:list<string>,code:?string,in_return:bool} $class MĚNÍ SE: přibývají důvody k ruční kontrole
+     * @param array<string,mixed> $snapshot odběratel z dokladu
+     */
+    private function rateIssuedItems(PohodaContext $ctx, string $step, array $doc, array &$amounts, array &$class, int $clientId, array $snapshot): bool
+    {
+        $p = $ctx->protocol;
+        $taxDate = $doc['tax'] ?? $doc['issue'];
+        $code = (string) $doc['vat_class'];
+        $candidate = !$class['in_return'] && abs($amounts['vat']) >= 0.005;
+        $client = null;
+        $ossItems = 0;
+        $manualReview = 0;
+        $warnings = [];
+
+        if ($candidate) {
+            $warning = $this->oss->runWarning($ctx->supplierId);
+            if ($warning !== null) {
+                $p->warn($step, 'oss_setup', $warning);
+            }
+        }
+
+        foreach ($amounts['items'] as $i => $item) {
+            if ($candidate && abs((float) $item['vat']) >= 0.005) {
+                $client ??= $this->oss->clientContext($clientId, (string) $snapshot['country'], (string) $snapshot['dic']);
+                $plan = $this->oss->planItem($ctx->supplierId, $client, (float) $item['rate'], $item['unit'], $taxDate, $code);
+                if ($plan['reason'] !== null && !in_array($plan['reason'], $class['reasons'], true)) {
+                    $class['reasons'][] = $plan['reason'];
+                }
+                if ($plan['rate_id'] !== null) {
+                    $amounts['items'][$i]['rate_id'] = $plan['rate_id'];
+                    $amounts['items'][$i]['rate'] = $plan['rate_percent'];
+                    $amounts['items'][$i]['oss'] = $plan['columns'];
+                    $ossItems++;
+                    $manualReview += (int) $plan['columns']['oss_needs_manual_review'] === 1 ? 1 : 0;
+                    foreach ($plan['warnings'] as $warning) {
+                        $warnings[$warning] = true;
+                    }
+                    continue;
+                }
+            }
+            $rateId = $this->rateId((float) $item['rate'], $taxDate, false);
+            if ($rateId === null) {
+                $p->error($step, 'unknown_vat_rate', sprintf(
+                    'Doklad %s: sazba DPH %s %% není v číselníku sazeb firmy, nepřevzat. Založte ji '
+                        . 'v Nastavení → Číselníky → DPH sazby (u zahraniční sazby nezapomeňte na sloupec '
+                        . 'Stát, formulář ho předvyplňuje na CZ) a převod zopakujte.',
+                    $doc['number'],
+                    rtrim(rtrim(number_format((float) $item['rate'], 2, ',', ''), '0'), ','),
+                ), ['document_no' => $doc['number'], 'rate' => $item['rate']]);
+                return false;
+            }
+            $amounts['items'][$i]['rate_id'] = $rateId;
+        }
+
+        if ($candidate && $ossItems === 0 && $class['reasons'] === []) {
+            // Pojistka pro doklad, u kterého se daň nedá přiřadit k žádnému řádku se sazbou
+            // (rozpis z Pohody nesedí na rekapitulaci). OSS se nerozhodlo, ale doklad daň
+            // nese a do přiznání nepatří - to člověk vidět musí.
+            $class['reasons'][] = "členění DPH „{$code}“ mimo přiznání u dokladu s daní";
+        }
+        if ($ossItems > 0) {
+            $p->count($step, 'oss_items', $ossItems);
+        }
+        if ($warnings !== []) {
+            $p->warn($step, 'oss_item_warning', sprintf('Doklad %s (režim OSS): %s', $doc['number'], implode('; ', array_keys($warnings))),
+                ['document_no' => $doc['number']]);
+        }
+        if ($manualReview > 0) {
+            $p->count($step, 'oss_manual_review', $manualReview);
+            $p->info($step, 'oss_manual_review', sprintf(
+                'Doklad %s je v režimu OSS, ale u %d řádků si převod místem plnění nebo typem sazby '
+                    . 'není jistý - jsou označené k ručnímu posouzení. Projděte je v náhledu OSS přiznání '
+                    . 'nebo hromadnou akcí Nastavit OSS.',
+                $doc['number'],
+                $manualReview,
+            ), ['document_no' => $doc['number'], 'items' => $manualReview]);
+        }
+
+        return true;
+    }
+
+    /**
      * @param array{items:list<array<string,mixed>>,vat:float} $amounts
      * @return array{reasons:list<string>,code:?string,in_return:bool}
      */
@@ -629,7 +746,9 @@ final class InvoiceImporter
             return ['reasons' => ["členění DPH „{$code}“ ({$ctx->vat->name($code)}) převod nezařazuje"], 'code' => null, 'in_return' => true];
         }
         if (!$res['in_return']) {
-            return ['reasons' => $hasVat ? ["členění DPH „{$code}“ mimo přiznání u dokladu s daní"] : [], 'code' => null, 'in_return' => false];
+            // Doklad s daní mimo přiznání ještě není vada - je to podpis režimu OSS.
+            // Rozhoduje o něm až {@see rateIssuedItems()}, které jediné zná odběratele.
+            return ['reasons' => [], 'code' => null, 'in_return' => false];
         }
         if ($res['code'] !== null && $hasVat && !in_array($res['code'], ['1m', '2m'], true)) {
             return ['reasons' => ["členění DPH „{$code}“ (plnění bez daně) u dokladu s daní"], 'code' => null, 'in_return' => true];
@@ -889,8 +1008,9 @@ final class InvoiceImporter
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'),
             $this->stmt('issued_item', 'INSERT INTO invoice_items
                 (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
-                 total_without_vat, total_vat, total_with_vat, order_index, oss_applicable, vat_classification_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'),
+                 total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
+                 oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type, oss_needs_manual_review)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
         ];
     }
 
@@ -918,10 +1038,14 @@ final class InvoiceImporter
         return $this->stmts[$key] ??= $this->db->pdo()->prepare($sql);
     }
 
-    private function rateId(float $rate, string $date): int
+    /**
+     * Tuzemská sazba firmy. `$required = false` vrací `null` místo výjimky - volající, který
+     * umí doklad přeskočit, si o něm řekne v protokolu sám.
+     */
+    private function rateId(float $rate, string $date, bool $required = true): ?int
     {
         $cacheKey = number_format($rate, 2, '.', '') . '|' . $date;
-        if (isset($this->rateCache[$cacheKey])) {
+        if (array_key_exists($cacheKey, $this->rateCache) && ($this->rateCache[$cacheKey] !== null || !$required)) {
             return $this->rateCache[$cacheKey];
         }
         $stmt = $this->stmt('rate', "SELECT id FROM vat_rates
@@ -932,6 +1056,10 @@ final class InvoiceImporter
         $stmt->execute([number_format($rate, 2, '.', ''), $date, $date]);
         $id = $stmt->fetchColumn();
         if ($id === false) {
+            $this->rateCache[$cacheKey] = null;
+            if (!$required) {
+                return null;
+            }
             throw new PohodaException('unknown_vat_rate', 'Sazba DPH ' . $rate . ' % není v číselníku sazeb.');
         }
         return $this->rateCache[$cacheKey] = (int) $id;

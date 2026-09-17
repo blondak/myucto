@@ -24873,6 +24873,8 @@
       "without_document": "payments without document",
       "suffixed": "numbers with year suffix",
       "review": "drafts for manual review",
+      "oss_items": "lines in OSS scheme",
+      "oss_manual_review": "OSS lines for manual review",
       "changed": "changed in POHODA, kept",
       "without_accounting": "documents without posting (opening balance)",
       "opening_balances": "account opening balance documents",

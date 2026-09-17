@@ -313,6 +313,7 @@ Odvození je ve všech kanálech totožné. Liší se jen to, **co se stane s od
 | Kanál | Chování |
 |---|---|
 | **Import souborů** (Pohoda XML, ISDOC), **iDoklad**, **Fakturoid**, **AI extrakce** | **Doklad se nevytvoří.** Chyba jmenuje konkrétní položku. Po opravě se běh zopakuje a doplní jen chybějící doklady |
+| **Převod účetního roku z POHODY** ([§ 107.2](107_Prechod_z_POHODY.md#1072-co-prevod-prenese)) | Odvozuje se jen u dokladu, jehož **členění DPH stojí mimo přiznání a přesto nese daň** — ostatních se převod nedotkne, protože o jejich zařazení už rozhodlo členění. Odmítnutý doklad se **nepřevezme** a protokol ho jmenuje; příčinu společnou celému běhu (vypnutý režim, chybějící číselník) řekne jednou větou na začátku |
 | **Pravidelná fakturace** (cron) | Doklad **vzniknout musí** — jinak by chybějící číselník zastavil fakturaci. Řádek zůstane mimo OSS a povinně dostane příznak **k ručnímu posouzení** |
 | **Veřejné API** bez OSS údajů | Režim se odvodí; do odpovědi jde poznámka a řádky, u kterých místo plnění určit nešlo, se označí k posouzení |
 | **Editor faktury** | Rozhoduje uživatel přepínačem OSS na řádku; kontrola soudržnosti dokladu běží stejně |
