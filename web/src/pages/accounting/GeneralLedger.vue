@@ -155,20 +155,28 @@ function isPlainGroup(g: LedgerGroup): boolean {
   return g.accounts.length === 1 && g.accounts[0].account_id === g.key
 }
 
-const openGroups = ref<Set<number>>(new Set())
+/*
+ * Sbalené skupiny, ne rozbalené: rozpad po analytikách si člověk zapíná právě
+ * proto, že chce analytiky VIDĚT. Když se zapnutím vysypaly samé mezisoučty,
+ * musel po něm ještě kliknout na „Rozbalit vše" — dva kroky za jedno přání.
+ * Výchozí stav je proto otevřeno a zavírá se jmenovitě.
+ */
+const closedGroups = ref<Set<number>>(new Set())
 function toggleGroup(g: LedgerGroup) {
-  const next = new Set(openGroups.value)
+  const next = new Set(closedGroups.value)
   if (next.has(g.key)) next.delete(g.key)
   else next.add(g.key)
-  openGroups.value = next
+  closedGroups.value = next
 }
 function groupOpen(g: LedgerGroup): boolean {
-  return openGroups.value.has(g.key)
+  return !closedGroups.value.has(g.key)
 }
 const allGroupsOpen = computed(() =>
-  ledgerGroups.value.every(g => isPlainGroup(g) || openGroups.value.has(g.key)))
+  ledgerGroups.value.every(g => isPlainGroup(g) || !closedGroups.value.has(g.key)))
 function toggleAllGroups() {
-  openGroups.value = allGroupsOpen.value ? new Set() : new Set(ledgerGroups.value.map(g => g.key))
+  closedGroups.value = allGroupsOpen.value
+    ? new Set(ledgerGroups.value.filter(g => !isPlainGroup(g)).map(g => g.key))
+    : new Set()
 }
 
 /**
@@ -302,7 +310,9 @@ async function focusAccount(id: number) {
   // bez rozbalení skupiny by proklik odroloval na prázdno.
   const group = ledgerGroups.value.find(g => g.accounts.some(a => a.account_id === id))
   if (group && !isPlainGroup(group)) {
-    openGroups.value = new Set(openGroups.value).add(group.key)
+    const next = new Set(closedGroups.value)
+    next.delete(group.key)
+    closedGroups.value = next
   }
   expandedId.value = id
   await nextTick()
