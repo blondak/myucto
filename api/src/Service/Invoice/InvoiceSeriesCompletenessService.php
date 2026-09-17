@@ -31,6 +31,11 @@ use PDO;
  * (jediný globální counter bez ročního resetu), kde se vždy skenuje CELÁ historie —
  * jinak by report ročním řezem sám vyrobil falešnou mezeru na hranici roku.
  *
+ * Dolní hranice rozsahu není konstanta: řada může mít ručně nastavený začátek
+ * (`invoice_counters.floor_number`, PUT /api/settings/supplier/invoice-counter) — typicky
+ * u přechodu z jiného software, kde se navazuje na rozjetou řadu. Čísla pod ním v tomhle
+ * systému nikdy nevznikla, takže je report nesmí hlásit jako chybějící doklady.
+ *
  * Scope se sbírá za všechny tři osy číslování, které zná
  * {@see VarsymbolGenerator::resolveTemplateAndPeriod()} — dodavatel, klient s vlastní
  * šablonou a kategorie tržby s vlastní šablonou.
@@ -65,9 +70,15 @@ final class InvoiceSeriesCompletenessService
     /** @var array<string, list<array<string,mixed>>> cache dokladů: "type|from|to" => řádky */
     private array $documentCache = [];
 
+    /** @var array<string,int>|null cache floorů: "client|category|type|period" => floor_number */
+    private ?array $floorCache = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly Config $config,
+        // Kvůli hasFloor() — detekce, jestli je sloupec `floor_number` v schématu. Záměrně
+        // se sem netahá druhá vlastní kontrola schématu; guard je pro floor jediné místo.
+        private readonly NumberSeriesGapGuard $gapGuard,
     ) {}
 
     /**
@@ -86,6 +97,7 @@ final class InvoiceSeriesCompletenessService
     {
         $this->regexCache = [];
         $this->documentCache = [];
+        $this->floorCache = null;
 
         $scopes = $this->collectScopes($supplierId);
         $groups = $this->groupByDigitSkeleton($scopes);
@@ -318,10 +330,22 @@ final class InvoiceSeriesCompletenessService
             }
             $max = max(array_keys($used));
 
-            // Počet mezer je aritmetika, ne výčet: všechna obsazená čísla leží v [1..$max],
-            // takže chybí právě $max - count($used). Díky tomu je celkové číslo správné
-            // i tehdy, když se výčet níže usekne.
-            $missingTotal = $max - count($used);
+            // Řada nemusí začínat jedničkou. Kdo přechází z jiného software s rozjetou
+            // řadou, nastaví si ruční začátek (PUT /api/settings/supplier/invoice-counter
+            // → `invoice_counters.floor_number`) a čísla pod ním v tomhle systému NIKDY
+            // nevznikla — hlásit je jako chybějící doklady je falešný účetní poplach.
+            $floor = $this->floorFor($supplierId, $group, $bucketKey);
+
+            // Pojistka proti nekonzistenci: stojí-li floor NAD nejnižším skutečně použitým
+            // číslem (floor se nastavil dodatečně, po vystavení starších dokladů), snížíme
+            // ho pod ně. Jinak by rozsah vydané číslo vynechal a aritmetika mezer by lhala.
+            $floor = min($floor, min(array_keys($used)) - 1);
+            $rangeFrom = $floor + 1;
+
+            // Počet mezer je aritmetika, ne výčet: všechna obsazená čísla leží
+            // v [$rangeFrom..$max], takže chybí právě $max - $floor - count($used).
+            // Díky tomu je celkové číslo správné i tehdy, když se výčet níže usekne.
+            $missingTotal = $max - $floor - count($used);
 
             // Výčet je stropovaný. Jediný doklad s ručně zadaným (nebo importem
             // rozbitým) číslem posune $max o několik řádů a report by pak stavěl
@@ -329,7 +353,7 @@ final class InvoiceSeriesCompletenessService
             // uvaří dřív, než ji stihne někdo přečíst. Useknutí se hlásí ven, aby si
             // uživatel nespletl "prvních 500" s "všechno".
             $missing = [];
-            for ($n = 1; $n <= $max && count($missing) < self::MAX_LISTED_MISSING; $n++) {
+            for ($n = $rangeFrom; $n <= $max && count($missing) < self::MAX_LISTED_MISSING; $n++) {
                 if (!isset($used[$n])) {
                     $missing[] = $n;
                 }
@@ -338,7 +362,7 @@ final class InvoiceSeriesCompletenessService
             $buckets[] = [
                 'period_key'        => $bucketKey,
                 'used_count'        => count($used),
-                'range_from'        => 1,
+                'range_from'        => $rangeFrom,
                 'range_to'          => $max,
                 'missing'           => $missing,
                 'missing_total'     => $missingTotal,
@@ -366,6 +390,73 @@ final class InvoiceSeriesCompletenessService
             'template_by_type'      => $group['template_by_type'],
             'buckets'               => $buckets,
         ];
+    }
+
+    /**
+     * Ruční začátek řady pro danou skupinu a období — čísla <= floor v systému nikdy
+     * nevznikla a do rozsahu úplnosti nepatří.
+     *
+     * Klíč `invoice_counters` je (supplier_id, client_id, revenue_category_id, invoice_type,
+     * period); skupina reportu drží přesně ty čtyři osy (client/kategorie ze scope,
+     * `period_key` bucketu = `VarsymbolGenerator::makePeriodKey()`), takže se mapuje 1:1.
+     *
+     * Sdílí-li skupina jednu řadu pro VÍC typů dokladu (stejný digit skeleton pro fakturu
+     * i dobropis), každý typ má v tabulce VLASTNÍ řádek počítadla. Rozsah je ale jeden
+     * společný, takže se bere NEJNIŽŠÍ floor: kdyby se vzal nejvyšší, čísla legitimně
+     * vydaná tím druhým typem pod ním by z rozsahu vypadla a report by skutečnou mezeru
+     * zamlčel. Report smí falešný poplach ztišit, ale nikdy ne skrýt díru.
+     *
+     * Typ BEZ řádku počítadla se do minima nepočítá — chybějící řádek není „řada začíná
+     * od jedničky", je to „o téhle řadě počítadlo nic neví".
+     *
+     * @param array{client_id:int, revenue_category_id:int, types: list<string>} $group
+     */
+    private function floorFor(int $supplierId, array $group, string $bucketKey): int
+    {
+        $floors = $this->floorMap($supplierId);
+        if ($floors === []) {
+            return 0;
+        }
+
+        $found = [];
+        foreach ($group['types'] as $type) {
+            $key = "{$group['client_id']}|{$group['revenue_category_id']}|{$type}|{$bucketKey}";
+            if (isset($floors[$key])) {
+                $found[] = $floors[$key];
+            }
+        }
+        return $found === [] ? 0 : min($found);
+    }
+
+    /**
+     * Všechny ruční začátky řad dodavatele jedním dotazem. Starší schéma sloupec
+     * `floor_number` nemá — detekci schématu drží {@see NumberSeriesGapGuard::hasFloor()},
+     * aby existovalo jedno místo, které o něm rozhoduje.
+     *
+     * @return array<string,int>
+     */
+    private function floorMap(int $supplierId): array
+    {
+        if ($this->floorCache !== null) {
+            return $this->floorCache;
+        }
+        if (!$this->gapGuard->hasFloor('invoice_counters')) {
+            return $this->floorCache = [];
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT client_id, revenue_category_id, invoice_type, period, floor_number
+                 FROM invoice_counters WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+
+        $map = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $key = ((int) $row['client_id']) . '|' . ((int) $row['revenue_category_id'])
+                 . '|' . ((string) $row['invoice_type']) . '|' . ((string) $row['period']);
+            $map[$key] = (int) $row['floor_number'];
+        }
+        return $this->floorCache = $map;
     }
 
     /**

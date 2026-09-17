@@ -4584,9 +4584,15 @@ paths:
       tags: [Settings]
       summary: Nastavení counteru číselné řady dokladů
       description: |
-        Nastaví supplier-wide counter tak, aby **příští vystavený doklad** daného
-        typu dostal číslo `next_number`. `date` určuje, do kterého období (dle
-        `invoice_number_period` supplier-a) se counter zapíše — default dnes.
+        Nastaví counter tak, aby **příští vystavený doklad** daného typu dostal
+        číslo `next_number`. `date` určuje, do kterého období (dle
+        `invoice_number_period`) se counter zapíše — default dnes.
+
+        Scope řady je volitelný: bez `client_id` i `revenue_category_id` jde
+        o řadu dodavatele, s jedním z nich o vlastní řadu klienta, resp. kategorie
+        tržby. Obě naráz kombinovat nelze. Osa musí mít **vlastní šablonu** daného
+        typu — zděděná šablona znamená společnou řadu s dodavatelem a nastavuje se
+        na něm. Id mimo firmu volajícího vrací 400 `invalid_reference`.
 
         Na rozdíl od samoopravné synchronizace umí counter i **snížit**; pokud by
         nové číslo kolidovalo s už vystaveným dokladem, vystavení se automaticky
@@ -4618,6 +4624,20 @@ paths:
                   type: string
                   format: date
                   description: Datum určující období řady (YYYY-MM-DD). Default = dnes.
+                client_id:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: >-
+                    Klient s vlastní číselnou řadou. 0 (default) = řada dodavatele.
+                    Nelze kombinovat s `revenue_category_id`.
+                revenue_category_id:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: >-
+                    Kategorie tržby s vlastní číselnou řadou. 0 (default) = řada
+                    dodavatele. Nelze kombinovat s `client_id`.
       responses:
         '200':
           description: Counter nastaven
@@ -4640,6 +4660,14 @@ paths:
                     type: string
                     example: "2607042"
                     description: Jak bude vypadat příští vygenerované číslo.
+                  client_id:
+                    type: integer
+                    example: 0
+                    description: Osa, na které counter reálně vznikl (0 = dodavatel).
+                  revenue_category_id:
+                    type: integer
+                    example: 0
+                    description: Osa, na které counter reálně vznikl (0 = dodavatel).
         '400':
           $ref: '#/components/responses/ValidationFailed'
         '403':

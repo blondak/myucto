@@ -281,7 +281,8 @@
     "client-new": [
       "errors",
       "payment_method",
-      "purchase_invoice"
+      "purchase_invoice",
+      "settings"
     ],
     "client-detail": [
       "documents",
@@ -294,7 +295,8 @@
     "client-edit": [
       "errors",
       "payment_method",
-      "purchase_invoice"
+      "purchase_invoice",
+      "settings"
     ],
     "projects": [
       "project"
@@ -333,6 +335,7 @@
       "price_list",
       "project",
       "purchase_invoice",
+      "settings",
       "stock",
       "time_billing"
     ],
@@ -361,6 +364,7 @@
       "price_list",
       "project",
       "purchase_invoice",
+      "settings",
       "stock",
       "time_billing"
     ],
@@ -419,6 +423,7 @@
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
+      "settings",
       "time_billing",
       "vendor"
     ],
@@ -446,6 +451,7 @@
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
+      "settings",
       "time_billing",
       "vendor"
     ],
@@ -778,6 +784,7 @@
       "linked_documents",
       "payment_method",
       "purchase_invoice",
+      "settings",
       "vendor"
     ],
     "gopay": [
@@ -793,6 +800,7 @@
       "linked_documents",
       "payment_method",
       "purchase_invoice",
+      "settings",
       "vendor"
     ],
     "activity-log": [
@@ -835,6 +843,7 @@
       "oss_rates",
       "public_holidays",
       "revenue_categories",
+      "settings",
       "vat_classifications"
     ],
     "admin-tax-constants": [
@@ -842,6 +851,7 @@
       "oss_rates",
       "public_holidays",
       "revenue_categories",
+      "settings",
       "vat_classifications"
     ],
     "admin-electronic-signatures": [
@@ -979,6 +989,7 @@
       "project",
       "purchase_invoice",
       "recurring",
+      "settings",
       "time_billing"
     ],
     "recurring-detail": [
@@ -991,6 +1002,7 @@
       "project",
       "purchase_invoice",
       "recurring",
+      "settings",
       "time_billing"
     ],
     "admin-diagnostics": [

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Settings;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\AccessLevel;
@@ -18,19 +19,27 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * PUT /api/settings/supplier/invoice-counter — nastaví counter číselné řady (admin).
  *
- * Body: { "type": "invoice"|"proforma"|"credit_note", "next_number": 42, "date": "2026-07-01"? }
+ * Body: { "type": "invoice"|"proforma"|"credit_note", "next_number": 42,
+ *         "date": "2026-07-01"?, "client_id": 7?, "revenue_category_id": 3? }
  *
- * Nastaví supplier-wide counter tak, aby PŘÍŠTÍ vystavený doklad daného typu dostal
- * číslo `next_number`. `date` určuje, do kterého období (dle `invoice_number_period`)
+ * Nastaví counter tak, aby PŘÍŠTÍ vystavený doklad daného typu dostal číslo
+ * `next_number`. `date` určuje, do kterého období (dle `invoice_number_period`)
  * se counter zapíše — default dnes. Umí counter i snížit; pokud by nové číslo
  * kolidovalo s už vystaveným dokladem, vystavení se samoopravně posune na první
  * volné číslo (viz VarsymbolGenerator::next()).
  *
+ * Scope je volitelný: bez `client_id` i `revenue_category_id` jde o supplier-wide řadu,
+ * s jedním z nich o řadu klienta, resp. kategorie tržby. Zůstává JEDNA routa záměrně —
+ * je to tentýž zápis do téhož počítadla, jen na jiném řádku téhož klíče, a resolver
+ * šablony ({@see VarsymbolGenerator::resolveTemplateAndPeriod()}) osy vyhodnocuje
+ * rovněž jedním průchodem. Tři routy by vynutily tři kopie téže validace a rozešly by
+ * se; volitelné pole navíc drží zpětnou kompatibilitu stávajících volajících.
+ *
  * Typický use-case: napojení externího systému, který přebírá existující číselnou
  * řadu (import historie, migrace z jiného fakturačního software).
  *
- * Response: { "type": "invoice", "next_number": 42, "counter": 41,
- *             "period": "202607", "preview": "2607042" }
+ * Response: { "type": "invoice", "next_number": 42, "counter": 41, "client_id": 0,
+ *             "revenue_category_id": 0, "period": "202607", "preview": "2607042" }
  */
 final class SupplierInvoiceCounterAction
 {
@@ -38,6 +47,9 @@ final class SupplierInvoiceCounterAction
         private readonly VarsymbolGenerator $varsymbol,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        // Kontrola vlastnictví scope — cizí client_id / revenue_category_id nesmí projít
+        // dál než sem (multi-tenant izolace, viz níže).
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -72,8 +84,32 @@ final class SupplierInvoiceCounterAction
             }
         }
 
+        $clientId   = (int) ($b['client_id'] ?? 0);
+        $categoryId = (int) ($b['revenue_category_id'] ?? 0);
+        if ($clientId < 0 || $categoryId < 0) {
+            return Json::error($response, 'validation_failed', 'client_id a revenue_category_id musí být >= 0.', 400);
+        }
+        if ($clientId > 0 && $categoryId > 0) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'client_id a revenue_category_id nelze kombinovat — řada patří vždy jedné ose.',
+                400,
+            );
+        }
+
+        // Multi-tenant izolace (CWE-639 / BOLA): obě id chodí od uživatele. Service je
+        // sice čte výhradně v rámci supplier_id, takže cizí záznam by řadu stejně
+        // nevyhrál — ale spolehnout se na to znamená hlásit „nemá vlastní šablonu"
+        // u záznamu, který tomuhle dodavateli vůbec nepatří. Vazba se proto ověřuje
+        // tady, a to týmž guardem jako u ostatních Action, ne vlastním dotazem.
+        $bad = $this->tenantRefs->violations($supplierId, $b, ['client_id', 'revenue_category_id']);
+        if ($bad !== []) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($bad), 400);
+        }
+
         try {
-            $result = $this->varsymbol->setCounter($supplierId, $type, $next, $for);
+            $result = $this->varsymbol->setCounter($supplierId, $type, $next, $for, $clientId, $categoryId);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
@@ -84,18 +120,26 @@ final class SupplierInvoiceCounterAction
             (int) ($user['id'] ?? 0),
             'supplier',
             $supplierId,
-            ['type' => $type, 'next_number' => $next, 'period' => $result['period']],
+            [
+                'type'                => $type,
+                'next_number'         => $next,
+                'period'              => $result['period'],
+                'client_id'           => $result['client_id'],
+                'revenue_category_id' => $result['revenue_category_id'],
+            ],
             $ip,
             $request->getHeaderLine('User-Agent'),
             $supplierId,
         );
 
         return Json::ok($response, [
-            'type'        => $type,
-            'next_number' => $next,
-            'counter'     => $result['counter'],
-            'period'      => $result['period'],
-            'preview'     => $result['preview'],
+            'type'                => $type,
+            'next_number'         => $next,
+            'counter'             => $result['counter'],
+            'period'              => $result['period'],
+            'preview'             => $result['preview'],
+            'client_id'           => $result['client_id'],
+            'revenue_category_id' => $result['revenue_category_id'],
         ]);
     }
 }

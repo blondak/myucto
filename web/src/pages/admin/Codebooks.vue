@@ -2,7 +2,7 @@
 import { ref, onMounted, onBeforeUnmount, reactive, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type VatRate, type Country, type Unit } from '@/api/settings'
+import { settingsApi, type VatRate, type Country, type Unit, type InvoiceCounterType } from '@/api/settings'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
@@ -20,6 +20,7 @@ import { formatMonth } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
 
 const { t, te } = useI18n()
 const route = useRoute()
@@ -309,6 +310,13 @@ const revenueHasNumbering = computed(() =>
  */
 function revenueNumberingPreview(field: RevenueNumberingField): string {
   return renderVarsymbolTemplate(revenueDraft[field], new Date(), 1)
+}
+
+/** Pole šablony → typ dokladu, jehož počítadlo se u něj nastavuje (issue #74). */
+const REVENUE_COUNTER_TYPE: Record<RevenueNumberingField, InvoiceCounterType> = {
+  invoice_number_format: 'invoice',
+  proforma_number_format: 'proforma',
+  credit_note_number_format: 'credit_note',
 }
 
 function revenueNumberingWarning(field: RevenueNumberingField): string {
@@ -2064,6 +2072,14 @@ watch(tab, (newTab) => {
                 <p v-else-if="revenueDraft[field]" class="text-xs text-neutral-500 mt-1 font-mono">
                   {{ t('revenue_categories.numbering_preview') }}: {{ revenueNumberingPreview(field) }}
                 </p>
+                <!--
+                  Počítadlo řady kategorie (issue #74). Jen u ULOŽENÉ kategorie: endpoint
+                  míří na její id a na šablonu, kterou zná server — u nové kategorie ani
+                  jedno zatím neexistuje.
+                -->
+                <InvoiceCounterField v-if="revenueDraft.id" :type="REVENUE_COUNTER_TYPE[field]"
+                  :template="revenueDraft[field]" :period="revenueDraft.invoice_number_period"
+                  :revenue-category-id="revenueDraft.id" />
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('revenue_categories.invoice_number_period') }}</label>

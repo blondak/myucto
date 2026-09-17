@@ -12,6 +12,7 @@ import { useDemoMode } from '@/composables/useDemoMode'
 import { useSupplierStore } from '@/stores/supplier'
 import { settingsApi, type BrandingProfile } from '@/api/settings'
 import { eshopApi, type PriceLevel } from '@/api/eshop'
+import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
 
 /**
  * V `embedded` módu komponenta nečte route, neredirektuje a vrací výsledek
@@ -1016,16 +1017,26 @@ async function submit() {
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.invoice_number_format') }}</label>
               <input v-model="form.invoice_number_format" type="text" maxlength="60" placeholder="{YY}{CCCC}"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <!--
+                Počítadlo vlastní řady klienta (issue #74) — jen u už uloženého klienta:
+                endpoint míří na jeho id a na šablonu, kterou zná server.
+              -->
+              <InvoiceCounterField v-if="clientId" type="invoice" :template="form.invoice_number_format"
+                :period="form.invoice_number_period" :client-id="clientId" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.proforma_number_format') }}</label>
               <input v-model="form.proforma_number_format" type="text" maxlength="60" placeholder="9{YY}{CCCC}"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <InvoiceCounterField v-if="clientId" type="proforma" :template="form.proforma_number_format"
+                :period="form.invoice_number_period" :client-id="clientId" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.credit_note_number_format') }}</label>
               <input v-model="form.credit_note_number_format" type="text" maxlength="60" placeholder=""
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <InvoiceCounterField v-if="clientId" type="credit_note" :template="form.credit_note_number_format"
+                :period="form.invoice_number_period" :client-id="clientId" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.invoice_number_period') }}</label>

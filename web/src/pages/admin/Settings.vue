@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest, type TaxRepresentationHistoryEntry, type TaxRepresentationSavePayload } from '@/api/settings'
+import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest, type TaxRepresentationHistoryEntry, type TaxRepresentationSavePayload, type InvoiceCounterType } from '@/api/settings'
 import { adminApi, type SampleDataStatus } from '@/api/admin'
 import { closingSettingsApi, type AccountingClosingSettings } from '@/api/closing'
 import { isCoveredByParent, toggleTurnoverRow } from '@/utils/netTurnoverRows'
@@ -17,6 +17,7 @@ import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierDomainsSettings from '@/components/settings/SupplierDomainsSettings.vue'
+import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 
@@ -192,6 +193,16 @@ const creditNotePreview     = computed(() => validateAndPreview(supplier.value?.
 const creditNoteFormatError = computed(() => validateAndPreview(supplier.value?.credit_note_number_format ?? null).error)
 const purchasePreview       = computed(() => validateAndPreview(supplier.value?.purchase_invoice_number_format ?? null).preview)
 const purchaseFormatError   = computed(() => validateAndPreview(supplier.value?.purchase_invoice_number_format ?? null).error)
+
+// Navázání na rozjetou číselnou řadu (issue #74) — kdo přechází z jiného software,
+// potřebuje, aby první doklad tady dostal číslo, kterým jeho řada pokračuje. Samotné
+// pole je ve sdílené komponentě InvoiceCounterField (stejný prvek má i řada klienta
+// a kategorie tržby); tady se jen dopočítá EFEKTIVNÍ šablona, protože prázdné pole
+// jede na cfg fallback úplně stejně jako na backendu.
+function counterTemplate(type: InvoiceCounterType): string {
+  const own = (supplier.value?.[`${type}_number_format`] ?? '').trim()
+  return own !== '' ? own : (supplier.value?.cfg_varsymbol_fallback?.[type] ?? '')
+}
 
 // MZ-03: identifikátory odvodů zaměstnavatele drží mzdový modul jen tehdy, když je
 // zapnutý. U vypnutých Mezd (i u OSVČ) zůstávají legacy pole na firmě jediným zdrojem —
@@ -1184,6 +1195,8 @@ async function confirmTaxRepDelete() {
                 {{ t('settings.numbering_preview') }}: <code class="font-mono font-semibold">{{ invoicePreview }}</code>
               </p>
               <p v-else class="text-xs text-neutral-400 mt-1">{{ t('settings.numbering_preview') }}: {{ t('settings.numbering_preview_fallback') }}</p>
+              <InvoiceCounterField type="invoice" :template="counterTemplate('invoice')"
+                :period="supplier.invoice_number_period" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.invoice_number_period') }}</label>
@@ -1205,6 +1218,8 @@ async function confirmTaxRepDelete() {
                 {{ t('settings.numbering_preview') }}: <code class="font-mono font-semibold">{{ proformaPreview }}</code>
               </p>
               <p v-else class="text-xs text-neutral-400 mt-1">{{ t('settings.numbering_preview') }}: {{ t('settings.numbering_preview_fallback') }}</p>
+              <InvoiceCounterField type="proforma" :template="counterTemplate('proforma')"
+                :period="supplier.invoice_number_period" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.credit_note_number_format') }}</label>
@@ -1217,6 +1232,8 @@ async function confirmTaxRepDelete() {
                 {{ t('settings.numbering_preview') }}: <code class="font-mono font-semibold">{{ creditNotePreview }}</code>
               </p>
               <p v-else class="text-xs text-neutral-400 mt-1">{{ t('settings.numbering_preview') }}: {{ t('settings.numbering_preview_fallback') }}</p>
+              <InvoiceCounterField type="credit_note" :template="counterTemplate('credit_note')"
+                :period="supplier.invoice_number_period" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.purchase_invoice_number_format') }}</label>

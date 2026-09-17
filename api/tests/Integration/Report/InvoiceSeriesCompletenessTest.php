@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Report;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\InvoiceSeriesCompletenessService;
+use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -28,6 +29,7 @@ final class InvoiceSeriesCompletenessTest extends TestCase
 
     private Connection $db;
     private InvoiceSeriesCompletenessService $service;
+    private VarsymbolGenerator $varsymbol;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -52,6 +54,7 @@ final class InvoiceSeriesCompletenessTest extends TestCase
             $container     = Bootstrap::buildApp()->getContainer();
             $this->db      = $container->get(Connection::class);
             $this->service = $container->get(InvoiceSeriesCompletenessService::class);
+            $this->varsymbol = $container->get(VarsymbolGenerator::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -108,7 +111,30 @@ final class InvoiceSeriesCompletenessTest extends TestCase
         foreach ($this->categoryIds as $categoryId) {
             $pdo->prepare('DELETE FROM revenue_categories WHERE id = ?')->execute([$categoryId]);
         }
+        $pdo->prepare('DELETE FROM invoice_counters WHERE supplier_id = ? AND period = ?')
+            ->execute([$this->supplierId, (string) self::YEAR]);
         $this->db->close();
+    }
+
+    /**
+     * Ruční začátek řady — jde ZÁMĚRNĚ přes tutéž službu, kterou volá
+     * PUT /api/settings/supplier/invoice-counter, ne přes vlastní INSERT. Kdyby si test
+     * floor zapsal sám, ověřil by jen svůj vlastní SQL řádek, ne to, co do tabulky
+     * reálně padá z nastavení.
+     */
+    private function setCounterFloor(string $type, int $nextNumber, int $clientId = 0, int $revenueCategoryId = 0): void
+    {
+        if (!$this->db->hasColumn('invoice_counters', 'floor_number')) {
+            $this->markTestSkipped('Schéma nemá invoice_counters.floor_number (migrace 1813).');
+        }
+        $this->varsymbol->setCounter(
+            $this->supplierId,
+            $type,
+            $nextNumber,
+            new \DateTimeImmutable(self::YEAR . '-06-15'),
+            $clientId,
+            $revenueCategoryId,
+        );
     }
 
     /** Kategorie tržby s VLASTNÍ číselnou řadou (migrace 1333). */
@@ -375,6 +401,127 @@ final class InvoiceSeriesCompletenessTest extends TestCase
         self::assertSame([2], $bucket['missing']);
         self::assertSame(1, $bucket['missing_total']);
         self::assertFalse($bucket['missing_truncated']);
+    }
+
+    /**
+     * Přechod z jiného software: uživatel navázal na rozjetou řadu a nechal počítadlo
+     * začít na 56 (`floor_number = 55`). Čísla 1–55 v tomhle systému NIKDY nevznikla,
+     * takže je report nesmí hlásit jako 55 chybějících dokladů — vypadalo by to jako
+     * účetní problém tam, kde žádný není.
+     */
+    public function testManualSeriesStartIsNotReportedAsMissingDocuments(): void
+    {
+        $this->setTemplates('{YY}01{CCCCC}', 'D{YYYY}{CCCC}');
+        $this->setCounterFloor('invoice', 56);
+
+        $yy = substr((string) self::YEAR, 2, 2);
+        foreach (range(56, 60) as $n) {
+            $this->insertInvoice($yy . '01' . str_pad((string) $n, 5, '0', STR_PAD_LEFT), 'invoice');
+        }
+
+        $bucket = self::groupFor($this->service->build($this->supplierId, self::YEAR), 0, 0)['buckets'][0];
+
+        self::assertSame([], $bucket['missing'], 'Čísla pod ručním začátkem řady nikdy neexistovala.');
+        self::assertSame(0, $bucket['missing_total'], 'Bez floor by report hlásil 55 neexistujících dokladů.');
+        self::assertSame(56, $bucket['range_from'], 'Rozsah řady začíná na ručně nastaveném čísle.');
+        self::assertSame(60, $bucket['range_to']);
+        self::assertSame(5, $bucket['used_count']);
+        self::assertFalse($bucket['missing_truncated']);
+    }
+
+    /**
+     * Protipól předchozího testu: ruční začátek řady NESMÍ kontrolu vypnout. Mezera
+     * NAD nastaveným číslem je pořád mezera a musí se hlásit.
+     */
+    public function testRealGapAboveManualSeriesStartIsStillReported(): void
+    {
+        $this->setTemplates('{YY}01{CCCCC}', 'D{YYYY}{CCCC}');
+        $this->setCounterFloor('invoice', 56);
+
+        $yy = substr((string) self::YEAR, 2, 2);
+        $this->insertInvoice($yy . '0100056', 'invoice');
+        $this->insertInvoice($yy . '0100058', 'invoice'); // 57 chybí OPRAVDU
+
+        $bucket = self::groupFor($this->service->build($this->supplierId, self::YEAR), 0, 0)['buckets'][0];
+
+        self::assertSame(56, $bucket['range_from']);
+        self::assertSame(58, $bucket['range_to']);
+        self::assertSame([57], $bucket['missing'], 'Mezera nad ručním začátkem řady se hlásit MUSÍ.');
+        self::assertSame(1, $bucket['missing_total']);
+    }
+
+    /**
+     * Floor nastavený dodatečně (až po vystavení starších dokladů) nesmí vydané číslo
+     * z rozsahu vynechat — aritmetika mezer by pak lhala do mínusu.
+     */
+    public function testFloorAboveExistingDocumentsIsClampedDown(): void
+    {
+        $this->setTemplates('{YY}01{CCCCC}', 'D{YYYY}{CCCC}');
+        $this->setCounterFloor('invoice', 56);
+
+        $yy = substr((string) self::YEAR, 2, 2);
+        $this->insertInvoice($yy . '0100010', 'invoice');
+        $this->insertInvoice($yy . '0100012', 'invoice');
+
+        $bucket = self::groupFor($this->service->build($this->supplierId, self::YEAR), 0, 0)['buckets'][0];
+
+        self::assertSame(10, $bucket['range_from'], 'Floor se srovná pod nejnižší skutečně vydané číslo.');
+        self::assertSame(12, $bucket['range_to']);
+        self::assertSame([11], $bucket['missing']);
+        self::assertSame(1, $bucket['missing_total']);
+    }
+
+    /**
+     * Ruční začátek řady existuje na všech třech osách číslování, ne jen u dodavatele.
+     * Report proto musí floor hledat na TÉ SAMÉ ose, kterou zrovna staví: klíč
+     * `invoice_counters` je (supplier_id, client_id, revenue_category_id, invoice_type,
+     * period). Kdyby se četl jen supplier-wide řádek, kategorie tržby navázaná na
+     * rozjetou řadu by hlásila stovky neexistujících dokladů — a naopak floor kategorie
+     * nesmí ztišit skutečnou mezeru v řadě dodavatele.
+     */
+    public function testManualSeriesStartIsScopedToRevenueCategorySeries(): void
+    {
+        $this->setTemplates('{YYYY}{CCCCCC}', 'D{YYYY}{CCCC}');
+        $categoryId = $this->createCategory('FR3NAVAZ', '{YYYY}9{CCC}');
+        // Ruční začátek JEN na řadě kategorie; dodavatelská řada zůstává od jedničky.
+        $this->setCounterFloor('invoice', 56, 0, $categoryId);
+
+        $y = self::YEAR;
+        $this->insertInvoice("{$y}9056", 'invoice', $categoryId);
+        $this->insertInvoice("{$y}9057", 'invoice', $categoryId);
+        // Dodavatelská řada má skutečnou mezeru (000002) a floor kategorie ji nesmí zakrýt.
+        $this->insertInvoice("{$y}000001", 'invoice');
+        $this->insertInvoice("{$y}000003", 'invoice');
+
+        $series = $this->service->build($this->supplierId, self::YEAR);
+
+        $categoryBucket = self::groupFor($series, 0, $categoryId)['buckets'][0];
+        self::assertSame(56, $categoryBucket['range_from'], 'Floor se musí načíst pro řadu kategorie.');
+        self::assertSame([], $categoryBucket['missing']);
+        self::assertSame(0, $categoryBucket['missing_total']);
+
+        $supplierBucket = self::groupFor($series, 0, 0)['buckets'][0];
+        self::assertSame(1, $supplierBucket['range_from'], 'Řada dodavatele ruční začátek nemá.');
+        self::assertSame([2], $supplierBucket['missing'], 'Floor jiné osy nesmí ztišit mezeru dodavatele.');
+    }
+
+    /**
+     * Řada klienta s vlastní šablonou je třetí osa a chová se stejně.
+     */
+    public function testManualSeriesStartIsScopedToClientSeries(): void
+    {
+        $this->setTemplates('{YYYY}{CCCCCC}', 'D{YYYY}{CCCC}');
+        $ownClientId = $this->createClientWithOwnSeries('K{YYYY}{CCCC}');
+        $this->setCounterFloor('invoice', 56, $ownClientId);
+
+        $y = self::YEAR;
+        $this->insertInvoice("K{$y}0056", 'invoice', null, $ownClientId);
+        $this->insertInvoice("K{$y}0058", 'invoice', null, $ownClientId);
+
+        $bucket = self::groupFor($this->service->build($this->supplierId, self::YEAR), $ownClientId, 0)['buckets'][0];
+
+        self::assertSame(56, $bucket['range_from']);
+        self::assertSame([57], $bucket['missing'], 'Mezera nad ručním začátkem řady klienta se hlásí dál.');
     }
 
     public function testDifferentYearIsNotPolluted(): void

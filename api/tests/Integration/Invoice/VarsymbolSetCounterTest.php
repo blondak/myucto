@@ -32,6 +32,10 @@ final class VarsymbolSetCounterTest extends TestCase
     private \DateTimeImmutable $date;
     /** @var int[] */
     private array $created = [];
+    /** @var int[] */
+    private array $createdCategories = [];
+    /** @var int[] */
+    private array $createdClients = [];
 
     protected function setUp(): void
     {
@@ -89,6 +93,67 @@ final class VarsymbolSetCounterTest extends TestCase
         $this->created = [];
         $pdo->prepare("DELETE FROM invoice_counters WHERE supplier_id = ? AND period LIKE '2099%'")
             ->execute([$this->supplierId]);
+        foreach ($this->createdCategories as $id) {
+            $pdo->prepare('DELETE FROM invoice_counters WHERE revenue_category_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM revenue_categories WHERE id = ?')->execute([$id]);
+        }
+        $this->createdCategories = [];
+        foreach ($this->createdClients as $id) {
+            $pdo->prepare('DELETE FROM invoice_counters WHERE client_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM invoices WHERE client_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$id]);
+        }
+        $this->createdClients = [];
+    }
+
+    /** Kategorie tržby s vlastní řadou; prázdná šablona = zdědí řadu dodavatele. */
+    private function createCategory(string $code, string $invoiceTemplate): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO revenue_categories (supplier_id, code, label, invoice_number_format, invoice_number_period)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId, $code, "SetCounter {$code}",
+            $invoiceTemplate === '' ? null : $invoiceTemplate, 'year',
+        ]);
+        $id = (int) $pdo->lastInsertId();
+        $this->createdCategories[] = $id;
+        return $id;
+    }
+
+    /** Kategorie JINÉHO dodavatele — fixtura druhé firmy zakládá tests/bootstrap.php. */
+    private function createForeignCategory(): int
+    {
+        $pdo = $this->db->pdo();
+        $foreignSupplierId = (int) ($pdo->query(
+            "SELECT id FROM supplier WHERE id <> {$this->supplierId} ORDER BY id LIMIT 1"
+        )->fetchColumn() ?: 0);
+        self::assertGreaterThan(0, $foreignSupplierId, 'Test izolace tenantů potřebuje druhého dodavatele.');
+
+        $pdo->prepare(
+            'INSERT INTO revenue_categories (supplier_id, code, label, invoice_number_format, invoice_number_period)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([$foreignSupplierId, 'SC2099FRGN', 'SetCounter cizí', '8{YYYY}{CCC}', 'year']);
+        $id = (int) $pdo->lastInsertId();
+        $this->createdCategories[] = $id;
+        return $id;
+    }
+
+    private function createClientWithOwnSeries(string $invoiceTemplate): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, ic,
+                                  main_email, language, currency_default_id, is_customer, is_vendor,
+                                  invoice_number_format, invoice_number_period)
+             SELECT ?, "SetCounter vlastní řada", "Test 9", "Praha", "11000", c.country_id, "10000004",
+                    "setcounter@example.com", "cs", ?, 1, 0, ?, "year"
+               FROM supplier c WHERE c.id = ?'
+        )->execute([$this->supplierId, $this->currencyId, $invoiceTemplate, $this->supplierId]);
+        $id = (int) $pdo->lastInsertId();
+        $this->createdClients[] = $id;
+        return $id;
     }
 
     private function insertIssued(int $counter): string
@@ -143,6 +208,92 @@ final class VarsymbolSetCounterTest extends TestCase
 
         self::assertNotSame($occupied, $next, 'Kolize se musí self-healnout, ne zduplikovat.');
         self::assertSame($this->gen->render($this->template, $this->date, 8), $next);
+    }
+
+    /**
+     * Přechod z jiného software se netýká jen řady dodavatele — přebít šablonu jde na
+     * třech osách (klient > kategorie tržby > dodavatel) a na každé z nich může běžet
+     * vlastní rozjetá řada. Counter proto musí jít nastavit na TÉ ose, které šablona
+     * patří, a zapsat se na její řádek `invoice_counters`.
+     */
+    public function testSetCounterTargetsRevenueCategorySeries(): void
+    {
+        $categoryId = $this->createCategory('SC2099CAT', '9{YYYY}{CCC}');
+
+        $result = $this->gen->setCounter($this->supplierId, 'invoice', 56, $this->date, 0, $categoryId);
+
+        self::assertSame(55, $result['counter']);
+        self::assertSame($categoryId, $result['revenue_category_id'], 'Counter vzniká na ose kategorie.');
+        self::assertSame(0, $result['client_id']);
+        self::assertSame('92099056', $result['preview'], 'Náhled musí vycházet ze šablony kategorie.');
+
+        $row = $this->db->pdo()->prepare(
+            'SELECT last_number FROM invoice_counters
+              WHERE supplier_id = ? AND client_id = 0 AND revenue_category_id = ? AND invoice_type = ? AND period = ?'
+        );
+        $row->execute([$this->supplierId, $categoryId, 'invoice', $result['period']]);
+        self::assertSame(55, (int) $row->fetchColumn(), 'Zápis jde na řádek řady kategorie.');
+
+        $next = $this->gen->next($this->supplierId, 'invoice', $this->date, 0, $categoryId);
+        self::assertSame('92099056', $next);
+    }
+
+    public function testSetCounterTargetsClientSeries(): void
+    {
+        $clientId = $this->createClientWithOwnSeries('K{YYYY}{CCCC}');
+
+        $result = $this->gen->setCounter($this->supplierId, 'invoice', 56, $this->date, $clientId);
+
+        self::assertSame($clientId, $result['client_id']);
+        self::assertSame(0, $result['revenue_category_id']);
+        self::assertSame('K20990056', $result['preview']);
+        self::assertSame('K20990056', $this->gen->next($this->supplierId, 'invoice', $this->date, $clientId));
+    }
+
+    /**
+     * Cizí kategorie (jiný dodavatel) nesmí skončit tichým zápisem do řady dodavatele
+     * přihlášeného uživatele — resolver ji nevidí, osa nevyhraje a požadavek padá.
+     * Multi-tenant izolace, ne kosmetika.
+     */
+    public function testSetCounterRejectsForeignRevenueCategory(): void
+    {
+        $foreignId = $this->createForeignCategory();
+
+        try {
+            $this->gen->setCounter($this->supplierId, 'invoice', 56, $this->date, 0, $foreignId);
+            self::fail('Cizí kategorie tržby musí být odmítnuta.');
+        } catch (\InvalidArgumentException) {
+            // očekáváno
+        }
+
+        $row = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM invoice_counters WHERE supplier_id = ? AND revenue_category_id = ?'
+        );
+        $row->execute([$this->supplierId, $foreignId]);
+        self::assertSame(0, (int) $row->fetchColumn(), 'Do cizí scope se nesmí nic zapsat.');
+
+        // A hlavně: nesmí to spadnout do supplier-wide řady, kterou uživatel needitoval.
+        $row = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM invoice_counters
+              WHERE supplier_id = ? AND client_id = 0 AND revenue_category_id = 0 AND period LIKE '2099%'"
+        );
+        $row->execute([$this->supplierId]);
+        self::assertSame(0, (int) $row->fetchColumn(), 'Cizí id nesmí přepsat řadu dodavatele.');
+    }
+
+    /** Zděděná šablona = společná řada s dodavatelem; vlastní počítadlo by nikdo nečetl. */
+    public function testSetCounterRejectsAxisWithoutOwnTemplate(): void
+    {
+        $categoryId = $this->createCategory('SC2099INH', '');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->gen->setCounter($this->supplierId, 'invoice', 56, $this->date, 0, $categoryId);
+    }
+
+    public function testSetCounterRejectsBothAxesAtOnce(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->gen->setCounter($this->supplierId, 'invoice', 56, $this->date, 1, 1);
     }
 
     public function testSetCounterRejectsInvalidInput(): void

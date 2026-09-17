@@ -226,6 +226,26 @@ s chybou „Chybí counter".
 > 409 chybu při Vystavení, ale doporučujeme spolu s změnou cyklu **upravit
 > i šablonu** (pro `year` vyhoď `{MM}`, pro `none` vyhoď `{YY}` i `{MM}`).
 
+**Navázání na rozjetou číselnou řadu:**
+
+Pod každou šablonou, která obsahuje counter, je pole **Příští číslo** s tlačítkem
+*Nastavit počítadlo*. Zadáš číslo, kterým má řada v tomhle systému pokračovat —
+typicky při přechodu z jiného software, kde se historie nepřenáší. Po potvrzení
+se ukáže náhled výsledného čísla tak, jak ho spočítal server.
+
+Pole se ukládá **samostatně**, mimo tlačítko *Uložit* — zapisuje totiž do počítadla
+řady, ne do nastavení firmy. Šablonu proto ulož napřed a teprve pak nastav počítadlo.
+
+> ⚠️ **Perioda resetu musí sedět se šablonou.** U masky bez `{MM}` a měsíčního resetu
+> spadne počítadlo prvního dne dalšího měsíce zpátky na začátek a čísla by kolidovala
+> s už vydanými. K navázané řadě patří buď roční reset, nebo *Bez resetu*, případně
+> `{MM}` v šabloně. Na nesoulad upozorní hláška přímo u pole.
+
+> 🛈 Sestava [Úplnost číselné řady](46_Ucetni_kontroly_a_inventarizace.md#468-uplnost-ciselne-rady-vydanych-dokladu)
+> začne řadu počítat až od nastaveného čísla. Kdo si řadu založí na 56, nedostane
+> hlášení o 55 chybějících dokladech, které nikdy nevznikly. Skutečná mezera nad
+> tím číslem (vydáno 56 a 58) se ale hlásí dál.
+
 **Počítadlo řady a mezery v číslování:**
 
 Pořadové číslo se čerpá až vystavením dokladu. Když vystavení neprojde (například
@@ -255,6 +275,16 @@ Každá vyhrávající úroveň má **vlastní počítadlo** — dvě kategorie 
 šablonou se navzájem nepřečíslovávají a supplier-wide řada jimi neproběhne.
 Nevyplněná pole se dědí, takže kategorie může mít vlastní řadu jen pro faktury
 a proformy nechat na dodavateli.
+
+Protože je počítadlo vlastní, dá se i **navázat na rozjetou řadu nezávisle na každé
+úrovni**: pole *Příští číslo* najdeš u šablony zákazníka i kategorie tržby, ne jen
+u dodavatele. Nastavuje vždy tu řadu, u jejíž šablony stojí.
+
+> 🛈 **Zděděná šablona pole nenabízí.** Nevyplněná šablona znamená, že se doklad
+> čísluje řadou o úroveň výš a sdílí s ní i počítadlo — nastavovat ho odsud by
+> vyrobilo počítadlo, ze kterého nikdo nečte. Chceš-li u takového zákazníka nebo
+> kategorie začít jinde, vyplň mu nejdřív vlastní šablonu a ulož ji. Pole se také
+> neukazuje u zákazníka ani kategorie, které ještě nebyly uložené.
 
 > ⚠️ Šablony různých řad se musí lišit **číslicí**, ne jen písmenem nebo pomlčkou —
 > bankovní párování variabilní symbol normalizuje na číslice. Kolizi hlásí kontrola

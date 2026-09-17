@@ -221,16 +221,33 @@ final class VarsymbolGenerator
      * syncCounter()/liftCounterTo() umí counter i snížit — kolize s už vystavenými
      * čísly řeší samoopravná logika v next() (přeskočí na první volné číslo).
      *
-     * Scope je vždy supplier-wide (client_id = 0, revenue_category_id = 0); řady
-     * klienta i kategorie tržby se nastavují přes vlastní template a jejich counter
-     * se dorovnává automaticky.
+     * Scope určují `$clientId` / `$revenueCategoryId` (obojí 0 = supplier-wide, dosavadní
+     * chování). Šablonu i období si scope řeší SÁM přes resolveTemplateAndPeriod() —
+     * jinak by náhled i kontrola „šablona má čítač" mluvily o jiné řadě, než kterou
+     * uživatel nastavuje.
      *
-     * @return array{counter:int, period:string, preview:string}
-     * @throws \InvalidArgumentException neplatný vstup, chybějící template
-     *                                   nebo template bez counter placeholderu
+     * Osa se nastavuje jen tam, kde řada skutečně VZNIKÁ, tedy kde je vlastní šablona.
+     * Zdědí-li klient (nebo kategorie) šablonu dodavatele, žádnou vlastní řadu nemá —
+     * sdílí počítadlo dodavatele a zápis na jeho vlastní řádek `invoice_counters` by
+     * vyrobil počítadlo, ze kterého nikdy nikdo nečte. Takový požadavek proto padá
+     * výjimkou, ne tichým zápisem jinam. Tatáž větev chytá i cizí `client_id` /
+     * `revenue_category_id`: resolver je čte výhradně v rámci `supplier_id`, takže cizí
+     * záznam nemá šablonu, osa nevyhraje a zápis se nekoná.
+     *
+     * @return array{counter:int, period:string, preview:string,
+     *               client_id:int, revenue_category_id:int}
+     * @throws \InvalidArgumentException neplatný vstup, chybějící template,
+     *                                   template bez counter placeholderu
+     *                                   nebo osa bez vlastní číselné řady
      */
-    public function setCounter(int $supplierId, string $invoiceType, int $nextNumber, ?\DateTimeInterface $for = null): array
-    {
+    public function setCounter(
+        int $supplierId,
+        string $invoiceType,
+        int $nextNumber,
+        ?\DateTimeInterface $for = null,
+        int $clientId = 0,
+        int $revenueCategoryId = 0,
+    ): array {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException("Neplatný supplier_id: {$supplierId}");
         }
@@ -241,8 +258,28 @@ final class VarsymbolGenerator
         if ($nextNumber < 1) {
             throw new \InvalidArgumentException('next_number musí být >= 1.');
         }
+        // Klíč `invoice_counters` drží právě jednu vyhrávající osu (viz docblock třídy),
+        // takže obě naráz by znamenalo řádek, který resolver nikdy nesestaví.
+        if ($clientId > 0 && $revenueCategoryId > 0) {
+            throw new \InvalidArgumentException(
+                'client_id a revenue_category_id nelze kombinovat — řada patří vždy jedné ose.'
+            );
+        }
 
-        [$template, $period] = $this->resolveTemplateAndPeriod($supplierId, $invoiceType, 0, 0);
+        [$template, $period, $counterClientId, $counterCategoryId] =
+            $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId, $revenueCategoryId);
+        if ($clientId > 0 && $counterClientId !== $clientId) {
+            throw new \InvalidArgumentException(
+                "Klient #{$clientId} nemá vlastní šablonu pro {$invoiceType} — čísluje se řadou dodavatele,"
+                . ' takže počítadlo se nastavuje tam.'
+            );
+        }
+        if ($revenueCategoryId > 0 && $counterCategoryId !== $revenueCategoryId) {
+            throw new \InvalidArgumentException(
+                "Kategorie tržby #{$revenueCategoryId} nemá vlastní šablonu pro {$invoiceType} —"
+                . ' čísluje se řadou dodavatele, takže počítadlo se nastavuje tam.'
+            );
+        }
         if ($template === '') {
             throw new \InvalidArgumentException(
                 "Chybí template pro {$invoiceType}: nastav v Systém → Dodavatelé → Číslování faktur,"
@@ -263,23 +300,30 @@ final class VarsymbolGenerator
         if ($this->db->hasColumn('invoice_counters', 'floor_number')) {
             $stmt = $this->db->pdo()->prepare(
                 'INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number, floor_number)
-                 VALUES (?, 0, 0, ?, ?, ?, ?)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE last_number = VALUES(last_number), floor_number = VALUES(floor_number)'
             );
-            $stmt->execute([$supplierId, $invoiceType, $periodKey, $nextNumber - 1, $nextNumber - 1]);
+            $stmt->execute([
+                $supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey,
+                $nextNumber - 1, $nextNumber - 1,
+            ]);
         } else {
             $stmt = $this->db->pdo()->prepare(
                 'INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number)
-                 VALUES (?, 0, 0, ?, ?, ?)
+                 VALUES (?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE last_number = VALUES(last_number)'
             );
-            $stmt->execute([$supplierId, $invoiceType, $periodKey, $nextNumber - 1]);
+            $stmt->execute([
+                $supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey, $nextNumber - 1,
+            ]);
         }
 
         return [
-            'counter' => $nextNumber - 1,
-            'period'  => $periodKey,
-            'preview' => $this->render($template, $for, $nextNumber),
+            'counter'             => $nextNumber - 1,
+            'period'              => $periodKey,
+            'preview'             => $this->render($template, $for, $nextNumber),
+            'client_id'           => $counterClientId,
+            'revenue_category_id' => $counterCategoryId,
         ];
     }
 

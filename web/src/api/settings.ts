@@ -330,6 +330,25 @@ export interface PaymentQrSettings {
   purchase_invoice_qr_include_due_date: boolean
 }
 
+/** Typy dokladů, které mají supplier-wide počítadlo číselné řady. */
+export type InvoiceCounterType = 'invoice' | 'proforma' | 'credit_note'
+
+/** Odpověď PUT /settings/supplier/invoice-counter. */
+export interface InvoiceCounterResult {
+  type: InvoiceCounterType
+  /** Číslo, které dostane PŘÍŠTÍ vystavený doklad. */
+  next_number: number
+  /** Uložená hodnota počítadla (= next_number - 1). */
+  counter: number
+  /** Období počítadla dle `invoice_number_period` ('2026' / '202601' / 'ALL'). */
+  period: string
+  /** Výsledné číslo vyrenderované SERVEREM — nedopočítávat v prohlížeči. */
+  preview: string
+  /** Osa, na které počítadlo reálně vzniklo (0 = řada dodavatele). */
+  client_id: number
+  revenue_category_id: number
+}
+
 export interface NumberSeriesSide {
   type: 'invoice' | 'proforma' | 'credit_note'
   client_id: number | null
@@ -898,6 +917,30 @@ export interface PdfSignatureOutputSettingsBatchResult {
 export const settingsApi = {
   getSupplier: () => api.get<Supplier>('/settings/supplier').then(r => r.data),
   updateSupplier: (payload: Partial<Supplier>) => api.put<Supplier>('/settings/supplier', payload).then(r => r.data),
+  /**
+   * Nastaví počítadlo tak, aby PŘÍŠTÍ doklad daného typu dostal číslo `nextNumber` —
+   * navázání na rozjetou řadu při přechodu z jiného software. Ukládá se mimo
+   * `updateSupplier()`, je to samostatný endpoint. `date` určuje, do kterého období se
+   * počítadlo zapíše (default dnes).
+   *
+   * Scope: bez `clientId` i `revenueCategoryId` jde o řadu dodavatele, s jedním z nich
+   * o vlastní řadu klienta, resp. kategorie tržby. Obě naráz backend odmítá a osa musí
+   * mít vlastní šablonu — u zděděné je řada společná s dodavatelem.
+   */
+  setInvoiceCounter: (
+    type: InvoiceCounterType,
+    nextNumber: number,
+    date?: string,
+    clientId = 0,
+    revenueCategoryId = 0,
+  ) =>
+    api.put<InvoiceCounterResult>('/settings/supplier/invoice-counter', {
+      type,
+      next_number: nextNumber,
+      ...(date ? { date } : {}),
+      ...(clientId ? { client_id: clientId } : {}),
+      ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
+    }).then(r => r.data),
   getClientBranding: () => api.get<OperationalBrandingSettings>('/settings/client/branding').then(r => r.data),
   updateClientBranding: (payload: Partial<OperationalBrandingSettings>) =>
     api.put<OperationalBrandingSettings>('/settings/client/branding', payload).then(r => r.data),

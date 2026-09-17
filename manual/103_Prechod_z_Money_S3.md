@@ -120,6 +120,26 @@ bankovních účtech nebo ve dvou pokladnách.
    dokončení průvodce nabídne účetní deník a obratovou předvahu. Převod jedné
    firmy běží vždy jen jeden, druhý se do jeho konce nespustí.
 
+### 103.4.1 Navázání na existující číselnou řadu
+
+Převod přenáší doklady s čísly, která měly v Money S3, ale počítadlo nové řady
+tím sám nenastaví. Číslo, kterým má řada v MyÚčtu pokračovat, zadejte
+v Nastavení → Doklady → **Číslování faktur** do pole **Příští číslo** u příslušné
+šablony a potvrďte tlačítkem *Nastavit počítadlo*. Ukládá se samostatně, mimo
+tlačítko *Uložit*, a po potvrzení ukáže náhled výsledného čísla.
+
+Vlastní řadu může mít i jednotlivý zákazník nebo kategorie tržby; pole *Příští
+číslo* je pak u jejich šablony. U zděděné šablony se pole nenabízí, protože se
+čísluje řadou dodavatele a počítadlo je společné.
+
+> ⚠️ Zkontrolujte, že **perioda resetu sedí se šablonou**: u masky bez `{MM}`
+> a měsíčního resetu by počítadlo prvního dne dalšího měsíce spadlo zpátky na
+> začátek a čísla by kolidovala. Podrobně viz
+> [§ 95.5.3](95_Multi_supplier.md#9553-cislovani-faktur).
+
+> 🛈 Sestava *Úplnost číselné řady* začne řadu počítat až od nastaveného čísla,
+> takže začátek řady na vyšším čísle nehlásí jako chybějící doklady.
+
 ## 103.5 Rekonciliace a protokol
 
 Každý běh (zkouška i převod) končí protokolem. Najdete v něm kroky převodu
