@@ -183,7 +183,11 @@ PHP;
                 $this->db->pdo(),
                 $process,
                 (int) $control['connection_id'],
-                '/INSERT\s+INTO\s+integration_change_log\b/i',
+                // Zámek kurzoru bere až TRIGGER nad integration_change_log, takže
+                // PROCESSLIST.INFO ukazuje jeho tělo (integration_change_state), ne
+                // vnější INSERT. Vzor musí pokrýt obojí: vnější příkaz pro okamžik
+                // před spuštěním triggeru, tělo triggeru pro dobu čekání na zámek.
+                '/INSERT\s+INTO\s+integration_change_(?:log|state)\b|UPDATE\s+integration_change_state\b/i',
                 'Worker did not wait on the tenant cursor lock.',
             );
             $this->db->pdo()->commit();

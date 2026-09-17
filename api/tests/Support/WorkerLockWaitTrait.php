@@ -15,10 +15,20 @@ use Symfony\Component\Process\Process;
  * deadline, takže na vytíženém CI runneru spolkl bootstrap aplikace skoro celou
  * lhůtu a na zjištění čekání nezbyl čas — test padal, i když zámek fungoval.
  *
- * Čekání se dokládá řádkem v INNODB_LOCK_WAITS, nebo tím, že worker aspoň
- * 250 ms drží rozpracovaný právě ten zamykající příkaz (stejný záložní signál
- * jako SalesOrderConfirmConcurrencyTest). Bez zámku by takový příkaz doběhl
- * v milisekundách; o správnosti serializace pak rozhoduje až aserce výsledku.
+ * Čekání se dokládá třemi nezávislými signály (stačí kterýkoli):
+ *   1. řádek v INNODB_LOCK_WAITS,
+ *   2. `INNODB_TRX.trx_state = 'LOCK WAIT'` pro session workeru — kanonický stav
+ *      transakce; hlásí ho i instalace, kde zůstává INNODB_LOCK_WAITS prázdné
+ *      (odtud padal test na CI, zatímco lokálně procházel),
+ *   3. worker aspoň 250 ms drží rozpracovaný právě ten zamykající příkaz (stejný
+ *      záložní signál jako SalesOrderConfirmConcurrencyTest).
+ * Bez zámku by takový příkaz doběhl v milisekundách; o správnosti serializace
+ * pak rozhoduje až aserce výsledku.
+ *
+ * POZOR na vzor pro signál 3: `PROCESSLIST.INFO` ukazuje u zámku braného UVNITŘ
+ * TRIGGERU příkaz z těla triggeru, ne vnější INSERT. Vzor proto musí popisovat
+ * příkaz, který zámek opravdu bere — jinak záložní signál nemůže nikdy sepnout
+ * a test visí na signálech 1–2.
  */
 trait WorkerLockWaitTrait
 {
@@ -69,14 +79,19 @@ trait WorkerLockWaitTrait
                       JOIN information_schema.INNODB_TRX waiter ON waiter.trx_id = w.requesting_trx_id
                      WHERE waiter.trx_mysql_thread_id = ?
                 ) AS has_lock_wait,
+                EXISTS(
+                    SELECT 1
+                      FROM information_schema.INNODB_TRX waiter
+                     WHERE waiter.trx_mysql_thread_id = ? AND waiter.trx_state = \'LOCK WAIT\'
+                ) AS trx_in_lock_wait,
                 COALESCE((SELECT INFO FROM information_schema.PROCESSLIST WHERE ID = ?), \'\') AS current_statement'
         );
         $deadline = microtime(true) + $timeoutSeconds;
         $statementSince = null;
         do {
-            $probe->execute([$connectionId, $connectionId]);
+            $probe->execute([$connectionId, $connectionId, $connectionId]);
             $row = $probe->fetch(PDO::FETCH_ASSOC) ?: [];
-            if ((int) ($row['has_lock_wait'] ?? 0) > 0) {
+            if ((int) ($row['has_lock_wait'] ?? 0) > 0 || (int) ($row['trx_in_lock_wait'] ?? 0) > 0) {
                 return;
             }
             if (preg_match($lockingStatementPattern, (string) ($row['current_statement'] ?? '')) === 1) {
