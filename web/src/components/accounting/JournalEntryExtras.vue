@@ -10,7 +10,7 @@
  *    doklad. Se `source_type`/`source_id` nemá nic společného (ta dvojice znamená
  *    „zápis JE zaúčtování dokladu"), takže ji lze doplnit i k ručnímu zápisu.
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -23,17 +23,25 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import JournalEntryHistory from '@/components/accounting/JournalEntryHistory.vue'
 import JournalEntryNotes from '@/components/accounting/JournalEntryNotes.vue'
 import JournalDocumentLinks from '@/components/accounting/JournalDocumentLinks.vue'
+import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 
 const props = defineProps<{ entry: JournalEntryDetail }>()
 const emit = defineEmits<{
   (e: 'description-updated', description: string, rowVersion: number): void
   /** Změna vazeb na doklady — volající překreslí panel „Souvisí". */
   (e: 'links-changed'): void
+  /** Počet položek ve všech podsekcích — nadřazená sekce podle něj pozná, že něco obsahuje. */
+  (e: 'count', n: number): void
 }>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+
+// Přílohy, poznámky a vazby dotahují potomci každý zvlášť; nadřazená sekce
+// potřebuje jen vědět, jestli je pod ní vůbec něco k vidění.
+const noteCount = ref(0)
+const linkCount = ref((props.entry.links ?? []).length)
 
 // ── description editor (§35) ────────────────────────────────────────────────
 const canEditDescription = computed(() =>
@@ -199,11 +207,13 @@ function fmtBytes(n: number | null): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
+watchEffect(() => emit('count', attachments.value.length + noteCount.value + linkCount.value))
+
 onMounted(loadAttachments)
 </script>
 
 <template>
-  <div class="mt-3 space-y-4">
+  <div class="mt-3 space-y-3">
     <!-- ── description (§35) ──
          Jen tam, kde se dá editovat. U zápisu řízeného zdrojovým dokladem je
          popis read-only a řádek deníku ho ukazuje ve sloupci POPIS o kus výš,
@@ -251,22 +261,17 @@ onMounted(loadAttachments)
          Hned za popisem: u ručního zápisu je „ke kterému dokladu to patří" ta
          první otázka, kterou po přečtení popisu účetní řeší. -->
     <JournalDocumentLinks :entry-id="entry.id" :initial-links="entry.links ?? null"
-      @changed="emit('links-changed')" />
+      @changed="links => { linkCount = links.length; emit('links-changed') }" />
 
     <!-- ── přílohy §33a ── -->
-    <div class="border-t border-neutral-200 pt-3">
-      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <h4 class="text-xs font-medium text-neutral-500 inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
-          {{ t('accounting.journal.attachments') }}
-          <span v-if="attachments.length" class="text-neutral-400">({{ attachments.length }})</span>
-        </h4>
+    <CollapsibleSection :title="t('accounting.journal.attachments')" :icon="ICONS.doc" :count="attachments.length">
+      <template #actions>
         <button v-if="auth.canWrite('accounting')" type="button" :class="btnOutline('primary')" @click="fileInput?.click()">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
           {{ t('accounting.journal.att_add') }}
         </button>
         <input ref="fileInput" type="file" multiple class="hidden" @change="onPick" />
-      </div>
+      </template>
 
       <!-- drag&drop zóna (jen write) -->
       <div v-if="auth.canWrite('accounting')"
@@ -334,10 +339,10 @@ onMounted(loadAttachments)
           </button>
         </li>
       </ul>
-    </div>
+    </CollapsibleSection>
 
     <!-- ── poznámky (1:N) — lazy, jdou psát i tam, kde je description read-only ── -->
-    <JournalEntryNotes :entry-id="entry.id" />
+    <JournalEntryNotes :entry-id="entry.id" @count="n => noteCount = n" />
 
     <!-- ── historie (SYSTEM VERSIONING timeline) ── -->
     <JournalEntryHistory :entry-id="entry.id" />

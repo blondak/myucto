@@ -13,6 +13,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS } from '@/components/ui/buttonStyles'
+import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 
 const props = defineProps<{ entryId: number }>()
 
@@ -46,8 +47,8 @@ function fieldValue(field: string, v: unknown): string {
   return String(v)
 }
 
-async function toggle() {
-  open.value = !open.value
+async function toggle(isOpen: boolean) {
+  open.value = isOpen
   if (open.value && !loaded.value) {
     loading.value = true
     try {
@@ -70,14 +71,8 @@ function lineSideLabel(side: string): string {
 </script>
 
 <template>
-  <div class="border-t border-neutral-200 pt-3">
-    <button type="button" class="cursor-pointer text-xs font-medium text-neutral-500 inline-flex items-center gap-1.5 hover:text-neutral-700" @click="toggle">
-      <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
-      {{ t('accounting.journal.history.title') }}
-      <span class="inline-block transition-transform text-neutral-400" :class="{ 'rotate-90': open }">▸</span>
-    </button>
-
-    <div v-if="open" class="mt-2">
+  <CollapsibleSection :title="t('accounting.journal.history.title')" :icon="ICONS.cycle" @toggle="toggle">
+    <div>
       <div v-if="loading" class="text-xs text-neutral-400 py-2">{{ t('common.loading') }}</div>
       <template v-else-if="history">
         <p v-if="history.versions.length <= 1" class="text-xs text-neutral-400">{{ t('accounting.journal.history.no_changes') }}</p>
@@ -133,5 +128,5 @@ function lineSideLabel(side: string): string {
         </ol>
       </template>
     </div>
-  </div>
+  </CollapsibleSection>
 </template>

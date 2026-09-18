@@ -7,10 +7,29 @@ import { useToast } from '@/composables/useToast'
 import { documentsApi, type DocItem, type EntityType } from '@/api/documents'
 import { docTypeBadge, formatBytes } from './docFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 
 // `uploadable` přidá nahrání nového souboru rovnou s vazbou na entitu (sken
 // účtenky k pokladnímu dokladu) — bez něj panel jen připojuje existující dokumenty.
-const props = defineProps<{ entityType: EntityType; entityId: number; uploadable?: boolean; title?: string }>()
+// `collapsible` schová panel do sbalitelné sekce místo samostatné karty.
+// Připojený dokument je u drtivé většiny dokladů výjimka, takže na detailech,
+// kde pod hlavní věcí stojí celý sloupec dalších sekcí, by prázdná karta byla
+// nejnápadnější prvek stránky.
+const props = defineProps<{
+  entityType: EntityType
+  entityId: number
+  uploadable?: boolean
+  title?: string
+  collapsible?: boolean
+}>()
+
+/** Počet připojených dokumentů ven — nadřazená sekce podle něj pozná, že něco obsahuje. */
+const emit = defineEmits<{ (e: 'count', n: number): void }>()
+
+const section = ref<{ open: boolean } | null>(null)
+
+/** Ikona dokumentu — tatáž, jakou nese sekce Přílohy o kus výš. */
+const DOC_ICON = 'M7 21h10a2 2 0 0 0 2-2V9.414a1 1 0 0 0-.293-.707l-5.414-5.414A1 1 0 0 0 12.586 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zM9 13h6m-6 4h6'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -57,6 +76,9 @@ async function onFiles(e: Event) {
 
 function toggleAttach() {
   attaching.value = !attaching.value
+  // Ve sbalitelné variantě sedí tlačítko v hlavičce sekce, takže jde zmáčknout
+  // i zavřené — hledání by se jinak otevřelo schované.
+  if (attaching.value && section.value) { section.value.open = true }
   if (attaching.value) nextTick(() => searchInput.value?.focus())
 }
 
@@ -64,6 +86,7 @@ async function load() {
   loading.value = true
   try {
     docs.value = await documentsApi.byEntity(props.entityType, props.entityId)
+    emit('count', docs.value.length)
   } finally {
     loading.value = false
   }
@@ -104,36 +127,24 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
-    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-      <h3 class="text-sm font-medium text-neutral-700 flex items-center gap-2">
-        <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 0 0 2-2V9.414a1 1 0 0 0-.293-.707l-5.414-5.414A1 1 0 0 0 12.586 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zM9 13h6m-6 4h6" />
-        </svg>
-        {{ title ?? t('documents.panel_title') }}
-        <span v-if="docs.length" class="text-xs text-neutral-400">({{ docs.length }})</span>
-      </h3>
-      <div class="flex flex-wrap items-center gap-2">
-        <template v-if="canUpload">
-          <input ref="fileInput" type="file" multiple accept="application/pdf,image/*" class="hidden" data-testid="linked-docs-file" @change="onFiles" />
-          <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :disabled="uploading" data-testid="linked-docs-upload" @click="pickFiles">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
-            {{ uploading ? t('linked_documents.uploading') : t('linked_documents.upload') }}
-          </button>
-        </template>
-        <!-- Stejný tvar jako „Přidat přílohu" o panel výš: obě tlačítka dělají
-             v témže detailu totéž (přiložit něco k dokladu), takže se nesmí lišit. -->
-        <button
-          v-if="auth.canWrite('documents.move')"
-          type="button"
-          :class="[btnOutline('neutral'), 'whitespace-nowrap']"
-          @click="toggleAttach"
-        >
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
-          {{ t('documents.panel_attach') }}
+  <CollapsibleSection ref="section" :variant="collapsible ? 'inline' : 'card'"
+    :title="title ?? t('documents.panel_title')" :count="docs.length" :icon="DOC_ICON">
+    <template #actions>
+      <template v-if="canUpload">
+        <input ref="fileInput" type="file" multiple accept="application/pdf,image/*" class="hidden" data-testid="linked-docs-file" @change="onFiles" />
+        <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :disabled="uploading" data-testid="linked-docs-upload" @click="pickFiles">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+          {{ uploading ? t('linked_documents.uploading') : t('linked_documents.upload') }}
         </button>
-      </div>
-    </div>
+      </template>
+      <!-- Stejný tvar jako „Přidat přílohu" o panel výš: obě tlačítka dělají
+           v témže detailu totéž (přiložit něco k dokladu), takže se nesmí lišit. -->
+      <button v-if="auth.canWrite('documents.move')" type="button"
+        :class="[btnOutline('neutral'), 'whitespace-nowrap']" @click="toggleAttach">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+        {{ t('documents.panel_attach') }}
+      </button>
+    </template>
 
     <!-- Připojení existujícího dokumentu (fulltext) -->
     <div v-if="attaching" class="mb-3">
@@ -191,5 +202,5 @@ onMounted(load)
         </button>
       </li>
     </ul>
-  </div>
+  </CollapsibleSection>
 </template>

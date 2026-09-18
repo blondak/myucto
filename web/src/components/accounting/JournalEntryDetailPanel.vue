@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { formatDate } from '@/composables/useFormat'
@@ -9,6 +10,7 @@ import JournalRelatedPanel from './JournalRelatedPanel.vue'
 import JournalEntryExtras from './JournalEntryExtras.vue'
 import WhyPanel from '@/components/automation/WhyPanel.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 
 /**
  * Obsah rozbaleného zápisu deníku (rozpad na účty, Souvisí, přílohy, akce).
@@ -38,6 +40,13 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// Přílohy, poznámky, vazby, dokumenty: u drtivé většiny zápisů je pod hlavní
+// věcí prázdno, takže celá ta část stojí sbalená pod jedním řádkem. Počty
+// hlásí potomci, jakmile si data dotáhnou — sekce se pak otevře sama.
+const extrasCount = ref(0)
+const documentCount = ref(0)
+const extrasTotal = computed(() => extrasCount.value + documentCount.value)
 </script>
 
 <template>
@@ -53,10 +62,15 @@ const { t } = useI18n()
       @preview="id => emit('preview', id)" @focus-entry="id => emit('focus-entry', id)" />
     <WhyPanel v-if="detail.automation" class="mt-3" :provenance="detail.automation" />
     <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
-    <JournalEntryExtras :entry="detail"
-      @description-updated="(desc, rv) => emit('description-updated', detail.id, desc, rv)"
-      @links-changed="emit('links-changed', detail.id)" />
-    <LinkedDocumentsPanel class="mt-4 block" entity-type="journal_entry" :entity-id="detail.id" />
+    <CollapsibleSection class="mt-4" :title="t('accounting.journal.extras_title')"
+      :icon="ICONS.doc" :count="extrasTotal">
+      <JournalEntryExtras :entry="detail"
+        @description-updated="(desc, rv) => emit('description-updated', detail.id, desc, rv)"
+        @links-changed="emit('links-changed', detail.id)"
+        @count="n => extrasCount = n" />
+      <LinkedDocumentsPanel entity-type="journal_entry" :entity-id="detail.id" collapsible
+        @count="n => documentCount = n" />
+    </CollapsibleSection>
     <div class="flex flex-wrap items-center justify-between gap-3 mt-4 pt-3 border-t border-neutral-200">
       <div class="text-xs text-neutral-500">
         <span v-if="detail.created_at">{{ t('accounting.journal.created_at') }}: {{ formatDate(detail.created_at) }}</span>

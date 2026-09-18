@@ -6,6 +6,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { accountingApi, type JournalNote } from '@/api/accounting'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 
 /**
  * Poznámky k účetnímu zápisu (1:N).
@@ -21,6 +22,8 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
  * celý smysl téhle featury.
  */
 const props = defineProps<{ entryId: number }>()
+/** Počet poznámek ven — nadřazená sekce podle něj pozná, že něco obsahuje. */
+const emit = defineEmits<{ (e: 'count', n: number): void }>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -40,8 +43,8 @@ const editDraft = ref('')
 const canWrite = computed(() => auth.canWrite('accounting'))
 const MAX_LENGTH = 5000
 
-async function toggle() {
-  open.value = !open.value
+async function toggle(isOpen: boolean) {
+  open.value = isOpen
   if (open.value && !loaded.value) await reload(true)
 }
 
@@ -51,7 +54,6 @@ async function toggle() {
  */
 onMounted(async () => {
   await reload()
-  if (notes.value.length > 0) open.value = true
 })
 
 async function reload(withSpinner = false) {
@@ -59,6 +61,7 @@ async function reload(withSpinner = false) {
   try {
     notes.value = await accountingApi.listJournalNotes(props.entryId)
     loaded.value = true
+    emit('count', notes.value.length)
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -148,18 +151,9 @@ function metaLine(n: JournalNote): string {
 </script>
 
 <template>
-  <div class="border-t border-neutral-200 pt-3">
-    <button type="button" class="cursor-pointer text-xs font-medium text-neutral-500 inline-flex items-center gap-1.5 hover:text-neutral-700"
-      @click="toggle">
-      <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" />
-      </svg>
-      {{ t('accounting.journal.notes.title') }}
-      <span v-if="loaded && notes.length" class="rounded-full bg-neutral-200 px-1.5 text-[11px] text-neutral-700">{{ notes.length }}</span>
-      <span class="inline-block transition-transform text-neutral-400" :class="{ 'rotate-90': open }">▸</span>
-    </button>
-
-    <div v-if="open" class="mt-3">
+  <CollapsibleSection :title="t('accounting.journal.notes.title')" :icon="ICONS.doc"
+    :count="loaded ? notes.length : null" @toggle="toggle">
+    <div>
       <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
 
       <template v-else>
@@ -230,5 +224,5 @@ function metaLine(n: JournalNote): string {
         </div>
       </template>
     </div>
-  </div>
+  </CollapsibleSection>
 </template>

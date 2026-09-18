@@ -12288,6 +12288,7 @@
       "bank_deleted": "Bankovní zápis byl smazán a pohyb vrácen mezi nezaúčtované.",
       "delete_depreciation_confirm": "Opravdu smazat zápis odpisu #{id}? Nevytvoří se protizápis; smaže se účetní odpis a odpovídající potvrzený daňový odpis nejnovějšího roku.",
       "depreciation_deleted": "Zápis odpisu i řádky odpisového plánu byly smazány.",
+      "extras_title": "Poznámky a doklady",
       "attachments": "Přílohy",
       "att_add": "Přidat přílohu",
       "att_drop": "Přetáhni soubory sem nebo klikni na Přidat přílohu",

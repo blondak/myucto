@@ -9,6 +9,7 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import { accountingApi, type JournalDocumentLink, type LinkCandidate } from '@/api/accounting'
 import DocumentLinkPicker from '@/components/accounting/DocumentLinkPicker.vue'
 import { ICONS, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 import type { PermissionKey } from '@/security/permissions'
 
 /**
@@ -41,7 +42,18 @@ const saving = ref(false)
 const adding = ref(false)
 const note = ref('')
 
+const section = ref<{ open: boolean } | null>(null)
+
 const canWrite = computed(() => auth.canWrite('accounting'))
+
+/**
+ * Tlačítko sedí v hlavičce sekce, takže jde zmáčknout i když je sbalená —
+ * formulář by se pak otevřel schovaný. Otevře sekci s sebou.
+ */
+function startAdding(): void {
+  adding.value = !adding.value
+  if (adding.value && section.value) { section.value.open = true }
+}
 const linkedKeys = computed(() => links.value.map(l => `${l.doc_type}:${l.doc_id}`))
 
 // Vazby z detailu zápisu platí jen pro zápis, se kterým přišly — při přepnutí
@@ -112,17 +124,11 @@ function canOpen(link: JournalDocumentLink): boolean {
 </script>
 
 <template>
-  <div class="border-t border-neutral-200 pt-3">
-    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-      <h4 class="text-xs font-medium text-neutral-500 inline-flex items-center gap-1.5">
-        <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" />
-        </svg>
-        {{ t('accounting.journal.links.title') }}
-        <span v-if="links.length" class="text-neutral-400">({{ links.length }})</span>
-      </h4>
+  <CollapsibleSection ref="section" :title="t('accounting.journal.links.title')" :icon="ICONS.link"
+    :count="links.length">
+    <template #actions>
       <button v-if="canWrite" type="button" :class="btnOutline('primary')" :disabled="saving"
-        @click="adding = !adding">
+        @click="startAdding">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" :d="adding ? ICONS.x : ICONS.plus" />
         </svg>
@@ -130,7 +136,7 @@ function canOpen(link: JournalDocumentLink): boolean {
           {{ adding ? t('common.cancel') : t('accounting.journal.links.add') }}
         </span>
       </button>
-    </div>
+    </template>
 
     <div v-if="adding" class="mb-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
       <p class="mb-2 text-xs text-neutral-500">{{ t('accounting.journal.links.hint') }}</p>
@@ -182,5 +188,5 @@ function canOpen(link: JournalDocumentLink): boolean {
         </div>
       </li>
     </ul>
-  </div>
+  </CollapsibleSection>
 </template>

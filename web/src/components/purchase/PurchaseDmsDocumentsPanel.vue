@@ -13,9 +13,11 @@ import { purchaseInvoicesApi } from '@/api/purchaseInvoices'
 import { documentsApi, type DocItem } from '@/api/documents'
 import { docTypeBadge, formatBytes } from '@/components/documents/docFormat'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
-import EmptyState from '@/components/ui/EmptyState.vue'
+import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 
 const props = defineProps<{ invoiceId: number }>()
+
+const section = ref<{ open: boolean } | null>(null)
 
 const { t } = useI18n()
 const router = useRouter()
@@ -32,6 +34,9 @@ let debounce: ReturnType<typeof setTimeout> | null = null
 
 function toggleAttach() {
   attaching.value = !attaching.value
+  // Tlačítko sedí v hlavičce sekce, takže jde zmáčknout i sbalené — hledání
+  // by se jinak otevřelo schované.
+  if (attaching.value && section.value) { section.value.open = true }
   if (attaching.value) nextTick(() => searchInput.value?.focus())
 }
 
@@ -73,18 +78,17 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
-    <div class="flex items-center justify-between mb-3">
-      <h3 class="text-sm font-medium text-neutral-700 flex items-center gap-2">
-        <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
-        {{ t('documents.dms_panel.title') }}
-        <span v-if="docs.length" class="text-xs text-neutral-400">({{ docs.length }})</span>
-      </h3>
+  <!-- Připojená příloha je u přijaté faktury výjimka (PDF dodavatele visí
+       o kus výš na svém vlastním řádku), takže prázdný panel byl na většině
+       dokladů největší prvek stránky. Sbalený drží jeden řádek. -->
+  <CollapsibleSection ref="section" variant="card"
+    :title="t('documents.dms_panel.title')" :count="docs.length" :icon="ICONS.link">
+    <template #actions>
       <button v-if="auth.canWrite('purchase_invoices')" type="button" :class="btnOutline('primary')" @click="toggleAttach">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
         {{ t('documents.dms_panel.attach') }}
       </button>
-    </div>
+    </template>
 
     <div v-if="attaching" class="mb-3">
       <input ref="searchInput" v-model="query" type="text"
@@ -99,7 +103,7 @@ onMounted(load)
     </div>
 
     <div v-if="loading" class="text-sm text-neutral-400">{{ t('common.loading') }}</div>
-    <EmptyState v-else-if="docs.length === 0" dense accent="neutral" icon="link" :title="t('documents.dms_panel.empty')" />
+    <p v-else-if="docs.length === 0" class="text-sm text-neutral-400">{{ t('documents.dms_panel.empty') }}</p>
     <ul v-else class="space-y-1">
       <li v-for="d in docs" :key="d.id" class="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-neutral-50 group">
         <span :class="['shrink-0 w-8 h-8 flex items-center justify-center rounded text-[9px] font-semibold', docTypeBadge(d.doc_type).class]">{{ docTypeBadge(d.doc_type).label }}</span>
@@ -115,5 +119,5 @@ onMounted(load)
         </button>
       </li>
     </ul>
-  </div>
+  </CollapsibleSection>
 </template>

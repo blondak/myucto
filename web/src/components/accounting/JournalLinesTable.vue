@@ -5,6 +5,7 @@ import { RouterLink } from 'vue-router'
 import { formatMoney } from '@/composables/useFormat'
 import type { JournalLine } from '@/api/accounting'
 import { calendarYearRange } from '@/utils/accountingPeriod'
+import { canPair, pairLines } from '@/utils/journalPairs'
 
 /**
  * Rozpad účetního zápisu na účty (MD/DAL) jako samostatná karta.
@@ -16,6 +17,13 @@ import { calendarYearRange } from '@/utils/accountingPeriod'
  * Karta na světlém povrchu je vědomá: jako holá tabulka na šedém podkladu
  * rozbaleného řádku splývala s okolím, ačkoli je to to hlavní, kvůli čemu se
  * řádek rozbaluje.
+ *
+ * Řádek tabulky = SOUVZTAŽNOST, ne noha zápisu: jedna částka a účty MD a DAL
+ * vedle sebe, jak to má POHODA i Money ERP. Rozpad po nohách psal tutéž částku
+ * dvakrát a párování účtů nechával na oku čtenáře. Kde souvztažnost z dat
+ * jednoznačně nevyplývá ({@see canPair} — obě strany mají víc nohou, zápis
+ * nesedí), se vrací původní rozpad po stranách; vymýšlet dvojice by bylo horší
+ * než je neukázat.
  */
 const props = withDefaults(defineProps<{
   lines: JournalLine[]
@@ -28,16 +36,20 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 
+const paired = computed(() => canPair(props.lines))
+const pairs = computed(() => (paired.value ? pairLines(props.lines) : []))
+
 /** Součet strany MD — u vyrovnaného zápisu je shodný se stranou DAL. */
 const total = computed(() =>
   props.lines.filter(l => l.side === 'debit').reduce((s, l) => s + Number(l.amount || 0), 0))
 
 /**
- * U dvouřádkového zápisu je součet jen opis: obě strany jsou vidět a jsou si
- * rovné. Smysl dává až tam, kde se strana skládá z víc řádků (doklad s DPH,
- * rozpad na střediska) a součet potvrzuje, že zápis sedí.
+ * U jediné souvztažnosti (resp. dvouřádkového zápisu po stranách) je součet jen
+ * opis: částka je vidět celá a je jen jedna. Smysl dává až tam, kde se zápis
+ * skládá z víc dvojic (doklad s DPH, rozpad na střediska) a součet potvrzuje,
+ * že zápis sedí.
  */
-const showsTotal = computed(() => props.lines.length > 2)
+const showsTotal = computed(() => (paired.value ? pairs.value.length > 1 : props.lines.length > 2))
 
 /**
  * Účty, které v zápisu stojí na obou stranách (typicky 343.900 u převodu DPH nebo
@@ -70,6 +82,9 @@ const twoSidedAccounts = computed(() => {
     .filter(a => Math.abs(a.net) > 0.005)
 })
 
+/** Středisko má sloupec jen tam, kde je vůbec vyplněné — jinak je to sloupec pomlček. */
+const showsCostCenter = computed(() => props.lines.some(l => !!l.cost_center))
+
 const cell = computed(() => (props.dense ? 'px-2 py-1' : 'px-3 py-2'))
 
 function movementLink(line: JournalLine) {
@@ -89,14 +104,65 @@ function movementLink(line: JournalLine) {
 
 <template>
   <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-    <!-- Desktop: tabulka MD/DAL. Na mobilu se čtyři sloupce (účet s názvem,
-         středisko a dvě částky) do šířky nevejdou a název účtu se zlomil na
-         čtyři řádky, takže karta odspoda ukazovala samé zbytky slov. -->
-    <table class="w-full hidden md:table" :class="dense ? 'text-xs' : 'text-sm'">
+    <!-- ── Desktop, souvztažnosti: MD účet | DAL účet | částka ──
+         Na mobilu se tři sloupce s názvy účtů do šířky nevejdou, tam je z každé
+         dvojice karta. -->
+    <table v-if="paired" class="w-full hidden md:table" :class="dense ? 'text-xs' : 'text-sm'">
+      <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide border-b border-neutral-200">
+        <tr>
+          <th class="text-left font-medium" :class="cell">{{ t('accounting.journal.side.debit') }}</th>
+          <th class="text-left font-medium" :class="cell">{{ t('accounting.journal.side.credit') }}</th>
+          <th v-if="showsCostCenter" class="text-left font-medium" :class="cell">{{ t('accounting.journal.cost_center') }}</th>
+          <th class="text-right font-medium w-36" :class="cell">{{ t('accounting.journal.col_amount') }}</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-neutral-100">
+        <tr v-for="p in pairs" :key="p.key">
+          <td :class="cell">
+            <RouterLink v-if="p.debit" :to="movementLink(p.debit)"
+              class="inline-flex flex-wrap items-baseline gap-x-1.5 text-primary-600 hover:text-primary-700 hover:underline"
+              :title="t('accounting.accounts.detail.statement')">
+              <span class="font-mono font-medium">{{ p.debit.account_code }}</span>
+              <span class="text-neutral-600">{{ p.debit.account_name }}</span>
+            </RouterLink>
+          </td>
+          <td :class="cell">
+            <RouterLink v-if="p.credit" :to="movementLink(p.credit)"
+              class="inline-flex flex-wrap items-baseline gap-x-1.5 text-primary-600 hover:text-primary-700 hover:underline"
+              :title="t('accounting.accounts.detail.statement')">
+              <span class="font-mono font-medium">{{ p.credit.account_code }}</span>
+              <span class="text-neutral-600">{{ p.credit.account_name }}</span>
+            </RouterLink>
+          </td>
+          <td v-if="showsCostCenter" class="text-neutral-500 text-xs" :class="cell">{{ p.costCenter || '—' }}</td>
+          <td class="text-right font-mono font-medium text-neutral-900 whitespace-nowrap" :class="cell">
+            {{ formatMoney(p.amount) }}
+            <div v-if="p.amountForeign != null && p.currencyCode" class="text-xs font-normal text-neutral-400">
+              {{ formatMoney(p.amountForeign, p.currencyCode) }}
+            </div>
+          </td>
+        </tr>
+      </tbody>
+      <tfoot v-if="showsTotal" class="bg-neutral-50 border-t-2 border-neutral-300">
+        <tr class="font-semibold">
+          <td :class="cell" :colspan="showsCostCenter ? 3 : 2">{{ t('accounting.journal.total') }}</td>
+          <td class="text-right font-mono text-neutral-900" :class="cell">{{ formatMoney(total) }}</td>
+        </tr>
+        <tr v-for="a in twoSidedAccounts" :key="a.code" class="text-xs font-normal text-neutral-500">
+          <td :class="cell" :colspan="showsCostCenter ? 3 : 2">{{ t('accounting.journal.net_on_account', { account: a.code }) }}</td>
+          <td class="text-right font-mono" :class="cell">{{ formatMoney(Math.abs(a.net)) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <!-- ── Desktop, rozpad po stranách ──
+         Záložní pohled pro zápisy, u kterých souvztažnost z dat nevyplývá
+         (obě strany víc nohou) nebo zápis nesedí. Tam je vidět syrový stav. -->
+    <table v-else class="w-full hidden md:table" :class="dense ? 'text-xs' : 'text-sm'">
       <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide border-b border-neutral-200">
         <tr>
           <th class="text-left font-medium" :class="cell">{{ t('accounting.journal.account') }}</th>
-          <th class="text-left font-medium" :class="cell">{{ t('accounting.journal.cost_center') }}</th>
+          <th v-if="showsCostCenter" class="text-left font-medium" :class="cell">{{ t('accounting.journal.cost_center') }}</th>
           <th class="text-right font-medium w-36" :class="cell">{{ t('accounting.journal.side.debit') }}</th>
           <th class="text-right font-medium w-36" :class="cell">{{ t('accounting.journal.side.credit') }}</th>
         </tr>
@@ -111,7 +177,7 @@ function movementLink(line: JournalLine) {
               <span class="text-neutral-600">{{ l.account_name }}</span>
             </RouterLink>
           </td>
-          <td class="text-neutral-500 text-xs" :class="cell">{{ l.cost_center || '—' }}</td>
+          <td v-if="showsCostCenter" class="text-neutral-500 text-xs" :class="cell">{{ l.cost_center || '—' }}</td>
           <td class="text-right font-mono font-medium text-neutral-900" :class="cell">
             <template v-if="l.side === 'debit'">
               {{ formatMoney(l.amount) }}
@@ -132,18 +198,59 @@ function movementLink(line: JournalLine) {
       </tbody>
       <tfoot v-if="showsTotal" class="bg-neutral-50 border-t-2 border-neutral-300">
         <tr class="font-semibold">
-          <td :class="cell" colspan="2">{{ t('accounting.journal.total') }}</td>
+          <td :class="cell" :colspan="showsCostCenter ? 2 : 1">{{ t('accounting.journal.total') }}</td>
           <td class="text-right font-mono text-neutral-900" :class="cell" colspan="2">{{ formatMoney(total) }}</td>
         </tr>
         <tr v-for="a in twoSidedAccounts" :key="a.code" class="text-xs font-normal text-neutral-500">
-          <td :class="cell" colspan="2">{{ t('accounting.journal.net_on_account', { account: a.code }) }}</td>
+          <td :class="cell" :colspan="showsCostCenter ? 2 : 1">{{ t('accounting.journal.net_on_account', { account: a.code }) }}</td>
           <td class="text-right font-mono" :class="cell" colspan="2">{{ formatMoney(Math.abs(a.net)) }}</td>
         </tr>
       </tfoot>
     </table>
 
-    <!-- Mobil: řádek = karta. Strana zápisu je štítek u částky, ne sloupec. -->
-    <div class="md:hidden divide-y divide-neutral-100">
+    <!-- ── Mobil: souvztažnost = karta, částka jednou nahoře ── -->
+    <div v-if="paired" class="md:hidden divide-y divide-neutral-100">
+      <div v-for="p in pairs" :key="`m-${p.key}`" class="px-3 py-2 space-y-1.5">
+        <div class="flex items-baseline justify-between gap-2">
+          <span class="text-[10px] uppercase tracking-wide font-medium text-neutral-400">{{ t('accounting.journal.col_amount') }}</span>
+          <div class="text-right">
+            <div class="font-mono text-sm font-semibold text-neutral-900">{{ formatMoney(p.amount) }}</div>
+            <div v-if="p.amountForeign != null && p.currencyCode" class="text-xs text-neutral-400 font-mono">
+              {{ formatMoney(p.amountForeign, p.currencyCode) }}
+            </div>
+          </div>
+        </div>
+        <div v-for="leg in [{ side: 'debit', line: p.debit }, { side: 'credit', line: p.credit }]" :key="leg.side">
+          <RouterLink v-if="leg.line" :to="movementLink(leg.line)"
+            class="flex items-baseline gap-2 text-primary-600 hover:text-primary-700"
+            :title="t('accounting.accounts.detail.statement')">
+            <span class="text-[10px] uppercase tracking-wide font-medium text-neutral-400 w-7 shrink-0">
+              {{ leg.side === 'debit' ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit') }}
+            </span>
+            <span class="min-w-0">
+              <span class="font-mono font-medium text-sm">{{ leg.line.account_code }}</span>
+              <span class="block text-xs text-neutral-600">{{ leg.line.account_name }}</span>
+            </span>
+          </RouterLink>
+        </div>
+        <div v-if="p.costCenter" class="text-xs text-neutral-500">
+          {{ t('accounting.journal.cost_center') }}: {{ p.costCenter }}
+        </div>
+      </div>
+      <div v-if="showsTotal" class="px-3 py-2 bg-neutral-50 space-y-1">
+        <div class="flex justify-between text-sm font-semibold">
+          <span>{{ t('accounting.journal.total') }}</span>
+          <span class="font-mono">{{ formatMoney(total) }}</span>
+        </div>
+        <div v-for="a in twoSidedAccounts" :key="`m-net-${a.code}`" class="flex justify-between text-xs text-neutral-500">
+          <span>{{ t('accounting.journal.net_on_account', { account: a.code }) }}</span>
+          <span class="font-mono">{{ formatMoney(Math.abs(a.net)) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Mobil, rozpad po stranách: řádek = karta, strana je štítek u částky ── -->
+    <div v-else class="md:hidden divide-y divide-neutral-100">
       <div v-for="l in lines" :key="`m-${l.id}`" class="px-3 py-2 space-y-1">
         <div class="flex items-baseline justify-between gap-2">
           <RouterLink :to="movementLink(l)"

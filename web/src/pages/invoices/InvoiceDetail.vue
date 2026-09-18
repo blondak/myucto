@@ -155,6 +155,9 @@ const smtpStatusBadge: Record<string, string> = {
 }
 function smtpBadge(s: string | null): string { return s ? (smtpStatusBadge[s] ?? 'bg-neutral-100 text-neutral-600') : 'bg-neutral-100 text-neutral-600' }
 const attachments = ref<InvoiceAttachment[]>([])
+// Příloha e-mailu je u drtivé většiny faktur výjimka, takže panel stojí sbalený
+// (stejně jako Historie PDF a Aktivita vedle) a sám se otevře, až něco nese.
+const attachmentsOpen = ref(false)
 const attachmentsBusy = ref(false)
 const attachmentsDragOver = ref(false)
 const attachmentInput = ref<HTMLInputElement | null>(null)
@@ -240,7 +243,11 @@ async function load() {
       .catch(() => { if (generation === loadGeneration) smtpEnabled.value = false })
   }
   invoicesApi.listAttachments(invoiceId)
-    .then(items => { if (generation === loadGeneration) attachments.value = items })
+    .then(items => {
+      if (generation !== loadGeneration) return
+      attachments.value = items
+      if (items.length > 0) attachmentsOpen.value = true
+    })
     .catch(() => {})
   loadPayments(invoiceId, generation)
   if (stockIntegrationVisible.value) void loadStockDocuments(invoiceId, generation)
@@ -2844,17 +2851,24 @@ const invoiceActions = computed<ActionItem[]>(() => {
       <!-- Přílohy emailu (PDF/Office/obrázky se přibalí při odeslání faktury) -->
       <div v-if="invoice && attachmentsAvailable(invoice)"
            class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
-          <div>
-            <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">
-              {{ t('invoice.attachments.title') }}
-            </h3>
-            <p class="text-xs text-neutral-500 mt-0.5">{{ t('invoice.attachments.hint') }}</p>
-          </div>
-          <span class="text-xs text-neutral-400">{{ attachments.length }}</span>
-        </header>
+        <button type="button" @click="attachmentsOpen = !attachmentsOpen"
+          class="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-neutral-50 cursor-pointer gap-3"
+          :class="attachmentsOpen ? 'border-b border-neutral-200' : ''">
+          <span class="min-w-0">
+            <span class="flex items-center gap-2">
+              <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+                {{ t('invoice.attachments.title') }}
+              </h3>
+              <span class="text-xs text-neutral-400">{{ attachments.length }}</span>
+            </span>
+            <span v-if="attachmentsOpen" class="block text-xs text-neutral-500 mt-0.5">{{ t('invoice.attachments.hint') }}</span>
+          </span>
+          <svg class="w-4 h-4 text-neutral-400 shrink-0 transition-transform" :class="attachmentsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
 
-        <ul v-if="attachments.length > 0" class="divide-y divide-neutral-100">
+        <ul v-if="attachmentsOpen && attachments.length > 0" class="divide-y divide-neutral-100">
           <li v-for="a in attachments" :key="a.id" class="px-5 py-2.5 text-sm flex items-center gap-3">
             <svg class="w-4 h-4 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round"
@@ -2893,7 +2907,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
           </li>
         </ul>
 
-        <div class="px-5 py-3"
+        <div v-show="attachmentsOpen" class="px-5 py-3"
              :class="attachmentsDragOver ? 'bg-primary-50' : 'bg-neutral-50/50'"
              @dragover.prevent="attachmentsDragOver = true"
              @dragleave.prevent="attachmentsDragOver = false"

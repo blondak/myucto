@@ -12288,6 +12288,7 @@
       "bank_deleted": "The bank entry was deleted and the transaction returned to the unposted queue.",
       "delete_depreciation_confirm": "Really delete depreciation entry #{id}? No reversal will be created; the accounting depreciation and the matching confirmed tax depreciation for the latest year will be deleted.",
       "depreciation_deleted": "The depreciation entry and depreciation-plan rows were deleted.",
+      "extras_title": "Notes and documents",
       "attachments": "Attachments",
       "att_add": "Add attachment",
       "att_drop": "Drop files here or click Add attachment",
