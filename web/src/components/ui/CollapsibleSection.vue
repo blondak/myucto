@@ -60,7 +60,12 @@ defineExpose({ open })
 <template>
   <section :class="wrapperClass">
     <div class="flex flex-wrap items-center gap-2">
-      <button type="button" class="cursor-pointer group flex min-w-0 items-center gap-2 text-left" @click="toggle">
+      <!-- Tlačítko bere celou šířku řádku: zaprvé se sekce dá přepnout kliknutím
+           kamkoli do hlavičky, zadruhé se prstenec fokusu obkreslí kolem celého
+           řádku. Když tlačítko drželo jen šířku textu, vypadal jako zbloudilý
+           rámeček uprostřed sekce. -->
+      <button type="button" @click="toggle"
+        class="cursor-pointer group flex min-w-0 flex-1 items-center gap-2 rounded-md py-0.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
         <svg class="w-3.5 h-3.5 shrink-0 text-neutral-400 transition-transform" :class="open ? 'rotate-90' : ''"
           fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />

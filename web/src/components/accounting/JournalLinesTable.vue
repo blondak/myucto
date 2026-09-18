@@ -39,6 +39,36 @@ const { t } = useI18n()
 const paired = computed(() => canPair(props.lines))
 const pairs = computed(() => (paired.value ? pairLines(props.lines) : []))
 
+/**
+ * Sloučení buněk u nohy, která se dělí mezi víc protistran (311 proti 602+343).
+ * Vypsat ji u každé dvojice znovu je šum: opakuje se ta samá věc a oko pak hledá
+ * rozdíl tam, kde žádný není. Sloučená buňka navíc ukazuje strukturu zápisu —
+ * jedna pohledávka rozpuštěná do tržby a daně.
+ *
+ * Pro každý řádek vrací, jestli se buňka té strany kreslí, a přes kolik řádků.
+ */
+function spansOf(side: 'debit' | 'credit') {
+  return computed(() => {
+    const rows = pairs.value
+    return rows.map((p, i) => {
+      const account = p[side]?.account_id ?? null
+      if (i > 0 && (rows[i - 1][side]?.account_id ?? null) === account) {
+        return { render: false, span: 1 }
+      }
+      let span = 1
+      while (i + span < rows.length && (rows[i + span][side]?.account_id ?? null) === account) { span += 1 }
+      return { render: true, span }
+    })
+  })
+}
+const debitSpans = spansOf('debit')
+const creditSpans = spansOf('credit')
+
+/** Linka nad buňkou — první řádek ji nemá, hlavička si vede vlastní. */
+function rowBorder(i: number): string {
+  return i > 0 ? 'border-t border-neutral-100' : ''
+}
+
 /** Součet strany MD — u vyrovnaného zápisu je shodný se stranou DAL. */
 const total = computed(() =>
   props.lines.filter(l => l.side === 'debit').reduce((s, l) => s + Number(l.amount || 0), 0))
@@ -116,9 +146,13 @@ function movementLink(line: JournalLine) {
           <th class="text-right font-medium w-36" :class="cell">{{ t('accounting.journal.col_amount') }}</th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-neutral-100">
-        <tr v-for="p in pairs" :key="p.key">
-          <td :class="cell">
+      <!-- Dělicí linka sedí na buňkách, ne na řádku: přes sloučenou buňku by
+           řádkový oddělovač vedl čáru a sloučení by bylo k ničemu. -->
+      <tbody>
+        <tr v-for="(p, i) in pairs" :key="p.key">
+          <!-- Dělená noha se vypisuje jednou a buňka sahá přes všechny své
+               protistrany — svisle na střed, ať je vidět, že patří ke všem. -->
+          <td v-if="debitSpans[i].render" :rowspan="debitSpans[i].span" class="align-middle" :class="[cell, rowBorder(i)]">
             <RouterLink v-if="p.debit" :to="movementLink(p.debit)"
               class="inline-flex flex-wrap items-baseline gap-x-1.5 text-primary-600 hover:text-primary-700 hover:underline"
               :title="t('accounting.accounts.detail.statement')">
@@ -126,7 +160,7 @@ function movementLink(line: JournalLine) {
               <span class="text-neutral-600">{{ p.debit.account_name }}</span>
             </RouterLink>
           </td>
-          <td :class="cell">
+          <td v-if="creditSpans[i].render" :rowspan="creditSpans[i].span" class="align-middle" :class="[cell, rowBorder(i)]">
             <RouterLink v-if="p.credit" :to="movementLink(p.credit)"
               class="inline-flex flex-wrap items-baseline gap-x-1.5 text-primary-600 hover:text-primary-700 hover:underline"
               :title="t('accounting.accounts.detail.statement')">
@@ -134,8 +168,8 @@ function movementLink(line: JournalLine) {
               <span class="text-neutral-600">{{ p.credit.account_name }}</span>
             </RouterLink>
           </td>
-          <td v-if="showsCostCenter" class="text-neutral-500 text-xs" :class="cell">{{ p.costCenter || '—' }}</td>
-          <td class="text-right font-mono font-medium text-neutral-900 whitespace-nowrap" :class="cell">
+          <td v-if="showsCostCenter" class="text-neutral-500 text-xs" :class="[cell, rowBorder(i)]">{{ p.costCenter || '—' }}</td>
+          <td class="text-right font-mono font-medium text-neutral-900 whitespace-nowrap" :class="[cell, rowBorder(i)]">
             {{ formatMoney(p.amount) }}
             <div v-if="p.amountForeign != null && p.currencyCode" class="text-xs font-normal text-neutral-400">
               {{ formatMoney(p.amountForeign, p.currencyCode) }}

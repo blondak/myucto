@@ -71,6 +71,11 @@ describe('JournalLinesTable', () => {
     expect(rows[1].text()).toContain('17640')
     // Částka smí být v řádku jen jednou — to je celý smysl souvztažnosti.
     expect(rows[0].text().match(/84000/g)).toHaveLength(1)
+
+    // Dělená pohledávka se vypíše jednou a buňka sahá přes obě protistrany.
+    expect(wrapper.findAll('table tbody td').filter(td => td.text().includes('311.100'))).toHaveLength(1)
+    expect(rows[0].findAll('td')[0].attributes('rowspan')).toBe('2')
+    expect(rows[1].text()).not.toContain('311.100')
   })
 
   it('u zápisu s víc nohama na obou stranách zůstává rozpad po stranách', () => {
