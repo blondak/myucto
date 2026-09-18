@@ -34,7 +34,7 @@ final class AiPdfExtractorRecapRateCodeTest extends TestCase
     /** @param list<array<string,mixed>> $recap @return list<array<string,mixed>> */
     private function repair(array $recap): array
     {
-        $out = AiPdfExtractor::repairedVatRecapRates(['vat_recap' => $recap], $this->resolver());
+        $out = AiPdfExtractor::repairedRateCodes(['vat_recap' => $recap], $this->resolver());
 
         return $out['vat_recap'];
     }
@@ -94,6 +94,64 @@ final class AiPdfExtractorRecapRateCodeTest extends TestCase
     {
         $data = ['vendor_invoice_number' => 'TEST-0001', 'total_with_vat' => 121.0];
 
-        self::assertSame($data, AiPdfExtractor::repairedVatRecapRates($data, $this->resolver()));
+        self::assertSame($data, AiPdfExtractor::repairedRateCodes($data, $this->resolver()));
+    }
+
+    /**
+     * Týž kód stojí i u položek. Sama oprava rekapitulace doklad nespasí: účtenka
+     * jednotkové ceny uvádí (`recapOnlyRates` se nechytí) a sazby jsou dvě
+     * (`singleRateConsistentRecap` vrací null), takže řádky spadnou na zástupnou nulu,
+     * `PurchaseVatRecapSeeder::computedRecap()` nad nimi vrátí prázdno a seeder daně
+     * nemá kam připnout. Dopočtený převod kód→procento proto musí dojít i na `items`.
+     */
+    public function testKodSazbySePropiseIDoPolozek(): void
+    {
+        $out = AiPdfExtractor::repairedRateCodes([
+            'vat_recap' => [
+                ['rate' => 23, 'base' => 3663.21, 'vat' => 439.59],
+                ['rate' => 6,  'base' => 1757.00, 'vat' => 368.97],
+            ],
+            'items' => [
+                ['description' => 'Zboží A', 'quantity' => 1, 'unit_price_without_vat' => 3663.21, 'vat_rate' => 23],
+                ['description' => 'Zboží B', 'quantity' => 1, 'unit_price_without_vat' => 1757.00, 'vat_rate' => 6],
+            ],
+        ], $this->resolver());
+
+        self::assertSame(12.0, $out['items'][0]['vat_rate']);
+        self::assertSame(21.0, $out['items'][1]['vat_rate']);
+        // Položka se smí změnit jen v sazbě — popis ani cena nejsou naše věc.
+        self::assertSame(3663.21, $out['items'][0]['unit_price_without_vat']);
+        self::assertSame('Zboží A', $out['items'][0]['description']);
+    }
+
+    /** Řádek se sazbou, kterou rekapitulace neopravila, se nepřebírá odhadem. */
+    public function testPolozkaSKodemMimoRekapitulaciZustane(): void
+    {
+        $out = AiPdfExtractor::repairedRateCodes([
+            'vat_recap' => [['rate' => 23, 'base' => 3663.21, 'vat' => 439.59]],
+            'items' => [
+                ['description' => 'A', 'vat_rate' => 23],
+                ['description' => 'B', 'vat_rate' => 6],   // kód, který v rekapitulaci není
+                ['description' => 'C', 'vat_rate' => 21],  // platná sazba
+                ['description' => 'D', 'vat_rate' => 0],   // osvobozeno
+            ],
+        ], $this->resolver());
+
+        self::assertSame(12.0, $out['items'][0]['vat_rate']);
+        self::assertSame(6, $out['items'][1]['vat_rate']);
+        self::assertSame(21, $out['items'][2]['vat_rate']);
+        self::assertSame(0, $out['items'][3]['vat_rate']);
+    }
+
+    /** Doklad, kde rekapitulace sedne, ale položky nejsou pole — nesmí spadnout. */
+    public function testPolozkyMimoTvarNevadi(): void
+    {
+        $out = AiPdfExtractor::repairedRateCodes([
+            'vat_recap' => [['rate' => 23, 'base' => 3663.21, 'vat' => 439.59]],
+            'items' => ['nesmysl', ['description' => 'A']],
+        ], $this->resolver());
+
+        self::assertSame(12.0, $out['vat_recap'][0]['rate']);
+        self::assertSame(['nesmysl', ['description' => 'A']], $out['items']);
     }
 }

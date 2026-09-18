@@ -243,7 +243,7 @@ final class AiPdfExtractor
         // Sazba uvedená kódem prodejce (Makro) → dopočet z podílu daně k základu.
         // Musí proběhnout dřív, než rekapitulaci začne číst kdokoli další.
         $recapDate = (string) ($data['tax_date'] ?? '') ?: (string) ($data['issue_date'] ?? date('Y-m-d'));
-        $data = self::repairedVatRecapRates($data, function (float $percent) use ($supplierId, $recapDate): ?float {
+        $data = self::repairedRateCodes($data, function (float $percent) use ($supplierId, $recapDate): ?float {
             $match = $this->planner->resolveDomesticRate($supplierId, $percent, $recapDate);
 
             return $match->found() ? $match->ratePercent : null;
@@ -311,8 +311,9 @@ final class AiPdfExtractor
         }
         $resolved = $this->clientResolver->resolveVendor($vendorData, $supplierId);
 
-        // Vytěžení tak, jak ho model z PDF přečetl (po opravě prohozených stran), ještě
-        // před doplněním náhradního čísla dokladu — ukládá se ke kontrole proti příloze.
+        // Vytěžení tak, jak ho model z PDF přečetl (po opravě prohozených stran a sazeb
+        // uvedených kódem), ještě před doplněním náhradního čísla dokladu — ukládá se ke
+        // kontrole proti příloze, takže drží též sazby, se kterými doklad opravdu vznikl.
         $extractedData = $data;
 
         // Číslo dokladu chybí (typicky účtenka/paragon bez čísla) → doplň unikátní
@@ -1264,15 +1265,26 @@ final class AiPdfExtractor
      * cizí sazba (německých 19 %) i nesmyslný podíl mají propadnout do kontroly, ne se
      * tady zahladit odhadem.
      *
+     * Týž kód ale stojí i u POLOŽEK — sloupec sazby na řádku je tátáž tabulka. Sama
+     * oprava rekapitulace proto doklad z Makra ještě nespasí: {@see recapOnlyRates}
+     * se ho nechytí (účtenka jednotkové ceny UVÁDÍ), {@see singleRateConsistentRecap}
+     * taky ne (dvě sazby), řádky spadnou přes {@see matchVatRateId} na zástupnou nulu —
+     * a {@see PurchaseVatRecapSeeder::computedRecap()} nad samou nulou vrátí prázdno,
+     * takže ani seeder nemá co s rekapitulací spárovat a daň na dokladu zůstane nula.
+     * Dopočtený převod kód→procento se proto propisuje i do `items`, a to jen pro kódy,
+     * které se právě prokázaly v rekapitulaci — ne odhadem podle čísla na řádku.
+     *
      * @param array<string,mixed> $data
      * @param callable(float):?float $resolveRate procento z číselníku, nebo null když sazba neexistuje
      * @return array<string,mixed>
      */
-    public static function repairedVatRecapRates(array $data, callable $resolveRate, ?LoggerInterface $logger = null): array
+    public static function repairedRateCodes(array $data, callable $resolveRate, ?LoggerInterface $logger = null): array
     {
         if (!isset($data['vat_recap']) || !is_array($data['vat_recap'])) {
             return $data;
         }
+        /** @var array<string,float|null> $byCode kód ze sloupce „sazba" => procento z číselníku (null = kód vyšel dvakrát jinak) */
+        $byCode = [];
         foreach ($data['vat_recap'] as $i => $row) {
             if (!is_array($row) || !isset($row['rate'], $row['base'], $row['vat'])) {
                 continue;
@@ -1293,11 +1305,41 @@ final class AiPdfExtractor
                 continue;
             }
             $data['vat_recap'][$i]['rate'] = $derived;
+            $key = number_format($rate, 2, '.', '');
+            if (!array_key_exists($key, $byCode)) {
+                $byCode[$key] = $derived;
+            } elseif ($byCode[$key] !== $derived) {
+                $byCode[$key] = null; // týž kód u dvou různých sazeb — na řádky ho použít nelze
+            }
             $logger?->info('AI extractor: sazba v rekapitulaci byla kód, dopočtena z podílu', [
                 'stated_rate'   => $rate,
                 'resolved_rate' => $derived,
                 'base'          => $base,
                 'vat'           => $vat,
+            ]);
+        }
+        if ($byCode === [] || !isset($data['items']) || !is_array($data['items'])) {
+            return $data;
+        }
+        // Klíč v mapě je z definice sazba, kterou číselník NEZNÁ (jinak by se řádek
+        // rekapitulace vůbec neopravoval), takže platnou sazbu na položce nemá čím trefit.
+        foreach ($data['items'] as $i => $line) {
+            if (!is_array($line) || !isset($line['vat_rate'])) {
+                continue;
+            }
+            $rate = abs((float) $line['vat_rate']);
+            if ($rate <= 0.0) {
+                continue;
+            }
+            $mapped = $byCode[number_format($rate, 2, '.', '')] ?? null;
+            if ($mapped === null) {
+                continue;
+            }
+            $data['items'][$i]['vat_rate'] = $mapped;
+            $logger?->info('AI extractor: sazba položky byla kód, převedena dle rekapitulace', [
+                'stated_rate'   => $rate,
+                'resolved_rate' => $mapped,
+                'item_index'    => $i,
             ]);
         }
 
