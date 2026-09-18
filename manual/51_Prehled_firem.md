@@ -43,7 +43,31 @@ konci; při shodě rozhoduje název firmy.
 > otevřete přes [K doúčtování](54_Rucni_fronta_doctovani.md); čekající návrhy
 > bankovní kontace jsou v [Automatu](53_Automat.md).
 
-## 51.3 Jak přehled používat
+## 51.3 Pruh akutních kontrol
+
+Firma s podvojným účetnictvím má nad ukazateli barevný pruh **Akutní kontroly**.
+Ukazuje vybrané nálezy z měsíční kontroly za aktuální účetní období do dnešního
+dne, jen jako názvy a počty. Kliknutím na nález se otevře měsíční kontrola té
+firmy, kde je celý seznam dokladů i opravy.
+
+Pruh záměrně ukazuje **jen to, s čím lze hnout dnes**: chybějící účetní zápis
+dokladu, saldo na 311 nebo 321, které nesedí na zaplacený doklad, nevyrovnaný
+deník, koncept v období, nezaúčtovaný kurzový rozdíl nebo rozdíl mezi účtem 343
+a podaným přiznáním k DPH.
+
+Práce vázaná na rozvahový den se v pruhu **nezobrazuje**, protože u otevřeného
+roku chybí naprosto legitimně a svítila by měsíce:
+
+- účetní odpisy roku (účtují se v uzávěrce),
+- inventarizace rozvahových účtů podle § 29–30 zákona o účetnictví,
+- nerozdělený výsledek hospodaření na účtu 431,
+- neuzavřený minulý rok.
+
+Tyto kontroly najdete v [Měsíční kontrole](62_Mesicni_kontrola.md) a hlídá je
+uzávěrková brána, která bez jejich vyřešení nedovolí rok uzavřít. Zelený pruh
+proto znamená „nic akutního", nikoli „účetnictví je hotové".
+
+## 51.4 Jak přehled používat
 
 Doporučený začátek práce nad více firmami:
 
@@ -60,7 +84,7 @@ Mobilní zobrazení používá zkrácené karty firmy. Ukazuje nejbližší term
 stav období a tři provozní počty; poslední import banky a přímé akční tlačítko
 jsou dostupné v plné tabulce na širší obrazovce.
 
-## 51.4 Co přehled nekontroluje
+## 51.5 Co přehled nekontroluje
 
 Přehled neověřuje věcnou správnost kontace, úplnost všech účetních podkladů,
 shodu saldokonta, DPH ani stav inventarizace. Například:

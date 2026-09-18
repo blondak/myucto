@@ -15,8 +15,8 @@ use PDO;
  * Účetní kancelář chce z rozcestníku vidět, KDE něco nesedí, ne otevírat měsíční
  * kontrolu firmu po firmě. Plná sada (přes 40 kontrol) se na to ale pustit nedá —
  * nad velkou firmou trvá jednotky sekund a přehled firem je jedna stránka pro
- * všechny firmy naráz. Bere se proto jen {@see KEYS}: kontroly, které ukazují na
- * rozbité účetnictví (nesedící deník, neuzavřený minulý rok), ne na stav práce.
+ * všechny firmy naráz. Bere se proto jen {@see ACUTE_KEYS}: kontroly, které ukazují
+ * na rozbité účetnictví (nesedící deník, chybějící zápis), ne na stav práce.
  *
  * Vrací jen POČTY a klíče — nálezy samotné si vyžádá až detail měsíční kontroly
  * té firmy. Přehled tak zůstane malý i u kanceláře s padesáti firmami.
@@ -24,21 +24,20 @@ use PDO;
 final class PortfolioCheckService
 {
     /**
-     * Kontroly, které jdou do přehledu firem.
+     * Kontroly, které jdou do přehledu firem — jen to, co je AKUTNÍ k dnešku.
      *
-     * Výběr je záměrně užší než měsíční kontrola: patří sem jen to, co účetní
-     * musí vidět, i když se zrovna na firmu nedívá. Informativní kontroly
-     * (zůstatky dohadných položek, daňový odhad) sem nepatří — nejsou to nálezy,
-     * jen čísla, a v přehledu by dělaly šum.
+     * Výběr je záměrně užší než měsíční kontrola, a to dvakrát. Informativní
+     * kontroly (zůstatky dohadných položek, daňový odhad) sem nepatří vůbec —
+     * nejsou to nálezy, jen čísla. A z nálezů sem patří jen ty, se kterými účetní
+     * může hnout DNES: chybějící zápis, saldo, které nesedí na zaplacený doklad,
+     * nevyrovnaný deník. Sezónní práce vázaná na rozvahový den je v
+     * {@see SEASONAL_KEYS} a na rozcestník nechodí.
      */
-    public const KEYS = [
+    public const ACUTE_KEYS = [
         // Rozbité účetnictví — severity error.
-        'prior_period_open',
         'pl_balance_before_period',
         'drafts_in_period',
         'journal_unbalanced',
-        'vh_431_undistributed',
-        'inventory_unresolved',
         // Nezaúčtováno / nesedí saldo — nejčastější reálné nálezy.
         'unposted_invoices',
         'unposted_purchases',
@@ -49,6 +48,30 @@ final class PortfolioCheckService
         // Daně a měna.
         'vat_343_vs_return',
         'realized_fx_unbooked',
+    ];
+
+    /**
+     * Kontroly, které přehled firem SCHVÁLNĚ nepočítá — patří do měsíční kontroly
+     * a do uzávěrky, ne na denní rozcestník.
+     *
+     * Není to rozdíl v závažnosti, ale v tom, KDY se to dělá. Všechny tři se
+     * rozsvítí jako běžný stav rozdělané práce a svítí měsíce, takže by z pruhu
+     * udělaly stálou barvu, kterou účetní přestane číst — a s ní přehlédne i nález,
+     * který akutní je:
+     *   - `depreciation_missing` — účetní odpisy roku se účtují v uzávěrce, takže
+     *     u otevřeného roku chybí naprosto legitimně až do jejího spuštění,
+     *   - `inventory_unresolved` — inventarizace se dělá k rozvahovému dni (§29–30 ZoÚ),
+     *   - `vh_431_undistributed` — VH na 431 leží nerozdělený legitimně až do
+     *     rozhodnutí valné hromady, typicky do půlky následujícího roku,
+     *   - `prior_period_open` — minulý rok je otevřený běžně až do podání přiznání.
+     *
+     * Blokující bránou uzávěrky zůstávají dál ({@see ClosingService::failingErrorChecks}),
+     * jen se na ně neupozorňuje odsud.
+     */
+    public const SEASONAL_KEYS = [
+        'prior_period_open',
+        'vh_431_undistributed',
+        'inventory_unresolved',
         'depreciation_missing',
     ];
 
@@ -86,7 +109,7 @@ final class PortfolioCheckService
         }
 
         // cap = 0: nálezy se stejně zahazují, posílají se jen počty.
-        $checks = $this->closing->buildChecks($supplierId, $period, $rangeFrom, $rangeTo, 0, self::KEYS);
+        $checks = $this->closing->buildChecks($supplierId, $period, $rangeFrom, $rangeTo, 0, self::ACUTE_KEYS);
 
         $findings = [];
         $errors = 0;
