@@ -240,6 +240,15 @@ final class AiPdfExtractor
             ];
         }
 
+        // Sazba uvedená kódem prodejce (Makro) → dopočet z podílu daně k základu.
+        // Musí proběhnout dřív, než rekapitulaci začne číst kdokoli další.
+        $recapDate = (string) ($data['tax_date'] ?? '') ?: (string) ($data['issue_date'] ?? date('Y-m-d'));
+        $data = self::repairedVatRecapRates($data, function (float $percent) use ($supplierId, $recapDate): ?float {
+            $match = $this->planner->resolveDomesticRate($supplierId, $percent, $recapDate);
+
+            return $match->found() ? $match->ratePercent : null;
+        }, $this->logger);
+
         // Cross-tenant guard — customer.ic musí matchovat tenant.
         // Swap detection: AI občas zamění vendor↔customer (tenanta dá jako vendora).
         // Imports jsou vždy purchase faktury (tenant je vždy customer/odběratel),
@@ -1231,6 +1240,68 @@ final class AiPdfExtractor
             'vat_rate_id'            => (int) $items[0]['vat_rate_id'],
             'order_index'            => 0,
         ]];
+    }
+
+    /**
+     * Opraví sazbu v rekapitulaci, kterou doklad uvádí KÓDEM místo procenta.
+     *
+     * Velkoobchodní účtenky (ověřeno na Makru) tisknou rekapitulaci takhle:
+     *
+     *   23= 12,0   3 663,21   439,59
+     *    6= 21,0   1 757,00   368,97
+     *
+     * `23` a `6` jsou interní kódy sazeb prodejce, procento stojí až za rovnítkem.
+     * Model opíše první číslo ve sloupci „sazba", takže do `vat_recap` dorazí 23 % a 6 %
+     * — sazby, které v tuzemsku neexistují. Každý čtenář rekapitulace takový řádek
+     * zahodí a doklad se založí z položek; u účtenky s cenami BEZ daně tím zmizí celá
+     * daň a zůstane doklad s nulovým DPH (ověřeno: 6 228,77 Kč se naimportovalo jako
+     * 5 420,21 Kč). Na modelu to nezávisí — Haiku i Sonnet čtou čísla správně a shodně
+     * sáhnou po kódu, takže retry na silnější model to neřeší.
+     *
+     * Rekapitulace ale sazbu nese DVAKRÁT: jako popisek a jako podíl daně k základu.
+     * Když popisek neodpovídá žádné platné tuzemské sazbě, vezme se podíl — a použije
+     * se JEN tehdy, když sedne na sazbu z číselníku. Jinak řádek zůstane, jak přišel:
+     * cizí sazba (německých 19 %) i nesmyslný podíl mají propadnout do kontroly, ne se
+     * tady zahladit odhadem.
+     *
+     * @param array<string,mixed> $data
+     * @param callable(float):?float $resolveRate procento z číselníku, nebo null když sazba neexistuje
+     * @return array<string,mixed>
+     */
+    public static function repairedVatRecapRates(array $data, callable $resolveRate, ?LoggerInterface $logger = null): array
+    {
+        if (!isset($data['vat_recap']) || !is_array($data['vat_recap'])) {
+            return $data;
+        }
+        foreach ($data['vat_recap'] as $i => $row) {
+            if (!is_array($row) || !isset($row['rate'], $row['base'], $row['vat'])) {
+                continue;
+            }
+            $rate = abs((float) $row['rate']);
+            $base = abs((float) $row['base']);
+            $vat  = abs((float) $row['vat']);
+            // Bez daně nebo bez základu není z čeho podíl počítat; osvobozený řádek
+            // (0 %) je navíc legitimní a opravovat se nemá.
+            if ($rate <= 0.0 || $base <= 0.0 || $vat <= 0.0) {
+                continue;
+            }
+            if ($resolveRate($rate) !== null) {
+                continue; // sazba existuje → doklad ji uvádí procentem, nic neřešíme
+            }
+            $derived = $resolveRate(round($vat / $base * 100, 2));
+            if ($derived === null) {
+                continue;
+            }
+            $data['vat_recap'][$i]['rate'] = $derived;
+            $logger?->info('AI extractor: sazba v rekapitulaci byla kód, dopočtena z podílu', [
+                'stated_rate'   => $rate,
+                'resolved_rate' => $derived,
+                'base'          => $base,
+                'vat'           => $vat,
+            ]);
+        }
+
+        return $data;
     }
 
     /**
