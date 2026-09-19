@@ -6,8 +6,30 @@ namespace MyInvoice\Service\Bank;
 
 use PDO;
 
+/**
+ * Skládá jemnozrnné výpisy jednoho účtu do JEDNOHO měsíčního výpisu, který pak
+ * uživatel vidí v přehledu. Zdrojové („evidenční") výpisy zůstávají jako doklad
+ * měsíce a v seznamu se skrývají ({@see visibleSql()}).
+ *
+ * Mechanismus vznikl pro strojový feed (`bank_api`, doplňkově `gpc` od stejného
+ * účtu), ale koncept je stejný pro DENNÍ PDF VÝPISY ({@see BankStatementSource},
+ * `bank_statements.period_kind = 'day'`): KB a další banky posílají e-mailem výpis
+ * po každém pohybu, takže bez složení do měsíce by přehled zaplavily jednodenní
+ * položky. Proto se sem přidaly, místo aby vznikl druhý paralelní mechanismus —
+ * názvy tabulek `bank_api_months` / `bank_api_evidence_months` zůstávají (interní
+ * identifikátory se nepřejmenovávají).
+ */
 final class BankApiMonthlyStatements
 {
+    /** Zdroje, které se skládají do měsíce bez dalších podmínek. */
+    private const FEED_SOURCES = "bs.source IN ('bank_api', 'gpc')";
+
+    /** Denní PDF výpis: skládá se do měsíce podle druhu období, ne podle zdroje. */
+    private const DAILY_PDF = "(bs.source = 'pdf' AND bs.period_kind = 'day')";
+
+    /** Výpis, který je stavebním kamenem měsíčního výpisu. */
+    private const PROJECTABLE = '(' . self::FEED_SOURCES . ' OR ' . self::DAILY_PDF . ')';
+
     public function __construct(private readonly PDO $pdo) {}
 
     public function pendingBackfillAccounts(): array
@@ -32,11 +54,11 @@ final class BankApiMonthlyStatements
         if (!$this->pdo->inTransaction()) throw new \LogicException('Monthly projection requires an account import transaction.');
         $key = AuthoritativeTransactionReconciler::account($account, $bank);
         if ($key === null) throw new \InvalidArgumentException('Invalid monthly statement account.');
-        if (!$this->hasApiAccount($supplierId, $account, $bank, $currency)) return [];
-        $query = $this->pdo->prepare("SELECT bs.id, bs.account_number, bs.bank_code, bs.statement_date
-            FROM bank_statements bs WHERE bs.supplier_id = ? AND bs.currency = ? AND bs.source IN ('bank_api', 'gpc')
+        if (!$this->aggregatesMonthly($supplierId, $account, $bank, $currency)) return [];
+        $query = $this->pdo->prepare('SELECT bs.id, bs.account_number, bs.bank_code, bs.statement_date
+            FROM bank_statements bs WHERE bs.supplier_id = ? AND bs.currency = ? AND ' . self::PROJECTABLE . '
             AND NOT EXISTS (SELECT 1 FROM bank_api_months m WHERE m.statement_id = bs.id)
-            AND " . self::visibleSql() . ' ORDER BY bs.id');
+            AND ' . self::visibleSql() . ' ORDER BY bs.id');
         $query->execute([$supplierId, $currency]);
         $evidence = array_filter($query->fetchAll(PDO::FETCH_ASSOC), static fn (array $row): bool =>
             AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) === $key);
@@ -146,6 +168,32 @@ final class BankApiMonthlyStatements
         return $months;
     }
 
+    /**
+     * Skládá se tenhle účet do měsíčních výpisů? Buď proto, že má strojový feed, nebo
+     * proto, že do něj chodí denní PDF výpisy. Jakmile je účet jednou složený, platí to
+     * pro VŠECHNY jeho skládatelné výpisy — i pro ručně nahrané GPC za měsíc, aby účet
+     * neměl půlku pohybů v měsíčním výpisu a půlku vedle něj.
+     */
+    public function aggregatesMonthly(int $supplierId, string $account, string $bank, string $currency): bool
+    {
+        return $this->hasApiAccount($supplierId, $account, $bank, $currency)
+            || $this->hasDailyStatements($supplierId, $account, $bank, $currency);
+    }
+
+    /** Přišel na tenhle účet aspoň jeden denní výpis (PDF „výpis při pohybu")? */
+    public function hasDailyStatements(int $supplierId, string $account, string $bank, string $currency): bool
+    {
+        $key = AuthoritativeTransactionReconciler::account($account, $bank);
+        if ($key === null) return false;
+        $query = $this->pdo->prepare('SELECT bs.account_number, bs.bank_code FROM bank_statements bs
+            WHERE bs.supplier_id = ? AND bs.currency = ? AND ' . self::DAILY_PDF);
+        $query->execute([$supplierId, $currency]);
+        foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) === $key) return true;
+        }
+        return false;
+    }
+
     public function hasApiAccount(int $supplierId, string $account, string $bank, string $currency): bool
     {
         $key = AuthoritativeTransactionReconciler::account($account, $bank);
@@ -176,8 +224,37 @@ final class BankApiMonthlyStatements
             $update->execute([$document['file_name'], $document['file_content'], $document['statement_number'], $document['prev_balance'], $document['curr_balance'], $monthId]);
             return;
         }
+        $month = substr((string) $this->pdo->query('SELECT month_start FROM bank_api_months WHERE statement_id = ' . $monthId)->fetchColumn(), 0, 7);
+        if ($this->useDailyDocuments($monthId, $supplierId, $month)) return;
         $this->pdo->prepare("UPDATE bank_statements SET source = 'bank_api', file_name = ?, file_content = NULL, statement_number = NULL, prev_balance = NULL, curr_balance = NULL WHERE id = ?")
-            ->execute(['API-' . substr((string) $this->pdo->query('SELECT month_start FROM bank_api_months WHERE statement_id = ' . $monthId)->fetchColumn(), 0, 7), $monthId]);
+            ->execute(['API-' . $month, $monthId]);
+    }
+
+    /**
+     * Měsíc složený VÝHRADNĚ z denních výpisů: doklad měsíce jsou ty denní výpisy
+     * (stáhnout jdou přes {@see evidencePdfs()}), a zůstatky měsíce jsou počáteční
+     * zůstatek prvního dne a konečný zůstatek posledního — obojí je údaj banky, ne
+     * náš dopočet, takže přehled stavů na účtech nemusí měsíc přeskakovat.
+     *
+     * Jakmile je mezi podklady i strojový feed, platí dosavadní chování: zůstatky se
+     * nedají složit z dvou různě granulárních zdrojů, aniž by se mlčky zvolil jeden.
+     */
+    private function useDailyDocuments(int $monthId, int $supplierId, string $month): bool
+    {
+        $query = $this->pdo->prepare("SELECT bs.source, bs.period_kind, bs.prev_balance, bs.curr_balance
+            FROM bank_api_evidence_months e JOIN bank_statements bs ON bs.id = e.evidence_statement_id
+            WHERE e.monthly_statement_id = ? AND bs.supplier_id = ?
+            ORDER BY bs.statement_date, bs.id");
+        $query->execute([$monthId, $supplierId]);
+        $evidence = $query->fetchAll(PDO::FETCH_ASSOC);
+        if ($evidence === []) return false;
+        foreach ($evidence as $row) {
+            if ((string) $row['source'] !== 'pdf' || (string) $row['period_kind'] !== 'day') return false;
+        }
+        $this->pdo->prepare("UPDATE bank_statements SET source = 'pdf', file_name = ?, file_content = NULL,
+                statement_number = NULL, prev_balance = ?, curr_balance = ? WHERE id = ?")
+            ->execute(['PDF-' . $month, $evidence[0]['prev_balance'], $evidence[array_key_last($evidence)]['curr_balance'], $monthId]);
+        return true;
     }
 
     private function preservePdf(int $monthId, int $supplierId): void
@@ -195,6 +272,24 @@ final class BankApiMonthlyStatements
                 ->execute([$document['pdf_content'], $document['pdf_name'], $document['pdf_hash'], $document['pdf_size_bytes'], $document['pdf_uploaded_at'], $monthId]);
             return;
         }
+        // Žádný podklad už měsíc nepokrývá celý — typicky proto, že k prvnímu dennímu
+        // výpisu přibyl druhý den. Převzaté PDF prvního dne by pak pod tlačítkem
+        // „Stáhnout PDF" vydávalo jeden den za celý měsíc, takže ho odpojíme; jednotlivé
+        // dny zůstávají ke stažení přes {@see evidencePdfs()}. Ručně nahrané PDF se
+        // nemaže — poznáme ho podle toho, že jeho otisk nepatří žádnému podkladu.
+        $current = $this->pdo->prepare('SELECT pdf_hash FROM bank_statements WHERE id = ? AND supplier_id = ?');
+        $current->execute([$monthId, $supplierId]);
+        $monthHash = $current->fetchColumn();
+        if ($monthHash === false || $monthHash === null || $monthHash === '') return;
+        $copied = $this->pdo->prepare('SELECT 1 FROM bank_api_evidence_months e
+            JOIN bank_statements src ON src.id = e.evidence_statement_id
+            WHERE e.monthly_statement_id = ? AND src.pdf_hash = ? LIMIT 1');
+        $copied->execute([$monthId, $monthHash]);
+        if ($copied->fetchColumn() === false) return;
+        $this->pdo->prepare('UPDATE bank_statements
+                SET pdf_content = NULL, pdf_name = NULL, pdf_hash = NULL, pdf_size_bytes = NULL, pdf_uploaded_at = NULL
+              WHERE id = ? AND supplier_id = ?')
+            ->execute([$monthId, $supplierId]);
     }
 
     public function monthIds(int $evidenceId, int $supplierId): array

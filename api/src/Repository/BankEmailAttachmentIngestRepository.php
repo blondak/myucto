@@ -39,12 +39,13 @@ final class BankEmailAttachmentIngestRepository
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO bank_email_attachment_ingests
                 (supplier_id, imap_account_id, message_id, sender, subject, filename, sha256, size_bytes,
-                 status, reason, submission_id, matched_by, match_score)
+                 status, reason, submission_id, bank_statement_id, matched_by, match_score)
              VALUES
                 (:supplier_id, :imap_account_id, :message_id, :sender, :subject, :filename, :sha256, :size_bytes,
-                 :status, :reason, :submission_id, :matched_by, :match_score)
+                 :status, :reason, :submission_id, :bank_statement_id, :matched_by, :match_score)
              ON DUPLICATE KEY UPDATE
                 status = VALUES(status), reason = VALUES(reason), submission_id = VALUES(submission_id),
+                bank_statement_id = VALUES(bank_statement_id),
                 matched_by = VALUES(matched_by), match_score = VALUES(match_score)'
         );
         $stmt->execute([
@@ -59,6 +60,7 @@ final class BankEmailAttachmentIngestRepository
             'status' => (string) $data['status'],
             'reason' => $this->truncate($data['reason'] ?? null, 1000),
             'submission_id' => $data['submission_id'] ?? null,
+            'bank_statement_id' => $data['bank_statement_id'] ?? null,
             'matched_by' => $this->truncate($data['matched_by'] ?? null, 32),
             'match_score' => $data['match_score'] ?? null,
         ]);
@@ -89,6 +91,7 @@ final class BankEmailAttachmentIngestRepository
             $row['supplier_id'] = (int) $row['supplier_id'];
             $row['imap_account_id'] = $row['imap_account_id'] !== null ? (int) $row['imap_account_id'] : null;
             $row['submission_id'] = $row['submission_id'] !== null ? (int) $row['submission_id'] : null;
+            $row['bank_statement_id'] = $row['bank_statement_id'] !== null ? (int) $row['bank_statement_id'] : null;
             $row['purchase_invoice_id'] = $row['purchase_invoice_id'] !== null ? (int) $row['purchase_invoice_id'] : null;
             $row['size_bytes'] = (int) $row['size_bytes'];
             $row['match_score'] = $row['match_score'] !== null ? (float) $row['match_score'] : null;

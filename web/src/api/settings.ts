@@ -430,6 +430,7 @@ export interface BankEmailImapSettings {
   require_email_auth: boolean
   allow_forwarded: boolean
   ingest_pdf_invoices: boolean
+  ingest_pdf_statements: boolean
   forwarded_from: string | null
   email_auth_serv_id: string | null
   username: string
@@ -523,8 +524,10 @@ export interface BankEmailAttachmentIngest {
   sha256: string
   size_bytes: number
   status: 'imported' | 'skipped_duplicate' | 'skipped_not_invoice' | 'rejected' | 'failed'
+    | 'imported_statement' | 'skipped_not_statement'
   reason: string | null
   submission_id: number | null
+  bank_statement_id: number | null
   submission_status?: string | null
   purchase_invoice_id: number | null
   matched_by: string | null

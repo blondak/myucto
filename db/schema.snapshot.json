@@ -837,7 +837,8 @@
         "1850_payroll_absence_sickness_window_carried.sql",
         "1851_payroll_migration_takeover_details.sql",
         "1852_payroll_posting_map_proposals.sql",
-        "1853_payroll_takeover_runs.sql"
+        "1853_payroll_takeover_runs.sql",
+        "1854_bank_daily_statement_ingest.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -2106,6 +2107,7 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "bank_statement_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "filename": "varchar(255) NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
@@ -2117,13 +2119,14 @@
                 "sender": "varchar(255) NULL DEFAULT NULL",
                 "sha256": "char(64) NOT NULL",
                 "size_bytes": "int(10) unsigned NOT NULL DEFAULT 0",
-                "status": "enum('imported','skipped_duplicate','skipped_not_invoice','rejected','failed') NOT NULL",
+                "status": "enum('imported','skipped_duplicate','skipped_not_invoice','rejected','failed','imported_statement','skipped_not_statement') NOT NULL",
                 "subject": "varchar(500) NULL DEFAULT NULL",
                 "submission_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_beai_statement": "BTREE (bank_statement_id)",
                 "idx_beai_account": "BTREE (imap_account_id)",
                 "idx_beai_submission": "BTREE (submission_id)",
                 "idx_beai_supplier_created": "BTREE (supplier_id, created_at)",
@@ -2131,6 +2134,7 @@
             },
             "foreign_keys": {
                 "fk_beai_account": "(imap_account_id) -> bank_email_imap_settings (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_beai_statement": "(bank_statement_id) -> bank_statements (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_beai_submission": "(submission_id) -> purchase_invoice_submissions (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_beai_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
@@ -2154,6 +2158,7 @@
                 "host": "varchar(190) NOT NULL DEFAULT ''",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "ingest_pdf_invoices": "tinyint(1) NOT NULL DEFAULT 0",
+                "ingest_pdf_statements": "tinyint(1) NOT NULL DEFAULT 0",
                 "last_scan_at": "timestamp NULL DEFAULT NULL",
                 "last_scan_message": "varchar(500) NULL DEFAULT NULL",
                 "last_scan_status": "enum('ok','error') NULL DEFAULT NULL",
@@ -2640,6 +2645,7 @@
                 "pdf_name": "varchar(255) NULL DEFAULT NULL",
                 "pdf_size_bytes": "int(10) unsigned NULL DEFAULT NULL",
                 "pdf_uploaded_at": "timestamp NULL DEFAULT NULL",
+                "period_kind": "enum('period','day') NOT NULL DEFAULT 'period'",
                 "prev_balance": "decimal(14,2) NULL DEFAULT NULL",
                 "source": "enum('gpc','email_notice','pdf','idoklad','bank_api','import') NOT NULL DEFAULT 'gpc'",
                 "source_ref": "varchar(190) NULL DEFAULT NULL",

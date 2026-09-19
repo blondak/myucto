@@ -423,6 +423,7 @@ Každý dodavatel může mít více IMAP účtů, typicky jeden pro každou bank
 | Přijímat přeposlaná (FW) avíza | Rozpozná banku i z těla e-mailu, když avíza chodí do schránky přeposlaná (odesílatel je tvoje adresa, ne banka) |
 | E-mail přeposílatele | Volitelné omezení, od koho smí přeposlaná avíza chodit — adresa (`jan@firma.cz`) nebo doména (`firma.cz`); prázdné = libovolný |
 | Načítat PDF faktury z příloh | Vedle avíz se z každé zprávy posoudí i PDF přílohy a doklady adresované tvé firmě se založí do Nákup → Příchozí doklady; **vypnuto** |
+| Načítat PDF výpisy z příloh | Vedle avíz se z každé zprávy posoudí i PDF přílohy a bankovní výpis k některému z účtů tvé firmy se rovnou naimportuje včetně párování plateb; **vypnuto** |
 | Po úspěchu | Co udělat se zpracovanou zprávou |
 
 ### 30.3.1 Ověření autenticity e-mailu (DKIM/DMARC)
@@ -513,6 +514,66 @@ složky chyb se nepřesune.
 
 Přílohy se posuzují **až po** ověření autenticity e-mailu (kapitola 29.3.1). Zpráva
 zamítnutá jako `security_rejected` do fronty dokladů nedostane nic.
+
+### 30.3.3 Načítání PDF výpisů z příloh
+
+Banky bez přímého API posílají výpisy e-mailem jako PDF. Komerční banka navíc
+umí **denní výpis při pohybu** — za každý den, kdy se na účtu něco stalo, jedno
+PDF, a zvlášť za každou měnu účtu. Přepínač **Načítat PDF výpisy z příloh** u
+IMAP účtu zapne třetí větev zpracování: u každé nové zprávy se PDF přílohy zkusí
+přečíst jako bankovní výpis a ten, který k tvé firmě patří, se naimportuje —
+stejnou cestou jako ruční *Nahrát PDF*, tedy **včetně párování plateb s fakturami**.
+
+Aby se výpis naimportoval, musí splnit obě podmínky:
+
+1. **Je to výpis banky, kterou umíme přečíst** — Komerční banka, ČSOB,
+   Raiffeisenbank, Banka CREDITAS. Rozhoduje textová vrstva PDF, ne název souboru.
+2. **Je k účtu tvé firmy** — číslo účtu z hlavičky výpisu musí sedět na právě
+   jeden bankovní účet firmy (záložka *Měny a účty*). U víceměnového účtu se
+   sdíleným číslem rozhoduje ještě měna výpisu.
+
+Cizí výpis se tím nikdy nestane tvým dokladem: kdyby ti někdo poslal do schránky
+výpis jiné firmy, skončí jako *Výpis k cizímu účtu* a nic nezaloží.
+
+#### Denní výpisy se skládají do měsíčního
+
+Kdyby se každý denní výpis ukázal v přehledu samostatně, byl by seznam výpisů po
+měsíci nepoužitelný. Denní výpisy jednoho účtu se proto **skládají do jednoho
+měsíčního výpisu** — úplně stejně jako pohyby z přímého bankovního API:
+
+- v přehledu je jeden řádek za měsíc a účet, označený `PDF-RRRR-MM`,
+- **počáteční zůstatek** měsíce je počáteční zůstatek prvního načteného dne,
+  **konečný zůstatek** konečný zůstatek posledního — obojí je údaj banky,
+- jednotlivé dny zůstávají jako podklady měsíce: v detailu výpisu je najdeš pod
+  tlačítkem „…" (otevřít den, stáhnout jeho původní PDF),
+- když některý den chybí, přepočet zůstatků to ohlásí jako rozdíl proti
+  bankovnímu výpisu — nechybí ti tedy pohyby potichu.
+
+Každý výpis se navíc před uložením sám kontroluje: součet pohybů musí na haléř
+sedět na rozdíl počátečního a konečného zůstatku z hlavičky, a v denním výpisu
+musí všechny pohyby patřit dni výpisu. Když to nesedí, výpis se nenaimportuje a
+důvod zůstane v logu příloh — částečná nebo posunutá data se do banky nedostanou.
+
+U karetních plateb pozor na dvě data: nákup se mohl stát v neděli a banka ho
+zúčtovala v pondělí. Do výpisu pohyb patří **dnem zúčtování**, a tak ho aplikace
+také eviduje; původní částka v cizí měně a kurz zůstávají v popisu pohybu.
+
+Výsledek posouzení přílohy najdeš ve stejné tabulce jako u faktur:
+
+| Výsledek | Význam |
+|---|---|
+| Naimportován bankovní výpis | Vznikl výpis (a u denního i měsíc, do kterého patří) |
+| Duplicita | Stejný výpis už v systému je |
+| Výpis k cizímu účtu | Číslo účtu nesedí na žádný bankovní účet tvé firmy |
+| Chyba | Výpis se nepodařilo přečíst — důvod je ve sloupci Důvod |
+
+Příloha, která výpisem není, se tím nezdrží — posoudí ji větev PDF faktur
+(kapitola 30.3.2). Naopak výpis, který se naimportuje, se už jako faktura
+neposuzuje; bez toho by mohl skončit ve frontě příchozích dokladů, protože na
+sobě má jméno i adresu tvé firmy.
+
+Stav *Výpis k cizímu účtu* se při dalším skenu posuzuje znovu — když účet do
+nastavení firmy doplníš, výpis se doimportuje.
 
 ## 30.4 Parser provideri
 

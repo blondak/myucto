@@ -54,7 +54,9 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             authResults: $this->authenticationResults($message),
             allowForwarded: (bool) ($settings['allow_forwarded'] ?? false),
             forwardedFrom: trim((string) ($settings['forwarded_from'] ?? '')),
-            attachments: empty($settings['ingest_pdf_invoices']) ? [] : $this->attachments($message),
+            attachments: (empty($settings['ingest_pdf_invoices']) && empty($settings['ingest_pdf_statements']))
+                ? []
+                : $this->attachments($message),
         );
     }
 

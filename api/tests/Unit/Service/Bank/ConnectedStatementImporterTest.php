@@ -26,7 +26,8 @@ final class ConnectedStatementImporterTest extends TestCase
         $this->pdo->exec("INSERT INTO currencies VALUES (1, 10, '1000000005', NULL, '2010', 'EUR', 1)");
         $this->pdo->exec('CREATE TABLE supplier_bank_accounts (supplier_id INTEGER, account_number TEXT, iban TEXT, bank_code TEXT, is_active INTEGER)');
         $this->pdo->exec('CREATE TABLE bank_statements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT, file_name TEXT, file_hash TEXT UNIQUE, file_content BLOB,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT, period_kind TEXT DEFAULT \'period\',
+            file_name TEXT, file_hash TEXT UNIQUE, file_content BLOB,
             pdf_content BLOB, pdf_name TEXT, pdf_hash TEXT, pdf_size_bytes INTEGER, pdf_uploaded_at TEXT,
             supplier_id INTEGER, account_number TEXT, bank_code TEXT, currency TEXT, statement_number TEXT,
             statement_date TEXT, prev_balance NUMERIC, curr_balance NUMERIC, credit_total NUMERIC,

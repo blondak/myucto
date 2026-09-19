@@ -29,10 +29,27 @@ final class BankStatementPdfParserRegistry
      */
     public function parse(string $pdfBytes): array
     {
+        $text = $this->extractText($pdfBytes);
+        $parser = $this->parserFor($text);
+        if ($parser === null) {
+            throw new \RuntimeException('Pro tento PDF výpis nebyl nalezen žádný podporovaný bankovní parser.');
+        }
+        return $parser->parse($pdfBytes, $text) + ['parser' => $parser->key()];
+    }
+
+    /**
+     * Textová vrstva PDF. Oddělené od {@see parse()}, aby šlo NEJDŘÍV zjistit, jestli
+     * je příloha z e-mailu vůbec bankovní výpis, a teprve pak ji parsovat — jinak by
+     * se „nerozpoznaná příloha" nedala odlišit od „výpis rozpoznán, ale parsování
+     * selhalo" a ztráta výpisu by prošla v tichu.
+     *
+     * @throws \RuntimeException Když PDF nejde přečíst nebo nemá textovou vrstvu.
+     */
+    public function extractText(string $pdfBytes): string
+    {
         if (!str_starts_with($pdfBytes, '%PDF')) {
             throw new \RuntimeException('Soubor není platné PDF.');
         }
-
         try {
             $doc = (new PdfTextParser())->parseContent($pdfBytes);
             $text = implode("\n", array_map(static fn ($p) => $p->getText(), $doc->getPages()));
@@ -42,13 +59,15 @@ final class BankStatementPdfParserRegistry
         if (trim($text) === '') {
             throw new \RuntimeException('PDF neobsahuje žádný extrahovatelný text (naskenovaný obrázek?).');
         }
+        return $text;
+    }
 
+    /** Parser, který text rozpozná jako výpis své banky (pořadí = priorita). */
+    public function parserFor(string $text): ?BankStatementPdfParserInterface
+    {
         foreach ($this->parsers as $parser) {
-            if (!$parser->supports($text)) continue;
-            $parsed = $parser->parse($pdfBytes, $text);
-            return $parsed + ['parser' => $parser->key()];
+            if ($parser->supports($text)) return $parser;
         }
-
-        throw new \RuntimeException('Pro tento PDF výpis nebyl nalezen žádný podporovaný bankovní parser.');
+        return null;
     }
 }

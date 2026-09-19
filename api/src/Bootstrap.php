@@ -667,6 +667,13 @@ final class Bootstrap
                 // Totéž pro ?EmailPdfInvoiceIngestor — bez bindu by se PDF faktury
                 // z příloh nikdy nenačetly, i kdyby to účet měl zapnuté.
                 pdfInvoices: $c->get(\MyInvoice\Service\Bank\EmailNotice\EmailPdfInvoiceIngestor::class),
+                pdfStatements: $c->get(\MyInvoice\Service\Bank\EmailNotice\EmailPdfStatementIngestor::class),
+            ),
+            \MyInvoice\Service\Bank\EmailNotice\EmailPdfStatementIngestor::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\EmailNotice\EmailPdfStatementIngestor(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Repository\BankEmailAttachmentIngestRepository::class),
+                $c->get(\MyInvoice\Service\Bank\Pdf\BankStatementPdfParserRegistry::class),
+                $c->get(\MyInvoice\Service\Bank\StatementImporter::class),
             ),
             \MyInvoice\Service\Bank\StatementImporter::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\StatementImporter(
                 $c->get(Connection::class),

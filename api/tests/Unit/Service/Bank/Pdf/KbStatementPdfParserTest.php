@@ -185,4 +185,188 @@ final class KbStatementPdfParserTest extends TestCase
         self::assertFalse($parser->supports("Nějaký jiný bankovní výpis\n"));
         self::assertFalse($parser->supports("VÝPIS Z ÚČTU\nwww.csob.cz\n"));
     }
+
+    /** Denní výpis („VÝPIS DENNÍ PŘI POHYBU") — jeden den, bez pole „Za období". */
+    private function dailyStatement(string $prev, string $curr, string $credit, string $debit, string $rows): string
+    {
+        return "Datum výpisu: 18.09.2026\n"
+            . "Číslo výpisu:\t196\n"
+            . "Strana:\t1/1\n"
+            . "VÝPIS DENNÍ PŘI POHYBU\n"
+            . "k účtu:123-4567890123/0100\n"
+            . "IBAN:CZ0001000001234567890123\n"
+            . "typ: Profi účet Gold\n"
+            . "měna:CZK\n"
+            . "BIC / SWIFT kód: KOMBCZPPXXX\n"
+            . "Počáteční zůstatek   {$prev}\n"
+            . "Konečný zůstatek   {$curr}\n"
+            . "POČÁTEČNÍ ZŮSTATEK   {$prev}\n"
+            . "Datum\nzúčtování\nDatum\ntransakce\nPopis transakce\nIdentifikace transakce\n"
+            . "Název protiúčtu / Číslo a typ karty\nProtiúčet a kód banky / Obchodní místo\nVS\nKS\nSS\nPřipsáno\nOdepsáno\n"
+            . $rows . "\n"
+            . "KONEČNÝ ZŮSTATEK   {$curr}\n"
+            . "Rekapitulace transakcí na účtu\tPřipsáno\tOdepsáno\n"
+            . "Obraty na účtu   {$credit}   -{$debit}\n"
+            . "Vklad na tomto účtu je pojištěn.\n";
+    }
+
+    public function testDailyStatementIsRecognisedAsSingleDay(): void
+    {
+        $text = $this->dailyStatement('1 000,00', '1 000,00', '0,00', '0,00', '');
+        $header = $this->parser()->parseHeaderFromText($text);
+
+        self::assertSame('day', $header['period_kind']);
+        self::assertSame('123-4567890123', $header['account_number']);
+        self::assertSame('2026-09-18', $header['statement_date']);
+        self::assertTrue($this->parser()->supports($text));
+    }
+
+    public function testPeriodicStatementStaysPeriod(): void
+    {
+        $text = $this->statement('100 000,00', '100 000,00', '0,00', '0,00', '');
+        self::assertSame('period', $this->parser()->parseHeaderFromText($text)['period_kind']);
+    }
+
+    public function testCardPaymentIsPostedOnClearingDateNotTransactionDate(): void
+    {
+        // Karetní platba má DVĚ data: zúčtování (18. 9.) a transakce (17. 9.). Do výpisu
+        // pohyb patří dnem zúčtování — jinak vypadne z období denního výpisu.
+        $rows = "18.09.2026\n"
+              . "17.09.2026\n"
+              . "TRANSAKCE PLATEBNÍ KARTOU\n"
+              . "Nákup na internetu\n"
+              . "zúčt. částka: 2 596,00 CZK\n"
+              . "kurz: 1,0000\n"
+              . "244-18092026 10865349648716\n"
+              . "5168 93** **** 6622 ECMC\n"
+              . "PRODEJNA TEST\n"
+              . "PRAHA CZE\n"
+              . "15500754\n"
+              . "1178\n"
+              . "101112001\n"
+              . "-2 596,00";
+        $text = $this->dailyStatement('10 000,00', '7 404,00', '0,00', '2 596,00', $rows);
+
+        $rowsOut = $this->parser()->parseTransactionsFromText($text);
+        self::assertCount(1, $rowsOut);
+        self::assertSame('2026-09-18', $rowsOut[0]['posted_at']);
+        self::assertSame(-2596.0, $rowsOut[0]['amount']);
+        self::assertSame('6622', $rowsOut[0]['card_last4']);
+        self::assertSame('PRODEJNA TEST', $rowsOut[0]['counterparty_name']);
+        // Původní částka a kurz zůstávají v popisu čitelné (dřív se z nich vyřezáním
+        // peněžní hodnoty staly trosky „zúčt. částka:  CZK | kurz: 00").
+        self::assertStringContainsString('zúčt. částka: 2 596,00 CZK', (string) $rowsOut[0]['description']);
+        self::assertStringContainsString('kurz: 1,0000', (string) $rowsOut[0]['description']);
+    }
+
+    public function testForeignCurrencyCardPaymentKeepsDebitSign(): void
+    {
+        // Původní částka v cizí měně je BEZ znaménka a stojí PŘED částkou v měně účtu.
+        // Kdyby se brala jako částka pohybu, z výdaje by se stal příjem.
+        $rows = "18.09.2026\n"
+              . "17.09.2026\n"
+              . "TRANSAKCE PLATEBNÍ KARTOU\n"
+              . "Opakovaná platba tokenem\n"
+              . "zúčt. částka: 22,63 EUR\n"
+              . "kurz: 1,0000\n"
+              . "244-18092026 10865349857263\n"
+              . "5168 93** **** 6622 ECMC\n"
+              . "SLUZBA TEST\n"
+              . "4029357733 CZE\n"
+              . "-549,99";
+        $text = $this->dailyStatement('1 000,00', '450,01', '0,00', '549,99', $rows);
+
+        $rowsOut = $this->parser()->parseTransactionsFromText($text);
+        self::assertCount(1, $rowsOut);
+        self::assertSame(-549.99, $rowsOut[0]['amount']);
+    }
+
+    public function testMessageForRecipientIsNotUsedAsCounterpartyName(): void
+    {
+        // Převod bez názvu protistrany: řádek těsně před protiúčtem je TĚLO zprávy pro
+        // příjemce, ne jméno. Zpětné hledání dřív jako jméno sebralo text zprávy.
+        $rows = "18.09.2026OKAMŽITÁ ODCHOZÍ ÚHRADA\n"
+              . "OI0004A3T80\n"
+              . "362-18092026 1602 602104 960754\n"
+              . "Zpráva pro příjemce:\n"
+              . "Platba faktury 5550123\n"
+              . "2300057139/2010\t5550123              -181,50";
+        $text = $this->dailyStatement('1 000,00', '818,50', '0,00', '181,50', $rows);
+
+        $rowsOut = $this->parser()->parseTransactionsFromText($text);
+        self::assertCount(1, $rowsOut);
+        self::assertNull($rowsOut[0]['counterparty_name']);
+        self::assertSame('2300057139', $rowsOut[0]['counterparty_account']);
+        self::assertSame('5550123', $rowsOut[0]['variable_symbol']);
+        self::assertStringContainsString('Platba faktury 5550123', (string) $rowsOut[0]['description']);
+    }
+
+    public function testCounterpartyNameRightAboveAccountIsKept(): void
+    {
+        $rows = "18.09.2026PŘÍCHOZÍ ÚHRADA\n"
+              . "2026091840903624072\n"
+              . "361-18092026 1086 086144 585374\n"
+              . "Zpráva pro příjemce:\n"
+              . "5550045 TESTOVACI FIRMA S.R.O.\n"
+              . "Druha Firma, s.r.o.\n"
+              . "1111111111/0300\n"
+              . "5550045\n"
+              . "308\n"
+              . "             7 033,00";
+        $text = $this->dailyStatement('1 000,00', '8 033,00', '7 033,00', '0,00', $rows);
+
+        $rowsOut = $this->parser()->parseTransactionsFromText($text);
+        self::assertCount(1, $rowsOut);
+        self::assertSame('Druha Firma, s.r.o.', $rowsOut[0]['counterparty_name']);
+        self::assertSame('5550045', $rowsOut[0]['variable_symbol']);
+        self::assertSame('308', $rowsOut[0]['constant_symbol']);
+    }
+
+    public function testForeignPaymentKeepsIbanAndNoInventedSymbols(): void
+    {
+        // Zahraniční platba: protiúčet je IBAN, čísla v pravém bloku jsou vlastní
+        // reference banky — jako VS/KS/SS se NESMÍ použít (falešný VS páruje cizí fakturu).
+        $rows = "18.09.2026UTT Europe\n"
+              . "OI0004A3UFG 11\n"
+              . "001-18092026 1602 602021 294431\n"
+              . "SK1211000000002922893625\n"
+              . "TATRSKBXXXX\n"
+              . "EndToEnd Reference:\n"
+              . "6020000000\n"
+              . "3857316421\n"
+              . "2672471\n"
+              . "-256,08";
+        $text = $this->dailyStatement('1 000,00', '743,92', '0,00', '256,08', $rows);
+
+        $rowsOut = $this->parser()->parseTransactionsFromText($text);
+        self::assertCount(1, $rowsOut);
+        self::assertSame('SK1211000000002922893625', $rowsOut[0]['counterparty_account']);
+        self::assertNull($rowsOut[0]['counterparty_bank']);
+        self::assertNull($rowsOut[0]['variable_symbol']);
+        self::assertNull($rowsOut[0]['constant_symbol']);
+        self::assertNull($rowsOut[0]['specific_symbol']);
+    }
+
+    public function testDailyStatementRejectsMovementFromAnotherDay(): void
+    {
+        // Denní výpis se skládá do měsíce podle data zúčtování. Pohyb z jiného dne
+        // znamená, že se datum vytěžilo špatně — takový výpis se NESMÍ uložit.
+        $rows = "17.09.2026PŘÍCHOZÍ ÚHRADA\n"
+              . "Druha Firma, s.r.o.\n"
+              . "1111111111/0300\n"
+              . "5550045\n"
+              . "             1 000,00";
+        $text = $this->dailyStatement('1 000,00', '2 000,00', '1 000,00', '0,00', $rows);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/denní výpis/u');
+        $this->parser()->parse('%PDF-fake', $text);
+    }
+
+    public function testParseKeepsAccountCurrencyInHeader(): void
+    {
+        $result = $this->parser()->parse('%PDF-fake', $this->dailyStatement('0,00', '0,00', '0,00', '0,00', ''));
+        self::assertSame('CZK', $result['header']['account_currency']);
+        self::assertSame('day', $result['header']['period_kind']);
+    }
 }

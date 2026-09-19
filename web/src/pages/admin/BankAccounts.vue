@@ -131,9 +131,9 @@ const imapAccounts = ref<BankEmailImapSettings[]>([])
 const messages = ref<BankEmailProcessedMessage[]>([])
 const attachmentIngests = ref<BankEmailAttachmentIngest[]>([])
 /** Sekci s přílohami ukazujeme, jen když ji aspoň jeden účet má zapnutou. */
-const pdfIngestEnabled = computed(() => imapAccounts.value.some(a => a.ingest_pdf_invoices))
+const pdfIngestEnabled = computed(() => imapAccounts.value.some(a => a.ingest_pdf_invoices || a.ingest_pdf_statements))
 function attachmentStatusClass(status: BankEmailAttachmentIngest['status']): string {
-  if (status === 'imported') return 'text-success-600'
+  if (status === 'imported' || status === 'imported_statement') return 'text-success-600'
   if (status === 'failed' || status === 'rejected') return 'text-danger-500'
   return 'text-neutral-500'
 }
@@ -222,6 +222,7 @@ function defaultImapDraft(): Partial<BankEmailImapSettings> & { password?: strin
     require_email_auth: true,
     allow_forwarded: false,
     ingest_pdf_invoices: false,
+    ingest_pdf_statements: false,
     forwarded_from: '',
     email_auth_serv_id: '',
     username: '',
@@ -1306,6 +1307,13 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <span>
                 {{ t('bank_accounts.ingest_pdf_invoices') }}
                 <span class="block text-xs text-neutral-500">{{ t('bank_accounts.ingest_pdf_invoices_hint') }}</span>
+              </span>
+            </label>
+            <label class="flex items-start gap-2 text-sm md:col-span-3">
+              <input v-model="imapDraft.ingest_pdf_statements" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+              <span>
+                {{ t('bank_accounts.ingest_pdf_statements') }}
+                <span class="block text-xs text-neutral-500">{{ t('bank_accounts.ingest_pdf_statements_hint') }}</span>
               </span>
             </label>
             <div>

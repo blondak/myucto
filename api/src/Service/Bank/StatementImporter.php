@@ -86,7 +86,7 @@ final class StatementImporter
 
     private function importScopedLocked(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive, array $reconciliationConfirmations = []): array
     {
-        if (!in_array($source, ['gpc', 'bank_api'], true)) {
+        if (!in_array($source, ['gpc', 'bank_api', 'pdf'], true)) {
             throw new \InvalidArgumentException('Unsupported connected statement source.');
         }
         $pdo = $this->db->pdo();
@@ -133,7 +133,9 @@ final class StatementImporter
                 $affectedStatements[] = (int) $owner['id'];
             }
             $monthly = new BankApiMonthlyStatements($pdo);
-            if ($source === 'bank_api' || $monthly->hasApiAccount($supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'])) {
+            if ($source === 'bank_api'
+                || ($parsed['header']['period_kind'] ?? 'period') === 'day'
+                || $monthly->aggregatesMonthly($supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'])) {
                 $months = $monthly->projectAccount(
                     $supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'], $userId,
                 );
@@ -189,6 +191,17 @@ final class StatementImporter
      */
     public function importParsedPdf(array $parsed, string $pdfBytes, string $fileName, ?int $userId, ?int $currencyId = null): array
     {
+        // Denní výpis („výpis při pohybu") se v přehledu nezobrazuje samostatně —
+        // skládá se do měsíčního výpisu účtu stejně jako pohyby ze strojového feedu.
+        // Projekci umí jen scoped cesta (zámek + transakce), a ta potřebuje jednoznačný
+        // měnový účet firmy; bez něj se výpis uloží postaru, jako samostatný doklad.
+        if (($parsed['header']['period_kind'] ?? 'period') === 'day') {
+            $account = $currencyId !== null ? $this->loadCurrencyById($currencyId) : $this->lookupAccount($parsed['header']['account_number']);
+            $owner = $currencyId !== null ? $account : $this->lookupRegisteredOwner($parsed['header']['account_number']);
+            if (!empty($account['id']) && !empty($owner['supplier_id']) && $owner['supplier_id'] === $account['supplier_id']) {
+                return $this->importScoped($parsed, $pdfBytes, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'pdf', false);
+            }
+        }
         return $this->persist($parsed, $pdfBytes, $fileName, $userId, $currencyId, 'pdf');
     }
 
@@ -292,13 +305,14 @@ final class StatementImporter
 
         $pdo->prepare(
             'INSERT INTO bank_statements
-                 (source, file_name, file_hash, file_content, pdf_content, pdf_name, pdf_hash, pdf_size_bytes, pdf_uploaded_at,
+                 (source, period_kind, file_name, file_hash, file_content, pdf_content, pdf_name, pdf_hash, pdf_size_bytes, pdf_uploaded_at,
                   supplier_id, account_number, bank_code, currency,
                   statement_number, statement_date,
                   prev_balance, curr_balance, credit_total, debit_total, transaction_count, imported_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
-            $source, $fileName, $hash, $fileContent, $pdfContent, $pdfName, $pdfHash, $pdfSize, $pdfUploadedAt,
+            $source, ($h['period_kind'] ?? 'period') === 'day' ? 'day' : 'period',
+            $fileName, $hash, $fileContent, $pdfContent, $pdfName, $pdfHash, $pdfSize, $pdfUploadedAt,
             $statementSupplierId, $h['account_number'], $accountBankCode, $statementCurrency,
             $h['statement_number'], $h['statement_date'],
             $h['prev_balance'], $h['curr_balance'], $h['credit_total'], $h['debit_total'],

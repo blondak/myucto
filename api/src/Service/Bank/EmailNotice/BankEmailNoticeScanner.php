@@ -29,6 +29,11 @@ final class BankEmailNoticeScanner
          * sestavují bez celé importní vrstvy.
          */
         private readonly ?EmailPdfInvoiceIngestor $pdfInvoices = null,
+        /**
+         * Načítání PDF bankovních výpisů z příloh (opt-in `ingest_pdf_statements`).
+         * Nepovinné ze stejného důvodu jako faktury.
+         */
+        private readonly ?EmailPdfStatementIngestor $pdfStatements = null,
     ) {}
 
     /**
@@ -256,8 +261,18 @@ final class BankEmailNoticeScanner
         // PDF přílohy se posuzují NEZÁVISLE na tom, jestli je zpráva čitelné avízo:
         // faktura od dodavatele avízo není a parser ji odmítne. Běží ale až ZA
         // ověřením autenticity — zamítnutá zpráva nesmí do fronty dokladů dostat nic.
-        $attachments = $this->pdfInvoices?->ingestFromMessage($supplierId, $settings, $message)
-            ?? ['enabled' => false, 'considered' => 0, 'imported' => 0, 'skipped' => 0, 'rejected' => 0, 'failed' => 0, 'details' => []];
+        // Bankovní výpis se posuzuje PRVNÍ: nese jméno a adresu naší firmy, takže by ho
+        // rozpoznávač dokladů mohl poslat do fronty přijatých faktur. Zápis do logu
+        // příloh (unikátní na firmu + SHA) zároveň ingestoru faktur řekne, že je hotovo.
+        $empty = ['enabled' => false, 'considered' => 0, 'imported' => 0, 'skipped' => 0, 'rejected' => 0, 'failed' => 0, 'details' => []];
+        $statements = $this->pdfStatements?->ingestFromMessage($supplierId, $settings, $message) ?? $empty;
+        $attachments = $this->pdfInvoices?->ingestFromMessage($supplierId, $settings, $message) ?? $empty;
+        foreach (['considered', 'imported', 'skipped', 'rejected', 'failed'] as $key) {
+            $attachments[$key] = (int) $attachments[$key] + (int) $statements[$key];
+        }
+        $attachments['enabled'] = !empty($attachments['enabled']) || !empty($statements['enabled']);
+        $attachments['statements'] = $statements;
+        $attachments['details'] = array_merge($statements['details'], $attachments['details']);
         $attachmentSummary = ['attachments' => $attachments];
 
         try {
