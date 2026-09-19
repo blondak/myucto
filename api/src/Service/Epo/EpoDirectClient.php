@@ -98,7 +98,11 @@ final class EpoDirectClient
     private function post(string $url, array $options): array
     {
         try {
-            $response = $this->http->post($url, $options);
+            // Přesměrování NIKDY nenásledujeme, ať je klient odkudkoli: podatelna jím hlásí
+            // odstávku (Location na stránku podpory) a slepé následování by vrátilo HTML
+            // informační stránky jako by to byla odpověď podatelny. Volba patří k požadavku,
+            // ne k výchozímu klientovi — injektovaný klient ji jinak nemá.
+            $response = $this->http->post($url, $options + ['allow_redirects' => false]);
         } catch (GuzzleException $e) {
             throw new EpoException(
                 'epo_unavailable',
@@ -110,6 +114,22 @@ final class EpoDirectClient
         $status = $response->getStatusCode();
         $stream = $response->getBody();
         $body = $stream->read(self::MAX_RESPONSE_BYTES + 1);
+
+        // Odstávka podatelny se pozná podle přesměrování na stránku podpory — tělo je
+        // prázdné, takže bez tohohle rozlišení se hlásilo "prázdná odpověď" a vypadalo
+        // to jako chyba u nás. Zkušební prostředí (zkus.mojedane.gov.cz) takhle odpovídalo
+        // celý den 20. 9. 2026.
+        $location = $response->getHeaderLine('Location');
+        if ($status >= 300 && $status < 400 && $location !== '') {
+            throw new EpoException(
+                'epo_unavailable',
+                'Podatelna EPO je mimo provoz — přesměrovala požadavek na informační stránku ('
+                    . $location . '). Zkuste to později.',
+                503,
+                $status,
+            );
+        }
+
         if ($body === '' || strlen($body) > self::MAX_RESPONSE_BYTES) {
             throw new EpoException(
                 'epo_invalid_response',

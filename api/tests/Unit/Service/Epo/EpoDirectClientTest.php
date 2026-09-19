@@ -37,6 +37,28 @@ final class EpoDirectClientTest extends TestCase
         self::assertSame($signed, (string) $request->getBody());
     }
 
+    /**
+     * Odstávka podatelny: EPO přesměruje na informační stránku a vrátí prázdné tělo.
+     * Bez rozlišení to hlásilo "EPO vrátilo prázdnou odpověď", což vypadá jako chyba
+     * u nás — zkušební prostředí takhle odpovídalo celý den 20. 9. 2026.
+     */
+    public function testRedirectToSupportPageIsReportedAsOutage(): void
+    {
+        $handler = HandlerStack::create(new MockHandler([
+            new Response(302, ['Location' => 'https://podpora.mojedane.gov.cz/cs/sorry-page'], ''),
+        ]));
+        $client = new EpoDirectClient(new Client(['handler' => $handler, 'http_errors' => false]));
+
+        try {
+            $client->submit(random_bytes(32), true);
+            self::fail('Přesměrování na stránku podpory musí skončit chybou.');
+        } catch (\MyInvoice\Service\Epo\EpoException $e) {
+            self::assertSame('epo_unavailable', $e->errorCode);
+            self::assertStringContainsString('mimo provoz', $e->getMessage());
+            self::assertStringContainsString('sorry-page', $e->getMessage());
+        }
+    }
+
     public function testStatusUsesDocumentedFormFields(): void
     {
         $history = [];
