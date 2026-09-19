@@ -52,6 +52,8 @@ final class CronJobGate
     public const INACTIVE_DISABLED_BY_CONFIG = 'disabled_by_config';
     /** Úloha dává smysl jen ve spravovaném provozu, a ten tu není zapnutý. */
     public const INACTIVE_MANAGED_ONLY = 'managed_only';
+    /** Úloha je vědomě volitelná a tahle instalace si ji v konfiguraci nezapnula. */
+    public const INACTIVE_NOT_ENABLED = 'not_enabled';
     /**
      * Volitelná úloha nemá u téhle instalace co obsluhovat: žádné bankovní
      * napojení, IMAP schránka, podání čekající na stav… Od FEATURE_OFF se liší
@@ -225,6 +227,21 @@ final class CronJobGate
     {
         if (($job['requires_managed'] ?? false) === true && !$this->isManagedInstallation()) {
             return self::INACTIVE_MANAGED_ONLY;
+        }
+
+        // Úloha, kterou si instalace musí vědomě zapnout. Na rozdíl od `requires_config`
+        // tu nejde o chybějící adresář, ale o to, že výchozí odpověď je NE — typicky
+        // hlídač cizích zdrojů, jehož nález umí zpracovat jen ten, kdo vydává aktualizace.
+        $flag = $job['requires_config_flag'] ?? null;
+        if ($flag !== null) {
+            try {
+                $enabled = (bool) $this->config->get((string) $flag, false);
+            } catch (Throwable) {
+                $enabled = false;
+            }
+            if (!$enabled) {
+                return self::INACTIVE_NOT_ENABLED;
+            }
         }
 
         $key = $job['requires_config'] ?? null;

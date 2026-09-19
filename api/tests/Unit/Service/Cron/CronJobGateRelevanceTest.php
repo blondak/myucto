@@ -184,7 +184,9 @@ final class CronJobGateRelevanceTest extends TestCase
         $gate = new CronJobGate(new Config([]), $this->pdoReturning(false));
 
         self::assertSame(CronJobGate::INACTIVE_FEATURE_OFF, $gate->inactiveReason($this->job('cron-jmhz-poll')));
-        self::assertSame(CronJobGate::INACTIVE_FEATURE_OFF, $gate->inactiveReason($this->job('cron-jmhz-source-monitor')));
+        // U hlídače cizích zdrojů vyhraje konfigurace: vypnutou úlohu není proč sondovat
+        // v databázi, takže se k otázce „jsou tu vůbec mzdy?" nedojde.
+        self::assertSame(CronJobGate::INACTIVE_NOT_ENABLED, $gate->inactiveReason($this->job('cron-jmhz-source-monitor')));
     }
 
     /** Se mzdami, ale bez otevřeného podání nemá dotazování ČSSZ na co čekat. */
@@ -196,7 +198,30 @@ final class CronJobGateRelevanceTest extends TestCase
         );
 
         self::assertSame(CronJobGate::INACTIVE_NOT_IN_USE, $gate->inactiveReason($this->job('cron-jmhz-poll')));
-        self::assertNull($gate->inactiveReason($this->job('cron-jmhz-source-monitor')));
+        // Hlídač cizích zdrojů je vědomě volitelný — samotné mzdy ho nezapínají.
+        self::assertSame(CronJobGate::INACTIVE_NOT_ENABLED, $gate->inactiveReason($this->job('cron-jmhz-source-monitor')));
+    }
+
+    /**
+     * Hlídač veřejných zdrojů JMHZ běží jen tam, kde si ho instalace zapnula. Jeho nález
+     * (nová verze číselníku, nové XSD) umí zpracovat jen ten, kdo vydává aktualizace —
+     * zákaznická instalace by jen denně ťukala na cizí portál a po změně jeho odpovědi
+     * by u ní svítila červená úloha, se kterou nemá co dělat.
+     */
+    public function testJmhzSourceMonitorRunsOnlyWhenExplicitlyEnabled(): void
+    {
+        $payroll = fn (Config $config): CronJobGate => new CronJobGate(
+            $config,
+            $this->pdoAnswering(static fn (string $sql): bool => str_contains($sql, 'payroll_enabled')),
+        );
+        $job = $this->job('cron-jmhz-source-monitor');
+
+        self::assertSame(CronJobGate::INACTIVE_NOT_ENABLED, $payroll(new Config([]))->inactiveReason($job));
+        self::assertSame(
+            CronJobGate::INACTIVE_NOT_ENABLED,
+            $payroll(new Config(['payroll' => ['jmhz_source_monitor' => false]]))->inactiveReason($job),
+        );
+        self::assertNull($payroll(new Config(['payroll' => ['jmhz_source_monitor' => true]]))->inactiveReason($job));
     }
 
     /** Povinné úlohy na tom, co je na instalaci zapnuté, nezávisí nikdy. */

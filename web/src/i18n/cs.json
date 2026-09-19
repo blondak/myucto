@@ -23860,6 +23860,7 @@
       "not_configured": "chybí nastavený adresář, se kterým úloha pracuje",
       "feature_off": "funkce, kterou úloha obsluhuje, není u žádné firmy zapnutá",
       "managed_only": "patří jen ke spravovanému provozu",
+      "not_enabled": "není zapnutá v konfiguraci (volitelný hlídač cizích zdrojů)",
       "disabled_by_config": "vypnuto konfigurací (cron.disabled_jobs)",
       "not_in_use": "úloha nemá co obsluhovat",
       "not_in_use_by_script": {

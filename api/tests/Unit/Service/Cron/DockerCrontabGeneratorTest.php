@@ -126,7 +126,8 @@ final class DockerCrontabGeneratorTest extends TestCase
 
         // Nepodmíněné úlohy naopak musí zůstat.
         foreach (CronCatalog::dispatchable() as $job) {
-            if (isset($job['requires_config']) || ($job['requires_managed'] ?? false) === true) {
+            if (isset($job['requires_config']) || isset($job['requires_config_flag'])
+                || ($job['requires_managed'] ?? false) === true) {
                 continue;
             }
             self::assertStringContainsString('api/bin/' . $job['script'] . '.php', $crontab);

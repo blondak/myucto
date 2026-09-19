@@ -492,7 +492,11 @@ final class JmhzOfficialSourceMonitor
             if (!is_string($apiId) || preg_match('/\A[0-9a-f-]{36}\z/D', $apiId) !== 1 || !is_string($versionNumber)) {
                 continue;
             }
-            $pages = $version['documentationPageItems'] ?? null;
+            // MPSV pole se stránkami dokumentace v katalogu přejmenovalo
+            // (`documentationPageItems` → `documentationPages`). Obsah i identifikátory
+            // zůstaly stejné, jen pod jiným klíčem — hlídač na to spadl a od 9. 9. 2026
+            // hlásil, že dokumentace v katalogu není. Čteme obojí, ať přežijeme i návrat.
+            $pages = $version['documentationPages'] ?? $version['documentationPageItems'] ?? null;
             foreach (is_array($pages) ? $pages : [] as $page) {
                 if (!is_array($page) || ($page['title'] ?? null) !== $source['documentation_title']) {
                     continue;
@@ -527,8 +531,11 @@ final class JmhzOfficialSourceMonitor
         } catch (\JsonException $e) {
             throw new RuntimeException("Dokumentace {$source['index_url']} není platný JSON.", previous: $e);
         }
-        $attachments = is_array($page) ? ($page['attachments'] ?? null) : null;
-        $body = is_array($page) ? ($page['body'] ?? null) : null;
+        // Druhé přejmenování v témže katalogu: tělo stránky i přílohy se přestěhovaly
+        // pod `payload`. Čteme obě podoby ze stejného důvodu jako u `documentationPages`.
+        $content = is_array($page) ? ($page['payload'] ?? $page) : null;
+        $attachments = is_array($content) ? ($content['attachments'] ?? null) : null;
+        $body = is_array($content) ? ($content['body'] ?? null) : null;
         if (!is_array($attachments) || !is_string($body)) {
             throw new RuntimeException("Dokumentace {$source['index_url']} nemá přílohy nebo tělo.");
         }

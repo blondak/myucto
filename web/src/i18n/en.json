@@ -23860,6 +23860,7 @@
       "not_configured": "the directory the job works with is not configured",
       "feature_off": "the feature the job serves is not enabled for any company",
       "managed_only": "belongs to managed hosting only",
+      "not_enabled": "not enabled in the configuration (optional watchdog of external sources)",
       "disabled_by_config": "turned off by configuration (cron.disabled_jobs)",
       "not_in_use": "the job has nothing to serve",
       "not_in_use_by_script": {

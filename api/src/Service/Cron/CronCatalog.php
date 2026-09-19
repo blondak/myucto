@@ -30,6 +30,7 @@ final class CronCatalog
      *   weekdays_only:bool,
      *   critical:bool,
      *   requires_config?:string,
+     *   requires_config_flag?:string,
      *   requires_managed?:bool,
      *   requires_ai_opt_in?:bool,
      *   requires_feature?:string,
@@ -49,6 +50,11 @@ final class CronCatalog
      *
      * `requires_config` (volitelné) = cfg klíč adresáře, bez kterého úloha nemá
      * co dělat (scan vypnutý). UI ji pak skryje, dokud není nastaven (CronJobsAction).
+     *
+     * `requires_config_flag` (volitelné) = cfg klíč, kterým si instalace úlohu vědomě
+     * ZAPÍNÁ; výchozí odpověď je NE. Na rozdíl od `requires_config` nejde o chybějící
+     * cestu, ale o relevanci: hlídač cizích zdrojů umí nález zpracovat jen ten, kdo
+     * vydává aktualizace aplikace.
      *
      * `requires_feature` (volitelné) = název funkce, kterou úloha obsluhuje;
      * podmínku k němu drží {@see CronJobGate}. Bez zapnuté funkce úloha nemá co
@@ -256,6 +262,14 @@ final class CronCatalog
                 'script' => 'cron-jmhz-source-monitor',
                 // Hlídá dokumentaci mzdového hlášení; bez mezd nemá čtenáře.
                 'requires_feature' => CronJobGate::FEATURE_PAYROLL,
+                // ⚠️ Výchozí stav je VYPNUTO a je to záměr. Hlídá CIZÍ zdroje (MPSV, ČSSZ,
+                // finanční správa) a jeho nález — nová verze číselníku, nové XSD, provozní
+                // oznámení — umí zpracovat jen ten, kdo vydává aktualizace aplikace.
+                // Zákaznická instalace s ním nemůže udělat nic: nové podklady k ní přijdou
+                // v další verzi. Zapnutý všude navíc znamená, že každá instalace denně
+                // ťuká na developers.mpsv.cz, a když tam změní tvar odpovědi (9. 9. 2026
+                // přejmenovali dvě pole v katalogu), svítí červená úloha u všech zákazníků.
+                'requires_config_flag' => 'payroll.jmhz_source_monitor',
                 'recommended' => 'daily_0700',
                 'linux_cron' => '0 7 * * *',
                 'windows_schtasks' => '/sc daily /st 07:00',

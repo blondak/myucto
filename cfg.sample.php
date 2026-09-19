@@ -577,6 +577,17 @@ return [
     ],
 
     // Cron retention (api/bin/cron-cleanup.php + cron-backup.php)
+    // Mzdy — provozní volby mzdového modulu.
+    'payroll' => [
+        // Hlídač veřejných zdrojů JMHZ (MPSV, ČSSZ, finanční správa) — cron-jmhz-source-monitor.
+        // VÝCHOZÍ STAV JE VYPNUTO a je to záměr: hlídač jen hlásí, že se na cizím portálu
+        // objevil nový dokument nebo verze číselníku, a zpracovat takový nález umí jen ten,
+        // kdo vydává aktualizace aplikace. Do běžné instalace přijdou nové podklady s další
+        // verzí, takže by tu úloha denně ťukala na cizí server pro nikoho — a když tam změní
+        // tvar odpovědi, svítila by tu červená úloha, se kterou nejde nic udělat.
+        'jmhz_source_monitor' => false,
+    ],
+
     'cron' => [
         // Úlohy, které se na téhle instalaci nemají spouštět vůbec — seznam
         // jmen z katalogu (`cron-backup-pdf`, `cron-backup-documents`, …).

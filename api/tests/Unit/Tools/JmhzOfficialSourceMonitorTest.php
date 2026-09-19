@@ -108,6 +108,73 @@ final class JmhzOfficialSourceMonitorTest extends TestCase
         self::assertSame(1, $report['sources'][0]['document_count']);
     }
 
+    /**
+     * MPSV v katalogu přejmenovalo pole se stránkami dokumentace
+     * (`documentationPageItems` → `documentationPages`). Obsah zůstal, hlídač ale
+     * od 9. 9. 2026 hlásil, že dokumentace v katalogu není, a deset dní nikdo nevěděl,
+     * že se na MPSV něco mění. Čteme obě jména.
+     */
+    public function testMpsvApiAcceptsRenamedCatalogShape(): void
+    {
+        $catalogUrl = 'https://developers.mpsv.cz/api/apidata';
+        $pageUrl = 'https://developers.mpsv.cz/api/apiversion/11111111-1111-1111-1111-111111111111/documentationPage/22222222-2222-2222-2222-222222222222';
+        $documentUrl = 'https://developers.mpsv.cz/assets/documents/33333333-3333-3333-3333-333333333333/current-1.2.3.xlsx';
+        $catalog = json_encode([
+            'data' => [[
+                'slug' => 'jednotne-mesicni-hlaseni-zamestnavatelu',
+                'versions' => [[
+                    'version' => '1.4.1',
+                    'status' => 'APPROVED',
+                    'apiId' => '11111111-1111-1111-1111-111111111111',
+                    'documentationPages' => [[
+                        'title' => 'Dokumentace projektu JMHZ',
+                        'apiVersionDocumentationId' => '22222222-2222-2222-2222-222222222222',
+                    ]],
+                ]],
+            ]],
+        ], JSON_THROW_ON_ERROR);
+        $body = json_encode([
+            'type' => 'doc',
+            'content' => [[
+                'type' => 'mediaInline',
+                'attrs' => ['id' => '33333333-3333-3333-3333-333333333333'],
+            ]],
+        ], JSON_THROW_ON_ERROR);
+        // Druhé přejmenování téhož katalogu: tělo i přílohy se přestěhovaly pod `payload`.
+        $page = json_encode([
+            'payload' => [
+                'body' => $body,
+                'attachments' => [[
+                    'mediaId' => '33333333-3333-3333-3333-333333333333',
+                    'fileName' => 'current-1.2.3.xlsx',
+                    'downloadLink' => $documentUrl,
+                ]],
+            ],
+        ], JSON_THROW_ON_ERROR);
+        $monitor = new JmhzOfficialSourceMonitor(
+            ['mpsv' => [
+                'label' => 'MPSV',
+                'index_url' => $catalogUrl,
+                'index_format' => 'mpsv_api',
+                'api_slug' => 'jednotne-mesicni-hlaseni-zamestnavatelu',
+                'documentation_title' => 'Dokumentace projektu JMHZ',
+                'document_hosts' => ['developers.mpsv.cz'],
+                'document_path_prefixes' => ['/assets/documents/'],
+                'document_extensions' => ['xlsx'],
+            ]],
+            fn (string $url): string => match ($url) {
+                $catalogUrl => $catalog,
+                $pageUrl => $page,
+                $documentUrl => 'obsah dokumentu',
+                default => throw new \RuntimeException('Neočekávaná adresa ' . $url),
+            },
+        );
+
+        $report = $monitor->monitor($this->statePath());
+
+        self::assertSame(1, $report['sources'][0]['document_count']);
+    }
+
     public function testMpsvApiUsesApprovedDocumentationAndOnlyCurrentlyReferencedAttachments(): void
     {
         $catalogUrl = 'https://developers.mpsv.cz/api/apidata';

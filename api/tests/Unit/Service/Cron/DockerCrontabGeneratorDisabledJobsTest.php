@@ -57,7 +57,8 @@ final class DockerCrontabGeneratorDisabledJobsTest extends TestCase
         );
 
         foreach (CronCatalog::dispatchable() as $job) {
-            if (isset($job['requires_config']) || ($job['requires_managed'] ?? false) === true) {
+            if (isset($job['requires_config']) || isset($job['requires_config_flag'])
+                || ($job['requires_managed'] ?? false) === true) {
                 continue;
             }
             self::assertStringContainsString(
