@@ -16,6 +16,7 @@ use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Security\PermissionCatalog;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Service\Auth\MfaOfferService;
+use MyInvoice\Service\Invoice\DefaultInvoiceNote;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\Tenant\TenantDomainContext;
@@ -93,7 +94,11 @@ final class MeAction
                                 default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
                                 auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
                                 accounting_mode, accounting_enabled, payroll_enabled, stock_enabled, ' . $ossSelect . ',
-                                ai_provider, ai_data_region, ai_eu_residency_required
+                                ai_provider, ai_data_region, ai_eu_residency_required, '
+                        // Výchozí poznámka pod položkami (#79) — editor faktury ji
+                        // předvyplní, a ten běží i pod rolí bez `settings.company.write`,
+                        // takže na GET /settings/supplier nedosáhne.
+                        . implode(', ', DefaultInvoiceNote::supplierColumns()) . '
                            FROM supplier' . $where . ' ORDER BY id'
                     );
                     $stmt->execute($params);
@@ -148,6 +153,13 @@ final class MeAction
             // Děkovný e-mail (issue #57) — UI v mark-paid modalu podle nich zobrazí checkbox.
             $s['payment_thanks_enabled']         = (bool) ($s['payment_thanks_enabled'] ?? false);
             $s['payment_thanks_default_checked'] = (bool) ($s['payment_thanks_default_checked'] ?? false);
+            // Výchozí poznámka pod položkami na nových dokladech (#79, migrace 1855).
+            // Vypnuto + prázdno = dnešní chování; `??` drží odpověď i pro řádky, které
+            // ještě visí v entity cache z doby před rozšířením SELECTu výš.
+            $s[DefaultInvoiceNote::ENABLED_COLUMN] = (bool) ($s[DefaultInvoiceNote::ENABLED_COLUMN] ?? false);
+            foreach (DefaultInvoiceNote::COLUMNS as $column) {
+                $s[$column] = isset($s[$column]) ? (string) $s[$column] : null;
+            }
             // F7 — AI provider selection (pro FE badge / Settings sekci; nav gate).
             $s['ai_provider']                    = (string) ($s['ai_provider'] ?? 'anthropic');
             $s['ai_data_region']                 = (string) ($s['ai_data_region'] ?? 'us');

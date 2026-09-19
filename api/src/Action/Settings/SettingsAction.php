@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Settings;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Service\Invoice\DefaultInvoiceNote;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -42,6 +43,12 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class SettingsAction
 {
+    /**
+     * Strop výchozí poznámky pod položkami (#79). Sloupec je TEXT, limit je tu
+     * proti překlepu typu vložená smlouva — na doklad se text tiskne celý.
+     */
+    private const DEFAULT_NOTE_MAX_LENGTH = 5000;
+
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
@@ -606,6 +613,10 @@ final class SettingsAction
             // (z dokladu, výchozí) vs 'import_date' (den importu, chování do 1848).
             // Platí pro VŠECHNY importní kanály, ne jen AI extrakci.
             'purchase_import_received_at',
+            // Výchozí poznámka pod položkami na nových vystavených dokladech (#79,
+            // migrace 1855) — přepínač + text pro každý jazyk dokladu.
+            DefaultInvoiceNote::ENABLED_COLUMN,
+            ...array_values(DefaultInvoiceNote::COLUMNS),
         ];
 
         // ENUM validace volby data přijetí u importu (migrace 1848).
@@ -622,6 +633,26 @@ final class SettingsAction
                 "purchase_import_received_at musí být 'issue_date' nebo 'import_date'.",
                 400,
             );
+        }
+
+        // Výchozí poznámka pod položkami (#79). Text se ukládá tak, jak ho uživatel
+        // napsal (včetně odřádkování), jen oříznutý o okrajové mezery; prázdný text
+        // je NULL, ať „nevyplněno" a „vyplněno mezerou" neznamenají dvě různé věci.
+        foreach (DefaultInvoiceNote::COLUMNS as $lang => $column) {
+            if (!array_key_exists($column, $body)) continue;
+            if ($body[$column] !== null && !is_string($body[$column])) {
+                return Json::error($response, 'validation_failed', "$column musí být text.", 400);
+            }
+            $text = trim((string) ($body[$column] ?? ''));
+            if (mb_strlen($text) > self::DEFAULT_NOTE_MAX_LENGTH) {
+                return Json::error(
+                    $response,
+                    'validation_failed',
+                    "Výchozí poznámka pod položkami ($lang) je delší než " . self::DEFAULT_NOTE_MAX_LENGTH . ' znaků.',
+                    400,
+                );
+            }
+            $body[$column] = $text === '' ? null : $text;
         }
 
         // F7 — ENUM validace AI provider selection (§3.8).
@@ -994,7 +1025,7 @@ final class SettingsAction
             }
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit'], true)
+                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', DefaultInvoiceNote::ENABLED_COLUMN], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }
@@ -1315,6 +1346,13 @@ final class SettingsAction
             true,
         ) ? (string) $row['purchase_import_received_at']
           : \MyInvoice\Service\Import\ImportedReceivedDatePolicy::DEFAULT_MODE;
+        // Výchozí poznámka pod položkami (#79, migrace 1855). Chybějící sloupce =
+        // nedoběhlá migrace; fallback drží dnešní chování (vypnuto, prázdno), ať
+        // formulář nastavení nevykreslí `undefined` do textarey.
+        $row[DefaultInvoiceNote::ENABLED_COLUMN] = (bool) ($row[DefaultInvoiceNote::ENABLED_COLUMN] ?? false);
+        foreach (DefaultInvoiceNote::COLUMNS as $column) {
+            $row[$column] = isset($row[$column]) ? (string) $row[$column] : null;
+        }
         // F7 — AI provider selection (non-secret; klíče `*_enc` jsou níže redigovány).
         $row['ai_provider']              = (string) ($row['ai_provider'] ?? 'anthropic');
         $row['ai_data_region']           = (string) ($row['ai_data_region'] ?? 'us');

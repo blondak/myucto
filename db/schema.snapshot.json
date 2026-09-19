@@ -838,7 +838,8 @@
         "1851_payroll_migration_takeover_details.sql",
         "1852_payroll_posting_map_proposals.sql",
         "1853_payroll_takeover_runs.sql",
-        "1854_bank_daily_statement_ingest.sql"
+        "1854_bank_daily_statement_ingest.sql",
+        "1855_supplier_default_note_below_items.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -19357,6 +19358,9 @@
                 "default_branding_profile_id": "int(10) unsigned NULL DEFAULT NULL",
                 "default_currency_id": "int(10) unsigned NOT NULL",
                 "default_hourly_rate": "decimal(14,6) NOT NULL DEFAULT 1500.000000",
+                "default_note_below_items_cs": "text NULL DEFAULT NULL",
+                "default_note_below_items_en": "text NULL DEFAULT NULL",
+                "default_note_below_items_enabled": "tinyint(1) NOT NULL DEFAULT 0",
                 "default_payment_due_days": "int(10) unsigned NOT NULL DEFAULT 7",
                 "default_payment_due_unit": "enum('days','month') NOT NULL DEFAULT 'days'",
                 "default_prices_include_vat": "tinyint(1) NOT NULL DEFAULT 0",

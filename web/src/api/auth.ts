@@ -52,6 +52,15 @@ export interface SupplierBrief {
   default_payment_due_unit: 'days' | 'month'
   /** Výchozí režim cen u nových faktur (false = bez DPH, true = ceny s DPH). */
   default_prices_include_vat: boolean
+  /**
+   * Výchozí poznámka pod položkami na nových dokladech (#79, migrace 1855) — editor
+   * ji předvyplní podle jazyka dokladu. Chodí přes `/me`, protože editor faktury běží
+   * i pod rolí bez `settings.company.write`, která na `/settings/supplier` nedosáhne.
+   * `undefined` = starší backend bez polí.
+   */
+  default_note_below_items_enabled?: boolean
+  default_note_below_items_cs?: string | null
+  default_note_below_items_en?: string | null
   /** Posílá dodavatel automatické upomínky? Když ne, per-faktura přepínač se v editoru skryje. */
   auto_send_reminders: boolean
   /** Děkovný e-mail za úhradu (issue #57) — řídí checkbox v mark-paid modalu. */
