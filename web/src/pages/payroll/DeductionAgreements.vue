@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
@@ -67,6 +68,20 @@ const COLUMNS: ColumnDef[] = [
   { key: 'actions', labelKey: 'common.detail', required: true },
 ]
 const tbl = useTablePrefs('payroll-deduction-agreements', COLUMNS)
+const detailColspan = computed(() => COLUMNS.filter(column => tbl.isVisible(column.key)).length)
+/*
+ * Detail patří pod rozkliknutý řádek, ne za celou stránkovanou tabulku — jinak
+ * se u řádku uprostřed seznamu otevře pod ohybem stránky. Panel existuje jen
+ * jednou (slouží i formuláři nové dohody), takže se přenáší do hostitele toho
+ * rozvržení, které je zrovna vidět; bez hostitele (zakládání) zůstává na místě.
+ * Práh 768 px = Tailwind `md`.
+ */
+const desktopLayout = useMediaQuery('(min-width: 768px)')
+const desktopDetailHost = ref<HTMLElement[]>([])
+const mobileDetailHost = ref<HTMLElement[]>([])
+const detailHost = computed<HTMLElement | null>(
+  () => (desktopLayout.value ? desktopDetailHost.value[0] : mobileDetailHost.value[0]) ?? null,
+)
 
 const today = appIsoDate()
 
@@ -284,12 +299,18 @@ async function openDetail(item: DeductionAgreementSummary) {
   }
 }
 
+const formSection = ref<HTMLElement | null>(null)
+
 function startCreate() {
   expandedId.value = null
   detail.value = null
   formError.value = ''
   form.value = emptyForm()
   creating.value = true
+  // Formulář nové dohody stojí pod seznamem, a ten může mít i dvacet řádků: bez posunutí
+  // se otevře pod ohybem a vypadá to, jako by tlačítko nic neudělalo. Detail řádku tenhle
+  // problém nemá, ten se kreslí rovnou u svého řádku.
+  void nextTick(() => formSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
 }
 
 function payloadFromForm() {
@@ -484,7 +505,8 @@ onMounted(load)
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="item in agreements" :key="item.id" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
+              <template v-for="item in agreements" :key="item.id">
+              <tr :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
                 <td v-if="tbl.isVisible('employee')" class="px-4 py-3 font-medium text-neutral-900">{{ item.full_name }}</td>
                 <td v-if="tbl.isVisible('title')" class="px-4 py-3">
                   {{ item.title }}
@@ -510,6 +532,12 @@ onMounted(load)
                   </button>
                 </td>
               </tr>
+              <tr v-if="expandedId === item.id">
+                <td :colspan="detailColspan" class="bg-neutral-50 px-4 py-4">
+                  <div ref="desktopDetailHost" />
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
           </div>
@@ -549,6 +577,7 @@ onMounted(load)
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>
               {{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}
             </button>
+            <div v-if="expandedId === item.id" ref="mobileDetailHost" class="-mx-4 -mb-4 mt-4 border-t border-neutral-200 bg-neutral-50 px-4 py-4" />
           </article>
         </div>
       </template>
@@ -563,7 +592,8 @@ onMounted(load)
       />
     </section>
 
-    <section v-if="creating || detail" data-test="deduction-detail-panel" class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 shadow-sm sm:p-6">
+    <Teleport v-if="creating || detail" :to="detailHost" :disabled="!detailHost || creating">
+    <section ref="formSection" data-test="deduction-detail-panel" :class="detailHost && !creating ? 'text-left' : 'rounded-xl border border-neutral-200 bg-neutral-50 p-4 shadow-sm sm:p-6'">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <h2 class="text-lg font-semibold text-neutral-900">
@@ -729,5 +759,6 @@ onMounted(load)
         </section>
       </div>
     </section>
+    </Teleport>
   </div>
 </template>

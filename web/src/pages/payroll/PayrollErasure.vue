@@ -84,6 +84,14 @@ const LOG_COLUMNS: ColumnDef[] = [
   { key: 'executed_at', labelKey: 'payroll.erasure.col.executed_at' },
 ]
 const logTbl = useTablePrefs('payroll-erasure-log', LOG_COLUMNS)
+const detailColspan = computed(() => LOG_COLUMNS.filter(column => logTbl.isVisible(column.key)).length)
+/*
+ * Detail návrhu patří pod vybraný řádek protokolu, ne za celou tabulku — ta
+ * roste s každým návrhem a u staršího řádku by se panel otevřel pod ohybem
+ * stránky. Panel je jeden a je velký, takže se na místo přenáší `Teleportem`.
+ */
+const detailHostRefs = ref<HTMLElement[]>([])
+const detailHost = computed<HTMLElement | null>(() => detailHostRefs.value[0] ?? null)
 
 const CANDIDATE_COLUMNS: ColumnDef[] = [
   { key: 'person', labelKey: 'payroll.erasure.col.person', required: true },
@@ -107,6 +115,17 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+/* Rozbalený řádek se zavírá dalším kliknutím — panel je teď jeho součástí. */
+function toggleDetail(id: number) {
+  if (selectedId.value === id) {
+    selectedId.value = null
+    detail.value = null
+    detailError.value = ''
+    return
+  }
+  void openDetail(id)
 }
 
 async function openDetail(id: number) {
@@ -370,13 +389,12 @@ onMounted(load)
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
+            <template v-for="p in proposals" :key="p.id">
             <tr
-              v-for="p in proposals"
-              :key="p.id"
               :data-test="`erasure-proposal-${p.id}`"
               class="cursor-pointer hover:bg-neutral-50"
               :class="selectedId === p.id ? 'bg-primary-50' : ''"
-              @click="openDetail(p.id)"
+              @click="toggleDetail(p.id)"
             >
               <td v-if="logTbl.isVisible('number')" class="px-3 py-2 font-mono font-semibold">#{{ p.id }}</td>
               <td v-if="logTbl.isVisible('as_of')" class="px-3 py-2 font-mono whitespace-nowrap">{{ fmtDate(p.as_of) }}</td>
@@ -390,13 +408,20 @@ onMounted(load)
               <td v-if="logTbl.isVisible('created_at')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ fmtDate(p.created_at) }}</td>
               <td v-if="logTbl.isVisible('executed_at')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ fmtDate(p.executed_at) }}</td>
             </tr>
+            <tr v-if="selectedId === p.id">
+              <td :colspan="detailColspan" class="bg-neutral-50 px-3 py-3">
+                <div ref="detailHostRefs" />
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- Detail návrhu: co přesně se stane a s KÝM. -->
-    <div v-if="selectedId !== null" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mt-4">
+    <!-- Detail návrhu: co přesně se stane a s KÝM. Kreslí se u vybraného řádku protokolu. -->
+    <Teleport v-if="selectedId !== null" :to="detailHost" :disabled="!detailHost">
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden" :class="detailHost ? '' : 'mt-4'">
       <div class="px-4 py-2 bg-neutral-50 border-b border-neutral-200 flex items-center justify-between gap-2 flex-wrap">
         <h2 class="text-sm font-semibold">{{ t('payroll.erasure.detail_title', { id: selectedId }) }}</h2>
         <div v-if="canWrite && detail" class="flex items-center gap-2 flex-wrap">
@@ -540,6 +565,7 @@ onMounted(load)
         </div>
       </div>
     </div>
+    </Teleport>
 
     <!-- Provedení: dvě nezávislá potvrzení, ne jeden klik. -->
     <Modal

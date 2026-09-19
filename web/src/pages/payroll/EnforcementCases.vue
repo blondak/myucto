@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { documentsApi, type DocItem } from '@/api/documents'
@@ -126,6 +127,21 @@ const COLUMNS: ColumnDef[] = [
   { key: 'actions', labelKey: 'common.detail', required: true },
 ]
 const tbl = useTablePrefs('payroll-enforcement', COLUMNS)
+const detailColspan = computed(() => COLUMNS.filter(column => tbl.isVisible(column.key)).length)
+/*
+ * Detail patří pod rozkliknutý řádek, ne za celou tabulku — u dvaceti případů
+ * se panel na konci seznamu vykreslil pod ohybem stránky a vypadalo to, že se
+ * kliknutím nic nestalo. Panel je ale velký a existuje jen v jedné instanci
+ * (drží si kotvy pro plynulé posouvání), takže se místo kopie do obou rozvržení
+ * přenáší přes `Teleport` do hostitele toho rozvržení, které je právě vidět:
+ * v tabulce rozbalovací řádek, na mobilu vnitřek karty. Práh 768 px = Tailwind `md`.
+ */
+const desktopLayout = useMediaQuery('(min-width: 768px)')
+const desktopDetailHost = ref<HTMLElement[]>([])
+const mobileDetailHost = ref<HTMLElement[]>([])
+const detailHost = computed<HTMLElement | null>(
+  () => (desktopLayout.value ? desktopDetailHost.value[0] : mobileDetailHost.value[0]) ?? null,
+)
 const recipientOptions = computed(() => {
   const seen = new Map<number, PayrollInstitutionAccount>()
   for (const account of recipientAccounts.value) {
@@ -1313,7 +1329,8 @@ onMounted(load)
           <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th v-if="tbl.isVisible('employee')" class="px-4 py-3">{{ t('payroll.enforcement.employee') }}</th><th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.enforcement.status_label') }}</th><th v-if="tbl.isVisible('case_kind')" class="px-4 py-3">{{ t('payroll.enforcement.case_kind') }}</th><th v-if="tbl.isVisible('claims')" class="px-4 py-3 text-right">{{ t('payroll.enforcement.claims') }}</th><th v-if="tbl.isVisible('balance')" class="px-4 py-3 text-right">{{ t('payroll.enforcement.balance') }}</th><th v-if="tbl.isVisible('actions')" class="px-4 py-3"><span class="sr-only">{{ t('common.detail') }}</span></th></tr></thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="item in cases" :key="item.id" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
+              <template v-for="item in cases" :key="item.id">
+              <tr :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
                 <td v-if="tbl.isVisible('employee')" class="px-4 py-3 font-medium text-neutral-900">{{ item.full_name }}</td>
                 <td v-if="tbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(item.status)">{{ t(`payroll.enforcement.status.${item.status}`) }}</span></td>
                 <td v-if="tbl.isVisible('case_kind')" class="px-4 py-3 text-neutral-600">{{ t(`payroll.enforcement.kinds.${item.case_kind}`) }}</td>
@@ -1321,6 +1338,12 @@ onMounted(load)
                 <td v-if="tbl.isVisible('balance')" class="px-4 py-3 text-right font-medium">{{ money(item.outstanding_minor_units) }}</td>
                 <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right"><button :class="btnOutlineSm('neutral')" :data-test="`enforcement-detail-${item.id}`" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button></td>
               </tr>
+              <tr v-if="expandedId === item.id">
+                <td :colspan="detailColspan" class="bg-neutral-50 px-4 py-4">
+                  <div ref="desktopDetailHost" />
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
           </div>
@@ -1330,6 +1353,7 @@ onMounted(load)
             <div class="flex flex-wrap items-start justify-between gap-2"><h2 class="font-semibold text-neutral-900">{{ item.full_name }}</h2><span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(item.status)">{{ t(`payroll.enforcement.status.${item.status}`) }}</span></div>
             <dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.case_kind') }}</dt><dd>{{ t(`payroll.enforcement.kinds.${item.case_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.balance') }}</dt><dd class="font-medium">{{ money(item.outstanding_minor_units) }}</dd></div></dl>
             <button :class="[btnOutline('neutral'), 'mt-4']" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button>
+            <div v-if="expandedId === item.id" ref="mobileDetailHost" class="-mx-4 -mb-4 mt-4 border-t border-neutral-200 bg-neutral-50 px-4 py-4" />
           </article>
         </div>
       </template>
@@ -1344,7 +1368,8 @@ onMounted(load)
       />
     </section>
 
-    <section v-if="expandedId" data-test="enforcement-detail-panel" class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 shadow-sm sm:p-6">
+    <Teleport v-if="expandedId && detailHost" :to="detailHost">
+    <section data-test="enforcement-detail-panel" class="text-left">
       <div v-if="!detail" class="h-28 animate-pulse rounded-lg bg-neutral-100" />
       <div v-else class="space-y-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
@@ -1757,5 +1782,6 @@ onMounted(load)
         </section>
       </div>
     </section>
+    </Teleport>
   </div>
 </template>

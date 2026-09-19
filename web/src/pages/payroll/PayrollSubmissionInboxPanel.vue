@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -120,6 +121,20 @@ const COLUMNS: ColumnDef[] = [
   { key: 'actions', labelKey: 'common.actions', required: true },
 ]
 const tbl = useTablePrefs('payroll-submission-inbox', COLUMNS)
+const detailColspan = computed(() => COLUMNS.filter(column => tbl.isVisible(column.key)).length)
+/*
+ * Detail patří pod rozbalený řádek, ne za celou stránkovanou tabulku — u položky
+ * uprostřed seznamu se jinak otevře pod ohybem stránky a vypadá to, že se nic
+ * nestalo. Panel je jeden, takže se přenáší do hostitele toho rozvržení, které
+ * je právě vidět: v tabulce rozbalovací řádek, na mobilu vnitřek karty.
+ * Práh 768 px = Tailwind `md`.
+ */
+const desktopLayout = useMediaQuery('(min-width: 768px)')
+const desktopDetailHost = ref<HTMLElement[]>([])
+const mobileDetailHost = ref<HTMLElement[]>([])
+const detailHost = computed<HTMLElement | null>(
+  () => (desktopLayout.value ? desktopDetailHost.value[0] : mobileDetailHost.value[0]) ?? null,
+)
 
 const pageSize = 25
 const total = ref(0)
@@ -386,7 +401,8 @@ defineExpose({ reload: load })
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
-                <tr v-for="item in items" :key="item.id" data-test="inbox-row">
+                <template v-for="item in items" :key="item.id">
+                <tr data-test="inbox-row" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
                     <td v-if="tbl.isVisible('agenda')" class="px-4 py-3">
                       <span class="block font-medium text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</span>
                       <span v-if="item.subject_label" class="block text-xs text-neutral-500">{{ item.subject_label }}</span>
@@ -456,13 +472,19 @@ defineExpose({ reload: load })
                       </div>
                     </td>
                 </tr>
+                <tr v-if="expandedId === item.id">
+                  <td :colspan="detailColspan" class="bg-neutral-50 px-4 py-4">
+                    <div ref="desktopDetailHost" />
+                  </td>
+                </tr>
+                </template>
               </tbody>
             </table>
           </div>
         </template>
 
         <div v-if="items.length" class="grid grid-cols-1 gap-3 p-4 md:hidden">
-          <article v-for="item in items" :key="item.id" class="rounded-lg border border-neutral-200 p-4" data-test="inbox-card">
+          <article v-for="item in items" :key="item.id" class="rounded-lg border border-neutral-200 p-4" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''" data-test="inbox-card">
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h3 class="font-semibold text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</h3>
@@ -525,6 +547,7 @@ defineExpose({ reload: load })
                 {{ t('payroll.submissions.inbox.snooze') }}
               </button>
             </div>
+            <div v-if="expandedId === item.id" ref="mobileDetailHost" class="-mx-4 -mb-4 mt-4 border-t border-neutral-200 bg-neutral-50 px-4 py-4" />
           </article>
         </div>
 
@@ -537,9 +560,10 @@ defineExpose({ reload: load })
         />
       </section>
 
+      <Teleport v-if="expandedId !== null" :to="detailHost" :disabled="!detailHost">
       <p
         v-if="expandedError"
-        class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
+        class="mb-4 rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
         role="alert"
         data-test="inbox-detail-error"
       >
@@ -547,7 +571,6 @@ defineExpose({ reload: load })
       </p>
 
       <section
-        v-if="expandedId !== null"
         class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm"
         data-test="inbox-detail"
       >
@@ -637,6 +660,7 @@ defineExpose({ reload: load })
           </article>
         </div>
       </section>
+      </Teleport>
     </template>
 
     <Modal

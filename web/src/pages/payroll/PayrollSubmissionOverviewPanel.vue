@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import { HEALTH_INSURERS } from '@/utils/healthInsurers'
@@ -144,6 +145,8 @@ const jmhzBlockedOffices = ref<Array<{
 const detail = ref<PayrollSubmissionDetail | null>(null)
 const detailLoadingId = ref<number | null>(null)
 const detailError = ref('')
+/* Detail se kreslí u svého řádku, takže je potřeba vědět, který to je. */
+const expandedId = ref<number | null>(null)
 const downloadingArtifactId = ref<number | null>(null)
 const artifactDownloadError = ref('')
 
@@ -156,6 +159,19 @@ const COLUMNS: ColumnDef[] = [
   { key: 'actions', labelKey: 'common.actions', required: true },
 ]
 const tbl = useTablePrefs('payroll-submission-overview', COLUMNS)
+const detailColspan = computed(() => COLUMNS.filter(column => tbl.isVisible(column.key)).length)
+/*
+ * Detail patří pod rozkliknutý řádek, ne za celou stránkovanou tabulku — u řádku
+ * uprostřed seznamu by se otevřel pod ohybem stránky. Panel je jeden, takže se
+ * přenáší do hostitele toho rozvržení, které je právě vidět: v tabulce
+ * rozbalovací řádek, na mobilu vnitřek karty. Práh 768 px = Tailwind `md`.
+ */
+const desktopLayout = useMediaQuery('(min-width: 768px)')
+const desktopDetailHost = ref<HTMLElement[]>([])
+const mobileDetailHost = ref<HTMLElement[]>([])
+const detailHost = computed<HTMLElement | null>(
+  () => (desktopLayout.value ? desktopDetailHost.value[0] : mobileDetailHost.value[0]) ?? null,
+)
 
 /*
  * Karty stojí na serverovém `deadline_summary`, ne na načtené stránce — souhrn
@@ -336,8 +352,14 @@ function readableBytes(bytes: number): string {
 
 async function openDetail(item: PayrollSubmissionOverviewItem) {
   if (!item.latest_submission || detailLoadingId.value !== null) return
+  if (expandedId.value === item.id) {
+    closeDetail()
+    return
+  }
   detailError.value = ''
   artifactDownloadError.value = ''
+  expandedId.value = item.id
+  detail.value = null
   detailLoadingId.value = item.latest_submission.id
   try {
     detail.value = await payrollApi.submissionDetail(item.latest_submission.id)
@@ -350,6 +372,13 @@ async function openDetail(item: PayrollSubmissionOverviewItem) {
   } finally {
     detailLoadingId.value = null
   }
+}
+
+function closeDetail() {
+  expandedId.value = null
+  detail.value = null
+  detailError.value = ''
+  artifactDownloadError.value = ''
 }
 
 async function downloadArtifact(
@@ -647,9 +676,7 @@ function healthBatchSent(results: MobileKeyBatchItemResult[]) {
 async function load() {
   loading.value = true
   error.value = ''
-  detail.value = null
-  detailError.value = ''
-  artifactDownloadError.value = ''
+  closeDetail()
   try {
     const response = await payrollApi.submissionOverview(
       environment.value,
@@ -808,7 +835,8 @@ onMounted(load)
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
-                <tr v-for="item in items" :key="item.id">
+                <template v-for="item in items" :key="item.id">
+                <tr :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
                   <td v-if="tbl.isVisible('agenda')" class="px-4 py-3 font-medium text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</td>
                   <td v-if="tbl.isVisible('subject')" class="px-4 py-3 text-neutral-700">{{ item.subject_label ?? '—' }}</td>
                   <td v-if="tbl.isVisible('due_on')" class="px-4 py-3 text-neutral-700">
@@ -871,7 +899,9 @@ onMounted(load)
                         <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                           <path :d="ICONS.doc" />
                         </svg>
-                        {{ t('payroll.submissions.overview.detail_action') }}
+                        {{ expandedId === item.id
+                          ? t('payroll.submissions.overview.detail_hide')
+                          : t('payroll.submissions.overview.detail_action') }}
                       </button>
                       <!--
                         Povinnost bez podání je otevřený úkol, ne prázdné pole.
@@ -895,13 +925,19 @@ onMounted(load)
                     </div>
                   </td>
                 </tr>
+                <tr v-if="expandedId === item.id">
+                  <td :colspan="detailColspan" class="bg-neutral-50 px-4 py-4">
+                    <div ref="desktopDetailHost" />
+                  </td>
+                </tr>
+                </template>
               </tbody>
             </table>
           </div>
         </template>
 
         <div v-if="items.length" class="grid grid-cols-1 gap-3 p-4 md:hidden">
-          <article v-for="item in items" :key="item.id" class="rounded-lg border border-neutral-200 p-4">
+          <article v-for="item in items" :key="item.id" class="rounded-lg border border-neutral-200 p-4" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h3 class="font-semibold text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</h3>
@@ -976,7 +1012,9 @@ onMounted(load)
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path :d="ICONS.doc" />
               </svg>
-              {{ t('payroll.submissions.overview.detail_action') }}
+              {{ expandedId === item.id
+                ? t('payroll.submissions.overview.detail_hide')
+                : t('payroll.submissions.overview.detail_action') }}
             </button>
             <RouterLink
               v-else
@@ -990,6 +1028,7 @@ onMounted(load)
               </svg>
               {{ t('payroll.submissions.overview.not_prepared_action') }}
             </RouterLink>
+            <div v-if="expandedId === item.id" ref="mobileDetailHost" class="-mx-4 -mb-4 mt-4 border-t border-neutral-200 bg-neutral-50 px-4 py-4" />
           </article>
         </div>
 
@@ -1002,9 +1041,10 @@ onMounted(load)
         />
       </section>
 
+      <Teleport v-if="detailError || detail" :to="detailHost" :disabled="!detailHost">
       <p
         v-if="detailError"
-        class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
+        class="mb-4 rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
         role="alert"
         data-test="submission-detail-error"
       >
@@ -1037,7 +1077,7 @@ onMounted(load)
               {{ formatDate(detail.submission.period_start) }} – {{ formatDate(detail.submission.period_end) }}
             </p>
           </div>
-          <button type="button" :class="btnOutline('neutral')" @click="detail = null">
+          <button type="button" :class="btnOutline('neutral')" @click="closeDetail">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.x" />
             </svg>
@@ -1199,6 +1239,7 @@ onMounted(load)
           </article>
         </div>
       </section>
+      </Teleport>
 
       <section
         v-if="mode === 'jmhz'"
