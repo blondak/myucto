@@ -6340,7 +6340,7 @@ paths:
         - in: query
           name: d_zjist
           schema: { type: string, format: date }
-          description: 'Datum zjištění důvodů pro dodatečné přiznání (§ 141 DŘ).'
+          description: 'Datum zjištění důvodů pro dodatečné přiznání (§ 141 DŘ). U jiné varianty → 400.'
       responses:
         '200':
           description: JSON summary (lines 1-29 + 40+, totals, deadline)
@@ -6383,7 +6383,7 @@ paths:
         - in: query
           name: d_zjist
           schema: { type: string, format: date }
-          description: 'Datum zjištění důvodů pro dodatečné přiznání (§ 141 DŘ).'
+          description: 'Datum zjištění důvodů pro dodatečné přiznání (§ 141 DŘ). U jiné varianty → 400.'
         - in: query
           name: acknowledge_mismatch
           schema: { type: string, enum: ['1', 'true'] }
@@ -6422,8 +6422,16 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year,  required: true, schema: { type: integer } }
         - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 } }
+        - { in: query, name: variant, description: "Typ podání; datum zjištění přijímá jen následné hlášení.", schema: { type: string, enum: [radne, opravne, nasledne, nasledne_opravne, vyzva_nulove, vyzva_potvrzeni] } }
+        - { in: query, name: d_zjist, description: "Datum zjištění (§ 101f odst. 2) — jen u následného hlášení, jinak 400.", schema: { type: string, format: date } }
+        - { in: query, name: c_jed_vyzvy, description: "Č.j. výzvy správce daně — jen u následného hlášení a rychlé odpovědi, jinak 400.", schema: { type: string } }
       responses:
-        '200': { description: Summary s counts sekcí A.1/A.2/A.4/A.5/B.1/B.2/B.3 }
+        '200':
+          description: |
+            Summary s counts sekcí A.1/A.2/A.4/A.5/B.1/B.2/B.3, varování k volbě typu podání
+            a fronta `post_filing_changes` (doklady změněné po posledním podání za období —
+            podklad pro rozhodnutí o opravném či následném hlášení).
+        '400': { description: "Neplatný typ podání, nebo parametr, který k němu nepatří" }
         '403': { description: Pouze admin/accountant }
 
   /api/v1/reports/dphkh1:

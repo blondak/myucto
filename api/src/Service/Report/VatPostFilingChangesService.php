@@ -35,20 +35,29 @@ final class VatPostFilingChangesService
      *                          total:float, updated_at:string}>
      * }
      */
-    public function changes(int $supplierId, int $year, int $month, string $period = 'monthly'): array
-    {
+    public function changes(
+        int $supplierId,
+        int $year,
+        int $month,
+        string $period = 'monthly',
+        string $formCode = 'dphdp3',
+        array $variants = ['B', 'O', 'D', 'E'],
+    ): array {
         [$start, $end, $quarter] = $this->periodBounds($year, $month, $period);
 
         // Základna = poslední skutečně podané přiznání (řádné/opravné/dodatečné/opravné-dodatečné) —
         // změny po JAKÉMKOLI z nich znamenají, že podaný stav už neodpovídá dokladům. Bereme
         // všechny druhy kromě neplatných (validation_status='failed' filtruje repo).
+        // Formulář je parametr, ne konstanta: tytéž doklady stojí za přiznáním i za
+        // kontrolním hlášením, takže „co se změnilo po podání" je pro obě tvrzení stejná
+        // otázka. KH ji dřív nemělo jak položit a UI u něj nemělo z čeho nabídnout opravné.
         $filing = $this->submissions->findLatestForPeriod(
             $supplierId,
-            'dphdp3',
+            $formCode,
             $year,
             $quarter !== null ? null : $month,
             $quarter,
-            ['B', 'O', 'D', 'E'],
+            $variants,
         );
         if ($filing === null) {
             return ['has_filing' => false, 'snapshot_available' => false, 'submission' => null, 'documents' => []];

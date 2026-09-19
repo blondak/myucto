@@ -36,6 +36,10 @@ final class DphPriznaniBuilder
         private readonly VatDeductionAdjustmentService $deductionAdjustments,
         private readonly Section79Service $section79,
         private readonly \MyInvoice\Service\Tax\Vat\Section43Service $section43,
+        // Společná pravidla pro volbu typu podání (lhůta, základna opravy, perioda) —
+        // tatáž brána, jakou používá kontrolní hlášení. Dřív si na ně každé tvrzení
+        // odpovídalo po svém a přiznání jich půlku nekontrolovalo vůbec.
+        private readonly SubmissionVariantGuard $variantGuard,
     ) {}
 
     /**
@@ -218,6 +222,26 @@ final class DphPriznaniBuilder
             $lines = $this->filterLinesForIdentified($lines, $warnings);
         }
         $quarter = $period === 'quarterly' ? (int) ceil($month / 3) : null;
+
+        // OPRAVNÉ přiznání (§ 138 DŘ) nahrazuje dříve podané řádné — bez základny nemá co
+        // nahradit a správce daně ho nemá s čím spárovat. Dodatečné (D/E) si vlastní, bohatší
+        // kontrolu dělá {@see loadAmendmentBaseline()} níž, proto se sem pouští jen 'O'.
+        if ($forma === 'O') {
+            $this->variantGuard->requirePriorSubmission(
+                $forma,
+                $supplierId,
+                'dphdp3',
+                $year,
+                $quarter !== null ? null : $month,
+                $quarter,
+                ['B', 'O'],
+                'vat_no_prior_submission',
+                'Za dané období není evidováno podané řádné přiznání k DPH. Opravné přiznání '
+                    . '(§ 138 daňového řádu) nahrazuje dříve podané — první podání za období je '
+                    . 'vždy ŘÁDNÉ. Pokud jste řádné přiznání podali, označte jeho snapshot '
+                    . 'v Archivu podání jako podaný.',
+            );
+        }
 
         // § 74b ZDPH — evidované korekce odpočtu dlužníka za období (audit §2.5). Snížení
         // (odst. 1/3): ř. 40/41 základ i daň ZÁPORNĚ + ř. 34 opr_dluz KLADNĚ; obnova
@@ -799,6 +823,31 @@ final class DphPriznaniBuilder
                 ]
                 : null,
         ];
+
+        // Volba typu podání proti lhůtě, proti už podanému období a proti registrované
+        // periodě plátce. Tytéž tři otázky řeší kontrolní hlášení — pravidlo i text proto
+        // drží společná brána, ne dvě nezávislé kopie (AGENTS.md § účetní vrstva).
+        array_push($warnings, ...SubmissionVariantGuard::deadlineWarnings(
+            $forma,
+            CzechWorkingDays::deadline($deadlineYear, $deadlineMonth),
+            'OPRAVNÉ přiznání',
+            'DODATEČNÉ přiznání',
+            '§ 138 DŘ',
+        ));
+        array_push($warnings, ...$this->variantGuard->alreadyFiledWarnings(
+            $forma,
+            $supplierId,
+            'dphdp3',
+            $year,
+            $quarter !== null ? null : $month,
+            $quarter,
+            'OPRAVNÉ přiznání (§ 138 DŘ)',
+            'DODATEČNÉ přiznání (§ 141 DŘ)',
+        ));
+        array_push($warnings, ...SubmissionVariantGuard::periodMismatchWarnings(
+            (string) $period,
+            (string) ($supplier['vat_period'] ?? ''),
+        ));
 
         return [
             'xml'      => $dom->saveXML() ?: '',

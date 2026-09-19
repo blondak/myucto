@@ -31,6 +31,8 @@ final class KontrolniHlaseniAction
         private readonly IpMatcher $ipMatcher,
         private readonly \MyInvoice\Service\Report\TaxSubmissionArchiver $archiver,
         private readonly \MyInvoice\Service\Currency\MissingExchangeRateFiller $rateFiller,
+        // Fronta „doklady změněné po podání" — podklad pro rozhodnutí o opravném hlášení.
+        private readonly \MyInvoice\Service\Report\VatPostFilingChangesService $postFilingChanges,
     ) {}
 
     /**
@@ -46,6 +48,12 @@ final class KontrolniHlaseniAction
 
     /** Varianty, které smí (a musí) nést č.j. výzvy správce daně. */
     private const KH_VYZVA_VARIANTS = ['nasledne', 'nasledne_opravne', 'vyzva_nulove', 'vyzva_potvrzeni'];
+
+    /**
+     * Varianty, u kterých má smysl datum zjištění (§ 101f odst. 2) — jen následné hlášení.
+     * Rychlá odpověď na výzvu ho nemá kam dát (builder ji staví bez sekcí).
+     */
+    private const KH_D_ZJIST_VARIANTS = ['nasledne', 'nasledne_opravne'];
 
     public function preview(Request $request, Response $response): Response
     {
@@ -67,9 +75,26 @@ final class KontrolniHlaseniAction
         } catch (\Throwable $e) {
             return ReportBuildError::toJson($response, $e);
         }
+        // Fronta „doklady změněné po podání" — bez ní nemá UI z čeho nabídnout opravné
+        // hlášení, protože samo nepozná, že je období už podané. Fail-open: je to podklad
+        // k rozhodnutí, ne součást výkazu, a její selhání nesmí shodit náhled.
+        $postFiling = ['has_filing' => false, 'snapshot_available' => false, 'submission' => null, 'documents' => []];
+        try {
+            $postFiling = $this->postFilingChanges->changes(
+                $supplierId,
+                $year,
+                $month,
+                $period ?? 'monthly',
+                'dphkh1',
+                ['B', 'O', 'N', 'E'],
+            );
+        } catch (\Throwable) {
+        }
+
         return Json::ok($response, [
             'summary'  => $result['summary'],
             'warnings' => $result['warnings'],
+            'post_filing_changes' => $postFiling,
         ]);
     }
 
@@ -163,6 +188,13 @@ final class KontrolniHlaseniAction
         if (!$acceptsVyzva && $cJedVyzvy !== null) {
             return [$variant, null, null, 'Č.j. výzvy lze uvést jen u následného kontrolního hlášení '
                 . 'nebo u rychlé odpovědi na výzvu.'];
+        }
+        // Datum zjištění se u ostatních variant dřív tiše zahazovalo, zatímco č.j. výzvy
+        // vracelo chybu — nad stejnou třídou vstupu dvojí chování. Kdo ho pošle omylem
+        // k opravnému hlášení, má vědět, že se nepoužije.
+        if ($dZjist !== null && !in_array($variant, self::KH_D_ZJIST_VARIANTS, true)) {
+            return [$variant, null, null, 'Datum zjištění lze uvést jen u následného kontrolního '
+                . 'hlášení (§ 101f odst. 2).'];
         }
         return [$variant, $dZjist, $cJedVyzvy, null];
     }

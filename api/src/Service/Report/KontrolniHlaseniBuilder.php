@@ -50,6 +50,8 @@ final class KontrolniHlaseniBuilder
         private readonly Section46Service $section46,
         // Archiv podání — základna následného KH (první podání za období je vždy řádné).
         private readonly TaxSubmissionRepository $submissions,
+        // Společná pravidla pro volbu typu podání — tatáž brána, jakou používá přiznání.
+        private readonly SubmissionVariantGuard $variantGuard,
     ) {}
 
     /**
@@ -179,25 +181,22 @@ final class KontrolniHlaseniBuilder
         // Následné KH navazuje na už podané hlášení — první podání za období je VŽDY řádné,
         // i po termínu (XSD anotace khdph_forma). Následné bez základny by správce daně
         // neměl s čím spárovat. Stejná brána, jakou má dodatečné přiznání k DPH.
-        if ($isFollowUp) {
-            $prior = $this->submissions->findLatestForPeriod(
-                $supplierId,
-                'dphkh1',
-                $year,
-                $period === 'quarterly' ? null : $month,
-                $period === 'quarterly' ? $quarter : null,
-                ['B', 'O'],
-            );
-            if ($prior === null) {
-                throw new PostingException(
-                    'kh_no_prior_submission',
-                    'Za dané období není evidováno podané řádné kontrolní hlášení. První podání '
-                        . 'za období je vždy ŘÁDNÉ, i když je po termínu (§ 101e). Pokud jste řádné '
-                        . 'KH podali, označte jeho snapshot v Archivu podání jako podaný.',
-                    422,
-                );
-            }
-        }
+        // Platí i pro OPRAVNÉ hlášení: to nahrazuje dříve podané řádné, takže bez základny
+        // nemá co nahradit. Dřív se ptalo jen následné a opravné za období, kde se nikdy nic
+        // nepodalo, prošlo bez hlesu.
+        $this->variantGuard->requirePriorSubmission(
+            $forma,
+            $supplierId,
+            'dphkh1',
+            $year,
+            $period === 'quarterly' ? null : $month,
+            $period === 'quarterly' ? $quarter : null,
+            ['B', 'O'],
+            'kh_no_prior_submission',
+            'Za dané období není evidováno podané řádné kontrolní hlášení. První podání '
+                . 'za období je vždy ŘÁDNÉ, i když je po termínu (§ 101e). Pokud jste řádné '
+                . 'KH podali, označte jeho snapshot v Archivu podání jako podaný.',
+        );
 
         // Rozhodný stav plátcovství = POSLEDNÍ DEN období výkazu, ne dnešek (EPIC VH-04)
         // — firma odregistrovaná dnes musí projít validací KH za období, kdy plátcem byla.
@@ -488,24 +487,25 @@ final class KontrolniHlaseniBuilder
         // proti lhůtě je tichá chyba — EPO takové podání může přijmout, ale správce daně
         // k opravnému po lhůtě nepřihlíží a původní chybné KH zůstane v platnosti.
         // Varování, ne blok: lhůtu lze individuálně prodloužit a tvrdá brzda těsně před
-        // termínem by byla horší než falešný poplach.
-        $today = date('Y-m-d');
-        if ($forma === 'O' && $today > $regularDeadline) {
-            $warnings[] = sprintf(
-                'Lhůta pro řádné kontrolní hlášení (%s) už uplynula — opravné hlášení (§ 101f '
-                    . 'odst. 1) lze podat jen před ní. Po lhůtě se podává NÁSLEDNÉ kontrolní '
-                    . 'hlášení; zkontrolujte typ podání.',
-                $regularDeadline,
-            );
-        }
-        if ($isFollowUp && $today <= $regularDeadline) {
-            $warnings[] = sprintf(
-                'Lhůta pro řádné kontrolní hlášení (%s) ještě běží — do jejího uplynutí se '
-                    . 'chyba opravuje OPRAVNÝM hlášením (§ 101f odst. 1), ne následným. '
-                    . 'Zkontrolujte typ podání.',
-                $regularDeadline,
-            );
-        }
+        // termínem by byla horší než falešný poplach. Text i pravidlo drží společná brána,
+        // aby se KH a přiznání k DPH nerozcházely.
+        array_push($warnings, ...SubmissionVariantGuard::deadlineWarnings(
+            $forma,
+            $regularDeadline,
+            'OPRAVNÉ kontrolní hlášení',
+            'NÁSLEDNÉ kontrolní hlášení',
+            '§ 101f odst. 1',
+        ));
+        array_push($warnings, ...$this->variantGuard->alreadyFiledWarnings(
+            $forma,
+            $supplierId,
+            'dphkh1',
+            $year,
+            $period === 'quarterly' ? null : $month,
+            $period === 'quarterly' ? $quarter : null,
+            'OPRAVNÉ kontrolní hlášení',
+            'NÁSLEDNÉ kontrolní hlášení',
+        ));
 
         return [
             'xml'      => $dom->saveXML() ?: '',

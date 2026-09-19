@@ -32,22 +32,22 @@ use PHPUnit\Framework\TestCase;
  * Izolovaný rok 2092 pod existujícím supplierem (vynucen plátce), úklid v tearDown.
  */
 #[Group('integration')]
-final class VatAmendedReturnTest extends TestCase
+class VatAmendedReturnTest extends TestCase
 {
-    private const YEAR = 2092;
+    protected const YEAR = 2092;
 
-    private Connection $db;
-    private DphPriznaniBuilder $dph;
-    private KontrolniHlaseniBuilder $kh;
-    private TaxSubmissionArchiver $archiver;
+    protected Connection $db;
+    protected DphPriznaniBuilder $dph;
+    protected KontrolniHlaseniBuilder $kh;
+    protected TaxSubmissionArchiver $archiver;
     private TaxSubmissionRepository $submissions;
     private VatPostFilingChangesService $postFiling;
     private ?XmlSchemaValidator $validator = null;
 
-    private int $supplierId = 0;
+    protected int $supplierId = 0;
     private int $currencyId = 0;
     private int $vatRateId = 0;
-    private int $userId = 0;
+    protected int $userId = 0;
     private int $czId = 0;
 
     /** @var array{customers:int[], vendors:int[]} */
@@ -153,7 +153,7 @@ final class VatAmendedReturnTest extends TestCase
      *
      * @param array<string,mixed> $summary
      */
-    private function archiveAndSubmit(
+    protected function archiveAndSubmit(
         int $supplierId,
         string $formCode,
         int $year,
@@ -178,6 +178,12 @@ final class VatAmendedReturnTest extends TestCase
     {
         $cust = $this->client('Odběratel', 'CZ90010011');
         $this->sale('OA-1', $cust, '1', $this->d(5, 10), [[100000, 21000, 21]]);
+        // Opravné nahrazuje dříve podané řádné — bez základny ho builder odmítne.
+        $baseline = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphdp3', self::YEAR, 5, null,
+            $baseline['xml'], $baseline['summary'], $this->userId, true, 'B',
+        );
 
         $result = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'opravne');
         $xml = new \SimpleXMLElement($result['xml']);
@@ -397,16 +403,17 @@ final class VatAmendedReturnTest extends TestCase
         $cust = $this->client('Odběratel', 'CZ90010079');
         $this->sale('XV-1', $cust, '1', $this->d(5, 10), [[100000, 21000, 21]]);
 
-        // O — plné přiznání.
-        $o = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'opravne');
-        $this->assertValid('dphdp3', $o['xml']);
-
-        // Archivuj řádné a postav dodatečné D (delta).
+        // Archivuj řádné — základna pro opravné i dodatečné.
         $b = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
         $this->archiveAndSubmit(
             $this->supplierId, 'dphdp3', self::YEAR, 5, null,
             $b['xml'], $b['summary'], $this->userId, true, 'B',
         );
+
+        // O — plné přiznání.
+        $o = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'opravne');
+        $this->assertValid('dphdp3', $o['xml']);
+
         $this->sale('XV-2', $cust, '1', $this->d(5, 20), [[50000, 10500, 21]]);
         $d = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'dodatecne', '2092-07-01');
         $this->assertValid('dphdp3', $d['xml']);
@@ -662,12 +669,12 @@ final class VatAmendedReturnTest extends TestCase
         $this->assertSame('passed', $v['status'], "XSD ({$form}) selhala:\n  - " . implode("\n  - ", $v['errors']));
     }
 
-    private function d(int $month, int $day): string
+    protected function d(int $month, int $day): string
     {
         return sprintf('%04d-%02d-%02d', self::YEAR, $month, $day);
     }
 
-    private function client(string $name, ?string $dic): int
+    protected function client(string $name, ?string $dic): int
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO clients
@@ -684,7 +691,7 @@ final class VatAmendedReturnTest extends TestCase
     /**
      * @param list<array{0:float,1:float,2:float}> $items [base, vat, vat_rate_snapshot]
      */
-    private function sale(string $varsymbol, int $clientId, ?string $code, string $tax, array $items): void
+    protected function sale(string $varsymbol, int $clientId, ?string $code, string $tax, array $items): void
     {
         $base = 0.0; $vat = 0.0;
         foreach ($items as $it) { $base += $it[0]; $vat += $it[1]; }

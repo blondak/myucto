@@ -47,6 +47,9 @@ final class DphPriznaniAction
      */
     private const DPH_VARIANTS = ['radne', 'opravne', 'dodatecne', 'dodatecne_opravne'];
 
+    /** Varianty, u kterých má smysl datum zjištění a důvody (§ 141 daňového řádu). */
+    private const DPH_AMENDMENT_VARIANTS = ['dodatecne', 'dodatecne_opravne'];
+
     /**
      * GET /api/reports/dphdp3/settings → { vat_period, is_vat_payer }
      * Vrátí supplier nastavení potřebné pro UI (měsíční vs kvartální period picker).
@@ -198,6 +201,19 @@ final class DphPriznaniAction
             return Json::error($response, 'validation_failed', 'Neplatný typ přiznání.', 400);
         }
         $dZjist = (string) ($q['d_zjist'] ?? '') ?: null;
+        // Datum zjištění a důvody patří jen k dodatečnému přiznání (§ 141). U ostatních
+        // variant se dřív tiše zahodily — kdo je pošle k opravnému, má se to dozvědět,
+        // ne čekat, že se použijí. Stejné pravidlo drží kontrolní hlášení.
+        if (($dZjist !== null || (string) ($q['reason'] ?? '') !== '')
+            && !in_array($variant, self::DPH_AMENDMENT_VARIANTS, true)
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Datum zjištění a důvody lze uvést jen u dodatečného přiznání (§ 141 daňového řádu).',
+                400,
+            );
+        }
         // Důvody pro dodatečné přiznání (§ 141 odst. 5) — textová příloha VetaR.
         $reason = (string) ($q['reason'] ?? '') ?: null;
         try {
@@ -255,6 +271,19 @@ final class DphPriznaniAction
             return Json::error($response, 'validation_failed', 'Neplatný typ přiznání.', 400);
         }
         $dZjist = (string) ($q['d_zjist'] ?? '') ?: null;
+        // Datum zjištění a důvody patří jen k dodatečnému přiznání (§ 141). U ostatních
+        // variant se dřív tiše zahodily — kdo je pošle k opravnému, má se to dozvědět,
+        // ne čekat, že se použijí. Stejné pravidlo drží kontrolní hlášení.
+        if (($dZjist !== null || (string) ($q['reason'] ?? '') !== '')
+            && !in_array($variant, self::DPH_AMENDMENT_VARIANTS, true)
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Datum zjištění a důvody lze uvést jen u dodatečného přiznání (§ 141 daňového řádu).',
+                400,
+            );
+        }
         // Důvody pro dodatečné přiznání (§ 141 odst. 5) — textová příloha VetaR.
         $reason = (string) ($q['reason'] ?? '') ?: null;
         try {
