@@ -491,7 +491,7 @@ doklad z klientského portálu. Rozpoznání dat z dokladu (ISDOC nebo AI) se sp
 až tam, takže se za nepřečtenou přílohu neplatí žádné AI volání.
 
 Výsledek posouzení každé přílohy — včetně zamítnuté — najdeš v tabulce
-**PDF faktury z příloh** pod přehledem zpracovaných zpráv:
+**PDF doklady z příloh** pod přehledem zpracovaných zpráv:
 
 | Výsledek | Význam |
 |---|---|
