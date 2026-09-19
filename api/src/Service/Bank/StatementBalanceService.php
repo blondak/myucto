@@ -298,11 +298,19 @@ final class StatementBalanceService
         $checkpoints = [];
         $unverifiedPdf = false;
         $hasKnownBalance = false;
+        // Existoval účet v evidenci UŽ PŘED tímhle měsícem? Když ne, jeho historie tímhle
+        // měsícem začíná a měsíc se otevírá na nule — a to i tehdy, když nějaký zůstatek
+        // známe zevnitř měsíce. Přesně tak vypadá první výpis po napojení účtu: banka
+        // pošle výpis za JEDEN den uprostřed měsíce, jeho počáteční zůstatek je stav
+        // uprostřed měsíce (ne na začátku), a bez tohohle rozlišení zůstal měsíc bez kotvy
+        // a export GPC zablokovaný navždy.
+        $historyBefore = false;
         $latestBalanceDate = null;
         foreach ($statements as $row) {
             $date = substr($row['statement_date'], 0, 10);
             if ($date > $to) continue;
             if ($row['curr_balance'] !== null || $row['prev_balance'] !== null) $hasKnownBalance = true;
+            if ($date < $from) $historyBefore = true;
             if ($row['source'] === 'bank_api' && $row['has_pdf'] && $date >= $from) $unverifiedPdf = true;
             if (!self::isAnchorRow($row) || $row['curr_balance'] === null) continue;
             $latestBalanceDate = $date;
@@ -353,7 +361,8 @@ final class StatementBalanceService
             }
         }
         $opening = $anchor ?? $firstOpening ?? (
-            $selected['source'] === 'bank_api' && !$hasKnownBalance && empty($selected['has_csob_advice']) ? 0 : null
+            $selected['source'] === 'bank_api' && (!$hasKnownBalance || !$historyBefore)
+                && empty($selected['has_csob_advice']) ? 0 : null
         );
         $adviceCheckpoint = null;
         if ($confirmed === null && !empty($selected['has_csob_advice'])) {

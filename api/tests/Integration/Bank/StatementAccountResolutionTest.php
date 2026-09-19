@@ -814,6 +814,44 @@ final class StatementAccountResolutionTest extends TestCase
         self::assertSame('missing_anchor', $snapshot['status']);
     }
 
+    /**
+     * První měsíc nově napojeného účtu: banka pošle výpis za JEDEN den uprostřed měsíce,
+     * takže jeho počáteční zůstatek je stav UPROSTŘED měsíce, ne na jeho začátku. Použít
+     * ho jako počáteční stav měsíce nelze (pohyby před ním by se započetly dvakrát), ale
+     * účet v evidenci před tímhle měsícem neexistoval — měsíc tedy začíná na nule.
+     *
+     * Bez toho zůstal měsíc `missing_anchor` a export GPC zablokovaný natrvalo, ačkoli
+     * dopočet sedí na bankou potvrzený konečný zůstatek na haléř.
+     */
+    public function testFreshAccountOpensMonthAtZeroWhenOnlyMidMonthStatementExists(): void
+    {
+        $account = '1000000005';
+        $this->registerCurrency('CZK', $account, '0100');
+        $pdo = $this->db->pdo();
+
+        // Přírůstek pohybů z API (bez zůstatků) — příchozí platba 10. 7.
+        $slice = $this->insertBankStatementWithBalances('bank_api', $account, '0100', '2099-07-14', null, null, null, null, 'fresh-api-slice');
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-10', 10000, 'CZK')")->execute([$slice]);
+        // Výpis banky za jediný den (15. 7.): jeho počáteční zůstatek 10 000 platí k 15. 7.
+        $daily = $this->insertBankStatementWithBalances('gpc', $account, '0100', '2099-07-15', 10000.0, 9986.67, 0.0, 13.33, 'fresh-daily-gpc');
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-15', -13.33, 'CZK')")->execute([$daily]);
+
+        $pdo->beginTransaction();
+        $mapping = (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo))
+            ->projectAccount($this->supplierId, $account, '0100', 'CZK');
+        $pdo->commit();
+        $monthId = $mapping[$slice][0];
+        foreach ($mapping as $ids) foreach ($ids as $id) $this->statementIds[] = $id;
+
+        $snapshot = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($this->supplierId, $monthId);
+
+        self::assertNotNull($snapshot['opening'], 'Měsíc nesmí zůstat bez kotvy — účet prokazatelně začíná tímhle měsícem.');
+        self::assertSame(0.0, (float) $snapshot['opening'], 'Nově napojený účet začíná na nule, ne na zůstatku zevnitř měsíce.');
+        self::assertSame(9986.67, (float) $snapshot['closing']);
+        self::assertSame(9986.67, (float) $snapshot['confirmed_closing']);
+        self::assertSame('confirmed', $snapshot['status'], 'Dopočet sedí na bankou potvrzený zůstatek — export GPC se nesmí blokovat.');
+    }
+
     private function insertBankStatementWithBalances(
         string $source,
         string $accountNumber,

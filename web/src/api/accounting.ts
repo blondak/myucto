@@ -1715,6 +1715,7 @@ export const accountingApi = {
     if (filters?.source_id) params.source_id = filters.source_id
     if (filters?.entry_id) params.entry_id = filters.entry_id
     if (filters?.posted !== undefined) params.posted = filters.posted ? '1' : '0'
+    if (filters?.reversal) params.reversal = filters.reversal
     if (filters?.automation) params.automation = filters.automation
     if (filters?.q) params.q = filters.q
     if (filters?.account_from) params.account_from = filters.account_from
