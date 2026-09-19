@@ -10767,6 +10767,67 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/reporting-settings/net-turnover-hints:
+    get:
+      tags: [Accounting]
+      summary: Nezávazný podklad k výnosům obchodního modelu
+      description: |
+        Pomůcka k výběru řádků výsledovky, které firma počítá do čistého obratu
+        nad výchozí I. + II. (§ 1a odst. 2 ZoÚ, § 35 vyhl. 500/2002 Sb.):
+        návrh podle zapsané činnosti CZ-NACE a obraty jednotlivých řádků
+        za referenční období.
+
+        Nic nenastavuje — výběr řádků se ukládá přes
+        `PUT /api/v1/accounting/reporting-settings`. Úsudek o obchodním modelu
+        dělá účetní jednotka a uvádí ho v příloze v účetní závěrce, proto
+        odpověď vždy nese `suggestions_binding: false`.
+
+        Prázdné `amounts` s `amounts_available: false` znamenají „obraty neznáme"
+        (firma nemá účetní období, nebo výkaz nejde sestavit), nikoli „všechno
+        je nula".
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nace:
+                    type: [object, "null"]
+                    properties:
+                      code: { type: string, description: "Kanonický kód z číselníku CZ-NACE" }
+                      display: { type: string, example: "68.20.00" }
+                      name: { type: [string, "null"] }
+                      status: { type: string, enum: [active, expired] }
+                  suggestion_reason:
+                    type: [string, "null"]
+                    enum: [holding, lending, securities_own_account, other_financial, rental, operating_lease, null]
+                    description: "Důvod návrhu; `null` = pro zapsanou činnost se nic nenavrhuje."
+                  suggested_rows:
+                    type: object
+                    properties:
+                      income_statement: { type: array, items: { type: string }, example: ["III.1."] }
+                      income_statement_purpose: { type: array, items: { type: string } }
+                  suggestions_binding: { type: boolean, enum: [false], description: "Vždy false — návrh není rozhodnutí." }
+                  period:
+                    type: [object, "null"]
+                    properties:
+                      id: { type: integer }
+                      fiscal_year: { type: integer }
+                      starts_on: { type: string, format: date }
+                      ends_on: { type: string, format: date }
+                  amounts:
+                    type: object
+                    description: "Obrat řádku za referenční období, po výkazech a kódech řádků."
+                    additionalProperties:
+                      type: object
+                      additionalProperties: { type: number }
+                  amounts_available: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/v1/accounting/period-lock:
     get:
       tags: [Accounting]

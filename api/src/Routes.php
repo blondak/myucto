@@ -2311,6 +2311,10 @@ final class Routes
             $g->get('/reports/payroll-sheet',                     [PayrollSheetAction::class, 'export']);
             $g->get('/reports/entity-category',                   [EntityCategoryAction::class, 'get']);
             $g->get('/reporting-settings',                        [ReportingSettingsAction::class, 'get']);
+            // Nezávazný podklad k výnosům obchodního modelu: návrh podle CZ-NACE
+            // a obraty nabízených řádků. Vlastní routa, protože kvůli obratům
+            // sestavuje celý VZZ — to nesmí platit každé čtení nastavení.
+            $g->get('/reporting-settings/net-turnover-hints',     [ReportingSettingsAction::class, 'netTurnoverHints']);
             $g->put('/reporting-settings',                        [ReportingSettingsAction::class, 'update']);
             // Příloha k účetní závěrce (§ 18/1/c ZoÚ, § 39/39a/39b vyhl. 500/2002) —
             // rozsah sekcí se stupňuje podle kategorie účetní jednotky a povinného auditu.

@@ -4,15 +4,16 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest, type TaxRepresentationHistoryEntry, type TaxRepresentationSavePayload, type InvoiceCounterType } from '@/api/settings'
 import { adminApi, type SampleDataStatus } from '@/api/admin'
-import { closingSettingsApi, type AccountingClosingSettings } from '@/api/closing'
-import { isCoveredByParent, toggleTurnoverRow } from '@/utils/netTurnoverRows'
+import { closingSettingsApi, type AccountingClosingSettings, type NetTurnoverHints } from '@/api/closing'
+import { isCoveredByParent, isTurnoverRowVisible, toggleTurnoverRow } from '@/utils/netTurnoverRows'
+import { formatMoney } from '@/composables/useFormat'
 import { clientsApi } from '@/api/clients'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { renderVarsymbolTemplate, hasCounterPlaceholder, templatesCollide } from '@/utils/varsymbol'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -366,6 +367,64 @@ async function loadReporting() {
   catch { reporting.value = null }
 }
 onMounted(loadReporting)
+
+// ── Výnosy obchodního modelu: nezávazná nápověda ───────────────────────────
+// Devatenáct zaškrtávátek bez jakéhokoli vodítka je rozhodnutí, na které se
+// nedá odpovědět. Napoví proto zapsaná činnost (CZ-NACE) a obraty řádků —
+// řádek, na kterém firma nemá ani korunu, není o čem rozhodovat.
+//
+// Podle KATEGORIE účetní jednotky by to nešlo: čistý obrat je jedním z kritérií,
+// ze kterých se kategorie (mikro/malá/střední/velká) teprve určuje, takže by
+// o obratu rozhodovalo to, co z obratu vychází.
+const turnoverHints = ref<NetTurnoverHints | null>(null)
+const showRowsWithoutAmount = ref(false)
+
+async function loadTurnoverHints() {
+  try { turnoverHints.value = await closingSettingsApi.netTurnoverHints() }
+  catch { turnoverHints.value = null }
+}
+onMounted(loadTurnoverHints)
+
+function turnoverAmount(type: TurnoverType, code: string): number | null {
+  const amounts = turnoverHints.value?.amounts?.[type]
+  return amounts && Object.hasOwn(amounts, code) ? amounts[code]! : null
+}
+
+function turnoverRowVisible(type: TurnoverType, code: string): boolean {
+  return isTurnoverRowVisible({
+    checked: turnoverChecked(type, code),
+    amount: turnoverAmount(type, code),
+    amountsAvailable: turnoverHints.value?.amounts_available === true,
+    showAll: showRowsWithoutAmount.value,
+  })
+}
+
+function turnoverVisibleOptions(type: TurnoverType) {
+  const options = reporting.value?.net_turnover_extra_row_options?.[type] ?? []
+  return options.filter(opt => turnoverRowVisible(type, opt.code))
+}
+
+function turnoverHiddenCount(type: TurnoverType): number {
+  const options = reporting.value?.net_turnover_extra_row_options?.[type] ?? []
+  return options.length - turnoverVisibleOptions(type).length
+}
+
+/** Navržené řádky, které ještě nejsou zvolené — jen ty má smysl nabízet doplnit. */
+function turnoverSuggestionPending(type: TurnoverType): string[] {
+  const suggested = turnoverHints.value?.suggested_rows?.[type] ?? []
+  return suggested.filter(code => !turnoverChecked(type, code))
+}
+
+const turnoverSuggestionCount = computed(
+  () => TURNOVER_TYPES.reduce((sum, type) => sum + turnoverSuggestionPending(type).length, 0),
+)
+
+/** Zaškrtne návrh. Neukládá — ukládá se se zbytkem záložky jedním Uložit. */
+function applyTurnoverSuggestion() {
+  for (const type of TURNOVER_TYPES) {
+    for (const code of turnoverSuggestionPending(type)) onTurnoverToggle(type, code, true)
+  }
+}
 
 function turnoverSelected(type: TurnoverType): string[] {
   return reporting.value?.net_turnover_extra_rows?.[type] ?? []
@@ -1994,18 +2053,58 @@ async function confirmTaxRepDelete() {
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-2">{{ t('settings.net_turnover.section') }}</h2>
         <p class="text-sm text-neutral-700 font-medium">{{ t('settings.net_turnover.title') }}</p>
         <p class="text-xs text-neutral-500 mt-1 mb-3">{{ t('settings.net_turnover.hint') }}</p>
+
+        <!-- Návrh podle zapsané činnosti. Nic nezaškrtává sám: úsudek o obchodním
+             modelu je na účetní jednotce a uvádí se v příloze (§ 1a odst. 2 ZoÚ). -->
+        <div v-if="turnoverHints?.suggestion_reason && turnoverSuggestionCount > 0"
+          class="mb-3 rounded-md border border-primary-500/30 bg-primary-50 px-3 py-2">
+          <p class="text-xs text-neutral-700">
+            <span class="font-medium">{{ t('settings.net_turnover.suggestion_title') }}</span>
+            <span v-if="turnoverHints.nace" class="ml-1 font-mono">{{ turnoverHints.nace.display }}</span>
+            <span v-if="turnoverHints.nace?.name"> — {{ turnoverHints.nace.name }}</span>
+          </p>
+          <p class="text-xs text-neutral-600 mt-1">{{ t(`settings.net_turnover.reason.${turnoverHints.suggestion_reason}`) }}</p>
+          <div class="mt-2 flex flex-wrap items-center gap-3">
+            <button type="button" :class="btnOutlineSm('primary')" data-test="net-turnover-apply-suggestion"
+              @click="applyTurnoverSuggestion">
+              <span class="whitespace-nowrap">{{ t('settings.net_turnover.suggestion_apply', { count: turnoverSuggestionCount }) }}</span>
+            </button>
+            <span class="text-xs text-neutral-500">{{ t('settings.net_turnover.suggestion_binding') }}</span>
+          </div>
+        </div>
+
+        <label v-if="turnoverHints?.amounts_available"
+          class="mb-3 flex items-center gap-2 text-xs text-neutral-600 cursor-pointer">
+          <input v-model="showRowsWithoutAmount" type="checkbox" data-test="net-turnover-show-all" />
+          {{ t('settings.net_turnover.show_rows_without_amount') }}
+          <span v-if="turnoverHints.period" class="text-neutral-400">
+            {{ t('settings.net_turnover.amount_period', { year: turnoverHints.period.fiscal_year }) }}
+          </span>
+        </label>
+
         <div v-for="type in TURNOVER_TYPES" :key="type" class="mb-3">
           <span class="block text-xs font-medium text-neutral-600 mb-1">{{ t(`settings.net_turnover.${type}`) }}</span>
           <div class="flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
-            <label v-for="opt in reporting.net_turnover_extra_row_options[type]" :key="opt.code"
+            <label v-for="opt in turnoverVisibleOptions(type)" :key="opt.code"
               class="flex items-start gap-2 cursor-pointer">
               <input type="checkbox" class="mt-0.5"
                 :checked="turnoverChecked(type, opt.code)"
                 :disabled="turnoverCovered(type, opt.code)"
                 @change="onTurnoverToggle(type, opt.code, ($event.target as HTMLInputElement).checked)" />
-              <span><span class="font-mono">{{ opt.code }}</span> {{ opt.label }}</span>
+              <span>
+                <span class="font-mono">{{ opt.code }}</span> {{ opt.label }}
+                <span v-if="turnoverAmount(type, opt.code) !== null" class="ml-1 text-xs"
+                  :class="turnoverAmount(type, opt.code) === 0 ? 'text-neutral-400' : 'text-neutral-500'">
+                  {{ turnoverAmount(type, opt.code) === 0
+                    ? t('settings.net_turnover.no_amount')
+                    : formatMoney(turnoverAmount(type, opt.code)) }}
+                </span>
+              </span>
             </label>
           </div>
+          <p v-if="turnoverHiddenCount(type) > 0" class="text-xs text-neutral-400 mt-1">
+            {{ t('settings.net_turnover.hidden_rows', { count: turnoverHiddenCount(type) }) }}
+          </p>
         </div>
       </section>
 

@@ -621,6 +621,26 @@ export interface NetTurnoverRowOption {
   label: string
 }
 
+/**
+ * Nezávazný podklad k výběru výnosů obchodního modelu (§ 1a odst. 2 ZoÚ).
+ *
+ * Podle KATEGORIE účetní jednotky to předvyplnit nejde: čistý obrat je jedním
+ * z kritérií, ze kterých se kategorie teprve určuje. Napovídá proto zapsaná
+ * činnost (CZ-NACE) a obraty jednotlivých řádků.
+ */
+export interface NetTurnoverHints {
+  nace: { code: string; display: string; name: string | null; status: string } | null
+  /** Klíč důvodu návrhu; texty drží frontend, aby zůstaly v obou locale. */
+  suggestion_reason: string | null
+  suggested_rows: NetTurnoverExtraRows
+  /** Vždy `false` — návrh je pomůcka, rozhodnutí je na účetní jednotce. */
+  suggestions_binding: false
+  period: { id: number; fiscal_year: number; starts_on: string; ends_on: string } | null
+  amounts: Partial<Record<keyof NetTurnoverExtraRows, Record<string, number>>>
+  /** `false` = obraty neznáme (není období / výkaz nejde sestavit) — nesmí se nic skrýt. */
+  amounts_available: boolean
+}
+
 // ── API klienti ────────────────────────────────────────────────────────────
 export const closingApi = {
   state: (periodId: number) =>
@@ -774,6 +794,10 @@ export const taxBaseApi = {
 
 export const closingSettingsApi = {
   get: () => api.get<AccountingClosingSettings>('/accounting/reporting-settings').then(r => r.data),
+  // Vlastní volání: kvůli obratům se na serveru sestavuje celý VZZ, takže to
+  // nesmí zdržovat načtení samotného nastavení.
+  netTurnoverHints: () =>
+    api.get<NetTurnoverHints>('/accounting/reporting-settings/net-turnover-hints').then(r => r.data),
   update: (payload: AccountingClosingSettings) =>
     api.put<AccountingClosingSettings>('/accounting/reporting-settings', payload).then(r => r.data),
 }

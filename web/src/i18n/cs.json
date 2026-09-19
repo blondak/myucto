@@ -19724,7 +19724,22 @@
       "hint": "Čistý obrat za období od 1. 1. 2024 tvoří výnosy z prodeje výrobků, zboží a služeb (§ 1a odst. 2 zákona o účetnictví, § 35 vyhl. 500/2002 Sb.), ve výsledovce výchozí řádky I. a II. Patří-li k obchodnímu modelu firmy i další výnosy, například tržby z prodeje majetku u pronajímatele nebo výnosy z podílů u holdingu, zaškrtněte jejich řádky. Jde o úsudek účetní jednotky, uveďte ho v příloze v účetní závěrce.",
       "income_statement": "Výsledovka v druhovém členění",
       "income_statement_purpose": "Výsledovka v účelovém členění",
-      "mapping_link": "Čistý obrat: nastavení výnosů obchodního modelu"
+      "mapping_link": "Čistý obrat: nastavení výnosů obchodního modelu",
+      "suggestion_title": "Podle zapsané činnosti CZ-NACE",
+      "suggestion_apply": "Předvyplnit návrh ({count})",
+      "suggestion_binding": "Návrh je pomůcka, ne rozhodnutí. Zkontrolujte ho proti skutečné činnosti firmy.",
+      "reason": {
+        "holding": "Holdingová nebo fondová společnost: výnosy z podílů a z ostatního dlouhodobého finančního majetku jsou u ní běžným výnosem obchodního modelu, ne mimořádnou událostí.",
+        "lending": "Poskytování úvěrů nebo finanční leasing: úroky jsou výnosem z hlavní činnosti, i když je výsledovka vede ve finanční oblasti.",
+        "securities_own_account": "Obchodování s cennými papíry na vlastní účet: výnos z něj je ostatním finančním výnosem, ale k obchodnímu modelu patří.",
+        "other_financial": "Ostatní finanční činnost: úroky i ostatní finanční výnosy mohou být výnosem obchodního modelu. Vyberte podle toho, co firma skutečně dělá.",
+        "rental": "Pronájem a správa nemovitostí: prodej pronajímané nemovitosti je konec obvyklého cyklu pronajímatele. V účelovém členění se nenavrhuje nic - samostatný řádek pro tržby z prodaného majetku tam není a celé Ostatní provozní výnosy by obrat nadhodnotily.",
+        "operating_lease": "Pronájem a leasing hmotných statků: prodej vyřazeného předmětu nájmu patří k modelu. V účelovém členění se nenavrhuje nic - samostatný řádek pro tržby z prodaného majetku tam není."
+      },
+      "show_rows_without_amount": "Zobrazit i řádky bez obratu",
+      "amount_period": "(obraty za {year})",
+      "no_amount": "bez obratu",
+      "hidden_rows": "Skryto řádků bez obratu: {count}"
     },
     "pohoda_section": "Pohoda XML export (volitelné)",
     "pohoda_hint": "Kódy z číselníků v Pohodě (účet, středisko, činnost, zakázka, předkontace). Vyplňuj jen pokud chceš, aby se předvyplnily na všech vyexportovaných fakturách. Necháš-li prázdné, Pohoda použije vlastní defaulty po importu.",

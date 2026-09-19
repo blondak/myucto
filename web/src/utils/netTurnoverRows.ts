@@ -15,3 +15,24 @@ export function toggleTurnoverRow(selected: readonly string[], code: string, on:
   const withoutChildren = selected.filter(c => c === code || !c.startsWith(code))
   return withoutChildren.includes(code) ? withoutChildren : [...withoutChildren, code]
 }
+
+/**
+ * Má se řádek nabídnout k rozhodnutí? Seznam devatenácti zaškrtávátek je bez
+ * vodítka nerozhodnutelný, takže se řádky bez obratu schovávají.
+ *
+ * Dvě situace, kdy se NESCHOVÁVÁ nikdy:
+ *  - **obrat neznáme** (`amountsAvailable === false`, nebo řádek v odpovědi
+ *    chybí) — „nevíme" není „nula" a schovat řádek kvůli neznalosti by tiše
+ *    ubralo z rozhodnutí, které dělá účetní jednotka;
+ *  - **řádek je zvolený** — schovaný zaškrtnutý řádek by nešlo odškrtnout
+ *    a mlčky by dál zvyšoval čistý obrat.
+ */
+export function isTurnoverRowVisible(row: {
+  checked: boolean
+  amount: number | null
+  amountsAvailable: boolean
+  showAll: boolean
+}): boolean {
+  if (row.showAll || !row.amountsAvailable || row.checked) return true
+  return row.amount === null || row.amount !== 0
+}

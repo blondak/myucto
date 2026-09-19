@@ -19724,7 +19724,22 @@
       "hint": "For periods from 1 January 2024, net turnover is revenue from the sale of products, goods and services (§ 1a(2) of the Accounting Act, § 35 of Decree 500/2002 Coll.), by default income statement rows I. and II. If other revenue belongs to the company's business model, such as proceeds from selling assets for a lessor or income from shares for a holding company, tick its rows. This is the entity's judgement; disclose it in the notes to the financial statements.",
       "income_statement": "Income statement by nature",
       "income_statement_purpose": "Income statement by function",
-      "mapping_link": "Net turnover: business-model revenue settings"
+      "mapping_link": "Net turnover: business-model revenue settings",
+      "suggestion_title": "Based on the registered CZ-NACE activity",
+      "suggestion_apply": "Prefill the suggestion ({count})",
+      "suggestion_binding": "The suggestion is an aid, not a decision. Check it against what the company actually does.",
+      "reason": {
+        "holding": "Holding or fund company: income from shares and from other long-term financial assets is ordinary business-model revenue here, not an exceptional event.",
+        "lending": "Lending or finance leasing: interest is revenue from the main activity, even though the income statement reports it under financial results.",
+        "securities_own_account": "Trading securities on own account: the income is reported as other financial income, yet it belongs to the business model.",
+        "other_financial": "Other financial activity: both interest and other financial income may be business-model revenue. Pick according to what the company actually does.",
+        "rental": "Letting and management of real estate: selling a let property is the end of a lessor’s ordinary cycle. Nothing is suggested for the statement by function - it has no separate row for proceeds from selling assets, and the whole Other operating income row would overstate turnover.",
+        "operating_lease": "Renting and leasing of tangible goods: selling a retired leased item belongs to the model. Nothing is suggested for the statement by function - it has no separate row for proceeds from selling assets."
+      },
+      "show_rows_without_amount": "Show rows with no turnover as well",
+      "amount_period": "(turnover for {year})",
+      "no_amount": "no turnover",
+      "hidden_rows": "Rows hidden for having no turnover: {count}"
     },
     "pohoda_section": "Pohoda XML export (optional)",
     "pohoda_hint": "Codes from Pohoda's enums (account, centre, activity, contract, accounting entry). Fill only if you want them auto-applied to all exported invoices. If empty, Pohoda will use its own defaults after import.",

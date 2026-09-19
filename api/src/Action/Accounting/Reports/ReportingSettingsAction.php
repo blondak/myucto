@@ -10,6 +10,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
+use MyInvoice\Service\Accounting\Reports\NetTurnoverSuggestionService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -23,6 +24,12 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  *   GET /api/accounting/reporting-settings — čtení (readonly+)
  *   PUT /api/accounting/reporting-settings — zápis — účetní|admin
+ *   GET /api/accounting/reporting-settings/net-turnover-hints — nezávazný
+ *       podklad k výnosům obchodního modelu (readonly+)
+ *
+ * Nápověda stojí ve vlastní routě schválně: kvůli obratům sestavuje celý výkaz
+ * zisku a ztráty, což je příliš drahé na to, aby to platilo každé čtení
+ * nastavení.
  *
  * Přepínače se ukládají jen jsou-li v body přítomné (partial update — starší
  * FE klienti bez těchto klíčů je nepřepíšou).
@@ -38,6 +45,7 @@ final class ReportingSettingsAction
         private readonly AccountingSupplierSettingsRepository $settings,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
+        private readonly NetTurnoverSuggestionService $netTurnover,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -74,6 +82,20 @@ final class ReportingSettingsAction
             }
         }
         return $this->settings->get($supplierId) + ['net_turnover_extra_row_options' => $options];
+    }
+
+    /**
+     * Nezávazný podklad k výběru výnosů obchodního modelu: návrh podle CZ-NACE
+     * a obraty jednotlivých řádků. Nic nenastavuje — zaškrtnutí i uložení
+     * zůstává na účetní, protože je to úsudek účetní jednotky, který se podle
+     * § 1a odst. 2 ZoÚ uvádí v příloze v účetní závěrce.
+     */
+    public function netTurnoverHints(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+
+        return Json::ok($response, $this->netTurnover->hints($supplierId));
     }
 
     public function update(Request $request, Response $response): Response

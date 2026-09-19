@@ -79,7 +79,14 @@ odst. 2 zákona o účetnictví, § 35 vyhlášky č. 500/2002 Sb.). Které dal�
 patří k obchodnímu modelu firmy, je její úsudek: pronajímatel k nim může
 počítat tržby z prodeje majetku (III.1.), holding výnosy z podílů (IV.). Řádky se
 volí v **Nastavení uzávěrky** na stránce účetních období a rozhodnutí se uvádí
-v příloze v účetní závěrce. Ve výkazu za první rok nového pojetí se čistý obrat
+v příloze v účetní závěrce.
+
+Výběr řádků má dvě pomůcky. Podle zapsané činnosti **CZ-NACE** aplikace navrhne
+řádky, které k takové činnosti typicky patří, i s odůvodněním; tlačítkem se
+návrh zaškrtne najednou. Řádky, na kterých firma za období nemá žádný obrat, se
+skryjí - přepínačem *Zobrazit i řádky bez obratu* se vrátí. Zvolený řádek se
+neskryje nikdy, ani když je na něm nula. Návrh je podklad, ne rozhodnutí:
+aplikace nic nezaškrtne sama a výběr uložíte vy. Ve výkazu za první rok nového pojetí se čistý obrat
 minulého období spočtený po staru neuvádí, sloupec zůstane nulový.
 
 Interně mají obě položky označené `I.` jedinečné kódy, na výstupu se však
