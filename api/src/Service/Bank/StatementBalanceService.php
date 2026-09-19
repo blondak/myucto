@@ -53,7 +53,7 @@ final class StatementBalanceService
                 $key = $selected['key'];
                 if (!isset($transactions[$key])) {
                     $ids = array_column($groups[$key], 'id');
-                    $query = $pdo->prepare("SELECT bt.id, bt.posted_at, bt.amount, bt.currency
+                    $query = $pdo->prepare("SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount, bt.currency
                         FROM bank_transactions bt WHERE bt.statement_id IN (" . implode(',', array_map('intval', $ids)) . ")
                         AND bt.source = 'statement' AND bt.posted_at > ? AND bt.posted_at <= ? ORDER BY bt.posted_at, bt.id");
                     $query->execute([self::transactionLowerBound($groups[$key], $periods[$key]['from']), $periods[$key]['to']]);
@@ -213,9 +213,56 @@ final class StatementBalanceService
         foreach ($statements as $row) {
             $date = substr((string) $row['statement_date'], 0, 10);
             if ($date >= $from) break;
-            if (BankStatementSource::isBalanceAnchor((string) $row['source']) && $row['curr_balance'] !== null) $anchorDate = $date;
+            if (self::isAnchorRow($row) && $row['curr_balance'] !== null) $anchorDate = $date;
         }
         return $anchorDate ?? '1000-01-01';
+    }
+
+    /**
+     * Je tenhle řádek doložený stav účtu, kterým se smí kotvit zůstatek?
+     *
+     * Vedle zdrojů, které jsou kotvou vždycky ({@see BankStatementSource::isBalanceAnchor()}),
+     * sem patří i STAŽENÝ výpis z bankovního API, který nese OBA zůstatky. Strojový feed
+     * obvykle vrací jen přírůstek pohybů bez zůstatků — proto `bank_api` mezi zdroji-kotvami
+     * není. Když ale konektor předá skutečný výpis banky se zůstatky (KB Plus, ČSOB), je to
+     * stejně doložený stav jako ručně nahrané GPC. Bez toho nemá nově napojený účet čím
+     * kotvit: zůstatky se sice v řádku ukládají, ale nepoužily se, takže měsíc zůstal
+     * `missing_anchor` a export GPC navždy zablokovaný.
+     *
+     * Měsíční projekce se takhle nikdy nekvalifikuje — zůstatky ani soubor nemá.
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function isAnchorRow(array $row): bool
+    {
+        if (BankStatementSource::isBalanceAnchor((string) $row['source'])) return true;
+        return (string) $row['source'] === 'bank_api'
+            && !empty($row['has_file'])
+            && $row['prev_balance'] !== null
+            && $row['curr_balance'] !== null;
+    }
+
+    /**
+     * Leží v měsíci pohyb PŘED tímhle výpisem, který výpis sám nepokrývá?
+     *
+     * Počáteční zůstatek výpisu platí k začátku JEHO období, ne nutně k prvnímu dni
+     * měsíce. Vlastní pohyby výpisu jsou v pořádku — leží uvnitř jeho období. Cizí pohyb
+     * před ním ale znamená, že výpis začíná až uvnitř měsíce, takže jeho počáteční
+     * zůstatek ty dřívější pohyby UŽ OBSAHUJE. Otevřít jím měsíc znamená započítat je
+     * dvakrát: přesně tak vznikl počáteční zůstatek 10 000 Kč u nově napojeného účtu,
+     * který reálně začínal na nule. Radši zůstaneme bez kotvy než s tiše posunutým
+     * počátečním stavem.
+     *
+     * @param list<array<string,mixed>> $transactions
+     */
+    private static function hasForeignMovementBefore(array $transactions, string $from, string $date, int $statementId): bool
+    {
+        foreach ($transactions as $row) {
+            $posted = substr((string) $row['posted_at'], 0, 10);
+            if ($posted < $from || $posted >= $date) continue;
+            if ((int) ($row['statement_id'] ?? 0) !== $statementId) return true;
+        }
+        return false;
     }
 
     private function readSnapshot(int $supplierId, int $statementId): array
@@ -257,7 +304,7 @@ final class StatementBalanceService
             if ($date > $to) continue;
             if ($row['curr_balance'] !== null || $row['prev_balance'] !== null) $hasKnownBalance = true;
             if ($row['source'] === 'bank_api' && $row['has_pdf'] && $date >= $from) $unverifiedPdf = true;
-            if (!BankStatementSource::isBalanceAnchor((string) $row['source']) || $row['curr_balance'] === null) continue;
+            if (!self::isAnchorRow($row) || $row['curr_balance'] === null) continue;
             $latestBalanceDate = $date;
             $balance = self::cents($row['curr_balance']);
             if ($row['prev_balance'] !== null && $row['credit_total'] !== null && $row['debit_total'] !== null
@@ -296,9 +343,12 @@ final class StatementBalanceService
         $firstOpening = null;
         if ($anchor === null) {
             foreach ($statements as $row) {
-                if (!BankStatementSource::isBalanceAnchor((string) $row['source']) || $row['prev_balance'] === null) continue;
+                if (!self::isAnchorRow($row) || $row['prev_balance'] === null) continue;
                 $date = substr((string) $row['statement_date'], 0, 10);
-                if ($date >= $from && $date <= $to) $firstOpening = self::cents($row['prev_balance']);
+                if ($date >= $from && $date <= $to
+                    && !self::hasForeignMovementBefore($preloadedTransactions, $from, $date, (int) $row['id'])) {
+                    $firstOpening = self::cents($row['prev_balance']);
+                }
                 break;
             }
         }

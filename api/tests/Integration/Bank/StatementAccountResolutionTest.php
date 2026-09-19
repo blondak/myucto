@@ -770,6 +770,88 @@ final class StatementAccountResolutionTest extends TestCase
         return (int) $stmt->fetchColumn();
     }
 
+    /**
+     * Nově napojený účet bez historie: stažený výpis z bankovního API nese OBA zůstatky,
+     * takže měsíc má čím kotvit. Dřív se `bank_api` mezi kotvy nepočítal, zůstatky v řádku
+     * zůstaly nevyužité a měsíc skončil jako `missing_anchor` — s ním i navždy zablokovaný
+     * export GPC, přestože banka počáteční i konečný stav dodala.
+     */
+    public function testDownloadedApiStatementWithBothBalancesAnchorsFreshAccount(): void
+    {
+        $account = '1000000005';
+        $this->registerCurrency('CZK', $account, '0100');
+        $pdo = $this->db->pdo();
+        $id = $this->insertBankStatementWithBalances('bank_api', $account, '0100', '2099-07-10', 0.0, 10000.0, 10000.0, 0.0, 'api-fresh-zero');
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-10', 10000, 'CZK')")->execute([$id]);
+
+        $snapshot = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($this->supplierId, $id);
+
+        self::assertNotSame('missing_anchor', $snapshot['status'], 'Banka počáteční i konečný stav dodala — měsíc nesmí zůstat bez kotvy.');
+        self::assertSame(0.0, (float) $snapshot['opening'], 'Nově napojený účet začíná na nule, ne na zůstatku po první platbě.');
+        self::assertSame(10000.0, (float) $snapshot['closing']);
+    }
+
+    /**
+     * Výpis, který začíná až UVNITŘ měsíce, nesmí měsíc otevřít svým počátečním zůstatkem:
+     * ten už dřívější pohyby obsahuje a dopočet by je započetl podruhé. Přesně tak vznikl
+     * na nově napojeném účtu počáteční zůstatek 10 000 Kč, ačkoli účet začínal na nule.
+     */
+    public function testMidMonthStatementDoesNotOpenMonthWithBalanceAfterEarlierMovements(): void
+    {
+        $account = '1000000005';
+        $this->registerCurrency('CZK', $account, '0100');
+        $pdo = $this->db->pdo();
+        // Dřívější pohyb měsíce přišel jiným výpisem (jiný feed, jiné připojení).
+        $earlier = $this->insertBankStatementWithBalances('bank_api', $account, '0100', '2099-07-05', null, null, null, null, 'api-earlier-movement');
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-05', 10000, 'CZK')")->execute([$earlier]);
+        // Výpis za 10.–20. 7.: jeho počáteční zůstatek 10 000 platí k 10. 7., ne k 1. 7.
+        $mid = $this->insertBankStatementWithBalances('gpc', $account, '0100', '2099-07-20', 10000.0, 9000.0, 0.0, 1000.0, 'gpc-mid-month');
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-20', -1000, 'CZK')")->execute([$mid]);
+
+        $snapshot = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($this->supplierId, $mid);
+
+        self::assertNull($snapshot['opening'], 'Zůstatek zevnitř měsíce není počátečním stavem měsíce.');
+        self::assertSame('missing_anchor', $snapshot['status']);
+    }
+
+    private function insertBankStatementWithBalances(
+        string $source,
+        string $accountNumber,
+        string $bankCode,
+        string $date,
+        ?float $prevBalance,
+        ?float $currBalance,
+        ?float $creditTotal,
+        ?float $debitTotal,
+        string $hashSuffix,
+    ): int {
+        $this->db->pdo()->prepare(
+            'INSERT INTO bank_statements
+                (source, file_name, file_hash, file_content, account_number, bank_code, currency,
+                 statement_date, prev_balance, curr_balance, credit_total, debit_total, supplier_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $source,
+            "TEST-BAL-{$hashSuffix}.{$source}",
+            hash('sha256', "test-balance-anchor:{$hashSuffix}"),
+            // Obsah = doklad, který konektor stáhl; `has_file` odlišuje stažený výpis
+            // od syntetické měsíční projekce.
+            '{"test":"' . $hashSuffix . '"}',
+            $accountNumber,
+            $bankCode,
+            'CZK',
+            $date,
+            $prevBalance,
+            $currBalance,
+            $creditTotal,
+            $debitTotal,
+            $this->supplierId,
+        ]);
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $this->statementIds[] = $id;
+        return $id;
+    }
+
     private function insertStatement(
         string $source,
         string $accountNumber,
