@@ -72,7 +72,17 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Průvodce „Přechod z POHODA" — převod účetního roku z XML exportu POHODY.
       {
         path: 'imports/pohoda', name: 'imports-pohoda',
-        component: () => import('@/pages/imports/PohodaMigration.vue'), meta: { requiresSupplier: true },
+        component: () => import('@/pages/imports/PohodaMigration.vue'), props: { system: 'pohoda' }, meta: { requiresSupplier: true },
+        beforeEnter: () => {
+          const auth = useAuthStore()
+          return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
+        },
+      },
+      // Průvodce „Přechod z PAMICA" — mzdový systém STORMWARE má vlastní datový soubor
+      // (Mzdy*.mdb) a převádí se z něj jen personalistika a mzdy, ne účetnictví.
+      {
+        path: 'imports/pamica', name: 'imports-pamica',
+        component: () => import('@/pages/imports/PohodaMigration.vue'), props: { system: 'pamica' }, meta: { requiresSupplier: true },
         beforeEnter: () => {
           const auth = useAuthStore()
           return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }

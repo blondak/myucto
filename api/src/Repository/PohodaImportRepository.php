@@ -33,6 +33,8 @@ final class PohodaImportRepository
     public const KIND_SMALL_ASSET = 'small_asset';
     /** Převedený měsíc mezd: `období|otisk sešitu` => id dávky importu docházky. */
     public const KIND_PAYROLL_MONTH = 'payroll_month';
+    /** Převedená trvalá srážka: reference srážky v PAMICA => id případu nebo dohody. */
+    public const KIND_PAYROLL_DEDUCTION = 'payroll_deduction';
 
     /** Jméno zámku je na serveru globální - obsahuje proto i databázi. */
     private const LOCK_SQL = "CONCAT('pohoda:', DATABASE(), ':', ?)";

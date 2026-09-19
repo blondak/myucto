@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
 use MyInvoice\Repository\Payroll\PayrollDependantRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
+use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
 use MyInvoice\Repository\Payroll\PayrollRecurringComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
@@ -122,6 +123,14 @@ final class PohodaPayrollPeopleWriter
     private int $accountsToVerify = 0;
     private int $accountsVerified = 0;
     private int $hourlyWageRelations = 0;
+    /** @var list<string> příjemci odvodů, pro které export nedal účet */
+    private array $institutionGaps = [];
+    /** Účty institucí převzaté z PAMICA, které čekají na potvrzení účetní. */
+    private int $institutionsToConfirm = 0;
+    private int $leaveTransferred = 0;
+    private int $leaveTakenHours = 0;
+    /** Osoby se souběžnými vztahy, u kterých nejde určit, komu zůstatek dovolené patří. */
+    private int $leaveShared = 0;
     /** @var array<string,int> pravidelné plnění => počet vztahů */
     private array $regularBenefits = [];
     /** @var array<string,int> druh nepřítomnosti => počet ponechaných na souhrnu importu */
@@ -150,11 +159,13 @@ final class PohodaPayrollPeopleWriter
         private readonly PayrollRecurringComponentValidator $recurringValidator,
         private readonly PayrollTimeRepository $time,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
+        private readonly PayrollLeaveRepository $leave,
     ) {}
 
     /**
      * @param list<array<string,mixed>> $records
-     * @param list<array<string,mixed>> $institutions zdravotní pojišťovny z registru PAMICA
+     * @param list<array<string,mixed>> $institutions příjemci odvodů z PAMICA (zdravotní pojišťovny,
+     *     ČSSZ, finanční úřad) - {@see PohodaPayrollPeople::institutions()}
      */
     public function write(int $supplierId, ?int $userId, array $records, int $year, bool $confirmIdentifiers, ImportProtocol $protocol, string $step, array $institutions = []): void
     {
@@ -165,6 +176,11 @@ final class PohodaPayrollPeopleWriter
         $this->accountsToVerify = 0;
         $this->accountsVerified = 0;
         $this->hourlyWageRelations = 0;
+        $this->institutionGaps = [];
+        $this->institutionsToConfirm = 0;
+        $this->leaveTransferred = 0;
+        $this->leaveTakenHours = 0;
+        $this->leaveShared = 0;
         $this->regularBenefits = [];
         $this->absencesFromImport = [];
         $this->importSummaries = [];
@@ -198,6 +214,7 @@ final class PohodaPayrollPeopleWriter
             $this->part($protocol, $step, $number, 'Předpis měsíční mzdy', fn (): array => $this->recurringWage($supplierId, $employmentId, $record, $userId));
             $this->part($protocol, $step, $number, 'Průměrný výdělek', fn (): array => $this->averageEarnings($supplierId, $employmentId, $record, $userId));
             $this->part($protocol, $step, $number, 'Nepřítomnosti', fn (): array => $this->absences($supplierId, $employmentId, $record, $userId));
+            $this->part($protocol, $step, $number, 'Zůstatek dovolené', fn (): array => $this->leaveCarryover($supplierId, $employmentId, $record, $userId));
             $this->part($protocol, $step, $number, 'Pracoviště JMHZ', fn (): array => $this->workplace($supplierId, $employmentId, $record, $userId));
             $this->part($protocol, $step, $number, 'Kód CZ-ISCO', fn (): array => $this->czIsco($supplierId, $employmentId, $record, $userId));
             if ($record['oic'] !== null || $record['id_ppv'] !== null) {
@@ -223,7 +240,41 @@ final class PohodaPayrollPeopleWriter
             ));
         }
         if ($institutions !== []) {
-            $this->part($protocol, $step, '-', 'Účty zdravotních pojišťoven', fn (): array => $this->institutionAccounts($supplierId, $institutions, $year, $userId));
+            $this->part($protocol, $step, '-', 'Účty institucí', fn (): array => $this->institutionAccounts($supplierId, $institutions, $year, $userId));
+        }
+        if ($this->institutionsToConfirm > 0) {
+            $protocol->warn($step, 'institution_accounts_unconfirmed', sprintf(
+                'Účtů ČSSZ a finančního úřadu převzatých z PAMICA: %d. Registr institucí je v PAMICA nemá, '
+                . 'převod je odvodil z vystavených závazků podle předčíslí účtu u ČNB, a proto je založil s původem '
+                . '„převzato z jiného systému". Platební dávka takový účet ODMÍTNE: než se z mezd zaplatí, otevřete '
+                . 'Nastavení mezd → Účty institucí, porovnejte číslo účtu a symboly s rozhodnutím úřadu a uložte '
+                . 'je jako ověřené.',
+                $this->institutionsToConfirm,
+            ));
+        }
+        if ($this->institutionGaps !== []) {
+            $protocol->warn($step, 'institution_accounts_missing', sprintf(
+                'Účty, které převod z PAMICA nedoložil a je nutné je zadat ručně v Nastavení mezd → Účty institucí: %s. '
+                . 'Bez nich neprojde kontrola připravenosti běhu ani příprava plateb.',
+                implode('; ', array_slice($this->institutionGaps, 0, 10))
+                    . (count($this->institutionGaps) > 10 ? '; …' : ''),
+            ));
+        }
+        if ($this->leaveTransferred > 0) {
+            $protocol->info($step, 'leave_carryover', sprintf(
+                'Zůstatek dovolené z PAMICA převzalo %d vztahů jako převod do knihy dovolené. Čerpání se nepřenáší: '
+                . 'položku typu „čerpáno" kniha dovolené ručně zapsat neumí, vzniká jen ze schválené nepřítomnosti, '
+                . 'a už je v převáděném zůstatku odečtené. V PAMICA bylo v převáděném roce vyčerpáno %d hodin.',
+                $this->leaveTransferred,
+                $this->leaveTakenHours,
+            ));
+        }
+        if ($this->leaveShared > 0) {
+            $protocol->warn($step, 'leave_shared', sprintf(
+                'Zůstatek dovolené se nepřevzal u %d osob se souběžnými pracovními vztahy: PAMICA vede kartu dovolené '
+                . 'na osobě, ne na vztahu, takže nejde poznat, kterému vztahu zůstatek patří. Zadejte ho ručně.',
+                $this->leaveShared,
+            ));
         }
         if ($this->regularBenefits !== []) {
             arsort($this->regularBenefits);
@@ -1163,8 +1214,20 @@ final class PohodaPayrollPeopleWriter
     }
 
     /**
-     * Účty zdravotních pojišťoven z registru PAMICA, jednou za firmu. Účty ČSSZ a finančního
-     * úřadu registr PAMICA nenese, ty zůstávají na účetní.
+     * Účty příjemců odvodů z PAMICA, jednou za firmu.
+     *
+     * Zdravotní pojišťovnu nese registr `sMzPoj` i s číslem účtu, takže je to sdělení
+     * instituce (`institution_notice`) a platební cesta ho uznává. Účet ČSSZ a finančního
+     * úřadu registr PAMICA NENESE - odvozuje se z vystavených závazků podle předčíslí
+     * účtu u ČNB, což je doklad o tom, kam předchozí systém platil, ne rozhodnutí úřadu.
+     * Takový účet se proto zakládá s původem `imported`: platební cesta ho odmítne
+     * ({@see \MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder}), dokud ho
+     * účetní neporovná s výměrem a neuloží znovu. Radši nepoužitelný účet než tiše
+     * špatně nasměrovaná platba odvodů.
+     *
+     * Příjemce, pro kterého se účet nenašel, se NEZAKLÁDÁ ani jako holá identita: účet je
+     * v evidenci povinný, instituce bez něj se nikde neukáže a jediné, co by přinesla, je
+     * dojem, že je vyřízená. Místo toho jde do protokolu, co přesně má účetní doplnit.
      *
      * @param list<array<string,mixed>> $institutions
      * @return array<string,int>
@@ -1175,33 +1238,190 @@ final class PohodaPayrollPeopleWriter
         foreach ($this->institutions->list($supplierId) as $account) {
             $known[(string) ($account['institution_type'] ?? '') . '|' . (string) ($account['institution_code'] ?? '')] = true;
         }
+        $officeCode = $this->socialSecurityOfficeCode($supplierId);
+        $taxVariableSymbol = $this->taxPayerVariableSymbol($supplierId);
         $written = 0;
         foreach ($institutions as $institution) {
-            $key = 'health_insurer|' . $institution['code'];
+            $type = (string) ($institution['type'] ?? 'health_insurer');
+            // Kód pracoviště ČSSZ je NAŠE klasifikace platebního cíle: příprava plateb hledá
+            // účet pod kódem z nastavení zaměstnavatele, takže ten má přednost před kódem
+            // z podání PAMICA. Bez obou se účet nedá dohledat a zakládat ho nemá smysl.
+            $code = $type === 'social_security'
+                ? ($officeCode ?? self::text($institution['code'] ?? null))
+                : self::text($institution['code'] ?? null);
+            if ($code === null) {
+                $this->institutionGaps[] = 'Správa sociálního zabezpečení: kód pracoviště není ani v nastavení '
+                    . 'zaměstnavatele, ani v podáních PAMICA';
+                continue;
+            }
+            $key = $type . '|' . $code;
             if (isset($known[$key])) {
                 continue;
             }
+            $account = self::text($institution['account'] ?? null);
+            $bankCode = self::text($institution['bank_code'] ?? null);
+            if ($account === null || $bankCode === null) {
+                $this->institutionGaps[] = self::institutionGap($institution, $code);
+                continue;
+            }
+            $notice = $type === 'health_insurer';
+            // Variabilní symbol u finančního úřadu je kmenová část DIČ plátce, ne symbol
+            // z dokladu: doklad může nést symbol opravný nebo cizí.
+            $variableSymbol = $type === 'tax_office'
+                ? $taxVariableSymbol
+                : self::text($institution['variable_symbol'] ?? null);
+            if ($type === 'tax_office' && $variableSymbol === null) {
+                $this->institutionGaps[] = sprintf(
+                    'Finanční úřad (%s): variabilní symbol zůstal prázdný, firma nemá vyplněné DIČ',
+                    $code,
+                );
+            }
             $this->institutions->create($supplierId, [
-                'institution_type' => 'health_insurer',
-                'institution_code' => (string) $institution['code'],
-                'institution_name' => (string) ($institution['name'] !== '' ? $institution['name'] : 'Zdravotní pojišťovna ' . $institution['code']),
-                'bank_account' => $institution['account'] . '/' . $institution['bank_code'],
+                'institution_type' => $type,
+                'institution_code' => $code,
+                'institution_name' => self::institutionName($institution, $type, $code),
+                'bank_account' => $account . '/' . $bankCode,
                 'currency_code' => 'CZK',
-                'variable_symbol' => $institution['variable_symbol'],
+                'variable_symbol' => $variableSymbol,
                 'specific_symbol' => null,
                 'constant_symbol' => null,
                 'valid_from' => sprintf('%04d-01-01', $year),
                 'valid_to' => null,
-                // Platební cesta uznává jen ověřené původy; účet pojišťovny je její sdělení,
-                // které PAMICA vede v registru.
-                'source_kind' => 'institution_notice',
-                'source_reference' => 'Převzato z registru PAMICA' . ($institution['data_box'] !== null ? ', datová schránka ' . $institution['data_box'] : ''),
+                'source_kind' => $notice ? 'institution_notice' : 'imported',
+                'source_reference' => $notice
+                    ? 'Převzato z registru PAMICA' . ($institution['data_box'] !== null ? ', datová schránka ' . $institution['data_box'] : '')
+                    : mb_substr('Odvozeno z ' . (self::text($institution['source'] ?? null) ?? 'dokladů PAMICA')
+                        . '; nepotvrzeno účetní', 0, 500),
                 'verified_on' => date('Y-m-d'),
             ], $userId);
             $known[$key] = true;
             $written++;
+            if (!$notice) {
+                $this->institutionsToConfirm++;
+            }
         }
         return $written > 0 ? ['institution_accounts' => $written] : [];
+    }
+
+    /**
+     * Proč se pro příjemce nezaložil účet - věta do protokolu, ne kód chyby.
+     *
+     * @param array<string,mixed> $institution
+     */
+    private static function institutionGap(array $institution, string $code): string
+    {
+        $name = self::text($institution['name'] ?? null) ?? $code;
+        return match ($institution['issue'] ?? null) {
+            'ambiguous' => sprintf(
+                '%s: v závazcích PAMICA je pod stejným předčíslím %d různých účtů, převod mezi nimi nevybírá',
+                $name,
+                (int) ($institution['candidates'] ?? 0),
+            ),
+            default => sprintf(
+                '%s: export PAMICA číslo účtu nenese (číselník úřadů je v nastavení programu, které se neexportuje, '
+                . 'a vystavené závazky v exportu nejsou)',
+                $name,
+            ),
+        };
+    }
+
+    /**
+     * @param array<string,mixed> $institution
+     */
+    private static function institutionName(array $institution, string $type, string $code): string
+    {
+        $name = self::text($institution['name'] ?? null);
+        if ($name !== null) {
+            return mb_substr($name, 0, 190);
+        }
+        return $type === 'health_insurer' ? 'Zdravotní pojišťovna ' . $code : $code;
+    }
+
+    /** Kód pracoviště ČSSZ z nastavení zaměstnavatele; pod ním hledá účet příprava plateb. */
+    private function socialSecurityOfficeCode(int $supplierId): ?string
+    {
+        if (!$this->db->hasTable('payroll_employer_settings')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT social_security_office_code FROM payroll_employer_settings WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        $value = $stmt->fetchColumn();
+        $value = is_string($value) ? strtoupper(trim($value)) : '';
+        return preg_match('/^[A-Z0-9][A-Z0-9._-]{0,31}$/D', $value) === 1 ? $value : null;
+    }
+
+    /** Kmenová část DIČ firmy („CZ12345678" => „12345678"); VS odvodů finančnímu úřadu. */
+    private function taxPayerVariableSymbol(int $supplierId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT dic FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $value = $stmt->fetchColumn();
+        $digits = is_string($value) ? (string) preg_replace('/\D/', '', $value) : '';
+        return preg_match('/^[0-9]{1,10}$/D', $digits) === 1 ? $digits : null;
+    }
+
+    /**
+     * Zůstatek dovolené z PAMICA jako převod (`carryover`) do knihy dovolené.
+     *
+     * Zapisuje se JEN zůstatek, ne čerpání: položku `taken` kniha dovolené ručně přijmout
+     * neumí (vzniká výhradně ze schválené nepřítomnosti s rozvrženými směnami) a v převáděném
+     * zůstatku je už odečtené, takže by se počítalo dvakrát. Záporný zůstatek se nepřevádí
+     * vůbec - přečerpání je rozhodnutí zaměstnavatele, ne údaj k opsání.
+     *
+     * Účinnost má den, od kterého mzdy vede MyÚčto; od té chvíle se z knihy odečítá.
+     *
+     * @param array<string,mixed> $record
+     * @return array<string,int>
+     */
+    private function leaveCarryover(int $supplierId, int $employmentId, array $record, ?int $userId): array
+    {
+        $leave = $record['leave'] ?? null;
+        if (!is_array($leave)) {
+            if (($record['leave_shared'] ?? false) === true) {
+                $this->leaveShared++;
+            }
+            return [];
+        }
+        $this->leaveTakenHours += (int) round((float) $leave['taken_hours']);
+        $year = (int) $leave['year'];
+        $minutes = (int) round(((float) $leave['balance_hours']) * 60);
+        if ($minutes <= 0) {
+            return $minutes < 0 ? ['leave_overdrawn' => 1] : [];
+        }
+        $existing = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM payroll_leave_ledger
+              WHERE supplier_id = ? AND employment_id = ? AND leave_year = ? AND entry_type = 'carryover'"
+        );
+        $existing->execute([$supplierId, $employmentId, $year]);
+        if ((int) $existing->fetchColumn() > 0) {
+            return ['leave_existing' => 1];
+        }
+        $from = (string) $record['transfer_start'] . '-01';
+        if (substr($from, 0, 4) !== (string) $year) {
+            $from = sprintf('%04d-01-01', $year);
+        }
+        $daily = $leave['daily_hours'] === null ? null : (float) $leave['daily_hours'];
+        $reason = self::NOTE . 'zůstatek dovolené ke dni převodu, ' . self::decimal((float) $leave['balance_hours']) . ' h'
+            . ($leave['balance_days'] === null || $daily === null
+                ? ''
+                : ' (' . self::decimal((float) $leave['balance_days']) . ' dne při úvazku ' . self::decimal($daily) . ' h denně)')
+            . ($leave['from_days'] === true ? '; export nesl jen dny, hodiny dopočteny denním úvazkem vztahu' : '')
+            . '.';
+        $this->leave->appendManual($supplierId, $employmentId, $year, $from, 'carryover', $minutes, $reason, $userId);
+        $this->leaveTransferred++;
+        return ['leave_carryover' => 1];
+    }
+
+    private static function text(mixed $value): ?string
+    {
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
+    /** Číslo do věty protokolu: desetinná čárka, bez zbytečných nul. */
+    private static function decimal(float $value): string
+    {
+        $text = number_format($value, 2, ',', ' ');
+        return str_contains($text, ',') ? rtrim(rtrim($text, '0'), ',') : $text;
     }
 
     /**

@@ -79,6 +79,7 @@
     "money_s3",
     "monthly_report",
     "oss_rates",
+    "pamica",
     "payment_method",
     "payment_order",
     "payroll",
@@ -175,6 +176,7 @@
       "money_s3",
       "monthly_report",
       "oss_rates",
+      "pamica",
       "payment_method",
       "payment_order",
       "payroll",
@@ -402,6 +404,12 @@
     ],
     "imports-pohoda": [
       "imports",
+      "pamica",
+      "pohoda"
+    ],
+    "imports-pamica": [
+      "imports",
+      "pamica",
       "pohoda"
     ],
     "purchase-invoices-payment-orders": [

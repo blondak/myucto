@@ -2008,6 +2008,27 @@ final class AttendanceImportService
     }
 
     /**
+     * Dodatečné schválení dávky, která už proběhla dřív.
+     *
+     * Převod mezd z PAMICA měsíc, který v MyÚčtu jednou prošel, znovu nezakládá. Když
+     * uživatel dodatečně řekne, že se převzaté podklady mají schválit, není co spustit -
+     * `apply()` se k takovému měsíci vůbec nedostane. Tahle cesta proto nad hotovou dávkou
+     * jen přepíše souhrny docházky (idempotentně), schválí čisté měsíce a vrátí dávku
+     * mzdových vstupů, aby volající mohl schválit i je.
+     *
+     * @return array{time:array<string,mixed>,input_import_id:int}
+     */
+    public function approveTakenOverBatch(int $supplierId, int $importId, ?int $userId): array
+    {
+        $batch = $this->imports->batch($supplierId, $importId);
+
+        return [
+            'time' => $this->timeApprovals->applyBatch($supplierId, $importId, true, $userId),
+            'input_import_id' => (int) ($batch['input_import_id'] ?? 0),
+        ];
+    }
+
+    /**
      * @param array<string,mixed> $batch
      * @param list<array<string,mixed>> $skipped
      * @param array{adopted:int,conflicts:list<array<string,mixed>>,runs_needing_refresh:list<array<string,mixed>>} $wages

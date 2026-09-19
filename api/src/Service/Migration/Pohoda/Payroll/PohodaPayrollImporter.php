@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Migration\Pohoda\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
+use MyInvoice\Repository\Payroll\PayrollInputFilter;
+use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
@@ -35,6 +37,7 @@ final class PohodaPayrollImporter
     public const STEP_PROFILE = 'payroll_profile';
     public const STEP_MONTHS = 'payroll_months';
     public const STEP_PEOPLE = 'payroll_people';
+    public const STEP_DEDUCTIONS = 'payroll_deductions';
     private const PERSON_CHUNK = 100;
     private const MESSAGE_LIMIT = 20;
 
@@ -44,12 +47,14 @@ final class PohodaPayrollImporter
         private readonly AttendanceImportService $attendance,
         private readonly PayrollImportProfileRepository $profiles,
         private readonly PohodaPayrollPeopleWriter $people,
+        private readonly PayrollInputRepository $inputs,
+        private readonly PohodaPayrollDeductionsWriter $deductions,
     ) {}
 
     /** @return list<string> */
     public static function stepKeys(): array
     {
-        return [self::STEP_PREFLIGHT, self::STEP_PROFILE, self::STEP_MONTHS, self::STEP_PEOPLE];
+        return [self::STEP_PREFLIGHT, self::STEP_PROFILE, self::STEP_MONTHS, self::STEP_PEOPLE, self::STEP_DEDUCTIONS];
     }
 
     /**
@@ -104,8 +109,9 @@ final class PohodaPayrollImporter
      * @param (callable(string,int,int):void)|null $progress
      * @param (callable():bool)|null $shouldCancel
      * @param bool $confirmIdentifiers uživatel potvrdil, že OIČ a ID PPV v PAMICA pocházejí z protokolů ČSSZ
+     * @param bool $approveTakenOver převzatá docházka a mzdové vstupy se rovnou schválí (viz {@see approveTakenOverInputs()})
      */
-    public function run(int $supplierId, int $userId, string $file, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, bool $confirmIdentifiers = false): ImportProtocol
+    public function run(int $supplierId, int $userId, string $file, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, bool $confirmIdentifiers = false, bool $approveTakenOver = false): ImportProtocol
     {
         $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
         $protocol->set('kind', 'payroll');
@@ -227,6 +233,13 @@ final class PohodaPayrollImporter
                 $key = $period . '|' . hash('sha256', (string) json_encode([$month['columns'], $month['rows']], JSON_UNESCAPED_UNICODE));
                 if (isset($done[$key])) {
                     $protocol->count(self::STEP_MONTHS, 'existing');
+                    // Měsíc, který už jednou prošel, se neimportuje znovu - ale schválení
+                    // převzatých podkladů si uživatel mohl vyžádat až teď, takže se dodatečně
+                    // dožene nad hotovou dávkou. Jinak by volba u dříve převedené firmy
+                    // neudělala nic a běh by pořád stál na blokujících kontrolách.
+                    if ($approveTakenOver) {
+                        $this->approveTakenOverBatch($supplierId, $userOrNull, $period, $done[$key], $protocol);
+                    }
                     continue;
                 }
                 try {
@@ -247,9 +260,12 @@ final class PohodaPayrollImporter
                     }
                     $applied = $this->attendance->apply(
                         $supplierId, $period, [$workbook], null, [], true, true, $userOrNull, null, true, $profileId,
-                        false, true, true, false, false, true,
+                        false, true, true, $approveTakenOver, false, true,
                     );
                     $skipped = count($applied['skipped'] ?? []);
+                    if ($approveTakenOver) {
+                        $this->approveTakenOverInputs($supplierId, $userOrNull, $period, (int) ($applied['inputs']['import_id'] ?? 0), $protocol);
+                    }
                     $this->map->put($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH, $key, (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), $runId);
                     // Pracoviště a CZ-ISCO ještě v tomhle měsíci, dokud je jeho verze podmínek
                     // ta poslední; další verze si je pak opíší. Po všech měsících už by je
@@ -280,6 +296,19 @@ final class PohodaPayrollImporter
                 $this->people->write($supplierId, $userOrNull, $records, $year, $confirmIdentifiers, $protocol, self::STEP_PEOPLE,
                     PohodaPayrollPeople::institutions($file));
                 $protocol->finish(self::STEP_PEOPLE);
+            }
+
+            // Trvalé srážky, exekuce a insolvence z karet zaměstnanců. Až po osobách:
+            // exekuční případ i dohoda o srážkách visí na zaměstnanci, který už musí být
+            // ve firmě založený.
+            if (!$protocol->failed()) {
+                $protocol->begin(self::STEP_DEDUCTIONS);
+                if ($progress !== null) {
+                    $progress(self::STEP_DEDUCTIONS, 0, 1);
+                }
+                $this->deductions->write($supplierId, $userOrNull, PohodaPayrollDeductions::read($file, $year), $year,
+                    $protocol, self::STEP_DEDUCTIONS, $runId);
+                $protocol->finish(self::STEP_DEDUCTIONS);
             }
         } finally {
             if ($savepoint) {
@@ -337,5 +366,61 @@ final class PohodaPayrollImporter
     private static function money(int $minor): string
     {
         return number_format($minor / 100, 2, ',', ' ');
+    }
+
+    /**
+     * Schválení převzatých mzdových vstupů měsíce.
+     *
+     * Import zakládá vstupy jako koncepty, protože u ručně nahrané docházky je má
+     * účetní projít. Tady ale jde o měsíc, který v PAMICA proběhl a je podaný -
+     * konceptem by zablokoval mzdový běh kontrolou `draft_inputs_present`, kterou
+     * nejde přebít výjimkou (ta je vyhrazená varováním). Schvaluje se výhradně
+     * dávka tohoto importu, ne cokoli, co v měsíci leží z jiného zdroje.
+     */
+    /**
+     * Dodatečné schválení měsíce, který už v MyÚčtu jednou prošel: docházka nad hotovou
+     * dávkou a pak její mzdové vstupy. `$batchId` je dávka importu docházky z mapy převodu,
+     * vstupy visí na vlastní dávce, kterou vrátí až služba importu.
+     */
+    private function approveTakenOverBatch(int $supplierId, ?int $userId, string $period, int $batchId, ImportProtocol $protocol): void
+    {
+        if ($batchId <= 0) {
+            return;
+        }
+        try {
+            $result = $this->attendance->approveTakenOverBatch($supplierId, $batchId, $userId);
+        } catch (\InvalidArgumentException|\DomainException|\RuntimeException $e) {
+            $protocol->warn(self::STEP_MONTHS, 'taken_over_approve_failed',
+                "{$period}: převzatou docházku se nepodařilo dodatečně schválit - " . $e->getMessage(), ['period' => $period]);
+            return;
+        }
+        $protocol->count(self::STEP_MONTHS, 'time_months_approved', (int) ($result['time']['approved'] ?? 0));
+        $this->approveTakenOverInputs($supplierId, $userId, $period, (int) $result['input_import_id'], $protocol);
+    }
+
+    private function approveTakenOverInputs(int $supplierId, ?int $userId, string $period, int $importId, ImportProtocol $protocol): void
+    {
+        if ($importId <= 0) {
+            return;
+        }
+        $filter = new PayrollInputFilter($period . '-01', null, null, null, [], [], [], ['draft'], $importId);
+        $approved = 0;
+        $failed = 0;
+        $afterId = 0;
+        // Schvalování běží po dávkách s časovým rozpočtem; pokračuje se od posledního id.
+        for ($guard = 0; $guard < 1000; $guard++) {
+            $result = $this->inputs->approveByFilter($supplierId, $filter, $userId, $afterId);
+            $approved += count($result['approved']);
+            $failed += count($result['failed']);
+            if ($result['complete'] || $result['next_after_id'] === $afterId) {
+                break;
+            }
+            $afterId = (int) $result['next_after_id'];
+        }
+        $protocol->count(self::STEP_MONTHS, 'inputs_approved', $approved);
+        if ($failed > 0) {
+            $protocol->warn(self::STEP_MONTHS, 'inputs_approve_failed',
+                "{$period}: {$failed} převzatých mzdových vstupů se nepodařilo schválit, zůstávají jako koncept.", ['period' => $period]);
+        }
     }
 }

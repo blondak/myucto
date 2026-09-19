@@ -89,8 +89,18 @@ describe('pohodaApi', () => {
     await pohodaApi.downloadTool()
     await pohodaApi.downloadToolFile('Export-Pohoda.ps1')
 
-    expect(get).toHaveBeenCalledWith('/admin/imports/pohoda/tool')
-    expect(download).toHaveBeenNthCalledWith(1, '/admin/imports/pohoda/tool/download', 'pohoda-export.zip')
-    expect(download).toHaveBeenNthCalledWith(2, '/admin/imports/pohoda/tool/download?name=Export-Pohoda.ps1', 'Export-Pohoda.ps1')
+    expect(get).toHaveBeenCalledWith('/admin/imports/pohoda/tool?variant=pohoda')
+    expect(download).toHaveBeenNthCalledWith(1, '/admin/imports/pohoda/tool/download?variant=pohoda', 'pohoda-export.zip')
+    expect(download).toHaveBeenNthCalledWith(2, '/admin/imports/pohoda/tool/download?variant=pohoda&name=Export-Pohoda.ps1', 'Export-Pohoda.ps1')
+  })
+
+  it('nástroj pro PAMICA se stahuje z vlastní varianty', async () => {
+    get.mockResolvedValueOnce({ data: { files: [{ name: 'Export-Pamica.cmd', size: 120 }] } })
+
+    await expect(pohodaApi.toolFiles('pamica')).resolves.toEqual({ files: [{ name: 'Export-Pamica.cmd', size: 120 }] })
+    await pohodaApi.downloadTool('pamica')
+
+    expect(get).toHaveBeenCalledWith('/admin/imports/pohoda/tool?variant=pamica')
+    expect(download).toHaveBeenNthCalledWith(1, '/admin/imports/pohoda/tool/download?variant=pamica', 'pamica-export.zip')
   })
 })

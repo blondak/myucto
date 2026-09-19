@@ -72,6 +72,23 @@ final class PohodaPayrollPeople
     /** Od kolika měsíců z odpracovaných se plnění považuje za pravidelné. */
     private const REGULAR_SHARE = 0.8;
 
+    /** Kód banky ČNB; odvody státu chodí jen na její účty. */
+    private const CNB_BANK_CODE = '0710';
+
+    /**
+     * Předčíslí účtu u ČNB => instituce MyÚčta, kód účtu a název. Registr institucí
+     * PAMICA nese jen zdravotní pojišťovny; účet ČSSZ a finančního úřadu je pouze na
+     * vystavených závazcích a předčíslí je tam jediné, co příjemce spolehlivě rozliší
+     * (`Doklady.Firma` je volný text účetní, číselník úřadů v exportu není).
+     * Kód účtu finančního úřadu je DRUH DANĚ, ne značka úřadu - každý druh má vlastní
+     * předčíslí a platební cesta pod ním účet hledá.
+     */
+    private const LEVY_ACCOUNTS = [
+        '21012' => ['social_security', null, 'Správa sociálního zabezpečení'],
+        '713' => ['tax_office', 'ADVANCE_TAX', 'Finanční úřad - záloha na daň ze závislé činnosti'],
+        '7720' => ['tax_office', 'WITHHOLDING_TAX', 'Finanční úřad - daň vybíraná srážkou'],
+    ];
+
     /**
      * Daňové zvýhodnění na dítě v `ZAMpDet.RelOdpoc` => pořadí dítěte. Ověřené na mzdách:
      * roční částka `KcOdec` = 12 × měsíční zvýhodnění daného pořadí a součet aktivních
@@ -275,6 +292,7 @@ final class PohodaPayrollPeople
         $health = self::healthNotices($byId);
         $social = self::socialSubmissions($byId);
         $eldp = self::eldp($byId);
+        $leaveCards = self::leaveCards($file, $year);
 
         $records = [];
         foreach ($payslips as $relationId => $periods) {
@@ -300,6 +318,11 @@ final class PohodaPayrollPeople
                     break;
                 }
             }
+            // Karta dovolené je v PAMICA na OSOBĚ, ne na vztahu. U souběžných vztahů
+            // by nešlo poznat, kterému z nich zůstatek patří, a rozdělit ho napůl by
+            // bylo vymýšlení - taková osoba zůstane na účetní.
+            $shared = ($relationCount[$personId] ?? 1) > 1 && isset($leaveCards[$personId]);
+            $leave = $shared ? null : self::leaveBalance($leaveCards[$personId] ?? null, $year, self::dailyHours($relation));
             $records[] = [
                 'personal_number' => self::personalNumber($person, $relation, $relationCount[$personId] ?? 1),
                 'person_key' => $personId,
@@ -321,6 +344,10 @@ final class PohodaPayrollPeople
                 'regular_benefits' => self::regularBenefits($benefitMonths[$relationId] ?? [], count($periods)),
                 'averages' => self::averages($relationMonths[$relationId] ?? [], $year),
                 'absences' => $absences[$relationId] ?? [],
+                // Zůstatek dovolené z karty PAMICA; čerpání se nepřenáší, kniha dovolené
+                // ho ručně zapsat neumí (vzniká jen ze schválené nepřítomnosti).
+                'leave' => $leave,
+                'leave_shared' => $shared,
                 'accounts' => $accounts[$personId] ?? [],
                 // Den poslední mzdy vyplacené v PAMICA: doklad, že se na účet opravdu platilo.
                 'accounts_paid_on' => $lastPaid[$personId] ?? null,
@@ -391,10 +418,17 @@ final class PohodaPayrollPeople
     }
 
     /**
-     * Registr institucí PAMICA: zdravotní pojišťovny s účtem, variabilním symbolem
-     * a datovou schránkou. Vrací jen pojišťovny s platným kódem a účtem.
+     * Příjemci odvodů z mezd, které export zná: zdravotní pojišťovny z registru
+     * `sMzPoj` (účet, variabilní symbol, datová schránka), ČSSZ a finanční úřad.
      *
-     * @return list<array{code:string,name:string,account:string,bank_code:string,variable_symbol:?string,data_box:?string}>
+     * ČSSZ ani finanční úřad v PAMICA číselník nemají (nastavení úřadů sedí v binárním
+     * blobu `sKonfig.Settings`, ten se neexportuje), takže se jejich účet odvozuje
+     * z vystavených závazků podle předčíslí ČNB - {@see self::LEVY_ACCOUNTS}. Když
+     * závazky v exportu nejsou nebo se pod předčíslím najde víc různých účtů, vrátí se
+     * příjemce s `account = null` a důvodem v `issue`; účet se nedomýšlí.
+     *
+     * @return list<array{type:string,code:?string,name:string,account:?string,bank_code:?string,
+     *     variable_symbol:?string,data_box:?string,source:?string,issue:?string,candidates:int}>
      */
     public static function institutions(string $file): array
     {
@@ -409,15 +443,198 @@ final class PohodaPayrollPeople
             }
             $variable = (string) preg_replace('/\D/', '', PohodaXml::text($row, 'VarSym'));
             $out[] = [
+                'type' => 'health_insurer',
                 'code' => $code,
                 'name' => mb_substr(PohodaXml::text($row, 'IDS'), 0, 190),
                 'account' => $account,
                 'bank_code' => $bankCode,
                 'variable_symbol' => $variable !== '' ? mb_substr($variable, 0, 10) : null,
                 'data_box' => self::limited(PohodaXml::text($row, 'DataBox'), 20),
+                'source' => 'sMzPoj',
+                'issue' => null,
+                'candidates' => 1,
+            ];
+        }
+        foreach (self::levyInstitutions($file) as $row) {
+            $out[] = $row;
+        }
+        return $out;
+    }
+
+    /**
+     * ČSSZ a finanční úřad z vystavených závazků (`Doklady`). Vrací vždy všechny tři
+     * příjemce, které mzdový běh potřebuje, i když se pro ně účet nenašel - protokol
+     * pak umí říct, co přesně účetní chybí.
+     *
+     * @return list<array{type:string,code:?string,name:string,account:?string,bank_code:?string,
+     *     variable_symbol:?string,data_box:?string,source:?string,issue:?string,candidates:int}>
+     */
+    private static function levyInstitutions(string $file): array
+    {
+        /** @var array<string,array{accounts:list<string>,variables:list<string>,document:string,count:int}> $found */
+        $found = [];
+        foreach (PohodaXml::records($file, 'Doklady') as $document) {
+            // Jen vystavený závazek (1); interní doklad (2) cizí účet nenese.
+            if (PohodaXml::text($document, 'RelTpDokl') !== '1'
+                || PohodaXml::text($document, 'KodBanky') !== self::CNB_BANK_CODE) {
+                continue;
+            }
+            $account = PohodaXml::text($document, 'Ucet');
+            if (preg_match('/^([0-9]{1,6})-([0-9]{2,10})$/D', $account, $match) !== 1
+                || !isset(self::LEVY_ACCOUNTS[$match[1]])) {
+                continue;
+            }
+            $prefix = $match[1];
+            $found[$prefix] ??= ['accounts' => [], 'variables' => [], 'document' => '', 'count' => 0];
+            if (!in_array($account, $found[$prefix]['accounts'], true)) {
+                $found[$prefix]['accounts'][] = $account;
+            }
+            $variable = (string) preg_replace('/\D/', '', PohodaXml::text($document, 'VarSym'));
+            if ($variable !== '' && strlen($variable) <= 10 && !in_array($variable, $found[$prefix]['variables'], true)) {
+                $found[$prefix]['variables'][] = $variable;
+            }
+            if ($found[$prefix]['document'] === '') {
+                $found[$prefix]['document'] = PohodaXml::text($document, 'Cislo');
+            }
+            $found[$prefix]['count']++;
+        }
+
+        $office = self::socialSecurityOffice($file);
+        $out = [];
+        foreach (self::LEVY_ACCOUNTS as $prefix => [$type, $code, $name]) {
+            $hit = $found[(string) $prefix] ?? null;
+            $accounts = $hit['accounts'] ?? [];
+            $variables = $hit['variables'] ?? [];
+            $issue = match (true) {
+                $accounts === [] => 'missing',
+                count($accounts) > 1 => 'ambiguous',
+                default => null,
+            };
+            $out[] = [
+                'type' => $type,
+                'code' => $code ?? $office['code'],
+                'name' => $type === 'social_security' && $office['name'] !== null
+                    ? mb_substr($name . ' ' . $office['name'], 0, 190)
+                    : $name,
+                'account' => $issue === null ? $accounts[0] : null,
+                'bank_code' => $issue === null ? self::CNB_BANK_CODE : null,
+                // Jediný symbol, na kterém se všechny závazky shodnou. Dva různé symboly
+                // znamenají dva různé plátce nebo opravu; hádat mezi nimi nejde.
+                'variable_symbol' => $issue === null && count($variables) === 1 ? $variables[0] : null,
+                'data_box' => null,
+                'source' => $issue === null
+                    ? sprintf('PAMICA, tabulka Doklady, závazek %s (%d dokladů s předčíslím %s)', $hit['document'], $hit['count'], $prefix)
+                    : null,
+                'issue' => $issue,
+                'candidates' => count($accounts),
             ];
         }
         return $out;
+    }
+
+    /**
+     * Pracoviště OSSZ z podání: kód nese `ONZpol.OSSZ`, název `NEMPRIpol`/`HZUPNpol`.
+     * Číselník OSSZ v exportu není a účet pracoviště tady nehledej, ten je jen
+     * na závazcích.
+     *
+     * @return array{code:?string,name:?string}
+     */
+    private static function socialSecurityOffice(string $file): array
+    {
+        $code = null;
+        $name = null;
+        foreach (['ONZpol' => 'OSSZ', 'NEMPRIpol' => 'KodOSSZ', 'HZUPNpol' => 'KodOSSZ'] as $table => $column) {
+            foreach (PohodaXml::records($file, $table) as $row) {
+                $value = strtoupper(trim(PohodaXml::text($row, $column)));
+                // Táž podoba kódu, jakou vyžaduje platební cesta u účtu instituce.
+                if ($code === null && preg_match('/^[A-Z0-9][A-Z0-9._-]{0,31}$/D', $value) === 1) {
+                    $code = $value;
+                }
+                $name ??= self::limited(PohodaXml::text($row, 'NazevOSSZ'), 100);
+                if ($code !== null && $name !== null) {
+                    return ['code' => $code, 'name' => $name];
+                }
+            }
+        }
+        return ['code' => $code, 'name' => $name];
+    }
+
+    /**
+     * Karty dovolené (`Dovolena`) převáděného roku po osobách. Tabulka je vedená
+     * na osobě a roce, ne na pracovním vztahu.
+     *
+     * @return array<string,array<string,mixed>>
+     */
+    private static function leaveCards(string $file, int $year): array
+    {
+        $out = [];
+        foreach (PohodaXml::records($file, 'Dovolena') as $row) {
+            if ((int) PohodaXml::text($row, 'Rok') !== $year) {
+                continue;
+            }
+            $out[PohodaXml::text($row, 'RefAg')] = $row;
+        }
+        return $out;
+    }
+
+    /**
+     * Zůstatek dovolené: nárok, převod z minulého roku a dodatková dovolená bez krácení
+     * a čerpání.
+     *
+     * Vedoucí jsou HODINOVÉ sloupce. Dovolená se od roku 2021 čerpá v hodinách podle
+     * rozvrhu (§ 216 odst. 4 ZP) a kniha dovolené ji v minutách i vede, takže hodiny
+     * jsou tatáž veličina a nic se nepřepočítává. Dny se použijí, jen když hodinové
+     * sloupce v exportu nejsou; přepočtou se DENNÍM ÚVAZKEM vztahu, protože při
+     * zkráceném úvazku je den jinak dlouhý než osm hodin.
+     *
+     * @param array<string,mixed>|null $row
+     * @return array{year:int,balance_hours:float,balance_days:?float,taken_hours:float,daily_hours:?float,from_days:bool}|null
+     */
+    private static function leaveBalance(?array $row, int $year, ?float $dailyHours): ?array
+    {
+        if ($row === null) {
+            return null;
+        }
+        $sum = static function (array $columns) use ($row): float {
+            $total = 0.0;
+            foreach ($columns as $column) {
+                $total += PohodaXml::num($row, $column);
+            }
+            return $total;
+        };
+        $hours = $sum(['NarokHod', 'StaraHod', 'DodatkovaHod']) - $sum(['KraceniHod', 'RucniKraceniHod', 'CerpanoHod']);
+        $fromDays = false;
+        if ($sum(['NarokHod', 'StaraHod', 'DodatkovaHod', 'KraceniHod', 'RucniKraceniHod', 'CerpanoHod']) <= 0) {
+            $days = $sum(['Narok', 'Stara', 'Dodatkova']) - $sum(['Kraceni', 'RucniKraceni', 'Cerpano']);
+            if ($dailyHours === null || $days === 0.0) {
+                return null;
+            }
+            $hours = $days * $dailyHours;
+            $fromDays = true;
+        }
+        return [
+            'year' => $year,
+            'balance_hours' => round($hours, 4),
+            'balance_days' => $dailyHours === null ? null : round($hours / $dailyHours, 2),
+            'taken_hours' => round(PohodaXml::num($row, 'CerpanoHod'), 4),
+            'daily_hours' => $dailyHours,
+            'from_days' => $fromDays,
+        ];
+    }
+
+    /**
+     * Denní úvazek vztahu: `DUvazek` je hodin denně, `TUvazek` týdně (pětidenní týden).
+     *
+     * @param array<string,mixed> $relation
+     */
+    private static function dailyHours(array $relation): ?float
+    {
+        $daily = PohodaXml::num($relation, 'DUvazek');
+        if ($daily > 0) {
+            return $daily;
+        }
+        $weekly = PohodaXml::num($relation, 'TUvazek');
+        return $weekly > 0 ? $weekly / 5 : null;
     }
 
     /**

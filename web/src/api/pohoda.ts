@@ -53,6 +53,8 @@ export interface PohodaAgenda {
 
 /** Co se převádí: účetní rok, nebo mzdy (vlastní akce, i pro export jen se mzdami). */
 export type PohodaKind = 'accounting' | 'payroll'
+/** Průvodce převodem: účetní agenda z POHODY, nebo mzdy z mzdového programu PAMICA. */
+export type PohodaSystem = 'pohoda' | 'pamica'
 
 export interface PohodaMessage {
   level: 'error' | 'warning' | 'info'
@@ -138,6 +140,7 @@ export interface PohodaStartParams {
   kind?: PohodaKind
   /** Mzdy: OIČ a ID PPV z PAMICA pocházejí z protokolů ČSSZ, převod je smí uložit. */
   confirm_identifiers?: boolean
+  approve_taken_over?: boolean
 }
 
 export interface PohodaToolFile {
@@ -158,11 +161,13 @@ export const pohodaApi = {
     api.get<{ items: PohodaRun[] }>(`${POHODA_BASE}/runs`).then(r => r.data),
   run: (id: number): Promise<PohodaRun> =>
     api.get<PohodaRun>(`${POHODA_BASE}/runs/${id}`).then(r => r.data),
-  toolFiles: (): Promise<{ files: PohodaToolFile[] }> =>
-    api.get<{ files: PohodaToolFile[] }>(`${POHODA_BASE}/tool`).then(r => r.data),
-  downloadTool: (): Promise<unknown> =>
-    downloadApiFile(`${POHODA_BASE}/tool/download`, 'pohoda-export.zip'),
-  downloadToolFile: (name: string): Promise<unknown> =>
+  // Nástroj se liší podle programu: POHODA exportuje účetní agendu přes XML rozhraní,
+  // PAMICA se čte přímo z mzdového datového souboru.
+  toolFiles: (system: PohodaSystem = 'pohoda'): Promise<{ files: PohodaToolFile[] }> =>
+    api.get<{ files: PohodaToolFile[] }>(`${POHODA_BASE}/tool?variant=${system}`).then(r => r.data),
+  downloadTool: (system: PohodaSystem = 'pohoda'): Promise<unknown> =>
+    downloadApiFile(`${POHODA_BASE}/tool/download?variant=${system}`, `${system}-export.zip`),
+  downloadToolFile: (name: string, system: PohodaSystem = 'pohoda'): Promise<unknown> =>
     // Jméno v query: IIS i nginx blokují přípony .cmd/.ps1 v cestě URL.
-    downloadApiFile(`${POHODA_BASE}/tool/download?name=${encodeURIComponent(name)}`, name),
+    downloadApiFile(`${POHODA_BASE}/tool/download?variant=${system}&name=${encodeURIComponent(name)}`, name),
 }

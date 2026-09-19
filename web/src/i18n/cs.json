@@ -1051,7 +1051,7 @@
     "imports_issued": "Import vystavených",
     "imports_purchase": "Import přijatých",
     "money_s3_migration": "Přechod z Money S3",
-    "pohoda_migration": "Přechod z POHODA a PAMICA",
+    "pohoda_migration": "Přechod z POHODA",
     "ai_settings": "AI nastavení",
     "integrations": "Externí integrace",
     "crm": "Zisk",
@@ -1204,7 +1204,8 @@
     "stock_fulfillment": "Vychystání a expedice",
     "stock_sales_orders": "Prodejní objednávky",
     "eshop_integrations": "Integrace",
-    "eshop_shoptet": "Shoptet"
+    "eshop_shoptet": "Shoptet",
+    "pamica_migration": "Přechod z PAMICA"
   },
   "instance_alert": {
     "storage_exhausted_title": "Instalace nepřijímá nové zápisy",
@@ -9460,8 +9461,21 @@
       "status_label": "Stav",
       "select": "Vyberte",
       "error": "Import se nepodařilo načíst.",
-      "fields": { "external_id": "Stálé ID řádku", "sku": "SKU", "quantity": "Množství", "unit_cost": "Pořizovací cena za jednotku" },
-      "status": { "pending": "Čeká", "ready": "Připraveno", "applied": "Zaúčtováno", "unchanged": "Beze změny", "failed": "Chyba", "conflict": "Konflikt", "skipped": "Přeskočeno" },
+      "fields": {
+        "external_id": "Stálé ID řádku",
+        "sku": "SKU",
+        "quantity": "Množství",
+        "unit_cost": "Pořizovací cena za jednotku"
+      },
+      "status": {
+        "pending": "Čeká",
+        "ready": "Připraveno",
+        "applied": "Zaúčtováno",
+        "unchanged": "Beze změny",
+        "failed": "Chyba",
+        "conflict": "Konflikt",
+        "skipped": "Přeskočeno"
+      },
       "errors": {
         "opening_import_failed": "Zpracování importu selhalo.",
         "opening_import_profile_invalid": "Nastavení importu není platné.",
@@ -9528,14 +9542,28 @@
       "invoiced_value": "Fakturovaná hodnota",
       "result": "Výsledek",
       "ready": "Připraveno",
-      "severity": { "error": "Chyba", "warning": "Upozornění" },
+      "severity": {
+        "error": "Chyba",
+        "warning": "Upozornění"
+      },
       "transport": {
-        "1": "námořní", "2": "železniční", "3": "silniční", "4": "letecká",
-        "5": "poštovní", "7": "pevná přepravní zařízení", "8": "vnitrozemská vodní", "9": "vlastní pohon"
+        "1": "námořní",
+        "2": "železniční",
+        "3": "silniční",
+        "4": "letecká",
+        "5": "poštovní",
+        "7": "pevná přepravní zařízení",
+        "8": "vnitrozemská vodní",
+        "9": "vlastní pohon"
       },
       "record_types": {
-        "ST": "běžný typ věty", "MZ": "malé zásilky", "NN": "negativní deklarace",
-        "ZH": "zjednodušené hlášení", "ZI": "průmyslové celky", "ZK": "kosmické lodě", "ZL": "letadla"
+        "ST": "běžný typ věty",
+        "MZ": "malé zásilky",
+        "NN": "negativní deklarace",
+        "ZH": "zjednodušené hlášení",
+        "ZI": "průmyslové celky",
+        "ZK": "kosmické lodě",
+        "ZL": "letadla"
       }
     },
     "item_type": {
@@ -11728,22 +11756,70 @@
         "custom": "Vlastní pole"
       },
       "fields": {
-        "product_sku": { "label": "Kód zboží (SKU)", "hint": "Identifikace karty, podle které se zboží páruje." },
-        "product_name": { "label": "Název zboží", "hint": "Název karty ve všech jazycích." },
-        "product_description": { "label": "Popis zboží", "hint": "Krátký a dlouhý popis v jazycích." },
-        "product_seo": { "label": "SEO texty a adresa", "hint": "SEO titulek, popis a adresa (slug) stránky zboží." },
-        "product_ean": { "label": "EAN", "hint": "Čárový kód zboží." },
-        "product_manufacturer": { "label": "Výrobce", "hint": "Výrobce nebo značka zboží." },
-        "product_media": { "label": "Obrázky a média", "hint": "Fotografie a další soubory ke kartě." },
-        "product_weight": { "label": "Hmotnost", "hint": "Hmotnost pro výpočet dopravy." },
-        "product_price": { "label": "Prodejní cena", "hint": "Prodejní ceny v jednotlivých měnách." },
-        "product_vat_rate": { "label": "Sazba DPH", "hint": "Sazba DPH zboží. Pro účetnictví je bezpečnější nechat ji místní." },
-        "product_visibility": { "label": "Prodejnost karty", "hint": "Zda je karta aktivní a nabízí se v e-shopu, nebo je vyřazená." },
-        "stock_quantity": { "label": "Skladové množství", "hint": "Dostupné množství ve skladech. Sklad vede MyÚčto, proto je výchozím vlastníkem místní strana." },
-        "order_status": { "label": "Stav objednávky", "hint": "Obchodní stav objednávky (přijata, potvrzena, zrušena)." },
-        "order_payment_status": { "label": "Stav úhrady objednávky", "hint": "Úhradu páruje MyÚčto z banky a pokladny, proto je výchozím vlastníkem místní strana." },
-        "order_fulfillment_status": { "label": "Stav expedice", "hint": "Rezervace, vyskladnění a odeslání zboží." },
-        "customer_contact": { "label": "Kontaktní údaje zákazníka", "hint": "Jméno, e-mail, telefon a doručovací adresa z objednávky." }
+        "product_sku": {
+          "label": "Kód zboží (SKU)",
+          "hint": "Identifikace karty, podle které se zboží páruje."
+        },
+        "product_name": {
+          "label": "Název zboží",
+          "hint": "Název karty ve všech jazycích."
+        },
+        "product_description": {
+          "label": "Popis zboží",
+          "hint": "Krátký a dlouhý popis v jazycích."
+        },
+        "product_seo": {
+          "label": "SEO texty a adresa",
+          "hint": "SEO titulek, popis a adresa (slug) stránky zboží."
+        },
+        "product_ean": {
+          "label": "EAN",
+          "hint": "Čárový kód zboží."
+        },
+        "product_manufacturer": {
+          "label": "Výrobce",
+          "hint": "Výrobce nebo značka zboží."
+        },
+        "product_media": {
+          "label": "Obrázky a média",
+          "hint": "Fotografie a další soubory ke kartě."
+        },
+        "product_weight": {
+          "label": "Hmotnost",
+          "hint": "Hmotnost pro výpočet dopravy."
+        },
+        "product_price": {
+          "label": "Prodejní cena",
+          "hint": "Prodejní ceny v jednotlivých měnách."
+        },
+        "product_vat_rate": {
+          "label": "Sazba DPH",
+          "hint": "Sazba DPH zboží. Pro účetnictví je bezpečnější nechat ji místní."
+        },
+        "product_visibility": {
+          "label": "Prodejnost karty",
+          "hint": "Zda je karta aktivní a nabízí se v e-shopu, nebo je vyřazená."
+        },
+        "stock_quantity": {
+          "label": "Skladové množství",
+          "hint": "Dostupné množství ve skladech. Sklad vede MyÚčto, proto je výchozím vlastníkem místní strana."
+        },
+        "order_status": {
+          "label": "Stav objednávky",
+          "hint": "Obchodní stav objednávky (přijata, potvrzena, zrušena)."
+        },
+        "order_payment_status": {
+          "label": "Stav úhrady objednávky",
+          "hint": "Úhradu páruje MyÚčto z banky a pokladny, proto je výchozím vlastníkem místní strana."
+        },
+        "order_fulfillment_status": {
+          "label": "Stav expedice",
+          "hint": "Rezervace, vyskladnění a odeslání zboží."
+        },
+        "customer_contact": {
+          "label": "Kontaktní údaje zákazníka",
+          "hint": "Jméno, e-mail, telefon a doručovací adresa z objednávky."
+        }
       },
       "ownership_default": "výchozí",
       "ownership_custom": "vlastní pole",
@@ -24664,8 +24740,8 @@
     }
   },
   "pohoda": {
-    "title": "Přechod z POHODA a PAMICA",
-    "subtitle": "Převod účetního roku z XML exportu programu POHODA: účetní deník, adresář, faktury, interní daňové doklady, pokladna, banka a rekonciliace na haléř. Mzdy se převádějí z databáze PAMICA.",
+    "title": "Přechod z POHODA",
+    "subtitle": "Převod účetního roku z XML exportu programu POHODA: účetní deník, adresář, faktury, interní daňové doklady, pokladna, banka a rekonciliace na haléř. Mzdy z programu PAMICA se převádějí zvlášť v sekci Přechod z PAMICA.",
     "step1": "Export z POHODY",
     "step2": "Náhled a volby",
     "step3": "Zkouška nanečisto",
@@ -24820,12 +24896,26 @@
       "payroll_profile": "Profil importu mezd",
       "payroll_months": "Mzdy po měsících",
       "payroll_people": "Údaje osob a vztahů",
+      "payroll_deductions": "Srážky, exekuce a insolvence",
       "cancelled": "Zrušeno uživatelem",
       "unexpected": "Neočekávaná chyba"
     },
     "counts": {
       "months": "měsíců",
       "payslips": "mezd",
+      "enforcement_cases": "exekučních případů",
+      "insolvency_months": "měsíců s upozorněním na insolvenci",
+      "deduction_agreements": "dohod o srážkách",
+      "deduction_agreements_draft": "dohod o srážkách bez částky (návrh)",
+      "deduction_agreements_existing": "dohod o srážkách už evidovaných",
+      "deductions_existing": "srážek už převedených",
+      "deductions_failed": "srážek nepřevedeno",
+      "deductions_unclassified": "srážek bez rozpoznaného druhu",
+      "deductions_person_not_found": "srážek bez pracovního vztahu",
+      "deductions_from_attendance": "srážek z měsíčních sešitů",
+      "dependants": "vyživovaných osob",
+      "recipients": "případů s příjemcem",
+      "recipient_accounts": "nových účtů příjemců",
       "persons_created": "nově založených osob",
       "persons_failed": "osob nezaloženo",
       "data_omitted": "údajů osob vynecháno k doplnění",
@@ -24911,9 +25001,7 @@
       "social_jurisdiction": "příslušností k sociálnímu pojištění",
       "social_jurisdiction_manual": "osob s cizí příslušností k doplnění",
       "pensioner_discount": "rozhodnutí o slevě pracujícího důchodce",
-      "children": "dětí s daňovým zvýhodněním",
       "children_existing": "osob s už zadanými dětmi",
-      "children_without_credit": "osob s dítětem bez nároku k ručnímu doplnění",
       "monthly_wage": "verzí sjednané měsíční mzdy",
       "monthly_wage_max": "vztahů s mzdou z nejvyššího měsíce",
       "averages": "snímků průměrného výdělku",
@@ -24931,7 +25019,9 @@
       "absences_from_import": "nepřítomností ponechaných na souhrnu z importu docházky",
       "components_without_jmhz": "složek bez zařazení do JMHZ",
       "payout_accounts_verified": "ověřených výplatních účtů",
-      "payout_accounts_to_verify": "výplatních účtů k ověření"
+      "payout_accounts_to_verify": "výplatních účtů k ověření",
+      "inputs_approved": "schválených mzdových vstupů",
+      "time_months_approved": "schválených měsíců docházky"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",
@@ -24980,7 +25070,9 @@
       "automation_during": "Během převodu: {level}",
       "automation_after": "Po převodu: {level}",
       "automation_left_off": "Automatika zůstává vypnutá, dokud převod neskončí bez chyb. Doklady bez vazby na deník by se jinak zaúčtovaly podruhé."
-    }
+    },
+    "other_wizard_hint": "Export obsahuje ještě další agendy, které tenhle průvodce nepřevádí (počet: {n}). Účetnictví převeďte v sekci Přechod z POHODA, mzdy v sekci Přechod z PAMICA.",
+    "payroll_approve_taken_over": "Převzatou docházku a mzdové vstupy rovnou schválit. Měsíce z PAMICA už proběhly a jsou podané; jako neschválené koncepty by nad nimi mzdový běh nešel spustit ani uzavřít. Pozor: spuštěný běh si měsíc spočítá znovu podle vlastní legislativní sady, takže výsledek se nemusí do koruny trefit do toho, co už bylo podané. Bez zaškrtnutí zůstanou podklady ke kontrole a schválíte je ručně v Mzdy → Vstupy a Mzdy → Docházka."
   },
   "payment_cards": {
     "nav": "Platební karty",
@@ -26183,5 +26275,31 @@
         "result_title": "Rozpoznané sloupce po listech"
       }
     }
+  },
+  "pamica": {
+    "title": "Přechod z PAMICA",
+    "subtitle": "Převod personalistiky a mezd z datového souboru mzdového programu PAMICA: zaměstnanci, pracovní vztahy, mzdové vstupy po měsících, docházkové souhrny a počáteční stavy ročních kumulací. Účetnictví se převádí zvlášť v sekci Přechod z POHODA.",
+    "step1": "Export z PAMICA",
+    "upload_title": "Vytvořte export z PAMICA a nahrajte ho",
+    "upload_hint": "PAMICA nemá XML rozhraní jako POHODA, proto se mzdy čtou přímo z datového souboru (Mzdy*.mdb). Nástroj soubor jen čte, v PAMICA nic nemění.",
+    "export_help_title": "Jak export z PAMICA vytvořit",
+    "export_help_items": [
+      "Stáhněte exportní nástroj a zkopírujte ho na počítač, kde je datový soubor PAMICA. Běží na Windows v PowerShellu 5.1, který je součástí Windows 10 a 11.",
+      "Zavřete PAMICA, ať nad datovým souborem neleží zámek. Nástroj ho otevírá jen pro čtení, ale otevřený program může zápis do souboru držet.",
+      "Spusťte Export-Pamica.cmd dvojklikem. Nástroj si datový soubor najde sám v obvyklých umístěních PAMICA; jinak zadejte cestu, například Export-Pamica.cmd -Mdb \"C:\\ProgramData\\STORMWARE\\PAMICA\\Data\\Mzdy.mdb\".",
+      "Chcete-li převést jen některé roky, použijte parametr -Rok, například -Rok 2026. Bez něj se vyexportují všechny roky, které datový soubor obsahuje.",
+      "Vedle skriptu vznikne soubor pamica_export_<datum>.zip. Ten nahrajte beze změny, nerozbalujte ho."
+    ],
+    "tool_hint": "Stáhněte všechny soubory najednou jako ZIP, nebo každý zvlášť. Oba soubory musí ležet ve stejné složce. Nástroj se připojuje k datovému souboru PAMICA, ne k POHODĚ.",
+    "file_help_title": "Co je v exportu",
+    "file_help_items": [
+      "Export nese zaměstnance a pracovní vztahy, zpracované mzdy po měsících, mzdové složky, nepřítomnosti, srážky, dovolenou, výplatní účty a stav podání pro ČSSZ a zdravotní pojišťovny.",
+      "Účetnictví v něm není. Účetní deník, faktury, pokladna a banka se převádějí samostatně v sekci Přechod z POHODA.",
+      "Firma musí v MyÚčtu existovat a mít stejné IČO jako v PAMICA. Převádí se do firmy, ve které právě pracujete; novou firmu nejdřív založte.",
+      "Měsíce před zahájením vedení mezd v MyÚčtu se nepřepočítávají. Jejich výsledky se uloží jako počáteční stavy ročních kumulací, aby na ně roční zúčtování a stropy navázaly.",
+      "Nahraný soubor aplikace po 7 dnech bez práce s převodem sama smaže."
+    ],
+    "no_matching_agenda": "Export neobsahuje mzdy s IČO firmy v MyÚčtu ({ico}). Zkontrolujte IČO v nastavení firmy a v PAMICA.",
+    "history_title": "Protokoly převodů mezd"
   }
 }

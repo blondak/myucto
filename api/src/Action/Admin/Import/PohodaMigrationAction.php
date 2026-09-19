@@ -54,7 +54,14 @@ final class PohodaMigrationAction
     private const MAX_ACTIVE_UPLOADS = 3;
     /** Část exportu: pod `upload_max_filesize`, IIS `maxAllowedContentLength` i nginx `client_max_body_size`. */
     public const CHUNK_BYTES = 8 * 1024 * 1024;
-    private const TOOL_DIR = '/tools/pohoda-export';
+    /**
+     * Exportní nástroje po programech. POHODA se exportuje přes XML rozhraní, PAMICA nemá
+     * XML rozhraní a čte se přímo z mzdového datového souboru, takže má vlastní skript.
+     */
+    private const TOOL_DIRS = [
+        'pohoda' => '/tools/pohoda-export',
+        'pamica' => '/tools/pamica-export',
+    ];
     private const TOOL_FILE_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.(ps1|cmd)$/';
 
     public function __construct(
@@ -369,6 +376,10 @@ final class PohodaMigrationAction
             'kind' => $kind,
             // OIČ a ID PPV z PAMICA se převezmou jen s potvrzením, že pocházejí z protokolů ČSSZ.
             'confirm_identifiers' => $kind === 'payroll' && filter_var($body['confirm_identifiers'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            // Převzatá docházka a mzdové vstupy se rovnou schválí. Bez toho zůstanou měsíce
+            // `open` a vstupy `draft` a mzdový běh nad nimi narazí na blokující kontroly
+            // `time_month_not_approved` a `draft_inputs_present`, které nejdou přebít výjimkou.
+            'approve_taken_over' => $kind === 'payroll' && filter_var($body['approve_taken_over'] ?? false, FILTER_VALIDATE_BOOLEAN),
         ], $userId);
         $stored = $this->jobs->find($jobId, $supplierId);
         if ($stored === null || ($stored['source'] ?? '') !== PohodaImportJobService::SOURCE) {
@@ -413,8 +424,9 @@ final class PohodaMigrationAction
         if ($denied !== null) {
             return $denied;
         }
+        $variant = self::toolVariant($request);
         $files = [];
-        foreach (self::toolFiles() as $name => $path) {
+        foreach (self::toolFiles($variant) as $name => $path) {
             $files[] = ['name' => $name, 'size' => (int) filesize($path)];
         }
         return Json::ok($response, ['files' => $files]);
@@ -430,7 +442,8 @@ final class PohodaMigrationAction
         if ($denied !== null) {
             return $denied;
         }
-        $files = self::toolFiles();
+        $variant = self::toolVariant($request);
+        $files = self::toolFiles($variant);
         if ($files === []) {
             return Json::error($response, 'tool_missing', 'Exportní nástroj v této instalaci chybí.', 404);
         }
@@ -451,14 +464,14 @@ final class PohodaMigrationAction
             return Json::error($response, 'zip_failed', 'Balíček nástroje se nepodařilo vytvořit.', 500);
         }
         foreach ($files as $fileName => $path) {
-            $zip->addFile($path, 'pohoda-export/' . $fileName);
+            $zip->addFile($path, $variant . '-export/' . $fileName);
         }
         $zip->close();
         $response->getBody()->write((string) file_get_contents($tmp));
         @unlink($tmp);
         return $response
             ->withHeader('Content-Type', 'application/zip')
-            ->withHeader('Content-Disposition', 'attachment; filename="pohoda-export.zip"')
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $variant . '-export.zip"')
             ->withHeader('Cache-Control', 'no-store');
     }
 
@@ -486,11 +499,19 @@ final class PohodaMigrationAction
             static fn (string $key): bool => !RequestAuthorization::allows($request, $key, AccessLevel::WRITE)));
     }
 
-    /** @return array<string,string> jméno => cesta */
-    private static function toolFiles(): array
+    /** Program, jehož nástroj se servíruje; neznámá hodnota spadne na POHODU. */
+    private static function toolVariant(Request $request): string
     {
+        $variant = (string) ($request->getQueryParams()['variant'] ?? 'pohoda');
+        return isset(self::TOOL_DIRS[$variant]) ? $variant : 'pohoda';
+    }
+
+    /** @return array<string,string> jméno => cesta */
+    private static function toolFiles(string $variant = 'pohoda'): array
+    {
+        $dir = self::TOOL_DIRS[$variant] ?? self::TOOL_DIRS['pohoda'];
         $out = [];
-        foreach (glob(Bootstrap::rootDir() . self::TOOL_DIR . '/*') ?: [] as $path) {
+        foreach (glob(Bootstrap::rootDir() . $dir . '/*') ?: [] as $path) {
             $name = basename($path);
             if (is_file($path) && preg_match(self::TOOL_FILE_PATTERN, $name) === 1) {
                 $out[$name] = $path;

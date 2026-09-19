@@ -42,6 +42,7 @@ final class PohodaImportJobService
         'payroll_profile' => 'Profil importu mezd',
         'payroll_months' => 'Mzdy po měsících',
         'payroll_people' => 'Údaje osob a vztahů',
+        'payroll_deductions' => 'Srážky, exekuce a insolvence',
         'small_assets' => 'Drobný majetek',
         'reconciliation' => 'Rekonciliace',
         'done' => 'Dokončuji',
@@ -148,7 +149,7 @@ final class PohodaImportJobService
 
             $protocol = $export === null
                 ? $this->payroll->run($supplierId, $userId, $agendaDir . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], (int) $agenda['year'], $dryRun, $runId, $progress, $cancel,
-                    (bool) ($params['confirm_identifiers'] ?? false))
+                    (bool) ($params['confirm_identifiers'] ?? false), (bool) ($params['approve_taken_over'] ?? false))
                 : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel);
             $result = $protocol->toArray() + ['kind' => $payroll ? 'payroll' : 'accounting'];
             $cancelled = $result['failure'] === 'cancelled';

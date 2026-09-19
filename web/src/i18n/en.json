@@ -1051,7 +1051,7 @@
     "imports_issued": "Imports (issued)",
     "imports_purchase": "Imports (purchase)",
     "money_s3_migration": "Switch from Money S3",
-    "pohoda_migration": "Migration from POHODA and PAMICA",
+    "pohoda_migration": "Migration from POHODA",
     "ai_settings": "AI settings",
     "integrations": "External integrations",
     "crm": "Profit",
@@ -1204,7 +1204,8 @@
     "stock_fulfillment": "Picking and shipping",
     "stock_sales_orders": "Sales orders",
     "eshop_integrations": "Integrations",
-    "eshop_shoptet": "Shoptet"
+    "eshop_shoptet": "Shoptet",
+    "pamica_migration": "Migration from PAMICA"
   },
   "instance_alert": {
     "storage_exhausted_title": "Instalace nepřijímá nové zápisy",
@@ -9460,8 +9461,21 @@
       "status_label": "Status",
       "select": "Select",
       "error": "The import could not be loaded.",
-      "fields": { "external_id": "Stable row ID", "sku": "SKU", "quantity": "Quantity", "unit_cost": "Acquisition unit cost" },
-      "status": { "pending": "Pending", "ready": "Ready", "applied": "Posted", "unchanged": "Unchanged", "failed": "Failed", "conflict": "Conflict", "skipped": "Skipped" },
+      "fields": {
+        "external_id": "Stable row ID",
+        "sku": "SKU",
+        "quantity": "Quantity",
+        "unit_cost": "Acquisition unit cost"
+      },
+      "status": {
+        "pending": "Pending",
+        "ready": "Ready",
+        "applied": "Posted",
+        "unchanged": "Unchanged",
+        "failed": "Failed",
+        "conflict": "Conflict",
+        "skipped": "Skipped"
+      },
       "errors": {
         "opening_import_failed": "Import processing failed.",
         "opening_import_profile_invalid": "The import settings are invalid.",
@@ -9528,14 +9542,28 @@
       "invoiced_value": "Invoiced value",
       "result": "Result",
       "ready": "Ready",
-      "severity": { "error": "Error", "warning": "Warning" },
+      "severity": {
+        "error": "Error",
+        "warning": "Warning"
+      },
       "transport": {
-        "1": "sea", "2": "rail", "3": "road", "4": "air",
-        "5": "postal", "7": "fixed transport installations", "8": "inland waterway", "9": "own propulsion"
+        "1": "sea",
+        "2": "rail",
+        "3": "road",
+        "4": "air",
+        "5": "postal",
+        "7": "fixed transport installations",
+        "8": "inland waterway",
+        "9": "own propulsion"
       },
       "record_types": {
-        "ST": "standard record", "MZ": "small consignments", "NN": "nil declaration",
-        "ZH": "simplified declaration", "ZI": "industrial plants", "ZK": "spacecraft", "ZL": "aircraft"
+        "ST": "standard record",
+        "MZ": "small consignments",
+        "NN": "nil declaration",
+        "ZH": "simplified declaration",
+        "ZI": "industrial plants",
+        "ZK": "spacecraft",
+        "ZL": "aircraft"
       }
     },
     "item_type": {
@@ -11728,22 +11756,70 @@
         "custom": "Custom fields"
       },
       "fields": {
-        "product_sku": { "label": "Product code (SKU)", "hint": "Card identifier used to pair products." },
-        "product_name": { "label": "Product name", "hint": "Card name in all languages." },
-        "product_description": { "label": "Product description", "hint": "Short and long description in each language." },
-        "product_seo": { "label": "SEO texts and URL", "hint": "SEO title, description and URL slug of the product page." },
-        "product_ean": { "label": "EAN", "hint": "Product barcode." },
-        "product_manufacturer": { "label": "Manufacturer", "hint": "Manufacturer or brand." },
-        "product_media": { "label": "Images and media", "hint": "Photos and other files of the card." },
-        "product_weight": { "label": "Weight", "hint": "Weight for shipping calculation." },
-        "product_price": { "label": "Sale price", "hint": "Sale prices in each currency." },
-        "product_vat_rate": { "label": "VAT rate", "hint": "VAT rate of the product. Keeping it local is safer for accounting." },
-        "product_visibility": { "label": "Card availability", "hint": "Whether the card is active and offered in the e-shop, or retired." },
-        "stock_quantity": { "label": "Stock quantity", "hint": "Available quantity in warehouses. MyÚčto runs the stock, so the local side is the default owner." },
-        "order_status": { "label": "Order status", "hint": "Commercial order status (received, confirmed, cancelled)." },
-        "order_payment_status": { "label": "Order payment status", "hint": "MyÚčto matches payments from the bank and cash desk, so the local side is the default owner." },
-        "order_fulfillment_status": { "label": "Fulfilment status", "hint": "Reservation, picking and shipping." },
-        "customer_contact": { "label": "Customer contact details", "hint": "Name, e-mail, phone and delivery address from the order." }
+        "product_sku": {
+          "label": "Product code (SKU)",
+          "hint": "Card identifier used to pair products."
+        },
+        "product_name": {
+          "label": "Product name",
+          "hint": "Card name in all languages."
+        },
+        "product_description": {
+          "label": "Product description",
+          "hint": "Short and long description in each language."
+        },
+        "product_seo": {
+          "label": "SEO texts and URL",
+          "hint": "SEO title, description and URL slug of the product page."
+        },
+        "product_ean": {
+          "label": "EAN",
+          "hint": "Product barcode."
+        },
+        "product_manufacturer": {
+          "label": "Manufacturer",
+          "hint": "Manufacturer or brand."
+        },
+        "product_media": {
+          "label": "Images and media",
+          "hint": "Photos and other files of the card."
+        },
+        "product_weight": {
+          "label": "Weight",
+          "hint": "Weight for shipping calculation."
+        },
+        "product_price": {
+          "label": "Sale price",
+          "hint": "Sale prices in each currency."
+        },
+        "product_vat_rate": {
+          "label": "VAT rate",
+          "hint": "VAT rate of the product. Keeping it local is safer for accounting."
+        },
+        "product_visibility": {
+          "label": "Card availability",
+          "hint": "Whether the card is active and offered in the e-shop, or retired."
+        },
+        "stock_quantity": {
+          "label": "Stock quantity",
+          "hint": "Available quantity in warehouses. MyÚčto runs the stock, so the local side is the default owner."
+        },
+        "order_status": {
+          "label": "Order status",
+          "hint": "Commercial order status (received, confirmed, cancelled)."
+        },
+        "order_payment_status": {
+          "label": "Order payment status",
+          "hint": "MyÚčto matches payments from the bank and cash desk, so the local side is the default owner."
+        },
+        "order_fulfillment_status": {
+          "label": "Fulfilment status",
+          "hint": "Reservation, picking and shipping."
+        },
+        "customer_contact": {
+          "label": "Customer contact details",
+          "hint": "Name, e-mail, phone and delivery address from the order."
+        }
       },
       "ownership_default": "default",
       "ownership_custom": "custom field",
@@ -24664,8 +24740,8 @@
     }
   },
   "pohoda": {
-    "title": "Migration from POHODA and PAMICA",
-    "subtitle": "Transfer an accounting year from a POHODA XML export: journal, address book, invoices, internal tax documents, cash, bank and reconciliation to the cent. Payroll is transferred from the PAMICA database.",
+    "title": "Migration from POHODA",
+    "subtitle": "Migrates an accounting year from the POHODA XML export: journal, address book, invoices, internal tax documents, cash, bank and reconciliation to the last haler. Payroll from PAMICA is migrated separately under Migration from PAMICA.",
     "step1": "POHODA export",
     "step2": "Preview and options",
     "step3": "Dry run",
@@ -24820,12 +24896,26 @@
       "payroll_profile": "Payroll import profile",
       "payroll_months": "Payroll by month",
       "payroll_people": "Person and employment details",
+      "payroll_deductions": "Deductions, garnishments and insolvency",
       "cancelled": "Cancelled by user",
       "unexpected": "Unexpected error"
     },
     "counts": {
       "months": "months",
       "payslips": "payslips",
+      "enforcement_cases": "garnishment cases",
+      "insolvency_months": "months flagged for insolvency",
+      "deduction_agreements": "deduction agreements",
+      "deduction_agreements_draft": "deduction agreements without an amount (draft)",
+      "deduction_agreements_existing": "deduction agreements already on file",
+      "deductions_existing": "deductions already transferred",
+      "deductions_failed": "deductions not transferred",
+      "deductions_unclassified": "deductions with an unrecognised type",
+      "deductions_person_not_found": "deductions without an employment",
+      "deductions_from_attendance": "deductions taken from monthly sheets",
+      "dependants": "dependants",
+      "recipients": "cases with a recipient",
+      "recipient_accounts": "new recipient accounts",
       "persons_created": "persons created",
       "persons_failed": "persons not created",
       "data_omitted": "person details omitted to fill in",
@@ -24911,9 +25001,7 @@
       "social_jurisdiction": "social insurance jurisdictions",
       "social_jurisdiction_manual": "persons with foreign jurisdiction to fill in",
       "pensioner_discount": "working pensioner discount decisions",
-      "children": "children with a tax credit",
       "children_existing": "persons with children already entered",
-      "children_without_credit": "persons with a child without a credit to fill in",
       "monthly_wage": "agreed monthly wage versions",
       "monthly_wage_max": "relations with the wage of the highest month",
       "averages": "average earning snapshots",
@@ -24931,7 +25019,9 @@
       "absences_from_import": "absences left to the attendance import summary",
       "components_without_jmhz": "components without a JMHZ classification",
       "payout_accounts_verified": "payout accounts verified",
-      "payout_accounts_to_verify": "payout accounts to verify"
+      "payout_accounts_to_verify": "payout accounts to verify",
+      "inputs_approved": "payroll inputs approved",
+      "time_months_approved": "attendance months approved"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",
@@ -24980,7 +25070,9 @@
       "automation_during": "During the transfer: {level}",
       "automation_after": "After the transfer: {level}",
       "automation_left_off": "Automation stays off until the transfer finishes without errors. Documents not linked to the journal would otherwise be posted twice."
-    }
+    },
+    "other_wizard_hint": "The export contains further agendas this wizard does not migrate (count: {n}). Migrate accounting under Migration from POHODA and payroll under Migration from PAMICA.",
+    "payroll_approve_taken_over": "Approve the taken-over attendance and payroll inputs right away. PAMICA months have already been processed and filed; as unapproved drafts they would block starting and closing a payroll run. Note: a started run recalculates the month with its own rule set, so the result may not match what was already filed to the last crown. Leave it unchecked to review and approve them manually under Payroll → Inputs and Payroll → Attendance."
   },
   "payment_cards": {
     "nav": "Payment cards",
@@ -26183,5 +26275,31 @@
         "result_title": "Recognised columns by sheet"
       }
     }
+  },
+  "pamica": {
+    "title": "Migration from PAMICA",
+    "subtitle": "Transfers HR records and payroll from the PAMICA payroll data file: employees, employments, monthly payroll inputs, attendance summaries and opening balances of annual accumulators. Accounting is migrated separately under Migration from POHODA.",
+    "step1": "PAMICA export",
+    "upload_title": "Create the PAMICA export and upload it",
+    "upload_hint": "PAMICA has no XML interface like POHODA, so payroll is read straight from the data file (Mzdy*.mdb). The tool only reads it and changes nothing in PAMICA.",
+    "export_help_title": "How to create the PAMICA export",
+    "export_help_items": [
+      "Download the export tool and copy it to the computer that holds the PAMICA data file. It runs on Windows in PowerShell 5.1, which ships with Windows 10 and 11.",
+      "Close PAMICA so the data file is not locked. The tool opens it read-only, but a running program can still hold a write lock.",
+      "Run Export-Pamica.cmd by double-clicking it. The tool looks for the data file in the usual PAMICA locations; otherwise pass the path, for example Export-Pamica.cmd -Mdb \"C:\\ProgramData\\STORMWARE\\PAMICA\\Data\\Mzdy.mdb\".",
+      "To migrate selected years only, use the -Rok parameter, for example -Rok 2026. Without it every year found in the data file is exported.",
+      "A pamica_export_<date>.zip file appears next to the script. Upload it unchanged, do not unpack it."
+    ],
+    "tool_hint": "Download all files at once as a ZIP, or one by one. Both files must sit in the same folder. The tool connects to the PAMICA data file, not to POHODA.",
+    "file_help_title": "What the export contains",
+    "file_help_items": [
+      "The export carries employees and employments, processed payroll by month, pay components, absences, deductions, leave, payout accounts and the submission status for the social security and health insurance authorities.",
+      "It contains no accounting. The journal, invoices, cash and bank are migrated separately under Migration from POHODA.",
+      "The company must already exist in MyUcto with the same company ID as in PAMICA. Data is migrated into the company you are working in; create a new company first if needed.",
+      "Months preceding the payroll start period are not recalculated. Their results are stored as opening balances of annual accumulators so that annual settlement and caps follow on.",
+      "The uploaded file is deleted automatically after 7 days of inactivity."
+    ],
+    "no_matching_agenda": "The export contains no payroll for the company ID used in MyUcto ({ico}). Check the company ID in the company settings and in PAMICA.",
+    "history_title": "Payroll migration protocols"
   }
 }
