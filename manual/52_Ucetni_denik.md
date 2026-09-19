@@ -185,7 +185,11 @@ Nad tabulkou je filtrační lišta:
   **ručně** bez automatického návrhu,
 - **Účet od / Účet do** — omezí deník na rozsah kódů účtů,
 - **Částka od / Částka do** — omezí celkovou částku zápisu,
-- **Stav** — jen zaúčtované, jen koncepty, nebo vše.
+- **Stav** — jen zaúčtované, jen koncepty, nebo vše,
+- **Storno** — stav stornování: **Stornované zápisy** (zápis, ke kterému existuje
+  protizápis), **Storna (protizápisy)** (samotný stornující zápis), **Stornované i storna**
+  (obě strany dvojice pohromadě), nebo **Bez storna**. Bez tohohle filtru se stornované
+  dvojice hledají očima — v deníku stojí u sebe jen tehdy, když se nefiltruje podle data.
 
 Odkaz **„Zrušit filtry"** vrátí výchozí (prázdný) stav. Když do stránky přijdeš
 prokliknutím z jiného místa aplikace (detail dokladu, uzávěrka, sestavy), filtry se
@@ -229,7 +233,9 @@ Klikem na řádek se zápis rozbalí a zobrazí:
   stejnými řádky (účet, strana, částka) a **dnešním datem**; hodí se pro doklady, které se
   opakují bez šablony (jednorázová varianta oproti šablonám, viz [§ 52.4](#524-rucni-zapis)),
 - tlačítko **Stornovat** (u aktivního zaúčtovaného zápisu), nebo odkaz na **stornující
-  zápis** (u již stornovaného).
+  zápis** (u již stornovaného),
+- tlačítko **Smazat zápis i storno** (u stornovaného zápisu v otevřeném období) — viz
+  [§ 52.8.4](#5284-smazani-cele-storno-dvojice).
 
 Zápisy, které už byly stornovány, mají v seznamu badge **Stornováno** a jsou vizuálně
 ztlumené (nižší kontrast řádku).
@@ -663,6 +669,9 @@ mechanismy podle toho, zda je období, kam zápis patří, ještě **otevřené*
 - U zápisu se zdrojem vydaná/přijatá faktura storno navíc **odemyká zdrojový doklad**
   (zruší příznak „Zaúčtováno" na faktuře), pokud k dokladu neexistuje jiný aktivní
   zaúčtovaný zápis — doklad tak můžeš opravit a zaúčtovat znovu.
+- **Otevřené období — smazání celé storno dvojice.** Když zápis v účetnictví nikdy
+  neměl vzniknout, je i po stornu v deníku dvojice, která se jen vzájemně ruší. V otevřeném
+  období ji jde odstranit celou — viz [§ 52.8.4](#5284-smazani-cele-storno-dvojice).
 - **Přeúčtování z dokladu.** Všechny tři cesty výš (přepis, storno, odmítnutí) má pod
   jedním tlačítkem i doklad sám — viz [§ 52.8.2](#5282-preuctovani-z-dokladu-sekce-zauctovani).
 
@@ -799,6 +808,39 @@ v zápisu opravdu objevily:
 - **„Ručně přeúčtováno {datum} ({uživatel})"** — za účty stojí účetní, ne šablona.
 - **„Zdroj kontace nelze určit"** — ruční zápis nebo doklad z doby před evidencí
   původu. Nepředstírá se šablona, která se nepoužila.
+
+### 52.8.4 Smazání celé storno dvojice
+
+Storno je správná cesta, jak zrušit účinek zápisu — v deníku po něm ale navždy zůstane
+dvojice, která se vzájemně ruší. Když šlo o zápis, který v účetnictví **nikdy neměl
+vzniknout** (duplicitní bankovní pohyb po přepojení konektoru, omylem zaúčtovaný doklad),
+je ta dvojice jen šum: nic nedokládá a v deníku i v opisu účtu jen překáží.
+
+V rozbaleném detailu stornovaného zápisu je proto v otevřeném období tlačítko
+**Smazat zápis i storno**. Odstraní obě strany najednou — původní zápis i jeho protizápis.
+
+**Na číslech se tím nic nemění.** Obě strany dvojice se ruší, takže žádný zůstatek,
+obratová předvaha ani výkaz nevypadají po smazání jinak. Mizí jen dva řádky deníku, které
+se vzájemně vynulovaly.
+
+Smazání se odmítne, když:
+
+- je některá strana dvojice v období, které **není otevřené** (uzavírá se, je uzavřené
+  nebo schválené),
+- datum některé strany spadá do **uzamčené části účetnictví**
+  (viz [§ 52.9](#529-zamek-uctovani-k-datu)),
+- na dvojici **navazuje další storno** (storno storna) — řetěz se rozplétá odzadu, od
+  posledního protizápisu,
+- se zdroj zápisu ruší **vlastním workflow** (mzdy, odpisy, reklasifikace).
+
+Bankovní pohyb, ze kterého zápis vznikl, se smazáním vrátí mezi nezaúčtované položky,
+takže jej lze zkontovat znovu; u faktury se zruší příznak „Zaúčtováno". Smazání se
+zaznamená do auditního logu včetně zrušených řádků obou zápisů.
+
+> [!NOTE]
+> Tohle není cesta, jak z účetnictví odklidit nepohodlný doklad. Je to úklid po chybě,
+> která se stala a hned se napravila stornem, a jde jen tam, kde se ještě nic nevykázalo.
+> Jakmile je období uzavřené nebo datum uzamčené, dvojice v deníku zůstává.
 
 ## 52.9 Zámek účtování k datu
 

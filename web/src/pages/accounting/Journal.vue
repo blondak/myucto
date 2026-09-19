@@ -54,6 +54,7 @@ const filters = reactive({
   date_to: '',
   source_type: '' as '' | (typeof SOURCE_TYPES)[number],
   posted: '' as '' | 'posted' | 'draft',
+  reversal: '' as '' | 'reversed' | 'reversal' | 'any' | 'none',
   automation: '' as '' | 'auto' | 'approved' | 'manual',
   // Featura D (audit 2026-07 follow-up) — fulltext + rozsah účtu/částky.
   q: '',
@@ -110,6 +111,7 @@ async function load() {
       source_id: sourceIdFilter.value || undefined,
       entry_id: entryIdFilter.value || undefined,
       posted: filters.posted === '' ? undefined : filters.posted === 'posted',
+      reversal: filters.reversal === '' ? undefined : filters.reversal,
       automation: filters.automation || undefined,
       q: filters.q || undefined,
       account_from: filters.account_from || undefined,
@@ -153,6 +155,7 @@ function resetFilters() {
   filters.date_to = ''
   filters.source_type = ''
   filters.posted = ''
+  filters.reversal = ''
   filters.automation = ''
   filters.q = ''
   filters.account_from = ''
@@ -178,6 +181,7 @@ function buildQuery(): Record<string, string> {
   if (filters.date_to) q.date_to = filters.date_to
   if (filters.source_type) q.source_type = filters.source_type
   if (filters.posted) q.posted = filters.posted
+  if (filters.reversal) q.reversal = filters.reversal
   if (filters.automation) q.automation = filters.automation
   if (filters.q) q.q = filters.q
   if (filters.account_from) q.account_from = filters.account_from
@@ -217,6 +221,9 @@ function hydrateFilters(q: Record<string, unknown>) {
   filters.posted = posted === 'posted' || posted === '1'
     ? 'posted'
     : (posted === 'draft' || posted === '0' ? 'draft' : '')
+  const reversal = value('reversal')
+  filters.reversal = (['reversed', 'reversal', 'any', 'none'] as const)
+    .includes(reversal as never) ? reversal as typeof filters.reversal : ''
   const automation = value('automation')
   filters.automation = automation === 'auto' || automation === 'approved' || automation === 'manual'
     ? automation : ''
@@ -253,6 +260,7 @@ const activeFilterCount = computed(() => {
   if (filters.date_from || filters.date_to) n++
   if (filters.source_type) n++
   if (filters.posted) n++
+  if (filters.reversal) n++
   if (filters.automation) n++
   if (filters.q) n++
   if (filters.account_from || filters.account_to) n++
@@ -278,6 +286,7 @@ const filterChips = computed<FilterChip[]>(() => {
   }
   if (filters.source_type) chips.push({ key: 'source_type', value: sourceLabel(filters.source_type) })
   if (filters.posted) chips.push({ key: 'posted', value: filters.posted === 'posted' ? t('accounting.journal.posted') : t('accounting.journal.draft') })
+  if (filters.reversal) chips.push({ key: 'reversal', value: t(`accounting.journal.reversal_${filters.reversal}`) })
   if (filters.automation) chips.push({ key: 'automation', value: t(`automation.origin_${filters.automation}`) })
   if (filters.q) chips.push({ key: 'q', label: t('accounting.journal.filter_q'), value: filters.q })
   if (filters.account_from || filters.account_to) {
@@ -297,6 +306,7 @@ function clearFilter(key: string) {
     case 'dates': filters.date_from = ''; filters.date_to = ''; break
     case 'source_type': filters.source_type = ''; break
     case 'posted': filters.posted = ''; break
+    case 'reversal': filters.reversal = ''; break
     case 'automation': filters.automation = ''; break
     case 'q': filters.q = ''; break
     case 'account_range': filters.account_from = ''; filters.account_to = ''; break
@@ -373,6 +383,7 @@ function exportQueryParams(): Record<string, string | number> {
   if (filters.source_type) q.source_type = filters.source_type
   if (sourceIdFilter.value) q.source_id = sourceIdFilter.value
   if (filters.posted) q.posted = filters.posted === 'posted' ? '1' : '0'
+  if (filters.reversal) q.reversal = filters.reversal
   if (filters.automation) q.automation = filters.automation
   if (filters.q) q.q = filters.q
   if (filters.account_from) q.account_from = filters.account_from
@@ -499,6 +510,31 @@ async function deleteEntry(entry: JournalEntryDetail) {
           ? 'accounting.journal.manual_deleted'
           : 'accounting.journal.deleted'
     toast.success(t(successKey))
+    collapseAll()
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+/**
+ * Stornovaný zápis i jeho protizápis jdou z deníku odstranit úplně, dokud je období
+ * otevřené. Obě strany se vzájemně ruší, takže se smazáním nezmění žádný zůstatek ani
+ * výkaz — v deníku jen zmizí dvojice, která tam nikdy neměla být (typicky duplicitní
+ * bankovní pohyb). Období protizápisu ověřuje server; tady se řídíme obdobím zápisu,
+ * protože storno vzniká k témuž datu.
+ */
+function canDeletePair(entry: JournalEntryDetail): boolean {
+  if (!entry.reversed_by) return false
+  if (!['manual', 'invoice', 'purchase_invoice', 'bank'].includes(entry.source_type)) return false
+  return periods.value.find(period => period.id === entry.period_id)?.status === 'open'
+}
+
+async function deleteEntryPair(entry: JournalEntryDetail) {
+  if (!confirm(t('accounting.journal.delete_pair_confirm', { id: entry.id, reversal: entry.reversed_by ?? 0 }))) return
+  try {
+    await accountingApi.deleteEntryReversalPair(entry.id)
+    toast.success(t('accounting.journal.pair_deleted'))
     collapseAll()
     await load()
   } catch (e: any) {
@@ -746,6 +782,17 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           </select>
         </div>
         <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_reversal') }}</label>
+          <select v-model="filters.reversal" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="reversed">{{ t('accounting.journal.reversal_reversed') }}</option>
+            <option value="reversal">{{ t('accounting.journal.reversal_reversal') }}</option>
+            <option value="any">{{ t('accounting.journal.reversal_any') }}</option>
+            <option value="none">{{ t('accounting.journal.reversal_none') }}</option>
+          </select>
+        </div>
+        <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('automation.journal_origin') }}</label>
           <select v-model="filters.automation" @change="applyFilters"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
@@ -913,10 +960,11 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                   <JournalEntryDetailPanel v-else-if="details[e.id]"
                     :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
                     :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
+                    :can-delete-pair="canDeletePair(details[e.id]!)"
                     :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
                     @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
                     @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
-                    @reverse="reverse" @remove="deleteEntry" @open-reversal="openReversal" />
+                    @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal" />
                 </td>
               </tr>
             </template>
@@ -979,10 +1027,11 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             <JournalEntryDetailPanel v-else-if="details[e.id]" class="pt-3"
               :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
               :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
+              :can-delete-pair="canDeletePair(details[e.id]!)"
               :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
               @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
               @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
-              @reverse="reverse" @remove="deleteEntry" @open-reversal="openReversal" />
+              @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal" />
           </div>
         </div>
       </div>

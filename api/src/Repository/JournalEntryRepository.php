@@ -945,6 +945,18 @@ final class JournalEntryRepository
         if (array_key_exists('posted', $filters) && $filters['posted'] !== null) {
             $where[] = $filters['posted'] ? 'je.posted_at IS NOT NULL' : 'je.posted_at IS NULL';
         }
+        if (!empty($filters['reversal'])) {
+            $isReversal = "EXISTS (
+                SELECT 1 FROM journal_entries rev
+                 WHERE rev.supplier_id = je.supplier_id AND rev.reversed_by = je.id
+            )";
+            $where[] = match ((string) $filters['reversal']) {
+                'reversed' => 'je.reversed_by IS NOT NULL',
+                'reversal' => $isReversal,
+                'any'      => "(je.reversed_by IS NOT NULL OR {$isReversal})",
+                default    => "(je.reversed_by IS NULL AND NOT {$isReversal})",
+            };
+        }
         if (!empty($filters['automation'])) {
             $bankStatus = $filters['automation'] === 'auto' ? 'auto_posted' : 'approved';
             $bankExists = "EXISTS (

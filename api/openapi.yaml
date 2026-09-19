@@ -9420,6 +9420,7 @@ paths:
         - { in: query, name: source_id, schema: { type: integer } }
         - { in: query, name: entry_id, description: Přesný identifikátor účetního zápisu, schema: { type: integer } }
         - { in: query, name: posted, description: "true = jen zaúčtované, false = jen koncepty", schema: { type: boolean } }
+        - { in: query, name: reversal, description: "Stav stornování: reversed = stornovaný zápis, reversal = samotný protizápis, any = obojí, none = ani jedno.", schema: { type: string, enum: [reversed, reversal, any, none] } }
         - { in: query, name: automation, description: Původ zápisu, schema: { type: string, enum: [auto, approved, manual] } }
         - { in: query, name: q, description: "Fulltext v popisu a čísle dokladu. Pokud hodnota jednoznačně odpovídá existujícímu kódu účtu, filtruje pohyby tohoto účtu; syntetický účet zahrne své analytiky.", schema: { type: string, maxLength: 100 } }
         - { in: query, name: account_from, description: Dolní mez rozsahu kódů účtů, schema: { type: string, maxLength: 20 } }
@@ -9761,6 +9762,39 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422':
           description: Zápis neexistuje / už stornován / koncept / zavřené období
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/accounting/journal/{id}/reversal-pair:
+    delete:
+      tags: [Accounting]
+      summary: Smazání celé storno dvojice (zápis i protizápis)
+      description: |
+        Účetní/admin. Odstraní z deníku stornovaný zápis i jeho protizápis najednou.
+        Obě strany se vzájemně ruší, takže se žádný zůstatek ani výkaz nemění — dvojice
+        jen přestane být v deníku vidět. Lze zadat ID kterékoli ze stran.
+
+        Odmítne se, když je některá strana v neotevřeném období nebo v uzamčené části
+        účetnictví, když na dvojici navazuje další storno, nebo když se zdroj zápisu ruší
+        vlastním workflow (mzdy, odpisy, reklasifikace).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Dvojice smazána
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  deleted_entry_ids: { type: array, items: { type: integer } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Zavřené období, uzamčené datum, navazující storno nebo nepodporovaný zdroj
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

@@ -2166,6 +2166,8 @@ final class Routes
             $g->post  ('/setup-assistant/jobs/{id:[0-9]+}/rollback', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'rollback']);
             $g->delete('/setup-assistant/jobs/{id:[0-9]+}/snapshot', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'deleteSnapshot']);
             $g->post  ('/journal/{id:[0-9]+}/reverse',        [JournalAction::class, 'reverse']);
+            // Smazání celé storno dvojice (zápis + protizápis) v otevřeném období.
+            $g->delete('/journal/{id:[0-9]+}/reversal-pair', [JournalAction::class, 'deleteReversalPair']);
             $g->delete('/journal/{id:[0-9]+}',                [JournalAction::class, 'delete']);
             // §35 popis + §33a přílohy — KONKRÉTNÍ cesty PŘED generickým /journal/{id}
             $g->patch ('/journal/{id:[0-9]+}/description',                          [JournalAction::class, 'updateDescription']);

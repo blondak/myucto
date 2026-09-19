@@ -504,6 +504,8 @@ export interface JournalFilters {
   /** Přesný odskok na jeden zápis (deep-link ?entry_id=), ne jen zúžení data. */
   entry_id?: number
   posted?: boolean
+  /** Stav stornování: stornovaný zápis, samotný protizápis, obojí, nebo ani jedno. */
+  reversal?: 'reversed' | 'reversal' | 'any' | 'none'
   automation?: 'auto' | 'approved' | 'manual'
   /** Fulltext (popis + čísla dokladů) — Featura D, audit 2026-07 follow-up. */
   q?: string
@@ -1764,6 +1766,10 @@ export const accountingApi = {
     api.post<JournalEntryDetail>(`/accounting/journal/${id}/reverse`).then(r => r.data),
   deleteEntry: (id: number) =>
     api.delete<{ ok: boolean }>(`/accounting/journal/${id}`).then(r => r.data),
+  /** Smaže celou storno dvojici (zápis i jeho protizápis) v otevřeném období. */
+  deleteEntryReversalPair: (id: number) =>
+    api.delete<{ ok: boolean; deleted_entry_ids: number[] }>(`/accounting/journal/${id}/reversal-pair`)
+      .then(r => r.data),
   // Auditní historie (SYSTEM VERSIONING timeline, audit 2026-07)
   getJournalHistory: (id: number) =>
     api.get<JournalHistoryResponse>(`/accounting/journal/${id}/history`).then(r => r.data),

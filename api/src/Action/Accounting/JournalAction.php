@@ -69,6 +69,13 @@ final class JournalAction
     /** Strop počtu dokladů v jedné dávce hromadného zaúčtování (audit Fáze A review). */
     private const BULK_POST_LIMIT = 500;
 
+    /**
+     * Zdroje, u kterých jde smazat celá storno dvojice ({@see deleteReversalPair()}).
+     * Shodné s allowlistem mazání jednoho zápisu, bez odpisů: u nich se maže i řádek
+     * v `depreciation_entries` a dvojice po stornu odpisu vzniká jinou cestou.
+     */
+    private const PAIR_DELETABLE_SOURCE_TYPES = ['manual', 'invoice', 'purchase_invoice', 'bank'];
+
     public function __construct(
         private readonly PostingService $posting,
         private readonly AiPostingOverrideResolver $aiOverrides,
@@ -223,6 +230,12 @@ final class JournalAction
         }
         if (in_array(($q['automation'] ?? null), ['auto', 'approved', 'manual'], true)) {
             $filters['automation'] = (string) $q['automation'];
+        }
+        // Stav stornování. `reversed` = zápis, který byl stornovaný; `reversal` = samotný
+        // protizápis; `none` = zápis, kterého se stornování netýká. Bez filtru se v deníku
+        // stornované dvojice hledají očima, protože stojí u sebe jen když se nefiltruje datem.
+        if (in_array(($q['reversal'] ?? null), ['reversed', 'reversal', 'any', 'none'], true)) {
+            $filters['reversal'] = (string) $q['reversal'];
         }
         if (!empty($q['account_from'])) $filters['account_from'] = mb_substr(trim((string) $q['account_from']), 0, 20);
         if (!empty($q['account_to']))   $filters['account_to'] = mb_substr(trim((string) $q['account_to']), 0, 20);
@@ -1328,6 +1341,242 @@ final class JournalAction
             'fiscal_year' => $fiscalYear,
             'pause_preserved' => $sourceType === 'depreciation' ? $pausePreserved : null,
         ], static fn ($value): bool => $value !== null));
+    }
+
+    /**
+     * DELETE /api/accounting/journal/{id}/reversal-pair — smaže CELOU storno dvojici
+     * (původní zápis i jeho protizápis) v otevřeném a nezamčeném období.
+     *
+     * Storno je správná cesta, jak zrušit účinek zápisu, ale v deníku po něm navždy
+     * zůstane dvojice, která se vzájemně ruší. Když šlo o zápis, který v účetnictví
+     * nikdy neměl vzniknout (duplicitní bankovní pohyb po přepojení konektoru,
+     * omylem zaúčtovaný doklad), je ta dvojice jen šum — v období, které se ještě
+     * nikam nevykázalo, ji jde odstranit beze stopy v číslech: obě strany se ruší,
+     * takže žádný zůstatek ani výkaz se smazáním nezmění.
+     *
+     * Záměrně to NENÍ součást {@see delete()}: tam se maže jeden zápis a stornovaného
+     * se to dotknout nesmí. Tady se vědomě mažou dva a chce to vlastní potvrzení
+     * i vlastní stopu v auditu.
+     *
+     * Brány (stejné jako u mazání jednoho zápisu, plus dvě navíc):
+     *   - obě strany v období se stavem `open` a mimo uzamčenou část účetnictví,
+     *   - protizápis sám nesmí být stornovaný a původní zápis nesmí být protizápisem
+     *     něčeho dalšího — řetěz stornování se rozplétá odzadu, ne zprostředka,
+     *   - zdroj z allowlistu ({@see delete()}); u zdrojů s vlastním workflow
+     *     (mzdy, reklasifikace) se ruší přes ně.
+     */
+    public function deleteReversalPair(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $id = (int) ($args['id'] ?? 0);
+
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+
+        $attachmentRows = [];
+        try {
+            $load = $pdo->prepare(
+                'SELECT je.id, je.period_id, je.entry_date, je.document_no, je.description,
+                        je.source_type, je.source_id, je.reversed_by, p.status AS period_status,
+                        (SELECT r.id FROM journal_entries r
+                          WHERE r.supplier_id = je.supplier_id AND r.reversed_by = je.id LIMIT 1) AS reverses_entry_id
+                   FROM journal_entries je
+                   JOIN accounting_periods p ON p.id = je.period_id AND p.supplier_id = je.supplier_id
+                  WHERE je.id = ? AND je.supplier_id = ?
+                  FOR UPDATE'
+            );
+            $load->execute([$id, $supplierId]);
+            $selected = $load->fetch(\PDO::FETCH_ASSOC);
+            if ($selected === false) {
+                if ($ownTx) $pdo->rollBack();
+                return Json::error($response, 'not_found', 'Účetní zápis nenalezen.', 404);
+            }
+
+            // Dvojici lze otevřít z kterékoli strany — z původního zápisu i z jeho storna.
+            $originalId = $selected['reversed_by'] !== null
+                ? (int) $selected['id']
+                : ($selected['reverses_entry_id'] !== null ? (int) $selected['reverses_entry_id'] : 0);
+            if ($originalId === 0) {
+                if ($ownTx) $pdo->rollBack();
+                return Json::error(
+                    $response,
+                    'entry_not_reversed',
+                    'Tenhle zápis žádné storno nemá — mazání dvojice se týká jen stornovaného zápisu a jeho protizápisu.',
+                    409,
+                );
+            }
+            if ($originalId !== (int) $selected['id']) {
+                $load->execute([$originalId, $supplierId]);
+                $original = $load->fetch(\PDO::FETCH_ASSOC);
+                if ($original === false) {
+                    if ($ownTx) $pdo->rollBack();
+                    return Json::error($response, 'not_found', 'Stornovaný zápis nenalezen.', 404);
+                }
+            } else {
+                $original = $selected;
+            }
+            $reversalId = (int) $original['reversed_by'];
+            $load->execute([$reversalId, $supplierId]);
+            $reversal = $load->fetch(\PDO::FETCH_ASSOC);
+            if ($reversal === false) {
+                if ($ownTx) $pdo->rollBack();
+                return Json::error($response, 'not_found', 'Protizápis nenalezen.', 404);
+            }
+
+            // Řetěz stornování rozplétej odzadu: storno storna je samostatná dvojice.
+            if ($reversal['reversed_by'] !== null || $original['reverses_entry_id'] !== null) {
+                if ($ownTx) $pdo->rollBack();
+                return Json::error(
+                    $response,
+                    'reversal_chain',
+                    'Na tuhle dvojici navazuje další storno — začněte od posledního.',
+                    409,
+                );
+            }
+
+            foreach ([$original, $reversal] as $row) {
+                if ((string) $row['period_status'] !== 'open') {
+                    if ($ownTx) $pdo->rollBack();
+                    return Json::error(
+                        $response,
+                        'period_not_open',
+                        'Zápis #' . (int) $row['id'] . ' je v období „' . $row['period_status']
+                            . '“ — smazat lze jen dvojici v otevřeném období.',
+                        409,
+                    );
+                }
+            }
+
+            $lock = $pdo->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE');
+            $lock->execute([$supplierId]);
+            $lockedUntil = $lock->fetchColumn();
+            if ($lockedUntil !== false && $lockedUntil !== null) {
+                foreach ([$original, $reversal] as $row) {
+                    if ((string) $row['entry_date'] <= (string) $lockedUntil) {
+                        if ($ownTx) $pdo->rollBack();
+                        return Json::error($response, 'date_locked', 'Datum zápisu spadá do uzamčené části účetnictví.', 409);
+                    }
+                }
+            }
+
+            $sourceType = (string) $original['source_type'];
+            if (!in_array($sourceType, self::PAIR_DELETABLE_SOURCE_TYPES, true)) {
+                if ($ownTx) $pdo->rollBack();
+                return Json::error(
+                    $response,
+                    'entry_delete_not_supported',
+                    'Tento typ zápisu se ruší přes své zdrojové workflow.',
+                    409,
+                );
+            }
+
+            $sourceId = $original['source_id'] === null ? null : (int) $original['source_id'];
+            $deletedLines = [];
+            foreach ([$original, $reversal] as $row) {
+                $attachmentRows = array_merge($attachmentRows, $this->attachments->list((int) $row['id'], $supplierId));
+                $deletedLines[(int) $row['id']] = $this->journal->linesForEntry((int) $row['id'], $supplierId);
+            }
+
+            // Bankovní pohyb se vrací do fronty k zaúčtování. Zápis bez zdroje
+            // (pohyb už smazaný) nemá co vracet — proto podmínka na source_id.
+            if ($sourceType === 'bank' && $sourceId !== null) {
+                $this->bankPosting->prepareEntryDeletion(
+                    $supplierId,
+                    $sourceId,
+                    (int) $original['id'],
+                    $this->auditMeta($request) + ['reason' => 'delete_reversal_pair'],
+                );
+            }
+
+            // Protizápis první: `journal_entries.reversed_by` je cizí klíč se SET NULL,
+            // takže po jeho smazání už původní zápis stornovaný není a jde smazat.
+            foreach ([$reversalId, (int) $original['id']] as $deleteId) {
+                $deleted = $pdo->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?');
+                $deleted->execute([$deleteId, $supplierId]);
+                if ($deleted->rowCount() !== 1) {
+                    throw new \RuntimeException('Účetní zápis se nepodařilo smazat.');
+                }
+            }
+
+            $statusFrom = null;
+            $statusTo = null;
+            if ($sourceId !== null && $sourceType === 'purchase_invoice') {
+                $doc = $pdo->prepare('SELECT status FROM purchase_invoices WHERE id = ? AND supplier_id = ? FOR UPDATE');
+                $doc->execute([$sourceId, $supplierId]);
+                $status = $doc->fetchColumn();
+                if ($status !== false) {
+                    $statusFrom = (string) $status;
+                    $statusTo = $statusFrom === 'booked' ? 'received' : $statusFrom;
+                    $pdo->prepare(
+                        "UPDATE purchase_invoices
+                            SET booked_at = NULL, booked_by = NULL,
+                                status = CASE WHEN status = 'booked' THEN 'received' ELSE status END
+                          WHERE id = ? AND supplier_id = ?"
+                    )->execute([$sourceId, $supplierId]);
+                }
+            } elseif ($sourceId !== null && $sourceType === 'invoice') {
+                $pdo->prepare('UPDATE invoices SET booked_at = NULL, booked_by = NULL WHERE id = ? AND supplier_id = ?')
+                    ->execute([$sourceId, $supplierId]);
+            }
+
+            $this->logger->log(
+                'accounting.reversal_pair_deleted',
+                $this->userId($request),
+                'journal_entry',
+                (int) $original['id'],
+                [
+                    'reversal_entry_id' => $reversalId,
+                    'period_id' => (int) $original['period_id'],
+                    'entry_date' => (string) $original['entry_date'],
+                    'document_no' => $original['document_no'],
+                    'description' => $original['description'],
+                    'source_type' => $sourceType,
+                    'source_id' => $sourceId,
+                    'document_status_from' => $statusFrom,
+                    'document_status_to' => $statusTo,
+                    'entries' => array_map(static fn (array $row): array => [
+                        'id' => (int) $row['id'],
+                        'document_no' => $row['document_no'],
+                        'entry_date' => (string) $row['entry_date'],
+                    ], [$original, $reversal]),
+                    'lines' => array_map(
+                        static fn (array $lines): array => array_map(static fn (array $line): array => [
+                            'account_id' => (int) $line['account_id'],
+                            'side' => (string) $line['side'],
+                            'amount' => (float) $line['amount'],
+                            'currency_code' => $line['currency_code'],
+                            'amount_foreign' => $line['amount_foreign'],
+                            'cost_center' => $line['cost_center'],
+                        ], $lines),
+                        $deletedLines,
+                    ),
+                ],
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+                $supplierId,
+            );
+
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+
+        if ($ownTx) {
+            foreach ($attachmentRows as $attachment) {
+                $this->attachmentStorage->deleteIfOrphan(
+                    $supplierId,
+                    (string) $attachment['sha256'],
+                    (string) $attachment['filename'],
+                    $this->attachments,
+                );
+            }
+        }
+
+        return Json::ok($response, ['ok' => true, 'deleted_entry_ids' => [(int) $original['id'], $reversalId]]);
     }
 
     /**

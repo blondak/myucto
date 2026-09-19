@@ -25,6 +25,8 @@ defineProps<{
   relatedKey: number
   canWrite: boolean
   canDelete: boolean
+  /** Lze smazat celou storno dvojici (zápis i jeho protizápis) — otevřené období. */
+  canDeletePair: boolean
   dateFrom: string
   dateTo: string
 }>()
@@ -36,6 +38,7 @@ const emit = defineEmits<{
   'links-changed': [entryId: number]
   reverse: [entry: JournalEntryDetail]
   remove: [entry: JournalEntryDetail]
+  'remove-pair': [entry: JournalEntryDetail]
   'open-reversal': [entryId: number]
 }>()
 
@@ -87,6 +90,10 @@ const extrasTotal = computed(() => extrasCount.value + documentCount.value)
         <button v-if="canWrite && canDelete" @click="emit('remove', detail)" :class="btnOutline('danger')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ t('accounting.journal.delete') }}
+        </button>
+        <button v-if="canWrite && canDeletePair && detail.reversed_by" @click="emit('remove-pair', detail)" :class="btnOutline('danger')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+          <span class="whitespace-nowrap">{{ t('accounting.journal.delete_pair') }}</span>
         </button>
         <button v-else-if="detail.reversed_by" type="button" @click="emit('open-reversal', detail.reversed_by)"
           class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 hover:underline">
