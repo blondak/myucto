@@ -541,6 +541,10 @@ final class PayrollAbsenceAction
             // uživatel neměl kde spočítaný nárok najít, natož ho smazat.
             'entitlements' => $this->leave->entitlements($supplierId, $employmentId, $year),
             'balance_minutes' => $this->leave->balance($supplierId, $employmentId, $year),
+            // Hranice, před kterou smí vzniknout ručně zapsané čerpání. Bez ní
+            // by formulář nabízel typ, který server odmítne, a uživatel by se
+            // o omezení dozvěděl až z chyby.
+            'payroll_start_period' => $this->leave->payrollStartPeriod($supplierId),
         ]);
     }
 
@@ -569,7 +573,12 @@ final class PayrollAbsenceAction
                     $body['source_absence_id'] ?? null,
                     'source_absence_id',
                 ),
+                // Převzaté čerpání (`taken`) se opisuje z výstupu předchozího
+                // mzdového programu — doklad o původu nese tenhle údaj.
+                trim((string) ($body['source_reference'] ?? '')) ?: null,
             );
+        } catch (PayrollYearClosedException $e) {
+            return self::yearClosedError($response, $e);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }

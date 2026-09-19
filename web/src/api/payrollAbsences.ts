@@ -282,8 +282,17 @@ export const payrollAbsenceApi = {
     api.post<{ snapshot: AverageSnapshot }>(`/payroll/time/averages/${id}/approve`, {
       row_version: rowVersion,
     }).then(response => response.data.snapshot),
+  /**
+   * `payroll_start_period` (RRRR-MM) je hranice, před kterou smí vzniknout ručně
+   * zapsané čerpání převzaté z předchozího mzdového programu. Null = firma
+   * období zahájení nastavené nemá, takže se ručně nezapisuje nic.
+   */
   leaveLedger: (employmentId: number, year: number) =>
-    api.get<{ entries: LeaveEntry[]; balance_minutes: number }>('/payroll/time/leave-ledger', {
+    api.get<{
+      entries: LeaveEntry[]
+      balance_minutes: number
+      payroll_start_period: string | null
+    }>('/payroll/time/leave-ledger', {
       params: { employment_id: employmentId, year },
     }).then(response => response.data),
   createLeaveEntry: (payload: Record<string, unknown>) =>

@@ -1363,10 +1363,11 @@ final class PohodaPayrollPeopleWriter
     /**
      * Zůstatek dovolené z PAMICA jako převod (`carryover`) do knihy dovolené.
      *
-     * Zapisuje se JEN zůstatek, ne čerpání: položku `taken` kniha dovolené ručně přijmout
-     * neumí (vzniká výhradně ze schválené nepřítomnosti s rozvrženými směnami) a v převáděném
-     * zůstatku je už odečtené, takže by se počítalo dvakrát. Záporný zůstatek se nepřevádí
-     * vůbec - přečerpání je rozhodnutí zaměstnavatele, ne údaj k opsání.
+     * Zapisuje se JEN zůstatek, ne čerpání. Ruční `taken` za období před zahájením vedení
+     * mezd kniha dovolené sice přijmout umí, ale v převáděném zůstatku je čerpání už
+     * odečtené, takže by se počítalo dvakrát; kdo chce čerpání i po jednotlivých položkách,
+     * zadá je ručně a zůstatek si o ně sníží. Záporný zůstatek se nepřevádí vůbec -
+     * přečerpání je rozhodnutí zaměstnavatele, ne údaj k opsání.
      *
      * Účinnost má den, od kterého mzdy vede MyÚčto; od té chvíle se z knihy odečítá.
      *

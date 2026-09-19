@@ -131,6 +131,74 @@ final class PohodaPayrollConverterTest extends TestCase
         self::assertSame('Příplatek za noční práci', $components['PRIPLATEK_NOCNI']);
     }
 
+    /**
+     * Srážky do sešitu vybírá číselník `sMZsrazky`, ne číslo složky: dobrovolné se sečtou
+     * do sloupce sešitu, zákonné (i deponovaná částka a insolvence) do něj nesmí, protože
+     * z nich dělá exekuční případ samostatný krok převodu, a řádek bez druhu v číselníku
+     * se nezahodí, ale vypíše se k dořešení.
+     */
+    public function testDeductionsFollowCatalogFlagsNotComponentNumbers(): void
+    {
+        $dir = $this->tmp . '/12345678_2026';
+        mkdir($dir, 0755, true);
+        $x = '';
+        $row = static function (string $table, array $cols) use (&$x): void {
+            $x .= "<{$table}>";
+            foreach ($cols as $k => $v) {
+                $x .= "<{$k}>" . htmlspecialchars((string) $v, ENT_XML1) . "</{$k}>";
+            }
+            $x .= "</{$table}>";
+        };
+        // Číslo složky si uživatel v PAMICA přepisuje, takže záměrně jiná než na instalaci,
+        // ze které zadání vzniklo: rozhodovat musí `JeZak` / `JeDepon` a název.
+        $row('sMZsrazky', ['ID' => 1, 'Cislo' => 'X10', 'Nazev' => 'Srážka zadaná částkou']);
+        $row('sMZsrazky', ['ID' => 2, 'Cislo' => 'X11', 'Nazev' => 'Záloha na obědy']);
+        $row('sMZsrazky', ['ID' => 3, 'Cislo' => 'X12', 'Nazev' => 'Životní pojištění']);
+        $row('sMZsrazky', ['ID' => 4, 'Cislo' => 'X20', 'Nazev' => 'Zákonná srážka zadaná pevnou částkou', 'JeZak' => 'True']);
+        $row('sMZsrazky', ['ID' => 5, 'Cislo' => 'X21', 'Nazev' => 'Deponovaná částka zákonné srážky', 'JeDepon' => 'True']);
+        $row('sMZsrazky', ['ID' => 6, 'Cislo' => 'X22', 'Nazev' => 'Insolvence - splátkový kalendář']);
+        $row('sMzPoj', ['ID' => 1, 'Kod' => '111']);
+        $row('ZAM', ['ID' => 1, 'OsCislo' => '3001', 'Jmeno' => 'Alena', 'Prijmeni' => 'Srážková', 'RefPoj' => 1]);
+        $row('ZAMpomer', ['ID' => 1, 'RefZAM' => 1, 'Poradi' => 1, 'JeDPP' => 0, 'DatNast' => '2025-01-01', 'TUvazek' => 40]);
+        $row('MZ', ['ID' => 1, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => 2026, 'RelMes' => 3, 'HodFond' => 168, 'HodOdpra' => 168,
+            'TUvazek' => 40, 'RefPoj' => 1, 'KcHrubaM' => 40000, 'KcCistaM' => 30000]);
+        $row('MZsrazky', ['ID' => 1, 'RefAg' => 1, 'RefSlozka' => 1, 'KcSrazeno' => 300]);
+        $row('MZsrazky', ['ID' => 2, 'RefAg' => 1, 'RefSlozka' => 3, 'KcSrazeno' => 500]);
+        $row('MZsrazky', ['ID' => 3, 'RefAg' => 1, 'RefSlozka' => 2, 'KcSrazeno' => 600]);
+        $row('MZsrazky', ['ID' => 4, 'RefAg' => 1, 'RefSlozka' => 4, 'KcSrazeno' => 4000]);
+        $row('MZsrazky', ['ID' => 5, 'RefAg' => 1, 'RefSlozka' => 5, 'KcSrazeno' => 1500]);
+        $row('MZsrazky', ['ID' => 6, 'RefAg' => 1, 'RefSlozka' => 6, 'KcSrazeno' => 2500]);
+        // Druh srážky, který v exportu číselník nemá; zařadit ho nelze ani jako dobrovolný.
+        $row('MZsrazky', ['ID' => 7, 'RefAg' => 1, 'RefSlozka' => 99, 'KcSrazeno' => 700]);
+        // Nulový řádek téhož druhu se nepočítá, hlásí se jen vstupy s částkou.
+        $row('MZsrazky', ['ID' => 8, 'RefAg' => 1, 'RefSlozka' => 99, 'KcSrazeno' => 0]);
+        file_put_contents($dir . '/91_mzdy.xml', '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+            . '<mdbExport version="1" group="mzdy" ico="12345678" year="2026" source="POHODA" state="ok">' . $x . '</mdbExport>');
+
+        $month = PohodaPayrollConverter::read($dir . '/91_mzdy.xml')->month('2026-03');
+        $alena = $month['rows'][0];
+        self::assertSame(800.0, $alena['Srážka ze mzdy (Kč)'], 'Dobrovolné srážky se sčítají do jednoho sloupce.');
+        self::assertSame(600.0, $alena['Obědy - srážka ze mzdy (Kč)'], 'Záloha na obědy je srážka za stravování.');
+        self::assertSame('net_other_deduction', $month['columns']['Srážka ze mzdy (Kč)']['meaning']);
+        self::assertSame('net_meal_deduction', $month['columns']['Obědy - srážka ze mzdy (Kč)']['meaning']);
+        self::assertSame(80000, $month['totals']['deduction_minor']);
+        self::assertSame(60000, $month['totals']['meal_minor']);
+
+        // Zákonná srážka (4 000 + 1 500 + 2 500 Kč) nesmí projít do žádného sloupce sešitu -
+        // přebírá ji krok exekučních případů a jinak by se z čisté mzdy strhla dvakrát.
+        $inSheet = 0.0;
+        foreach ($month['columns'] as $header => $meta) {
+            self::assertNotContains($alena[$header] ?? null, [4000.0, 1500.0, 2500.0], "Zákonná srážka prosákla do sloupce {$header}.");
+            if (in_array($meta['meaning'], ['net_meal_deduction', 'net_other_deduction'], true)) {
+                $inSheet += (float) ($alena[$header] ?? 0.0);
+            }
+        }
+        self::assertSame(1400.0, $inSheet, 'V sešitu smí být jen dobrovolná srážka 300 + 500 + 600 Kč.');
+
+        self::assertSame(['#99'], array_keys($month['unclassified_deductions']));
+        self::assertSame(1, $month['unclassified_deductions']['#99']['inputs']);
+    }
+
     /** Sešit přečtený parserem importu MyÚčta s vygenerovaným profilem dává stejné součty. */
     public function testWorkbookRoundTripThroughImportParser(): void
     {

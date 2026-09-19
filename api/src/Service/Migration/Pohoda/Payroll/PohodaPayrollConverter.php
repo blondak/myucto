@@ -110,8 +110,13 @@ final class PohodaPayrollConverter
     /**
      * Sešit jednoho měsíce: sloupce (hlavička => význam), řádky a součty ke kontrole.
      *
+     * `unclassified_deductions` nese druhy srážek, které se do sešitu nedostaly, protože
+     * jim v exportu chybí řádek číselníku `sMZsrazky`; zahodit je tiše nelze (mohla by to
+     * být exekuce), takže je převod předá protokolu k ručnímu dořešení.
+     *
      * @return array{period:string, columns:array<string,array{meaning:string,unit:?string,kind:?string,code:?string}>,
-     *     rows:list<array<string,string|float|null>>, totals:array<string,int>, omitted:list<string>}
+     *     rows:list<array<string,string|float|null>>, totals:array<string,int>, omitted:list<string>,
+     *     unclassified_deductions:array<string,array{code:string,name:string,inputs:int}>}
      */
     public function month(string $period): array
     {
@@ -125,6 +130,8 @@ final class PohodaPayrollConverter
 
         $rows = [];
         $omitted = [];
+        /** @var array<string,array{code:string,name:string,inputs:int}> $unclassifiedDeductions */
+        $unclassifiedDeductions = [];
         $totals = ['rows' => 0, 'gross_minor' => 0, 'net_minor' => 0, 'components_minor' => 0, 'meal_minor' => 0, 'deduction_minor' => 0, 'worked_millihours' => 0];
         foreach ($this->mz[$period] ?? [] as $mz) {
             $mzId = PohodaXml::text($mz, 'ID');
@@ -176,13 +183,25 @@ final class PohodaPayrollConverter
                 }
             }
             foreach ($this->items['MZsrazky'][$mzId] ?? [] as $item) {
-                $catalog = $this->byId['sMZsrazky'][PohodaXml::text($item, 'RefSlozka')] ?? [];
-                $class = PohodaPayrollCatalog::deduction(PohodaXml::text($catalog, 'Cislo'));
-                if ($class['meaning'] !== 'ignore') {
-                    $column($class['header'], $class['meaning'], 'amount');
-                    $add($class['header'], PohodaXml::num($item, 'KcSrazeno'));
-                    $totals['deduction_minor'] += self::minor(PohodaXml::num($item, 'KcSrazeno'));
+                $reference = PohodaXml::text($item, 'RefSlozka');
+                // Zákonná srážka (`ignore`) do sešitu nepatří: exekuční případ z ní dělá
+                // samostatný krok převodu, takže by se z čisté mzdy strhla dvakrát.
+                $class = PohodaPayrollCatalog::deduction($this->byId['sMZsrazky'][$reference] ?? []);
+                $amount = PohodaXml::num($item, 'KcSrazeno');
+                if ($class['meaning'] === 'unclassified') {
+                    if (round($amount, 2) != 0.0) {
+                        $key = $class['code'] !== '' ? $class['code'] : '#' . $reference;
+                        $unclassifiedDeductions[$key] ??= ['code' => $key, 'name' => $class['name'], 'inputs' => 0];
+                        $unclassifiedDeductions[$key]['inputs']++;
+                    }
+                    continue;
                 }
+                if ($class['meaning'] === 'ignore') {
+                    continue;
+                }
+                $column($class['header'], $class['meaning'], 'amount');
+                $add($class['header'], $amount);
+                $totals[$class['meaning'] === 'net_meal_deduction' ? 'meal_minor' : 'deduction_minor'] += self::minor($amount);
             }
 
             $isDpp = self::bool(PohodaXml::text($relation, 'JeDPP'));
@@ -250,7 +269,10 @@ final class PohodaPayrollConverter
         usort($rows, static fn (array $a, array $b): int => [AttendanceText::normalize((string) $a['Zaměstnanec']), $a['Osobní číslo']]
             <=> [AttendanceText::normalize((string) $b['Zaměstnanec']), $b['Osobní číslo']]);
 
-        return ['period' => $period, 'columns' => $columns, 'rows' => $rows, 'totals' => $totals, 'omitted' => $omitted];
+        uasort($unclassifiedDeductions, static fn (array $a, array $b): int => [$b['inputs'], $a['code']] <=> [$a['inputs'], $b['code']]);
+
+        return ['period' => $period, 'columns' => $columns, 'rows' => $rows, 'totals' => $totals, 'omitted' => $omitted,
+            'unclassified_deductions' => $unclassifiedDeductions];
     }
 
     /**

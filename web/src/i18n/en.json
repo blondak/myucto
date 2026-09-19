@@ -23287,6 +23287,12 @@
       "effective_date": "Effective date",
       "minutes_delta": "Change (hours)",
       "reason": "Reason",
+      "historic_taken_option": "Leave taken before payroll start",
+      "historic_taken_option_note": "Only before {period}",
+      "historic_taken_hint": "For months taken over from the previous payroll software, i.e. before {period}. From that period on, MyÚčto calculates leave and taken days arise from an approved absence with scheduled shifts - a manual entry would be a second source of the same figure. Enter the hours as a negative number.",
+      "source_reference": "Source of the figure",
+      "source_reference_placeholder": "Leave record from the previous payroll software as of 31 July 2026",
+      "source_reference_hint": "Where the figure is taken from. Stored in the leave ledger together with the reason.",
       "add": "Add entry",
       "ledger": "Leave history",
       "types": {
@@ -25021,7 +25027,8 @@
       "payout_accounts_verified": "payout accounts verified",
       "payout_accounts_to_verify": "payout accounts to verify",
       "inputs_approved": "payroll inputs approved",
-      "time_months_approved": "attendance months approved"
+      "time_months_approved": "attendance months approved",
+      "deductions_without_kind": "deductions without a catalog kind"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",

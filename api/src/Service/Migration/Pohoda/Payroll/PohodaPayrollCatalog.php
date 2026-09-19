@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda\Payroll;
 
+use MyInvoice\Service\Migration\Pohoda\PohodaXml;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceText;
 
 /**
  * Význam mzdové složky, nepřítomnosti a srážky POHODA Mzdy / PAMICA pro import
  * docházky a mezd MyÚčta. Klasifikace se řídí číslem složky (skupina podle první
  * číslice katalogu) a u víceúčelových složek (O01, J03) i jejím názvem.
+ *
+ * U srážek je to jinak: tam rozhoduje číselník `sMZsrazky` (příznaky `JeZak`,
+ * `JeDepon` a název), ne číslo složky - to si uživatel v PAMICA přidává a přepisuje,
+ * takže `S01a` / `S07` viděné na jedné instalaci nejsou kontrakt.
  *
  * Co import MyÚčta nepřebírá (základní mzdu počítá ze sjednané mzdy vztahu, náhrady
  * z hodin a průměru, odstupné a zákonné položky jinak), vrací význam `ignore` - takový
@@ -29,6 +34,25 @@ final class PohodaPayrollCatalog
 
     /** Odměna za kontejnery, tatáž složka jako ve vzoru GIRITON (druh `bonus`, JMHZ 10331). */
     public const CONTAINER_BONUS = 'ODMENA_KONTEJNERY';
+
+    /**
+     * Srážka za stravování; jediný druh dobrovolné srážky, který import docházky
+     * odlišuje vlastním významem ({@see \MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::DEDUCTIONS}).
+     * Tentýž výraz nese položka `meal` v `PohodaPayrollDeductions::VOLUNTARY_KINDS`.
+     */
+    public const MEAL_DEDUCTION = '/obed|strav/';
+
+    /**
+     * Insolvence v číselníku srážek. Vlastní příznak pro ni `sMZsrazky` nemá (u části
+     * druhů chybí i `JeZak`), takže jediné vodítko je číslo a název položky.
+     */
+    public const INSOLVENCY_DEDUCTION = '/insolven|oddluz/';
+
+    /** Sloupec sešitu, do kterého se sčítá srážka za stravování (složka i srážka). */
+    private const MEAL_HEADER = 'Obědy - srážka ze mzdy (Kč)';
+
+    /** Sloupec sešitu pro ostatní dobrovolné srážky; jeden na měsíc, hodnoty se sčítají. */
+    private const OTHER_DEDUCTION_HEADER = 'Srážka ze mzdy (Kč)';
 
     /**
      * @return array{meaning:string,kind:?string,code:?string,header:string}
@@ -95,7 +119,7 @@ final class PohodaPayrollCatalog
             return $component('compensation');
         }
         if ($number === 'J03' && str_contains($normalized, 'obed')) {
-            return ['meaning' => 'meal', 'kind' => null, 'code' => null, 'header' => 'Obědy - srážka ze mzdy (Kč)'];
+            return ['meaning' => 'meal', 'kind' => null, 'code' => null, 'header' => self::MEAL_HEADER];
         }
         return $ignore;
     }
@@ -121,12 +145,74 @@ final class PohodaPayrollCatalog
         };
     }
 
-    /** @return array{meaning:string,header:string} */
-    public static function deduction(string $number): array
+    /**
+     * Zákonná srážka podle číselníku `sMZsrazky`: exekuce, insolvence i deponovaná
+     * částka zákonné srážky (ta není vlastní titul, ale stav téže srážky).
+     *
+     * **Tohle je hranice mezi oběma cestami převodu srážek a žije jen tady.** Měsíční
+     * sešit ({@see PohodaPayrollConverter}) zákonnou srážku nést nesmí: exekuční případ
+     * z ní dělá samostatný krok ({@see PohodaPayrollDeductions},
+     * {@see PohodaPayrollDeductionsWriter}) a druhý zápis by ji z čisté mzdy strhl
+     * podruhé. Klasifikace exekučního kroku proto rozhoduje touž metodou.
+     *
+     * @param array<string,mixed> $catalog řádek číselníku `sMZsrazky`
+     */
+    public static function statutoryDeduction(array $catalog): bool
     {
-        return strtoupper(trim($number)) === 'S07'
-            ? ['meaning' => 'net_other_deduction', 'header' => 'Srážka ze mzdy (Kč)']
-            : ['meaning' => 'ignore', 'header' => 'Srážka ' . strtoupper(trim($number))];
+        return self::bool(PohodaXml::text($catalog, 'JeZak'))
+            || self::bool(PohodaXml::text($catalog, 'JeDepon'))
+            || self::insolvencyDeduction($catalog);
+    }
+
+    /**
+     * Insolvence mezi zákonnými srážkami. Číselník ji od exekuce neodlišuje, rozhoduje
+     * název; oddělená metoda proto, že exekuční krok potřebuje i tenhle mezistupeň.
+     *
+     * @param array<string,mixed> $catalog řádek číselníku `sMZsrazky`
+     */
+    public static function insolvencyDeduction(array $catalog): bool
+    {
+        $text = AttendanceText::normalize(PohodaXml::text($catalog, 'Cislo') . ' ' . PohodaXml::text($catalog, 'Nazev'));
+
+        return preg_match(self::INSOLVENCY_DEDUCTION, $text) === 1;
+    }
+
+    /**
+     * Význam srážky pro měsíční sešit převodu.
+     *
+     * - `ignore` = zákonná srážka, tu přebírá krok exekučních případů,
+     * - `unclassified` = řádek `MZsrazky` bez druhu v číselníku; zařadit ho nejde a do
+     *   sešitu nesmí (mohla by to být exekuce), takže ho převod vypíše účetní,
+     * - `net_meal_deduction` / `net_other_deduction` = dobrovolná srážka. Víc významů
+     *   pro srážky import docházky nezná a hodnoty téhož významu nesčítá, takže každý
+     *   z nich má v sešitu právě jeden sloupec, do kterého se srážky sčítají.
+     *
+     * @param array<string,mixed>|string $catalog řádek číselníku `sMZsrazky`; samotné
+     *        číslo složky je zkratka pro případ, kdy o zákonnosti rozhodl volající už
+     *        z téhož číselníku ({@see PohodaPayrollDeductions})
+     * @return array{meaning:string,header:string,code:string,name:string}
+     */
+    public static function deduction(array|string $catalog): array
+    {
+        if (is_string($catalog)) {
+            $catalog = ['Cislo' => $catalog];
+        }
+        $code = strtoupper(PohodaXml::text($catalog, 'Cislo'));
+        $name = PohodaXml::text($catalog, 'Nazev');
+        $result = static fn (string $meaning, string $header): array
+            => ['meaning' => $meaning, 'header' => $header, 'code' => $code, 'name' => $name];
+
+        if ($catalog === []) {
+            return $result('unclassified', trim("Srážka {$code}"));
+        }
+        if (self::statutoryDeduction($catalog)) {
+            return $result('ignore', trim("Zákonná srážka {$code}"));
+        }
+        if (preg_match(self::MEAL_DEDUCTION, AttendanceText::normalize("{$code} {$name}")) === 1) {
+            return $result('net_meal_deduction', self::MEAL_HEADER);
+        }
+
+        return $result('net_other_deduction', self::OTHER_DEDUCTION_HEADER);
     }
 
     /** @return array{meaning:string,header:string}|null hodiny ze složek, které MyÚčto vede jako druh práce */
@@ -139,6 +225,11 @@ final class PohodaPayrollCatalog
             'P03' => ['meaning' => 'holiday_work_hours', 'header' => 'Práce ve svátek (h)'],
             default => null,
         };
+    }
+
+    private static function bool(string $value): bool
+    {
+        return in_array(strtolower(trim($value)), ['1', '-1', 'true'], true);
     }
 
     private static function slug(string $text, int $max): string

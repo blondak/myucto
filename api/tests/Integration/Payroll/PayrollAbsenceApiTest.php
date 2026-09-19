@@ -9,6 +9,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
 use MyInvoice\Service\Payroll\Absence\PayrollLeaveInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
@@ -956,6 +957,137 @@ final class PayrollAbsenceApiTest extends TestCase
             9_600,
             $this->json($response)['entitlement']['ledger_entry']['minutes_delta'],
         );
+    }
+
+    /**
+     * PAM-07 — ruční `taken` za měsíce před zahájením vedení mezd v MyÚčtu.
+     *
+     * Kontroluje tři věci najednou, protože každá z nich sama o sobě jde obejít:
+     * že převzaté čerpání projde jen před `payroll_module_state.start_period`,
+     * že opakované odeslání téhož řádku zůstatek nesníží podruhé, a že se
+     * zůstatek o ručně zadané čerpání opravdu sníží.
+     */
+    public function testHistoricLeaveTakenIsAllowedOnlyBeforePayrollStartPeriod(): void
+    {
+        $this->setPayrollStartPeriod('2026-08-01');
+        $entitlement = $this->action->createEntitlement(
+            $this->request('POST')->withParsedBody([
+                'employment_id' => $this->employmentId,
+                'leave_year' => 2026,
+                'weekly_minutes' => 2_400,
+                'entitlement_weeks' => 4,
+                'continuous_calendar_days' => 365,
+                'worked_equivalent_minutes' => 124_800,
+                'rationale' => 'Synteticky ověřené započitatelné doby.',
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $entitlement->getStatusCode(), (string) $entitlement->getBody());
+        self::assertSame(9_600, $this->json($entitlement)['entitlement']['balance_minutes']);
+
+        $payload = [
+            'employment_id' => $this->employmentId,
+            'leave_year' => 2026,
+            'effective_date' => '2026-03-31',
+            'entry_type' => 'taken',
+            'minutes_delta' => -960,
+            'reason' => 'Vyčerpáno v lednu až březnu, 2 dny po 8 hodinách.',
+            'source_reference' => 'Karta dovolené z předchozího mzdového programu k 31. 7. 2026',
+        ];
+        $created = $this->action->createLeaveEntry(
+            $this->request('POST')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $entry = $this->json($created)['entry'];
+        self::assertSame('taken', $entry['entry_type']);
+        self::assertSame(-960, $entry['minutes_delta']);
+        self::assertNull($entry['source_absence_id']);
+        // Původ je doložený ve větě důvodu — jinak by v knize zbyl anonymní minus.
+        self::assertStringContainsString(
+            PayrollLeaveRepository::HISTORIC_TAKEN_NOTE,
+            (string) $entry['reason'],
+        );
+        self::assertStringContainsString(
+            'Karta dovolené z předchozího mzdového programu k 31. 7. 2026',
+            (string) $entry['reason'],
+        );
+
+        self::assertSame(9_600 - 960, $this->leaveLedgerBalance());
+        $ledger = $this->action->leaveLedger(
+            $this->request('GET')->withQueryParams([
+                'employment_id' => $this->employmentId,
+                'year' => 2026,
+            ]),
+            new Response(),
+        );
+        self::assertSame(200, $ledger->getStatusCode());
+        self::assertSame('2026-08', $this->json($ledger)['payroll_start_period']);
+
+        $repeated = $this->action->createLeaveEntry(
+            $this->request('POST')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(201, $repeated->getStatusCode(), (string) $repeated->getBody());
+        self::assertSame($entry['id'], $this->json($repeated)['entry']['id']);
+        self::assertSame(9_600 - 960, $this->leaveLedgerBalance());
+
+        $inComputedPeriod = $this->action->createLeaveEntry(
+            $this->request('POST')->withParsedBody([
+                ...$payload,
+                'effective_date' => '2026-08-03',
+            ]),
+            new Response(),
+        );
+        self::assertSame(422, $inComputedPeriod->getStatusCode(), (string) $inComputedPeriod->getBody());
+        self::assertStringContainsString(
+            'před zahájením vedení mezd',
+            (string) ($this->json($inComputedPeriod)['error']['message'] ?? ''),
+        );
+        self::assertSame(9_600 - 960, $this->leaveLedgerBalance());
+    }
+
+    /** Převzaté čerpání bez doložení původu se nezapíše. */
+    public function testHistoricLeaveTakenRequiresDocumentedSource(): void
+    {
+        $this->setPayrollStartPeriod('2026-08-01');
+        $response = $this->action->createLeaveEntry(
+            $this->request('POST')->withParsedBody([
+                'employment_id' => $this->employmentId,
+                'leave_year' => 2026,
+                'effective_date' => '2026-03-31',
+                'entry_type' => 'taken',
+                'minutes_delta' => -960,
+                'reason' => 'Vyčerpáno v lednu až březnu.',
+            ]),
+            new Response(),
+        );
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertStringContainsString(
+            'doložení původu',
+            (string) ($this->json($response)['error']['message'] ?? ''),
+        );
+        self::assertSame(0, $this->leaveLedgerBalance());
+    }
+
+    private function setPayrollStartPeriod(string $startPeriod): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_module_state (supplier_id, status, start_period)
+             VALUES (?, 'active', ?)
+             ON DUPLICATE KEY UPDATE status = VALUES(status), start_period = VALUES(start_period)"
+        )->execute([$this->supplierId, $startPeriod]);
+    }
+
+    private function leaveLedgerBalance(int $year = 2026): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(SUM(minutes_delta), 0) FROM payroll_leave_ledger
+              WHERE supplier_id = ? AND employment_id = ? AND leave_year = ?'
+        );
+        $stmt->execute([$this->supplierId, $this->employmentId, $year]);
+
+        return (int) $stmt->fetchColumn();
     }
 
     public function testDeletingSupplierCascadesMZ07History(): void

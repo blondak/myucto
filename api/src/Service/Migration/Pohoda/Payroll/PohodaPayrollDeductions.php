@@ -38,9 +38,6 @@ final class PohodaPayrollDeductions
     /** Tabulky, které se čtou celé do paměti (jednotky až stovky řádků). */
     private const TABLES = ['ZAM', 'ZAMpomer', 'sMZsrazky', 'ZAMsrazky'];
 
-    /** Insolvence v názvu druhu srážky; číselník pro ni vlastní příznak nemá. */
-    private const INSOLVENCY = '/insolven|oddluz/';
-
     /** Druh pohledávky `RelDrSra` => kategorie pohledávky MyÚčta. */
     private const PRIORITY_KIND = [
         '3' => 'other_priority',
@@ -284,10 +281,13 @@ final class PohodaPayrollDeductions
             return ['target' => null, 'reason' => 'catalog_missing', 'code' => $code, 'name' => $name, 'kind' => null, 'deferred' => false];
         }
         $text = AttendanceText::normalize($code . ' ' . $name);
+        // Hranice „zákonná vs. dobrovolná“ je jedna a tatáž pro tenhle krok i pro měsíční
+        // sešit ({@see PohodaPayrollCatalog::deduction()}); kdyby ji každá strana rozhodovala
+        // po svém, srážka by se buď ztratila, nebo srazila dvakrát.
         $statutory = self::bool(PohodaXml::text($catalog, 'JeZak'));
         $deferred = self::bool(PohodaXml::text($catalog, 'JeDepon'));
-        $insolvency = preg_match(self::INSOLVENCY, $text) === 1;
-        if ($statutory || $deferred || $insolvency) {
+        $insolvency = PohodaPayrollCatalog::insolvencyDeduction($catalog);
+        if (PohodaPayrollCatalog::statutoryDeduction($catalog)) {
             return [
                 'target' => $insolvency ? 'insolvency' : 'enforcement',
                 // Deponovaná částka není vlastní titul, je to stav zákonné srážky: vede se

@@ -23287,6 +23287,12 @@
       "effective_date": "Datum účinnosti",
       "minutes_delta": "Změna (hodiny)",
       "reason": "Důvod",
+      "historic_taken_option": "Čerpání před zahájením vedení mezd",
+      "historic_taken_option_note": "Jen do {period}",
+      "historic_taken_hint": "Pro měsíce převzaté z předchozího mzdového programu, tedy před {period}. Od tohoto období počítá dovolenou MyÚčto a čerpání vzniká schválením nepřítomnosti s rozvrženými směnami - ruční položka by byla druhý zdroj téhož údaje. Hodiny zadejte se záporným znaménkem.",
+      "source_reference": "Doložení původu",
+      "source_reference_placeholder": "Karta dovolené z předchozího mzdového programu k 31. 7. 2026",
+      "source_reference_hint": "Odkud se údaj přebírá. Zapíše se do knihy dovolené spolu s důvodem.",
       "add": "Přidat položku",
       "ledger": "Historie dovolené",
       "types": {
@@ -25021,7 +25027,8 @@
       "payout_accounts_verified": "ověřených výplatních účtů",
       "payout_accounts_to_verify": "výplatních účtů k ověření",
       "inputs_approved": "schválených mzdových vstupů",
-      "time_months_approved": "schválených měsíců docházky"
+      "time_months_approved": "schválených měsíců docházky",
+      "deductions_without_kind": "srážek bez druhu v číselníku"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",

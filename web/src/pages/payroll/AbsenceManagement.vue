@@ -135,7 +135,16 @@ const absenceTypes: AbsenceType[] = [
   'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
   'employer_obstacle', 'compensatory_time_off', 'unexcused', 'other',
 ]
-const leaveEntryTypes = ['carryover', 'adjustment', 'shortening', 'overdrawn', 'payout']
+const manualLeaveEntryTypes = ['carryover', 'adjustment', 'shortening', 'overdrawn', 'payout']
+/*
+ * Období, od kterého firma vede mzdy v MyÚčtu. Čerpání (`taken`) jde zapsat
+ * ručně jen PŘED ním — od něj vzniká schválením nepřítomnosti s rozvrženými
+ * směnami. Bez známé hranice se typ vůbec nenabízí; server by ho stejně odmítl.
+ */
+const payrollStartPeriod = ref<string | null>(null)
+const leaveEntryTypes = computed(() => payrollStartPeriod.value
+  ? [...manualLeaveEntryTypes, 'taken']
+  : manualLeaveEntryTypes)
 
 const absenceForm = reactive({
   employment_id: 0,
@@ -196,6 +205,7 @@ const entryForm = reactive({
   entry_type: 'adjustment',
   hours_delta: 1,
   reason: '',
+  source_reference: '',
 })
 const dpnReviews = reactive<Record<number, {
   firstDayFullyWorked: boolean
@@ -264,10 +274,16 @@ const averageOptions = computed(() => approvedAverages.value.map(item => ({
   label: `${item.applicable_year}/Q${item.applicable_quarter}`,
   secondary: money(item.average_hourly_minor),
 })))
-const leaveEntryTypeOptions = computed(() => leaveEntryTypes.map(type => ({
+const leaveEntryTypeOptions = computed(() => leaveEntryTypes.value.map(type => ({
   value: type,
-  label: t(`payroll_absence.leave.types.${type}`),
+  label: type === 'taken'
+    ? t('payroll_absence.leave.historic_taken_option')
+    : t(`payroll_absence.leave.types.${type}`),
+  ...(type === 'taken'
+    ? { secondary: t('payroll_absence.leave.historic_taken_option_note', { period: payrollStartPeriod.value ?? '' }) }
+    : {}),
 })))
+const isHistoricTakenEntry = computed(() => entryForm.entry_type === 'taken')
 const needsAverage = computed(() =>
   ['vacation', 'dpn', 'quarantine', 'employee_obstacle', 'employer_obstacle']
     .includes(absenceForm.absence_type),
@@ -533,6 +549,10 @@ async function loadData() {
     averages.value = averageData
     leaveEntries.value = leaveData?.entries ?? []
     leaveBalance.value = leaveData?.balance_minutes ?? 0
+    payrollStartPeriod.value = leaveData?.payroll_start_period ?? null
+    if (entryForm.entry_type === 'taken' && payrollStartPeriod.value === null) {
+      entryForm.entry_type = 'adjustment'
+    }
   } catch (error: any) {
     if (sequence !== dataLoadSequence) return
     // Nepřítomnosti, průměry ani nárok se nemažou. Prázdný seznam by tu byl
@@ -1048,6 +1068,9 @@ async function createEntry() {
       entry_type: entryForm.entry_type,
       minutes_delta: hoursToMinutes(entryForm.hours_delta, { nonZero: true, signed: true }),
       reason: entryForm.reason,
+      // Doložení původu patří jen k převzatému čerpání; u ostatních typů ho
+      // server odmítne, protože se nemá k čemu vztáhnout.
+      ...(isHistoricTakenEntry.value ? { source_reference: entryForm.source_reference } : {}),
     })
     toast.success(t('payroll_absence.messages.entry_created'))
     await loadData()
@@ -1066,6 +1089,19 @@ function minutes(value: number) {
   return `${sign}${Math.floor(absolute / 60)}:${String(absolute % 60).padStart(2, '0')}`
 }
 
+/*
+ * Převzaté čerpání zůstatek snižuje, takže se hodiny předvyplní záporně.
+ * Je to PŘEDVYPLNĚNÍ, ne tichá úprava odesílané hodnoty — uživatel znaménko
+ * vidí a smí ho přepsat; server kladnou hodnotu odmítne.
+ */
+watch(() => entryForm.entry_type, (type, previous) => {
+  if (type === previous) return
+  if (type === 'taken') {
+    entryForm.hours_delta = -Math.abs(entryForm.hours_delta || 8)
+  } else {
+    entryForm.source_reference = ''
+  }
+})
 watch(selectedEmployeeId, employeeId => {
   const available = employments.value.filter(item => item.employee_id === employeeId)
   if (!available.some(item => item.id === selectedEmploymentId.value)) {
@@ -1910,6 +1946,26 @@ onMounted(async () => {
             <label><span class="form-label">{{ t('payroll_absence.leave.effective_date') }}</span><DateInput v-model="entryForm.effective_date" :class="fieldClass" /></label>
             <label><span class="form-label">{{ t('payroll_absence.leave.minutes_delta') }}</span><input v-model.number="entryForm.hours_delta" data-test="leave-entry-hours" step="0.25" type="number" :class="fieldClass"></label>
             <label><span class="form-label">{{ t('payroll_absence.leave.reason') }}</span><input v-model="entryForm.reason" data-test="leave-entry-reason" required maxlength="1000" :class="fieldClass"></label>
+            <template v-if="isHistoricTakenEntry">
+              <p
+                data-test="leave-historic-taken-hint"
+                class="rounded-lg border border-payroll-200 bg-payroll-50 p-3 text-sm text-neutral-700 sm:col-span-2"
+              >
+                {{ t('payroll_absence.leave.historic_taken_hint', { period: payrollStartPeriod ?? '' }) }}
+              </p>
+              <label class="sm:col-span-2">
+                <span class="form-label">{{ t('payroll_absence.leave.source_reference') }}</span>
+                <input
+                  v-model="entryForm.source_reference"
+                  data-test="leave-entry-source-reference"
+                  required
+                  maxlength="200"
+                  :placeholder="t('payroll_absence.leave.source_reference_placeholder')"
+                  :class="fieldClass"
+                >
+                <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.leave.source_reference_hint') }}</span>
+              </label>
+            </template>
             <div class="flex flex-wrap justify-end sm:col-span-2"><button :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll_absence.leave.add') }}</button></div>
             <p v-if="entryError" data-test="entry-error" role="alert" class="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2">{{ entryError }}</p>
           </form>

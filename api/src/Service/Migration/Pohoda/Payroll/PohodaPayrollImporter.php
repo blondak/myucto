@@ -219,6 +219,30 @@ final class PohodaPayrollImporter
                     $protocol->warn(self::STEP_MONTHS, 'person_data_omitted', ucfirst($text));
                 }
             }
+            // Srážka, jejíž druh v číselníku PAMICA není, se do sešitu nedostane: bez druhu
+            // ji nejde odlišit od exekuce a tichá záměna by ji buď srazila dvakrát, nebo
+            // vůbec. Vypíše se proto k ručnímu dořešení, stejně jako složky bez JMHZ.
+            $unclassifiedDeductions = [];
+            foreach ($months as $month) {
+                foreach ($month['unclassified_deductions'] ?? [] as $key => $entry) {
+                    $unclassifiedDeductions[$key] ??= ['code' => $entry['code'], 'name' => $entry['name'], 'inputs' => 0];
+                    $unclassifiedDeductions[$key]['inputs'] += (int) $entry['inputs'];
+                }
+            }
+            if ($unclassifiedDeductions !== []) {
+                uasort($unclassifiedDeductions, static fn (array $a, array $b): int => $b['inputs'] <=> $a['inputs']);
+                $protocol->count(self::STEP_MONTHS, 'deductions_without_kind', count($unclassifiedDeductions));
+                $list = array_map(
+                    static fn (array $e): string => trim($e['code'] . ' ' . $e['name']) . " ({$e['inputs']} vstupů)",
+                    array_slice($unclassifiedDeductions, 0, self::MESSAGE_LIMIT),
+                );
+                $protocol->warn(self::STEP_MONTHS, 'deductions_without_kind', sprintf(
+                    'Srážky bez druhu v číselníku PAMICA: %s. Do mzdových vstupů se nepřevedly, protože bez '
+                    . 'druhu nejde poznat, jestli jde o dobrovolnou srážku, nebo o exekuci. Doplňte je ručně '
+                    . 'v Mzdy → Vstupy, u exekucí v Mzdy → Exekuce a insolvence.',
+                    implode(', ', $list),
+                ));
+            }
             foreach ($months as $index => $month) {
                 if ($shouldCancel !== null && $shouldCancel()) {
                     $protocol->fail('cancelled');

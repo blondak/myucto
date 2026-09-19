@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementResult;
+use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 
@@ -18,12 +19,38 @@ final class PayrollLeaveRepository
      */
     public const WARNING_ENTITLEMENT_NOT_DETERMINED = 'leave_entitlement_not_determined';
 
+    /**
+     * Uvození ručně převzatého čerpání v `reason`. Kniha dovolené nemá sloupec
+     * pro původ údaje a zavádět ho kvůli jednomu typu by znamenalo migraci
+     * tabulky, kterou ostatní ruční typy nepotřebují — `carryover` z převodu
+     * PAMICA řeší totéž prefixem ve větě důvodu. Držíme se téhož vzoru, jen
+     * prefix nese i pojmenovaný zdroj, ze kterého se číslo přebírá.
+     */
+    public const HISTORIC_TAKEN_NOTE = 'Převzaté čerpání dovolené před zahájením vedení mezd v MyÚčtu';
+
+    /**
+     * Typy, které smí vzniknout ručně.
+     *
+     * `taken` je mezi nimi jen pro období PŘED `payroll_module_state.start_period`
+     * — viz {@see self::assertHistoricTakenPeriod()}. V období, které MyÚčto
+     * počítá, vzniká čerpání výhradně schválením nepřítomnosti
+     * ({@see self::recordTaken()}); dva zdroje téhož údaje by znamenaly, že
+     * zůstatek nejde odvodit z rozvrhu.
+     */
+    private const MANUAL_ENTRY_TYPES = [
+        'carryover', 'adjustment', 'shortening', 'overdrawn', 'payout', 'taken',
+    ];
+
+    private readonly PayrollYearCloseGuard $yearClose;
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollLeaveLedgerDeletionRepository $ledgerDeletion,
         private readonly PayrollLeaveEntitlementDeletionRepository $entitlementDeletion,
         private readonly PayrollAbsenceRepository $absences,
-    ) {}
+    ) {
+        $this->yearClose = new PayrollYearCloseGuard($db);
+    }
 
     /** @return list<array<string,mixed>> */
     public function list(int $supplierId, int $employmentId, int $year): array
@@ -122,7 +149,11 @@ final class PayrollLeaveRepository
         return $relationType;
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * @param ?string $sourceReference doložení původu převzatého čerpání (`taken`)
+     *                                 — u ostatních typů se nezadává
+     * @return array<string,mixed>
+     */
     public function appendManual(
         int $supplierId,
         int $employmentId,
@@ -133,8 +164,9 @@ final class PayrollLeaveRepository
         string $reason,
         ?int $userId,
         ?int $sourceAbsenceId = null,
+        ?string $sourceReference = null,
     ): array {
-        if (!in_array($entryType, ['carryover', 'adjustment', 'shortening', 'overdrawn', 'payout'], true)) {
+        if (!in_array($entryType, self::MANUAL_ENTRY_TYPES, true)) {
             throw new \InvalidArgumentException('Typ ruční položky dovolené není platný.');
         }
         if ($entryType === 'carryover' && $minutesDelta < 0) {
@@ -142,6 +174,14 @@ final class PayrollLeaveRepository
         }
         if (in_array($entryType, ['shortening', 'overdrawn', 'payout'], true) && $minutesDelta > 0) {
             throw new \InvalidArgumentException('Krácení, přečerpání a proplacení musí snižovat zůstatek.');
+        }
+        $sourceReference = $sourceReference === null ? null : trim($sourceReference);
+        if ($entryType === 'taken') {
+            $reason = $this->historicTakenReason($minutesDelta, $reason, $sourceReference, $sourceAbsenceId);
+        } elseif ($sourceReference !== null && $sourceReference !== '') {
+            throw new \InvalidArgumentException(
+                'Doložení původu se zadává jen u převzatého čerpání dovolené.'
+            );
         }
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -152,7 +192,32 @@ final class PayrollLeaveRepository
             if ($entryType === 'shortening') {
                 $this->assertShorteningAllowed($supplierId, $employmentId, $year, -$minutesDelta);
             }
-            $entry = $this->append(
+            if ($entryType === 'taken') {
+                $this->assertHistoricTakenPeriod($supplierId, $effectiveDate);
+                // Roční uzávěrku hlídá jen tahle nová větev. Ostatní ruční typy
+                // se dosud proti uzavřenému roku nekontrolovaly a tiché
+                // zpřísnění by z přidání `taken` udělalo změnu jejich chování.
+                $this->yearClose->assertOpenForYear($supplierId, $year);
+                $this->lockEmployment($supplierId, $employmentId);
+            }
+            // Ruční převzetí se opisuje z cizí sestavy, takže se snadno odešle
+            // dvakrát. Položka se stejným otiskem už v knize je → vrátíme ji,
+            // místo aby se zůstatek snížil podruhé.
+            $entry = $entryType === 'taken'
+                ? $this->findByHash($supplierId, $employmentId, $year, self::sourceHash(
+                    $effectiveDate,
+                    $employmentId,
+                    $entryType,
+                    $year,
+                    $minutesDelta,
+                    $reason,
+                    null,
+                    $sourceAbsenceId,
+                    $supplierId,
+                    'manual_review',
+                ))
+                : null;
+            $entry ??= $this->append(
                 $supplierId,
                 $employmentId,
                 $year,
@@ -175,6 +240,109 @@ final class PayrollLeaveRepository
         }
 
         return $entry;
+    }
+
+    /**
+     * Věta důvodu převzatého čerpání — nese uvození i pojmenovaný zdroj.
+     *
+     * Původ je tu jediné, co z položky udělá doklad: číslo se nepočítá z rozvrhu,
+     * opisuje se z výstupu předchozího mzdového programu. Bez pojmenovaného
+     * zdroje by v knize zbyl anonymní minusový řádek, tedy přesně to, co dnes
+     * vzniká obcházením přes zápornou `adjustment`.
+     */
+    private function historicTakenReason(
+        int $minutesDelta,
+        string $reason,
+        ?string $sourceReference,
+        ?int $sourceAbsenceId,
+    ): string {
+        if ($minutesDelta > 0) {
+            throw new \InvalidArgumentException('Převzaté čerpání dovolené musí snižovat zůstatek.');
+        }
+        if ($sourceAbsenceId !== null) {
+            throw new \InvalidArgumentException(
+                'Čerpání navázané na nepřítomnost vzniká jejím schválením, ne ruční položkou.'
+            );
+        }
+        if ($sourceReference === null || $sourceReference === '' || mb_strlen($sourceReference) > 200) {
+            throw new \InvalidArgumentException(
+                'Převzaté čerpání dovolené vyžaduje doložení původu — odkud se přebírá'
+                . ' (nejvýše 200 znaků).'
+            );
+        }
+        $composed = sprintf('%s (zdroj: %s): %s', self::HISTORIC_TAKEN_NOTE, $sourceReference, trim($reason));
+        if (trim($reason) === '' || mb_strlen($composed) > 1000) {
+            throw new \InvalidArgumentException(
+                'Důvod převzatého čerpání je povinný a spolu s doložením původu smí mít'
+                . ' nejvýše 1000 znaků.'
+            );
+        }
+
+        return $composed;
+    }
+
+    /**
+     * Ruční `taken` patří jen před `payroll_module_state.start_period`.
+     *
+     * Od prvního období, které MyÚčto počítá, je jediným zdrojem čerpání
+     * schválená nepřítomnost s rozvrženými směnami — dovolená se od roku 2021
+     * čerpá v hodinách podle rozvrhu (§ 216 odst. 4 ZP) a ruční cesta vedle ní
+     * by vyrobila druhý zdroj téhož údaje, který nejde odsouhlasit s docházkou.
+     *
+     * Nemá-li firma období zahájení nastavené, nezapisuje se nic: bez něj se
+     * nedá říct, které měsíce jsou převzaté, a povolit zápis „zatím všude" by
+     * tu hranici zrušilo.
+     */
+    private function assertHistoricTakenPeriod(int $supplierId, string $effectiveDate): void
+    {
+        $startPeriod = $this->payrollStartPeriod($supplierId);
+        if ($startPeriod === null) {
+            throw new \InvalidArgumentException(
+                'Převzaté čerpání dovolené lze zapsat až po nastavení období, od kterého'
+                . ' firma vede mzdy v MyÚčtu.'
+            );
+        }
+        // `start_period` je vždy prvním dnem měsíce (CHECK v migraci 1186).
+        if ($effectiveDate >= $startPeriod . '-01') {
+            throw new \InvalidArgumentException(sprintf(
+                'Převzaté čerpání dovolené patří jen do období před zahájením vedení mezd'
+                . ' v MyÚčtu (%s). Od tohoto období vzniká čerpání schválením nepřítomnosti'
+                . ' s rozvrženými směnami.',
+                $startPeriod,
+            ));
+        }
+    }
+
+    /**
+     * Období, od kterého firma vede mzdy v MyÚčtu, ve tvaru `RRRR-MM`
+     * (`payroll_module_state.start_period`), nebo null, když nastavené není.
+     */
+    public function payrollStartPeriod(int $supplierId): ?string
+    {
+        if (!$this->db->hasTable('payroll_module_state')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT start_period FROM payroll_module_state WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $period = $stmt->fetchColumn();
+
+        return is_string($period) && $period !== '' ? substr($period, 0, 7) : null;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function findByHash(int $supplierId, int $employmentId, int $year, string $hash): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_leave_ledger
+              WHERE supplier_id = ? AND employment_id = ? AND leave_year = ? AND source_hash = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId, $year, $hash]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? self::cast($row) : null;
     }
 
     /**
@@ -629,18 +797,18 @@ final class PayrollLeaveRepository
             throw new \InvalidArgumentException('Položka dovolené vyžaduje nenulové minuty a důvod.');
         }
         $this->lockEmployment($supplierId, $employmentId);
-        $hash = hash('sha256', CanonicalJson::encode([
-            'effective_date' => $effectiveDate,
-            'employment_id' => $employmentId,
-            'entry_type' => $entryType,
-            'leave_year' => $year,
-            'minutes_delta' => $minutesDelta,
-            'reason' => trim($reason),
-            'reversal_of_id' => $reversalOfId,
-            'source_absence_id' => $absenceId,
-            'supplier_id' => $supplierId,
-            'support_status' => $supportStatus,
-        ]), true);
+        $hash = self::sourceHash(
+            $effectiveDate,
+            $employmentId,
+            $entryType,
+            $year,
+            $minutesDelta,
+            $reason,
+            $reversalOfId,
+            $absenceId,
+            $supplierId,
+            $supportStatus,
+        );
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_leave_ledger
                 (supplier_id, employment_id, leave_year, effective_date, entry_type,
@@ -658,6 +826,33 @@ final class PayrollLeaveRepository
         $find->execute([$supplierId, $id]);
         $row = $find->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? self::cast($row) : throw new \RuntimeException('Položka dovolené nebyla nalezena.');
+    }
+
+    /** Otisk položky knihy dovolené — jediné místo, kde se skládá. */
+    private static function sourceHash(
+        string $effectiveDate,
+        int $employmentId,
+        string $entryType,
+        int $year,
+        int $minutesDelta,
+        string $reason,
+        ?int $reversalOfId,
+        ?int $absenceId,
+        int $supplierId,
+        string $supportStatus,
+    ): string {
+        return hash('sha256', CanonicalJson::encode([
+            'effective_date' => $effectiveDate,
+            'employment_id' => $employmentId,
+            'entry_type' => $entryType,
+            'leave_year' => $year,
+            'minutes_delta' => $minutesDelta,
+            'reason' => trim($reason),
+            'reversal_of_id' => $reversalOfId,
+            'source_absence_id' => $absenceId,
+            'supplier_id' => $supplierId,
+            'support_status' => $supportStatus,
+        ]), true);
     }
 
     private function lockEmployment(int $supplierId, int $employmentId): void
