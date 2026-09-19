@@ -123,6 +123,12 @@ final class EmailPdfStatementIngestor
         ];
 
         $known = $this->log->findBySha($supplierId, $base['sha256']);
+        // Vazba na podání, které z přílohy vzniklo dřív, přežije přepsání řádku:
+        // uživatel musí mít kam dojít pro doklad, který mezitím leží ve frontě
+        // příchozích dokladů jako nepovedená AI extrakce toho samého výpisu.
+        if ($known !== null && ($known['submission_id'] ?? null) !== null) {
+            $base['submission_id'] = (int) $known['submission_id'];
+        }
         $knownStatus = $known !== null ? (string) $known['status'] : null;
         // Hotová rozhodnutí se neopakují. Zamítnutí ANO: „výpis nepatří k žádnému účtu
         // firmy" zmizí, jakmile účet v nastavení přibude, a „není faktura" mohlo vzniknout
@@ -136,8 +142,17 @@ final class EmailPdfStatementIngestor
                 persist: false,
             );
         }
-        if ($knownStatus === 'imported' || $knownStatus === 'skipped_duplicate') {
-            return null; // přílohu si vzala fronta příchozích dokladů
+        // Přílohu si vzala fronta příchozích dokladů. Rozhodnutí se ale mohlo
+        // narodit dřív, než tahle cesta existovala: bankovní výpis nese jméno
+        // i adresu naší firmy, takže ho rozpoznávač dokladů poslal do fronty
+        // jako doklad a AI extrakce nad ním skončila na „chybí items". Dokud
+        // ten řádek v logu držel, výpis už se z e-mailu nedal načíst NIKDY -
+        // znovu poslaná tatáž příloha má tentýž SHA. Proto se posuzuje znovu,
+        // ale jen dokud o něm nerozhodla tahle cesta (`bank_statement_id`).
+        $takenByInvoiceQueue = ($knownStatus === 'imported' || $knownStatus === 'skipped_duplicate')
+            && ($known['bank_statement_id'] ?? null) === null;
+        if (($knownStatus === 'imported' || $knownStatus === 'skipped_duplicate') && !$takenByInvoiceQueue) {
+            return null;
         }
 
         try {
@@ -152,13 +167,18 @@ final class EmailPdfStatementIngestor
         try {
             $parsed = $this->parsers->parse($attachment->content);
         } catch (\Throwable $e) {
-            return $this->record($base, 'failed', 'Výpis se nepodařilo zpracovat: ' . $e->getMessage());
+            // ⚠️ Záznam fronty dokladů se přepisuje JEN když z přílohy opravdu
+            // vznikne výpis. Jinak by se tím zahodila vazba na založené podání
+            // a uživatel by v logu příloh přestal vidět, kam se doklad poděl.
+            return $takenByInvoiceQueue
+                ? null
+                : $this->record($base, 'failed', 'Výpis se nepodařilo zpracovat: ' . $e->getMessage());
         }
 
         $accountNumber = (string) ($parsed['header']['account_number'] ?? '');
         $currencyId = $this->resolveCurrencyAccount($supplierId, $accountNumber, $parsed);
         if ($currencyId === null) {
-            return $this->record($base, 'skipped_not_statement', sprintf(
+            return $takenByInvoiceQueue ? null : $this->record($base, 'skipped_not_statement', sprintf(
                 'Výpis k účtu %s — tenhle účet není mezi bankovními účty firmy, nebo mu odpovídá víc účtů. Doplňte ho v nastavení a spusťte sken znovu.',
                 $accountNumber !== '' ? $accountNumber : 'neuveden',
             ));
@@ -173,7 +193,9 @@ final class EmailPdfStatementIngestor
                 $currencyId,
             );
         } catch (\Throwable $e) {
-            return $this->record($base, 'failed', 'Import výpisu selhal: ' . $e->getMessage());
+            return $takenByInvoiceQueue
+                ? null
+                : $this->record($base, 'failed', 'Import výpisu selhal: ' . $e->getMessage());
         }
 
         // U denního výpisu je `statement_id` měsíční výpis, do kterého se složil —

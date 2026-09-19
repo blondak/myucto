@@ -194,6 +194,41 @@ final class DailyStatementIngestTest extends TestCase
     }
 
     /**
+     * Výpis, který si PŘED zavedením načítání výpisů vzala fronta příchozích
+     * dokladů (nese jméno i adresu naší firmy, takže ho rozpoznávač dokladů
+     * poslal do fronty a AI extrakce nad ním spadla na „chybí items"), se musí
+     * dát načíst znovu jako výpis. Tentýž soubor má tentýž SHA, takže znovu
+     * poslaný e-mail by jinak narazil na hotové rozhodnutí a zůstal navždy
+     * ležet ve frontě dokladů.
+     */
+    public function testStatementAlreadyTakenByInvoiceQueueIsReassessed(): void
+    {
+        $pdf = $this->dailyPdf($this->accountNumber, '18.09.2026', '196', '10 000,00', '13 000,00', '3 000,00', '0,00', [
+            ['description' => 'PŘÍCHOZÍ ÚHRADA', 'counterparty' => 'Treti Firma, s.r.o.', 'account' => '1111111111/0300', 'vs' => '5550045', 'amount' => '   3 000,00'],
+        ]);
+        $this->pdo->prepare(
+            'INSERT INTO bank_email_attachment_ingests
+                (supplier_id, filename, sha256, size_bytes, status, reason)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId, 'vypis.pdf', hash('sha256', $pdf), strlen($pdf),
+            'imported', 'Rozpoznán doklad naší firmy - přidáno do příchozích dokladů.',
+        ]);
+
+        $summary = $this->ingest($pdf);
+
+        self::assertSame(1, $summary['imported'], 'Výpis zablokovaný starým rozhodnutím se musí naimportovat.');
+        $log = $this->pdo->prepare(
+            'SELECT status, bank_statement_id FROM bank_email_attachment_ingests WHERE supplier_id = ?'
+        );
+        $log->execute([$this->supplierId]);
+        $rows = $log->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(1, $rows, 'Řádek logu se přepisuje, nezakládá se druhý.');
+        self::assertSame('imported_statement', (string) $rows[0]['status']);
+        self::assertNotNull($rows[0]['bank_statement_id']);
+    }
+
+    /**
      * @param list<array<string,string>> $rows
      */
     private function dailyPdf(
