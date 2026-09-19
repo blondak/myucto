@@ -132,6 +132,10 @@ export interface JournalEntry {
   posted_at: string | null
   posted_by: number | null
   reversed_by: number | null
+  /** ID zápisu, který tenhle zápis stornuje (u protizápisu). */
+  reverses_entry_id?: number | null
+  /** ID zdroje pro proklik; u protizápisu zděděné ze stornovaného zápisu. */
+  source_link_id?: number | null
   row_version: number
   created_at: string
   updated_at: string

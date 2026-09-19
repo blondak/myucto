@@ -476,12 +476,16 @@ final class JournalEntryRepository
 
     public function find(int $id, int $supplierId): ?array
     {
+        // `reverses_entry_id`: co tenhle zápis stornuje. Protizápis nese zdroj jen jako typ,
+        // bez ID — bez téhle vazby z něj v detailu nevede cesta zpět na stornovaný zápis.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, supplier_id, period_id, entry_date, document_date, document_no, description,
-                    source_type, source_id, posted_at, posted_by, reversed_by, row_version,
-                    created_at, updated_at
-               FROM journal_entries
-              WHERE id = ? AND supplier_id = ?'
+            'SELECT je.id, je.supplier_id, je.period_id, je.entry_date, je.document_date,
+                    je.document_no, je.description, je.source_type, je.source_id, je.posted_at,
+                    je.posted_by, je.reversed_by, je.row_version, je.created_at, je.updated_at,
+                    (SELECT r.id FROM journal_entries r
+                      WHERE r.supplier_id = je.supplier_id AND r.reversed_by = je.id LIMIT 1) AS reverses_entry_id
+               FROM journal_entries je
+              WHERE je.id = ? AND je.supplier_id = ?'
         );
         $stmt->execute([$id, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -587,15 +591,24 @@ final class JournalEntryRepository
                        je.posted_by, je.reversed_by, je.row_version, je.created_at, je.updated_at,
                        u.name AS posted_by_name,
                        {$amountSelect}
-                       bt.statement_id AS source_statement_id,
-                       cd.doc_number AS source_doc_number,
-                       cd.register_id AS source_register_id,
+                       COALESCE(bt.statement_id, rev_bt.statement_id) AS source_statement_id,
+                       COALESCE(cd.doc_number, rev_cd.doc_number) AS source_doc_number,
+                       COALESCE(cd.register_id, rev_cd.register_id) AS source_register_id,
                        ast.id AS source_asset_id,
                        ast.name AS source_asset_name,
                        stl.doc_type AS source_settlement_doc_type,
-                       stl.doc_id AS source_settlement_doc_id
+                       stl.doc_id AS source_settlement_doc_id,
+                       -- Protizápis nese zdroj jen jako typ, ne jako ID: doklad patří tomu,
+                       -- co stornuje. Bez tohohle na něm chybí proklik na prvotní doklad
+                       -- i cesta zpět na stornovaný zápis, takže ze storna nevede nikam nic.
+                       rev_src.id AS reverses_entry_id,
+                       COALESCE(je.source_id, rev_src.source_id) AS source_link_id
                   FROM journal_entries je
              LEFT JOIN users u ON u.id = je.posted_by
+             LEFT JOIN journal_entries rev_src ON rev_src.supplier_id = je.supplier_id
+                    AND rev_src.reversed_by = je.id
+             LEFT JOIN bank_transactions rev_bt ON rev_src.source_type = 'bank' AND rev_bt.id = rev_src.source_id
+             LEFT JOIN cash_documents rev_cd ON rev_src.source_type = 'cash' AND rev_cd.id = rev_src.source_id
              LEFT JOIN bank_transactions bt ON je.source_type = 'bank' AND bt.id = je.source_id
              LEFT JOIN cash_documents cd ON je.source_type = 'cash' AND cd.id = je.source_id
              -- Zápočet: source_id je ID ZÁPOČTU, ne dokladu. Bez tohohle JOINu nemá deník
@@ -998,6 +1011,9 @@ final class JournalEntryRepository
         $r['source_id'] = $r['source_id'] === null ? null : (int) $r['source_id'];
         $r['posted_by'] = $r['posted_by'] === null ? null : (int) $r['posted_by'];
         $r['reversed_by'] = $r['reversed_by'] === null ? null : (int) $r['reversed_by'];
+        if (array_key_exists('reverses_entry_id', $r)) {
+            $r['reverses_entry_id'] = $r['reverses_entry_id'] === null ? null : (int) $r['reverses_entry_id'];
+        }
         $r['row_version'] = (int) $r['row_version'];
         return $r;
     }
@@ -1023,6 +1039,8 @@ final class JournalEntryRepository
             $r['amount_side'] = null;
         }
         $r['source_statement_id'] = $r['source_statement_id'] === null ? null : (int) $r['source_statement_id'];
+        $r['reverses_entry_id'] = ($r['reverses_entry_id'] ?? null) === null ? null : (int) $r['reverses_entry_id'];
+        $r['source_link_id'] = ($r['source_link_id'] ?? null) === null ? null : (int) $r['source_link_id'];
         $r['source_register_id'] = $r['source_register_id'] === null ? null : (int) $r['source_register_id'];
         $r['source_asset_id'] = $r['source_asset_id'] === null ? null : (int) $r['source_asset_id'];
         // Zápočet ukazuje na fakturu, kterou vyrovnal (doc_type + doc_id).

@@ -12592,6 +12592,7 @@
       "reversal_reversal": "Reversing entries",
       "reversal_any": "Reversed and reversing",
       "reversal_none": "Without reversal",
+      "reversed_entry": "Reversed entry",
       "delete_pair": "Delete entry and reversal",
       "delete_pair_confirm": "Really delete entry #{id} together with its reversal #{reversal}? The two cancel each other out, so no balance or report changes — but they disappear from the journal for good. Only possible in an open period.",
       "pair_deleted": "The entry and its reversal were deleted.",

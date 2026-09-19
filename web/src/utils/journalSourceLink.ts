@@ -18,6 +18,12 @@ import type { RouteLocationRaw } from 'vue-router'
 export interface JournalSourceRef {
   source_type: string
   source_id?: number | null
+  /**
+   * ID zdroje pro odkaz. U protizápisu je to zdroj STORNOVANÉHO zápisu — protizápis
+   * sám nese jen typ zdroje, takže by jinak nikam nevedl. Jinde je shodné se `source_id`;
+   * `source_id` se nepřepisuje, řídí se podle něj mazání i workflow zdroje.
+   */
+  source_link_id?: number | null
   source_statement_id?: number | null
   source_doc_number?: string | null
   source_register_id?: number | null
@@ -27,11 +33,12 @@ export interface JournalSourceRef {
 }
 
 export function journalSourceLink(entry: JournalSourceRef): RouteLocationRaw | null {
-  if (entry.source_type === 'invoice' && entry.source_id) {
-    return { name: 'invoice-detail', params: { id: entry.source_id } }
+  const sourceId = entry.source_link_id ?? entry.source_id
+  if (entry.source_type === 'invoice' && sourceId) {
+    return { name: 'invoice-detail', params: { id: sourceId } }
   }
-  if (entry.source_type === 'purchase_invoice' && entry.source_id) {
-    return { name: 'purchase-invoice-detail', params: { id: entry.source_id } }
+  if (entry.source_type === 'purchase_invoice' && sourceId) {
+    return { name: 'purchase-invoice-detail', params: { id: sourceId } }
   }
   if (entry.source_type === 'bank' && entry.source_statement_id) {
     return { name: 'bank-detail', params: { id: entry.source_statement_id } }
@@ -48,8 +55,8 @@ export function journalSourceLink(entry: JournalSourceRef): RouteLocationRaw | n
       },
     }
   }
-  if ((entry.source_type === 'asset' || entry.source_type === 'asset_disposal') && entry.source_id) {
-    return { name: 'accounting-asset-detail', params: { id: entry.source_id } }
+  if ((entry.source_type === 'asset' || entry.source_type === 'asset_disposal') && sourceId) {
+    return { name: 'accounting-asset-detail', params: { id: sourceId } }
   }
   if (entry.source_type === 'depreciation' && entry.source_asset_id) {
     return { name: 'accounting-asset-detail', params: { id: entry.source_asset_id } }

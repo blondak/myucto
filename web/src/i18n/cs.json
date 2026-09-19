@@ -12592,6 +12592,7 @@
       "reversal_reversal": "Storna (protizápisy)",
       "reversal_any": "Stornované i storna",
       "reversal_none": "Bez storna",
+      "reversed_entry": "Stornovaný zápis",
       "delete_pair": "Smazat zápis i storno",
       "delete_pair_confirm": "Opravdu smazat zápis #{id} i jeho storno #{reversal}? Obě strany se ruší, takže se žádný zůstatek ani výkaz nezmění — z deníku ale zmizí natrvalo. Jde to jen v otevřeném období.",
       "pair_deleted": "Zápis i jeho storno byly smazány.",
