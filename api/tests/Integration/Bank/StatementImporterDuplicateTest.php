@@ -77,8 +77,14 @@ final class StatementImporterDuplicateTest extends TestCase
             return;
         }
         $pdo = $this->db->pdo();
+        // Vazby na měsíční výpis padnou první — měsíc odkazuje na pohyby DENNÍCH/dílčích
+        // výpisů, takže by cizí klíč mazání hlaviček jinak zablokoval.
         foreach ($this->statementIds as $id) {
+            $pdo->prepare('DELETE FROM bank_api_evidence_months WHERE evidence_statement_id = ? OR monthly_statement_id = ?')->execute([$id, $id]);
+            $pdo->prepare('DELETE FROM bank_api_months WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_transaction_imports WHERE original_statement_id = ? OR statement_id = ?')->execute([$id, $id]);
+        }
+        foreach ($this->statementIds as $id) {
             $pdo->prepare('DELETE FROM bank_transactions WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
         }
@@ -167,6 +173,145 @@ final class StatementImporterDuplicateTest extends TestCase
         self::assertSame(1, $r['transactions'], 'Historický pohyb bez bank_ref se nesmí založit podruhé.');
         self::assertSame(1, $r['skipped_duplicates']);
         self::assertSame(2, $this->transactionCount($account), 'Druhá, dosud ztracená platba se musí doplnit.');
+    }
+
+    /**
+     * Přepojení účtu na nové připojení k bance: konektor začne TENTÝŽ pohyb popisovat jinak
+     * (jiná reference banky, protiúčet v IBANu místo domácího tvaru), takže otisk pohybu vyjde
+     * jiný a deterministický dedup ho nepozná. Dřív se taková platba naimportovala i zaúčtovala
+     * DVAKRÁT — reconciler křížil jen různé zdroje a uvnitř `bank_api` se spoléhal na otisk.
+     */
+    public function testSameMovementFromTwoApiConnectionsIsNotImportedTwice(): void
+    {
+        $account = '9990562355';
+        $currencyId = $this->activeCurrency($account, '0100');
+
+        $first = $this->importer->importConnectedParsed(
+            $this->apiStatement($account, 'kbplus:SGWD013384652111', '2222222222', '0800'),
+            '{"connection":8}',
+            'kb_plus-8-2099-01-01-2099-01-31.json',
+            null,
+            $currencyId,
+            $this->supplierId,
+        );
+        $this->statementIds[] = (int) ($first['evidence_statement_id'] ?? $first['statement_id']);
+        $this->statementIds[] = (int) $first['statement_id'];
+        self::assertSame(1, $first['transactions']);
+
+        $second = $this->importer->importConnectedParsed(
+            $this->apiStatement($account, '1', 'CZ5808000000002222222222', ''),
+            '{"connection":11}',
+            'kb_plus-11-2099-01-02-2099-01-31.json',
+            null,
+            $currencyId,
+            $this->supplierId,
+        );
+        $this->statementIds[] = (int) ($second['evidence_statement_id'] ?? $second['statement_id']);
+        $this->statementIds[] = (int) $second['statement_id'];
+
+        self::assertSame(0, $second['transactions'], 'Tentýž pohyb z nového připojení se nesmí založit podruhé.');
+        self::assertSame(1, $second['skipped_duplicates']);
+        self::assertSame(1, $this->rawTransactionCount($account), 'V evidenci smí zůstat jediný pohyb.');
+    }
+
+    /**
+     * Protiváha: dvě opravdu RŮZNÉ platby téhož dne a částky ze stejného zdroje, které spolu
+     * nic nespojuje, musí zůstat obě. Silná shoda (reference / protiúčet + VS / popis) je
+     * podmínka, ne domněnka.
+     */
+    public function testTwoUnrelatedApiMovementsOfSameDayAndAmountAreBothKept(): void
+    {
+        $account = '9990562356';
+        $currencyId = $this->activeCurrency($account, '0100');
+
+        $first = $this->importer->importConnectedParsed(
+            $this->apiStatement($account, 'ref-A', '3333333333', '0800', vs: '2099009991', description: 'Platba A'),
+            '{"batch":"a"}',
+            'kb_plus-20-a.json',
+            null,
+            $currencyId,
+            $this->supplierId,
+        );
+        $this->statementIds[] = (int) ($first['evidence_statement_id'] ?? $first['statement_id']);
+        $this->statementIds[] = (int) $first['statement_id'];
+        self::assertSame(1, $first['transactions']);
+
+        $second = $this->importer->importConnectedParsed(
+            $this->apiStatement($account, 'ref-B', '4444444444', '0300', vs: '2099009992', description: 'Platba B'),
+            '{"batch":"b"}',
+            'kb_plus-20-b.json',
+            null,
+            $currencyId,
+            $this->supplierId,
+        );
+        $this->statementIds[] = (int) ($second['evidence_statement_id'] ?? $second['statement_id']);
+        $this->statementIds[] = (int) $second['statement_id'];
+
+        self::assertSame(1, $second['transactions'], 'Nesouvisející platba téhož dne a částky se nesmí spolknout.');
+        self::assertSame(2, $this->rawTransactionCount($account));
+    }
+
+    /**
+     * Naparsovaný výpis z bankovního API s jediným pohybem.
+     *
+     * @return array{header:array<string,mixed>,transactions:list<array<string,mixed>>}
+     */
+    private function apiStatement(
+        string $account,
+        string $bankRef,
+        string $counterpartyAccount,
+        string $counterpartyBank,
+        string $vs = self::VS,
+        string $description = 'MyFirma s.r.o — vlastni ucet',
+    ): array {
+        return [
+            'header' => [
+                'account_number' => $account,
+                'statement_date' => '2099-01-31',
+                'statement_number' => null,
+                'prev_balance' => null,
+                'curr_balance' => null,
+                'credit_total' => null,
+                'debit_total' => null,
+            ],
+            'transactions' => [[
+                'posted_at' => '2099-01-15',
+                'amount' => 10000.00,
+                'currency' => 'CZK',
+                'variable_symbol' => $vs,
+                'constant_symbol' => null,
+                'specific_symbol' => null,
+                'counterparty_account' => $counterpartyAccount,
+                'counterparty_bank' => $counterpartyBank !== '' ? $counterpartyBank : null,
+                'counterparty_name' => 'MyFirma s.r.o',
+                'description' => $description,
+                'bank_ref' => $bankRef,
+            ]],
+        ];
+    }
+
+    private function activeCurrency(string $account, string $bankCode): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO currencies
+                (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default,
+                 account_number, bank_code)
+             VALUES (?, "CZK", ?, "CZK", "CZK", "CZK", 2, 1, 0, ?, ?)'
+        )->execute([$this->supplierId, 'TEST BUG0 API /' . $bankCode . ' ' . $account, $account, $bankCode]);
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $this->currencyIds[] = $id;
+        return $id;
+    }
+
+    private function rawTransactionCount(string $account): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bs.account_number = ?'
+        );
+        $stmt->execute([$account]);
+        return (int) $stmt->fetchColumn();
     }
 
     /** Nahrání téhož souboru podruhé zůstává duplicitou na úrovni výpisu (SHA-256 file_hash). */
@@ -267,7 +412,22 @@ final class StatementImporterDuplicateTest extends TestCase
               WHERE bs.file_name = ?'
         )->execute([self::FILE_NAME]);
         $pdo->prepare('DELETE FROM bank_statements WHERE file_name = ?')->execute([self::FILE_NAME]);
-        $pdo->prepare("DELETE FROM currencies WHERE label LIKE 'TEST BUG0 /%'")->execute();
+        // Výpisy z API nemají společné jméno souboru — poznají se podle syntetického účtu
+        // téhle testovací třídy. Bez toho by po přerušeném běhu zůstal pohyb v evidenci
+        // a další běh by ho dedupnul, takže by test hlásil chybu tam, kde žádná není.
+        $ids = array_map('intval', $pdo->query(
+            "SELECT id FROM bank_statements WHERE account_number LIKE '999056235%'"
+        )->fetchAll(PDO::FETCH_COLUMN));
+        foreach ($ids as $id) {
+            $pdo->prepare('DELETE FROM bank_api_evidence_months WHERE evidence_statement_id = ? OR monthly_statement_id = ?')->execute([$id, $id]);
+            $pdo->prepare('DELETE FROM bank_api_months WHERE statement_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM bank_transaction_imports WHERE original_statement_id = ? OR statement_id = ?')->execute([$id, $id]);
+        }
+        foreach ($ids as $id) {
+            $pdo->prepare('DELETE FROM bank_transactions WHERE statement_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
+        }
+        $pdo->prepare("DELETE FROM currencies WHERE label LIKE 'TEST BUG0 /%' OR label LIKE 'TEST BUG0 API /%'")->execute();
     }
 
     /**

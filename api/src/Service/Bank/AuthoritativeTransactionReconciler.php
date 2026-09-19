@@ -50,8 +50,21 @@ final class AuthoritativeTransactionReconciler
         $strong = [];
         foreach ($transactions as $index => $tx) {
             if (isset($known[$index])) continue;
+            // Kandidátem je i pohyb ze STEJNÉHO zdroje. Dřív se křížily jen různé zdroje
+            // (GPC × API) s tichým předpokladem, že uvnitř jednoho zdroje si dedup uhlídá
+            // sám otisk pohybu. Ten předpoklad padne, jakmile konektor začne tentýž pohyb
+            // popisovat jinak — po přepojení bankovního účtu na nové připojení vrátila KB
+            // u téže platby jinou referenci a protiúčet v IBANu místo domácího tvaru, otisk
+            // tedy vyšel jiný a platba se naimportovala i zaúčtovala DVAKRÁT.
+            //
+            // Uvnitř jednoho zdroje ale bereme JEN silnou shodu (shodná reference, nebo
+            // protiúčet + VS, nebo shodný popis). Slabá shoda se tu neřeší dotazem na
+            // uživatele jako u křížení zdrojů: dedup uvnitř zdroje má vlastní, deterministickou
+            // cestu přes otisk pohybu a tu nesmí předběhnout domněnka. Když tedy silná shoda
+            // není, pohyb se prostě založí — přesně jako dosud.
             $possible = array_values(array_filter($byDateAmount[self::dateAmount($tx)] ?? [], static fn (array $row): bool =>
-                $row['statement_source'] !== $source && self::compatible($tx, $row)
+                self::compatible($tx, $row)
+                && ($row['statement_source'] !== $source || self::strong($tx, $row))
             ));
             $exact = array_values(array_filter($possible, static fn (array $row): bool =>
                 self::reference($tx) !== '' && self::reference($tx) === self::reference($row)
