@@ -351,6 +351,38 @@ export interface TierQuote {
   pending_target?: string | null
 }
 
+/**
+ * Nabídka přechodu z měsíčního předplatného na roční.
+ *
+ * `amount` je CELÁ roční cena (účtuje se deset měsíců místo dvanácti), ne
+ * doplatek: roční období se přilepí na konec už zaplaceného měsíce, takže se
+ * zaplacené dny neztratí. `new_period_end` je platnost, kterou tím licence
+ * dostane.
+ */
+export interface AnnualSwitchQuote {
+  current_period: 'month'
+  new_period: 'year'
+  amount: number
+  monthly_amount: number
+  months_charged: number
+  /** Kolik se rokem ušetří proti dvanácti měsíčním platbám. */
+  saving: number
+  currency: string | null
+  period_end: number | string | null
+  new_period_end: number | string | null
+  quote_token: string
+  expires_at: number | string | null
+}
+
+export interface AnnualSwitchResult {
+  new_period: 'year'
+  amount_charged: number | null
+  valid_until: number | string | null
+  pending: boolean
+  order_id: string | null
+  state: LicenseStatus
+}
+
 export interface TierChangeResult {
   new_tier: string
   amount_charged: number | null
@@ -523,6 +555,16 @@ export const licenseApi = {
 
   changeTier: (tier: string, quote_token: string) =>
     api.post<TierChangeResult>('/license/tier', { tier, quote_token }).then((r) => r.data),
+
+  /**
+   * Přechod na roční předplatné. Jde jen z měsíčního; už zaplacenou roční
+   * licenci server prodloužit dopředu nenechá (`already_annual`).
+   */
+  annualSwitchQuote: () =>
+    api.post<AnnualSwitchQuote>('/license/period/quote', {}).then((r) => r.data),
+
+  switchToAnnual: (quote_token: string) =>
+    api.post<AnnualSwitchResult>('/license/period', { quote_token }).then((r) => r.data),
 
   payrollQuote: (enabled: boolean, payroll_employees_target: number, payroll_users_target: number) =>
     api.post<PayrollQuote>('/license/payroll/quote', {

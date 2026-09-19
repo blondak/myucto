@@ -326,6 +326,26 @@ final class LicenseClient
     }
 
     /** @return array<string,mixed> */
+    public function annualSwitchQuote(string $licenseKey, string $instanceId): array
+    {
+        return $this->post('/api/license/period', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+            'quote'       => true,
+        ]);
+    }
+
+    /** @return array<string,mixed> */
+    public function annualSwitch(string $licenseKey, string $instanceId, string $quoteToken): array
+    {
+        return $this->post('/api/license/period', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+            'quote_token' => $quoteToken,
+        ], self::CHARGE_TIMEOUT);
+    }
+
+    /** @return array<string,mixed> */
     public function payrollQuote(
         string $licenseKey,
         string $instanceId,

@@ -839,6 +839,62 @@ final class LicenseService
         return $resp;
     }
 
+    /**
+     * Kolik stojí přechod z měsíčního předplatného na roční a dokdy pak licence platí.
+     *
+     * @return array<string,mixed>
+     */
+    public function annualSwitchQuote(): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+        try {
+            return $this->client->annualSwitchQuote($key, $this->instanceIdOf($row));
+        } catch (LicenseNetworkException $e) {
+            $this->logger->info('license.annual_quote.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'server_unreachable'];
+        }
+    }
+
+    /**
+     * Přechod na roční předplatné. Server strhne roční cenu z uložené karty a
+     * prodlouží platnost o rok od konce už zaplaceného měsíce; lokální token
+     * proto musíme vytáhnout znovu, jinak aplikace dál ukazuje starou platnost.
+     *
+     * @return array<string,mixed>
+     */
+    public function switchToAnnual(string $quoteToken): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+        try {
+            $resp = $this->client->annualSwitch($key, $this->instanceIdOf($row), $quoteToken);
+        } catch (LicenseNetworkException $e) {
+            // ⚠️ `result_unknown`, ne „nepovedlo se". Roční částka mohla projít
+            // a odpověď se cestou ztratit - druhý pokus na vlastní pěst by se
+            // strhl podruhé. Stav zjistí obnova tokenu, případně obsluha.
+            $this->logger->warning('license.annual_switch.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'result_unknown'];
+        }
+        if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
+            return $this->rejection($resp, 'change_failed');
+        }
+        $pending = ($resp['error'] ?? '') === 'charge_pending';
+        if (!$pending) {
+            $this->forceRenew();
+        }
+        $resp['ok'] = true;
+        $resp['pending'] = $pending;
+        $resp['state_local'] = $this->current();
+        return $resp;
+    }
+
     /** @return array<string,mixed> */
     public function payrollQuote(bool $enabled, ?int $employeesTarget = null, ?int $usersTarget = null): array
     {

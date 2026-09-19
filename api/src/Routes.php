@@ -344,6 +344,8 @@ use MyInvoice\Action\License\StorageUpgradeAction;
 use MyInvoice\Action\License\UpgradeQuoteLicenseAction;
 use MyInvoice\Action\License\UpgradeLicenseAction;
 use MyInvoice\Action\License\SupportLinkAction;
+use MyInvoice\Action\License\AnnualSwitchAction;
+use MyInvoice\Action\License\AnnualSwitchQuoteAction;
 use MyInvoice\Action\License\TierQuoteAction;
 use MyInvoice\Action\License\TierChangeAction;
 use MyInvoice\Action\License\PayrollQuoteAction;
@@ -489,6 +491,11 @@ final class Routes
         $app->post('/api/license/quota',       StorageUpgradeAction::class);
         $app->post('/api/license/tier/quote', TierQuoteAction::class);
         $app->post('/api/license/tier',       TierChangeAction::class);
+        // Přechod z měsíčního předplatného na roční. Roční období se přilepí
+        // na konec už zaplaceného měsíce, takže se zaplacené dny neztratí.
+        // Zpátky ani o rok dopředu to nejde - server to odmítne sám.
+        $app->post('/api/license/period/quote', AnnualSwitchQuoteAction::class);
+        $app->post('/api/license/period',       AnnualSwitchAction::class);
         $app->post('/api/license/payroll/quote', PayrollQuoteAction::class);
         $app->post('/api/license/payroll',       PayrollChangeAction::class);
         $app->post('/api/license/change-status', ChangeStatusAction::class);

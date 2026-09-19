@@ -172,6 +172,21 @@ zaplaceného období. Po potvrzení se naplánuje od začátku následujícího
 fakturačního období a jeho nižší rozsah se použije pro další pravidelnou
 platbu. Za současné období se neposkytuje vratka ani dobropis.
 
+**Přechod z měsíčního předplatného na roční** je v sekci **Přechod na roční
+předplatné** na téže stránce. Roční předplatné se platí **za deset měsíců místo
+dvanácti**. Po **Spočítat cenu** se ukáže celá roční částka, kolik ušetříš a do
+kdy pak licence platí; potvrzením se částka strhne z uložené karty. Roční období
+**navazuje na konec už zaplaceného měsíce**, takže o zaplacené dny nepřijdeš —
+nic se nevrací a nic nepropadá. Od té chvíle se předplatné obnovuje jednou ročně.
+
+Opačný směr, tedy z ročního zpátky na měsíční, se z aplikace dělat nedá, a **už
+zaplacenou roční licenci nelze prodloužit dopředu** o další rok — nabídka se
+proto u ročního předplatného vůbec nezobrazí. Další rok se naúčtuje sám řádnou
+obnovou na konci zaplaceného období. Přechod nejde spustit, dokud je na
+předplatném naplánovaná změna na další období (nižší tarif, méně uživatelů,
+menší prostor nebo změna Mezd) — tu je potřeba nejdřív zrušit, jinak by se
+zaplatil rok v jiném rozsahu, než v jakém by pak běžel.
+
 ## 105.7 Přenos licence a přeinstalace
 
 Licenci lze přesunout na jinou instalaci (nový server, přeinstalace) —

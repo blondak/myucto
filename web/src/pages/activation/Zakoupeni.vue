@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { licenseApi, type LicenseStatus, type LicenseStateKind, type PayrollQuote, type TierQuote, type UpgradeQuote } from '@/api/license'
+import { licenseApi, type AnnualSwitchQuote, type LicenseStatus, type LicenseStateKind, type PayrollQuote, type TierQuote, type UpgradeQuote } from '@/api/license'
 import { formatQuotaBytes } from '@/api/storageQuota'
 import { ensureInstanceDunning, instanceStatus } from '@/api/instanceStatus'
 import { resolveBillingNarrative } from '@/api/instanceHealth'
@@ -123,6 +123,10 @@ const tierQuote = ref<TierQuote | null>(null)
 const tierBusy = ref(false)
 const tierError = ref<string | null>(null)
 const tierSuccess = ref<string | null>(null)
+const annualQuote = ref<AnnualSwitchQuote | null>(null)
+const annualBusy = ref(false)
+const annualError = ref<string | null>(null)
+const annualSuccess = ref<string | null>(null)
 const payrollQuote = ref<PayrollQuote | null>(null)
 const payrollBusy = ref(false)
 const payrollError = ref<string | null>(null)
@@ -533,6 +537,57 @@ async function applyTierChange(): Promise<void> {
     tierError.value = upgradeErrMsg(e)
   } finally {
     tierBusy.value = false
+  }
+}
+
+/**
+ * Přechod na roční předplatné se nabízí jen tam, kde má smysl: běžící měsíční
+ * předplatné s uloženou kartou. Roční se nenabízí znovu - zaplacený rok se
+ * dopředu prodloužit nedá a server takový pokus stejně odmítne.
+ */
+const canSwitchToAnnual = computed(() => canUpgrade.value
+  && subscription.value?.period === 'month'
+  && subscription.value?.auto_renew === true)
+
+async function calcAnnualQuote(): Promise<void> {
+  if (annualBusy.value) return
+  annualBusy.value = true
+  annualError.value = null
+  annualSuccess.value = null
+  try {
+    annualQuote.value = await licenseApi.annualSwitchQuote()
+  } catch (e: unknown) {
+    annualError.value = upgradeErrMsg(e)
+  } finally {
+    annualBusy.value = false
+  }
+}
+
+async function applyAnnualSwitch(): Promise<void> {
+  const quote = annualQuote.value
+  if (!quote || annualBusy.value) return
+  if (!confirm(t('license.annual_confirm', {
+    amount: fmtAmount(quote.amount, quote.currency),
+    date: fmtEffective(quote.new_period_end),
+  }))) return
+  annualBusy.value = true
+  annualError.value = null
+  try {
+    let result = await licenseApi.switchToAnnual(quote.quote_token)
+    if (result.pending && result.order_id) {
+      const settled = await licenseApi.waitForChange(result.order_id)
+      if (settled.applied && settled.license) result = { ...result, pending: false, state: settled.license }
+    }
+    status.value = result.state
+    annualQuote.value = null
+    annualSuccess.value = result.pending
+      ? t('license.change_pending')
+      : t('license.annual_success', { date: fmtEffective(result.valid_until) })
+    await auth.refresh()
+  } catch (e: unknown) {
+    annualError.value = upgradeErrMsg(e)
+  } finally {
+    annualBusy.value = false
   }
 }
 
@@ -1347,6 +1402,32 @@ onMounted(async () => {
         </div>
         <p v-if="tierSuccess" class="mt-3 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ tierSuccess }}</p>
         <p v-if="tierError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ tierError }}</p>
+      </section>
+
+      <!-- Přechod na roční předplatné (jen z měsíčního; zaplacený rok se dopředu neprodlužuje) -->
+      <section v-if="canSwitchToAnnual" id="annual-switch" class="rounded-lg border border-success-200 bg-success-50/30 p-5" data-annual-switch>
+        <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.annual_title') }}</h2>
+        <p class="mt-1 text-sm text-neutral-600">{{ t('license.annual_desc') }}</p>
+        <div class="mt-3 flex flex-wrap items-end gap-3">
+          <button type="button" :disabled="annualBusy" :class="btnOutline('success')" @click="calcAnnualQuote" data-annual-quote-cta>
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
+            {{ annualBusy ? t('license.upgrade_quoting') : t('license.upgrade_quote_cta') }}
+          </button>
+        </div>
+        <div v-if="annualQuote" class="mt-4 rounded-md border border-success-300 bg-surface p-3 text-sm" data-annual-quote>
+          <p class="font-medium text-neutral-900">{{ t('license.upgrade_amount', { amount: fmtAmount(annualQuote.amount, annualQuote.currency) }) }}</p>
+          <p class="mt-1 text-neutral-500">{{ t('license.annual_quote_detail', {
+            months: annualQuote.months_charged,
+            saving: fmtAmount(annualQuote.saving, annualQuote.currency),
+          }) }}</p>
+          <p class="mt-0.5 text-neutral-500">{{ t('license.annual_quote_valid_until', { date: fmtEffective(annualQuote.new_period_end) }) }}</p>
+          <button type="button" :disabled="annualBusy" :class="[btnFilled('success'), 'mt-3']" @click="applyAnnualSwitch" data-annual-pay-cta>
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ annualBusy ? t('license.upgrading') : t('license.upgrade_pay_cta') }}
+          </button>
+        </div>
+        <p v-if="annualSuccess" class="mt-3 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ annualSuccess }}</p>
+        <p v-if="annualError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ annualError }}</p>
       </section>
 
       <!-- In-place navýšení počtu uživatelů -->

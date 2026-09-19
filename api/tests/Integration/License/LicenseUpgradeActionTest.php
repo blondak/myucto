@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\License;
 
+use MyInvoice\Action\License\AnnualSwitchAction;
+use MyInvoice\Action\License\AnnualSwitchQuoteAction;
 use MyInvoice\Action\License\StorageQuoteAction;
 use MyInvoice\Action\License\StorageUpgradeAction;
 use MyInvoice\Action\License\TierChangeAction;
@@ -44,6 +46,8 @@ final class LicenseUpgradeActionTest extends TestCase
     private UpgradeLicenseAction $upgrade;
     private TierQuoteAction $tierQuote;
     private TierChangeAction $tierChange;
+    private AnnualSwitchQuoteAction $annualQuote;
+    private AnnualSwitchAction $annualSwitch;
     private StorageQuoteAction $storageQuote;
     private StorageUpgradeAction $storageUpgrade;
     private string $instanceId;
@@ -78,6 +82,8 @@ final class LicenseUpgradeActionTest extends TestCase
         $this->upgrade = new UpgradeLicenseAction($this->service);
         $this->tierQuote = new TierQuoteAction($this->service);
         $this->tierChange = new TierChangeAction($this->service);
+        $this->annualQuote = new AnnualSwitchQuoteAction($this->service);
+        $this->annualSwitch = new AnnualSwitchAction($this->service);
         $managed = new ManagedModeGuard($config);
         $this->storageQuote = new StorageQuoteAction($this->service, $managed);
         $this->storageUpgrade = new StorageUpgradeAction($this->service, $managed);
@@ -271,6 +277,86 @@ final class LicenseUpgradeActionTest extends TestCase
         self::assertSame(200, $change->getStatusCode());
         self::assertSame('multi10', $this->body($change)['state']['tier']);
         self::assertSame(10, $this->body($change)['state']['max_companies']);
+    }
+
+    // ── přechod na roční předplatné ────────────────────────────────────────────
+
+    public function testAnnualSwitchQuoteReturnsWholeYearPriceAndNewValidity(): void
+    {
+        $this->seedActivated();
+        $periodEnd = time() + 86400 * 15;
+        $newEnd = $periodEnd + 86400 * 365;
+        $this->client->expects($this->once())
+            ->method('annualSwitchQuote')
+            ->with($this->anything(), $this->instanceId)
+            ->willReturn([
+                'ok' => true, 'current_period' => 'month', 'new_period' => 'year',
+                'amount' => 6900.0, 'monthly_amount' => 690.0, 'months_charged' => 10,
+                'saving' => 1380.0, 'currency' => 'CZK',
+                'period_end' => $periodEnd, 'new_period_end' => $newEnd,
+                'quote_token' => 'period-quote',
+            ]);
+
+        $response = $this->annualQuote->__invoke($this->adminRequest([]), new Psr7Response());
+
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->body($response);
+        self::assertEquals(6900.0, $body['amount']);
+        self::assertEquals(1380.0, $body['saving']);
+        self::assertSame($newEnd, $body['new_period_end']);
+        self::assertSame('period-quote', $body['quote_token']);
+    }
+
+    public function testAnnualSwitchChargesAndPullsFreshToken(): void
+    {
+        $this->seedActivated();
+        $validUntil = time() + 86400 * 380;
+        $this->client->expects($this->once())
+            ->method('annualSwitch')
+            ->with($this->anything(), $this->instanceId, 'period-quote')
+            ->willReturn(['ok' => true, 'new_period' => 'year', 'amount_charged' => 6900.0, 'valid_until' => $validUntil]);
+        // Bez obnovy tokenu by aplikace dál ukazovala starou platnost licence.
+        $this->client->expects($this->once())
+            ->method('renew')
+            ->willReturn(['ok' => true, 'token' => $this->token(['valid_until' => $validUntil])]);
+
+        $response = $this->annualSwitch->__invoke(
+            $this->adminRequest(['quote_token' => 'period-quote']),
+            new Psr7Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->body($response);
+        self::assertSame('year', $body['new_period']);
+        self::assertEquals(6900.0, $body['amount_charged']);
+    }
+
+    public function testAnnualSwitchWithoutQuoteTokenNeverReachesServer(): void
+    {
+        $this->seedActivated();
+        $this->client->expects($this->never())->method('annualSwitch');
+
+        $response = $this->annualSwitch->__invoke($this->adminRequest([]), new Psr7Response());
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertSame('quote_required', $this->body($response)['error']['code']);
+    }
+
+    public function testPaidAnnualSubscriptionRefusalIsPassedThroughAndNothingIsRenewed(): void
+    {
+        $this->seedActivated();
+        $this->client->expects($this->once())
+            ->method('annualSwitch')
+            ->willReturn(['ok' => false, 'error' => 'already_annual']);
+        $this->client->expects($this->never())->method('renew');
+
+        $response = $this->annualSwitch->__invoke(
+            $this->adminRequest(['quote_token' => 'period-quote']),
+            new Psr7Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame('already_annual', $this->body($response)['error']['code']);
     }
 
     public function testSelfHostedStoragePurchaseEndpointsAreRejectedBeforeServerCall(): void
