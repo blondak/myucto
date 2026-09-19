@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Eldp;
 
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverMonth;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
@@ -22,6 +24,32 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  * kterou modul neumí zapsat, jiné datum nástupu mezi měsíci nebo krácení
  * ročním maximem nevede k odhadu, ale k blokátoru, který pojmenuje konkrétní
  * chybějící podklad. Zákonný rámec a lhůty popisuje `EldpDeadlinePolicy`.
+ *
+ * ## Rok přechodu z jiného mzdového programu
+ *
+ * Měsíc má **dva možné zdroje**: zmrazenou schválenou revizi a převzatý mzdový
+ * měsíc ({@see PayrollTakeoverYear}, plněný převodem z jiného systému). Zdroje
+ * se nesčítají a nemíchají uvnitř měsíce — každý měsíc pochází právě z jednoho:
+ *
+ *  - měsíc se schválenou revizí se bere **vždy z revize**, i když k němu
+ *    převzatá data leží; převzatý protějšek se jen zapíše do podkladu
+ *    (`takeover_overridden_periods`) jako doložený rozpor, viz
+ *    {@see self::readTakeoverMonths()},
+ *  - měsíc bez schválené revize, který MyÚčto přesto počítá, převzatá data
+ *    **nenahradí**; jinak by se schoval rozpracovaný běh s jinými čísly,
+ *  - měsíc jen s převzatými daty se bere z nich, a je v podkladu, v otisku
+ *    i v manifestu vidět jako převzatý ({@see self::takeoverLine()}).
+ *
+ * **Trvání vztahu se z převzatých dat neodvozuje.** Pole `relationship_end_date`
+ * je u nich dvojznačné (prázdné znamená „trvá" i „původní systém to nevydal"),
+ * takže rozsah listu drží dál zmrazená revize a převzatá data se proti němu jen
+ * kontrolují. Bez jediné schválené revize v roce se proto list nesestaví.
+ *
+ * Bez jediného převzatého měsíce je payload i znění blokátorů **doslova** jako
+ * dřív: nové klíče (`source_takeovers`, `takeover_overridden_periods`,
+ * `monthly_lines[].source`) se objeví jen tam, kde převzatá data opravdu jsou.
+ * Evidenční list je zmrazený otiskem a prázdný klíč navíc by z dřív platného
+ * listu udělal neověřitelný.
  *
  * ## Co se do listu vědomě nezapisuje
  *
@@ -58,6 +86,8 @@ final class EldpAnnualStatementBuilder
     /**
      * @param list<mixed> $revisions zmrazené mzdové revize roku
      * @param array<string,mixed>       $confirmation výslovné potvrzení účetní
+     * @param PayrollTakeoverYear|null  $takeover převzaté mzdy roku přechodu;
+     *        `null` (nebo prázdný rok) = firma vede mzdy v MyÚčtu celý rok
      */
     public function build(
         int $supplierId,
@@ -65,6 +95,7 @@ final class EldpAnnualStatementBuilder
         int $year,
         array $revisions,
         array $confirmation,
+        ?PayrollTakeoverYear $takeover = null,
     ): EldpAnnualStatement {
         if ($supplierId <= 0 || $employmentId <= 0) {
             throw new \InvalidArgumentException(
@@ -168,16 +199,53 @@ final class EldpAnnualStatementBuilder
             $employment['start'],
             $reportingEnd,
         );
+        /*
+         * Druhý zdroj měsíců se zapíná jen tehdy, když k tomuhle vztahu opravdu
+         * nějaký převzatý měsíc leží. Firma, která vede mzdy v MyÚčtu celý rok,
+         * tak projde doslova touž cestou včetně znění blokátorů.
+         */
+        if ($takeover !== null
+            && ($takeover->supplierId !== $supplierId || $takeover->year !== $year)
+        ) {
+            throw new \InvalidArgumentException(
+                'Převzaté mzdy musí být načtené za tutéž firmu a rok jako evidenční list.',
+            );
+        }
+        $hasTakeover = $takeover !== null && $takeover->forEmployment($employmentId) !== [];
+        $takeoverMonths = [];
+        $takeoverRejected = [];
+        $takeoverOverridden = [];
+        $withoutAnySource = [];
+        if ($hasTakeover) {
+            /** @var PayrollTakeoverYear $takeover */
+            [$takeoverMonths, $takeoverRejected, $takeoverOverridden] = $this->readTakeoverMonths(
+                $takeover,
+                $employmentId,
+                $requiredMonths,
+                $months,
+                $blockers,
+            );
+            // Trvání vztahu v roce, ať se na měsíce mimo vztah vůbec neptáme.
+            $withoutAnySource = array_flip(
+                $takeover->missingPeriods($employment['start'], $reportingEnd),
+            );
+        }
         foreach ($requiredMonths as $periodStart) {
-            if (!isset($months[$periodStart])) {
-                $label = self::monthLabel($periodStart);
-                $blockers[] = [
-                    'code' => 'eldp_month_source_missing',
-                    'message' => "Chybí schválená mzdová revize za {$label} — "
-                        . 'bez ní nelze doložit dobu pojištění ani vyměřovací základ.',
-                    'detail' => ['period_start' => $periodStart, 'employment_id' => $employmentId],
-                ];
+            if (isset($months[$periodStart])
+                || isset($takeoverMonths[$periodStart])
+                || isset($takeoverRejected[$periodStart])
+            ) {
+                continue;
             }
+            $blockers[] = [
+                'code' => 'eldp_month_source_missing',
+                'message' => self::missingMonthMessage(
+                    self::monthLabel($periodStart),
+                    $hasTakeover,
+                    isset($withoutAnySource[substr($periodStart, 0, 7)]),
+                ),
+                'detail' => ['period_start' => $periodStart, 'employment_id' => $employmentId],
+            ];
         }
         foreach (array_keys($months) as $periodStart) {
             if (!in_array($periodStart, $requiredMonths, true)) {
@@ -195,12 +263,20 @@ final class EldpAnnualStatementBuilder
 
         $lines = [];
         foreach ($requiredMonths as $periodStart) {
-            $line = $this->monthLine(
-                $employmentId,
-                $months[$periodStart],
-                $employment,
-                $blockers,
-            );
+            $line = isset($months[$periodStart])
+                ? $this->monthLine(
+                    $employmentId,
+                    $months[$periodStart],
+                    $employment,
+                    $blockers,
+                )
+                : $this->takeoverLine(
+                    $employmentId,
+                    $periodStart,
+                    $takeoverMonths[$periodStart],
+                    $employment,
+                    $blockers,
+                );
             if ($line !== null) {
                 $lines[] = $line;
             }
@@ -261,6 +337,20 @@ final class EldpAnnualStatementBuilder
             $window = $this->deadlines->forYear($year);
         }
 
+        /*
+         * Poctivost dokladu: převzatá část se nikde neschová. Jde do podkladu
+         * (`monthly_lines[].source`), do seznamu zdrojů s otiskem řádku
+         * (`source_takeovers`) a odtud i do zdrojového manifestu evidenčního
+         * listu — stejně jako otisky snapshotů mzdové revize.
+         */
+        $takeoverSources = [];
+        foreach ($lines as $line) {
+            if ($line['source'] === 'takeover') {
+                $takeoverSources[] = $line['takeover'];
+            }
+        }
+        $mixedSources = $takeoverSources !== [];
+
         $spec = $this->specManifest();
         $payload = [
             'schema_reference' => EldpAnnualStatement::SCHEMA_REFERENCE,
@@ -297,7 +387,7 @@ final class EldpAnnualStatementBuilder
                 'spec_manifest_sha256' => $spec['manifest_sha256'],
                 'eldp_code_evidence' => $codeEvidence,
             ],
-            'source_revisions' => array_map(
+            'source_revisions' => array_values(array_map(
                 static fn (array $line): array => [
                     'period_start' => $line['period_start'],
                     'revision_id' => $line['revision_id'],
@@ -305,20 +395,33 @@ final class EldpAnnualStatementBuilder
                     'input_snapshot_hash' => $line['input_snapshot_hash'],
                     'result_snapshot_hash' => $line['result_snapshot_hash'],
                 ],
-                $lines,
-            ),
+                array_filter(
+                    $lines,
+                    static fn (array $line): bool => $line['source'] === 'revision',
+                ),
+            )),
             'monthly_lines' => array_map(
-                static fn (array $line): array => [
-                    'period_start' => $line['period_start'],
-                    'insurance_from' => $line['insurance_from'],
-                    'insurance_to' => $line['insurance_to'],
-                    'insurance_days' => $line['insurance_days'],
-                    'assessment_base_czk' => $line['assessment_base_czk'],
-                    'code' => $line['code'],
-                    'excluded_days' => $line['excluded']['components'],
-                    'excluded_days_total' => $line['excluded']['total'],
-                    'excluded_days_provenance' => $line['excluded']['provenance'],
-                ],
+                static function (array $line) use ($mixedSources): array {
+                    $entry = [
+                        'period_start' => $line['period_start'],
+                        'insurance_from' => $line['insurance_from'],
+                        'insurance_to' => $line['insurance_to'],
+                        'insurance_days' => $line['insurance_days'],
+                        'assessment_base_czk' => $line['assessment_base_czk'],
+                        'code' => $line['code'],
+                        'excluded_days' => $line['excluded']['components'],
+                        'excluded_days_total' => $line['excluded']['total'],
+                        'excluded_days_provenance' => $line['excluded']['provenance'],
+                    ];
+                    if ($mixedSources) {
+                        $entry['source'] = $line['source'];
+                        if ($line['source'] === 'takeover') {
+                            $entry['takeover_source'] = $line['takeover']['source'];
+                        }
+                    }
+
+                    return $entry;
+                },
                 $lines,
             ),
             'eldp_sections' => $sections,
@@ -330,6 +433,12 @@ final class EldpAnnualStatementBuilder
                 'note' => trim($note),
             ],
         ];
+        if ($takeoverSources !== []) {
+            $payload['source_takeovers'] = $takeoverSources;
+        }
+        if ($takeoverOverridden !== []) {
+            $payload['takeover_overridden_periods'] = $takeoverOverridden;
+        }
 
         return new EldpAnnualStatement($payload);
     }
@@ -677,6 +786,7 @@ final class EldpAnnualStatementBuilder
         return [
             'period_start' => $periodStart,
             'period_end' => $periodEnd,
+            'source' => 'revision',
             'revision_id' => $month['revision_id'],
             'run_id' => $month['run_id'],
             'input_snapshot_hash' => $month['input_snapshot_hash'],
@@ -688,6 +798,306 @@ final class EldpAnnualStatementBuilder
             'code' => $activityCode . '++',
             'excluded' => $excluded,
         ];
+    }
+
+    /**
+     * Které měsíce roku se vezmou z převzatých mezd, a které se tím naopak
+     * zablokují.
+     *
+     * ## Měsíc z obou stran vyhrává REVIZE
+     *
+     * `presence() === 'both'` není věc k sečtení — dvakrát započtený měsíc
+     * znamená dvojí dobu pojištění i dvojí vyměřovací základ. Vyhrává schválená
+     * mzdová revize, a to ze tří důvodů:
+     *
+     *  1. Je to jediný podklad, který umí evidenční list **doložit**: je
+     *     zmrazený, ověřený otiskem obou snapshotů a rozpadá se až na jednotlivé
+     *     nepřítomnosti, ze kterých vznikly vyloučené doby. Převzatý měsíc je
+     *     opis souhrnu bez vnitřní struktury, kterou by šlo přezkoumat.
+     *  2. Je to **náš** výpočet za měsíc, který MyÚčto opravdu počítalo.
+     *     Převzatý protějšek téhož měsíce je kontrolní údaj (přesně nad ním
+     *     stojí sestava „naše přepočtená mzda vs. převzatá"), ne druhá pravda.
+     *  3. Celá reprodukovatelnost listu stojí na tom, že jde znovu sestavit ze
+     *     zmrazených revizí i za deset let.
+     *
+     * Rozpor se tím ale nezamete: měsíc jde do `takeover_overridden_periods`,
+     * tedy do podkladu i do manifestu.
+     *
+     * Měsíc, který MyÚčto počítá, ale nemá schválenou revizi, převzatá data
+     * NENAHRADÍ. Jinak by se za doložený převod vydal měsíc, ke kterému uvnitř
+     * leží rozpracovaný běh s jinými čísly.
+     *
+     * @param list<string> $requiredMonths
+     * @param array<string,array<string,mixed>> $months měsíce ze schválených revizí
+     * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
+     * @return array{0:array<string,PayrollTakeoverMonth>,1:array<string,true>,2:list<string>}
+     */
+    private function readTakeoverMonths(
+        PayrollTakeoverYear $takeover,
+        int $employmentId,
+        array $requiredMonths,
+        array $months,
+        array &$blockers,
+    ): array {
+        $rows = [];
+        foreach ($takeover->forEmployment($employmentId) as $month) {
+            $rows[$month->period][] = $month;
+        }
+        $resolved = [];
+        $rejected = [];
+        $overridden = [];
+        foreach ($requiredMonths as $periodStart) {
+            $period = substr($periodStart, 0, 7);
+            $candidates = $rows[$period] ?? [];
+            if ($candidates === []) {
+                continue;
+            }
+            if (isset($months[$periodStart])) {
+                $overridden[] = $periodStart;
+                continue;
+            }
+            $label = self::monthLabel($periodStart);
+            if ($takeover->hasCalculated($period)) {
+                $rejected[$periodStart] = true;
+                $blockers[] = [
+                    'code' => 'eldp_takeover_month_not_substitutable',
+                    'message' => "Mzdu za {$label} počítá MyÚčto, ale nemá schválenou mzdovou revizi; "
+                        . 'převzatý měsíc ji nesmí nahradit. Revizi měsíce schvalte, '
+                        . 'nebo rozpracovaný běh zrušte.',
+                    'detail' => ['period_start' => $periodStart, 'employment_id' => $employmentId],
+                ];
+                continue;
+            }
+            if (count($candidates) > 1) {
+                $rejected[$periodStart] = true;
+                $blockers[] = [
+                    'code' => 'eldp_takeover_month_ambiguous',
+                    'message' => "Za {$label} leží víc převzatých mzdových měsíců téhož pracovního vztahu; "
+                        . 'evidenční list nesmí stát na nejednoznačném podkladu. '
+                        . 'Nechte v Mzdy → Kontrola převodu mezd jediný řádek za měsíc.',
+                    'detail' => ['period_start' => $periodStart, 'employment_id' => $employmentId],
+                ];
+                continue;
+            }
+            $resolved[$periodStart] = $candidates[0];
+        }
+
+        return [$resolved, $rejected, $overridden];
+    }
+
+    /**
+     * Řádek evidenčního listu z převzatého mzdového měsíce.
+     *
+     * Převzatý měsíc není výsledek výpočtu MyÚčta, ale opis toho, co za měsíc
+     * vydal původní mzdový program. Proto se z něj **nic nedopočítává**: každý
+     * údaj, který evidenční list potřebuje a původní systém ho nevydal, je
+     * blokátor s adresou, kde ho doplnit. Odvodit dny pojištění z odpracované
+     * doby nebo složky vyloučených dob z jejich součtu by vyrobilo nedoložený
+     * údaj v zákonné evidenci, ze které se za desítky let počítá důchod.
+     *
+     * @param array{employee_id:int,start:string,end:string|null} $employment
+     * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
+     * @return array<string,mixed>|null
+     */
+    private function takeoverLine(
+        int $employmentId,
+        string $periodStart,
+        PayrollTakeoverMonth $month,
+        array $employment,
+        array &$blockers,
+    ): ?array {
+        $label = self::monthLabel($periodStart);
+        $periodEnd = (new \DateTimeImmutable($periodStart))
+            ->modify('last day of this month')->format('Y-m-d');
+        $where = ' Doplňte jej u převzatého měsíce v Mzdy → Kontrola převodu mezd a import opakujte.';
+        $detail = [
+            'period_start' => $periodStart,
+            'employment_id' => $employmentId,
+            'source' => 'takeover',
+            'takeover_source' => $month->source,
+        ];
+
+        if ($month->relationType !== 'employment') {
+            $blockers[] = [
+                'code' => 'eldp_takeover_relationship_kind_unsupported',
+                'message' => "Převzatý měsíc {$label} nemá druh vztahu pracovní poměr ("
+                    . ($month->relationType ?? 'neuvedeno') . '); evidenční list zatím jiný neumí.'
+                    . $where,
+                'detail' => $detail + ['relation_type' => $month->relationType],
+            ];
+
+            return null;
+        }
+        $code = $month->eldpCode();
+        if ($code === null) {
+            $blockers[] = [
+                'code' => 'eldp_takeover_activity_missing',
+                'message' => "Převzatý měsíc {$label} nemá druh činnosti ČSSZ 1–9, ze kterého se skládá "
+                    . 'kód sekce evidenčního listu.' . $where,
+                'detail' => $detail + ['activity_code' => $month->activityCode],
+            ];
+
+            return null;
+        }
+        /*
+         * Rozsah listu drží zmrazená revize; převzatá data se proti ní jen
+         * kontrolují. Je to tatáž přísnost jako u `eldp_employment_dates_inconsistent`
+         * mezi revizemi: nesourodý podklad se nesjednocuje, protože právě datum
+         * „od" a „do" je to, co ČSSZ z listu čte.
+         */
+        if (($month->relationshipStartDate !== null
+                && $month->relationshipStartDate !== $employment['start'])
+            || ($month->relationshipEndDate !== null
+                && $month->relationshipEndDate !== $employment['end'])
+        ) {
+            $blockers[] = [
+                'code' => 'eldp_takeover_employment_dates_inconsistent',
+                'message' => "Převzatý měsíc {$label} eviduje jiné trvání pracovního vztahu ("
+                    . ($month->relationshipStartDate ?? '?') . ' – '
+                    . ($month->relationshipEndDate ?? 'trvá') . ') než schválené mzdové revize ('
+                    . $employment['start'] . ' – ' . ($employment['end'] ?? 'trvá')
+                    . '); evidenční list nesmí sečíst nesourodé podklady.',
+                'detail' => $detail + [
+                    'takeover_start_date' => $month->relationshipStartDate,
+                    'takeover_end_date' => $month->relationshipEndDate,
+                ],
+            ];
+
+            return null;
+        }
+
+        $insuranceFrom = max($periodStart, $employment['start']);
+        $insuranceTo = $employment['end'] === null
+            ? $periodEnd
+            : min($periodEnd, $employment['end']);
+        if ($insuranceFrom > $insuranceTo) {
+            return null;
+        }
+        if (!$month->pensionParticipation && $month->socialBaseMinor !== 0) {
+            $blockers[] = [
+                'code' => 'eldp_takeover_participation_conflict',
+                'message' => "Převzatý měsíc {$label} je označen jako měsíc bez účasti na důchodovém "
+                    . 'pojištění, ale nese vyměřovací základ; jedno z toho je chybně převzaté.'
+                    . $where,
+                'detail' => $detail,
+            ];
+
+            return null;
+        }
+        /*
+         * Nula dnů je u převzatého měsíce dvojznačná — může znamenat „původní
+         * systém to nevydal" i „měsíc není dobou pojištění". Rozhoduje výhradně
+         * příznak účasti, který zapisovatel převzatých mezd drží v souladu s § 11
+         * odst. 2 zákona č. 155/1995 Sb. Dopočítat dny odjinud se nesmí.
+         */
+        $days = $month->pensionParticipation ? $month->insuranceDays : 0;
+        if ($month->pensionParticipation && $days <= 0) {
+            $blockers[] = [
+                'code' => 'eldp_takeover_insurance_days_missing',
+                'message' => "Převzatý měsíc {$label} se účastní důchodového pojištění, ale nemá dny "
+                    . 'účasti. Modul je z ničeho jiného neodvozuje.' . $where,
+                'detail' => $detail,
+            ];
+
+            return null;
+        }
+        $available = EldpExcludedPeriodDeriver::inclusiveDays($insuranceFrom, $insuranceTo);
+        if ($days > $available) {
+            $blockers[] = [
+                'code' => 'eldp_takeover_insurance_days_exceed_period',
+                'message' => "Převzatý měsíc {$label} vykazuje {$days} dnů účasti, ale pracovní vztah "
+                    . "v něm trval jen {$available} dnů.",
+                'detail' => $detail + ['insurance_days' => $days, 'available_days' => $available],
+            ];
+
+            return null;
+        }
+        /*
+         * Vyloučené doby jdou do listu jen rozepsané na složky § 16 odst. 4
+         * (nemoc, PPM, OČR, otcovská, ostatní) — převzatá data mají jen jejich
+         * součet. Zařadit celý součet do jedné složky by byl vymyšlený údaj,
+         * takže měsíc s vyloučenými dobami zůstává blokátorem. Součet nula se
+         * bere jako doložená nula; stvrzuje ji výslovné potvrzení účetní
+         * (`excluded_days_confirmed`), které se vztahuje na celý list.
+         */
+        if ($month->excludedDays !== 0) {
+            $blockers[] = [
+                'code' => 'eldp_takeover_excluded_days_breakdown_missing',
+                'message' => "Převzatý měsíc {$label} má {$month->excludedDays} dnů vyloučených dob, "
+                    . 'ale ne jejich rozpad podle § 16 odst. 4 zákona č. 155/1995 Sb. '
+                    . 'Zaevidujte odpovídající nepřítomnosti v Mzdy → Nepřítomnosti a měsíc '
+                    . 'přepočítejte, nebo evidenční list podejte mimo aplikaci.',
+                'detail' => $detail + ['excluded_days' => $month->excludedDays],
+            ];
+
+            return null;
+        }
+        $base = $month->socialBaseMinor;
+        if ($base < 0 || ($days > 0 && $base === 0)) {
+            $blockers[] = [
+                'code' => 'eldp_takeover_assessment_base_missing',
+                'message' => "Převzatý měsíc {$label} vykazuje dobu pojištění, ale nemá vyměřovací "
+                    . 'základ sociálního pojištění.' . $where,
+                'detail' => $detail,
+            ];
+
+            return null;
+        }
+        if ($base % 100 !== 0 || intdiv($base, 100) > 9_999_999_999) {
+            $blockers[] = [
+                'code' => 'eldp_takeover_assessment_base_not_whole_czk',
+                'message' => "Vyměřovací základ převzatého měsíce {$label} není celé Kč v rozsahu "
+                    . 'datové věty.' . $where,
+                'detail' => $detail,
+            ];
+
+            return null;
+        }
+
+        return [
+            'period_start' => $periodStart,
+            'period_end' => $periodEnd,
+            'source' => 'takeover',
+            'takeover' => [
+                'period_start' => $periodStart,
+                'source' => $month->source,
+                'external_person_ref' => $month->externalPersonRef,
+                'external_relationship_ref' => $month->externalRelationshipRef,
+                'import_reference' => $month->importReference,
+                // Otisk přesně toho řádku, ze kterého měsíc vznikl — protějšek
+                // otisků snapshotů mzdové revize v `source_revisions`.
+                'row_sha256' => hash('sha256', CanonicalJson::encode($month->toArray())),
+            ],
+            'insurance_from' => $insuranceFrom,
+            'insurance_to' => $insuranceTo,
+            'insurance_days' => $days,
+            'assessment_base_czk' => intdiv($base, 100),
+            'code' => $code,
+            'excluded' => [
+                'components' => array_fill_keys(EldpExcludedPeriodDeriver::COMPONENTS, 0),
+                'total' => 0,
+                'provenance' => [],
+            ],
+        ];
+    }
+
+    private static function missingMonthMessage(
+        string $label,
+        bool $hasTakeover,
+        bool $withoutAnySource,
+    ): string {
+        if (!$hasTakeover) {
+            return "Chybí schválená mzdová revize za {$label} — "
+                . 'bez ní nelze doložit dobu pojištění ani vyměřovací základ.';
+        }
+        if ($withoutAnySource) {
+            return "Za {$label} není ani schválená mzdová revize, ani převzatý mzdový měsíc — "
+                . 'bez jednoho z nich nelze doložit dobu pojištění ani vyměřovací základ. '
+                . 'Měsíc doplňte v Mzdy → Kontrola převodu mezd, nebo mzdu spočítejte a schvalte.';
+        }
+
+        return "Mzdu za {$label} počítá MyÚčto, ale nemá schválenou mzdovou revizi; "
+            . 'bez ní nelze doložit dobu pojištění ani vyměřovací základ.';
     }
 
     /**

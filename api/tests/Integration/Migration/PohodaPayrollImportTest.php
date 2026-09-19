@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaPayroll;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -324,6 +325,89 @@ final class PohodaPayrollImportTest extends TestCase
                 AND verified_on = '2026-03-10' AND verified_by = ?",
             [$supplierId, $this->userId],
         ), $this->explain($again));
+    }
+
+    /**
+     * Měsíc s nemocí musí po převodu jít schválit. Nemoc, ošetřovné, otcovská, neplacené
+     * volno a neomluvená absence rozhodují o náhradě mzdy i vyloučené době, takže je
+     * evidence vede jedině s daty od a do: dokud šly hodiny měsíčním souhrnem z importu
+     * docházky, schválení je vracelo s `absence_hours_without_dates` a mzdový běh se o ty
+     * měsíce zastavil. Nepřítomnost s daty proto zapisuje převod z `MZneprit` a tytéž
+     * hodiny do souhrnu nejdou - jeden údaj, jeden zdroj.
+     */
+    public function testDatedSicknessIsWrittenOnceAndItsMonthCanBeApproved(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = $this->writeSicknessPayroll();
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $employment = $this->employment($supplierId, '5001');
+
+        // Nepřítomnost s daty přesně z `MZneprit`, nic dopočítaného.
+        self::assertSame(1, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_absences
+              WHERE supplier_id = ? AND employment_id = ? AND absence_type = 'dpn'
+                AND date_from = '2026-03-05' AND date_to = '2026-03-13'",
+            [$supplierId, $employment['id']],
+        ), $this->explain($protocol));
+
+        // Měsíc je schválený, takže se o něj mzdový běh nezastaví.
+        self::assertSame('approved', (string) $this->db->pdo()->query(sprintf(
+            "SELECT status FROM payroll_time_months WHERE supplier_id = %d AND employment_id = %d AND period_start = '2026-03-01'",
+            $supplierId,
+            (int) $employment['id'],
+        ))?->fetchColumn(), $this->explain($protocol));
+
+        // Tytéž hodiny nesmí být zároveň v souhrnu z importu, jinak by se doba vedla dvakrát.
+        $summary = $this->db->pdo()->prepare(
+            'SELECT values_json FROM payroll_time_month_import_summaries
+              WHERE supplier_id = ? AND employment_id = ? AND period_start = ?'
+        );
+        $summary->execute([$supplierId, $employment['id'], '2026-03-01']);
+        /** @var array<string,int> $values */
+        $values = json_decode((string) $summary->fetchColumn(), true) ?: [];
+        self::assertArrayNotHasKey('sick_hours', $values, json_encode($values));
+        self::assertSame([], PayrollJmhzWorkMonthSummaryBuilder::importHoursRequiringDates($values));
+    }
+
+    /**
+     * Jedna fiktivní osoba s měsíční mzdou a nemocí, kterou PAMICA nese s datem od a do.
+     * Syntetická data, žádné reálné doklady ani osoby.
+     */
+    private function writeSicknessPayroll(): string
+    {
+        $dir = $this->tmp . '/12345678_2026';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $x = '';
+        $row = static function (string $table, array $cols) use (&$x): void {
+            $x .= "<{$table}>";
+            foreach ($cols as $k => $v) {
+                $x .= "<{$k}>" . htmlspecialchars((string) $v, ENT_XML1) . "</{$k}>";
+            }
+            $x .= "</{$table}>";
+        };
+        $row('sMZneprit', ['ID' => 1, 'Cislo' => 'H01', 'Nazev' => 'Náhrada za nemoc']);
+        $row('sMZslozky', ['ID' => 1, 'Cislo' => 'M01', 'Nazev' => 'Základní mzda měsíční']);
+        $row('sMzPoj', ['ID' => 1, 'IDS' => 'VZP', 'Kod' => '111']);
+        $row('ZAM', ['ID' => 1, 'OsCislo' => '5001', 'Jmeno' => 'Hana', 'Prijmeni' => 'Nemocná', 'DatNar' => '1988-02-03',
+            'StatPris' => 'CZ', 'Nerezident' => 0, 'RefPoj' => 1, 'Ulice' => 'Zkušební', 'CP' => '1', 'Obec' => 'Brno',
+            'PSC' => '60200', 'Stat' => 'CZ']);
+        $row('ZAMpomer', ['ID' => 1, 'RefZAM' => 1, 'Poradi' => 1, 'Cislo' => '1', 'JeDPP' => 0, 'DatNast' => '2024-01-01', 'TUvazek' => 40]);
+        $row('MZ', ['ID' => 30, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => 2026, 'RelMes' => 3, 'HodFond' => 176, 'DnyFond2' => 22,
+            'TUvazek' => 40, 'HodOdpra' => 136, 'RefPoj' => 1, 'KcHrubaM' => 35000, 'KcCistaM' => 27000, 'Prohlas' => 1,
+            'JeSocPP' => 1, 'KcSoc' => 2485, 'KcZaklM' => 35000, 'DnyPrac' => 22, 'DnyOdpra' => 17, 'KcPrum' => 200,
+            'Datum' => '2026-04-10', 'KcVyplat' => 27000]);
+        $row('MZslozky', ['ID' => 1, 'RefAg' => 30, 'RefSlozka' => 1, 'KcMzda' => 35000, 'Hodnota1' => 35000]);
+        $row('MZneprit', ['ID' => 1, 'RefAg' => 30, 'RefSlozka' => 1, 'HodPrac' => 40, 'KcNahr' => 6000,
+            'DatZac' => '2026-03-05', 'DatKon' => '2026-03-13']);
+
+        $file = $dir . '/91_mzdy.xml';
+        file_put_contents($file, '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+            . '<mdbExport version="1" group="mzdy" ico="12345678" year="2026" source="POHODA" state="ok">' . $x . '</mdbExport>');
+        return $file;
     }
 
     public function testDryRunLeavesNothingBehind(): void

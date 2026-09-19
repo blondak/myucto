@@ -391,6 +391,41 @@ final class PayrollAbsenceAction
         return Json::ok($response, ['absence' => $absence]);
     }
 
+    /**
+     * Zápis dnů okna náhrady mzdy (§ 192 ZP) vyčerpaných u DPN/karantény ještě
+     * PŘED touhle nepřítomností — u předchozího zaměstnavatele nebo předchozího
+     * mzdového programu. Pravidla (jen DPN/karanténa, otevřený rok, absence bez
+     * spočítané náhrady) drží {@see PayrollAbsenceRepository::setSicknessWindowCarriedDays()}.
+     *
+     * @param array<string,string> $args
+     */
+    public function sicknessWindowCarried(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $body = $this->body($request);
+        try {
+            $version = $this->requiredNonNegativeInt($body['row_version'] ?? null, 'row_version');
+            $days = $this->requiredNonNegativeInt(
+                $body['sickness_window_carried_days'] ?? null,
+                'sickness_window_carried_days',
+            );
+            $absence = $this->absences->setSicknessWindowCarriedDays($supplierId, $id, $days, $version);
+        } catch (PayrollYearClosedException $e) {
+            return self::yearClosedError($response, $e);
+        } catch (\DomainException|\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (PayrollAbsenceConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        }
+        return Json::ok($response, ['absence' => $absence]);
+    }
+
     public function averages(Request $request, Response $response): Response
     {
         if (($error = $this->authorize($request, $response, AccessLevel::READ, true)) !== null) {
@@ -918,6 +953,7 @@ final class PayrollAbsenceAction
             'leave_year', 'year' => 'Rok',
             'row_version' => 'Verze záznamu',
             'minutes_delta' => 'Změna nároku v minutách',
+            'sickness_window_carried_days' => 'Dny okna náhrady vyčerpané předchozím plátcem',
             default => 'Zadaná hodnota',
         };
     }

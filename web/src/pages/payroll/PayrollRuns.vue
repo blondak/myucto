@@ -33,6 +33,7 @@ import { useToast } from '@/composables/useToast'
 import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import { runPayrollInputBatch } from '@/pages/payroll/payrollInputFilters'
 import PayrollMonthlyChecklistPanel from '@/pages/payroll/PayrollMonthlyChecklistPanel.vue'
+import PayrollTakeoverRunsPanel from '@/pages/payroll/PayrollTakeoverRunsPanel.vue'
 import type { PayrollRegzelEnvironment, PayrollStatutoryBulkResult } from '@/api/payroll'
 import DateInput from '@/components/ui/DateInput.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
@@ -125,6 +126,9 @@ const preparationOpen = ref(true)
 const periodRun = computed(
   () => runs.value.find(run => run.period_start.slice(0, 7) === period.value) ?? null,
 )
+
+/** Rok zvoleného období — panel převzatých měsíců pracuje po rocích. */
+const takeoverYear = computed(() => Number(period.value.slice(0, 4)))
 
 /**
  * Příprava vstupů svítí, jen dokud jsou vstupy měnitelné — tedy když za období
@@ -1548,6 +1552,16 @@ onMounted(load)
       </div>
     </section>
 
+    <!--
+      Rok přechodu z jiného mzdového programu. Panel se sám schová u firmy,
+      která žádné převzaté historické měsíce nemá.
+    -->
+    <PayrollTakeoverRunsPanel
+      :year="takeoverYear"
+      :can-write="canWrite"
+      @changed="load"
+    />
+
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 2" :key="index" class="h-40 animate-pulse rounded-xl bg-neutral-100" />
     </div>
@@ -1592,6 +1606,17 @@ onMounted(load)
               </h2>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(run.status)">
                 {{ t(`payroll.runs.status.${run.status}`) }}
+              </span>
+              <!--
+                Převzatý běh musí jít odlišit na první pohled. Je to zrcadlo
+                cizího výpočtu: žádná revize, žádné zaúčtování, žádné doklady.
+              -->
+              <span
+                v-if="run.run_kind === 'takeover'"
+                class="rounded-full bg-payroll-50 px-2.5 py-1 text-xs font-medium text-payroll-600"
+                :title="t('payroll.runs.takeover.badge_hint')"
+              >
+                {{ t('payroll.runs.takeover.badge') }}
               </span>
             </div>
             <p class="mt-1 text-sm text-neutral-500">

@@ -1029,6 +1029,7 @@
     "payroll_retention": "Retenční lhůty",
     "payroll_erasure": "Výmaz osobních údajů",
     "payroll_benefit_baskets": "Koše benefitů",
+    "payroll_posting_map": "Kontace z původního programu",
     "payroll_migration_reconciliation": "Kontrola převzatých mezd",
     "settings": "Nastavení",
     "company_settings": "Nastavení firmy",
@@ -1672,6 +1673,55 @@
       "privacy_hint": "Přehled neobsahuje jména, osobní identifikátory ani detail jednotlivých zaměstnanců.",
       "load_failed": "Roční přehled mezd se nepodařilo načíst."
     },
+    "posting_map": {
+      "title": "Kontace mezd z původního programu",
+      "intro": "Z převzatého zaúčtování se odvodí, který účet stál u kterého mzdového plnění, a nabídne se to jako návrh nastavení kontací. Uloží se jen to, co potvrdíte.",
+      "not_posted": "Účetní zápisy se nepřebírají. Mzdy zaúčtuje MyÚčto vlastní cestou podle tohoto nastavení; převzaté zápisy by proti převedeným dokladům vyrobily duplicitu.",
+      "reload": "Načíst znovu",
+      "hide_missing": "Skrýt významy bez podkladu",
+      "load_failed": "Návrh kontací se nepodařilo načíst.",
+      "save_failed": "Potvrzené kontace se nepodařilo uložit.",
+      "saved": "Potvrzené kontace jsou uložené v nastavení mezd.",
+      "conflict": "Nastavení mezd mezitím někdo změnil. Načetli jsme ho znovu, výběr prosím zopakujte.",
+      "empty_title": "Zatím není z čeho odvozovat",
+      "empty_description": "Návrh vzniká při převodu mezd z původního programu. Spusťte převod a vraťte se sem.",
+      "table_title": "Odvozené kontace",
+      "table_hint": "Prázdná nabídka znamená „ponechat dosavadní účet“. Rozpor se nerozhoduje za vás: když na jeden význam vyšly dva účty, vyberte ten správný sami.",
+      "accept_unambiguous": "Převzít jednoznačné",
+      "clear_choices": "Zrušit výběr",
+      "nothing_derived": "Z převzatých dat nic nevyšlo",
+      "not_in_chart": "v osnově chybí",
+      "synthetic_available": "v osnově máte {code}",
+      "evidence": "{lines} řádků, {amount}",
+      "cost_centers": "střediska: {list}",
+      "is_default": "výchozí hodnota",
+      "keep_current": "Ponechat dosavadní účet",
+      "unmapped_title": "Plnění bez protějšku v MyÚčtu",
+      "unmapped_hint": "Tyhle řádky převzatého zaúčtování se k žádné mzdové kontaci MyÚčta nepřiřadily. Nejsou zahozené, jen je nemá kam zařadit: zálohy, úhrady mzdy, zaokrouhlení a podobně.",
+      "pending": "Potvrzeno k uložení: {count}",
+      "save": "Uložit potvrzené kontace",
+      "status": {
+        "unambiguous": "jednoznačné",
+        "conflict": "rozpor",
+        "outside_chart": "účet mimo osnovu",
+        "missing": "bez podkladu"
+      },
+      "summary": {
+        "lines": "Řádků převzatého zaúčtování",
+        "unambiguous": "Jednoznačných",
+        "conflict": "Rozporných",
+        "outside_chart": "Mimo osnovu"
+      },
+      "column": {
+        "meaning": "Mzdové plnění",
+        "derived": "Odvozeno z převzatých dat",
+        "current": "Nastaveno teď",
+        "choice": "Potvrdit účet",
+        "legacy_label": "Plnění v původním programu",
+        "lines": "Řádků",
+        "amount": "Částka"
+      }
+    },
     "migration_reconciliation": {
       "title": "Kontrola převzatých mezd",
       "subtitle": "Porovná mzdu přepočítanou v MyÚčtu s mzdou převzatou z původního systému. Původní systém už ta čísla podal do JMHZ, na zdravotní pojišťovny a na finanční úřad, takže rozdíl je potřeba znát dřív, než se přepočet schválí.",
@@ -1681,7 +1731,38 @@
       "source_name": {
         "pamica": "PAMICA",
         "pohoda": "POHODA Mzdy",
-        "money_s3": "Money S3"
+        "money_s3": "Money S3",
+        "other": "Jiný mzdový systém"
+      },
+      "takeover": {
+        "title": "Převzaté mzdy za rok",
+        "subtitle": "Co je za rok k dispozici z původního systému. Nad těmito daty stojí i evidenční list důchodového pojištění a zpětná evidence plateb, takže měsíc, který není ani převzatý, ani spočítaný, je díra v roce.",
+        "template": "Vzorový soubor",
+        "historical": "historický",
+        "presence": {
+          "takeover_only": "převzatý",
+          "calculated_only": "počítá MyÚčto",
+          "both": "obě strany",
+          "none": "chybí"
+        },
+        "people_count": "{count} osob",
+        "months": "Měsíců",
+        "net_payable": "K výplatě",
+        "missing": "Bez podkladu z kterékoli strany: {periods}",
+        "overlapping": "Z obou stran (k porovnání v sestavě níž): {periods}",
+        "upload_title": "Nahrát převzaté mzdy",
+        "upload_hint": "CSV nebo XLSX se sloupci ze vzorového souboru. Částky v celých haléřích, dny a hodiny desetinně. Trvání a druh pracovního vztahu se berou z evidence, ne ze souboru. Opakované nahrání týchž dat řádky nezdvojí, přepíše je.",
+        "import_source": "Původní systém",
+        "file": "Soubor",
+        "preview": "Zkontrolovat",
+        "apply": "Nahrát",
+        "format_unsupported": "Vyberte soubor CSV nebo XLSX.",
+        "preview_failed": "Soubor se nepodařilo zkontrolovat.",
+        "apply_failed": "Převzaté mzdy se nepodařilo uložit.",
+        "apply_done": "Uloženo {rows} řádků za {people} osob a {months} měsíců.",
+        "preview_summary": "Řádků {rows}, osob {people}, měsíců {months}. Vše v pořádku, můžete nahrát.",
+        "errors_block": "Soubor má {count} vadných řádků a nezapíše se ani zčásti. Převzaté mzdy jsou souvislá řada měsíců, takže částečný zápis by tiše zkreslil dobu pojištění.",
+        "error_row": "Řádek {row}:"
       },
       "reload": "Načíst znovu",
       "load_failed": "Kontrolní sestavu se nepodařilo načíst.",
@@ -2232,6 +2313,46 @@
       "empty": "Pro zvolené období není mzdový běh",
       "empty_hint": "Zkontrolujte vstupy a vytvořte první běh tlačítkem nahoře.",
       "run_label": "Mzdy za {period}",
+      "takeover": {
+        "title": "Převzaté měsíce roku přechodu",
+        "subtitle": "Měsíce, které zpracoval předchozí mzdový program. Převzatý běh je jejich zrcadlo: nepočítá se, neschvaluje a znovu se nezaúčtovává.",
+        "boundary": "MyÚčto počítá mzdy od {period}",
+        "loading": "Načítám převzaté měsíce…",
+        "rows": "{count} řádků převodu",
+        "state_built": "Převzato",
+        "state_available": "K převzetí",
+        "build": "Převzít měsíc",
+        "built": "Měsíc {period} je převzatý.",
+        "build_failed": "Měsíc se nepodařilo převzít.",
+        "show": "Zobrazit doložení plateb",
+        "hide": "Skrýt doložení plateb",
+        "detail_failed": "Doložení plateb se nepodařilo načíst.",
+        "discard": "Zrušit převzetí",
+        "discard_hint": "Převzatý běh se neopravuje. Zrušte ho a převezměte znovu z aktuálních podkladů.",
+        "discard_reason": "Důvod zrušení",
+        "discard_confirm": "Zrušit převzetí",
+        "discard_cancel": "Ponechat",
+        "discarded": "Převzetí bylo zrušeno.",
+        "discard_failed": "Převzetí se nepodařilo zrušit.",
+        "badge": "Převzato",
+        "badge_hint": "Výsledek pochází z předchozího mzdového programu, nevznikl výpočtem v MyÚčtu.",
+        "evidence_note": "Doložení plateb, ne platební příkaz. Nevzniká tu závazek ani úhrada, takže se to neobjeví v saldu ani v účetním deníku — zaúčtování historického měsíce je v knihách už z převodu.",
+        "column_kind": "Druh",
+        "column_who": "Komu",
+        "column_amount": "Částka",
+        "column_paid_on": "Zaplaceno",
+        "whole_company": "Za celou firmu",
+        "no_payment_date": "datum neznámé",
+        "kind": {
+          "net_wage": "Čistá mzda",
+          "deduction": "Srážky ze mzdy",
+          "social_insurance": "Sociální pojištění",
+          "health_insurance": "Zdravotní pojištění",
+          "advance_tax": "Záloha na daň",
+          "withholding_tax": "Srážková daň",
+          "tax_bonus": "Daňový bonus"
+        }
+      },
       "revision": "revize {revision}",
       "reason_prompt": "Uveďte důvod změny:",
       "reason_required": "Důvod je povinný.",
@@ -6838,7 +6959,14 @@
         "prepareFailed": "Evidenční list se nepodařilo sestavit.",
         "downloadFailed": "Kontrolní XML evidenčního listu se nepodařilo stáhnout."
       },
-      "noteOptionalHint": "Nepovinné. ČSSZ poznámku nepřebírá, zůstává jen ve vaší evidenci jako zápis, proč list vznikl. Předvyplňujeme ji podle důvodu přípustnosti."
+      "noteOptionalHint": "Nepovinné. ČSSZ poznámku nepřebírá, zůstává jen ve vaší evidenci jako zápis, proč list vznikl. Předvyplňujeme ji podle důvodu přípustnosti.",
+      "takeover": {
+        "title": "Část roku pochází z jiného mzdového programu.",
+        "description": "Následující měsíce nespočítalo MyÚčto: jsou převzaté z původního systému a do evidenčního listu jdou tak, jak je vydal. Před podáním je porovnejte s podklady původního programu; jejich otisk je součástí zmrazeného evidenčního listu.",
+        "month": "{period} — převzato z {source}",
+        "fingerprint": "Otisk převzatého řádku: {hash}",
+        "overridden": "Za tyto měsíce leží převzatá data i schválená mzdová revize MyÚčta; evidenční list stojí na revizi: {periods}."
+      }
     },
     "regzel": {
       "description": "Bezpečně připraví pouze doplňující údaje zaměstnavatele. Prvotní registrace, změny životního cyklu a opravy zůstávají zablokované.",
@@ -8973,7 +9101,8 @@
         "calendar": "Najít pracovní kalendář vztahu",
         "entries": "Zkontrolovat docházku vztahu",
         "imports": "Otevřít importy docházky",
-        "average": "Doplnit průměr tohoto vztahu"
+        "average": "Doplnit průměr tohoto vztahu",
+        "takeover": "Otevřít kontrolu převodu mezd"
       },
       "eldp": {
         "period": "Vykazované období: {period}.",
@@ -8991,7 +9120,9 @@
           "absence_dates": "V podkladech je absence s neplatným začátkem nebo koncem.",
           "absence_overlap": "Vyloučené doby se překrývají nebo jejich počet překračuje dobu pracovního vztahu.",
           "income_month": "V měsíci nebyl zúčtován žádný započitatelný příjem a z evidovaných nepřítomností nejde rozhodnout, zda je měsíc dobou pojištění (nemoc spolu s neplaceným volnem, měsíc porodu nebo měsíc bez příjmu i bez nepřítomnosti).",
-          "unknown": "Přípravu evidenčního listu zastavila chyba, kterou musí posoudit podpora."
+          "unknown": "Přípravu evidenčního listu zastavila chyba, kterou musí posoudit podpora.",
+          "takeover": "Převzatý mzdový měsíc z původního programu nemá údaj, který evidenční list potřebuje, nebo si odporuje se mzdami vedenými v MyÚčtu.",
+          "takeover_revision": "Mzdu za označený měsíc počítá MyÚčto, ale nemá schválenou revizi; převzatá data z původního programu ji nahradit nesmí."
         },
         "steps": {
           "no_revisions": "V agendě Mzdy vyberte vykazovaný rok a zkontrolujte měsíce trvání vztahu. Doplňte skutečně chybějící výpočty a jejich schválení. Pokud mzdy vznikly mimo aplikaci, nevytvářejte fiktivní výpočty; zpracování historických podkladů dohodněte s podporou.",
@@ -9007,7 +9138,9 @@
           "absence_dates": "Otevřete Absence tohoto vztahu a zkontrolujte data a překryvy ve vykazovaném období. Opravte pouze chybně evidované záznamy, následně přepočítejte a schvalte dotčené mzdy. Pokud souběh absencí odpovídá skutečnosti, nemažte jej kvůli kontrole a kontaktujte podporu.",
           "absence_overlap": "Otevřete Absence tohoto vztahu a zkontrolujte data a překryvy ve vykazovaném období. Opravte pouze chybně evidované záznamy, následně přepočítejte a schvalte dotčené mzdy. Pokud souběh absencí odpovídá skutečnosti, nemažte jej kvůli kontrole a kontaktujte podporu.",
           "income_month": "Otevřete Absence tohoto vztahu a ověřte nepřítomnosti v označeném měsíci. Chybí-li evidovaná nepřítomnost nebo zapomenutá mzda, doplňte ji a mzdu přepočítejte. Pokud evidence odpovídá skutečnosti, rozhoduje zákon jen o celém měsíci a aplikace ho nevyhodnotí sama; takový měsíc zpracujte ručně a nic kvůli kontrole neupravujte.",
-          "unknown": "Kontaktujte podporu a přiložte vykazovaný rok, pracovní vztah a technické podrobnosti níže. Údaje zaměstnance ani schválené mzdy kvůli této chybě neměňte naslepo."
+          "unknown": "Kontaktujte podporu a přiložte vykazovaný rok, pracovní vztah a technické podrobnosti níže. Údaje zaměstnance ani schválené mzdy kvůli této chybě neměňte naslepo.",
+          "takeover": "Otevřete Kontrolu převodu mezd, u označeného měsíce doplňte chybějící údaj (druh činnosti, dny účasti, vyměřovací základ, trvání vztahu) a převod zopakujte. Údaj nedoplňujte odhadem: evidenční list je podklad pro výpočet důchodu. Pokud jej původní program nevydal, sestavte evidenční list za dotčený měsíc mimo aplikaci.",
+          "takeover_revision": "Otevřete mzdy označeného měsíce, dokončete výpočet a schvalte aktuální revizi, nebo rozpracovaný běh zrušte. Teprve potom připravte evidenční list znovu. Převzatá data měsíc nenahradí, aby se rozpracovaný výpočet s jinými čísly neschoval."
         }
       },
       "work": {
@@ -23277,7 +23410,11 @@
       "record_childbirth": "Doplnit den porodu",
       "record_childbirth_save": "Uložit den porodu",
       "record_childbirth_once": "Den porodu jde doplnit jen jednou. Chybný údaj opravíte zrušením nepřítomnosti a novým zápisem.",
-      "childbirth_recorded": "Den porodu je doplněný."
+      "childbirth_recorded": "Den porodu je doplněný.",
+      "sickness_window_carried_days": "Dnů okna náhrady vyčerpaných předchozím plátcem",
+      "sickness_window_carried_edit": "Upravit dny okna náhrady",
+      "sickness_window_carried_hint": "Vyplňte, jen když zaměstnanec byl na začátku neschopnosti u jiného zaměstnavatele nebo v předchozím mzdovém programu — okno náhrady mzdy (§ 192 ZP) se pak zkrátí o dny, které tam už vyčerpal. Po spočítané náhradě mzdy se už nezmění.",
+      "sickness_window_carried_saved": "Dny okna náhrady jsou uložené."
     },
     "dpn": {
       "insurance": "Potvrzena účast na nemocenském pojištění",
@@ -25014,7 +25151,8 @@
       "payroll_deductions": "Srážky, exekuce a insolvence",
       "cancelled": "Zrušeno uživatelem",
       "unexpected": "Neočekávaná chyba",
-      "payroll_sickness": "Nemocenská a náhrady mzdy"
+      "payroll_sickness": "Nemocenská a náhrady mzdy",
+      "payroll_posting_map": "Kontace z původního programu"
     },
     "counts": {
       "months": "měsíců",
@@ -25128,6 +25266,7 @@
       "institution_accounts": "účtů zdravotních pojišťoven",
       "monthly_wage_ended": "ukončených vztahů bez přenosu mzdy",
       "absences_overlap": "nepřítomností vynechaných pro překryv",
+      "absences_without_dates": "nepřítomností bez data od a do",
       "monthly_wage_settled": "verzí mzdy do uzavřeného období",
       "recurring_wage": "předpisů měsíční mzdy",
       "recurring_wage_hourly": "z toho vztahů i s hodinovou nebo úkolovou mzdou",
@@ -25147,7 +25286,8 @@
       "sickness_overlap": "případů překrytých jinou nepřítomností",
       "sickness_failed": "případů nepřevedeno",
       "reference_totals": "převzatých mezd pro srovnání",
-      "reference_totals_skipped": "mezd bez identifikace vztahu"
+      "reference_totals_skipped": "mezd bez identifikace vztahu",
+      "posting_map_conflicts": "kontací s rozporem"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",

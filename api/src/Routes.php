@@ -99,6 +99,7 @@ use MyInvoice\Action\Payroll\PayrollEnforcementFactsAction;
 use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
+use MyInvoice\Action\Payroll\PayrollPostingMapAction;
 use MyInvoice\Action\Payroll\PayrollOfficeRegistrationAction;
 use MyInvoice\Action\Payroll\PayrollAccidentInsuranceRateAction;
 use MyInvoice\Action\Payroll\PayrollOperationalHealthAction;
@@ -140,6 +141,7 @@ use MyInvoice\Action\Payroll\PayrollForeignPermitAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
 use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
 use MyInvoice\Action\Payroll\PayrollOpeningBalanceAction;
+use MyInvoice\Action\Payroll\PayrollTakeoverWageAction;
 use MyInvoice\Action\Payroll\PayrollPersonSensitiveRevealAction;
 use MyInvoice\Action\Payroll\PayrollPersonStatutoryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollStatutoryEvidenceBulkDefaultsAction;
@@ -1059,6 +1061,30 @@ final class Routes
                 '/reports/migration-reconciliation/{year:[0-9]{4}}',
                 [PayrollMigrationReconciliationAction::class, 'show'],
             );
+            // Převzaté mzdy roku přechodu. Vzor a import stojí před rokovými
+            // routami, aby `import` nespadl do `{year}` — regulární výraz na
+            // čtyři číslice by ho sice nechytil, ale pořadí to říká nahlas.
+            $g->get(
+                '/takeover-wages/import/template',
+                [PayrollTakeoverWageAction::class, 'importTemplate'],
+            );
+            $g->post(
+                '/takeover-wages/import/preview',
+                [PayrollTakeoverWageAction::class, 'importPreview'],
+            );
+            $g->post(
+                '/takeover-wages/import/apply',
+                [PayrollTakeoverWageAction::class, 'importApply'],
+            );
+            $g->get(
+                '/takeover-wages/{year:[0-9]{4}}',
+                [PayrollTakeoverWageAction::class, 'overview'],
+            );
+            // Podklad pro evidenční list a pro zpětnou evidenci plateb za osobu.
+            $g->get(
+                '/takeover-wages/{year:[0-9]{4}}/people/{employeeId:[0-9]+}',
+                [PayrollTakeoverWageAction::class, 'person'],
+            );
             // Žádosti o poukázání chybějící částky na daňovém bonusu
             // (§ 35d odst. 5 = DPZMB1, odst. 9 = DPZDB1). Vyplacené bonusy nad
             // rámec sražených záloh doplácí zaměstnavatel ze svého a bez téhle
@@ -1080,6 +1106,23 @@ final class Routes
             $g->post('/year-close/{year:[0-9]{4}}/close', [PayrollYearCloseAction::class, 'close']);
             $g->post('/year-close/{year:[0-9]{4}}/reopen', [PayrollYearCloseAction::class, 'reopen']);
             $g->get('/runs/{id:[0-9]+}/history', [PayrollRunsAction::class, 'history']);
+            // Převzatý mzdový běh roku přechodu (PAM-17) a doložení jeho plateb
+            // (PAM-18). Není to příkaz workflow: převzatý běh neprochází
+            // výpočtem ani schválením, takže pod `commands/` nepatří. Rok stojí
+            // před `{id}`, aby bylo na první pohled vidět, že se nepřekrývají.
+            $g->get(
+                '/runs/takeover/{year:[0-9]{4}}',
+                [PayrollRunsAction::class, 'takeoverOverview'],
+            );
+            $g->post('/runs/takeover', [PayrollRunsAction::class, 'takeoverBuild']);
+            $g->get(
+                '/runs/{id:[0-9]+}/takeover',
+                [PayrollRunsAction::class, 'takeoverDetail'],
+            );
+            $g->post(
+                '/runs/{id:[0-9]+}/takeover/discard',
+                [PayrollRunsAction::class, 'takeoverDiscard'],
+            );
             // Detail existuje kvůli tomu, aby seznam nemusel posílat celý
             // výsledkový snapshot každého běhu — ten se dotahuje na vyžádání.
             $g->get('/runs/{id:[0-9]+}', [PayrollRunsAction::class, 'detail']);
@@ -1938,6 +1981,11 @@ final class Routes
             $g->get('/settings/account-options', PayrollAccountOptionsAction::class);
             $g->get('/settings/employer', [PayrollEmployerSettingsAction::class, 'get']);
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
+            // Návrh předkontací z převzatého zaúčtování (PAM-16). Potvrzení jde
+            // dovnitř přes tutéž cestu jako `/settings/employer`, jen s účty,
+            // které účetní vybrala.
+            $g->get('/migration/posting-map', [PayrollPostingMapAction::class, 'show']);
+            $g->post('/migration/posting-map/confirm', [PayrollPostingMapAction::class, 'confirm']);
             $g->get('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'list']);
             $g->post('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'create']);
             // Vzít zpět špatně datovanou registraci; pustí jen tu poslední.
@@ -2004,6 +2052,10 @@ final class Routes
             $g->post('/time/absences/{id:[0-9]+}/decision', [PayrollAbsenceAction::class, 'decision']);
             $g->post('/time/absences/{id:[0-9]+}/cancel', [PayrollAbsenceAction::class, 'cancel']);
             $g->post('/time/absences/{id:[0-9]+}/childbirth', [PayrollAbsenceAction::class, 'childbirth']);
+            $g->post(
+                '/time/absences/{id:[0-9]+}/sickness-window-carried',
+                [PayrollAbsenceAction::class, 'sicknessWindowCarried'],
+            );
             $g->get('/time/averages', [PayrollAbsenceAction::class, 'averages']);
             // Konkrétní cesta musí předcházet `{id}` routám níž — jinak by
             // `suggestion` spadlo do parametru. Je to čtení: návrh vstupů

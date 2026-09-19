@@ -239,6 +239,12 @@ final class RoutePermissionMap
         // Kontrola přepočtu proti mzdám převzatým z původního systému — čtení
         // mzdových dat osob, tedy stejné právo jako ostatní mzdové sestavy.
         ['GET', '#^/api/payroll/reports/migration-reconciliation/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
+        // Převzaté mzdy roku přechodu. Čtení je mzdová sestava; import zapisuje
+        // mzdová data osoby, takže nese totéž právo jako počáteční stavy kumulací.
+        ['GET', '#^/api/payroll/takeover-wages/import/template$#', 'payroll.reports', AccessLevel::READ],
+        ['POST', '#^/api/payroll/takeover-wages/import/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
+        ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}/people/[0-9]+$#', 'payroll.reports', AccessLevel::READ],
         // Žádosti o daňový bonus (§ 35d odst. 5 a 9). Náhled je mzdová sestava;
         // stažení XML navíc prochází `reports.export` kontrolou v Action, protože
         // vzniklý soubor je EPO podání a archivuje se mezi ostatní.
@@ -254,6 +260,13 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/settings/accident-insurance-rates$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/accident-insurance-rate-schedule$#', 'payroll.settings', AccessLevel::READ],
         ['GET', '#^/api/payroll/runs$#', 'payroll', AccessLevel::READ],
+        // Převzatý mzdový běh (PAM-17/PAM-18). Stavět a rušit ho smí tentýž,
+        // kdo zakládá běžný běh — je to práce se vstupy roku přechodu, ne
+        // výpočet ani schválení, kterým převzatý běh vůbec neprochází.
+        ['GET', '#^/api/payroll/runs/takeover/[0-9]{4}$#', 'payroll', AccessLevel::READ],
+        ['POST', '#^/api/payroll/runs/takeover$#', 'payroll.inputs.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/runs/[0-9]+/takeover$#', 'payroll', AccessLevel::READ],
+        ['POST', '#^/api/payroll/runs/[0-9]+/takeover/discard$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/runs/[0-9]+/history$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/operational-health$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/operational-reconciliation(?:/issues/[0-9]+)?$#', 'payroll', AccessLevel::READ],
@@ -504,6 +517,10 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/settings/account-options$#', 'payroll.settings', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/employer$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/employer$#', 'payroll.settings', AccessLevel::WRITE],
+        // Návrh předkontací z převzatého zaúčtování (PAM-16). Potvrzení zapisuje
+        // do nastavení zaměstnavatele, proto stejné oprávnění jako to nastavení.
+        ['GET', '#^/api/payroll/migration/posting-map$#', 'payroll.settings', AccessLevel::READ],
+        ['POST', '#^/api/payroll/migration/posting-map/confirm$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/institution-accounts(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/institution-accounts(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/dimensions(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::READ],

@@ -59,6 +59,13 @@ export interface PayrollAbsence {
   support_status: 'manual_review'
   status: 'requested' | 'approved' | 'rejected' | 'cancelled'
   correction_pending: boolean
+  /**
+   * Jen u `dpn`/`quarantine`: dny 14denního okna náhrady mzdy (§ 192 ZP)
+   * vyčerpané PŘED `date_from` u předchozího zaměstnavatele nebo předchozího
+   * mzdového programu. 0 = případ začal v MyÚčtu. Zapisuje se samostatnou
+   * akcí ({@link payrollAbsenceApi.setSicknessWindowCarried}).
+   */
+  sickness_window_carried_days: number
   row_version: number
 }
 
@@ -258,6 +265,17 @@ export const payrollAbsenceApi = {
     api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/childbirth`, {
       row_version: rowVersion,
       childbirth_date: childbirthDate,
+    }).then(response => response.data.absence),
+  /**
+   * Zapíše dny okna náhrady mzdy (§ 192 ZP) vyčerpané u DPN/karantény ještě
+   * PŘED touhle nepřítomností — u předchozího zaměstnavatele nebo předchozího
+   * mzdového programu. Server odmítne jiný druh absence, uzavřený rok i
+   * absenci se spočítanou náhradou (viz `PayrollAbsenceRepository::setSicknessWindowCarriedDays`).
+   */
+  setSicknessWindowCarried: (id: number, rowVersion: number, days: number) =>
+    api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/sickness-window-carried`, {
+      row_version: rowVersion,
+      sickness_window_carried_days: days,
     }).then(response => response.data.absence),
   averages: (employmentId: number) =>
     api.get<{ snapshots: AverageSnapshot[] }>('/payroll/time/averages', {

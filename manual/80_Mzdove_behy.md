@@ -262,3 +262,58 @@ který ještě nebyl zaúčtován (vypnuté automatické zaúčtování, čekaj�
 nebo firma vedoucí daňovou evidenci), stránka označí jako nezaúčtovaný —
 nejde o rozdíl. Stránka je čistě informační a nic nezapisuje ani do deníku,
 ani do mzdové revize.
+
+## 80.9 Převzaté měsíce roku přechodu
+
+Firma, která přešla z jiného mzdového programu uprostřed roku, má v roce
+přechodu dvě poloviny: měsíce vedené původním programem a měsíce, které už
+počítá MyÚčto. Hranicí je první mzdový měsíc nastavený u mzdového modulu.
+Za měsíc pod touto hranicí mzdový běh založit nejde a ani nemá — MyÚčto ten
+měsíc nepočítalo.
+
+Na stránce **Mzdy → Mzdové běhy** proto svítí panel **Převzaté měsíce roku
+přechodu**. Vypíše historické měsíce, ke kterým jsou v aplikaci převzaté
+mzdy (z převodu z PAMICA, POHODY, Money S3 nebo z importu CSV/XLSX), a u
+každého nabídne **Převzít měsíc**. Panel se u firmy bez převzatých
+historických měsíců nezobrazí.
+
+**Převzatý běh** je zrcadlo cizího výpočtu, ne pracovní dokument:
+
+- Nic se nepočítá. Výsledek vzniká pouze součtem převzatých řádků za měsíc;
+  chybějící veličina zůstane nulová a nedopočítává se.
+- Neprochází workflow. Nemá revizi, nejde ho uzamknout, přepočítat,
+  zkontrolovat ani schválit; v seznamu běhů je označený štítkem **Převzato**.
+- Nezaúčtovává se. Doklady za historická období jsou v účetnictví už
+  z převodu, takže druhý zápis vzniknout nesmí a ani nemůže.
+- Neopravuje se. Cestou zpět je **Zrušit převzetí** s uvedením důvodu; potom
+  jde měsíc převzít znovu z aktuálních podkladů.
+- Nevstupuje do zákonných výstupů. Evidenční list, roční zúčtování,
+  potvrzení o zdanitelných příjmech, vyúčtování daně ani hlášení pro ČSSZ
+  a zdravotní pojišťovny z převzatého běhu nečerpají. Převzatá čísla pro ně
+  mají vlastní, přiznanou cestu — nikdy se nesmí dostat do tiskopisu jako
+  údaj spočítaný aplikací.
+
+### 80.9.1 Doložení plateb za historický měsíc
+
+U převzatého měsíce se pod tlačítkem **Zobrazit doložení plateb** vypíše, co
+se za měsíc platilo. Rozlišují se dvě jistoty:
+
+- **Čistá mzda** je uvedená po osobách. Nese-li převzatý záznam datum
+  výplaty, zobrazí se u částky; jinak zůstane sloupec **Zaplaceno** prázdný
+  s poznámkou *datum neznámé*.
+- **Odvody a srážky** (sociální a zdravotní pojištění, záloha na daň,
+  srážková daň, daňový bonus, srážky ze mzdy) jsou součtem složek převzaté
+  mzdy za celou firmu. Datum u nich není a nedoplňuje se: převzatá data
+  nenesou doklad o odeslané platbě. Záloha na daň a daňový bonus zůstávají
+  rozepsané zvlášť, protože jejich rozdíl by byl dopočet aplikace, ne
+  doložení.
+
+Doložení plateb **není platba**. Nevzniká z něj platební závazek, platební
+dávka ani úhrada, takže se neobjeví v saldu mzdových příkazů, v hlídači
+termínů ani v účetním deníku. Je to záměr: za historický měsíc MyÚčto nikdy
+nic nedlužilo — závazek vznikl i zanikl v původním programu a jeho účetní
+obraz je v knihách už z převodu. Otevřený závazek by naopak trvale znečistil
+saldo částkami, které jsou dávno zaplacené.
+
+Pro měsíce, které počítá MyÚčto, se nic nemění: mzdové příkazy, úhrady
+i saldo fungují dál přes [mzdové příkazy a úhrady](82_Platby_a_uhrady.md).

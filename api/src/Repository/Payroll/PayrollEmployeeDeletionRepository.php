@@ -200,6 +200,10 @@ final class PayrollEmployeeDeletionRepository
         // s ní odcházejí; cizí klíč na ni tabulka schválně nemá (musí unést i mzdu vztahu,
         // který se nepřevedl), takže by na ni jinak nikdo neupozornil.
         'migration_reference' => ['payroll_migration_reference_totals'],
+        // Doložení plateb za převzatá období. Není to vydaný doklad ani podání, jen
+        // interní stopa převodu nad týmiž čísly, takže s osobou odchází stejně jako
+        // úhrny výše. Cizí klíč je RESTRICT, takže bez tohohle záznamu by výmaz spadl.
+        'takeover_payment_evidence' => ['payroll_takeover_payment_evidence'],
     ];
 
     /**

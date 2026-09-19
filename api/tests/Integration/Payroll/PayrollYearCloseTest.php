@@ -246,6 +246,39 @@ final class PayrollYearCloseTest extends TestCase
         ], $this->userId);
     }
 
+    /**
+     * Absence vznikla v otevřeném roce, teprve zápis dnů okna náhrady
+     * (§ 192 ZP) přichází až po uzávěrce — musí ho odmítnout stejně jako
+     * ostatní zápisy do absence uzavřeného roku.
+     */
+    public function testClosedYearRejectsSicknessWindowCarriedDaysWrite(): void
+    {
+        $this->seedClosedMonths($this->supplierId, 2026);
+        [, $employmentId] = $this->seedEmployment($this->supplierId);
+        $absence = $this->absences->create($this->supplierId, [
+            'employment_id' => $employmentId,
+            'absence_type' => 'dpn',
+            'date_from' => '2026-07-07',
+            'date_to' => '2026-07-10',
+            'timezone_name' => 'Europe/Prague',
+            'partial_first_minutes' => null,
+            'partial_last_minutes' => null,
+            'note' => null,
+            'compensation_policy' => 'dpn',
+            'compensation_rate_basis_points' => 6_000,
+            'average_snapshot_id' => null,
+        ], $this->userId);
+        $this->service->close($this->supplierId, 2026, 0, $this->userId);
+
+        $this->expectException(PayrollYearClosedException::class);
+        $this->absences->setSicknessWindowCarriedDays(
+            $this->supplierId,
+            (int) $absence['id'],
+            5,
+            (int) $absence['row_version'],
+        );
+    }
+
     public function testClosedYearAllowsTestObligationAndSubmission(): void
     {
         $this->seedClosedMonths($this->supplierId, 2026);

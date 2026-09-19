@@ -834,7 +834,10 @@
         "1847_payroll_component_jmhz_stravovani_mapping.sql",
         "1848_supplier_purchase_import_received_at.sql",
         "1849_payroll_migration_reference_totals.sql",
-        "1850_payroll_absence_sickness_window_carried.sql"
+        "1850_payroll_absence_sickness_window_carried.sql",
+        "1851_payroll_migration_takeover_details.sql",
+        "1852_payroll_posting_map_proposals.sql",
+        "1853_payroll_takeover_runs.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -11158,32 +11161,45 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "activity_code": "varchar(32) NULL DEFAULT NULL",
                 "advance_tax_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "deductions_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "employee_health_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "employee_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "employee_social_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "employer_health_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "employer_social_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "employment_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "excluded_days": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "external_person_ref": "varchar(64) NOT NULL COLLATE utf8mb4_bin",
                 "external_relationship_ref": "varchar(64) NOT NULL COLLATE utf8mb4_bin",
                 "gross_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "health_base_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "import_reference": "varchar(190) NULL DEFAULT NULL",
+                "insurance_days": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "net_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "net_payable_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "payout_date": "date NULL DEFAULT NULL",
+                "pension_participation": "tinyint(1) NOT NULL DEFAULT 1",
                 "period_start": "date NOT NULL",
+                "relation_type": "varchar(32) NULL DEFAULT NULL",
+                "relationship_end_date": "date NULL DEFAULT NULL",
+                "relationship_start_date": "date NULL DEFAULT NULL",
                 "social_base_minor": "bigint(20) NOT NULL DEFAULT 0",
-                "source": "enum('pamica','pohoda','money_s3') NOT NULL",
+                "source": "enum('pamica','pohoda','money_s3','other') NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_bonus_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
-                "withholding_tax_minor": "bigint(20) NOT NULL DEFAULT 0"
+                "withholding_tax_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "worked_days_hundredths": "int(10) unsigned NOT NULL DEFAULT 0",
+                "worked_minutes": "int(10) unsigned NOT NULL DEFAULT 0"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "ix_pmrt_employee": "BTREE (supplier_id, employee_id, period_start)",
+                "ix_pmrt_employment": "BTREE (supplier_id, employment_id, period_start)",
                 "ix_pmrt_period": "BTREE (supplier_id, period_start)",
                 "uq_pmrt_relationship_period": "UNIQUE BTREE (supplier_id, source, period_start, external_relationship_ref)"
             },
@@ -11191,7 +11207,9 @@
                 "fk_pmrt_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
-                "chk_pmrt_period_first_day": "dayofmonth(`period_start`) = 1"
+                "chk_pmrt_period_first_day": "dayofmonth(`period_start`) = 1",
+                "chk_pmrt_takeover_days": "`insurance_days` <= 31 and `excluded_days` <= 31",
+                "chk_pmrt_takeover_relationship_span": "`relationship_start_date` is null or `relationship_end_date` is null or `relationship_end_date` >= `relationship_start_date`"
             }
         },
         "payroll_module_state": {
@@ -13066,6 +13084,38 @@
                 "chk_payroll_posting_batch_state": "`status` = 'prepared' and `journal_entry_id` is null and `posted_at` is null or `status` = 'posted' and `journal_entry_id` is not null and `posted_at` is not null or `status` = 'no_change' and `journal_entry_id` is null and `posted_at` is not null or `status` = 'reversed' and `posted_at` is not null"
             }
         },
+        "payroll_posting_map_proposals": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "confirmed_at": "timestamp NULL DEFAULT NULL",
+                "confirmed_by": "int(10) unsigned NULL DEFAULT NULL",
+                "confirmed_json": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "proposal_json": "longtext NOT NULL COLLATE utf8mb4_bin",
+                "source": "enum('pamica','pohoda','money_s3','other') NOT NULL",
+                "source_reference": "varchar(190) NULL DEFAULT NULL",
+                "source_year": "smallint(5) unsigned NULL DEFAULT NULL",
+                "status": "enum('draft','confirmed') NOT NULL DEFAULT 'draft'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_ppmp_status": "BTREE (supplier_id, status)",
+                "uq_ppmp_supplier_source": "UNIQUE BTREE (supplier_id, source)"
+            },
+            "foreign_keys": {
+                "fk_ppmp_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_ppmp_confirmed_json": "`confirmed_json` is null or json_valid(`confirmed_json`)",
+                "chk_ppmp_confirmed_pair": "`status` = 'confirmed' = (`confirmed_at` is not null)",
+                "chk_ppmp_proposal_json": "json_valid(`proposal_json`)"
+            }
+        },
         "payroll_production_qualification_documents": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -13942,6 +13992,7 @@
                 "payment_date": "date NOT NULL",
                 "period_start": "date NOT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "run_kind": "enum('calculated','takeover') NOT NULL DEFAULT 'calculated'",
                 "status": "enum('draft','inputs_locked','calculated','reviewed','approved','posted','payment_ready','paid','closed','correction_pending','reopened','cancelled') NOT NULL DEFAULT 'draft'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
@@ -14993,6 +15044,81 @@
             "checks": {
                 "chk_payroll_surcharge_claim_period": "dayofmonth(`period_start`) = 1",
                 "chk_payroll_surcharge_claim_row_version": "`row_version` > 0"
+            }
+        },
+        "payroll_takeover_payment_evidence": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "amount_minor": "bigint(20) NOT NULL",
+                "certainty": "enum('reported','derived') NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "currency_code": "char(3) NOT NULL DEFAULT 'CZK'",
+                "employee_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "evidence_kind": "enum('net_wage','deduction','social_insurance','health_insurance','advance_tax','withholding_tax','tax_bonus') NOT NULL",
+                "external_person_ref": "varchar(64) NOT NULL DEFAULT '' COLLATE utf8mb4_bin",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "paid_on": "date NULL DEFAULT NULL",
+                "person_scope": "bigint(20) unsigned NULL DEFAULT NULL STORED GENERATED AS (coalesce(`employee_id`,0))",
+                "run_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_takeover_payment_employee": "BTREE (supplier_id, employee_id)",
+                "fk_payroll_takeover_payment_user": "BTREE (created_by)",
+                "idx_payroll_takeover_payment_run": "BTREE (supplier_id, run_id, evidence_kind)",
+                "uq_payroll_takeover_payment": "UNIQUE BTREE (supplier_id, run_id, evidence_kind, person_scope, external_person_ref)",
+                "uq_payroll_takeover_payment_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_takeover_payment_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_takeover_payment_run": "(supplier_id, run_id) -> payroll_runs (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_takeover_payment_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_payroll_takeover_payment_currency": "`currency_code` regexp '^[A-Z]{3}$'",
+                "chk_payroll_takeover_payment_date": "`paid_on` is null or `certainty` = 'reported'",
+                "chk_payroll_takeover_payment_person": "`evidence_kind` <> 'net_wage' or `employee_id` is not null or `external_person_ref` <> ''"
+            }
+        },
+        "payroll_takeover_runs": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "built_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "built_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employee_count": "int(10) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "input_snapshot_hash": "char(64) NOT NULL",
+                "input_snapshot_json": "longtext NOT NULL",
+                "period_start": "date NOT NULL",
+                "relationship_count": "int(10) unsigned NOT NULL",
+                "result_snapshot_hash": "char(64) NOT NULL",
+                "result_snapshot_json": "longtext NOT NULL",
+                "run_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "takeover_sources": "varchar(190) NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_takeover_run_user": "BTREE (built_by)",
+                "idx_payroll_takeover_run_period": "BTREE (supplier_id, period_start)",
+                "uq_payroll_takeover_run": "UNIQUE BTREE (supplier_id, run_id)",
+                "uq_payroll_takeover_run_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_takeover_run_run": "(supplier_id, run_id) -> payroll_runs (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_takeover_run_user": "(built_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_payroll_takeover_run_hashes": "`input_snapshot_hash` regexp '^[0-9a-f]{64}$' and `result_snapshot_hash` regexp '^[0-9a-f]{64}$'",
+                "chk_payroll_takeover_run_period": "dayofmonth(`period_start`) = 1",
+                "input_snapshot_json": "json_valid(`input_snapshot_json`)",
+                "result_snapshot_json": "json_valid(`result_snapshot_json`)"
             }
         },
         "payroll_time_entries": {
@@ -21217,6 +21343,7 @@
         "trg_payroll_posting_allocation_prepared_insert": "BEFORE INSERT ON payroll_posting_allocations #0233afcd7abef5f02709e54eb24236dc9beef5c4",
         "trg_payroll_posting_batch_immutable_delete": "BEFORE DELETE ON payroll_posting_batches #3902615da1db81f04a79d778f90065b84f7ee15e",
         "trg_payroll_posting_batch_immutable_update": "BEFORE UPDATE ON payroll_posting_batches #1ababce79f6be312f8aa5a7d9313cb0405404992",
+        "trg_payroll_posting_batch_takeover_block": "BEFORE INSERT ON payroll_posting_batches #f867caeb18d015609ffdeeb36048100d9ed023ac",
         "trg_payroll_production_qualification_immutable_delete": "BEFORE DELETE ON payroll_production_qualifications #9b1e325a1e9b0bcdd30e1bcadb8215f10f467012",
         "trg_payroll_production_qualification_immutable_update": "BEFORE UPDATE ON payroll_production_qualifications #9b1e325a1e9b0bcdd30e1bcadb8215f10f467012",
         "trg_payroll_qualification_document_immutable_delete": "BEFORE DELETE ON payroll_production_qualification_documents #4b2c890049256b19ba646f0924b940ab4c84b45b",
@@ -21244,7 +21371,8 @@
         "trg_payroll_run_result_period_propagate": "AFTER UPDATE ON payroll_runs #b0c9eacd6fe3a2729402302f9de199abf85ece8d",
         "trg_payroll_run_revision_immutable_delete": "BEFORE DELETE ON payroll_run_revisions #89ef39d22aac3a63bca8f5bebf4c710964380d20",
         "trg_payroll_run_revision_immutable_update": "BEFORE UPDATE ON payroll_run_revisions #988d3894f1644dd1fca9ab04b369fe096282aa02",
-        "trg_payroll_run_update_guard": "BEFORE UPDATE ON payroll_runs #a09d91346da858281629e158e0580f8150ee60d9",
+        "trg_payroll_run_revision_takeover_block": "BEFORE INSERT ON payroll_run_revisions #1e14da6afb3b5ff3720dcc381705fb99f67430d3",
+        "trg_payroll_run_update_guard": "BEFORE UPDATE ON payroll_runs #b9fada5e0f2f8960fa3eb4273d13ebc7bd4d6c5f",
         "trg_payroll_sickness_input_materialization_immutable_delete": "BEFORE DELETE ON payroll_sickness_input_materializations #062210db44bcad2a4bb2a08fc3cca4636459fd85",
         "trg_payroll_sickness_input_materialization_immutable_update": "BEFORE UPDATE ON payroll_sickness_input_materializations #062210db44bcad2a4bb2a08fc3cca4636459fd85",
         "trg_payroll_signing_profile_update_guard": "BEFORE UPDATE ON payroll_submission_signing_profiles #ecb3428cc4a30fa6c35dcdfe9927bc65ec41c2fb",
@@ -21270,6 +21398,10 @@
         "trg_payroll_submission_receipt_update": "BEFORE UPDATE ON payroll_submission_receipts #f99923036d7e7db5836dbc43651059c391d64f19",
         "trg_payroll_surcharge_materialization_immutable_delete": "BEFORE DELETE ON payroll_surcharge_input_materializations #b1859f3ac1a51f21f361a33532d550675f3ae8a4",
         "trg_payroll_surcharge_materialization_immutable_update": "BEFORE UPDATE ON payroll_surcharge_input_materializations #b1859f3ac1a51f21f361a33532d550675f3ae8a4",
+        "trg_payroll_takeover_payment_immutable_update": "BEFORE UPDATE ON payroll_takeover_payment_evidence #eb8aec377ac5f324f60db9411cb1c6140baf74e2",
+        "trg_payroll_takeover_payment_validate_insert": "BEFORE INSERT ON payroll_takeover_payment_evidence #458899f08e05b9a7a6839c027e8b55ad54007631",
+        "trg_payroll_takeover_run_immutable_update": "BEFORE UPDATE ON payroll_takeover_runs #953f0ecaa1f2282568bb0c00c1245ad29828dab5",
+        "trg_payroll_takeover_run_validate_insert": "BEFORE INSERT ON payroll_takeover_runs #443da72fc60c01f8688d6258922a1183ba01ec90",
         "trg_payroll_time_import_summary_no_delete": "BEFORE DELETE ON payroll_time_month_import_summaries #9e66912fca98485fa5fe04286e89678c85cf0be7",
         "trg_payroll_time_import_summary_no_update": "BEFORE UPDATE ON payroll_time_month_import_summaries #9e66912fca98485fa5fe04286e89678c85cf0be7",
         "trg_payroll_time_month_event_jmhz_guard": "BEFORE INSERT ON payroll_time_month_events #9c2b1e3761a000e407e0b0ad998da0b1187b93ed",

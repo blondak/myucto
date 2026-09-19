@@ -73,6 +73,11 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Návrh kontací z převzatého zaúčtování (přechod z jiného mzdového programu)
+        'payrollPostingMap.ts::PayrollPostingMapSource'
+            => 'const:MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalStore::SOURCES',
+        'payrollPostingMap.ts::PayrollPostingMapStatus'
+            => 'const:MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalBuilder::STATUSES',
         // Srovnání převzatých mezd s vlastním přepočtem (přechod z jiného mzdového programu)
         'payrollMigrationReconciliation.ts::PayrollMigrationSource'
             => 'const:MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter::SOURCES',
@@ -80,6 +85,24 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Report\PayrollMigrationReconciliationBuilder::STATUSES',
         'payrollMigrationReconciliation.ts::PayrollMigrationRowMetric'
             => 'const:MyInvoice\Service\Payroll\Report\PayrollMigrationReconciliationBuilder::ROW_METRICS',
+        // Odkud je měsíc roku přechodu. `none` je díra v roce, ne prázdná hodnota —
+        // klient, který ji nezná, by ji nakreslil jako „v pořádku".
+        'payrollMigrationReconciliation.ts::PayrollTakeoverPresence'
+            => 'const:MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear::PRESENCES',
+        // Převzatý mzdový běh roku přechodu (PAM-17/PAM-18). Druh běhu je to,
+        // podle čeho se pozná zrcadlo cizího výpočtu — klient, který hodnotu
+        // nezná, by převzatý běh nakreslil jako spočítaný.
+        'payrollTakeoverRuns.ts::PayrollTakeoverPresence'
+            => 'const:MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear::PRESENCES',
+        'payroll.ts::PayrollRunKind'
+            => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunKind',
+        'payrollTakeoverRuns.ts::PayrollTakeoverEvidenceKind'
+            => 'db:payroll_takeover_payment_evidence.evidence_kind',
+        // `reported` = zdroj sám doložil platbu, `derived` = jen součet složek
+        // převzaté mzdy. Smazat ten rozdíl v klientovi znamená vydávat dopočet
+        // za doklad.
+        'payrollTakeoverRuns.ts::PayrollTakeoverEvidenceCertainty'
+            => 'db:payroll_takeover_payment_evidence.certainty',
         // Zákonné příplatky § 114 až § 118 ZP
         'payroll.ts::PayrollSurchargeKind'
             => 'enum:MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind',

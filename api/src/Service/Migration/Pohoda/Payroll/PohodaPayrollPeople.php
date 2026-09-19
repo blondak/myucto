@@ -210,15 +210,16 @@ final class PohodaPayrollPeople
 
         /** @var array<string,list<array<string,mixed>>> $absences vztah => nepřítomnosti s daty */
         $absences = [];
+        /** @var array<string,int> $undated vztah => nepřítomnosti vyžadující data, které je v exportu nemají */
+        $undated = [];
         foreach (PohodaXml::records($file, 'MZneprit') as $row) {
             $payslip = $payslipOf[PohodaXml::text($row, 'RefAg')] ?? null;
-            $from = self::realDate(PohodaXml::date($row, 'DatZac'));
-            $to = self::realDate(PohodaXml::date($row, 'DatKon'));
-            if ($payslip === null || $from === null || $to === null || $to < $from) {
+            if ($payslip === null) {
                 continue;
             }
             $catalog = $byId['sMZneprit'][PohodaXml::text($row, 'RefSlozka')] ?? [];
-            $code = strtoupper(trim(PohodaXml::text($catalog, 'Cislo')));
+            $number = PohodaXml::text($catalog, 'Cislo');
+            $code = strtoupper(trim($number));
             $childbirth = self::realDate(PohodaXml::date($row, 'DatPorod'));
             $type = self::ABSENCE_CODES[$code] ?? null;
             if ($type === null && $childbirth !== null) {
@@ -227,11 +228,20 @@ final class PohodaPayrollPeople
             if ($type === null) {
                 continue;
             }
-            // Dlouhá nepřítomnost se ořízne na převáděný rok; pokračování patří dalšímu roku.
+            $dates = self::absenceDates($row, $year);
+            if ($dates === null) {
+                // Doba, kterou z hodin dopočítat nejde. U druhu, který evidence vede jedině
+                // s daty, zůstanou hodiny v měsíčním souhrnu (neztratí se) a měsíc si vyžádá
+                // ruční dořešení; protokol ho hlásí s osobním číslem.
+                if (PohodaPayrollCatalog::absenceNeedsDates($number, PohodaXml::text($catalog, 'Nazev'))) {
+                    $undated[$payslip['relation']] = ($undated[$payslip['relation']] ?? 0) + 1;
+                }
+                continue;
+            }
             $absences[$payslip['relation']][] = [
                 'type' => $type,
-                'from' => max($from, sprintf('%04d-01-01', $year)),
-                'to' => min($to, sprintf('%04d-12-31', $year)),
+                'from' => $dates['from'],
+                'to' => $dates['to'],
                 'childbirth' => $childbirth,
                 'hours' => PohodaXml::num($row, 'HodPrac'),
             ];
@@ -344,6 +354,7 @@ final class PohodaPayrollPeople
                 'regular_benefits' => self::regularBenefits($benefitMonths[$relationId] ?? [], count($periods)),
                 'averages' => self::averages($relationMonths[$relationId] ?? [], $year),
                 'absences' => $absences[$relationId] ?? [],
+                'absences_without_dates' => $undated[$relationId] ?? 0,
                 // Zůstatek dovolené z karty PAMICA; čerpání se nepřenáší, kniha dovolené
                 // ho ručně zapsat neumí (vzniká jen ze schválené nepřítomnosti).
                 'leave' => $leave,
@@ -394,6 +405,32 @@ final class PohodaPayrollPeople
         usort($records, static fn (array $a, array $b): int => strcmp((string) $a['personal_number'], (string) $b['personal_number']));
 
         return $records;
+    }
+
+    /**
+     * Doba nepřítomnosti z řádku `MZneprit` oříznutá na převáděný rok, nebo null, když
+     * ji zapsat nejde: nulové datum Accessu, obrácené pořadí, nebo doba mimo převáděný rok.
+     *
+     * **Jediné místo, které o datovatelnosti rozhoduje.** Podle něj převod nepřítomnost
+     * zapisuje s daty ({@see PohodaPayrollPeopleWriter::absences()}) a měsíční sešit tytéž
+     * hodiny vypouští ({@see PohodaPayrollConverter::month()}). Kdyby to každá strana
+     * posuzovala po svém, vedla by se doba dvakrát, nebo nikde.
+     *
+     * @param array<string,mixed> $row řádek `MZneprit`
+     * @return array{from:string,to:string}|null
+     */
+    public static function absenceDates(array $row, int $year): ?array
+    {
+        $from = self::realDate(PohodaXml::date($row, 'DatZac'));
+        $to = self::realDate(PohodaXml::date($row, 'DatKon'));
+        if ($from === null || $to === null || $to < $from) {
+            return null;
+        }
+        // Dlouhá nepřítomnost se ořízne na převáděný rok; pokračování patří dalšímu roku.
+        $from = max($from, sprintf('%04d-01-01', $year));
+        $to = min($to, sprintf('%04d-12-31', $year));
+
+        return $from > $to ? null : ['from' => $from, 'to' => $to];
     }
 
     /**

@@ -5636,6 +5636,9 @@ export type PayrollRunCommand =
   | 'cancel'
   | 'close'
 
+/** Druh mzdového běhu: spočítaný modulem, nebo převzatý z jiného programu. */
+export type PayrollRunKind = 'calculated' | 'takeover'
+
 /**
  * Co se při příkazu doopravdy stalo. Samotný přechod stavu to neřekne: firma
  * v daňové evidenci projde `post` bez účetního zápisu a běh, kde je celá čistá
@@ -5835,6 +5838,12 @@ export interface PayrollRun {
   period_start: string
   payment_date: string
   status: PayrollRunStatus
+  /**
+   * Odkud pochází výsledek běhu. `takeover` je zrcadlo měsíce, který zpracoval
+   * předchozí mzdový program: nemá revizi, neprochází workflow a nezaúčtovává
+   * se. Chybí-li pole (starší odpověď serveru), je to běžný spočítaný běh.
+   */
+  run_kind?: PayrollRunKind
   current_revision_no: number
   row_version: number
   revision_id: number | null

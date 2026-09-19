@@ -784,6 +784,34 @@ Budoucí měsíce se nevyžadují. Chybí-li ale některá revize uvnitř takto
 vymezeného období, příprava zůstane zablokovaná, protože by nebylo možné
 doložit souvislou dobu pojištění ani vyměřovací základ.
 
+### Rok přechodu z jiného mzdového programu
+
+Přejdete-li na MyÚčto uprostřed roku, chybí za měsíce vedené původním programem
+mzdová revize. Evidenční list se v takovém roce sestaví ze **dvou zdrojů**:
+z měsíců spočítaných v MyÚčtu a z převzatých mzdových měsíců, které jste
+naplnili převodem z původního systému nebo importem tabulky v **Kontrole převodu
+mezd**. Převzatá část je vidět přímo v panelu — vypsaná po měsících, se zdrojem
+a s otiskem převzatého řádku — a tentýž otisk je součástí zmrazeného podkladu
+listu. Údaje z původního programu se tedy nikdy nevydávají za vlastní výpočet.
+
+Platí přitom tři pravidla:
+
+- **Měsíc se schválenou mzdovou revizí se bere vždy z revize.** Leží-li k němu
+  navíc převzatá data, nesčítají se; panel takový měsíc pojmenuje jako rozpor
+  a evidenční list stojí na revizi.
+- **Měsíc, který MyÚčto počítá, ale nemá schválenou revizi, převzatá data
+  nenahradí.** Nejdřív revizi schvalte, nebo rozpracovaný běh zrušte.
+- **Nic se nedopočítává.** Chybí-li převzatému měsíci druh činnosti ČSSZ, dny
+  účasti, vyměřovací základ nebo souhlasné trvání vztahu, příprava zůstane
+  zablokovaná a hláška řekne, který měsíc a který údaj doplnit. Má-li převzatý
+  měsíc vyloučené doby jen jako součet, bez rozpadu podle § 16 odst. 4 zákona
+  č. 155/1995 Sb., nelze jej do listu zapsat — zaevidujte odpovídající
+  nepřítomnosti, nebo evidenční list za dotčený měsíc podejte mimo aplikaci.
+
+Trvání pracovního vztahu se z převzatých dat neodvozuje: rozsah listu drží
+zmrazená revize a převzatá data se proti ní jen kontrolují. Rok, ve kterém
+v MyÚčtu neexistuje ani jedna schválená revize, proto sestavit nelze.
+
 Vygenerované XML slouží pouze ke kontrole údajů. Není to transportní datová
 věta a MyÚčto je neodesílá ani nevkládá do datové schránky. ELDP dokončete
 v aktuálním oficiálním rozhraní ČSSZ a výsledek potom doložte aktivním firemním

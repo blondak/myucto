@@ -9,7 +9,9 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
+use MyInvoice\Service\Payroll\Absence\AbsenceHolidayTreatment;
 use MyInvoice\Service\Payroll\Absence\PayrollLeaveInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
@@ -27,6 +29,7 @@ final class PayrollAbsenceApiTest extends TestCase
 
     private Connection $db;
     private PayrollAbsenceAction $action;
+    private PayrollAbsenceRepository $absences;
     private PayrollSicknessInputMaterializer $sicknessInputs;
     private PayrollLeaveInputMaterializer $leaveInputs;
     private PayrollRunCalculator $runCalculator;
@@ -45,6 +48,7 @@ final class PayrollAbsenceApiTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollAbsenceAction::class);
+            $this->absences = $container->get(PayrollAbsenceRepository::class);
             $this->sicknessInputs = $container->get(PayrollSicknessInputMaterializer::class);
             $this->leaveInputs = $container->get(PayrollLeaveInputMaterializer::class);
             $this->runCalculator = $container->get(PayrollRunCalculator::class);
@@ -172,6 +176,141 @@ final class PayrollAbsenceApiTest extends TestCase
         self::assertSame(480, $calculation['segments'][0]['eligible_minutes']);
         self::assertGreaterThan(0, $calculation['compensation_minor']);
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $calculation['ruleset_hash']);
+    }
+
+    /**
+     * Dny okna náhrady vyčerpané předchozím plátcem (§ 192 ZP) musí jít zapsat
+     * z API a musí se skutečně projevit ve zkráceném okně náhrady, ne jen na
+     * obrazovce. Okno DPN od 2026-06-15 bez převzatých dnů končí 2026-06-28
+     * ({@see \MyInvoice\Tests\Unit\Payroll\Absence\AbsenceRulesetTest}); se
+     * 7 převzatými dny končí 2026-06-21. Směna 25. 6. je proto uvnitř okna
+     * PŘED zápisem a za oknem PO zápisu.
+     */
+    public function testSicknessWindowCarriedDaysIsWritableAndShortensTheReplacementWindow(): void
+    {
+        $this->insertPublishedShift('2026-06-25 06:00:00', '2026-06-25 14:30:00', 30);
+        $payload = $this->absencePayload(0);
+        $payload['absence_type'] = 'dpn';
+        $payload['average_snapshot_id'] = null;
+        $payload['date_to'] = '2026-06-28';
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+        self::assertSame(0, $absence['sickness_window_carried_days']);
+
+        $beforeRow = $this->absences->find($this->supplierId, $absence['id']);
+        self::assertNotNull($beforeRow);
+        $beforeSegments = $this->absences->publishedShiftSegments(
+            $beforeRow,
+            false,
+            AbsenceHolidayTreatment::CompensateSickness,
+        );
+        self::assertNotEmpty($beforeSegments, 'Směna 25. 6. musí být uvnitř 14denního okna bez převzatých dnů.');
+        self::assertEmpty(
+            $this->absences->publishedShiftSegmentsBeyondSicknessWindow($beforeRow, false),
+            'Bez převzatých dnů nesmí nic ležet za oknem náhrady.',
+        );
+
+        $written = $this->action->sicknessWindowCarried(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'sickness_window_carried_days' => 7,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $written->getStatusCode(), (string) $written->getBody());
+        $updated = $this->json($written)['absence'];
+        self::assertSame(7, $updated['sickness_window_carried_days']);
+        self::assertSame($absence['row_version'] + 1, $updated['row_version']);
+
+        $afterRow = $this->absences->find($this->supplierId, $absence['id']);
+        self::assertNotNull($afterRow);
+        self::assertSame(7, PayrollAbsenceRepository::carriedWindowDays($afterRow));
+        self::assertEmpty(
+            $this->absences->publishedShiftSegments($afterRow, false, AbsenceHolidayTreatment::CompensateSickness),
+            'Se 7 převzatými dny musí okno skončit 21. 6. a směnu 25. 6. už nepokrýt.',
+        );
+        $beyond = $this->absences->publishedShiftSegmentsBeyondSicknessWindow($afterRow, false);
+        self::assertNotEmpty($beyond, 'Směna 25. 6. musí po zkrácení okna spadnout za něj (hodiny bez náhrady).');
+        self::assertSame('2026-06-25', $beyond[0]['local_date']);
+
+        $stale = $this->action->sicknessWindowCarried(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'sickness_window_carried_days' => 3,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(409, $stale->getStatusCode());
+        self::assertSame('row_version_conflict', $this->json($stale)['error']['code']);
+    }
+
+    public function testSicknessWindowCarriedDaysRejectsNonSicknessAbsenceType(): void
+    {
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody([
+                ...$this->absencePayload(0),
+                'average_snapshot_id' => null,
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+
+        $response = $this->action->sicknessWindowCarried(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'sickness_window_carried_days' => 5,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('dočasná pracovní neschopnost a karanténa', (string) $response->getBody());
+    }
+
+    public function testSicknessWindowCarriedDaysRejectsAfterCompensationIsComputed(): void
+    {
+        $averageId = $this->createApprovedAverage();
+        $this->insertPublishedShift('2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+        $payload = $this->absencePayload($averageId);
+        $payload['absence_type'] = 'dpn';
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+                'first_day_fully_worked' => false,
+                'insurance_eligibility_confirmed' => true,
+                'conflicting_benefit_excluded' => true,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        $approvedAbsence = $this->json($approved)['absence'];
+
+        $response = $this->action->sicknessWindowCarried(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $approvedAbsence['row_version'],
+                'sickness_window_carried_days' => 4,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('je už spočítaná', (string) $response->getBody());
     }
 
     public function testApprovedDpnMaterializesIdempotentCanonicalInputAndItsRunBases(): void

@@ -544,6 +544,9 @@
     "payroll-migration-reconciliation": [
       "payroll"
     ],
+    "payroll-posting-map": [
+      "payroll"
+    ],
     "payroll-settings": [
       "payroll"
     ],

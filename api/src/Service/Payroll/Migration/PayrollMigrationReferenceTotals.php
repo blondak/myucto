@@ -62,6 +62,12 @@ final readonly class PayrollMigrationReferenceTotals
         public int $advanceTaxMinor,
         public int $withholdingTaxMinor,
         public int $taxBonusMinor,
+        /**
+         * Doby, druh vztahu a platba. Nepovinné, protože kontrolní sestava je
+         * nepotřebuje — bez nich ale nevznikne ELDP za rok přechodu ani zpětná
+         * evidence plateb ({@see PayrollMigrationTakeoverFacts}).
+         */
+        public PayrollMigrationTakeoverFacts $facts = new PayrollMigrationTakeoverFacts(),
     ) {
         if (preg_match('/^[0-9]{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
             throw new \InvalidArgumentException('Mzdové období musí být ve tvaru YYYY-MM.');
@@ -80,6 +86,11 @@ final readonly class PayrollMigrationReferenceTotals
      * Jeden záznam `MZ` z `91_mzdy.xml`. `$employeeId` a `$employmentId` doplňuje převod
      * z vlastní párovací mapy; nechá je `null`, pokud vztah do MyÚčta nepřevedl.
      *
+     * Doby a platba se čtou z TÉHOŽ záznamu `MZ`, takže volající nemusí nic
+     * měnit, aby se naplnily. Druh vztahu a druh činnosti z `MZ` odvodit nejdou
+     * (`RelDruhM` je vlastní číselník PAMICA, ne kód ČSSZ) — kdo zná napárovaný
+     * pracovní vztah, předá je zde, jinak zůstanou nevyplněné.
+     *
      * @param array<string,mixed> $mz
      */
     public static function fromPohodaMz(
@@ -87,6 +98,8 @@ final readonly class PayrollMigrationReferenceTotals
         int $year,
         ?int $employeeId = null,
         ?int $employmentId = null,
+        ?string $relationType = null,
+        ?string $activityCode = null,
     ): self {
         $month = (int) PohodaXml::text($mz, 'RelMes');
         if ($month < 1 || $month > 12) {
@@ -111,6 +124,7 @@ final readonly class PayrollMigrationReferenceTotals
             $minor('advance_tax'),
             $minor('withholding_tax'),
             $minor('tax_bonus'),
+            PayrollMigrationTakeoverFacts::fromPohodaMz($mz, $relationType, $activityCode),
         );
     }
 

@@ -148,6 +148,11 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // `payroll.reports` jako ostatní mzdové sestavy — stejný klíč hlídá
       // RoutePermissionMap u /api/payroll/reports/*.
       { path: 'payroll/migration-reconciliation', name: 'payroll-migration-reconciliation', component: () => import('@/pages/payroll/PayrollMigrationReconciliation.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Návrh kontací mezd odvozený ze zaúčtování převzatého z původního
+      // programu. Jede na `payroll.settings`, protože potvrzení zapisuje do
+      // nastavení zaměstnavatele - stejný klíč hlídá RoutePermissionMap
+      // u /api/payroll/migration/posting-map.
+      { path: 'payroll/posting-map', name: 'payroll-posting-map', component: () => import('@/pages/payroll/PayrollPostingMap.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/imports', name: 'payroll-imports', component: () => import('@/pages/payroll/PayrollImports.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Retenční lhůty ukazují katalog z kódu a pouštějí dvojí zápis — odchylku

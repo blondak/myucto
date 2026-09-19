@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Pohoda\Payroll;
 
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceText;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 
 /**
  * Význam mzdové složky, nepřítomnosti a srážky POHODA Mzdy / PAMICA pro import
@@ -143,6 +144,28 @@ final class PohodaPayrollCatalog
             $number === 'H15' => ['meaning' => 'paternity_hours', 'header' => 'Otcovská (h)'],
             default => ['meaning' => 'ignore', 'header' => trim("Nepřítomnost {$number}")],
         };
+    }
+
+    /**
+     * Nese nepřítomnost hodiny, které evidence umí vést jedině s daty od a do?
+     *
+     * **Hranice mezi oběma cestami převodu nepřítomností a žije jen tady.** Nemoc,
+     * ošetřovné, otcovská, neplacené volno, náhradní volno a neomluvená absence
+     * rozhodují o náhradě mzdy, vyloučené době i době pojištění, a z holého měsíčního
+     * součtu hodin se nic z toho odvodit nedá: schválení měsíce takový souhrn odmítne
+     * s `absence_hours_without_dates` ({@see \MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService}).
+     * Do měsíčního sešitu ({@see PohodaPayrollConverter::month()}) proto takové hodiny
+     * nejdou a tatáž doba se zapíše datovaně z `MZneprit`
+     * ({@see PohodaPayrollPeopleWriter::absences()}). Dovolená a překážky zůstávají
+     * v souhrnu: ty schválení s daty nevyžaduje.
+     */
+    public static function absenceNeedsDates(string $number, string $name): bool
+    {
+        return in_array(
+            self::absence($number, $name)['meaning'],
+            PayrollJmhzWorkMonthSummaryBuilder::IMPORT_HOURS_REQUIRING_DATES,
+            true,
+        );
     }
 
     /**

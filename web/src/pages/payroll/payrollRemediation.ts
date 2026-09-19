@@ -35,6 +35,20 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_source_hash_mismatch: 'integrity',
   eldp_source_invalid: 'integrity',
   eldp_xml_snapshot_mismatch: 'integrity',
+  // Rok přechodu z jiného mzdového programu: náprava je v převzatých mzdách,
+  // ne ve mzdách MyÚčta. Výjimkou je měsíc, který MyÚčto počítá a jen mu chybí
+  // schválení — ten se řeší v běhu, jinak by převzatá data zakryla jiná čísla.
+  eldp_takeover_month_not_substitutable: 'takeover_revision',
+  eldp_takeover_month_ambiguous: 'takeover',
+  eldp_takeover_relationship_kind_unsupported: 'takeover',
+  eldp_takeover_activity_missing: 'takeover',
+  eldp_takeover_employment_dates_inconsistent: 'takeover',
+  eldp_takeover_participation_conflict: 'takeover',
+  eldp_takeover_insurance_days_missing: 'takeover',
+  eldp_takeover_insurance_days_exceed_period: 'takeover',
+  eldp_takeover_excluded_days_breakdown_missing: 'takeover',
+  eldp_takeover_assessment_base_missing: 'takeover',
+  eldp_takeover_assessment_base_not_whole_czk: 'takeover',
 }
 
 export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: number | null, year: number) {
@@ -45,9 +59,12 @@ export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: numb
     ? blocker.detail!.period_start!.slice(0, 7) : null
   let path = '/admin/support'
   let action = 'support'
-  if (['missing_month', 'revision', 'missing_employment', 'social', 'no_revisions'].includes(kind)) {
+  if (['missing_month', 'revision', 'missing_employment', 'social', 'no_revisions', 'takeover_revision'].includes(kind)) {
     path = '/payroll/runs' + (period ? `?period=${period}` : '')
     action = 'runs'
+  } else if (kind === 'takeover') {
+    path = '/payroll/migration-reconciliation'
+    action = 'takeover'
   } else if (['activity', 'dates'].includes(kind) && hasEmployment) {
     path = `/payroll/people?employment=${employmentId}`
       + (kind === 'activity' ? '&panel=employment_terms&field=activity_code' : '')

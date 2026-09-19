@@ -250,8 +250,10 @@ se zůstatek nepřevede a protokol na to upozorní.
 - **Dávky nemocenského (`MZdavky`) a náhrady mzdy (`MZnahr`).** Převádí se
   jen souhrn nepřítomností za měsíc, ne jednotlivé dávky a náhrady; doplatky
   a dopočty zkontrolujte a zadejte ručně.
-- **Zaúčtování mezd (`MZzauct`).** Mzdy se do účetnictví zaúčtují až
-  v MyÚčtu, podle jeho vlastního nastavení mzdové účtárny.
+- **Zaúčtování mezd (`MZzauct`).** Účetní zápisy se nepřenášejí: mzdy se do
+  účetnictví zaúčtují až v MyÚčtu, podle jeho vlastního nastavení. Převzaté
+  zápisy by proti převedeným dokladům vyrobily duplicitu. Z převzatého
+  zaúčtování se bere jen podklad pro nastavení kontací (§ 108.10).
 - **Zákonné pojištění odpovědnosti zaměstnavatele.** Export ho nevede.
 
 ## 108.7 Přechod uprostřed roku
@@ -316,3 +318,38 @@ podívat se na přepočet dřív, než se schválí. Měsíc s neschválenou rev
 označený stavem revize.
 
 Sestavu vidí uživatel s oprávněním ke mzdovým sestavám (`payroll.reports`).
+
+## 108.10 Kontace mezd z původního programu
+
+**Cesta: `Mzdy → Kontace z původního programu`**
+
+Kontace mezd (které mzdové plnění jde na který účet) má původní program
+nastavené a export je nese. MyÚčto z nich odvodí **návrh nastavení**, takže
+je nemusíte naklikat znovu.
+
+Není to import účetních zápisů. Mzdy se zaúčtují až v MyÚčtu podle tohoto
+nastavení; převzaté zápisy by proti převedeným dokladům vznikly dvakrát.
+
+U každého mzdového plnění obrazovka ukáže, **z čeho odvozený účet vyšel**:
+kolik řádků převzatého zaúčtování za ním stojí, kolik přes něj prošlo peněz
+a na jakých střediscích. Stavy jsou čtyři:
+
+- **jednoznačné** - vyšel právě jeden účet a firma ho má v osnově. Jen tenhle
+  stav nese doporučení.
+- **rozpor** - na jedno plnění vyšly dva a víc účtů. Návrh **nevybírá
+  většinový**: firma se dvěma zdravotními pojišťovnami na dvou analytikách má
+  obě správně. Oba účty se ukážou s počty a rozhodnete vy.
+- **účet mimo osnovu** - účet je jednoznačný, ale ve vaší účtové osnově není.
+  Nabídnout ho jako hotovou volbu by nešlo uložit, takže se jen označí; pokud
+  má osnova aspoň jeho syntetiku, obrazovka to připomene.
+- **bez podkladu** - v převzatých datech k tomu plnění nic není a nastavení
+  zůstává na výchozí hodnotě.
+
+Plnění, pro které MyÚčto kontaci nemá (zálohy, úhrada mzdy, zaokrouhlení,
+dávky nemocenské), se nezahazuje - je ve zvláštní tabulce pod návrhem.
+
+**Nic se neuloží samo.** Uloží se právě ty účty, které jste v nabídce
+vybrali; ostatní plnění zůstanou na dosavadní hodnotě. Zápis jde stejnou
+cestou jako obrazovka `Mzdy → Nastavení`, takže platí stejné kontroly osnovy
+i typu účtu. Obrazovku vidí uživatel s oprávněním k nastavení mezd
+(`payroll.settings`).

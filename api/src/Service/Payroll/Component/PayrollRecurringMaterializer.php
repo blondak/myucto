@@ -213,9 +213,17 @@ final class PayrollRecurringMaterializer
             'absence_exceeds_work_fund' =>
                 'Nepřítomnost v měsíci přesahuje fond pracovní doby; evidence si odporuje '
                 . 'a poměrná část mzdy by z ní vyšla nesprávně.',
+            // Měsíc, kde je obojí, se od převodu datovaných nepřítomností počítá smíšenou
+            // větví; tenhle důvod už služba nevrací a zůstává jen pro starší uložené záznamy.
             'import_summary_with_dated_absences' =>
                 'Měsíc má docházku ze souhrnu importu a zároveň nepřítomnost s daty, takže '
                 . 'by se tatáž doba krátila dvakrát. Ponechte jen jeden zdroj.',
+            'import_summary_title_in_both_sources' =>
+                'Týž druh nepřítomnosti je v měsíci vedený i v souhrnu importu, i v evidenci '
+                . 'nepřítomností s daty. Ponechte jen jeden zdroj, jinak by se doba krátila dvakrát.',
+            'dated_absence_without_shift_time' =>
+                'Nepřítomnost s daty nemá v měsíci rozvrženou směnu, takže její dobu nelze '
+                . 'změřit a poměrnou část mzdy doložit.',
             'import_summary_missing', 'empty_work_fund', 'import_fund_mismatch',
             'import_summary_inconsistent' =>
                 'Měsíc nemá doložený fond pracovní doby ani hodiny nepřítomnosti, ze kterých '

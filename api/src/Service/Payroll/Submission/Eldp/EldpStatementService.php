@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
 use MyInvoice\Repository\Payroll\EldpStatementRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
@@ -17,7 +18,8 @@ use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
  *
  * Řetěz je záměrně krátký a končí dřív, než by mohl něco odeslat:
  *
- * 1. sestavení ze zmrazených schválených revizí roku,
+ * 1. sestavení ze zmrazených schválených revizí roku, v roce přechodu z jiného
+ *    mzdového programu doplněných o převzaté měsíce (`PayrollTakeoverReader`),
  * 2. XML podle připnutého oficiálního typu `eldpType` a jeho validace,
  * 3. neměnný šifrovaný snapshot evidenčního listu,
  * 4. zápis do **registru povinností** s vlastní zákonnou lhůtou,
@@ -52,6 +54,12 @@ final readonly class EldpStatementService
         private PayrollObligationService $obligations,
         private PayrollSubmissionService $submissions,
         private PayrollSubmissionRepository $submissionRepository,
+        /**
+         * Druhý zdroj měsíců roku přechodu z jiného mzdového programu.
+         * Sestavovač si ho nečte sám: stejně jako mzdové revize ho dostane
+         * hotový, aby zůstal čistou funkcí podkladů.
+         */
+        private PayrollTakeoverReader $takeover,
     ) {}
 
     /**
@@ -156,6 +164,7 @@ final readonly class EldpStatementService
                 $year,
                 $this->repository->revisionsForYear($supplierId, $year),
                 $confirmation,
+                $this->takeover->forEmployment($supplierId, $employmentId, $year),
             );
             $xml = $this->serializer->serialize($statement);
             $schema = $this->validator->validate($statement, $xml);
@@ -167,7 +176,7 @@ final readonly class EldpStatementService
                 $supplierId,
             );
             $scope = $statement->scope();
-            $manifestJson = CanonicalJson::encode([
+            $manifest = [
                 'schema_reference' => self::MANIFEST_SCHEMA,
                 'builder_version' => EldpAnnualStatementBuilder::BUILDER_VERSION,
                 'scope' => $scope,
@@ -179,7 +188,32 @@ final readonly class EldpStatementService
                 'xml_sha256' => $xmlSha256,
                 'section_count' => count($statement->sections()),
                 'statement_fingerprint' => $fingerprint,
-            ]);
+            ];
+            /*
+             * Převzatá část roku přechodu má v manifestu tutéž váhu jako otisky
+             * snapshotů mzdové revize: bez ní by z nešifrovaného manifestu nešlo
+             * poznat, že část zákonné evidence nepochází z výpočtu MyÚčta.
+             *
+             * Klíče se přidávají jen tehdy, když převzatá data opravdu jsou.
+             * Prázdné pole navíc by změnilo `source_manifest_sha256` i
+             * `request_fingerprint` u všech dřív zmrazených listů a opakovaná
+             * příprava by je odmítla jako změněný podklad.
+             *
+             * Identita osoby z původního systému (`external_person_ref`) sem
+             * NEPATŘÍ — manifest se ukládá nešifrovaný. Zůstává jen v šifrovaném
+             * snapshotu evidenčního listu; tady je období, zdroj a otisk řádku.
+             */
+            $takeovers = self::takeoverSources($statement);
+            if ($takeovers !== []) {
+                $manifest['source_takeovers'] = $takeovers;
+            }
+            $overridden = $statement->payload['takeover_overridden_periods'] ?? null;
+            if (is_array($overridden) && $overridden !== []) {
+                $manifest['takeover_overridden_periods'] = array_values(
+                    array_map(strval(...), $overridden),
+                );
+            }
+            $manifestJson = CanonicalJson::encode($manifest);
             $manifestHash = hash('sha256', $manifestJson);
             $requestFingerprint = hash('sha256', CanonicalJson::encode([
                 'schema_reference' => self::REQUEST_SCHEMA,
@@ -676,6 +710,39 @@ final readonly class EldpStatementService
                 'run_id' => (int) $source['run_id'],
                 'input_snapshot_hash' => (string) $source['input_snapshot_hash'],
                 'result_snapshot_hash' => (string) $source['result_snapshot_hash'],
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Otisk převzatých měsíců pro nešifrovaný manifest.
+     *
+     * @return list<array{period_start:string,source:string,row_sha256:string}>
+     */
+    private static function takeoverSources(EldpAnnualStatement $statement): array
+    {
+        $sources = $statement->payload['source_takeovers'] ?? null;
+        if ($sources === null) {
+            return [];
+        }
+        if (!is_array($sources) || !array_is_list($sources)) {
+            throw new \UnexpectedValueException(
+                'Zdrojové převzaté měsíce evidenčního listu nejsou seznam.',
+            );
+        }
+        $normalized = [];
+        foreach ($sources as $source) {
+            if (!is_array($source)) {
+                throw new \UnexpectedValueException(
+                    'Zdrojový převzatý měsíc evidenčního listu není objekt.',
+                );
+            }
+            $normalized[] = [
+                'period_start' => (string) $source['period_start'],
+                'source' => (string) $source['source'],
+                'row_sha256' => (string) $source['row_sha256'],
             ];
         }
 

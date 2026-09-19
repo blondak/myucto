@@ -207,6 +207,44 @@ async function loadEmployments(id: number): Promise<void> {
  */
 const suggestedNote = ref('')
 
+/*
+ * Rok přechodu z jiného mzdového programu. Převzatý měsíc není výsledek
+ * výpočtu MyÚčta, a evidenční list jde na ČSSZ — takže se to nesmí schovat
+ * do souhrnu. Panel vypisuje, které měsíce jsou převzaté, odkud, a s jakým
+ * otiskem řádku jdou do zmrazeného podkladu.
+ */
+interface EldpTakeoverSource {
+  period_start: string
+  source: string
+  row_sha256: string
+}
+
+function isTakeoverSource(value: unknown): value is EldpTakeoverSource {
+  const item = value as Partial<EldpTakeoverSource> | null
+  return typeof item?.period_start === 'string'
+    && typeof item.source === 'string'
+    && typeof item.row_sha256 === 'string'
+}
+
+const takeoverSources = computed<EldpTakeoverSource[]>(() => {
+  const value = statement.value?.payload?.source_takeovers
+  return Array.isArray(value) ? value.filter(isTakeoverSource) : []
+})
+const takeoverOverriddenPeriods = computed<string[]>(() => {
+  const value = statement.value?.payload?.takeover_overridden_periods
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string').map(monthLabel)
+    : []
+})
+
+function monthLabel(periodStart: string): string {
+  return periodStart.slice(0, 7)
+}
+
+function takeoverSourceLabel(code: string): string {
+  return t(`payroll.migration_reconciliation.source_name.${code}`)
+}
+
 function applyNoteSuggestion(): void {
   const reason = eligibility.value?.reason?.trim() ?? ''
   if (reason === '') return
@@ -622,6 +660,47 @@ watch(requestedByAuthority, value => {
             <dd class="font-medium">{{ statement.section_count }}</dd>
           </div>
         </dl>
+      </div>
+
+      <!--
+        Převzatá část roku přechodu. Stojí hned pod souhrnem, protože účetní
+        musí vědět, že část zákonné evidence nespočítalo MyÚčto, ještě než
+        stáhne kontrolní XML a půjde list podat.
+      -->
+      <div
+        v-if="statement && (takeoverSources.length || takeoverOverriddenPeriods.length)"
+        class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-800"
+        data-test="eldp-takeover"
+        role="status"
+      >
+        <p class="font-medium">{{ t('payroll.eldp.takeover.title') }}</p>
+        <p class="mt-1 max-w-prose text-xs">{{ t('payroll.eldp.takeover.description') }}</p>
+        <ul v-if="takeoverSources.length" class="mt-2 space-y-1 text-xs">
+          <li
+            v-for="item in takeoverSources"
+            :key="item.period_start"
+            data-test="eldp-takeover-month"
+          >
+            <span class="font-medium">
+              {{ t('payroll.eldp.takeover.month', {
+                period: monthLabel(item.period_start),
+                source: takeoverSourceLabel(item.source),
+              }) }}
+            </span>
+            <span class="block break-all text-warning-700">
+              {{ t('payroll.eldp.takeover.fingerprint', { hash: item.row_sha256 }) }}
+            </span>
+          </li>
+        </ul>
+        <p
+          v-if="takeoverOverriddenPeriods.length"
+          class="mt-2 max-w-prose text-xs"
+          data-test="eldp-takeover-overridden"
+        >
+          {{ t('payroll.eldp.takeover.overridden', {
+            periods: takeoverOverriddenPeriods.join(', '),
+          }) }}
+        </p>
       </div>
 
       <p class="max-w-prose text-xs text-warning-700">

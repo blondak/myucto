@@ -3,8 +3,14 @@ import { api } from './client'
 // PAM-11 — kontrolní sestava „naše přepočtená mzda vs. mzda převzatá z původního
 // systému". Read-only report; žádné mutační metody.
 
-/** Zdroj převzatých mezd; musí sedět na ENUM v migraci 1849. */
-export type PayrollMigrationSource = 'pamica' | 'pohoda' | 'money_s3'
+/**
+ * Zdroj převzatých mezd; musí sedět na ENUM v migraci 1849 ve znění 1851
+ * a na `PayrollMigrationReferenceTotalsWriter::SOURCES`.
+ *
+ * `other` je obecný zdroj tabulkového importu — převzaté mzdy nejsou vázané na
+ * PAMICU, pojmenované zdroje jsou jen ty s vlastním feederem v aplikaci.
+ */
+export type PayrollMigrationSource = 'pamica' | 'pohoda' | 'money_s3' | 'other'
 
 /**
  * Stav porovnání jedné částky. `reference_missing` / `calculated_missing` NENÍ
@@ -108,4 +114,100 @@ export const payrollMigrationReconciliationApi = {
     api.get<{ report: PayrollMigrationReconciliation }>(
       `/payroll/reports/migration-reconciliation/${year}${source ? `?source=${encodeURIComponent(source)}` : ''}`,
     ).then(response => response.data.report),
+}
+
+// ─── Převzaté mzdy roku přechodu (PAM-09) ─────────────────────────────────────
+// Přehled toho, co je za rok k dispozici, a obecný tabulkový import z libovolného
+// mzdového systému. Nad týmiž daty stojí evidenční list důchodového pojištění
+// a zpětná evidence plateb, takže „chybí měsíc" je tu stejně důležité jako čísla.
+
+/** Odkud je měsíc. `none` = odnikud, tedy díra v roce. */
+export type PayrollTakeoverPresence = 'takeover_only' | 'calculated_only' | 'both' | 'none'
+
+export interface PayrollTakeoverPeriod {
+  period: string
+  presence: PayrollTakeoverPresence
+  /** Období předchází `payroll_module_state.start_period`. */
+  historical: boolean
+  takeover_row_count: number
+  takeover_employee_count: number
+  sources: PayrollMigrationSource[]
+}
+
+export interface PayrollTakeoverOverview {
+  supplier_id: number
+  year: number
+  employee_id: number | null
+  employment_id: number | null
+  payroll_start_period: string | null
+  sources: PayrollMigrationSource[]
+  periods: PayrollTakeoverPeriod[]
+  takeover_periods: string[]
+  calculated_periods: string[]
+  /** Měsíce vedené z obou stran — dvojí evidence, nebo kontrola přepočtu. */
+  overlapping_periods: string[]
+  /** Měsíce roku bez podkladu z kterékoli strany. */
+  missing_periods: string[]
+  months: Record<string, unknown>[]
+}
+
+export interface PayrollTakeoverImportError {
+  row_number: number
+  error_code: string
+  field_name: string | null
+  error_message: string
+}
+
+export interface PayrollTakeoverImportPreview {
+  format: string
+  source: PayrollMigrationSource
+  source_name: string
+  row_count: number
+  errors: PayrollTakeoverImportError[]
+  periods: { period: string; row_count: number; gross_minor: number }[]
+  people: {
+    employee_id: number | null
+    employee_name: string
+    month_count: number
+    gross_minor: number
+    net_payable_minor: number
+  }[]
+}
+
+export interface PayrollTakeoverImportResult {
+  format: string
+  source: PayrollMigrationSource
+  source_name: string
+  written: number
+  employee_count: number
+  periods: string[]
+}
+
+interface PayrollTakeoverImportRequest {
+  source: PayrollMigrationSource
+  format: 'csv' | 'xlsx'
+  source_name: string
+  content_base64: string
+}
+
+export const payrollTakeoverWagesApi = {
+  overview: (year: number, source?: PayrollMigrationSource | null) =>
+    api.get<{ takeover: PayrollTakeoverOverview }>(
+      `/payroll/takeover-wages/${year}${source ? `?source=${encodeURIComponent(source)}` : ''}`,
+    ).then(response => response.data.takeover),
+  person: (year: number, employeeId: number) =>
+    api.get<{ takeover: PayrollTakeoverOverview }>(
+      `/payroll/takeover-wages/${year}/people/${employeeId}`,
+    ).then(response => response.data.takeover),
+  importTemplateUrl: '/api/payroll/takeover-wages/import/template',
+  importPreview: (payload: PayrollTakeoverImportRequest) =>
+    api.post<{ preview: PayrollTakeoverImportPreview }>(
+      '/payroll/takeover-wages/import/preview',
+      payload,
+    ).then(response => response.data.preview),
+  importApply: (payload: PayrollTakeoverImportRequest) =>
+    api.post<{ import: PayrollTakeoverImportResult }>(
+      '/payroll/takeover-wages/import/apply',
+      payload,
+    ).then(response => response.data.import),
 }

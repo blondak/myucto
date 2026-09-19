@@ -684,6 +684,9 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/payroll/migration-reconciliation', label: t('nav.payroll_migration_reconciliation'), icon: ICONS.stats, permission: 'payroll.reports' as PermissionKey },
         // 3) Jednorázové nastavení — sáhne se do něj při zavádění a pak výjimečně.
         { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey, dividerBefore: true },
+        // Kontace převzaté z původního mzdového programu. Stojí hned za
+        // nastavením mezd, protože do něj potvrzením zapisuje.
+        { to: '/payroll/posting-map', label: t('nav.payroll_posting_map'), icon: ICONS.swap, permission: 'payroll.settings' as PermissionKey },
         // Importy patří k zavádění: převzetí zaměstnanců z registrací ČSSZ
         // a měsíčních podkladů z docházkového systému.
         { to: '/payroll/imports', label: t('nav.payroll_imports'), icon: ICONS.exports, permission: 'payroll.inputs.write' as PermissionKey },

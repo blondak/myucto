@@ -30,6 +30,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
 use MyInvoice\Service\Payroll\Run\PayrollRunSourceDriftDetector;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
+use MyInvoice\Service\Payroll\Run\PayrollTakeoverRunService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -59,6 +60,10 @@ final class PayrollRunsAction
         private readonly PayrollRunAutoSettlementService $autoSettlement,
         // Otevřená revize se zastaralým snímkem — varování s počtem u běhu.
         private readonly PayrollRunSourceDriftDetector $sourceDrift,
+        // Rok přechodu z jiného mzdového programu — převzatý běh (PAM-17)
+        // a doložení jeho plateb (PAM-18). Vědomě mimo `PayrollRunCommandService`:
+        // převzatý běh neprochází workflow.
+        private readonly PayrollTakeoverRunService $takeoverRuns,
     ) {}
 
     /**
@@ -625,6 +630,133 @@ final class PayrollRunsAction
             static fn (string $command): bool
                 => $command !== PayrollRunCommand::MARK_PAID->value,
         ));
+    }
+
+    /**
+     * Přehled roku přechodu: které měsíce jdou převzít a které už převzaté jsou.
+     *
+     * @param array<string,string> $args
+     */
+    public function takeoverOverview(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $overview = $this->takeoverRuns->overview(
+                $this->currentSupplierId($request),
+                (int) ($args['year'] ?? 0),
+            );
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, ['takeover_overview' => $overview]);
+    }
+
+    /**
+     * Postaví převzatý mzdový běh za jeden historický měsíc.
+     *
+     * Není to příkaz workflow a ani se tak nejmenuje: převzatý běh neprochází
+     * výpočtem, kontrolou ani schválením, takže by ho `commands/{command}`
+     * jen zamaskoval mezi kroky, které s ním nemají nic společného.
+     */
+    public function takeoverBuild(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.inputs.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        try {
+            $result = $this->takeoverRuns->build(
+                $this->currentSupplierId($request),
+                $this->requiredString($body, 'period'),
+                $this->requiredUserId($request),
+            );
+        } catch (PayrollYearClosedException $e) {
+            return self::yearClosedError($response, $e);
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, $result, 201);
+    }
+
+    /** @param array<string,string> $args */
+    public function takeoverDetail(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
+            true,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $result = $this->takeoverRuns->detail(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+            );
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /** @param array<string,string> $args */
+    public function takeoverDiscard(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.inputs.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        try {
+            $result = $this->takeoverRuns->discard(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                (string) ($body['reason'] ?? ''),
+                $this->requiredUserId($request),
+            );
+        } catch (PayrollYearClosedException $e) {
+            return self::yearClosedError($response, $e);
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, $result);
     }
 
     /**

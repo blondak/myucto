@@ -20,8 +20,11 @@ export const PAYROLL_MANUAL_CHAPTERS: PayrollManualChapterRule[] = [
   [/^\/payroll\/settings(?:\/|$)/, '90_Nastaveni_mezd'],
   // Importy registrací, hlášení a docházky popisuje 90.9 v Nastavení mezd.
   [/^\/payroll\/imports(?:\/|$)/, '90_Nastaveni_mezd'],
-  // Srovnání převzatých mezd s vlastním přepočtem patří k převodu z PAMICA.
+  // Srovnání převzatých mezd i kontace z původního programu patří k převodu.
   [/^\/payroll\/migration-reconciliation(?:\/|$)/, '108_Prechod_z_PAMICA'],
+  [/^\/payroll\/posting-map(?:\/|$)/, '108_Prechod_z_PAMICA'],
+  // Kontace odvozené z převzatého zaúčtování jsou také krok přechodu.
+  [/^\/payroll\/posting-map(?:\/|$)/, '108_Prechod_z_PAMICA'],
   [/^\/payroll\/components(?:\/|$)/, '91_Mzdove_slozky_a_vstupy'],
   [/^\/payroll\/rulesets(?:\/|$)/, '92_Legislativni_pravidla_mezd'],
   [/^\/payroll\/retention(?:\/|$)/, '93_Retencni_lhuty'],

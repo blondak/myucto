@@ -580,44 +580,80 @@ final class PayrollAbsenceRepository
      * výpočtu a jeho okno by se změnou rozešlo s tím, ze kterého vznikl mzdový
      * vstup. Opravuje se stornem výpočtu, ne přepsáním vstupu.
      *
+     * `$expectedVersion` je `null` jen pro interní volání z převodu z PAMICA
+     * ({@see \MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollSicknessWriter}),
+     * kde absence vzniká ve stejném běhu a souběh nehrozí. Zápis z API
+     * ({@see \MyInvoice\Action\Payroll\PayrollAbsenceAction::sicknessWindowCarried()})
+     * ho vyžaduje vždy.
+     *
      * @return array<string,mixed>
      */
     public function setSicknessWindowCarriedDays(
         int $supplierId,
         int $id,
         int $days,
+        ?int $expectedVersion = null,
     ): array {
         if ($days < 0) {
             throw new \InvalidArgumentException('Vyčerpaných dnů okna náhrady nemůže být záporný počet.');
         }
-        $absence = $this->find($supplierId, $id)
-            ?? throw new \RuntimeException('Nepřítomnost nebyla nalezena.');
-        if (!self::isSickness($absence)) {
-            throw new \DomainException(
-                'Okno náhrady mzdy podle § 192 ZP má jen dočasná pracovní neschopnost a karanténa.'
-            );
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
         }
-        $this->yearClose->assertOpenForDateRange(
-            $supplierId,
-            (string) $absence['date_from'],
-            (string) $absence['date_to'],
-        );
-        $computed = $this->db->pdo()->prepare(
-            'SELECT COUNT(*) FROM payroll_sickness_events WHERE supplier_id = ? AND absence_id = ?'
-        );
-        $computed->execute([$supplierId, $id]);
-        if ((int) $computed->fetchColumn() > 0) {
-            throw new \DomainException(
-                'Náhrada mzdy k téhle neschopnosti je už spočítaná; vyčerpané dny okna '
-                . 'nastavte až po jejím stornu.'
+        try {
+            $absence = $this->find($supplierId, $id)
+                ?? throw new \InvalidArgumentException('Nepřítomnost nebyla nalezena.');
+            if (!self::isSickness($absence)) {
+                throw new \DomainException(
+                    'Okno náhrady mzdy podle § 192 ZP má jen dočasná pracovní neschopnost a karanténa.'
+                );
+            }
+            $this->yearClose->assertOpenForDateRange(
+                $supplierId,
+                (string) $absence['date_from'],
+                (string) $absence['date_to'],
             );
+            $computed = $pdo->prepare(
+                'SELECT COUNT(*) FROM payroll_sickness_events WHERE supplier_id = ? AND absence_id = ?'
+            );
+            $computed->execute([$supplierId, $id]);
+            if ((int) $computed->fetchColumn() > 0) {
+                throw new \DomainException(
+                    'Náhrada mzdy k téhle neschopnosti je už spočítaná; vyčerpané dny okna '
+                    . 'nastavte až po jejím stornu.'
+                );
+            }
+            $sql = 'UPDATE payroll_absences
+                       SET sickness_window_carried_days = ?, row_version = row_version + 1
+                     WHERE supplier_id = ? AND id = ?';
+            $params = [$days, $supplierId, $id];
+            if ($expectedVersion !== null) {
+                $sql .= ' AND row_version = ?';
+                $params[] = $expectedVersion;
+            }
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            if ($expectedVersion !== null && $stmt->rowCount() !== 1) {
+                $current = $pdo->prepare(
+                    'SELECT row_version FROM payroll_absences WHERE supplier_id = ? AND id = ?'
+                );
+                $current->execute([$supplierId, $id]);
+                $currentVersion = $current->fetchColumn();
+                throw new PayrollAbsenceConflictException(
+                    $currentVersion !== false ? (int) $currentVersion : $expectedVersion,
+                );
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
         }
-        $stmt = $this->db->pdo()->prepare(
-            'UPDATE payroll_absences
-                SET sickness_window_carried_days = ?, row_version = row_version + 1
-              WHERE supplier_id = ? AND id = ?'
-        );
-        $stmt->execute([$days, $supplierId, $id]);
 
         return $this->find($supplierId, $id)
             ?? throw new \RuntimeException('Nepřítomnost nebyla po zápisu nalezena.');

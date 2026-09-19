@@ -174,12 +174,45 @@ final class PohodaPayrollConverter
                     $monthlyWage = max($monthlyWage ?? 0.0, PohodaXml::num($item, 'Hodnota1'));
                 }
             }
+            /*
+             * Nepřítomnost, kterou evidence vede jedině s daty od a do (nemoc, ošetřovné,
+             * otcovská, neplacené volno, neomluvená absence), do měsíčního sešitu NEPATŘÍ:
+             * tutéž dobu zapíše převod datovaně z `MZneprit` a jeden údaj má mít jediný
+             * zdroj - {@see PohodaPayrollCatalog::absenceNeedsDates()}. Z holého měsíčního
+             * součtu hodin se náhrada mzdy ani vyloučená doba spočítat nedá, takže souhrn
+             * s nimi měsíc stejně schválit nepustí.
+             *
+             * Vypouští se jen druh, u kterého má data KAŽDÝ jeho řádek v měsíci. Kdyby se
+             * vypustila jen datovaná část, zbytek by v souhrnu druh podržel, převod by kvůli
+             * tomu nezapsal ani datovanou část ({@see PohodaPayrollPeopleWriter::absences()})
+             * a ta doba by zmizela z obou stran.
+             */
+            $year = (int) substr($period, 0, 4);
+            /** @var array<string,list<array{header:string,hours:float}>> $absenceHours význam => hodiny řádků */
+            $absenceHours = [];
+            /** @var array<string,bool> $absenceDated význam => zapíše se datovaně místo do sešitu */
+            $absenceDated = [];
             foreach ($this->items['MZneprit'][$mzId] ?? [] as $item) {
                 $catalog = $this->byId['sMZneprit'][PohodaXml::text($item, 'RefSlozka')] ?? [];
-                $class = PohodaPayrollCatalog::absence(PohodaXml::text($catalog, 'Cislo'), PohodaXml::text($catalog, 'Nazev'));
-                if ($class['meaning'] !== 'ignore') {
-                    $column($class['header'], $class['meaning'], 'hours');
-                    $add($class['header'], PohodaXml::num($item, 'HodPrac'));
+                $number = PohodaXml::text($catalog, 'Cislo');
+                $name = PohodaXml::text($catalog, 'Nazev');
+                $class = PohodaPayrollCatalog::absence($number, $name);
+                if ($class['meaning'] === 'ignore') {
+                    continue;
+                }
+                $meaning = $class['meaning'];
+                $absenceHours[$meaning][] = ['header' => $class['header'], 'hours' => PohodaXml::num($item, 'HodPrac')];
+                $absenceDated[$meaning] = ($absenceDated[$meaning] ?? true)
+                    && PohodaPayrollCatalog::absenceNeedsDates($number, $name)
+                    && PohodaPayrollPeople::absenceDates($item, $year) !== null;
+            }
+            foreach ($absenceHours as $meaning => $items) {
+                if ($absenceDated[$meaning] === true) {
+                    continue;
+                }
+                foreach ($items as $absence) {
+                    $column($absence['header'], $meaning, 'hours');
+                    $add($absence['header'], $absence['hours']);
                 }
             }
             foreach ($this->items['MZsrazky'][$mzId] ?? [] as $item) {

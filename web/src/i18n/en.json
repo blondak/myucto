@@ -1029,6 +1029,7 @@
     "payroll_retention": "Retention periods",
     "payroll_erasure": "Erasure of personal data",
     "payroll_benefit_baskets": "Benefit baskets",
+    "payroll_posting_map": "Postings from the previous program",
     "payroll_migration_reconciliation": "Migrated payroll check",
     "settings": "Settings",
     "company_settings": "Company settings",
@@ -1672,6 +1673,55 @@
       "privacy_hint": "This overview contains no names, personal identifiers, or individual employee detail.",
       "load_failed": "The annual payroll overview could not be loaded."
     },
+    "posting_map": {
+      "title": "Payroll postings from the previous program",
+      "intro": "The taken-over postings are used to derive which account sat behind which payroll item, and the result is offered as a proposal for the posting settings. Only what you confirm is saved.",
+      "not_posted": "Accounting entries are not migrated. MyÚčto posts payroll on its own from these settings; taken-over entries would duplicate the migrated documents.",
+      "reload": "Reload",
+      "hide_missing": "Hide items with no evidence",
+      "load_failed": "The posting proposal could not be loaded.",
+      "save_failed": "The confirmed postings could not be saved.",
+      "saved": "The confirmed postings are stored in the payroll settings.",
+      "conflict": "Someone changed the payroll settings in the meantime. We reloaded them, please repeat your selection.",
+      "empty_title": "Nothing to derive from yet",
+      "empty_description": "The proposal is created when payroll is migrated from the previous program. Run the migration and come back.",
+      "table_title": "Derived postings",
+      "table_hint": "An empty selection means “keep the current account”. A conflict is never decided for you: when one meaning yielded two accounts, pick the right one yourself.",
+      "accept_unambiguous": "Take the unambiguous ones",
+      "clear_choices": "Clear selection",
+      "nothing_derived": "Nothing came out of the taken-over data",
+      "not_in_chart": "missing in the chart",
+      "synthetic_available": "your chart has {code}",
+      "evidence": "{lines} lines, {amount}",
+      "cost_centers": "cost centres: {list}",
+      "is_default": "default value",
+      "keep_current": "Keep the current account",
+      "unmapped_title": "Items with no counterpart in MyÚčto",
+      "unmapped_hint": "These taken-over posting lines matched no MyÚčto payroll posting. They are not dropped, there is simply nowhere to put them: advances, wage payouts, rounding and the like.",
+      "pending": "Confirmed to save: {count}",
+      "save": "Save confirmed postings",
+      "status": {
+        "unambiguous": "unambiguous",
+        "conflict": "conflict",
+        "outside_chart": "account outside the chart",
+        "missing": "no evidence"
+      },
+      "summary": {
+        "lines": "Taken-over posting lines",
+        "unambiguous": "Unambiguous",
+        "conflict": "Conflicting",
+        "outside_chart": "Outside the chart"
+      },
+      "column": {
+        "meaning": "Payroll item",
+        "derived": "Derived from taken-over data",
+        "current": "Currently set",
+        "choice": "Confirm account",
+        "legacy_label": "Item in the previous program",
+        "lines": "Lines",
+        "amount": "Amount"
+      }
+    },
     "migration_reconciliation": {
       "title": "Migrated payroll check",
       "subtitle": "Compares the payroll recalculated in MyÚčto with the payroll taken over from the previous system. The previous system already filed those figures with social security, the health insurers and the tax office, so any difference has to be known before the recalculation is approved.",
@@ -1681,7 +1731,38 @@
       "source_name": {
         "pamica": "PAMICA",
         "pohoda": "POHODA Payroll",
-        "money_s3": "Money S3"
+        "money_s3": "Money S3",
+        "other": "Other payroll system"
+      },
+      "takeover": {
+        "title": "Taken-over payroll for the year",
+        "subtitle": "What is available for the year from the previous system. The pension insurance record sheet and the retrospective payment evidence are built on the same data, so a month that is neither taken over nor calculated is a gap in the year.",
+        "template": "Sample file",
+        "historical": "historical",
+        "presence": {
+          "takeover_only": "taken over",
+          "calculated_only": "calculated here",
+          "both": "both sides",
+          "none": "missing"
+        },
+        "people_count": "{count} people",
+        "months": "Months",
+        "net_payable": "Payable",
+        "missing": "No source on either side: {periods}",
+        "overlapping": "From both sides (compared in the table below): {periods}",
+        "upload_title": "Upload taken-over payroll",
+        "upload_hint": "CSV or XLSX with the columns from the sample file. Amounts in whole minor units, days and hours as decimals. The duration and type of the employment relationship come from the records, not from the file. Uploading the same data again overwrites the rows instead of duplicating them.",
+        "import_source": "Previous system",
+        "file": "File",
+        "preview": "Check",
+        "apply": "Upload",
+        "format_unsupported": "Choose a CSV or XLSX file.",
+        "preview_failed": "The file could not be checked.",
+        "apply_failed": "The taken-over payroll could not be saved.",
+        "apply_done": "Saved {rows} rows for {people} people across {months} months.",
+        "preview_summary": "{rows} rows, {people} people, {months} months. Everything is valid, you can upload.",
+        "errors_block": "The file has {count} invalid rows and will not be written even in part. Taken-over payroll is a continuous run of months, so a partial write would silently distort the insurance period.",
+        "error_row": "Row {row}:"
       },
       "reload": "Reload",
       "load_failed": "The check could not be loaded.",
@@ -2232,6 +2313,46 @@
       "empty": "No payroll run for the selected period",
       "empty_hint": "Check the inputs and create the first run using the button above.",
       "run_label": "Payroll for {period}",
+      "takeover": {
+        "title": "Taken-over months of the transition year",
+        "subtitle": "Months processed by the previous payroll program. A taken-over run mirrors them: it is not calculated, not approved and never posted again.",
+        "boundary": "MyÚčto calculates payroll from {period}",
+        "loading": "Loading taken-over months…",
+        "rows": "{count} migration rows",
+        "state_built": "Taken over",
+        "state_available": "Ready to take over",
+        "build": "Take over month",
+        "built": "Month {period} has been taken over.",
+        "build_failed": "The month could not be taken over.",
+        "show": "Show payment evidence",
+        "hide": "Hide payment evidence",
+        "detail_failed": "Payment evidence could not be loaded.",
+        "discard": "Discard takeover",
+        "discard_hint": "A taken-over run is never edited. Discard it and take the month over again from the current data.",
+        "discard_reason": "Reason for discarding",
+        "discard_confirm": "Discard takeover",
+        "discard_cancel": "Keep",
+        "discarded": "The takeover has been discarded.",
+        "discard_failed": "The takeover could not be discarded.",
+        "badge": "Taken over",
+        "badge_hint": "The result comes from the previous payroll program; MyÚčto did not calculate it.",
+        "evidence_note": "Payment evidence, not a payment order. No liability or settlement is created, so it never shows up in the balance or in the journal — the historical month was already posted during the migration.",
+        "column_kind": "Kind",
+        "column_who": "Recipient",
+        "column_amount": "Amount",
+        "column_paid_on": "Paid on",
+        "whole_company": "Whole company",
+        "no_payment_date": "date unknown",
+        "kind": {
+          "net_wage": "Net wage",
+          "deduction": "Wage deductions",
+          "social_insurance": "Social insurance",
+          "health_insurance": "Health insurance",
+          "advance_tax": "Advance tax",
+          "withholding_tax": "Withholding tax",
+          "tax_bonus": "Tax bonus"
+        }
+      },
       "revision": "revision {revision}",
       "reason_prompt": "Enter the reason for the change:",
       "reason_required": "A reason is required.",
@@ -6838,7 +6959,14 @@
         "prepareFailed": "The record sheet could not be built.",
         "downloadFailed": "The record sheet control XML could not be downloaded."
       },
-      "noteOptionalHint": "Optional. ČSSZ does not accept the note; it stays in your own records as a trace of why the sheet was issued. We prefill it from the eligibility reason."
+      "noteOptionalHint": "Optional. ČSSZ does not accept the note; it stays in your own records as a trace of why the sheet was issued. We prefill it from the eligibility reason.",
+      "takeover": {
+        "title": "Part of the year comes from another payroll program.",
+        "description": "MyÚčto did not calculate the following months: they were taken over from the previous system and enter the evidence sheet exactly as it issued them. Compare them with the previous program’s documents before filing; their fingerprint is part of the frozen evidence sheet.",
+        "month": "{period} — taken over from {source}",
+        "fingerprint": "Taken-over row fingerprint: {hash}",
+        "overridden": "These months have both taken-over data and an approved MyÚčto payroll revision; the evidence sheet is built from the revision: {periods}."
+      }
     },
     "regzel": {
       "description": "Safely prepares supplemental employer information only. Initial registration, lifecycle changes and corrections remain blocked.",
@@ -8973,7 +9101,8 @@
         "calendar": "Find the employment calendar",
         "entries": "Review attendance for this employment",
         "imports": "Open attendance imports",
-        "average": "Complete this employment’s average earnings"
+        "average": "Complete this employment’s average earnings",
+        "takeover": "Open payroll takeover review"
       },
       "eldp": {
         "period": "Reporting period: {period}.",
@@ -8991,7 +9120,9 @@
           "absence_dates": "An absence has an invalid start or end date.",
           "absence_overlap": "Excluded periods overlap or exceed the employment duration.",
           "income_month": "No countable income was paid in the month and the recorded absences cannot decide whether the month is an insurance period (sickness combined with unpaid leave, the month of childbirth, or a month with neither income nor absence).",
-          "unknown": "A preparation error must be investigated by support."
+          "unknown": "A preparation error must be investigated by support.",
+          "takeover": "A payroll month taken over from the previous program lacks a value the pension evidence sheet needs, or it contradicts the payroll kept in MyÚčto.",
+          "takeover_revision": "MyÚčto calculates payroll for the indicated month but has no approved revision; data taken over from the previous program must not replace it."
         },
         "steps": {
           "no_revisions": "In Payroll, select the reporting year and check the months during which the employment existed. Complete genuinely missing calculations and approvals. If payroll was processed elsewhere, do not create fictitious calculations; contact support about historical evidence.",
@@ -9007,7 +9138,9 @@
           "absence_dates": "Open this employment’s absences and check dates and overlaps for the reporting period. Correct only erroneous records, then recalculate and approve affected payroll. If overlapping absences are accurate, do not remove them just to pass validation; contact support.",
           "absence_overlap": "Open this employment’s absences and check dates and overlaps for the reporting period. Correct only erroneous records, then recalculate and approve affected payroll. If overlapping absences are accurate, do not remove them just to pass validation; contact support.",
           "income_month": "Open this employment’s absences and verify the absences in the indicated month. If an absence or forgotten pay is missing, add it and recalculate payroll. If the records are accurate, the law decides only about the whole month and the application cannot resolve it; process that month manually and do not change anything just to pass validation.",
-          "unknown": "Contact support with the reporting year, employment and technical details below. Do not change employee data or approved payroll blindly because of this error."
+          "unknown": "Contact support with the reporting year, employment and technical details below. Do not change employee data or approved payroll blindly because of this error.",
+          "takeover": "Open the payroll takeover review, fill in the missing value for the indicated month (activity kind, insured days, assessment base, employment dates) and repeat the takeover. Do not estimate the value: the evidence sheet feeds a pension calculation. If the previous program never issued it, file the evidence sheet for that month outside the application.",
+          "takeover_revision": "Open payroll for the indicated month, finish the calculation and approve the current revision, or discard the draft run. Only then prepare the evidence sheet again. Taken-over data will not substitute the month so that a draft calculation with different figures cannot stay hidden."
         }
       },
       "work": {
@@ -23277,7 +23410,11 @@
       "record_childbirth": "Add date of birth",
       "record_childbirth_save": "Save date of birth",
       "record_childbirth_once": "The date of birth can be added only once. To correct a wrong date, cancel the absence and record it again.",
-      "childbirth_recorded": "The date of birth has been added."
+      "childbirth_recorded": "The date of birth has been added.",
+      "sickness_window_carried_days": "Days of the compensation window used up by the previous payer",
+      "sickness_window_carried_edit": "Edit days of the compensation window",
+      "sickness_window_carried_hint": "Fill in only when the employee was with a different employer or a previous payroll program at the start of the incapacity — the wage compensation window (Section 192 of the Labour Code) shortens by the days already used up there. It can no longer be changed once the wage compensation has been calculated.",
+      "sickness_window_carried_saved": "The compensation window days have been saved."
     },
     "dpn": {
       "insurance": "Sickness insurance participation confirmed",
@@ -25014,7 +25151,8 @@
       "payroll_deductions": "Deductions, garnishments and insolvency",
       "cancelled": "Cancelled by user",
       "unexpected": "Unexpected error",
-      "payroll_sickness": "Sickness and wage compensation"
+      "payroll_sickness": "Sickness and wage compensation",
+      "payroll_posting_map": "Posting rules from the previous program"
     },
     "counts": {
       "months": "months",
@@ -25128,6 +25266,7 @@
       "institution_accounts": "health insurer accounts",
       "monthly_wage_ended": "ended relations without a wage transfer",
       "absences_overlap": "absences skipped due to overlap",
+      "absences_without_dates": "absences without a start and end date",
       "monthly_wage_settled": "wage versions into a settled period",
       "recurring_wage": "monthly wage prescriptions",
       "recurring_wage_hourly": "of which relations with hourly or task pay too",
@@ -25147,7 +25286,8 @@
       "sickness_overlap": "cases overlapping another absence",
       "sickness_failed": "cases not migrated",
       "reference_totals": "reference payslips stored for comparison",
-      "reference_totals_skipped": "payslips without employment identification"
+      "reference_totals_skipped": "payslips without employment identification",
+      "posting_map_conflicts": "posting rules in conflict"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",

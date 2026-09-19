@@ -80,6 +80,11 @@ final class PayrollRunCommandService
                 $officeId,
                 $actorUserId,
             );
+            // `createOrGet` je najdi-nebo-založ, takže za období s převzatým
+            // během vrátí TEN. Historické období sem sice neprojde už přes
+            // `assertModuleAvailable()`, ale hranice mzdového modulu se dá
+            // posunout — a pak by se převzatý běh tiše stal běžným.
+            $this->assertCalculatedRun($run);
             $this->ownership->claimPayroll(
                 $supplierId,
                 (int) $period->format('Y'),
@@ -551,6 +556,7 @@ final class PayrollRunCommandService
             if ($run === null) {
                 throw new \OutOfBoundsException('Mzdový běh nebyl nalezen.');
             }
+            $this->assertCalculatedRun($run);
             $this->assertModuleAvailable(
                 $supplierId,
                 (string) $run['period_start'],
@@ -695,6 +701,9 @@ final class PayrollRunCommandService
             if ($run === null) {
                 throw new \OutOfBoundsException('Mzdový běh nebyl nalezen.');
             }
+            // Před potvrzenkou i před vším ostatním: převzatý běh do workflow
+            // nepatří a nesmí se do něj dostat ani přehráním starého příkazu.
+            $this->assertCalculatedRun($run);
 
             $receipt = $this->runs->commandReceipt($supplierId, $keyHashBinary);
             if ($receipt !== null) {
@@ -1359,6 +1368,34 @@ final class PayrollRunCommandService
                 : (int) $row['journal_entry_id'],
             'posting_status' => (string) $row['status'],
         ];
+    }
+
+    /**
+     * Workflow běhu platí jen pro běh, který MyÚčto počítá.
+     *
+     * Převzatý běh je zrcadlo cizího výpočtu: nemá revizi, nemá co spočítat,
+     * co schválit ani co zaúčtovat (doklady za historické období jsou
+     * v účetnictví už z převodu). Brána je vázaná na `run_kind`, tedy na DRUH
+     * BĚHU — ne na výjimku pro soubor nebo pro období — takže ji nemine žádný
+     * příkaz: `execute()` ji volá hned po zamknutí řádku, tedy ještě před
+     * potvrzenkou idempotence i před workflow.
+     *
+     * Cesta ven je {@see PayrollTakeoverRunService::discard()}: zrcadlo se
+     * neopravuje, zahodí se a převezme znovu.
+     *
+     * @param array<string,mixed> $run
+     */
+    private function assertCalculatedRun(array $run): void
+    {
+        if (!PayrollRunKind::isTakeover($run)) {
+            return;
+        }
+
+        throw new \DomainException(
+            'Převzatý mzdový běh se neřídí příkazy mzdového workflow — je to '
+            . 'zrcadlo výpočtu z předchozího programu. Opravit ho jde jen tak, '
+            . 'že ho zrušíte a převezmete znovu.',
+        );
     }
 
     private function assertModuleAvailable(int $supplierId, string $periodStart): void

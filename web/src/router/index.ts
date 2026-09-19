@@ -130,6 +130,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-submissions': ['payroll.submissions'],
   'payroll-submissions-tab': ['payroll.submissions'],
   'payroll-migration-reconciliation': ['payroll.reports'],
+  'payroll-posting-map': ['payroll.settings'],
   'payroll-settings': ['payroll.settings'],
   // Importy zakládají osoby i mzdové vstupy; vstupní branou je zápis vstupů,
   // import registrací si server hlídá vlastním právem `payroll.person.write`.

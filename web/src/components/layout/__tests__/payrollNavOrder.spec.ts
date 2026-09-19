@@ -75,8 +75,10 @@ describe('mzdové menu', () => {
   it('odděluje jednorázové nastavení od měsíční práce a řadí ho nakonec', () => {
     const items = payrollNavItems()
     const setup = [
-      '/payroll/settings', '/payroll/imports', '/payroll/components', '/payroll/rulesets',
-      '/payroll/retention', '/payroll/erasure',
+      // Kontace z původního programu stojí hned za nastavením mezd, protože do něj
+      // potvrzením zapisuje; je to zavádění, ne měsíční práce.
+      '/payroll/settings', '/payroll/posting-map', '/payroll/imports', '/payroll/components',
+      '/payroll/rulesets', '/payroll/retention', '/payroll/erasure',
     ]
 
     expect(items.slice(-setup.length).map(item => item.to)).toEqual(setup)

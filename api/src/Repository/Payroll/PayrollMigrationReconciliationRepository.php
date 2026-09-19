@@ -52,6 +52,107 @@ final class PayrollMigrationReconciliationRepository
         return $rows;
     }
 
+    /**
+     * Úplné převzaté řádky včetně dob, druhu vztahu a platby (migrace 1851).
+     *
+     * Na rozdíl od {@see self::referenceTotals()}, které vydává jen porovnávané
+     * peníze pro kontrolní sestavu, tohle je celý řádek — čte ho
+     * {@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader} a nad ním
+     * stojí sestavení ELDP i zpětná evidence plateb za rok přechodu.
+     *
+     * Filtr podle osoby i vztahu je volitelný a kombinovatelný; `employment_id`
+     * je soft link, takže vztah, který se do MyÚčta nepřevedl, se dá najít jen
+     * přes osobu nebo celofiremním čtením.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function takeoverRows(
+        int $supplierId,
+        int $year,
+        ?int $employeeId = null,
+        ?int $employmentId = null,
+        ?string $source = null,
+    ): array {
+        $sql = 'SELECT DATE_FORMAT(period_start, "%Y-%m") AS period,
+                       source, external_person_ref, external_relationship_ref,
+                       employee_id, employment_id,
+                       relationship_start_date, relationship_end_date,
+                       relation_type, activity_code, pension_participation,
+                       insurance_days, excluded_days,
+                       worked_days_hundredths, worked_minutes,
+                       gross_minor, net_minor, deductions_minor, net_payable_minor,
+                       social_base_minor, health_base_minor,
+                       employee_social_minor, employee_health_minor,
+                       employer_social_minor, employer_health_minor,
+                       advance_tax_minor, withholding_tax_minor, tax_bonus_minor,
+                       payout_date, import_reference
+                  FROM payroll_migration_reference_totals
+                 WHERE supplier_id = ?
+                   AND period_start >= ?
+                   AND period_start < ?';
+        $parameters = [$supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)];
+        if ($employeeId !== null) {
+            $sql .= ' AND employee_id = ?';
+            $parameters[] = $employeeId;
+        }
+        if ($employmentId !== null) {
+            $sql .= ' AND employment_id = ?';
+            $parameters[] = $employmentId;
+        }
+        if ($source !== null) {
+            $sql .= ' AND source = ?';
+            $parameters[] = $source;
+        }
+        $sql .= ' ORDER BY period_start, external_person_ref, external_relationship_ref';
+
+        $statement = $this->db->pdo()->prepare($sql);
+        $statement->execute($parameters);
+
+        /** @var list<array<string,mixed>> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        return $rows;
+    }
+
+    /**
+     * Období roku, za která MyÚčto samo počítalo mzdu.
+     *
+     * Čte se AKTUÁLNÍ revize, ne jen schválená — stejně jako
+     * {@see self::calculatedTotals()}. Rozpracovaný běh je taky „MyÚčto ten
+     * měsíc počítá" a navazující sestava musí vidět, že proti převzatému měsíci
+     * stojí ještě neschválený přepočet.
+     *
+     * S `$employeeId` jsou to období, ve kterých má vlastní výsledek TA osoba;
+     * bez něj kterákoli osoba ve firmě.
+     *
+     * @return list<string> `YYYY-MM`, vzestupně
+     */
+    public function calculatedPeriods(int $supplierId, int $year, ?int $employeeId = null): array
+    {
+        $sql = 'SELECT DISTINCT DATE_FORMAT(run.period_start, "%Y-%m") AS period
+                  FROM payroll_runs run
+                  JOIN payroll_run_revisions revision
+                    ON revision.supplier_id = run.supplier_id
+                   AND revision.run_id = run.id
+                   AND revision.revision_no = run.current_revision_no
+                  JOIN payroll_net_results net
+                    ON net.supplier_id = revision.supplier_id
+                   AND net.revision_id = revision.id
+                 WHERE run.supplier_id = ?
+                   AND run.period_start >= ?
+                   AND run.period_start < ?';
+        $parameters = [$supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)];
+        if ($employeeId !== null) {
+            $sql .= ' AND net.employee_id = ?';
+            $parameters[] = $employeeId;
+        }
+        $sql .= ' ORDER BY period';
+
+        $statement = $this->db->pdo()->prepare($sql);
+        $statement->execute($parameters);
+
+        return array_map('strval', (array) $statement->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     /** @return list<string> zdroje, ze kterých pro firmu a rok něco leží */
     public function referenceSources(int $supplierId, int $year): array
     {

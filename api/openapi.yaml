@@ -22818,6 +22818,14 @@ components:
             average_hourly_minor: { type: [integer, "null"] }
             status: { type: string, enum: [requested, approved, rejected, cancelled] }
             correction_pending: { type: boolean }
+            sickness_window_carried_days:
+              type: integer
+              minimum: 0
+              description: |
+                U `dpn`/`quarantine` počet kalendářních dnů okna náhrady mzdy (§ 192 ZP)
+                vyčerpaných PŘED `date_from` u předchozího zaměstnavatele nebo předchozího
+                mzdového programu. 0 = případ začal v MyÚčtu. U ostatních druhů absence
+                vždy 0. Zapisuje se samostatnou akcí, ne přes tento endpoint.
             row_version: { type: integer, minimum: 0 }
 
     PayrollAbsencesPage:

@@ -322,6 +322,41 @@ async function recordChildbirth(item: PayrollAbsence) {
     saving.value = false
   }
 }
+
+/*
+ * Dny okna náhrady mzdy (§ 192 ZP) vyčerpané u DPN/karantény ještě PŘED
+ * touhle nepřítomností — u předchozího zaměstnavatele nebo předchozího
+ * mzdového programu. Editovatelné u obou stavů, ve kterých okno ještě má
+ * smysl počítat (schválení náhradu teprve spočítá); server sám odmítne
+ * absenci, ke které je náhrada už spočítaná, i uzavřený rok.
+ */
+const sicknessWindowCarriedEditing = ref<number | null>(null)
+const sicknessWindowCarriedDraft = ref('')
+
+function canEditSicknessWindowCarried(item: PayrollAbsence) {
+  return ['dpn', 'quarantine'].includes(item.absence_type)
+}
+
+function openSicknessWindowCarried(item: PayrollAbsence) {
+  sicknessWindowCarriedEditing.value = item.id
+  sicknessWindowCarriedDraft.value = String(item.sickness_window_carried_days)
+}
+
+async function saveSicknessWindowCarried(item: PayrollAbsence) {
+  const days = Number(sicknessWindowCarriedDraft.value)
+  if (!Number.isInteger(days) || days < 0) return
+  saving.value = true
+  try {
+    await payrollAbsenceApi.setSicknessWindowCarried(item.id, item.row_version, days)
+    sicknessWindowCarriedEditing.value = null
+    toast.success(t('payroll_absence.absences.sickness_window_carried_saved'))
+    await loadData()
+  } catch (error: any) {
+    showPayrollError(error, t('payroll_absence.messages.save_failed'))
+  } finally {
+    saving.value = false
+  }
+}
 /*
  * Co bude chybět při SCHVÁLENÍ. Dovolená, DPN a překážky se počítají
  * z průměrného výdělku, takže bez něj nemá server z čeho počítat náhradu —
@@ -1529,6 +1564,10 @@ onMounted(async () => {
                   </dd>
                 </div>
               </template>
+              <div v-if="['dpn', 'quarantine'].includes(item.absence_type)" data-test="absence-sickness-window-carried-value">
+                <dt class="text-neutral-500">{{ t('payroll_absence.absences.sickness_window_carried_days') }}</dt>
+                <dd class="font-medium text-neutral-900">{{ item.sickness_window_carried_days }}</dd>
+              </div>
             </dl>
             <p v-if="item.note" class="mt-3 text-sm text-neutral-600">{{ item.note }}</p>
             <div v-if="item.correction_pending" class="mt-3 rounded-lg bg-warning-50 p-2 text-xs text-warning-800">
@@ -1596,6 +1635,47 @@ onMounted(async () => {
               >
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>
                 {{ t('payroll_absence.absences.record_childbirth') }}
+              </button>
+            </div>
+            <div v-if="canWrite && canEditSicknessWindowCarried(item)" class="mt-4" data-test="sickness-window-carried">
+              <div v-if="sicknessWindowCarriedEditing === item.id" class="flex flex-wrap items-end gap-2">
+                <label class="min-w-0 flex-1">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.sickness_window_carried_days') }}</span>
+                  <input
+                    v-model="sicknessWindowCarriedDraft"
+                    type="number"
+                    min="0"
+                    step="1"
+                    data-test="sickness-window-carried-input"
+                    :class="fieldClass"
+                  >
+                </label>
+                <button
+                  type="button"
+                  :class="btnFilled('primary')"
+                  data-test="sickness-window-carried-save"
+                  :disabled="saving || sicknessWindowCarriedDraft === ''"
+                  @click="saveSicknessWindowCarried(item)"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+                  {{ t('common.save') }}
+                </button>
+                <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="sicknessWindowCarriedEditing = null">
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+                  {{ t('common.cancel') }}
+                </button>
+                <p class="w-full text-xs text-neutral-500">{{ t('payroll_absence.absences.sickness_window_carried_hint') }}</p>
+              </div>
+              <button
+                v-else
+                type="button"
+                :class="btnOutline('primary')"
+                data-test="sickness-window-carried-open"
+                :disabled="saving"
+                @click="openSicknessWindowCarried(item)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
+                {{ t('payroll_absence.absences.sickness_window_carried_edit') }}
               </button>
             </div>
             <div v-if="canWrite && item.status === 'requested'" class="mt-4 flex flex-wrap gap-2">

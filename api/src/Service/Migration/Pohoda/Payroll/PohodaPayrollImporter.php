@@ -14,6 +14,7 @@ use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents;
@@ -42,6 +43,7 @@ final class PohodaPayrollImporter
     public const STEP_PEOPLE = 'payroll_people';
     public const STEP_DEDUCTIONS = 'payroll_deductions';
     public const STEP_SICKNESS = 'payroll_sickness';
+    public const STEP_POSTING_MAP = 'payroll_posting_map';
     private const PERSON_CHUNK = 100;
     private const MESSAGE_LIMIT = 20;
 
@@ -55,12 +57,14 @@ final class PohodaPayrollImporter
         private readonly PohodaPayrollDeductionsWriter $deductions,
         private readonly PohodaPayrollSicknessWriter $sickness,
         private readonly PayrollMigrationReferenceTotalsWriter $referenceTotals,
+        private readonly PayrollPostingMapProposalService $postingMap,
     ) {}
 
     /** @return list<string> */
     public static function stepKeys(): array
     {
-        return [self::STEP_PREFLIGHT, self::STEP_PROFILE, self::STEP_MONTHS, self::STEP_PEOPLE, self::STEP_DEDUCTIONS, self::STEP_SICKNESS];
+        return [self::STEP_PREFLIGHT, self::STEP_PROFILE, self::STEP_MONTHS, self::STEP_PEOPLE, self::STEP_DEDUCTIONS,
+            self::STEP_SICKNESS, self::STEP_POSTING_MAP];
     }
 
     /**
@@ -360,6 +364,29 @@ final class PohodaPayrollImporter
                 );
                 $protocol->finish(self::STEP_SICKNESS);
             }
+
+            // Návrh kontací mezd z převzatého zaúčtování. Účetní zápisy se NEPŘENÁŠEJÍ:
+            // mzdy zaúčtuje MyÚčto vlastní cestou a převzaté zápisy by proti převedeným
+            // dokladům vyrobily duplicitu. Ukládá se jen návrh nastavení; do nastavení
+            // zaměstnavatele sáhne teprve potvrzení účetní.
+            if (!$protocol->failed()) {
+                $protocol->begin(self::STEP_POSTING_MAP);
+                if ($progress !== null) {
+                    $progress(self::STEP_POSTING_MAP, 0, 1);
+                }
+                $stored = $this->postingMap->refresh(
+                    $supplierId,
+                    PohodaPayrollPostingMap::read($file, $year),
+                    $year,
+                    basename($file),
+                );
+                if ($stored !== null) {
+                    $protocol->set('posting_map', $stored['proposal']);
+                    $protocol->count(self::STEP_POSTING_MAP, 'posting_map_conflicts',
+                        (int) ($stored['proposal']['summary']['conflict'] ?? 0));
+                }
+                $protocol->finish(self::STEP_POSTING_MAP);
+            }
         } finally {
             if ($savepoint) {
                 $pdo->exec('ROLLBACK TO SAVEPOINT pohoda_payroll_dry_run');
@@ -497,6 +524,8 @@ final class PohodaPayrollImporter
                     $year,
                     $pair['employee_id'] ?? null,
                     $pair['employment_id'] ?? null,
+                    $pair['relation_type'] ?? null,
+                    $pair['activity_code'] ?? null,
                 );
             } catch (\InvalidArgumentException) {
                 // Mzda bez platného měsíce nebo bez identifikace vztahu: do sestavy nepatří,

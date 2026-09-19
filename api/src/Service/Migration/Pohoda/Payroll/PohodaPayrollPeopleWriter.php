@@ -85,6 +85,13 @@ final class PohodaPayrollPeopleWriter
      * Zrcadlí `PayrollWageProrationService::IMPORT_SUMMARY_TITLES`: co je v souhrnu,
      * má jediný zdroj v importu. Peněžitá pomoc v mateřství, rodičovská a dlouhodobé
      * ošetřovné v souhrnu nejsou, ty zapisuje převod dál.
+     *
+     * Rozhoduje se podle SKUTEČNÝCH hodin souhrnu ({@see self::carriedByImportSummary()}),
+     * ne podle druhu, a to je i cesta pro nemoc, ošetřovné, otcovskou, neplacené volno
+     * a neomluvenou absenci: ty do měsíčního sešitu vůbec nejdou, pokud je `MZneprit`
+     * nese s daty ({@see PohodaPayrollCatalog::absenceNeedsDates()}), souhrn pro ně proto
+     * hodiny nemá a zapíšou se tudy s daty. Bez dat zůstanou v souhrnu a tahle tabulka je
+     * z datovaného zápisu vyloučí, aby se doba nevedla dvakrát.
      */
     private const IMPORT_SUMMARY_ABSENCE_HOURS = [
         'vacation' => ['vacation_hours'],
@@ -135,6 +142,10 @@ final class PohodaPayrollPeopleWriter
     private array $regularBenefits = [];
     /** @var array<string,int> druh nepřítomnosti => počet ponechaných na souhrnu importu */
     private array $absencesFromImport = [];
+    /** @var array<string,int> osobní číslo => nepřítomnosti vyžadující data, které je v PAMICA nemají */
+    private array $absencesWithoutDates = [];
+    /** @var array<string,int> osobní číslo => nepřítomnosti vynechané pro překryv s jinou */
+    private array $absenceOverlaps = [];
     /** @var array<string,array<string,int>|null> vztah a měsíc => hodiny souhrnu importu */
     private array $importSummaries = [];
     /** @var array<string,array{employee_id:int,employment_id:int}> vztah v PAMICA => vztah v MyÚčtu */
@@ -196,6 +207,8 @@ final class PohodaPayrollPeopleWriter
         $this->leaveShared = 0;
         $this->regularBenefits = [];
         $this->absencesFromImport = [];
+        $this->absencesWithoutDates = [];
+        $this->absenceOverlaps = [];
         $this->importSummaries = [];
         $this->matched = [];
         $today = date('Y-m-d');
@@ -215,7 +228,15 @@ final class PohodaPayrollPeopleWriter
             // Párovací mapa pro srovnávací sestavu: převzatá mzda z PAMICA nese jen
             // své vlastní identifikátory, a spojit ji s naším přepočtem jde jedině tady,
             // kde je vztah právě dohledaný podle osobního čísla.
-            $this->matched[(string) $record['relation_key']] = ['employee_id' => $employeeId, 'employment_id' => $employmentId];
+            $this->matched[(string) $record['relation_key']] = [
+                'employee_id' => $employeeId,
+                'employment_id' => $employmentId,
+                // Druh vztahu a druh činnosti z MZ odvodit nejde (PAMICA má vlastní číselník),
+                // ale evidenční list je bez nich nesestaví. Berou se proto z už převedeného
+                // vztahu a jeho podmínek; chybí-li, zůstanou prázdné a list to řekne.
+                'relation_type' => self::text($employment['relation_type'] ?? null),
+                'activity_code' => $this->employmentActivityCode($supplierId, $employmentId),
+            ];
             foreach ((array) $record['regular_benefits'] as $benefit) {
                 $this->regularBenefits[(string) $benefit] = ($this->regularBenefits[(string) $benefit] ?? 0) + 1;
             }
@@ -320,6 +341,26 @@ final class PohodaPayrollPeopleWriter
                 . 'vedly by se dvakrát a krácení měsíční mzdy by se neprovedlo. Druhy, které souhrn '
                 . 'nenese (peněžitá pomoc v mateřství, rodičovská, dlouhodobé ošetřovné), zapsané jsou.',
                 implode(', ', $byType),
+            ));
+        }
+        if ($this->absencesWithoutDates !== []) {
+            $protocol->warn($step, 'absences_without_dates', sprintf(
+                'Nepřítomností, které evidence vede jedině s daty od a do (nemoc, ošetřovné, otcovská, neplacené '
+                . 'volno, neomluvená absence) a PAMICA k nim datum nemá: %d u osobních čísel %s. Zapsat je nejde, '
+                . 'z hodin se den od ani do dopočítat nedá. Hodiny zůstaly v souhrnu z importu docházky, takže se '
+                . 'neztratily, ale schválení měsíce si je vyžádá s daty: doplňte nepřítomnost v kartě zaměstnance '
+                . 'a měsíc schvalte ručně.',
+                array_sum($this->absencesWithoutDates),
+                self::personalNumbers($this->absencesWithoutDates),
+            ));
+        }
+        if ($this->absenceOverlaps !== []) {
+            $protocol->warn($step, 'absences_overlap', sprintf(
+                'Nepřítomností vynechaných pro překryv s jinou: %d u osobních čísel %s. Evidence dva druhy v týchž '
+                . 'dnech nepovolí, takže se zapsala jen ta první a zbytek dne zůstal bez nepřítomnosti. Zkontrolujte '
+                . 'je v kartě zaměstnance.',
+                array_sum($this->absenceOverlaps),
+                self::personalNumbers($this->absenceOverlaps),
             ));
         }
         if ($this->hourlyWageRelations > 0) {
@@ -1067,6 +1108,10 @@ final class PohodaPayrollPeopleWriter
      * Schvalují se jen ty, které schválení pustí (u náhrady z průměru musí existovat
      * schválený průměr); ostatní zůstanou zapsané k rozhodnutí.
      *
+     * Nepřítomnost, kterou `MZneprit` nenese s daty, se nezapisuje: den od ani do se
+     * z hodin dopočítat nedá. Její hodiny proto zůstávají v měsíčním sešitu a protokol
+     * ji hlásí s osobním číslem.
+     *
      * @param array<string,mixed> $record
      * @return array<string,int>
      */
@@ -1074,13 +1119,20 @@ final class PohodaPayrollPeopleWriter
     {
         /** @var list<array<string,mixed>> $absences */
         $absences = $record['absences'];
+        $number = (string) $record['personal_number'];
+        $counts = [];
+        $undated = (int) ($record['absences_without_dates'] ?? 0);
+        if ($undated > 0) {
+            $this->absencesWithoutDates[$number] = $undated;
+            $counts['absences_without_dates'] = $undated;
+        }
         if ($absences === []) {
-            return [];
+            return $counts;
         }
         $existing = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_absences WHERE supplier_id = ? AND employment_id = ?');
         $existing->execute([$supplierId, $employmentId]);
         if ((int) $existing->fetchColumn() > 0) {
-            return ['absences_existing' => 1];
+            return $counts + ['absences_existing' => 1];
         }
         $written = 0;
         $overlaps = 0;
@@ -1134,7 +1186,10 @@ final class PohodaPayrollPeopleWriter
                 }
             }
         }
-        $counts = $overlaps > 0 ? ['absences_overlap' => $overlaps] : [];
+        if ($overlaps > 0) {
+            $this->absenceOverlaps[$number] = $overlaps;
+            $counts['absences_overlap'] = $overlaps;
+        }
         if ($approved > 0) {
             $counts['absences_approved'] = $approved;
         }
@@ -1796,11 +1851,23 @@ final class PohodaPayrollPeopleWriter
     private function employmentByCode(int $supplierId, string $code): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, employee_id FROM payroll_employments WHERE supplier_id = ? AND code = ? ORDER BY id LIMIT 1'
+            'SELECT id, employee_id, relation_type FROM payroll_employments WHERE supplier_id = ? AND code = ? ORDER BY id LIMIT 1'
         );
         $stmt->execute([$supplierId, $code]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $row === false ? null : $row;
+    }
+
+    /** Druh činnosti z poslední verze podmínek vztahu; pro evidenční list. */
+    private function employmentActivityCode(int $supplierId, int $employmentId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT activity_code FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?'
+            . ' ORDER BY effective_from DESC, id DESC LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+
+        return self::text($stmt->fetchColumn() ?: null);
     }
 
     /** @return array<string,mixed>|null */
@@ -1890,6 +1957,19 @@ final class PohodaPayrollPeopleWriter
             $parts[] = (self::CHECKLIST_LABELS[$key] ?? $key) . ' ' . $count;
         }
         return implode(', ', $parts);
+    }
+
+    /**
+     * Osobní čísla do protokolu, nejvýš třicet; bez nich by nález nešlo dohledat.
+     *
+     * @param array<string,int> $byNumber osobní číslo => počet
+     */
+    private static function personalNumbers(array $byNumber): string
+    {
+        $numbers = array_keys($byNumber);
+        sort($numbers);
+
+        return implode(', ', array_slice($numbers, 0, 30)) . (count($numbers) > 30 ? ', …' : '');
     }
 
     /** První den měsíce první mzdy, nebo nástupu, je-li dřív. */
