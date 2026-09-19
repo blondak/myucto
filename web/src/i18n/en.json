@@ -1,4 +1,14 @@
 {
+  "invoice_default_note": {
+    "title": "Default note below items",
+    "hint": "Text pre-filled into the note below items on every newly created document. You can rewrite or delete it in the document at any time; already issued documents are left untouched.",
+    "enabled": "Pre-fill the note below items",
+    "enabled_hint": "While this is off, nothing is pre-filled.",
+    "text_cs": "Text for documents in Czech",
+    "text_en": "Text for documents in English",
+    "language_hint": "The variant follows the document language, not the currency. When the text for the document language is missing, the note stays empty.",
+    "placeholder": "E.g. retention of title and the late payment interest rate."
+  },
   "time_billing": {
     "duration": "Work duration",
     "hint": "Enter hours and minutes (1:20) or decimal hours (1.5).",

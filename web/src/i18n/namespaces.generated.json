@@ -67,6 +67,7 @@
     "imports",
     "instance_export",
     "integrations",
+    "invoice_default_note",
     "kb_plus",
     "linked_documents",
     "lock",
@@ -164,6 +165,7 @@
       "imports",
       "instance_export",
       "integrations",
+      "invoice_default_note",
       "kb_plus",
       "linked_documents",
       "lock",
@@ -834,6 +836,7 @@
       "activation",
       "automation",
       "domains",
+      "invoice_default_note",
       "settings",
       "stock"
     ],

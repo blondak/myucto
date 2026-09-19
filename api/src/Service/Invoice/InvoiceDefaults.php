@@ -20,8 +20,13 @@ final class InvoiceDefaults
 
     /**
      * Doplní chybějící pole v $data podle defaultů.
+     *
+     * @param bool $forNewInvoice Doklad teprve VZNIKÁ. Rozlišení je nutné, protože
+     *        tentýž resolver běží i nad PUT (UpdateInvoiceAction) — defaulty, které
+     *        smí platit jen při založení, by jinak dotekly i roky staré faktury při
+     *        obyčejném přeuložení. Týká se výchozí poznámky pod položkami (#79).
      */
-    public function resolve(array $data): array
+    public function resolve(array $data, bool $forNewInvoice = false): array
     {
         $pdo = $this->db->pdo();
         $today = date('Y-m-d');
@@ -59,8 +64,9 @@ final class InvoiceDefaults
         $supplier = null;
         if ($client !== null && !empty($client['supplier_id'])) {
             $stmt = $pdo->prepare(
-                'SELECT default_currency_id, default_payment_due_days, default_payment_due_unit
-                   FROM supplier WHERE id = ?'
+                'SELECT default_currency_id, default_payment_due_days, default_payment_due_unit, '
+                . implode(', ', DefaultInvoiceNote::supplierColumns())
+                . ' FROM supplier WHERE id = ?'
             );
             $stmt->execute([(int) $client['supplier_id']]);
             $supplier = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
@@ -120,6 +126,13 @@ final class InvoiceDefaults
             $data['language'] = $client['language'] ?? 'cs';
         }
 
+        // Výchozí poznámka pod položkami (#79) — AŽ ZA resolucí jazyka výš, text se
+        // vybírá podle jazyka dokladu. Jen při zakládání: PUT chodí tímhle resolverem
+        // taky a existující faktuře by přeuložení doplnilo text, který nikdy neměla.
+        if ($forNewInvoice) {
+            $data = self::withDefaultNote($data, $supplier);
+        }
+
         if (!isset($data['reverse_charge'])) {
             $data['reverse_charge'] = (bool) ($client['reverse_charge'] ?? false);
         }
@@ -131,6 +144,32 @@ final class InvoiceDefaults
                 $client,
                 $supplier,
             );
+        }
+
+        return $data;
+    }
+
+    /**
+     * Doplní výchozí poznámku pod položkami do payloadu ZAKLÁDANÉHO dokladu
+     * (#79, migrace 1855).
+     *
+     * Doplní se jen tehdy, když klíč `note_below_items` v payloadu VŮBEC NENÍ:
+     * editor i API ho posílají vždy (byť jako `null`), takže vědomě smazaný text
+     * se tudy nevrátí zpátky. Předpokládá už vyřešený `language`.
+     *
+     * @param  array<string, mixed>      $data
+     * @param  array<string, mixed>|null $supplier řádek `supplier` se sloupci
+     *                                   {@see DefaultInvoiceNote::supplierColumns()}
+     * @return array<string, mixed>
+     */
+    public static function withDefaultNote(array $data, ?array $supplier): array
+    {
+        if (array_key_exists('note_below_items', $data)) {
+            return $data;
+        }
+        $note = DefaultInvoiceNote::forLanguage($supplier, (string) ($data['language'] ?? ''));
+        if ($note !== '') {
+            $data['note_below_items'] = $note;
         }
 
         return $data;

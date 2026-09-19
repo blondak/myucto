@@ -1,4 +1,14 @@
 {
+  "invoice_default_note": {
+    "title": "Výchozí poznámka pod položkami",
+    "hint": "Text, který se předvyplní do poznámky pod položkami na každém nově zakládaném dokladu. V dokladu ho lze kdykoli přepsat nebo smazat; už vystavené doklady se nemění.",
+    "enabled": "Předvyplňovat poznámku pod položkami",
+    "enabled_hint": "Dokud je volba vypnutá, nic se nepředvyplňuje.",
+    "text_cs": "Text pro doklady v češtině",
+    "text_en": "Text pro doklady v angličtině",
+    "language_hint": "Varianta se vybírá podle jazyka dokladu, ne podle měny. Když text pro jazyk dokladu chybí, poznámka zůstane prázdná.",
+    "placeholder": "Např. výhrada vlastnictví a sazba úroku z prodlení."
+  },
   "time_billing": {
     "duration": "Doba práce",
     "hint": "Zadejte hodiny a minuty (1:20) nebo desetinné hodiny (1,5).",

@@ -74,7 +74,7 @@ final class CreateInvoiceAction
         }
 
         try {
-            $body = $this->defaults->resolve($body);
+            $body = $this->defaults->resolve($body, forNewInvoice: true);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
         }

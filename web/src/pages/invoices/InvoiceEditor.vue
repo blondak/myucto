@@ -34,6 +34,7 @@ import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
 import { rowKey } from '@/utils/rowKey'
+import { defaultNoteFor, noteAfterLanguageChange } from '@/pages/invoices/invoiceDefaultNote'
 import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
@@ -1046,6 +1047,19 @@ watch(() => route.query.type, () => {
   form.value.invoice_type = queryDocType.value ?? 'invoice'
 })
 
+// Výchozí poznámka pod položkami z nastavení firmy (#79). Jen pro NOVÝ doklad:
+// u existujícího by hydratace jazyka z faktury předvyplnila text do dokladu, který
+// ho nikdy neměl — a ten se pak uloží při nejbližším přepočtu.
+watch(() => form.value.language, (to, from) => {
+  if (isEdit.value || !from || to === from) return
+  form.value.note_below_items = noteAfterLanguageChange(
+    form.value.note_below_items,
+    supplierStore.currentSupplier,
+    from,
+    to,
+  )
+})
+
 watch(
   () => [form.value.client_id, form.value.currency_id, form.value.prices_include_vat, form.value.issue_date, form.value.tax_date] as const,
   () => { if (loaded.value) void loadPriceListItems() },
@@ -1193,6 +1207,12 @@ onMounted(async () => {
     // (supplier store je teď spolehlivě načtený, na rozdíl od init form refu).
     if (!form.value.client_id && !form.value.project_id) {
       form.value.due_date = supplierDueDate(form.value.issue_date)
+    }
+    // Výchozí poznámka pod položkami z nastavení firmy (#79) — až tady, kdy je jazyk
+    // dokladu finální (vybraný klient ho mohl přepnout). Je to jen předvyplněná
+    // hodnota: uživatel ji smí v dokladu libovolně přepsat i smazat.
+    if (form.value.note_below_items.trim() === '') {
+      form.value.note_below_items = defaultNoteFor(supplierStore.currentSupplier, form.value.language)
     }
     await loadVarsymbolPreview()
   }

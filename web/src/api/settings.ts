@@ -191,6 +191,14 @@ export interface Supplier {
   default_payment_due_unit: 'days' | 'month'
   /** Výchozí režim cen u nových faktur (false = bez DPH, true = ceny s DPH). */
   default_prices_include_vat: boolean
+  /**
+   * Výchozí poznámka pod položkami na nově zakládaných dokladech (#79, migrace 1855).
+   * Vypnuto + prázdné texty = dnešní chování. Text se drží podle JAZYKA dokladu,
+   * ne podle měny; vyhodnocuje ho `pages/invoices/invoiceDefaultNote.ts`.
+   */
+  default_note_below_items_enabled: boolean
+  default_note_below_items_cs: string | null
+  default_note_below_items_en: string | null
   default_hourly_rate: number
   auto_send_reminders: boolean
   reminder_days_after_due: number

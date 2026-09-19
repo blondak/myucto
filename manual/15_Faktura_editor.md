@@ -327,6 +327,40 @@ Zaokrouhlování CZK přepočtu: **HALF_UP, 2 desetinná místa, zvlášť per s
   pokud doklad obsahuje českou DPH, uvede pouze zákonem požadovanou výši DPH v CZK
 - **Editor (re-edit)** — informativní řádka pod totály s použitým kurzem
 
+### 15.4.3 Poznámky nad a pod položkami
+
+Pod sumářem jsou dvě volná textová pole, která se tisknou na PDF:
+
+| Pole | Kde se vytiskne |
+|---|---|
+| **Poznámka nad položkami** | Mezi hlavičkou dokladu a tabulkou položek |
+| **Poznámka pod položkami** | Pod sumářem — typicky obchodní podmínky, výhrada vlastnictví, penále z prodlení |
+
+#### Výchozí text poznámky pod položkami
+
+Text, který patří na **každou** fakturu, nemusíš psát ručně pokaždé znovu.
+V **Nastavení → Firma → Fakturace → Výchozí poznámka pod položkami** zapni
+**Předvyplňovat poznámku pod položkami** a vyplň text.
+
+- Text se drží **podle jazyka dokladu**, ne podle měny — jsou tam dvě pole,
+  **Text pro doklady v češtině** a **Text pro doklady v angličtině**. Česká
+  firma běžně fakturuje v eurech česky, proto rozhoduje jazyk.
+- Předvyplní se jen na **nově zakládaném** dokladu. V dokladu ho můžeš
+  libovolně přepsat i smazat — je to výchozí hodnota, ne zámek.
+- **Už vystavené a rozpracované doklady se nemění.** Uložení ani přepočet
+  staré faktury text nedoplní ani nepřepíše.
+- Když v rozpracovaném dokladu **přepneš jazyk** (ručně nebo výběrem klienta,
+  který má nastavenou angličtinu), text se přepne na variantu nového jazyka —
+  ale **jen pokud jsi do pole nesáhl**. Ručně upravený text zůstane. Pokud
+  pro nový jazyk text vyplněný není, pole se vyprázdní, ať v anglickém dokladu
+  nezůstane česká věta.
+- Dokud je přepínač **vypnutý**, nepředvyplňuje se nic.
+
+> 💡 **Typický obsah** — výhrada vlastnictví a sazba úroku z prodlení, třeba
+> „Zboží zůstává až do úplného uhrazení majetkem dodavatele. Při zpožděné úhradě
+> Vám budeme účtovat penále ve výši 0,05 % za každý započatý den prodlení."
+> Výchozí nastavení je prázdné — text si napíšeš vlastní.
+
 ## 15.5 Tlačítka
 
 | Tlačítko | Funkce |

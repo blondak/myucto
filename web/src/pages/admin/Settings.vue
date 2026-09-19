@@ -13,6 +13,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { renderVarsymbolTemplate, hasCounterPlaceholder, templatesCollide } from '@/utils/varsymbol'
+import { DEFAULT_NOTE_MAX_LENGTH } from '@/pages/invoices/invoiceDefaultNote'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -42,6 +43,9 @@ function syncSupplierStore(s: Supplier) {
     default_payment_due_days: s.default_payment_due_days,
     default_payment_due_unit: s.default_payment_due_unit,
     default_prices_include_vat: s.default_prices_include_vat,
+    default_note_below_items_enabled: s.default_note_below_items_enabled ?? false,
+    default_note_below_items_cs: s.default_note_below_items_cs ?? null,
+    default_note_below_items_en: s.default_note_below_items_en ?? null,
     auto_send_reminders: s.auto_send_reminders,
     payment_thanks_enabled: s.payment_thanks_enabled,
     payment_thanks_default_checked: s.payment_thanks_default_checked,
@@ -536,6 +540,10 @@ async function saveSupplier() {
       default_payment_due_days: supplier.value.default_payment_due_days,
       default_payment_due_unit: supplier.value.default_payment_due_unit,
       default_prices_include_vat: supplier.value.default_prices_include_vat,
+      // Výchozí poznámka pod položkami (#79) — prázdné pole ukládá server jako NULL.
+      default_note_below_items_enabled: supplier.value.default_note_below_items_enabled ?? false,
+      default_note_below_items_cs: supplier.value.default_note_below_items_cs ?? null,
+      default_note_below_items_en: supplier.value.default_note_below_items_en ?? null,
       default_hourly_rate: supplier.value.default_hourly_rate,
       auto_send_reminders: supplier.value.auto_send_reminders,
       reminder_days_after_due: supplier.value.reminder_days_after_due,
@@ -1057,6 +1065,33 @@ async function confirmTaxRepDelete() {
               <span class="font-medium">{{ t('settings.default_prices_include_vat') }}</span>
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.default_prices_include_vat_hint') }}</p>
+          </div>
+          <div class="md:col-span-2 border-t border-neutral-200 pt-4 space-y-3">
+            <div>
+              <h3 class="text-sm font-semibold text-neutral-700">{{ t('invoice_default_note.title') }}</h3>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('invoice_default_note.hint') }}</p>
+            </div>
+            <label class="flex items-start gap-2 text-sm">
+              <input v-model="supplier.default_note_below_items_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+              <span>
+                <span class="font-medium text-neutral-700">{{ t('invoice_default_note.enabled') }}</span>
+                <span class="block text-xs text-neutral-500 mt-0.5">{{ t('invoice_default_note.enabled_hint') }}</span>
+              </span>
+            </label>
+            <div v-if="supplier.default_note_below_items_enabled" class="ml-6 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice_default_note.text_cs') }}</label>
+                <textarea v-model="supplier.default_note_below_items_cs" rows="3" :maxlength="DEFAULT_NOTE_MAX_LENGTH"
+                          :placeholder="t('invoice_default_note.placeholder')"
+                          class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm resize-y"></textarea>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice_default_note.text_en') }}</label>
+                <textarea v-model="supplier.default_note_below_items_en" rows="3" :maxlength="DEFAULT_NOTE_MAX_LENGTH"
+                          class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm resize-y"></textarea>
+              </div>
+              <p class="md:col-span-2 text-xs text-neutral-500">{{ t('invoice_default_note.language_hint') }}</p>
+            </div>
           </div>
           <div class="md:col-span-2 border-t border-neutral-200 pt-4 space-y-3">
             <div>

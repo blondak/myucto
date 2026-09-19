@@ -25596,7 +25596,13 @@ components:
             Jen vstupní alias — odpověď ho nevrací, čti `note_above_items` / `note_below_items`.
         supplier_order_number: { type: [string, "null"], maxLength: 80, description: "Číslo objednávky dodavatele; používá se také pro automatické párování plateb." }
         note_above_items: { type: [string, "null"] }
-        note_below_items: { type: [string, "null"] }
+        note_below_items:
+          type: [string, "null"]
+          description: |
+            Poznámka pod položkami. Když má firma zapnutý výchozí text
+            (`default_note_below_items_*` v SupplierFull) a tělo tenhle klíč
+            VŮBEC neobsahuje, doplní se text pro jazyk dokladu. Poslané `null`
+            i prázdný řetězec jsou vědomé vyprázdnění a výchozí text nepřepíšou.
         items:
           type: array
           items: { $ref: '#/components/schemas/InvoiceItemInput' }
@@ -26696,6 +26702,9 @@ components:
         default_payment_due_days: { type: integer }
         default_payment_due_unit: { type: string, enum: [days, month] }
         default_prices_include_vat: { type: boolean }
+        default_note_below_items_enabled: { type: boolean, default: false, description: "Předvyplňovat poznámku pod položkami na nově zakládaných vystavených dokladech (#79, migrace 1855). Text se vybírá podle jazyka dokladu, ne podle měny; doplní se jen tehdy, když POST /api/v1/invoices klíč `note_below_items` vůbec nepošle." }
+        default_note_below_items_cs: { type: [string, "null"], maxLength: 5000, description: "Výchozí text poznámky pod položkami pro doklady v češtině. Prázdný text se ukládá jako null." }
+        default_note_below_items_en: { type: [string, "null"], maxLength: 5000, description: "Výchozí text poznámky pod položkami pro doklady v angličtině. Prázdný text se ukládá jako null." }
         invoice_qr_include_due_date: { type: boolean, default: false, description: "Zahrnout skutečné datum splatnosti do pole DT nově generovaných CZK QR Plateb (SPAYD) na vystavených dokladech. EPC QR pro jiné měny datum nepodporuje." }
         purchase_invoice_qr_include_due_date: { type: boolean, default: false, description: "Zahrnout skutečné datum splatnosti do pole DT nově generovaných CZK QR Plateb (SPAYD) na přijatých dokladech. Nemění QR obrázek převzatý z PDF dodavatele." }
         invoice_number_format:
@@ -26798,6 +26807,9 @@ components:
         default_payment_due_unit: { type: string, enum: [days, month] }
         default_hourly_rate: { type: number, format: double, multipleOf: 0.000001 }
         default_prices_include_vat: { type: boolean, description: "Default pro nové doklady (migrace 0083)" }
+        default_note_below_items_enabled: { type: boolean, default: false, description: "Předvyplňovat poznámku pod položkami na nově zakládaných vystavených dokladech (#79, migrace 1855). Vypnuto = nic se nepředvyplňuje." }
+        default_note_below_items_cs: { type: [string, "null"], maxLength: 5000, description: "Výchozí text poznámky pod položkami pro doklady v češtině (invoices.language='cs')." }
+        default_note_below_items_en: { type: [string, "null"], maxLength: 5000, description: "Výchozí text poznámky pod položkami pro doklady v angličtině (invoices.language='en')." }
         invoice_qr_include_due_date: { type: boolean, default: false, description: "Zahrnout invoices.due_date do volitelného pole DT CZK QR Platby (SPAYD) vystavených dokladů." }
         purchase_invoice_qr_include_due_date: { type: boolean, default: false, description: "Zahrnout purchase_invoices.due_date do volitelného pole DT nově generované CZK QR Platby (SPAYD)." }
         stock_enabled: { type: boolean, description: "Feature-flag Epic SKLAD — zapíná skladovou evidenci pro tohoto dodavatele." }
