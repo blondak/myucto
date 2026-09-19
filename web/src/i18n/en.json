@@ -25287,7 +25287,8 @@
       "sickness_failed": "cases not migrated",
       "reference_totals": "reference payslips stored for comparison",
       "reference_totals_skipped": "payslips without employment identification",
-      "posting_map_conflicts": "posting rules in conflict"
+      "posting_map_conflicts": "posting rules in conflict",
+      "sickness_absences_approved": "taken-over absences approved"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",

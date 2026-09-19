@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Pohoda\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAbsenceOverlapException;
 use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
+use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
@@ -51,6 +52,7 @@ final class PohodaPayrollSicknessWriter
         private readonly PayrollAbsenceValidator $validator,
         private readonly PayrollModuleStateRepository $moduleState,
         private readonly PayrollRulesetProvider $rulesets,
+        private readonly PayrollAverageEarningRepository $averages,
     ) {}
 
     /** První měsíc vedení mezd, podle kterého se pozná rozpracovaný případ. */
@@ -155,6 +157,29 @@ final class PohodaPayrollSicknessWriter
             $existing = $this->absences->create($supplierId, $this->validator->absence($body), $userId);
             $counts['sickness_absences'] = 1;
         }
+        // Rozhodnout ji musí někdo, jinak nerozhodnutá nepřítomnost zablokuje schválení
+        // celého pracovního měsíce. U převzatého případu rozhodl předchozí program: proběhl
+        // a je podaný. Schvaluje se stejným pravidlem jako u ostatních převzatých
+        // nepřítomností ({@see PohodaPayrollPeopleWriter::absences()}): druh, který potřebuje
+        // průměrný výdělek, až když čtvrtletí schválený průměr má.
+        //
+        // Dorovnává se i u nepřítomnosti z dřívějšího běhu převodu, ale JEN u té, kterou
+        // převod sám založil (pozná se podle poznámky). Cizí nerozhodnutou nepřítomnost by
+        // převod rozhodovat neměl - účetní ji mohla nechat otevřenou schválně.
+        if (self::takenOver($existing) && ($existing['status'] ?? null) === 'requested') {
+            $quarter = (int) ceil(((int) substr((string) $existing['date_from'], 5, 2)) / 3);
+            $year = (int) substr((string) $existing['date_from'], 0, 4);
+            $needsAverage = in_array($type, PayrollAbsenceValidator::TYPES_REQUIRING_AVERAGE, true);
+            if (!$needsAverage || $this->averages->findApproved($supplierId, $employmentId, $year, $quarter) !== null) {
+                try {
+                    $this->absences->decide($supplierId, (int) $existing['id'], (int) $existing['row_version'], 'approved', $userId);
+                    $existing = $this->absences->find($supplierId, (int) $existing['id']) ?? $existing;
+                    $counts['sickness_absences_approved'] = 1;
+                } catch (\DomainException|\InvalidArgumentException) {
+                    // Nechá se na účetní; protokol to vypíše jako nerozhodnutou nepřítomnost.
+                }
+            }
+        }
 
         $carried = $this->carriedDays($case, (string) $existing['date_from']);
         if ($carried !== null && $carried !== (int) ($existing['sickness_window_carried_days'] ?? 0)) {
@@ -215,6 +240,12 @@ final class PohodaPayrollSicknessWriter
     }
 
     /** @param array<string,mixed> $case */
+    /** Nepřítomnost, kterou založil převod; cizí záznam se nerozhoduje. */
+    private static function takenOver(array $absence): bool
+    {
+        return str_starts_with((string) ($absence['note'] ?? ''), self::NOTE);
+    }
+
     private static function note(array $case): string
     {
         $note = self::NOTE . 'rozpracovaný případ nemocenské od ' . $case['date_from'] . '.';

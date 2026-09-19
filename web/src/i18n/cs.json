@@ -25287,7 +25287,8 @@
       "sickness_failed": "případů nepřevedeno",
       "reference_totals": "převzatých mezd pro srovnání",
       "reference_totals_skipped": "mezd bez identifikace vztahu",
-      "posting_map_conflicts": "kontací s rozporem"
+      "posting_map_conflicts": "kontací s rozporem",
+      "sickness_absences_approved": "převzatých nepřítomností schváleno"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",

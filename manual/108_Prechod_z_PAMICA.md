@@ -247,26 +247,52 @@ se zůstatek nepřevede a protokol na to upozorní.
 
 ## 108.6 Co převod nepřenese
 
-- **Dávky nemocenského (`MZdavky`) a náhrady mzdy (`MZnahr`).** Převádí se
-  jen souhrn nepřítomností za měsíc, ne jednotlivé dávky a náhrady; doplatky
-  a dopočty zkontrolujte a zadejte ručně.
+- **Dávky nemocenského (`MZdavky`).** Od roku 2009 je vyplácí ČSSZ, MyÚčto pro
+  ně evidenci nevede. Rozpracovaná podání zadejte v `Mzdy → Podání`.
+- **Vlastní výpočet náhrady mzdy.** Částku z předchozího programu převod uvede
+  u nepřítomnosti jako poznámku, ale nepoužije ji: náhradu si MyÚčto počítá
+  z průměrného výdělku a rozvržených směn. Vnucená cizí částka by ten výpočet
+  obešla.
+- **Přílohy k žádosti o dávku (`NEMPRIpol`).** Rozhodné období a vyloučené dny
+  z nich MyÚčto v případu dávky nevede.
 - **Zaúčtování mezd (`MZzauct`).** Účetní zápisy se nepřenášejí: mzdy se do
   účetnictví zaúčtují až v MyÚčtu, podle jeho vlastního nastavení. Převzaté
   zápisy by proti převedeným dokladům vyrobily duplicitu. Z převzatého
-  zaúčtování se bere jen podklad pro nastavení kontací (§ 108.10).
+  zaúčtování se bere jen podklad pro nastavení kontací (§ 108.11).
 - **Zákonné pojištění odpovědnosti zaměstnavatele.** Export ho nevede.
 
-## 108.7 Přechod uprostřed roku
+## 108.7 Nemocenská přes přelom
+
+Neschopnost, která začala u předchozího programu a pokračuje v prvním měsíci
+vedeném v MyÚčtu, převod zapíše jako nepřítomnost od prvního měsíce, který
+MyÚčto vede, a **doplní dny čtrnáctidenního okna náhrady mzdy, které vyčerpal
+předchozí plátce** (§ 192 zákoníku práce). Bez nich by MyÚčto okno počítalo
+znovu od začátku a náhradu vyplatilo podruhé. Hodnotu je vidět a jde opravit
+v detailu nepřítomnosti.
+
+Nepřítomnost, kterou převod založil, rovnou schválí: u převzatého případu
+rozhodl předchozí program. Druh, který potřebuje průměrný výdělek, se schválí
+až když má čtvrtletí schválený průměr; ostatní zůstanou k rozhodnutí a protokol
+je vypíše.
+
+## 108.8 Přechod uprostřed roku
 
 Měsíce před zahájením vedení mezd v MyÚčtu se nepřepočítávají — jejich
 výsledky se uloží jako počáteční stavy ročních kumulací (§ 108.2, Začátek
-vedení mezd). Z toho plyne omezení: za rok přechodu **nelze v MyÚčtu
-sestavit** potvrzení o zdanitelných příjmech ze závislé činnosti
-(§ 38j odst. 3 zákona o daních z příjmů), roční mzdový list ani ELDP za celý
-rok — pro tyto výstupy chybí MyÚčtu měsíce zpracované v PAMICA. Podávají se
-z předchozího programu.
+vedení mezd) a jako **převzaté mzdy** po měsících.
 
-## 108.8 Opakovaný převod
+Z převzatých mezd MyÚčto sestaví i to, co dřív za rok přechodu sestavit nešlo:
+potvrzení o zdanitelných příjmech ze závislé činnosti (§ 38j odst. 3 zákona
+o daních z příjmů), roční mzdový list a evidenční list důchodového pojištění.
+Převzatá část je v dokladu vždy označená — není to výpočet MyÚčta. Chybí-li
+převzatému měsíci údaj, který doklad potřebuje, doklad se raději nevystaví
+a řekne, co doplnit.
+
+Převzaté mzdy plní převod z PAMICA sám. Zákazník, který přichází odjinud, je
+nahraje z CSV nebo XLSX v `Mzdy → Převzaté mzdy`; vzorový soubor je ke stažení
+tamtéž.
+
+## 108.9 Opakovaný převod
 
 Převod si pamatuje, co z které agendy už vzniklo. Opakovaný převod téhož nebo
 novějšího exportu založí jen to, co ještě chybí, a nic nezdvojí. Měsíc, který
@@ -275,7 +301,7 @@ platného data narození nebo neznámý kód pojišťovny), protokol vypíše a 
 mzdy v daném měsíci zůstanou nespárované; po doplnění osoby v evidenci
 převod spusťte znovu.
 
-## 108.9 Kontrola převzatých mezd
+## 108.10 Kontrola převzatých mezd
 
 **Cesta: `Mzdy → Kontrola převzatých mezd`**
 
@@ -319,7 +345,7 @@ označený stavem revize.
 
 Sestavu vidí uživatel s oprávněním ke mzdovým sestavám (`payroll.reports`).
 
-## 108.10 Kontace mezd z původního programu
+## 108.11 Kontace mezd z původního programu
 
 **Cesta: `Mzdy → Kontace z původního programu`**
 
