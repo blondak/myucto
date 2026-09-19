@@ -15,6 +15,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Component\PayrollQuickInputValidator;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -29,6 +30,7 @@ final class PayrollQuickInputsAction
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollHistoricalPeriodService $historicalPeriods,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -79,6 +81,14 @@ final class PayrollQuickInputsAction
             'employment_id' => $employmentId,
             // Uplatněné hledání — prázdný výsledek hledání není prázdný měsíc.
             'q' => $search,
+            // Měsíc před začátkem vedení mezd v MyÚčtu. Karty i mřížka ho
+            // dál ukazují, jen ne jako rozdělanou práci: značka „vyžaduje
+            // pozornost" u něj nic neřeší, protože běh za takové období
+            // nejde založit.
+            ...$this->historicalPeriods->describe(
+                $this->currentSupplierId($request),
+                $period,
+            ),
             ...($cardsView ? ['view' => 'cards'] : []),
         ]);
     }

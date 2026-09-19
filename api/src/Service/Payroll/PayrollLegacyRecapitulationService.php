@@ -48,21 +48,6 @@ final class PayrollLegacyRecapitulationService
     /** Zdrojový typ účetního zápisu ruční mzdové rekapitulace. */
     private const LEGACY_JOURNAL_SOURCE_TYPE = 'manual';
 
-    /** Druhy kumulace, pro které počáteční stavy existují (shodné s opening službou). */
-    private const OPENING_KINDS = ['social_insurance', 'income_tax'];
-
-    /** Daňová pole počátečního stavu — musí sedět na PayrollOpeningBalanceService. */
-    private const OPENING_TAX_FIELDS = [
-        'advance_base_minor_units',
-        'withholding_base_minor_units',
-        'advance_tax_minor_units',
-        'withholding_tax_minor_units',
-        'applied_non_refundable_credits_minor_units',
-        'applied_child_credit_minor_units',
-        'tax_bonus_minor_units',
-        'bonus_qualifying_income_minor_units',
-    ];
-
     public function __construct(
         private readonly Connection $db,
         private readonly PostingService $posting,
@@ -351,7 +336,7 @@ final class PayrollLegacyRecapitulationService
         ?int $userId,
     ): int {
         $adjusted = 0;
-        foreach (self::OPENING_KINDS as $kind) {
+        foreach (PayrollOpeningBalanceService::KINDS as $kind) {
             $previous = $this->accumulators->openingBalance(
                 $supplierId,
                 $employeeId,
@@ -376,23 +361,12 @@ final class PayrollLegacyRecapitulationService
                 continue;
             }
 
-            $values = $kind === 'social_insurance'
-                ? ['assessment_base_minor_units' => 0]
-                : ['completed_months' => count($remaining)]
-                    + array_fill_keys(self::OPENING_TAX_FIELDS, 0);
-            foreach ($remaining as $row) {
-                if (!is_array($row)) {
-                    continue;
-                }
-                if ($kind === 'social_insurance') {
-                    $values['assessment_base_minor_units'] +=
-                        (int) ($row['social_assessment_base_minor_units'] ?? 0);
-                    continue;
-                }
-                foreach (self::OPENING_TAX_FIELDS as $field) {
-                    $values[$field] += (int) ($row[$field] ?? 0);
-                }
-            }
+            // Součet dělá tatáž metoda, jako když opening vzniká z obrazovky.
+            // Kdyby se počítal tady zvlášť, každý nový druh kumulace i každé
+            // nové pole by se musely doplnit na dvou místech.
+            $values = PayrollOpeningBalanceService::accumulatorValues(array_values(
+                array_filter($remaining, static fn (mixed $row): bool => is_array($row)),
+            ))[$kind];
 
             $this->accumulators->appendOpeningBalance(
                 $supplierId,

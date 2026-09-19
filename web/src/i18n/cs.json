@@ -1029,6 +1029,7 @@
     "payroll_retention": "Retenční lhůty",
     "payroll_erasure": "Výmaz osobních údajů",
     "payroll_benefit_baskets": "Koše benefitů",
+    "payroll_migration_reconciliation": "Kontrola převzatých mezd",
     "settings": "Nastavení",
     "company_settings": "Nastavení firmy",
     "branding": "Branding",
@@ -1670,6 +1671,76 @@
       "empty": "Za vybraný rok zatím nejsou schválené mzdové revize.",
       "privacy_hint": "Přehled neobsahuje jména, osobní identifikátory ani detail jednotlivých zaměstnanců.",
       "load_failed": "Roční přehled mezd se nepodařilo načíst."
+    },
+    "migration_reconciliation": {
+      "title": "Kontrola převzatých mezd",
+      "subtitle": "Porovná mzdu přepočítanou v MyÚčtu s mzdou převzatou z původního systému. Původní systém už ta čísla podal do JMHZ, na zdravotní pojišťovny a na finanční úřad, takže rozdíl je potřeba znát dřív, než se přepočet schválí.",
+      "year": "Rok",
+      "source": "Zdroj",
+      "source_all": "Všechny zdroje",
+      "source_name": {
+        "pamica": "PAMICA",
+        "pohoda": "POHODA Mzdy",
+        "money_s3": "Money S3"
+      },
+      "reload": "Načíst znovu",
+      "load_failed": "Kontrolní sestavu se nepodařilo načíst.",
+      "summary": {
+        "rows": "Porovnaných osoboměsíců",
+        "deviations": "Odchylek",
+        "missing": "Bez protějšku",
+        "max_difference": "Největší rozdíl"
+      },
+      "empty_title": "Za vybraný rok není co porovnávat",
+      "empty_description": "Buď se z původního systému nepřevedly žádné zpracované mzdy, nebo za ten rok zatím neproběhl mzdový běh.",
+      "deviations_title": "Odchylky",
+      "deviations_hint": "Seřazeno od největšího rozdílu. Položky, kde jedna strana chybí, stojí první — neznámý rozdíl je horší než známý.",
+      "no_deviations": "Všechny porovnané částky sedí na korunu.",
+      "period": "Období",
+      "person": "Osoba",
+      "side": "Strana",
+      "metric_column": "Veličina",
+      "reference": "Původní systém",
+      "calculated": "MyÚčto",
+      "difference": "Rozdíl",
+      "year_totals": "Součty za rok",
+      "months_title": "Po měsících a osobách",
+      "month_total": "Rozdíl celkem za měsíc",
+      "hide_matching": "Skrýt shodné řádky",
+      "all_matching": "Ve všech měsících čísla sedí.",
+      "incomplete": "neúplné",
+      "incomplete_hint": "Do součtu nepřispěly všechny řádky — některé nemají protějšek.",
+      "missing_count": "Bez protějšku: {count}",
+      "relationship_count": "{count} pracovní vztahy v původním systému",
+      "revision_status": "Revize ve stavu {status}",
+      "external_person": "Osoba {ref} z původního systému",
+      "unknown_person": "Neurčená osoba",
+      "employer_social_note": "Pojistné zaměstnavatele na sociální zabezpečení (jen za firmu, osobní veličina to není):",
+      "grain_hint": "Řádek je osoba a měsíc. Převzatá strana se sčítá přes pracovní vztahy, protože pojistné i daň jsou ze zákona veličiny osoby, ne vztahu — rozpočítat je zpět na vztahy by znamenalo vymyslet si alokační klíč.",
+      "metric": {
+        "gross": "Hrubá mzda",
+        "net": "Čistá mzda",
+        "social_base": "VZ sociální",
+        "health_base": "VZ zdravotní",
+        "employee_social": "SP zaměstnanec",
+        "employee_health": "ZP zaměstnanec",
+        "employer_social": "SP zaměstnavatel",
+        "employer_health": "ZP zaměstnavatel",
+        "advance_tax": "Záloha na daň",
+        "withholding_tax": "Srážková daň",
+        "tax_bonus": "Daňový bonus"
+      },
+      "status": {
+        "match": "sedí",
+        "differs": "liší se",
+        "reference_missing": "chybí v původním systému",
+        "calculated_missing": "MyÚčto nepočítalo"
+      },
+      "presence": {
+        "both": "obě strany",
+        "reference_only": "jen původní systém",
+        "calculated_only": "jen MyÚčto"
+      }
     },
     "tax_statement": {
       "title": "Roční vyúčtování daně",
@@ -3651,6 +3722,13 @@
       "settle_unavailable": "Náhled zúčtování zatím neprošel. Načtěte ho znovu, nebo zkontrolujte podklady zaměstnance.",
       "save_request_read_only": "Evidenci podkladů může měnit jen uživatel s právem zapisovat mzdové doklady."
     },
+    "historical": {
+      "badge": "Historické",
+      "title": "Toto období vedl předchozí program",
+      "attendance": "Mzdy vedete v MyÚčtu od {period}. Docházka za starší měsíce je převzatá z předchozího programu. Zůstává k nahlédnutí i jako podklad pro počáteční stavy, ale schvalovat ji nemusíte - mzdový běh za takové období nejde založit.",
+      "inputs": "Mzdy vedete v MyÚčtu od {period}. Mzdové vstupy za starší měsíce jsou převzaté z předchozího programu. Zůstávají k nahlédnutí, ale schvalovat je nemusíte - mzdový běh za takové období nejde založit.",
+      "quick_inputs": "Mzdy vedete v MyÚčtu od {period}. Tenhle měsíc zpracoval předchozí program, takže zadané vstupy se nikde nepoužijí - mzdový běh za takové období nejde založit."
+    },
     "time": {
       "title": "Docházka a směny",
       "subtitle": "Historický pracovní fond, publikovaný plán a auditovaná skutečnost pro každý pracovní vztah.",
@@ -3752,7 +3830,8 @@
       "status": {
         "open": "Otevřený",
         "incomplete": "Neúplný",
-        "approved": "Schválený"
+        "approved": "Schválený",
+        "historical": "Historický"
       },
       "category": {
         "regular": "Běžná práce",
@@ -4678,13 +4757,43 @@
         "source": "Odkud údaje jsou (volitelné)",
         "source_placeholder": "Např. Mzdová rekapitulace 1–7/2026 z programu XY",
         "source_hint": "Volitelná poznámka pro Vaši vlastní dohledávku; počáteční stavy uložíte i bez ní.",
-        "locked": "Za tenhle rok už je schválená mzda, takže počáteční stavy měnit nelze — přepsaly by základ, ze kterého se počítala.",
+        "locked": "Za tenhle rok už je podané hlášení nebo vydaný roční doklad, takže počáteční stavy měnit nelze.",
+        "approved_warning": "Za tenhle rok je už zpracovaná mzda za období {periods}. Opravu počátečních stavů ještě uložíte, ale spočítané měsíce se samy nepřepočítají — zkontrolujte je a v případě potřeby pořiďte opravnou revizi.",
         "amount_invalid": "Částky za měsíc {month} musí být nezáporná čísla.",
         "saved": "Počáteční stavy jsou uložené.",
         "load_failed": "Počáteční stavy se nepodařilo načíst.",
         "save_failed": "Počáteční stavy se nepodařilo uložit.",
+        "import": {
+          "title": "Import z tabulky (CSV/XLSX)",
+          "hint": "Jeden soubor za celou firmu. Každý řádek je jeden měsíc jednoho zaměstnance, částky v celých haléřích. Stáhněte si vzor, ať sedí hlavička.",
+          "template": "Stáhnout vzor",
+          "preview": "Náhled",
+          "apply": "Naimportovat",
+          "rows": "Přečteno řádků: {count}.",
+          "months": "měsíců: {count}",
+          "error_row": "Řádek {row}:",
+          "format_invalid": "Podporovaný je soubor CSV nebo XLSX.",
+          "preview_failed": "Náhled importu se nepodařilo sestavit.",
+          "apply_failed": "Import se nepodařilo provést.",
+          "template_failed": "Vzorový soubor se nepodařilo stáhnout.",
+          "applied": "Uloženo: {saved}, beze změny: {unchanged}, přeskočeno: {skipped}.",
+          "status": {
+            "ready": "připraveno k uložení",
+            "unchanged": "beze změny",
+            "blocked": "nelze uložit"
+          }
+        },
+        "group": {
+          "social": "Sociální pojištění",
+          "health": "Zdravotní pojištění",
+          "tax": "Daň z příjmů"
+        },
         "field": {
           "social_assessment_base_minor_units": "Základ SP",
+          "health_assessment_base_minor_units": "Základ ZP",
+          "health_employee_contribution_minor_units": "Pojistné zaměstnance",
+          "health_employer_contribution_minor_units": "Pojistné zaměstnavatele",
+          "health_minimum_top_up_minor_units": "Z toho dopočet do minima",
           "advance_base_minor_units": "Základ zálohové daně",
           "advance_tax_minor_units": "Záloha na daň",
           "withholding_base_minor_units": "Základ srážkové daně",
@@ -24904,7 +25013,8 @@
       "payroll_people": "Údaje osob a vztahů",
       "payroll_deductions": "Srážky, exekuce a insolvence",
       "cancelled": "Zrušeno uživatelem",
-      "unexpected": "Neočekávaná chyba"
+      "unexpected": "Neočekávaná chyba",
+      "payroll_sickness": "Nemocenská a náhrady mzdy"
     },
     "counts": {
       "months": "měsíců",
@@ -25028,7 +25138,16 @@
       "payout_accounts_to_verify": "výplatních účtů k ověření",
       "inputs_approved": "schválených mzdových vstupů",
       "time_months_approved": "schválených měsíců docházky",
-      "deductions_without_kind": "srážek bez druhu v číselníku"
+      "deductions_without_kind": "srážek bez druhu v číselníku",
+      "sickness_cases": "případů nemocenské",
+      "sickness_cases_in_progress": "rozpracovaných případů",
+      "sickness_absences": "nepřítomností založeno",
+      "sickness_window_carried": "případů s navázaným oknem náhrady",
+      "sickness_person_not_found": "případů bez pracovního vztahu",
+      "sickness_overlap": "případů překrytých jinou nepřítomností",
+      "sickness_failed": "případů nepřevedeno",
+      "reference_totals": "převzatých mezd pro srovnání",
+      "reference_totals_skipped": "mezd bez identifikace vztahu"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",

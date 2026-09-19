@@ -50,6 +50,23 @@ final readonly class PayrollSheetDocumentData
     ];
 
     /**
+     * Popisky sloupců převzaté části. Pořadí určuje pořadí sloupců v dokladu;
+     * pole, které tu není, se vypíše pod svým klíčem (viz carriedOverTemplate).
+     */
+    private const CARRIED_OVER_LABELS = [
+        'social_assessment_base_minor_units' => 'Základ SP',
+        'health_assessment_base_minor_units' => 'Základ ZP',
+        'advance_base_minor_units' => 'Zálohový základ',
+        'advance_tax_minor_units' => 'Sražená záloha',
+        'applied_non_refundable_credits_minor_units' => 'Uplatněná sleva § 35ba',
+        'applied_child_credit_minor_units' => 'Uplatněná sleva § 35c',
+        'tax_bonus_minor_units' => 'Daňový bonus',
+        'bonus_qualifying_income_minor_units' => 'Příjem pro nárok na bonus',
+        'withholding_base_minor_units' => 'Základ srážkové daně',
+        'withholding_tax_minor_units' => 'Srážková daň',
+    ];
+
+    /**
      * @param list<string> $previousNames
      * @param list<PayrollSheetMonth> $months
      * @param list<array{code:string,relation_type:string,start_date:string,
@@ -93,6 +110,25 @@ final readonly class PayrollSheetDocumentData
          * @var ?array<string,string>
          */
         public ?array $annualSettlementEvidence = null,
+        /**
+         * Převzatá část roku z předchozího mzdového programu, nebo `null`.
+         *
+         * Do `$months` NEPATŘÍ: měsíční řádek § 38j odst. 2 žádá hrubý příjem,
+         * pojistné zaměstnavatele i čistou výplatu, a počáteční stav zákonné
+         * kumulace nic z toho nenese. Vmáčknout ho tam s nulami by znamenalo
+         * tvrdit, že zaměstnanec v těch měsících nic nedostal.
+         *
+         * @var ?array<string,mixed>
+         */
+        public ?array $carriedOver = null,
+        /**
+         * Posoudila revize, jestli převzatá část roku existuje?
+         *
+         * `false` u revizí vydaných před mapováním v6 — tam `null` v
+         * `$carriedOver` neznamená „nic převzatého není", ale „nikdo se
+         * neptal". Stejný důvod jako u ANNUAL_SETTLEMENT_NOT_RECORDED.
+         */
+        public bool $carriedOverAssessed = false,
     ) {
         if (preg_match('/^[a-f0-9]{64}$/D', $sourceSnapshotSha256) !== 1) {
             throw new \InvalidArgumentException('Zdrojový otisk mzdového listu není platný.');
@@ -171,6 +207,42 @@ final readonly class PayrollSheetDocumentData
                 if ($value !== null && (!is_string($value) || mb_strlen($value) > 191)) {
                     throw new \InvalidArgumentException('Pracovní vztah mzdového listu není úplný.');
                 }
+            }
+        }
+        if ($carriedOver !== null) {
+            if (!$carriedOverAssessed) {
+                throw new \InvalidArgumentException(
+                    'Převzatou část roku nese jen revize, která ji posoudila.',
+                );
+            }
+            $carriedMonths = $carriedOver['months'] ?? null;
+            if (!is_array($carriedMonths)
+                || !array_is_list($carriedMonths)
+                || $carriedMonths === []
+            ) {
+                throw new \InvalidArgumentException(
+                    'Převzatá část roku nemá seznam měsíců.',
+                );
+            }
+            foreach ($carriedMonths as $month) {
+                if (!is_int($month)
+                    || $month < 1
+                    || $month > 12
+                    || isset($seen[$month])
+                ) {
+                    // Překryv s vlastním měsícem by tentýž měsíc uvedl dvakrát.
+                    throw new \InvalidArgumentException(
+                        'Převzatý měsíc není platný nebo se kryje s měsícem '
+                        . 'vlastního výpočtu.',
+                    );
+                }
+            }
+            if (!is_array($carriedOver['month_rows'] ?? null)
+                || !is_string($carriedOver['source_reference'] ?? null)
+            ) {
+                throw new \InvalidArgumentException(
+                    'Převzatá část roku nemá rozpis měsíců a popis zdroje.',
+                );
             }
         }
     }
@@ -268,6 +340,87 @@ final readonly class PayrollSheetDocumentData
             'credit_detail_complete' => $this->creditDetailComplete(),
             'employments' => $this->employments,
             'tax_detail_complete' => $this->taxDetailComplete(),
+            'carried_over' => $this->carriedOverTemplate(),
+            'carried_over_assessed' => $this->carriedOverAssessed,
+        ];
+    }
+
+    /**
+     * Převzatá část roku pro šablonu: rozpis po měsících, úhrn a zdroj.
+     *
+     * Sloupce se ODVOZUJÍ z toho, co v počátečním stavu skutečně je, ne
+     * z pevného seznamu. Až průvodce počátečních stavů začne zapisovat
+     * zdravotní pojištění (`calculation_kind = 'health_insurance'`), projeví se
+     * v dokladu samo; pole bez popisku se ukáže pod svým klíčem, což je
+     * viditelná pobídka popisek doplnit — na rozdíl od tichého zahození.
+     *
+     * @return ?array{
+     *   months:list<int>,
+     *   months_label:string,
+     *   source_reference:string,
+     *   columns:list<array{field:string,label:string}>,
+     *   rows:list<array{month:int,amounts:array<string,int>}>,
+     *   totals:array<string,int>
+     * }
+     */
+    private function carriedOverTemplate(): ?array
+    {
+        if ($this->carriedOver === null) {
+            return null;
+        }
+        /** @var list<int> $months */
+        $months = $this->carriedOver['months'];
+        $rows = [];
+        $totals = [];
+        $fields = [];
+        foreach ($this->carriedOver['month_rows'] as $row) {
+            if (!is_array($row) || !is_int($row['month'] ?? null)) {
+                throw new \InvalidArgumentException(
+                    'Rozpis převzatého měsíce není platný.',
+                );
+            }
+            $amounts = [];
+            foreach ($row as $field => $amount) {
+                if ($field === 'month') {
+                    continue;
+                }
+                if (!is_string($field) || !is_int($amount) || $amount < 0) {
+                    throw new \InvalidArgumentException(
+                        'Částka v rozpisu převzatého měsíce není platná.',
+                    );
+                }
+                $amounts[$field] = $amount;
+                $fields[$field] = true;
+                $totals[$field] = $this->add($totals[$field] ?? 0, $amount);
+            }
+            $rows[] = ['month' => $row['month'], 'amounts' => $amounts];
+        }
+        $columns = [];
+        foreach (array_keys(self::CARRIED_OVER_LABELS) as $field) {
+            if (isset($fields[$field])) {
+                $columns[] = [
+                    'field' => $field,
+                    'label' => self::CARRIED_OVER_LABELS[$field],
+                ];
+                unset($fields[$field]);
+            }
+        }
+        $remaining = array_keys($fields);
+        sort($remaining, SORT_STRING);
+        foreach ($remaining as $field) {
+            $columns[] = ['field' => $field, 'label' => $field];
+        }
+
+        return [
+            'months' => $months,
+            'months_label' => is_string($this->carriedOver['months_label'] ?? null)
+                && $this->carriedOver['months_label'] !== ''
+                    ? $this->carriedOver['months_label']
+                    : implode(', ', array_map(strval(...), $months)),
+            'source_reference' => (string) $this->carriedOver['source_reference'],
+            'columns' => $columns,
+            'rows' => $rows,
+            'totals' => $totals,
         ];
     }
 

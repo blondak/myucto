@@ -9,6 +9,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Import\OpeningBalance\OpeningBalanceMonthValidator;
+use MyInvoice\Service\Payroll\Import\OpeningBalance\OpeningBalanceTabularImportService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -25,27 +27,9 @@ final class PayrollOpeningBalanceAction
 {
     use PayrollActionSupport;
 
-    /**
-     * Měsíční částky, které uživatel opisuje ze sestavy předchozího programu.
-     *
-     * Klíč je sloupec, hodnota je NÁZEV SLOUPCE V TABULCE NA OBRAZOVCE. Hláška
-     * musí ukázat na buňku, do které se má sáhnout; „Částka
-     * »advance_base_minor_units« za měsíc 3" účetní nikam nenavede.
-     */
-    private const MONTH_FIELDS = [
-        'social_assessment_base_minor_units' => 'Vyměřovací základ sociálního pojištění',
-        'advance_base_minor_units' => 'Základ zálohové daně',
-        'advance_tax_minor_units' => 'Záloha na daň',
-        'withholding_base_minor_units' => 'Základ srážkové daně',
-        'withholding_tax_minor_units' => 'Srážková daň',
-        'applied_non_refundable_credits_minor_units' => 'Uplatněné slevy na dani',
-        'applied_child_credit_minor_units' => 'Uplatněné daňové zvýhodnění na děti',
-        'tax_bonus_minor_units' => 'Daňový bonus',
-        'bonus_qualifying_income_minor_units' => 'Příjem rozhodný pro bonus',
-    ];
-
     public function __construct(
         private readonly PayrollOpeningBalanceService $openings,
+        private readonly OpeningBalanceTabularImportService $tabular,
         private readonly PayrollModuleAccess $access,
         private readonly IpMatcher $ipMatcher,
     ) {}
@@ -93,6 +77,89 @@ final class PayrollOpeningBalanceAction
         }
     }
 
+    /**
+     * Vzorový soubor se správnou hlavičkou.
+     *
+     * Bez něj hlavičku nikdo netrefí a import skončí na „chybí povinný sloupec".
+     */
+    public function importTemplate(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+        $response->getBody()->write(OpeningBalanceTabularImportService::template());
+
+        return $response
+            ->withHeader('Content-Type', 'text/csv; charset=utf-8')
+            ->withHeader('Content-Disposition', 'attachment; filename="pocatecni-stavy-vzor.csv"');
+    }
+
+    /** Náhled tabulkového importu za celou firmu — nic nezapisuje. */
+    public function importPreview(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+
+            return Json::ok($response, ['preview' => $this->tabular->preview(
+                $this->currentSupplierId($request),
+                is_string($body['format'] ?? null) ? $body['format'] : '',
+                is_string($body['source_name'] ?? null) ? $body['source_name'] : '',
+                $this->content($body),
+            )]);
+        } catch (\Throwable $e) {
+            return $this->failure($response, $e);
+        }
+    }
+
+    public function importApply(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+
+            return Json::ok($response, ['import' => $this->tabular->apply(
+                $this->currentSupplierId($request),
+                is_string($body['format'] ?? null) ? $body['format'] : '',
+                is_string($body['source_name'] ?? null) ? $body['source_name'] : '',
+                $this->content($body),
+                $this->userId($request),
+            )]);
+        } catch (\Throwable $e) {
+            return $this->failure($response, $e);
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function body(Request $request): array
+    {
+        $body = $request->getParsedBody();
+        if (!is_array($body)) {
+            throw new \InvalidArgumentException('Tělo požadavku musí být objekt.');
+        }
+
+        return $body;
+    }
+
+    /** @param array<string,mixed> $body */
+    private function content(array $body): string
+    {
+        $encoded = is_string($body['content_base64'] ?? null) ? $body['content_base64'] : '';
+        if ($encoded === '' || strlen($encoded) > 6_700_000) {
+            throw new \InvalidArgumentException('Importní obsah chybí nebo překračuje bezpečný limit.');
+        }
+        $decoded = base64_decode($encoded, true);
+        if ($decoded === false) {
+            throw new \InvalidArgumentException('content_base64 není platné Base64.');
+        }
+
+        return $decoded;
+    }
+
     /** @return list<array<string,int>> */
     private function months(mixed $value): array
     {
@@ -115,7 +182,9 @@ final class PayrollOpeningBalanceAction
             $seen[$month] = true;
 
             $row = ['month' => $month];
-            foreach (self::MONTH_FIELDS as $field => $label) {
+            // Sada sloupců i jejich popisky mají jediný zdroj — mřížka, tabulkový
+            // import a import hlášení JMHZ musí znát tytéž sloupce.
+            foreach (OpeningBalanceMonthValidator::labels() as $field => $label) {
                 $amount = filter_var($item[$field] ?? 0, FILTER_VALIDATE_INT);
                 if ($amount === false || $amount < 0) {
                     throw new \InvalidArgumentException(sprintf(

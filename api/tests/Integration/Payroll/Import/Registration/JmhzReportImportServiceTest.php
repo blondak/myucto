@@ -432,7 +432,12 @@ final class JmhzReportImportServiceTest extends TestCase
             ->current($this->supplierId, $employeeId, 2026)['months']);
     }
 
-    public function testOpeningBalancesAreBlockedWhenTheYearHasApprovedPayroll(): void
+    /**
+     * PAM-14: schválená mzda roku převzetí počátečních stavů NEBLOKUJE —
+     * u firmy, která přešla v průběhu roku, se převzatá čísla dolaďují.
+     * Blokuje až to, co odešlo ven; tady vydaný roční doklad zaměstnance.
+     */
+    public function testOpeningBalancesAreBlockedOnlyAfterTheYearIsReported(): void
     {
         [$employeeId] = $this->registerEmployee(withIdentifiers: true);
         $files = [];
@@ -456,13 +461,32 @@ final class JmhzReportImportServiceTest extends TestCase
         }
 
         $opening = $this->imports->preview($this->supplierId, 'test', $files)['opening_balances'][0];
-        self::assertSame('blocked', $opening['status']);
-        self::assertStringContainsString('schválenou mzdu', (string) $opening['reason']);
+        self::assertSame('ready', $opening['status'], 'Schválená mzda sama převzetí neblokuje.');
         self::assertCount(3, $opening['months']);
+
+        $manifest = '{"sources":[]}';
+        $pdo->prepare(
+            'INSERT INTO payroll_annual_document_revisions
+                (supplier_id, employee_id, tax_year, purpose, revision_no,
+                 snapshot_ciphertext, snapshot_hash, source_manifest_json,
+                 source_manifest_hash, approved_at)
+             VALUES (?, ?, 2026, "taxable_income_advance_certificate", 1, ?, ?, ?, ?, NOW())'
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            'synteticky-sifrovany-snapshot',
+            hash('sha256', 'snapshot2026'),
+            $manifest,
+            hash('sha256', $manifest),
+        ]);
+
+        $opening = $this->imports->preview($this->supplierId, 'test', $files)['opening_balances'][0];
+        self::assertSame('blocked', $opening['status']);
+        self::assertStringContainsString('roční doklad', (string) $opening['reason']);
 
         $applied = $this->apply($files, [], openings: true);
         self::assertSame(0, $applied['opening_balances']['saved']);
-        self::assertStringContainsString('schválenou mzdu', (string) $applied['opening_balances']['skipped'][0]['reason']);
+        self::assertStringContainsString('roční doklad', (string) $applied['opening_balances']['skipped'][0]['reason']);
     }
 
     public function testMissingMonthBlocksOpeningBalances(): void

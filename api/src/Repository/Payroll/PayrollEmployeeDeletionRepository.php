@@ -196,6 +196,10 @@ final class PayrollEmployeeDeletionRepository
             'payroll_person_foreign_permits',
         ],
         'payout_rules' => ['payroll_payout_rules'],
+        // Úhrny mezd převzaté z předchozího programu. Jsou to mzdové údaje osoby, takže
+        // s ní odcházejí; cizí klíč na ni tabulka schválně nemá (musí unést i mzdu vztahu,
+        // který se nepřevedl), takže by na ni jinak nikdo neupozornil.
+        'migration_reference' => ['payroll_migration_reference_totals'],
     ];
 
     /**

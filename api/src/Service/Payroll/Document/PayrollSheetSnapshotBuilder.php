@@ -16,7 +16,7 @@ use PDO;
 
 final class PayrollSheetSnapshotBuilder
 {
-    public const SCHEMA_VERSION = 'payroll-sheet-document.v4';
+    public const SCHEMA_VERSION = 'payroll-sheet-document.v5';
     public const PURPOSE = 'payroll_sheet';
 
     /**
@@ -48,12 +48,20 @@ final class PayrollSheetSnapshotBuilder
      * než jaká se skutečně poskytla, a druhá polovina bodu 5 („záloha snížená
      * o měsíční slevu") mu z toho vycházela záporná.
      *
+     * Mapování v6 dává mzdovému listu druhý zdroj: převzatou část roku
+     * z počátečních stavů kumulací ({@see PayrollCarriedOverPeriod}). Zákazník,
+     * který přešel z jiného mzdového programu uprostřed roku, měl dosud mzdový
+     * list jen za měsíce spočítané MyÚčtem, tedy z pohledu § 38j odst. 2
+     * neúplný. Převzaté měsíce se do měsíční řady NEMÍCHAJÍ — nejsou výsledkem
+     * výpočtu a nemají většinu údajů, které měsíční řádek žádá; doklad je nese
+     * v samostatné části s uvedením zdroje.
+     *
      * Verze je součástí zdrojového manifestu, takže se pro tytéž zdrojové revize
      * NENAJDE dřívější revize a doklad se vydá jako DALŠÍ revize v řetězu.
      * Existující revize ani její archivované PDF se tím nemění — což je jediná
      * přípustná cesta, protože roční revize jsou append-only a kotvené otiskem.
      */
-    public const MAPPING_VERSION = 'payroll-sheet-mapping.v5';
+    public const MAPPING_VERSION = 'payroll-sheet-mapping.v6';
 
     /**
      * Snapshoty vydané pod starším mapováním zůstávají čitelné. Nedopočítávají
@@ -64,11 +72,13 @@ final class PayrollSheetSnapshotBuilder
     private const SCHEMA_VERSION_V1 = 'payroll-sheet-document.v1';
     private const SCHEMA_VERSION_V2 = 'payroll-sheet-document.v2';
     private const SCHEMA_VERSION_V3 = 'payroll-sheet-document.v3';
+    private const SCHEMA_VERSION_V4 = 'payroll-sheet-document.v4';
 
     private const SUPPORTED_SCHEMA_VERSIONS = [
         self::SCHEMA_VERSION_V1,
         self::SCHEMA_VERSION_V2,
         self::SCHEMA_VERSION_V3,
+        self::SCHEMA_VERSION_V4,
         self::SCHEMA_VERSION,
     ];
 
@@ -88,6 +98,7 @@ final class PayrollSheetSnapshotBuilder
         private readonly PayrollAnnualDocumentRepository $annualRevisions,
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly SecretEncryption $encryption,
+        private readonly PayrollCarriedOverPeriodReader $carriedOverPeriods,
     ) {}
 
     /**
@@ -119,6 +130,16 @@ final class PayrollSheetSnapshotBuilder
         $profile = $this->profileSnapshot($supplierId, $employeeId, $taxYear);
         $employer = $this->employerSnapshot($supplierId);
         [$months, $manifestSources, $employments] = $this->months($sources, $employeeId);
+        // Druhý zdroj: měsíce roku před prvním obdobím zpracovaným v MyÚčtu.
+        // Bez nich je mzdový list za rok přechodu z jiného programu neúplný.
+        // Chybí-li za ně počáteční stav, čtečka doklad odmítne — neúplný
+        // mzdový list se nevydává, viz PayrollCarriedOverPeriod::fromOpenings().
+        $carried = $this->carriedOverPeriods->read(
+            $supplierId,
+            $employeeId,
+            $taxYear,
+            (int) substr($this->text($sources[0], 'period_start'), 5, 2),
+        );
 
         $profileHash = $this->sensitiveData->keyedFingerprint(
             CanonicalJson::encode($profile),
@@ -153,6 +174,9 @@ final class PayrollSheetSnapshotBuilder
                 'evidence' => $settlementEvidence,
             ])),
             'sources' => $manifestSources,
+            // Otisk verze počátečního stavu: oprava převzatých čísel musí
+            // vydat DALŠÍ revizi, ne vrátit původní se starými úhrny.
+            'carried_over' => $carried?->manifestAnchor(),
         ];
         $manifestJson = CanonicalJson::encode($manifest);
         $manifestHash = hash('sha256', $manifestJson);
@@ -171,6 +195,7 @@ final class PayrollSheetSnapshotBuilder
                 : PayrollSheetDocumentData::ANNUAL_SETTLEMENT_APPROVED,
             'annual_settlement' => $settlement,
             'annual_settlement_evidence' => $settlementEvidence,
+            'carried_over' => $carried?->toSnapshot(),
         ];
         $snapshotJson = CanonicalJson::encode($snapshot);
         $snapshotHash = $this->snapshotFingerprint($snapshotJson, $supplierId);
@@ -753,7 +778,11 @@ final class PayrollSheetSnapshotBuilder
         // doby ve snapshotu jsou; v4 mění jen zdroj slevy podle § 35ba.
         $recordedSinceV3 = in_array(
             $schemaVersion,
-            [self::SCHEMA_VERSION_V3, self::SCHEMA_VERSION],
+            [
+                self::SCHEMA_VERSION_V3,
+                self::SCHEMA_VERSION_V4,
+                self::SCHEMA_VERSION,
+            ],
             true,
         );
         $childDetail = $recordedSinceV3
@@ -762,7 +791,11 @@ final class PayrollSheetSnapshotBuilder
         // Do v3 včetně nesla kolonka slevy podle § 35ba NÁROK, ne poskytnutou
         // slevu. Zpětně se nepřepočítává — zmrazený snapshot je závazný obsah
         // vydané revize a rozdíl v něm už není z čeho dopočítat.
-        $creditDetail = $schemaVersion === self::SCHEMA_VERSION
+        $creditDetail = in_array(
+            $schemaVersion,
+            [self::SCHEMA_VERSION_V4, self::SCHEMA_VERSION],
+            true,
+        )
             ? PayrollSheetMonth::CREDIT_DETAIL_APPLIED
             : PayrollSheetMonth::CREDIT_DETAIL_CLAIMED;
         $employer = $this->object($snapshot['employer'] ?? null, 'employer');
@@ -858,6 +891,15 @@ final class PayrollSheetSnapshotBuilder
                     'annual_settlement_evidence',
                 )
                 : null,
+            // Převzatá část roku je až ve v5. Ve starším snapshotu ji nemá cenu
+            // hledat: revize o počátečních stavech nevěděla, takže její
+            // nepřítomnost neznamená, že převzatá část neexistuje.
+            $schemaVersion === self::SCHEMA_VERSION
+                ? PayrollCarriedOverPeriod::fromSnapshot(
+                    $snapshot['carried_over'] ?? null,
+                )
+                : null,
+            $schemaVersion === self::SCHEMA_VERSION,
         );
     }
 

@@ -31,6 +31,7 @@ const EXPECTED_CHAPTERS = new Map<string, string>([
   ['/payroll/benefit-baskets', '89_Kose_benefitu'],
   ['/payroll/settings', '90_Nastaveni_mezd'],
   ['/payroll/imports', '90_Nastaveni_mezd'],
+  ['/payroll/migration-reconciliation', '108_Prechod_z_PAMICA'],
   ['/payroll/components', '91_Mzdove_slozky_a_vstupy'],
   ['/payroll/rulesets', '92_Legislativni_pravidla_mezd'],
   ['/payroll/retention', '93_Retencni_lhuty'],
@@ -44,7 +45,7 @@ describe('payroll contextual manual chapters', () => {
       .filter(path => path === 'payroll' || path.startsWith('payroll/'))
       .map(path => `/${path}`)
 
-    expect(payrollPaths).toHaveLength(25)
+    expect(payrollPaths).toHaveLength(26)
     expect([...payrollPaths].sort()).toEqual([...EXPECTED_CHAPTERS.keys()].sort())
     for (const path of payrollPaths) {
       expect(payrollManualChapter(path), path).toBe(EXPECTED_CHAPTERS.get(path))

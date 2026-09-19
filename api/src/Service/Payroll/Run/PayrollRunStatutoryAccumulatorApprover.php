@@ -40,6 +40,11 @@ final class PayrollRunStatutoryAccumulatorApprover
                 $revisionId,
                 $actorUserId,
             );
+            $this->approveHealthInsurance(
+                $supplierId,
+                $revisionId,
+                $actorUserId,
+            );
             $this->approveIncomeTax(
                 $supplierId,
                 $revisionId,
@@ -89,6 +94,80 @@ final class PayrollRunStatutoryAccumulatorApprover
                 $this->hash(
                     $person['result_snapshot_hash'] ?? null,
                     'social_insurance.result_snapshot_hash',
+                ),
+                $actorUserId,
+            );
+        }
+    }
+
+    /**
+     * Roční kumulace zdravotního pojištění.
+     *
+     * Do měsíčního výpočtu z ní nic nevstupuje (ZP nemá roční strop ani roční
+     * slevu), ale bez ní není proti čemu srovnat roční přehledy pojišťoven —
+     * a zákazníkovi, který přešel uprostřed roku, by chyběla ta část roku,
+     * kterou zpracoval jinde.
+     *
+     * Základ je ten VYKÁZANÝ: při dopočtu do minima se pojišťovně hlásí
+     * minimum, ne skutečný příjem, takže roční úhrn musí sčítat totéž číslo,
+     * jaké šlo v přehledech ven.
+     */
+    private function approveHealthInsurance(
+        int $supplierId,
+        int $revisionId,
+        int $actorUserId,
+    ): void {
+        foreach (
+            $this->calculatedPeople(
+                $supplierId,
+                $revisionId,
+                'health_insurance',
+            ) as $person
+        ) {
+            $employeeId = $this->positiveInt(
+                $person['employee_id'] ?? null,
+                'health_insurance.employee_id',
+            );
+            $result = $this->object(
+                $person['result_snapshot'] ?? null,
+                'health_insurance.result_snapshot',
+            );
+            $this->assertPersonReference(
+                $result['person_id'] ?? null,
+                $employeeId,
+                'health_insurance.person_id',
+            );
+            $employeeTopUp = $this->nonNegativeInt(
+                $result['employee_minimum_top_up_minor_units'] ?? null,
+                'health_insurance.employee_minimum_top_up_minor_units',
+            );
+            $employerTopUp = $this->nonNegativeInt(
+                $result['employer_minimum_top_up_minor_units'] ?? null,
+                'health_insurance.employer_minimum_top_up_minor_units',
+            );
+            $this->accumulators->appendApprovedResult(
+                $supplierId,
+                $revisionId,
+                $employeeId,
+                'health_insurance',
+                [
+                    'assessment_base_minor_units' => $this->nonNegativeInt(
+                        $result['ppz_assessment_base_minor_units'] ?? null,
+                        'health_insurance.ppz_assessment_base_minor_units',
+                    ),
+                    'employee_contribution_minor_units' => $this->nonNegativeInt(
+                        $result['employee_contribution_minor_units'] ?? null,
+                        'health_insurance.employee_contribution_minor_units',
+                    ),
+                    'employer_contribution_minor_units' => $this->nonNegativeInt(
+                        $result['employer_contribution_minor_units'] ?? null,
+                        'health_insurance.employer_contribution_minor_units',
+                    ),
+                    'minimum_top_up_minor_units' => $employeeTopUp + $employerTopUp,
+                ],
+                $this->hash(
+                    $person['result_snapshot_hash'] ?? null,
+                    'health_insurance.result_snapshot_hash',
                 ),
                 $actorUserId,
             );

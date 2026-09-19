@@ -202,6 +202,50 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
   </tfoot>
 </table>
 
+{% if carried_over %}
+<div class="section">Převzaté období {{ carried_over.months_label }} — nepočítalo MyÚčto</div>
+<table class="book">
+  <thead>
+    <tr>
+      <th class="first">Měsíc</th>
+      {% for column in carried_over.columns %}<th>{{ column.label }}</th>{% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in carried_over.rows %}
+    <tr>
+      <td class="first">{{ names[row.month - 1] }}</td>
+      {% for column in carried_over.columns %}
+      <td>{{ row.amounts[column.field] is defined ? row.amounts[column.field]|minor_money : '—' }}</td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td class="first">Celkem</td>
+      {% for column in carried_over.columns %}
+      <td>{{ carried_over.totals[column.field]|default(0)|minor_money }}</td>
+      {% endfor %}
+    </tr>
+  </tfoot>
+</table>
+<div class="note">
+Měsíce {{ carried_over.months_label }} zpracoval předchozí mzdový program, ne MyÚčto. Údaje výše
+jsou převzaté z počátečních stavů mzdových kumulací, které plátce zadal{% if carried_over.source_reference %} (zdroj: {{ carried_over.source_reference }}){% endif %}; MyÚčto je nepočítalo ani nepřepočítávalo
+a nese je v nezměněné podobě. Počáteční stav eviduje jen vyměřovací základy a daňové položky,
+proto tahle část neuvádí hrubý ani čistý příjem, pojistné zaměstnance a zaměstnavatele
+ani srážky — a tabulky výše, které je uvádějí, jsou proto jen za měsíce vlastního výpočtu.
+Podklady za převzaté období musí plátce doložit sestavou z předchozího programu.
+</div>
+{% elseif not carried_over_assessed %}
+<div class="note">
+Zda část roku zpracoval jiný mzdový program, tato revize neposuzovala: doklad vznikl nad
+starším mapováním. Není to tvrzení, že celý rok zpracovalo MyÚčto — nově vydaná revize
+dokladu to určí.
+</div>
+{% endif %}
+
 <div class="section">Roční zúčtování záloh a daňového zvýhodnění (§ 38j odst. 2 písm. h)</div>
 {% if annual_settlement_status == 'approved' %}
 <table class="book">

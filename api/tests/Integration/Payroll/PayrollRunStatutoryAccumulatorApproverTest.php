@@ -130,6 +130,7 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
     {
         $revisionId = $this->createRevision('2026-06-01', 'approved');
         $this->storeSocialResult($revisionId, 4_200_000, 'calculated');
+        $this->storeHealthResult($revisionId, 4_200_000, 'calculated');
         $this->storeIncomeTaxResult($revisionId, 'calculated');
 
         $this->approver->approve(
@@ -143,7 +144,7 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
             $this->actorUserIds[2],
         );
 
-        self::assertSame(2, $this->entryCount($revisionId));
+        self::assertSame(3, $this->entryCount($revisionId));
         $social = $this->accumulators->stateBeforePeriod(
             $this->supplierId,
             $this->employeeId,
@@ -155,6 +156,19 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
             4_200_000,
             $social['totals']['assessment_base_minor_units'],
         );
+        $health = $this->accumulators->stateBeforePeriod(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            '2026-07-01',
+            'health_insurance',
+        );
+        self::assertSame([
+            'assessment_base_minor_units' => 4_200_000,
+            'employee_contribution_minor_units' => 189_000,
+            'employer_contribution_minor_units' => 378_000,
+            'minimum_top_up_minor_units' => 0,
+        ], $health['totals']);
         $tax = $this->accumulators->stateBeforePeriod(
             $this->supplierId,
             $this->employeeId,
@@ -175,6 +189,7 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
     {
         $revisionId = $this->createRevision('2026-07-01', 'approved');
         $this->storeSocialResult($revisionId, 4_500_000, 'calculated');
+        $this->storeHealthResult($revisionId, 4_500_000, 'calculated');
         $this->storeIncomeTaxResult($revisionId, 'manual_review');
 
         try {
@@ -194,6 +209,7 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
     {
         $revisionId = $this->createRevision('2026-08-01', 'reviewed');
         $this->storeSocialResult($revisionId, 4_800_000, 'calculated');
+        $this->storeHealthResult($revisionId, 4_800_000, 'calculated');
         $this->storeIncomeTaxResult($revisionId, 'calculated');
 
         $this->expectException(\DomainException::class);
@@ -209,6 +225,7 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
         $revisionId = $this->createRevision('2026-09-01', 'reviewed');
         $runId = $this->runId($revisionId);
         $this->storeSocialResult($revisionId, 5_100_000, 'calculated');
+        $this->storeHealthResult($revisionId, 5_100_000, 'calculated');
         $this->storeIncomeTaxResult($revisionId, 'calculated');
 
         $approved = $this->commands->approve(
@@ -228,7 +245,7 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
 
         self::assertSame('approved', $approved->run['status']);
         self::assertTrue($replayed->idempotentReplay);
-        self::assertSame(2, $this->entryCount($revisionId));
+        self::assertSame(3, $this->entryCount($revisionId));
     }
 
     public function testApproveWorkflowRollsBackRevisionAndPartialAccumulator(): void
@@ -236,6 +253,7 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
         $revisionId = $this->createRevision('2026-10-01', 'reviewed');
         $runId = $this->runId($revisionId);
         $this->storeSocialResult($revisionId, 5_400_000, 'calculated');
+        $this->storeHealthResult($revisionId, 5_400_000, 'calculated');
 
         try {
             $this->commands->approve(
@@ -266,6 +284,22 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
             'synthetic:social-opening',
             ['verified_zero' => true],
             "approval-social-opening:{$this->supplierId}",
+            actorUserId: $this->actorUserIds[2],
+        );
+        $this->accumulators->appendOpeningBalance(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            'health_insurance',
+            [
+                'assessment_base_minor_units' => 0,
+                'employee_contribution_minor_units' => 0,
+                'employer_contribution_minor_units' => 0,
+                'minimum_top_up_minor_units' => 0,
+            ],
+            'synthetic:health-opening',
+            ['verified_zero' => true],
+            "approval-health-opening:{$this->supplierId}",
             actorUserId: $this->actorUserIds[2],
         );
         $this->accumulators->appendOpeningBalance(
@@ -304,6 +338,29 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
                 'person_id' => "employee:{$this->employeeId}",
                 'status' => $status,
                 'capped_assessment_base_minor_units' => $cappedBaseMinorUnits,
+            ],
+        );
+    }
+
+    private function storeHealthResult(
+        int $revisionId,
+        int $reportedBaseMinorUnits,
+        string $status,
+    ): void {
+        $this->storeResult(
+            $revisionId,
+            'health_insurance',
+            $status,
+            [
+                'person_id' => "employee:{$this->employeeId}",
+                'status' => $status,
+                // Do kumulace jde VYKÁZANÝ základ, ne skutečný příjem.
+                'assessment_base_minor_units' => $reportedBaseMinorUnits,
+                'ppz_assessment_base_minor_units' => $reportedBaseMinorUnits,
+                'employee_contribution_minor_units' => 189_000,
+                'employer_contribution_minor_units' => 378_000,
+                'employee_minimum_top_up_minor_units' => 0,
+                'employer_minimum_top_up_minor_units' => 0,
             ],
         );
     }

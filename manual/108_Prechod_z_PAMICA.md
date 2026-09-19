@@ -272,3 +272,47 @@ už prošel, přeskočí. Osobu, kterou nejde založit (například rodné čís
 platného data narození nebo neznámý kód pojišťovny), protokol vypíše a její
 mzdy v daném měsíci zůstanou nespárované; po doplnění osoby v evidenci
 převod spusťte znovu.
+
+## 108.9 Kontrola převzatých mezd
+
+**Cesta: `Mzdy → Kontrola převzatých mezd`**
+
+Převzatý měsíc jde v MyÚčtu přepočítat vlastní legislativní sadou. Jenže
+PAMICA ta čísla už podala — do jednotného měsíčního hlášení zaměstnavatele,
+zdravotním pojišťovnám a finančnímu úřadu. Kontrolní sestava postaví obě
+strany vedle sebe, aby bylo vidět, jestli se přepočet s podaným rozešel.
+
+Sestava porovnává za rok, po osobách a měsících, vždy trojici **PAMICA /
+MyÚčto / rozdíl**:
+
+- hrubá a čistá mzda,
+- vyměřovací základ sociálního a zdravotního pojištění,
+- pojistné zaměstnance na sociální a na zdravotní,
+- pojistné zaměstnavatele na zdravotní,
+- záloha na daň, srážková daň a daňový bonus.
+
+Nad tabulkou stojí **seznam odchylek** seřazený od největšího rozdílu.
+Přepínačem *Skrýt shodné řádky* se schovají osoby, u kterých všechno sedí.
+
+Pojistné zaměstnavatele na **sociální** zabezpečení se porovnává jen
+v součtu za měsíc a za rok. Osobní veličina to není — počítá se z úhrnu
+vyměřovacích základů celé firmy —, takže rozpad na jednotlivé osoby by byl
+jen odhad.
+
+Řádek sestavy je **osoba a měsíc**, ne pracovní vztah a měsíc. PAMICA má
+zpracovanou mzdu za každý vztah zvlášť a sestava je za osobu sečte: pojistné
+i daň jsou ze zákona veličiny osoby, ne vztahu, takže jinou společnou
+granularitu obě strany nemají. Kolik vztahů do řádku přispělo, je u osoby
+vidět.
+
+**Chybějící protějšek se nikdy nevydává za nulu.** Měsíc, který MyÚčto
+nepočítalo, i vztah, který PAMICA nemá, se v rozdílovém sloupci ukáže jako
+*MyÚčto nepočítalo* / *chybí v původním systému*, a součet, do kterého
+nepřispěly všechny řádky, nese značku *neúplné*. Nula v rozdílu tak vždycky
+znamená „sedí to", ne „nemám s čím porovnat".
+
+Sestava čte **aktuální** revizi mzdového běhu, ne jen schválenou — smysl je
+podívat se na přepočet dřív, než se schválí. Měsíc s neschválenou revizí je
+označený stavem revize.
+
+Sestavu vidí uživatel s oprávněním ke mzdovým sestavám (`payroll.reports`).

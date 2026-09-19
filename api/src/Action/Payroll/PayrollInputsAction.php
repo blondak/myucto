@@ -18,6 +18,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Component\PayrollInputPreviewService;
 use MyInvoice\Service\Payroll\Component\PayrollInputValidator;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -33,6 +34,7 @@ final class PayrollInputsAction
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollHistoricalPeriodService $historicalPeriods,
     ) {}
 
     /**
@@ -99,6 +101,22 @@ final class PayrollInputsAction
             'group_total' => $groups['total'] ?? null,
             'facets' => $facets,
             'filter' => $filter->toArray(),
+            /*
+             * Koncepty za období, které vedl předchozí program, se jen OZNAČÍ.
+             * Schválit je nejde k ničemu použít — mzdový běh za takový měsíc
+             * nejde založit — ale smazat ani schovat se nesmí: jsou podkladem
+             * pro srovnávací sestavu a pro počáteční stavy kumulací.
+             *
+             * U rozsahu měsíců se za historický považuje jen výpis, který
+             * NECELÝ leží před začátkem. Kdyby stačil první měsíc rozsahu,
+             * označil by se i výpis „leden až prosinec" u firmy, která vede
+             * mzdy od června — a ta polovina roku, kterou MyÚčto počítá, by
+             * v něm zmizela pod hlavičkou historie.
+             */
+            ...$this->historicalPeriods->describe(
+                $supplierId,
+                substr($filter->periodEnd ?? $filter->periodStart, 0, 7),
+            ),
         ]);
     }
 

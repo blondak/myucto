@@ -11,6 +11,9 @@ use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
+use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
+use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents;
@@ -38,6 +41,7 @@ final class PohodaPayrollImporter
     public const STEP_MONTHS = 'payroll_months';
     public const STEP_PEOPLE = 'payroll_people';
     public const STEP_DEDUCTIONS = 'payroll_deductions';
+    public const STEP_SICKNESS = 'payroll_sickness';
     private const PERSON_CHUNK = 100;
     private const MESSAGE_LIMIT = 20;
 
@@ -49,12 +53,14 @@ final class PohodaPayrollImporter
         private readonly PohodaPayrollPeopleWriter $people,
         private readonly PayrollInputRepository $inputs,
         private readonly PohodaPayrollDeductionsWriter $deductions,
+        private readonly PohodaPayrollSicknessWriter $sickness,
+        private readonly PayrollMigrationReferenceTotalsWriter $referenceTotals,
     ) {}
 
     /** @return list<string> */
     public static function stepKeys(): array
     {
-        return [self::STEP_PREFLIGHT, self::STEP_PROFILE, self::STEP_MONTHS, self::STEP_PEOPLE, self::STEP_DEDUCTIONS];
+        return [self::STEP_PREFLIGHT, self::STEP_PROFILE, self::STEP_MONTHS, self::STEP_PEOPLE, self::STEP_DEDUCTIONS, self::STEP_SICKNESS];
     }
 
     /**
@@ -319,6 +325,7 @@ final class PohodaPayrollImporter
                 }
                 $this->people->write($supplierId, $userOrNull, $records, $year, $confirmIdentifiers, $protocol, self::STEP_PEOPLE,
                     PohodaPayrollPeople::institutions($file));
+                $this->storeReferenceTotals($supplierId, $file, $year, $protocol);
                 $protocol->finish(self::STEP_PEOPLE);
             }
 
@@ -333,6 +340,25 @@ final class PohodaPayrollImporter
                 $this->deductions->write($supplierId, $userOrNull, PohodaPayrollDeductions::read($file, $year), $year,
                     $protocol, self::STEP_DEDUCTIONS, $runId);
                 $protocol->finish(self::STEP_DEDUCTIONS);
+            }
+
+            // Rozpracovaná neschopnost přes první měsíc vedení mezd. Až po osobách:
+            // nepřítomnosti z převedených mezd už existují a tenhle krok jim jen dopíše
+            // dny okna náhrady mzdy, které vyčerpal předchozí plátce. Bez nich by MyÚčto
+            // začalo čtrnáctidenní okno počítat znovu od začátku.
+            if (!$protocol->failed()) {
+                $protocol->begin(self::STEP_SICKNESS);
+                if ($progress !== null) {
+                    $progress(self::STEP_SICKNESS, 0, 1);
+                }
+                $this->sickness->write(
+                    $supplierId,
+                    $userOrNull,
+                    PohodaPayrollSickness::read($file, $year, $this->sickness->startPeriod($supplierId)),
+                    $protocol,
+                    self::STEP_SICKNESS,
+                );
+                $protocol->finish(self::STEP_SICKNESS);
             }
         } finally {
             if ($savepoint) {
@@ -447,4 +473,41 @@ final class PohodaPayrollImporter
                 "{$period}: {$failed} převzatých mzdových vstupů se nepodařilo schválit, zůstávají jako koncept.", ['period' => $period]);
         }
     }
+
+    /**
+     * Úhrny zpracovaných mezd z PAMICA tak, jak je spočítal původní program.
+     *
+     * Bez nich nejde po přepočtu zjistit, jestli se MyÚčto trefilo do toho, co už bylo
+     * podané - a právě to je jediná obrana proti tichému rozejití s hlášeními. Ukládají
+     * se při převodu, ne až při generování sestavy: měsíce po převodu už export nikdo
+     * po ruce nemá, a přesně tehdy se historický měsíc přepočítává.
+     */
+    private function storeReferenceTotals(int $supplierId, string $file, int $year, ImportProtocol $protocol): void
+    {
+        $matched = $this->people->matchedRelations();
+        $totals = [];
+        foreach (PohodaXml::records($file, 'MZ') as $mz) {
+            if ((int) PohodaXml::text($mz, 'Rok') !== $year) {
+                continue;
+            }
+            $pair = $matched[PohodaXml::text($mz, 'RefPomer')] ?? null;
+            try {
+                $totals[] = PayrollMigrationReferenceTotals::fromPohodaMz(
+                    $mz,
+                    $year,
+                    $pair['employee_id'] ?? null,
+                    $pair['employment_id'] ?? null,
+                );
+            } catch (\InvalidArgumentException) {
+                // Mzda bez platného měsíce nebo bez identifikace vztahu: do sestavy nepatří,
+                // ale ani kvůli ní nemá padnout celý převod.
+                $protocol->count(self::STEP_PEOPLE, 'reference_totals_skipped');
+            }
+        }
+        if ($totals === []) {
+            return;
+        }
+        $protocol->count(self::STEP_PEOPLE, 'reference_totals', $this->referenceTotals->store($supplierId, 'pamica', $totals, basename($file)));
+    }
+
 }

@@ -278,7 +278,8 @@ final class PohodaPayrollImportTest extends TestCase
 
         $fourth = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true);
         self::assertSame(2, self::stepCounts($fourth, PohodaPayrollImporter::STEP_PEOPLE)['openings_existing'] ?? 0, $this->explain($fourth));
-        self::assertSame(4, $this->rows('payroll_statutory_accumulator_openings', $supplierId));
+        // Dvě osoby krát tři druhy kumulace (sociální, zdravotní, daň z příjmů).
+        self::assertSame(6, $this->rows('payroll_statutory_accumulator_openings', $supplierId));
     }
 
     /**

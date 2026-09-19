@@ -541,6 +541,9 @@
       "payroll",
       "period_filter"
     ],
+    "payroll-migration-reconciliation": [
+      "payroll"
+    ],
     "payroll-settings": [
       "payroll"
     ],

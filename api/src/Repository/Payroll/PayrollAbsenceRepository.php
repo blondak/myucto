@@ -544,7 +544,10 @@ final class PayrollAbsenceRepository
      * Poslední den okna náhrady mzdy podle § 192 ZP.
      *
      * Délka okna se historicky měnila (21 → 14 dnů), proto je v rulesetu,
-     * ne v literálu.
+     * ne v literálu. Okno se zkracuje o dny, které padly ještě před začátkem
+     * téhle nepřítomnosti — u neschopnosti převzaté z jiného mzdového programu
+     * (`sickness_window_carried_days`, migrace 1850). Okno patří případu, ne
+     * plátci: bez toho by převzatá nemoc dostala celých čtrnáct dnů znovu.
      *
      * @param array<string,mixed> $absence
      */
@@ -553,7 +556,71 @@ final class PayrollAbsenceRepository
         \DateTimeImmutable $windowFrom,
     ): \DateTimeImmutable {
         return AbsenceRuleset::forDate($this->rulesets, (string) $absence['date_from'])
-            ->sicknessWindowEnd($windowFrom);
+            ->sicknessWindowEnd($windowFrom, self::carriedWindowDays($absence));
+    }
+
+    /**
+     * Dny okna § 192 ZP vyčerpané předchozím plátcem. Jediná čtecí cesta k tomu
+     * sloupci — sahají na ni {@see publishedShiftSegments},
+     * {@see publishedShiftSegmentsBeyondSicknessWindow} i
+     * {@see PayrollSicknessRepository::record()}, aby se uložené okno a spočítané
+     * segmenty nerozešly.
+     *
+     * @param array<string,mixed> $absence
+     */
+    public static function carriedWindowDays(array $absence): int
+    {
+        return max(0, (int) ($absence['sickness_window_carried_days'] ?? 0));
+    }
+
+    /**
+     * Zápis dnů okna náhrady mzdy vyčerpaných před začátkem nepřítomnosti.
+     *
+     * Odmítne se po výpočtu náhrady: `payroll_sickness_events` je neměnný důkaz
+     * výpočtu a jeho okno by se změnou rozešlo s tím, ze kterého vznikl mzdový
+     * vstup. Opravuje se stornem výpočtu, ne přepsáním vstupu.
+     *
+     * @return array<string,mixed>
+     */
+    public function setSicknessWindowCarriedDays(
+        int $supplierId,
+        int $id,
+        int $days,
+    ): array {
+        if ($days < 0) {
+            throw new \InvalidArgumentException('Vyčerpaných dnů okna náhrady nemůže být záporný počet.');
+        }
+        $absence = $this->find($supplierId, $id)
+            ?? throw new \RuntimeException('Nepřítomnost nebyla nalezena.');
+        if (!self::isSickness($absence)) {
+            throw new \DomainException(
+                'Okno náhrady mzdy podle § 192 ZP má jen dočasná pracovní neschopnost a karanténa.'
+            );
+        }
+        $this->yearClose->assertOpenForDateRange(
+            $supplierId,
+            (string) $absence['date_from'],
+            (string) $absence['date_to'],
+        );
+        $computed = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_sickness_events WHERE supplier_id = ? AND absence_id = ?'
+        );
+        $computed->execute([$supplierId, $id]);
+        if ((int) $computed->fetchColumn() > 0) {
+            throw new \DomainException(
+                'Náhrada mzdy k téhle neschopnosti je už spočítaná; vyčerpané dny okna '
+                . 'nastavte až po jejím stornu.'
+            );
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_absences
+                SET sickness_window_carried_days = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$days, $supplierId, $id]);
+
+        return $this->find($supplierId, $id)
+            ?? throw new \RuntimeException('Nepřítomnost nebyla po zápisu nalezena.');
     }
 
     /**
@@ -762,6 +829,7 @@ final class PayrollAbsenceRepository
             'partial_last_minutes', 'compensation_rate_basis_points',
             'average_snapshot_id', 'average_hourly_minor', 'average_year',
             'average_quarter', 'row_version', 'childbirth_recorded_by',
+            'sickness_window_carried_days',
         ] as $key) {
             $row[$key] = $row[$key] === null ? null : (int) $row[$key];
         }

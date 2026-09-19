@@ -38,6 +38,22 @@ final class AbsenceRulesetTest extends TestCase
         );
     }
 
+    /**
+     * Okno patří případu, ne plátci: dny vyčerpané předchozím plátcem
+     * (`payroll_absences.sickness_window_carried_days`) ho zkracují, a vyčerpané
+     * okno vrací den před začátkem, takže volajícím vyjde prázdný rozsah.
+     */
+    public function testCarriedDaysShortenTheSicknessWindow(): void
+    {
+        $rules = AbsenceRuleset::forYear(CzechPayrollRulesets2026::provider(), 2026);
+        $from = new \DateTimeImmutable('2026-08-01');
+
+        self::assertSame('2026-08-02', $rules->sicknessWindowEnd($from, 12)->format('Y-m-d'));
+        self::assertSame('2026-08-01', $rules->sicknessWindowEnd($from, 13)->format('Y-m-d'));
+        self::assertSame('2026-07-31', $rules->sicknessWindowEnd($from, 14)->format('Y-m-d'));
+        self::assertSame('2026-07-31', $rules->sicknessWindowEnd($from, 40)->format('Y-m-d'));
+    }
+
     public function testDateWithoutRulesetFailsClosed(): void
     {
         $this->expectException(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException::class);

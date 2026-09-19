@@ -75,6 +75,7 @@ use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
 use MyInvoice\Action\Payroll\PayrollAnnualDocumentBatchAction;
 use MyInvoice\Action\Payroll\PayrollAnnualSettlementAction;
 use MyInvoice\Action\Payroll\PayrollAnnualReportAction;
+use MyInvoice\Action\Payroll\PayrollMigrationReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollYearCloseAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
@@ -1051,6 +1052,13 @@ final class Routes
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
             $g->get('/reports/annual/{year:[0-9]{4}}', [PayrollAnnualReportAction::class, 'show']);
+            // Kontrola přepočtu převzatého měsíce proti číslům původního systému.
+            // Bez ní je přepočet historického měsíce hazard: původní systém ta čísla
+            // už podal do JMHZ, na pojišťovny a na finanční úřad.
+            $g->get(
+                '/reports/migration-reconciliation/{year:[0-9]{4}}',
+                [PayrollMigrationReconciliationAction::class, 'show'],
+            );
             // Žádosti o poukázání chybějící částky na daňovém bonusu
             // (§ 35d odst. 5 = DPZMB1, odst. 9 = DPZDB1). Vyplacené bonusy nad
             // rámec sražených záloh doplácí zaměstnavatel ze svého a bez téhle
@@ -1394,6 +1402,18 @@ final class Routes
             $g->put(
                 '/people/{id:[0-9]+}/statutory-openings',
                 [PayrollOpeningBalanceAction::class, 'save'],
+            );
+            $g->get(
+                '/statutory-openings/import/template',
+                [PayrollOpeningBalanceAction::class, 'importTemplate'],
+            );
+            $g->post(
+                '/statutory-openings/import/preview',
+                [PayrollOpeningBalanceAction::class, 'importPreview'],
+            );
+            $g->post(
+                '/statutory-openings/import/apply',
+                [PayrollOpeningBalanceAction::class, 'importApply'],
             );
             $g->post(
                 '/people/{employeeId:[0-9]+}/accounts/{accountId:[0-9]+}/verify',

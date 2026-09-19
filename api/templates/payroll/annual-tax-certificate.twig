@@ -257,6 +257,22 @@
         </div>
     {% endif %}
 
+    {% if carried_over %}
+        <div class="box">
+            <span class="label">Převzaté období – údaje nepocházejí z výpočtu MyÚčta</span>
+            Kalendářní měsíce {{ carried_over.months_label }} roku {{ tax_year }} plátce
+            nezpracoval v MyÚčtu. Částky za ně jsou převzaté z počátečních stavů mzdových
+            kumulací zadaných z předchozího mzdového programu{% if carried_over.source_reference %}
+            (zdroj: {{ carried_over.source_reference }}){% endif %} a v úhrnech níže jsou
+            započtené. MyÚčto je nepočítalo ani nepřepočítávalo.<br>
+            Vlastní výpočet pokrývá měsíce {{ own_months_label }}. Jen za ně doklad uvádí
+            daňovou rezidenci{% if is_advance %}, Prohlášení poplatníka, děti na řádku 11,
+            invaliditu na řádku 12 a povinné pojistné na řádku 14{% endif %}
+            a jen za ně dokládá skutečné vyplacení vlastní platební evidencí; za převzaté
+            měsíce za tyto údaje odpovídá plátce ze své evidence.
+        </div>
+    {% endif %}
+
     <table class="rows">
         <thead>
             <tr>
@@ -432,9 +448,14 @@
 
     <div class="closing-block">
         <div class="evidence">
-            Skutečné vyplacení částek bylo doloženo neměnnou platební evidencí.
+            Skutečné vyplacení částek{% if carried_over %} za měsíce {{ own_months_label }}{% endif %}
+            bylo doloženo neměnnou platební evidencí.
             Poslední doložená úhrada: {{ payment_evidence.last_payment_date }};
             rozhodný stav k {{ payment_evidence.cutoff }}.
+            {% if carried_over %}
+            Za převzaté měsíce {{ carried_over.months_label }} platební evidenci vede
+            předchozí mzdový program, ne MyÚčto.
+            {% endif %}
         </div>
 
         {% if correction_reason %}
@@ -453,7 +474,9 @@
         </table>
 
         <p class="footnote">
-            Zdroj: schválené mzdové revize a neměnná evidence skutečných úhrad.
+            Zdroj: schválené mzdové revize a neměnná evidence skutečných úhrad{% if carried_over %},
+            u měsíců {{ carried_over.months_label }} počáteční stavy převzaté z předchozího
+            mzdového programu{% endif %}.
             Zdrojový otisk a verze rendereru jsou vloženy do metadat PDF.
         </p>
     </div>

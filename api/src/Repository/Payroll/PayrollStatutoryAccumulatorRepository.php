@@ -16,10 +16,33 @@ final class PayrollStatutoryAccumulatorRepository
     /** Velikost dávky pro množinové načtení nad zmrazenou sadou osob. */
     private const CHUNK_SIZE = 500;
 
-    /** @var array<string,list<string>> */
-    private const VALUE_FIELDS = [
+    /**
+     * Sada hodnot podle druhu kumulace — JEDINÝ zdroj pravdy o tom, co kumulace
+     * nese. Veřejná proto, že z ní odvozuje sloupce měsíčního rozpisu
+     * {@see \MyInvoice\Service\Payroll\PayrollOpeningBalanceService::monthColumns()};
+     * kdyby si je držel vlastní seznam, nové pole by se do počátečních stavů
+     * nedostalo a roční úhrn by tiše chyběl.
+     *
+     * @var array<string,list<string>>
+     */
+    public const VALUE_FIELDS = [
         'social_insurance' => [
             'assessment_base_minor_units',
+        ],
+        /*
+         * Zdravotní pojištění nemá roční strop ani roční slevu, takže z téhle
+         * kumulace nic nevstupuje zpátky do měsíčního výpočtu — nese roční úhrn
+         * pro rekonciliaci a přehledy pojišťoven. Základ je ten VYKÁZANÝ
+         * (`ppz_assessment_base_minor_units`), protože při dopočtu do minima se
+         * pojišťovně hlásí minimum, ne skutečný příjem. Celkové pojistné se
+         * neukládá: je to vždy součet obou stran a druhá kopie téhož čísla se
+         * umí rozejít.
+         */
+        'health_insurance' => [
+            'assessment_base_minor_units',
+            'employee_contribution_minor_units',
+            'employer_contribution_minor_units',
+            'minimum_top_up_minor_units',
         ],
         'income_tax' => [
             'completed_months',
@@ -1005,23 +1028,109 @@ final class PayrollStatutoryAccumulatorRepository
     }
 
     /**
-     * Má zaměstnanec za daný rok schválený zákonný výsledek?
+     * Období roku, za která už zaměstnanec má schválený zákonný výsledek.
      *
-     * Řádek kumulace vzniká JEN schválením revize, takže je to nejlevnější
-     * a nejpřesnější doklad o tom, že se z počátečního stavu už počítalo.
-     * Po něm ho měnit nelze — přepsal by se základ hotového výpočtu.
+     * Není to zámek — je to seznam měsíců, které se počítaly NAD tehdejším
+     * počátečním stavem. Když se stav opraví, tyhle měsíce se samy
+     * nepřepočítají a uživatel to musí vidět.
+     *
+     * @return list<string> období ve tvaru `YYYY-MM`, od nejstaršího
      */
-    public function hasApprovedResult(int $supplierId, int $employeeId, int $year): bool
+    public function approvedPeriods(int $supplierId, int $employeeId, int $year): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT 1
+            'SELECT DISTINCT period_start
                FROM payroll_statutory_accumulator_entries
               WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
-              LIMIT 1'
+              ORDER BY period_start'
         );
         $stmt->execute([$supplierId, $employeeId, $year]);
 
-        return $stmt->fetchColumn() !== false;
+        return array_map(
+            static fn (mixed $value): string => substr((string) $value, 0, 7),
+            $stmt->fetchAll(PDO::FETCH_COLUMN),
+        );
+    }
+
+    /**
+     * Doklad o tom, že se z počátečního stavu roku už stalo něco nevratného.
+     *
+     * Schválený mzdový běh sám o sobě počáteční stav NEZAMYKÁ. U firmy, která
+     * přešla na MyÚčto v průběhu roku, se převzatá čísla dolaďují a chyba
+     * nalezená v listopadu musí jít opravit — zámek na prvním schváleném běhu
+     * to znemožnil hned v prvním měsíci. Zamyká se až to, co ven skutečně
+     * odešlo:
+     *
+     *  - `submission` — podané hlášení (produkční prostředí, `submitted_at`)
+     *    postavené nad revizí běhu, ve kterém ta OSOBA byla. Vazba přes
+     *    `source_revision_id` je to, co dělá zámek per-osoba a per-období:
+     *    registrace a jiná podání, do kterých roční kumulace nevstupuje,
+     *    počáteční stav nezamykají.
+     *  - `annual_document` — vydaný roční doklad osoby (potvrzení o
+     *    zdanitelných příjmech, mzdový list, výsledek ročního zúčtování).
+     *    Je to neměnný snapshot CELÉHO roku včetně převzatých měsíců.
+     *  - `year_closed` — uzavřený mzdový rok.
+     *
+     * @return array{kind:string,reference:string}|null
+     */
+    public function openingLock(int $supplierId, int $employeeId, int $year): ?array
+    {
+        $from = sprintf('%04d-01-01', $year);
+        $to = sprintf('%04d-12-31', $year);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT run.period_start
+               FROM payroll_submissions submission
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = submission.supplier_id
+                AND revision.id = submission.source_revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+               JOIN payroll_run_persons person
+                 ON person.supplier_id = revision.supplier_id
+                AND person.revision_id = revision.id
+                AND person.employee_id = ?
+              WHERE submission.supplier_id = ?
+                AND submission.environment = 'production'
+                AND submission.submitted_at IS NOT NULL
+                AND submission.status <> 'cancelled_in_time'
+                AND run.period_start BETWEEN ? AND ?
+              ORDER BY run.period_start, submission.id
+              LIMIT 1"
+        );
+        $stmt->execute([$employeeId, $supplierId, $from, $to]);
+        $period = $stmt->fetchColumn();
+        if (is_string($period) && $period !== '') {
+            return ['kind' => 'submission', 'reference' => substr($period, 0, 7)];
+        }
+
+        if ($this->db->hasTable('payroll_annual_document_revisions')) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT purpose
+                   FROM payroll_annual_document_revisions
+                  WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
+                  ORDER BY id
+                  LIMIT 1'
+            );
+            $stmt->execute([$supplierId, $employeeId, $year]);
+            $purpose = $stmt->fetchColumn();
+            if (is_string($purpose) && $purpose !== '') {
+                return ['kind' => 'annual_document', 'reference' => $purpose];
+            }
+        }
+
+        if ($this->db->hasTable('payroll_year_closures')) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT status FROM payroll_year_closures
+                  WHERE supplier_id = ? AND calendar_year = ?'
+            );
+            $stmt->execute([$supplierId, $year]);
+            if ($stmt->fetchColumn() === 'closed') {
+                return ['kind' => 'year_closed', 'reference' => (string) $year];
+            }
+        }
+
+        return null;
     }
 
     /**

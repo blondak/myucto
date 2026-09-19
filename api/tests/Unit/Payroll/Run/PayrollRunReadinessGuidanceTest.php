@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Run;
 
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
@@ -71,11 +72,10 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
      */
     public function testPeriodBeforeTheFirstPayrollMonthIsRefusedOutright(): void
     {
-        $precedes = static fn (?string $start, string $period): bool => self::invoke(
-            PayrollRunReadinessService::class,
-            'periodPrecedesModuleStart',
-            [$start, $period],
-        );
+        // Hranici drží PayrollHistoricalPeriodService — tentýž předěl odděluje
+        // historii i v přehledu docházky a ve výpisu mzdových vstupů, takže
+        // kontrola před během si ji nesmí počítat po svém.
+        $precedes = PayrollHistoricalPeriodService::precedesStart(...);
 
         self::assertTrue($precedes('2026-11', '2026-06-01'));
         self::assertTrue($precedes('2026-06-01', '2026-05-01'));

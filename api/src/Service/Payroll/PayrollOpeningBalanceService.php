@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
+use MyInvoice\Service\Payroll\Import\OpeningBalance\OpeningBalanceMonthValidator;
 
 /**
  * Počáteční stavy mzdových kumulací.
@@ -22,6 +23,10 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
  * @phpstan-type OpeningMonth array{
  *   month:int,
  *   social_assessment_base_minor_units:int,
+ *   health_assessment_base_minor_units:int,
+ *   health_employee_contribution_minor_units:int,
+ *   health_employer_contribution_minor_units:int,
+ *   health_minimum_top_up_minor_units:int,
  *   advance_base_minor_units:int,
  *   advance_tax_minor_units:int,
  *   withholding_base_minor_units:int,
@@ -37,24 +42,33 @@ final readonly class PayrollOpeningBalanceService
     private const SAVEPOINT = 'payroll_opening_balance';
 
     /**
-     * Zdravotní pojištění tu schválně není. `calculation_kind` ho od migrace 1401
-     * zná, ale akumulační cesta pro něj neexistuje (chybí sada polí, větev ve
-     * snapshot builderu i `approveHealthInsurance()`), takže zapsaný opening by
-     * nikdo nepřečetl. Až cesta vznikne, přibude sem třetí druh.
+     * Druhy kumulace, které počáteční stav plní. Musí odpovídat
+     * `PayrollStatutoryAccumulatorRepository::VALUE_FIELDS`; zapsat se dá jen
+     * druh, pro který repozitář zná sadu polí.
      */
-    private const KINDS = ['social_insurance', 'income_tax'];
+    public const KINDS = ['social_insurance', 'health_insurance', 'income_tax'];
 
-    /** Daňová pole kumulace, v tom pořadí, v jakém je čte roční zúčtování. */
-    private const TAX_FIELDS = [
-        'advance_base_minor_units',
-        'withholding_base_minor_units',
-        'advance_tax_minor_units',
-        'withholding_tax_minor_units',
-        'applied_non_refundable_credits_minor_units',
-        'applied_child_credit_minor_units',
-        'tax_bonus_minor_units',
-        'bonus_qualifying_income_minor_units',
+    /**
+     * Prefix sloupce měsíčního rozpisu podle druhu kumulace.
+     *
+     * Vyměřovací základ sociálního i zdravotního pojištění se v kumulaci jmenuje
+     * stejně (`assessment_base_minor_units`), takže by se v jednom řádku rozpisu
+     * překryly — prefix je rozliší. Daňová pole prefix nepotřebují, jejich názvy
+     * jsou jedinečné a takhle je zná i hlášení JMHZ.
+     */
+    private const MONTH_COLUMN_PREFIX = [
+        'social_insurance' => 'social_',
+        'health_insurance' => 'health_',
+        'income_tax' => '',
     ];
+
+    /**
+     * Pole kumulace, která se NEZADÁVAJÍ — plynou z rozpisu samotného.
+     * Počet uzavřených měsíců je počet řádků, ne částka.
+     *
+     * @var array<string,list<string>>
+     */
+    private const DERIVED_FIELDS = ['income_tax' => ['completed_months']];
 
     public function __construct(
         private PayrollStatutoryAccumulatorRepository $accumulators,
@@ -65,7 +79,8 @@ final readonly class PayrollOpeningBalanceService
      * Co je za daný rok uložené. Vrací i `id` aktuální verze — oprava se na něj
      * musí explicitně navázat, jinak ji repozitář odmítne jako duplicitu.
      *
-     * @return array{year:int,months:list<OpeningMonth>,openings:array<string,?int>,source_reference:string,locked:bool}
+     * @return array{year:int,months:list<OpeningMonth>,openings:array<string,?int>,
+     *   source_reference:string,locked:bool,lock_reason:?string,approved_periods:list<string>}
      */
     public function current(int $supplierId, int $employeeId, int $year): array
     {
@@ -75,20 +90,62 @@ final readonly class PayrollOpeningBalanceService
         foreach (self::KINDS as $kind) {
             $opening = $this->accumulators->openingBalance($supplierId, $employeeId, $year, $kind);
             $openings[$kind] = $opening === null ? null : (int) $opening['id'];
-            // Rozpis měsíců je v evidence u obou druhů stejný; stačí ten první nalezený.
+            // Rozpis měsíců je v evidence u všech druhů stejný; stačí ten první nalezený.
             if ($months === [] && $opening !== null && is_array($opening['evidence']['months'] ?? null)) {
                 $months = $opening['evidence']['months'];
                 $sourceReference = (string) $opening['source_reference'];
             }
         }
 
+        $lockReason = $this->lockReason($supplierId, $employeeId, $year);
+
         return [
             'year' => $year,
             'months' => array_values($months),
             'openings' => $openings,
             'source_reference' => $sourceReference,
-            'locked' => $this->accumulators->hasApprovedResult($supplierId, $employeeId, $year),
+            'locked' => $lockReason !== null,
+            'lock_reason' => $lockReason,
+            // Měsíce, které se počítaly nad tímhle stavem. Nejsou zámek, ale
+            // oprava je sama nepřepočítá — uživatel to musí vidět dřív, než uloží.
+            'approved_periods' => $this->accumulators->approvedPeriods($supplierId, $employeeId, $year),
         ];
+    }
+
+    /**
+     * Proč počáteční stav roku už nejde měnit, nebo `null`.
+     *
+     * JEDINÉ místo, kde se zámek formuluje — mřížka, tabulkový import i import
+     * hlášení JMHZ se ptají tady. Zámek se váže na PODANÉ hlášení a vydané roční
+     * doklady, ne na schválený mzdový běh: u firmy, která přešla na MyÚčto
+     * v průběhu roku, se převzatá čísla dolaďují a zámek na prvním schváleném
+     * běhu znamenal, že chybu nalezenou v listopadu už nešlo opravit vůbec.
+     * Co ale jednou odešlo ven, se zpětně přepsat nesmí.
+     *
+     * {@see PayrollStatutoryAccumulatorRepository::openingLock()}
+     */
+    public function lockReason(int $supplierId, int $employeeId, int $year): ?string
+    {
+        $lock = $this->accumulators->openingLock($supplierId, $employeeId, $year);
+        if ($lock === null) {
+            return null;
+        }
+
+        return match ($lock['kind']) {
+            'submission' => sprintf(
+                'Za období %s je podané hlášení, které z těchhle úhrnů vyšlo. Podaná čísla se zpětně '
+                    . 'nepřepisují — opravu proveďte opravným hlášením za dotčené období.',
+                $lock['reference'],
+            ),
+            'annual_document' => sprintf(
+                'Za rok %d je vydaný roční doklad zaměstnance (%s). Ten je neměnným otiskem celého roku '
+                    . 'včetně převzatých měsíců, takže počáteční stavy už měnit nelze.',
+                $year,
+                $lock['reference'],
+            ),
+            'year_closed' => sprintf('Mzdový rok %d je uzavřený.', $year),
+            default => throw new \LogicException('Neznámý důvod zámku počátečních stavů.'),
+        };
     }
 
     /**
@@ -241,7 +298,8 @@ final readonly class PayrollOpeningBalanceService
      * vrátí původní řádek), změna čísel je oprava navázaná na aktuální verzi.
      *
      * @param list<OpeningMonth> $months
-     * @return array{year:int,months:list<OpeningMonth>,openings:array<string,?int>,source_reference:string,locked:bool}
+     * @return array{year:int,months:list<OpeningMonth>,openings:array<string,?int>,
+     *   source_reference:string,locked:bool,lock_reason:?string,approved_periods:list<string>}
      */
     public function save(
         int $supplierId,
@@ -252,39 +310,14 @@ final readonly class PayrollOpeningBalanceService
         ?int $actorUserId,
     ): array {
         $sourceReference = trim($sourceReference);
-        $months = $this->continuousMonths($months);
-        // Prázdný rozpis je záměrný a auditovatelný nulový počátek nového
-        // zaměstnance. Nesmíme z ledna až měsíce nástupu vyrábět fiktivně
-        // „dokončené" měsíce, protože by zkreslily roční daňovou kumulaci.
-        /*
-         * Kumulace nese `completed_months` a repozitář ho u openingu omezuje na 11 —
-         * dvanáctý měsíc už není „před obdobím", ale celý rok.
-         */
-        if (count($months) > 11) {
-            throw new \InvalidArgumentException(
-                'Počáteční stavy pokrývají měsíce PŘED prvním zpracovaným obdobím, tedy nejvýš jedenáct.',
-            );
-        }
-        if ($this->accumulators->hasApprovedResult($supplierId, $employeeId, $year)) {
-            throw new \DomainException(
-                'Za tenhle rok už je schválená mzda. Počáteční stavy by změnily základ, ze kterého se počítala.',
-            );
-        }
-
-        $social = ['assessment_base_minor_units' => 0];
-        $tax = ['completed_months' => count($months)];
-        foreach (self::TAX_FIELDS as $field) {
-            $tax[$field] = 0;
-        }
-        foreach ($months as $month) {
-            $social['assessment_base_minor_units'] += $month['social_assessment_base_minor_units'];
-            foreach (self::TAX_FIELDS as $field) {
-                $tax[$field] += $month[$field];
-            }
+        $months = self::normalizedMonths($months);
+        $lockReason = $this->lockReason($supplierId, $employeeId, $year);
+        if ($lockReason !== null) {
+            throw new \DomainException($lockReason);
         }
 
         $evidence = ['months' => array_values($months)];
-        $values = ['social_insurance' => $social, 'income_tax' => $tax];
+        $values = self::accumulatorValues($months);
         $this->transactional(function () use (
             $supplierId,
             $employeeId,
@@ -344,14 +377,99 @@ final readonly class PayrollOpeningBalanceService
     }
 
     /**
+     * Roční kumulace za všechny druhy, složené z měsíčního rozpisu.
+     *
+     * Jediné místo, kde se z měsíců počítají hodnoty kumulací — a schválně
+     * veřejné a statické, aby šlo zavolat. Předání měsíce mzdovému modulu
+     * ({@see PayrollLegacyRecapitulationService::shrinkOpeningBalance()})
+     * skládá tytéž hodnoty ze zbylých měsíců; kdyby si je počítalo samo,
+     * rozešel by se s ním každý nový druh kumulace i každé nové pole.
+     *
+     * Chybějící sloupec je nula: rozpis uložený dřív, než druh kumulace
+     * existoval, se musí dát přepočítat i po jeho doplnění.
+     *
+     * @param list<array<string,mixed>> $months
+     * @return array<string,array<string,int>>
+     */
+    public static function accumulatorValues(array $months): array
+    {
+        $columns = self::monthColumns();
+        $values = [];
+        foreach ($columns as $kind => $map) {
+            $values[$kind] = array_fill_keys(array_values($map), 0);
+            foreach (self::DERIVED_FIELDS[$kind] ?? [] as $field) {
+                // Jediné odvozené pole: kolik měsíců rozpis pokrývá.
+                $values[$kind][$field] = count($months);
+            }
+        }
+        foreach ($months as $month) {
+            foreach ($columns as $kind => $map) {
+                foreach ($map as $column => $field) {
+                    $values[$kind][$field] += (int) ($month[$column] ?? 0);
+                }
+            }
+        }
+
+        return $values;
+    }
+
+    /**
+     * Sloupce měsíčního rozpisu podle druhu kumulace.
+     *
+     * Odvozuje se z {@see PayrollStatutoryAccumulatorRepository::VALUE_FIELDS},
+     * ne z vlastního seznamu: nový druh kumulace i nové pole se tím objeví ve
+     * všech cestách naráz (mřížka, tabulkový import, import hlášení JMHZ).
+     * Vlastní seznam by znamenal, že se do počátečních stavů nové pole prostě
+     * nedostane a roční úhrn bude tiše chybět.
+     *
+     * @return array<string,array<string,string>> druh => [sloupec rozpisu => pole kumulace]
+     */
+    public static function monthColumns(): array
+    {
+        $columns = [];
+        foreach (self::KINDS as $kind) {
+            $prefix = self::MONTH_COLUMN_PREFIX[$kind]
+                ?? throw new \LogicException("Druh kumulace {$kind} nemá prefix sloupce rozpisu.");
+            $map = [];
+            foreach (PayrollStatutoryAccumulatorRepository::VALUE_FIELDS[$kind] ?? [] as $field) {
+                if (in_array($field, self::DERIVED_FIELDS[$kind] ?? [], true)) {
+                    continue;
+                }
+                $map[$prefix . $field] = $field;
+            }
+            $columns[$kind] = $map;
+        }
+
+        return $columns;
+    }
+
+    /** @return list<string> sloupce rozpisu napříč druhy, v pořadí kumulací */
+    public static function monthFields(): array
+    {
+        $fields = [];
+        foreach (self::monthColumns() as $map) {
+            foreach (array_keys($map) as $column) {
+                $fields[] = $column;
+            }
+        }
+
+        return $fields;
+    }
+
+    /**
+     * Rozpis seřazený, ověřený a připravený k zápisu.
+     *
      * Počet dokončených měsíců smí vzniknout jen ze souvislého intervalu.
      * První měsíc je záměrně explicitní: převzatý zaměstnanec, který nastoupil
      * až v březnu, má před srpnovou aktivací pět měsíců (3–7), ne sedm.
      *
-     * @param list<OpeningMonth> $months
-     * @return list<OpeningMonth>
+     * Veřejné a statické, aby se náhled importu mohl zeptat přesně na to, co
+     * udělá zápis — náhled, který se ptá jinak, slibuje něco, co apply odmítne.
+     *
+     * @param list<array<string,mixed>> $months
+     * @return list<array<string,mixed>>
      */
-    private function continuousMonths(array $months): array
+    public static function normalizedMonths(array $months): array
     {
         $byMonth = [];
         foreach ($months as $row) {
@@ -366,6 +484,7 @@ final readonly class PayrollOpeningBalanceService
                     "Měsíc {$month} je v počátečních stavech dvakrát.",
                 );
             }
+            OpeningBalanceMonthValidator::assertValid($row);
             $byMonth[$month] = $row;
         }
         if ($byMonth === []) {
@@ -381,8 +500,39 @@ final readonly class PayrollOpeningBalanceService
                 'Měsíce počátečního stavu musí tvořit souvislou řadu.',
             );
         }
+        /*
+         * Prázdný rozpis je záměrný a auditovatelný nulový počátek nového
+         * zaměstnance. Nesmíme z ledna až měsíce nástupu vyrábět fiktivně
+         * „dokončené" měsíce, protože by zkreslily roční daňovou kumulaci.
+         *
+         * Kumulace nese `completed_months` a repozitář ho u openingu omezuje
+         * na 11 — dvanáctý měsíc už není „před obdobím", ale celý rok.
+         */
+        if (count($byMonth) > 11) {
+            throw new \InvalidArgumentException(
+                'Počáteční stavy pokrývají měsíce PŘED prvním zpracovaným obdobím, tedy nejvýš jedenáct.',
+            );
+        }
 
         return array_values($byMonth);
+    }
+
+    /**
+     * Důvod, proč by uložení neprošlo — tytéž kontroly jako {@see save()},
+     * ale bez zápisu. Náhled tabulkového importu se tím ptá stejnou branou,
+     * kterou pak projde (nebo neprojde) samotný zápis.
+     *
+     * @param list<array<string,mixed>> $months
+     */
+    public function rejectReason(int $supplierId, int $employeeId, int $year, array $months): ?string
+    {
+        try {
+            self::normalizedMonths($months);
+        } catch (\InvalidArgumentException $e) {
+            return $e->getMessage();
+        }
+
+        return $this->lockReason($supplierId, $employeeId, $year);
     }
 
     /** @param callable():void $callback */

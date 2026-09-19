@@ -1029,6 +1029,7 @@
     "payroll_retention": "Retention periods",
     "payroll_erasure": "Erasure of personal data",
     "payroll_benefit_baskets": "Benefit baskets",
+    "payroll_migration_reconciliation": "Migrated payroll check",
     "settings": "Settings",
     "company_settings": "Company settings",
     "branding": "Branding",
@@ -1670,6 +1671,76 @@
       "empty": "There are no approved payroll revisions for the selected year yet.",
       "privacy_hint": "This overview contains no names, personal identifiers, or individual employee detail.",
       "load_failed": "The annual payroll overview could not be loaded."
+    },
+    "migration_reconciliation": {
+      "title": "Migrated payroll check",
+      "subtitle": "Compares the payroll recalculated in MyÚčto with the payroll taken over from the previous system. The previous system already filed those figures with social security, the health insurers and the tax office, so any difference has to be known before the recalculation is approved.",
+      "year": "Year",
+      "source": "Source",
+      "source_all": "All sources",
+      "source_name": {
+        "pamica": "PAMICA",
+        "pohoda": "POHODA Payroll",
+        "money_s3": "Money S3"
+      },
+      "reload": "Reload",
+      "load_failed": "The check could not be loaded.",
+      "summary": {
+        "rows": "Person-months compared",
+        "deviations": "Deviations",
+        "missing": "Without counterpart",
+        "max_difference": "Largest difference"
+      },
+      "empty_title": "Nothing to compare for the selected year",
+      "empty_description": "Either no processed payroll was migrated from the previous system, or no payroll run exists for that year yet.",
+      "deviations_title": "Deviations",
+      "deviations_hint": "Sorted from the largest difference. Items where one side is missing come first — an unknown difference is worse than a known one.",
+      "no_deviations": "Every compared amount matches to the crown.",
+      "period": "Period",
+      "person": "Person",
+      "side": "Side",
+      "metric_column": "Item",
+      "reference": "Previous system",
+      "calculated": "MyÚčto",
+      "difference": "Difference",
+      "year_totals": "Yearly totals",
+      "months_title": "By month and person",
+      "month_total": "Total difference for the month",
+      "hide_matching": "Hide matching rows",
+      "all_matching": "The figures match in every month.",
+      "incomplete": "incomplete",
+      "incomplete_hint": "Not every row contributed to the total — some have no counterpart.",
+      "missing_count": "Without counterpart: {count}",
+      "relationship_count": "{count} employment relationships in the previous system",
+      "revision_status": "Revision in status {status}",
+      "external_person": "Person {ref} from the previous system",
+      "unknown_person": "Unidentified person",
+      "employer_social_note": "Employer social security contribution (company-wide only, it is not a per-person amount):",
+      "grain_hint": "A row is one person and month. The migrated side is summed across employment relationships, because contributions and tax are by law amounts of the person, not of the relationship — splitting them back would mean inventing an allocation key.",
+      "metric": {
+        "gross": "Gross pay",
+        "net": "Net pay",
+        "social_base": "Social base",
+        "health_base": "Health base",
+        "employee_social": "Social (employee)",
+        "employee_health": "Health (employee)",
+        "employer_social": "Social (employer)",
+        "employer_health": "Health (employer)",
+        "advance_tax": "Advance tax",
+        "withholding_tax": "Withholding tax",
+        "tax_bonus": "Tax bonus"
+      },
+      "status": {
+        "match": "matches",
+        "differs": "differs",
+        "reference_missing": "missing in the previous system",
+        "calculated_missing": "not calculated by MyÚčto"
+      },
+      "presence": {
+        "both": "both sides",
+        "reference_only": "previous system only",
+        "calculated_only": "MyÚčto only"
+      }
     },
     "tax_statement": {
       "title": "Annual tax statement",
@@ -3651,6 +3722,13 @@
       "settle_unavailable": "The settlement preview did not go through. Reload it or check the employee's documents.",
       "save_request_read_only": "Only a user allowed to write payroll documents can change these records."
     },
+    "historical": {
+      "badge": "Historical",
+      "title": "This period was run by your previous software",
+      "attendance": "You have been running payroll in MyÚčto since {period}. Attendance for earlier months was taken over from the previous software. It stays available for reference and as a basis for opening balances, but you do not have to approve it - a payroll run cannot be created for such a period.",
+      "inputs": "You have been running payroll in MyÚčto since {period}. Payroll inputs for earlier months were taken over from the previous software. They stay available for reference, but you do not have to approve them - a payroll run cannot be created for such a period.",
+      "quick_inputs": "You have been running payroll in MyÚčto since {period}. This month was processed by the previous software, so inputs entered here are not used anywhere - a payroll run cannot be created for such a period."
+    },
     "time": {
       "title": "Time and shifts",
       "subtitle": "Historical working-time fund, published schedule and audited actual time for every employment.",
@@ -3752,7 +3830,8 @@
       "status": {
         "open": "Open",
         "incomplete": "Incomplete",
-        "approved": "Approved"
+        "approved": "Approved",
+        "historical": "Historical"
       },
       "category": {
         "regular": "Regular work",
@@ -4678,13 +4757,43 @@
         "source": "Where the figures come from (optional)",
         "source_placeholder": "e.g. Payroll summary 1–7/2026 from system XY",
         "source_hint": "An optional note for your own reference; opening balances can be saved without it.",
-        "locked": "Payroll for this year has already been approved, so the opening balances cannot change — they would rewrite the basis it was calculated from.",
+        "locked": "A report has already been filed or an annual document issued for this year, so the opening balances can no longer change.",
+        "approved_warning": "Payroll for {periods} has already been processed in this year. You can still save a correction of the opening balances, but the calculated months will not recalculate themselves — review them and file a corrective revision if needed.",
         "amount_invalid": "Amounts for month {month} must be non-negative numbers.",
         "saved": "Opening balances saved.",
         "load_failed": "Opening balances could not be loaded.",
         "save_failed": "Opening balances could not be saved.",
+        "import": {
+          "title": "Import from a spreadsheet (CSV/XLSX)",
+          "hint": "One file for the whole company. Each row is one month of one employee, amounts in whole minor units. Download the template so the header matches.",
+          "template": "Download template",
+          "preview": "Preview",
+          "apply": "Import",
+          "rows": "Rows read: {count}.",
+          "months": "months: {count}",
+          "error_row": "Row {row}:",
+          "format_invalid": "Only CSV or XLSX files are supported.",
+          "preview_failed": "The import preview could not be built.",
+          "apply_failed": "The import could not be completed.",
+          "template_failed": "The template file could not be downloaded.",
+          "applied": "Saved: {saved}, unchanged: {unchanged}, skipped: {skipped}.",
+          "status": {
+            "ready": "ready to save",
+            "unchanged": "unchanged",
+            "blocked": "cannot be saved"
+          }
+        },
+        "group": {
+          "social": "Social insurance",
+          "health": "Health insurance",
+          "tax": "Income tax"
+        },
         "field": {
           "social_assessment_base_minor_units": "Social base",
+          "health_assessment_base_minor_units": "Health base",
+          "health_employee_contribution_minor_units": "Employee contribution",
+          "health_employer_contribution_minor_units": "Employer contribution",
+          "health_minimum_top_up_minor_units": "Of which minimum top-up",
           "advance_base_minor_units": "Advance tax base",
           "advance_tax_minor_units": "Advance tax",
           "withholding_base_minor_units": "Withholding base",
@@ -24904,7 +25013,8 @@
       "payroll_people": "Person and employment details",
       "payroll_deductions": "Deductions, garnishments and insolvency",
       "cancelled": "Cancelled by user",
-      "unexpected": "Unexpected error"
+      "unexpected": "Unexpected error",
+      "payroll_sickness": "Sickness and wage compensation"
     },
     "counts": {
       "months": "months",
@@ -25028,7 +25138,16 @@
       "payout_accounts_to_verify": "payout accounts to verify",
       "inputs_approved": "payroll inputs approved",
       "time_months_approved": "attendance months approved",
-      "deductions_without_kind": "deductions without a catalog kind"
+      "deductions_without_kind": "deductions without a catalog kind",
+      "sickness_cases": "sickness cases",
+      "sickness_cases_in_progress": "cases in progress",
+      "sickness_absences": "absences created",
+      "sickness_window_carried": "cases with a carried compensation window",
+      "sickness_person_not_found": "cases without an employment",
+      "sickness_overlap": "cases overlapping another absence",
+      "sickness_failed": "cases not migrated",
+      "reference_totals": "reference payslips stored for comparison",
+      "reference_totals_skipped": "payslips without employment identification"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",

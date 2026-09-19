@@ -108,11 +108,11 @@ describe('PayrollOpeningBalancesPanel', () => {
     expect(wrapper.emitted('loaded')).toEqual([[false]])
   })
 
-  it('reports the opening as saved only when both accumulator ids exist', async () => {
+  it('reports the opening as saved only when all three accumulator ids exist', async () => {
     m.load.mockResolvedValue({
       locked: false,
       months: [],
-      openings: { social_insurance: 11, income_tax: 12 },
+      openings: { social_insurance: 11, health_insurance: 12, income_tax: 13 },
       source_reference: '',
     })
     const wrapper = mount(PayrollOpeningBalancesPanel, {

@@ -185,6 +185,15 @@ const inputFilters = ref<PayrollInputFilterState>(payrollInputFiltersFromQuery(r
 const inputFilterParams = computed(() => payrollInputFilterParams(inputFilters.value))
 const inputFiltersOn = computed(() => payrollInputFiltersActive(inputFilters.value))
 const inputSummary = ref<PayrollInputsSummary | null>(null)
+/*
+ * Zobrazený výpis celý předchází prvnímu mzdovému období firmy.
+ *
+ * Převod mezd naimportuje vstupy i za měsíce, které MyÚčto nepočítá. Koncepty
+ * za ně tu visely jako nedodělek, přestože mzdový běh za takové období nejde
+ * založit. Značka je proto na výpisu, ne na datech: řádky i souhrn zůstávají.
+ */
+const inputsHistorical = ref(false)
+const inputsStartPeriod = ref<string | null>(null)
 const inputFacets = ref<PayrollInputFacets>({ components: [], imports: [] })
 const inputGroups = ref<PayrollInputGroup[]>([])
 const inputGroupTotal = ref(0)
@@ -1251,6 +1260,10 @@ async function fetchInputsPage() {
   inputGroups.value = page.groups ?? []
   inputGroupTotal.value = page.group_total ?? 0
   inputSummary.value = page.summary ?? null
+  // Výpis za období, které vedl předchozí program. Koncepty se nemažou ani
+  // neschovávají, jen přestávají vypadat jako práce k dodělání.
+  inputsHistorical.value = page.historical === true
+  inputsStartPeriod.value = page.payroll_start_period ?? null
   if (page.facets) inputFacets.value = page.facets
   if (groupBy === null) {
     const visible = new Set(page.items.map(item => item.id))
@@ -2264,6 +2277,14 @@ onMounted(load)
               {{ t('payroll.components.inputs.summary', { total: summaryTotal, amount: formatMoney(summaryAmount), drafts: matchingDraftCount }) }}
               <span v-if="rangeMode" class="block text-xs text-neutral-500">{{ t('payroll.components.inputs.range_summary', { period: listPeriodLabel }) }}</span>
               <span v-if="batchDisabledInRange && matchingDraftCount > 0" :class="[BTN_DISABLED_NOTE, 'block']" data-testid="payroll-inputs-batch-range-note">{{ t('payroll.components.inputs.batch_range_blocked') }}</span>
+              <!--
+                Období, které vedl předchozí program. Koncepty zůstávají ve
+                výpisu i v souhrnu — schvalovat je ale není proč.
+              -->
+              <span v-if="inputsHistorical" class="mt-1 block text-xs text-neutral-500" data-testid="payroll-inputs-historical-notice">
+                <span class="mr-1 rounded-full bg-neutral-200 px-2 py-0.5 font-medium text-neutral-700">{{ t('payroll.historical.badge') }}</span>
+                {{ t('payroll.historical.inputs', { period: formatPeriod(inputsStartPeriod ?? '') }) }}
+              </span>
             </p>
             <div class="flex flex-wrap items-center gap-2">
               <button type="button" data-testid="payroll-inputs-export-xlsx" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :disabled="exportingInputs !== null || summaryTotal === 0" :aria-busy="exportingInputs === 'xlsx'" :title="t('payroll.components.inputs.export_hint')" @click="exportInputs('xlsx')">

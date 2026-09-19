@@ -55,9 +55,25 @@ final class AbsenceRuleset
         return $this->integer('wage_compensation.window_calendar_days');
     }
 
-    public function sicknessWindowEnd(\DateTimeImmutable $windowFrom): \DateTimeImmutable
-    {
-        return $windowFrom->modify('+' . ($this->sicknessWindowCalendarDays() - 1) . ' days');
+    /**
+     * Poslední den okna náhrady mzdy.
+     *
+     * `$carriedCalendarDays` jsou dny okna vyčerpané ještě PŘED `$windowFrom` — typicky
+     * u neschopnosti převzaté z jiného mzdového programu, která u nás pokračuje
+     * (`payroll_absences.sickness_window_carried_days`, migrace 1850). Okno je jedna
+     * souvislá řada kalendářních dnů od vzniku neschopnosti, ne nárok každého plátce
+     * zvlášť, takže se o ně zkracuje. Vyčerpané okno vrací den PŘED začátkem, čímž
+     * volajícím vyjde prázdný rozsah a náhrada se neposkytne vůbec.
+     */
+    public function sicknessWindowEnd(
+        \DateTimeImmutable $windowFrom,
+        int $carriedCalendarDays = 0,
+    ): \DateTimeImmutable {
+        // Vyčerpat se dá nejvýš celé okno; víc dnů než jeho délka posune konec zpět
+        // o nesmyslný počet dnů a rozsah by pak nebyl prázdný, ale obrácený.
+        $remaining = max(0, $this->sicknessWindowCalendarDays() - max(0, $carriedCalendarDays));
+
+        return $windowFrom->modify(($remaining - 1) . ' days');
     }
 
     /** Podpůrčí doba otcovské podle § 38b odst. 1 z. č. 187/2006 Sb. */

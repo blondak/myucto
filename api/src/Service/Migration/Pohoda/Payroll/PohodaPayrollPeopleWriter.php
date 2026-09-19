@@ -137,6 +137,8 @@ final class PohodaPayrollPeopleWriter
     private array $absencesFromImport = [];
     /** @var array<string,array<string,int>|null> vztah a měsíc => hodiny souhrnu importu */
     private array $importSummaries = [];
+    /** @var array<string,array{employee_id:int,employment_id:int}> vztah v PAMICA => vztah v MyÚčtu */
+    private array $matched = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -167,6 +169,17 @@ final class PohodaPayrollPeopleWriter
      * @param list<array<string,mixed>> $institutions příjemci odvodů z PAMICA (zdravotní pojišťovny,
      *     ČSSZ, finanční úřad) - {@see PohodaPayrollPeople::institutions()}
      */
+    /**
+     * Vztahy, které se při posledním zápisu podařilo spárovat: klíč z PAMICA => naše id.
+     * Čte to srovnávací sestava převzatých mezd; jinde ta mapa nikde neexistuje.
+     *
+     * @return array<string,array{employee_id:int,employment_id:int}>
+     */
+    public function matchedRelations(): array
+    {
+        return $this->matched;
+    }
+
     public function write(int $supplierId, ?int $userId, array $records, int $year, bool $confirmIdentifiers, ImportProtocol $protocol, string $step, array $institutions = []): void
     {
         $this->messages = 0;
@@ -184,6 +197,7 @@ final class PohodaPayrollPeopleWriter
         $this->regularBenefits = [];
         $this->absencesFromImport = [];
         $this->importSummaries = [];
+        $this->matched = [];
         $today = date('Y-m-d');
         $moduleStart = $this->moduleStart($supplierId);
         $employees = [];
@@ -198,6 +212,10 @@ final class PohodaPayrollPeopleWriter
             }
             $employeeId = (int) $employment['employee_id'];
             $employmentId = (int) $employment['id'];
+            // Párovací mapa pro srovnávací sestavu: převzatá mzda z PAMICA nese jen
+            // své vlastní identifikátory, a spojit ji s naším přepočtem jde jedině tady,
+            // kde je vztah právě dohledaný podle osobního čísla.
+            $this->matched[(string) $record['relation_key']] = ['employee_id' => $employeeId, 'employment_id' => $employmentId];
             foreach ((array) $record['regular_benefits'] as $benefit) {
                 $this->regularBenefits[(string) $benefit] = ($this->regularBenefits[(string) $benefit] ?? 0) + 1;
             }

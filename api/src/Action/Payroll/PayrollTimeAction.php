@@ -14,6 +14,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkSummaryConflictException;
 use MyInvoice\Service\Payroll\Time\PayrollTimeCsvImportService;
@@ -35,6 +36,7 @@ final class PayrollTimeAction
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
         private readonly PayrollSurchargeInputMaterializer $surchargeInputs,
+        private readonly PayrollHistoricalPeriodService $historicalPeriods,
     ) {}
 
     public function month(Request $request, Response $response): Response
@@ -57,18 +59,26 @@ final class PayrollTimeAction
             FILTER_VALIDATE_BOOL,
         );
         $employmentId = self::narrowingId($query, 'employment_id');
+        $supplierId = $this->currentSupplierId($request);
         try {
-            return Json::ok($response, $this->time->overview(
-                $this->currentSupplierId($request),
-                $period,
-                $incomplete,
-                max(1, min(
-                    PayrollTimeService::LIST_MAX_LIMIT,
-                    (int) ($query['limit'] ?? PayrollTimeService::LIST_DEFAULT_LIMIT),
-                )),
-                max(0, (int) ($query['offset'] ?? 0)),
-                $employmentId,
-            ));
+            return Json::ok($response, [
+                ...$this->time->overview(
+                    $supplierId,
+                    $period,
+                    $incomplete,
+                    max(1, min(
+                        PayrollTimeService::LIST_MAX_LIMIT,
+                        (int) ($query['limit'] ?? PayrollTimeService::LIST_DEFAULT_LIMIT),
+                    )),
+                    max(0, (int) ($query['offset'] ?? 0)),
+                    $employmentId,
+                ),
+                // Měsíc, který zpracoval předchozí program, se jen OZNAČÍ.
+                // Řádky zůstávají i s neschváleným stavem — jsou podkladem pro
+                // srovnávací sestavu a pro počáteční stavy kumulací. Mění se
+                // jen to, že nevypadají jako nedodělaná práce.
+                ...$this->historicalPeriods->describe($supplierId, $period),
+            ]);
         } catch (\InvalidArgumentException $e) {
             return $this->validation($response, $e);
         }
@@ -93,18 +103,25 @@ final class PayrollTimeAction
             return $error;
         }
         $query = $request->getQueryParams();
+        $supplierId = $this->currentSupplierId($request);
         try {
-            return Json::ok($response, $this->time->history(
-                $this->currentSupplierId($request),
-                self::narrowingId($query, 'employment_id') ?? 0,
-                self::optionalPeriod($query, 'from'),
-                self::optionalPeriod($query, 'to'),
-                max(1, min(
-                    PayrollTimeService::HISTORY_MAX_LIMIT,
-                    (int) ($query['limit'] ?? PayrollTimeService::HISTORY_DEFAULT_LIMIT),
-                )),
-                max(0, (int) ($query['offset'] ?? 0)),
-            ));
+            return Json::ok($response, [
+                ...$this->time->history(
+                    $supplierId,
+                    self::narrowingId($query, 'employment_id') ?? 0,
+                    self::optionalPeriod($query, 'from'),
+                    self::optionalPeriod($query, 'to'),
+                    max(1, min(
+                        PayrollTimeService::HISTORY_MAX_LIMIT,
+                        (int) ($query['limit'] ?? PayrollTimeService::HISTORY_DEFAULT_LIMIT),
+                    )),
+                    max(0, (int) ($query['offset'] ?? 0)),
+                ),
+                // Historie jde přes víc měsíců naráz, takže se posílá jen
+                // hranice a označení si dělá výpis řádek po řádku sám.
+                'payroll_start_period' => $this->historicalPeriods
+                    ->startPeriod($supplierId),
+            ]);
         } catch (\OutOfBoundsException $e) {
             return Json::error($response, 'not_found', $e->getMessage(), 404);
         } catch (\InvalidArgumentException $e) {

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Import\Jmhz;
 
-use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
+use MyInvoice\Service\Payroll\Import\OpeningBalance\OpeningBalanceMonthValidator;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportLookup;
 use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
 
@@ -60,7 +60,6 @@ final class JmhzOpeningBalancePlanner
 {
     public function __construct(
         private readonly PayrollOpeningBalanceService $openings,
-        private readonly PayrollStatutoryAccumulatorRepository $accumulators,
         private readonly RegistrationImportLookup $lookup,
         private readonly JmhzReportLookup $jmhzLookup,
     ) {}
@@ -161,7 +160,7 @@ final class JmhzOpeningBalancePlanner
                 . "(10298 − 10305 − 10304 = {$appliedCredits} Kč) vyšší než slevy v prohlášení ({$claimedCredits} Kč)."];
         }
 
-        return ['row' => [
+        $row = [
             'month' => $month,
             'social_assessment_base_minor_units' => $social * 100,
             'advance_base_minor_units' => $advanceBase * 100,
@@ -172,7 +171,19 @@ final class JmhzOpeningBalancePlanner
             'applied_child_credit_minor_units' => $appliedChild * 100,
             'tax_bonus_minor_units' => $bonus * 100,
             'bonus_qualifying_income_minor_units' => $advanceBase * 100,
-        ], 'reason' => null];
+        ];
+        /*
+         * Společná věcná kontrola měsíce — táž, kterou projde ruční mřížka
+         * i tabulkový import. Bez ní tudy prošlo hlášení s daní bez základu:
+         * zápis by ho odmítl až v `save()`, takže by náhled sliboval převzetí,
+         * které apply zahodí.
+         */
+        $reason = OpeningBalanceMonthValidator::reject($row);
+        if ($reason !== null) {
+            return ['row' => null, 'reason' => "Hlášení za {$period}: " . $reason];
+        }
+
+        return ['row' => $row, 'reason' => null];
     }
 
     /**
@@ -295,10 +306,12 @@ final class JmhzOpeningBalancePlanner
             $rows[] = $computed['row'];
         }
         $public['months'] = $rows;
-        if ($this->accumulators->hasApprovedResult($supplierId, $employeeId, $year)) {
-            return ['public' => ['reason' => "Za rok {$year} už má zaměstnanec schválenou mzdu v MyÚčtu. Počáteční "
-                . 'stavy by změnily základ, ze kterého se počítala, a proto se nepřebírají.'] + $public,
-                'source_reference' => ''];
+        // Zámek počátečních stavů má jediný zdroj pravdy; kdyby si ho planner
+        // držel vlastní („schválená mzda"), rozešel by se se zápisem a náhled
+        // by blokoval i to, co `save()` pustí.
+        $lockReason = $this->openings->lockReason($supplierId, $employeeId, $year);
+        if ($lockReason !== null) {
+            return ['public' => ['reason' => $lockReason] + $public, 'source_reference' => ''];
         }
         $current = $this->openings->current($supplierId, $employeeId, $year);
         if ($current['months'] == $rows) {

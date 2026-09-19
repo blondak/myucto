@@ -19,8 +19,19 @@ use PDO;
 
 class AnnualTaxCertificateSnapshotBuilder
 {
-    public const SCHEMA_VERSION = 'annual-tax-certificate-snapshot.v5';
-    public const MAPPING_VERSION = 'annual-tax-certificate-2026-mapping.v5';
+    /**
+     * Schéma v6 doplňuje převzatou část roku ({@see PayrollCarriedOverPeriod}).
+     * Zákazník, který přešel z jiného mzdového programu uprostřed roku, měl
+     * dosud potvrzení jen za měsíce, které spočítalo MyÚčto — tedy nižší roční
+     * úhrn, než jaký doopravdy platí.
+     *
+     * Verze je součástí zdrojového manifestu, takže se pro tytéž zdrojové
+     * revize NENAJDE dřívější revize a doklad se vydá jako další revize
+     * v řetězu. Dřívější revize ani jejich archivovaná PDF se tím nemění —
+     * roční revize jsou append-only a kotvené otiskem.
+     */
+    public const SCHEMA_VERSION = 'annual-tax-certificate-snapshot.v6';
+    public const MAPPING_VERSION = 'annual-tax-certificate-2026-mapping.v6';
 
     public function __construct(
         private readonly Connection $db,
@@ -30,6 +41,7 @@ class AnnualTaxCertificateSnapshotBuilder
         private readonly AnnualTaxCertificatePaymentEvidenceProvider $payments,
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly SecretEncryption $encryption,
+        private readonly PayrollCarriedOverPeriodReader $carriedOverPeriods,
     ) {}
 
     /**
@@ -101,6 +113,26 @@ class AnnualTaxCertificateSnapshotBuilder
                 'Pro zvolený druh potvrzení neexistuje doložený zdanitelný příjem.',
             );
         }
+        // Druhý zdroj: měsíce roku před tím, než firma začala vést mzdy
+        // v MyÚčtu. Bez něj doklad vykazuje nižší roční úhrn, než jaký platí.
+        // Chybí-li za ně počáteční stav, čtečka doklad odmítne — viz
+        // {@see PayrollCarriedOverPeriod::fromOpenings()}.
+        $carried = $this->carriedOverPeriods->read(
+            $supplierId,
+            $employeeId,
+            $taxYear,
+            (int) substr($this->text($sources[0], 'period_start'), 5, 2),
+        );
+        [
+            'income_minor_units' => $carriedIncome,
+            'tax_minor_units' => $carriedTax,
+            'tax_bonus_minor_units' => $carriedTaxBonus,
+            'snapshot' => $carriedSnapshot,
+            'manifest' => $carriedManifest,
+        ] = $this->carriedAmounts($carried, $kind);
+        $incomeMinorUnits = $this->add($incomeMinorUnits, $carriedIncome);
+        $taxMinorUnits = $this->add($taxMinorUnits, $carriedTax);
+        $taxBonusMinorUnits = $this->add($taxBonusMinorUnits, $carriedTaxBonus);
         $profile = $this->profileSnapshot(
             $supplierId,
             $employeeId,
@@ -181,6 +213,10 @@ class AnnualTaxCertificateSnapshotBuilder
             'profile_snapshot_hash' => $profileHash,
             'employer_snapshot_hash' => $employerHash,
             'sources' => $manifestSources,
+            // Otisk verze počátečního stavu. Oprava převzatých čísel je nová
+            // verze openingu, takže musí vzniknout DALŠÍ revize dokladu, ne se
+            // vrátit ta původní se starými úhrny.
+            'carried_over' => $carriedManifest,
             'annual_settlement_source' => $annualSettlementEvidence['source'],
             'issuance' => $issuanceManifest,
         ];
@@ -290,6 +326,7 @@ class AnnualTaxCertificateSnapshotBuilder
             'payment_evidence_cutoff' => $cutoff,
             'last_proven_payment_date' => $lastPaymentDate,
             'payment_evidence' => $paymentEvidence,
+            'carried_over' => $carriedSnapshot,
         ];
         $snapshotJson = CanonicalJson::encode($snapshot);
         $snapshotHash = $this->sensitiveData->keyedFingerprint(
@@ -337,6 +374,82 @@ class AnnualTaxCertificateSnapshotBuilder
         return [
             'revision' => $revision,
             'document' => $this->hydrate($snapshot, $snapshotHash, $kind),
+        ];
+    }
+
+    /**
+     * Co se z počátečního stavu bere do potvrzení § 38j odst. 3 — a co ne.
+     *
+     * BERE se roční úhrn zdanitelného příjmu, skutečně sražené daně a u
+     * zálohového potvrzení i vyplacených měsíčních bonusů. Jsou to přesně ta
+     * tři čísla, která opening o dani nese a která tvoří řádky 1, 2, 6, 8 a 9.
+     *
+     * NEBERE se nic dalšího, protože to opening nemá: Prohlášení poplatníka
+     * a daňová rezidence po měsících (řádek 3 a hlavička), uplatněné děti
+     * (řádek 11), invalidita a ZTP/P (řádek 12), povinné pojistné nerezidenta
+     * (řádek 14) ani platební důkaz. Tyhle údaje proto zůstávají výhradně za
+     * měsíce, které spočítalo MyÚčto, a doklad to musí říct — dělá to poznámka
+     * o převzatém období, kterou plní {@see PayrollCarriedOverPeriod}.
+     *
+     * Zdravotní ani sociální pojištění se sem nepromítá: potvrzení podle
+     * § 38j odst. 3 je vykazuje jen u nerezidenta (řádek 14) a ten se z cizího
+     * programu přebírat nedá — chybí k němu doložená rezidence po měsících.
+     *
+     * @return array{
+     *   income_minor_units:int,
+     *   tax_minor_units:int,
+     *   tax_bonus_minor_units:int,
+     *   snapshot:?array<string,mixed>,
+     *   manifest:?array<string,mixed>
+     * }
+     */
+    private function carriedAmounts(
+        ?PayrollCarriedOverPeriod $carried,
+        PayrollDocumentKind $kind,
+    ): array {
+        $empty = [
+            'income_minor_units' => 0,
+            'tax_minor_units' => 0,
+            'tax_bonus_minor_units' => 0,
+            'snapshot' => null,
+            'manifest' => null,
+        ];
+        if ($carried === null) {
+            return $empty;
+        }
+        $advance = $kind === PayrollDocumentKind::TaxableIncomeAdvanceCertificate;
+        $income = $carried->taxAmount(
+            $advance ? 'advance_base_minor_units' : 'withholding_base_minor_units',
+        );
+        if ($income === 0) {
+            // Převzaté měsíce existují, ale příjem tohohle druhu v nich nebyl.
+            // Uvádět je jako převzatou část by tvrdilo, že doklad něco přebírá,
+            // i když nepřebírá nic.
+            return $empty;
+        }
+        $tax = $carried->taxAmount(
+            $advance ? 'advance_tax_minor_units' : 'withholding_tax_minor_units',
+        );
+        $bonus = $advance ? $carried->taxAmount('tax_bonus_minor_units') : 0;
+        foreach ([
+            'zdanitelný příjem' => $income,
+            'sražená daň' => $tax,
+            'daňový bonus' => $bonus,
+        ] as $label => $amount) {
+            if ($amount % 100 !== 0) {
+                throw new \DomainException(
+                    "Převzatý {$label} z předchozího mzdového programu "
+                    . 'nelze vykázat v celých Kč.',
+                );
+            }
+        }
+
+        return [
+            'income_minor_units' => $income,
+            'tax_minor_units' => $tax,
+            'tax_bonus_minor_units' => $bonus,
+            'snapshot' => $carried->toSnapshot(),
+            'manifest' => $carried->manifestAnchor(),
         ];
     }
 
@@ -1696,6 +1809,9 @@ class AnnualTaxCertificateSnapshotBuilder
                 $this->text($snapshot, 'payment_evidence_cutoff'),
             lastProvenPaymentDate:
                 $this->text($snapshot, 'last_proven_payment_date'),
+            carriedOver: PayrollCarriedOverPeriod::fromSnapshot(
+                $snapshot['carried_over'] ?? null,
+            ),
         );
     }
 

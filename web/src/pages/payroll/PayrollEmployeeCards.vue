@@ -10,7 +10,7 @@ import {
 } from '@/api/payroll'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
-import { formatMoneyMinor } from '@/composables/useFormat'
+import { formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { payrollInputEditable } from './payrollComponentsUi'
@@ -46,6 +46,15 @@ const total = ref(0)
 const offset = ref(0)
 const companyHeadcount = ref(0)
 const summary = ref({ people: 0, gross_preview_minor: 0, away: 0, attention: 0 })
+/*
+ * Měsíc před prvním mzdovým obdobím firmy.
+ *
+ * Značka „vyžaduje pozornost" u převzatého měsíce posílá účetní dodělávat
+ * něco, co se nikdy nepoužije — mzdový běh za takové období nejde založit.
+ * Počet zůstává, jen se u něj řekne, že jde o historii.
+ */
+const historicalMonth = ref(false)
+const payrollStartPeriod = ref<string | null>(null)
 const search = ref('')
 const statusFilter = ref<PayrollEmployeeCardStatusFilter>('active')
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
@@ -167,6 +176,8 @@ async function load() {
     total.value = month.total
     companyHeadcount.value = month.company_headcount
     summary.value = month.summary
+    historicalMonth.value = month.historical === true
+    payrollStartPeriod.value = month.payroll_start_period ?? null
   } catch {
     if (sequence !== requestSequence) return
     failed.value = true
@@ -284,6 +295,19 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
+      <!--
+        Měsíc, který zpracoval předchozí program. Karty zůstávají, jen se
+        nečtou jako práce k dodělání.
+      -->
+      <p
+        v-if="historicalMonth"
+        data-test="employee-cards-historical-notice"
+        class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+      >
+        <span class="mr-1 rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-700">{{ t('payroll.historical.badge') }}</span>
+        {{ t('payroll.historical.quick_inputs', { period: formatPeriod(payrollStartPeriod ?? '') }) }}
+      </p>
+
       <dl class="mt-4 grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
         <div class="rounded-lg bg-neutral-50 p-3">
           <dt class="text-xs text-neutral-500">{{ t('payroll.employee_cards.summary.people') }}</dt>

@@ -196,6 +196,11 @@ final class RoutePermissionMap
         // Hromadné doplnění pracoviště — tentýž zápis jako oprava podmínek na
         // kartě vztahu, jen pro víc vztahů. Náhled je POST se seznamem vztahů.
         ['POST', '#^/api/payroll/employments/workplace-bulk/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Počáteční stavy kumulací: zápis je táž operace jako PUT
+        // /people/{id}/statutory-openings, jen za víc osob naráz (soubor za celou
+        // firmu). Vzorový soubor je prázdná šablona bez dat, tedy jen čtení.
+        ['GET', '#^/api/payroll/statutory-openings/import/template$#', 'payroll', AccessLevel::READ],
+        ['POST', '#^/api/payroll/statutory-openings/import/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/foreign-permits$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/foreign-permits$#', 'payroll.person.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],
@@ -231,6 +236,9 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/year-close/[0-9]{4}/close$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/year-close/[0-9]{4}/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/reports/annual/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
+        // Kontrola přepočtu proti mzdám převzatým z původního systému — čtení
+        // mzdových dat osob, tedy stejné právo jako ostatní mzdové sestavy.
+        ['GET', '#^/api/payroll/reports/migration-reconciliation/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
         // Žádosti o daňový bonus (§ 35d odst. 5 a 9). Náhled je mzdová sestava;
         // stažení XML navíc prochází `reports.export` kontrolou v Action, protože
         // vzniklý soubor je EPO podání a archivuje se mezi ostatní.

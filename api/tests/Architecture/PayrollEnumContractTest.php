@@ -73,6 +73,13 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Srovnání převzatých mezd s vlastním přepočtem (přechod z jiného mzdového programu)
+        'payrollMigrationReconciliation.ts::PayrollMigrationSource'
+            => 'const:MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter::SOURCES',
+        'payrollMigrationReconciliation.ts::PayrollMigrationCellStatus'
+            => 'const:MyInvoice\Service\Payroll\Report\PayrollMigrationReconciliationBuilder::STATUSES',
+        'payrollMigrationReconciliation.ts::PayrollMigrationRowMetric'
+            => 'const:MyInvoice\Service\Payroll\Report\PayrollMigrationReconciliationBuilder::ROW_METRICS',
         // Zákonné příplatky § 114 až § 118 ZP
         'payroll.ts::PayrollSurchargeKind'
             => 'enum:MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind',

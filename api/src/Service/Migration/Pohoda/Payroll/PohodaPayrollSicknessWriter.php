@@ -1,0 +1,367 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Migration\Pohoda\Payroll;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollAbsenceOverlapException;
+use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
+use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
+use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+
+/**
+ * Zápis rozpracovaných případů nemocenské z PAMICA ({@see PohodaPayrollSickness}).
+ *
+ * Řeší jedinou věc, kterou ostatní kroky převodu neumějí: NÁVAZNOST. Nepřítomnost se
+ * zakládá toutéž cestou jako ruční zápis (validátor + {@see PayrollAbsenceRepository}),
+ * vlastní SQL do jejích tabulek tu není; navíc se u dočasné pracovní neschopnosti
+ * a karantény zapíší dny okna náhrady mzdy podle § 192 ZP, které padly ještě u předchozího
+ * plátce. Bez nich MyÚčto počítá okno z `date_from` nepřítomnosti a náhradu vyplatí znovu
+ * od začátku - u nemoci přes přelom (červenec tam, srpen tady) až čtrnáct dnů navíc.
+ *
+ * **Bez prvního měsíce vedení mezd se nezapisuje nic.** `payroll_module_state.start_period`
+ * je jediné, co dělí „vyčerpáno jinde“ od „vyčerpáno u nás“. Když nastavený není, krok
+ * jen napíše do protokolu, kolik případů čeká, a skončí - hádaná hranice by vyrobila
+ * hádané dny okna.
+ *
+ * **Jen doplnit, nepřepisovat.** Existující nepřítomnost se dohledá podle vztahu, druhu
+ * a překryvu dat; zapíšou se jí vyčerpané dny a víc nic. Chybí-li, založí se ta část
+ * případu, která spadá do MyÚčta, ve stavu „požadováno“ - schválení patří účetní, protože
+ * konec neschopnosti z jiného programu není potvrzením ošetřujícího lékaře. Opakovaný
+ * převod proto nic nezdvojí: podruhé už nepřítomnost existuje a vyčerpané dny sedí.
+ */
+final class PohodaPayrollSicknessWriter
+{
+    private const MESSAGE_LIMIT = 40;
+    private const SAVEPOINT = 'pohoda_payroll_sickness';
+    private const NOTE = 'Převzato z PAMICA: ';
+
+    private int $messages = 0;
+    private int $windowWritten = 0;
+    private int $compensationFromAbsence = 0;
+    private int $withoutCompensation = 0;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollAbsenceRepository $absences,
+        private readonly PayrollAbsenceValidator $validator,
+        private readonly PayrollModuleStateRepository $moduleState,
+        private readonly PayrollRulesetProvider $rulesets,
+    ) {}
+
+    /** První měsíc vedení mezd, podle kterého se pozná rozpracovaný případ. */
+    public function startPeriod(int $supplierId): ?string
+    {
+        return $this->moduleState->get($supplierId)['start_period'];
+    }
+
+    /**
+     * @param array{
+     *     start_period:?string,
+     *     cases:list<array<string,mixed>>,
+     *     wage_compensation_rows:int,
+     *     benefit_rows:int,
+     *     benefit_claims:int,
+     *     unclassified:array<string,int>
+     * } $result
+     */
+    public function write(int $supplierId, ?int $userId, array $result, ImportProtocol $protocol, string $step): void
+    {
+        $this->messages = 0;
+        $this->windowWritten = 0;
+        $this->compensationFromAbsence = 0;
+        $this->withoutCompensation = 0;
+
+        $startPeriod = $result['start_period'];
+        $inProgress = array_values(array_filter(
+            $result['cases'],
+            static fn (array $case): bool => $case['in_progress'] === true,
+        ));
+        $protocol->count($step, 'sickness_cases', count($result['cases']));
+
+        if ($startPeriod === null) {
+            $protocol->warn($step, 'sickness_start_period_missing', sprintf(
+                'Případů nemocenské v exportu: %d. Převod z nich nezapsal nic, protože firma nemá '
+                . 'nastavený první měsíc vedení mezd v MyÚčtu (Mzdy → Nastavení). Bez něj nejde '
+                . 'poznat, které dny okna náhrady mzdy podle § 192 ZP vyčerpal předchozí plátce. '
+                . 'Nastavte první měsíc, který PAMICA nezpracovala, a převod zopakujte.',
+                count($result['cases']),
+            ));
+            $this->summary($protocol, $step, $result);
+            return;
+        }
+
+        foreach ($inProgress as $case) {
+            $number = (string) ($case['personal_number'] ?? $case['person_key']);
+            $label = self::label($case);
+            $employmentId = $this->employmentFor($supplierId, $case['personal_number']);
+            if ($employmentId === null) {
+                $protocol->count($step, 'sickness_person_not_found');
+                $this->warn($protocol, $step, 'sickness_person_not_found',
+                    "Osobní číslo {$number}: {$label} nelze převzít, pracovní vztah s tímto kódem ve firmě není.", $number);
+                continue;
+            }
+            $this->part($protocol, $step, $number, $label,
+                fn (): array => $this->case($supplierId, $employmentId, $case, (string) $startPeriod, $userId));
+        }
+
+        $protocol->count($step, 'sickness_cases_in_progress', count($inProgress));
+        if ($this->windowWritten > 0) {
+            $protocol->info($step, 'sickness_window_carried', sprintf(
+                'Rozpracovaných neschopností s navázaným oknem náhrady mzdy: %d. U nich je zapsané, '
+                . 'kolik kalendářních dnů okna podle § 192 ZP padlo ještě u předchozího plátce, '
+                . 'takže MyÚčto vyplatí jen zbytek okna, ne celých čtrnáct dnů znovu.',
+                $this->windowWritten,
+            ));
+        }
+        $this->summary($protocol, $step, $result);
+    }
+
+    /**
+     * Jeden rozpracovaný případ: buď se dohledá nepřítomnost, kterou MyÚčto už má, nebo
+     * se založí její část od prvního měsíce vedení mezd. V obou případech se dopočítají
+     * vyčerpané dny okna proti SKUTEČNÉMU `date_from` nepřítomnosti - to je den, od kterého
+     * {@see AbsenceRuleset::sicknessWindowEnd()} okno počítá, takže cokoli před ním je
+     * vyčerpané jinde.
+     *
+     * @param array<string,mixed> $case
+     * @return array<string,int>
+     */
+    private function case(int $supplierId, int $employmentId, array $case, string $startPeriod, ?int $userId): array
+    {
+        $type = (string) $case['type'];
+        $from = (string) $case['date_from'];
+        $to = (string) $case['date_to'];
+        $existing = $this->existingAbsence($supplierId, $employmentId, $type, $from, $to);
+        $counts = [];
+        if ($existing === null) {
+            $body = [
+                'employment_id' => $employmentId,
+                'absence_type' => $type,
+                // Do MyÚčta patří jen část případu od prvního měsíce, který vede; dřívější
+                // dny zpracovala PAMICA a jsou v převedených mzdách.
+                'date_from' => max($from, $startPeriod . '-01'),
+                'date_to' => $to,
+                'note' => self::note($case),
+            ];
+            if ($type === 'ppm' && is_string($case['childbirth'])) {
+                $body['expected_childbirth_date'] = $case['childbirth'];
+                $body['childbirth_date'] = $case['childbirth'];
+            }
+            $existing = $this->absences->create($supplierId, $this->validator->absence($body), $userId);
+            $counts['sickness_absences'] = 1;
+        }
+
+        $carried = $this->carriedDays($case, (string) $existing['date_from']);
+        if ($carried !== null && $carried !== (int) ($existing['sickness_window_carried_days'] ?? 0)) {
+            $this->absences->setSicknessWindowCarriedDays($supplierId, (int) $existing['id'], $carried);
+            $this->windowWritten++;
+            $counts['sickness_window_carried'] = 1;
+        }
+        if ($case['compensation_minor'] === null) {
+            $this->withoutCompensation++;
+        } elseif ($case['compensation_source'] === 'mzneprit_kcnahr') {
+            $this->compensationFromAbsence++;
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Vyčerpané dny okna § 192 ZP. Délku okna drží ruleset
+     * ({@see AbsenceRuleset::sicknessWindowCalendarDays()}), takže se tu zastropují týmž
+     * číslem, jakým se okno počítá; u druhů bez náhrady mzdy (ošetřovné, PPM, otcovská)
+     * žádné okno neexistuje a nezapisuje se nic.
+     *
+     * @param array<string,mixed> $case
+     */
+    private function carriedDays(array $case, string $absenceFrom): ?int
+    {
+        if (!in_array((string) $case['type'], PohodaPayrollSickness::WAGE_COMPENSATION_TYPES, true)) {
+            return null;
+        }
+
+        return PohodaPayrollSickness::windowUsedCalendarDays(
+            (string) $case['date_from'],
+            $absenceFrom,
+            AbsenceRuleset::forDate($this->rulesets, (string) $case['date_from'])->sicknessWindowCalendarDays(),
+        );
+    }
+
+    /**
+     * Nepřítomnost téhož vztahu a druhu, která se s případem překrývá. Bere se ta nejdřívější:
+     * případ z PAMICA je souvislá řada dnů, takže víc nepřítomností v jeho rozsahu znamená
+     * rozdělenou evidenci a okno počítá ta první.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function existingAbsence(int $supplierId, int $employmentId, string $type, string $from, string $to): ?array
+    {
+        $found = null;
+        foreach ($this->absences->list($supplierId, $from, $to, $employmentId, PayrollAbsenceRepository::LIST_MAX_LIMIT)['items'] as $absence) {
+            if ($absence['absence_type'] !== $type || $absence['status'] === 'cancelled' || $absence['status'] === 'rejected') {
+                continue;
+            }
+            if ($found === null || $absence['date_from'] < $found['date_from']) {
+                $found = $absence;
+            }
+        }
+
+        return $found;
+    }
+
+    /** @param array<string,mixed> $case */
+    private static function note(array $case): string
+    {
+        $note = self::NOTE . 'rozpracovaný případ nemocenské od ' . $case['date_from'] . '.';
+        if ($case['compensation_minor'] !== null) {
+            $note .= sprintf(' Náhrada mzdy vyplacená předchozím programem: %s Kč (%s).',
+                number_format(((int) $case['compensation_minor']) / 100, 2, ',', ' '),
+                $case['compensation_source'] === 'mznahr' ? 'MZnahr' : 'MZneprit.KcNahr');
+        }
+
+        return mb_substr($note . ' Zkontrolujte a schvalte proti dokladu.', 0, 1000);
+    }
+
+    /** @param array<string,mixed> $case */
+    private static function label(array $case): string
+    {
+        return sprintf('Nepřítomnost %s %s až %s', $case['type'], $case['date_from'], $case['date_to']);
+    }
+
+    /**
+     * Co se z nemocenské oblasti převést nedá. Protokol to musí říct nahlas - tichý
+     * výpadek údaje vypadá jako převedený údaj.
+     *
+     * @param array<string,mixed> $result
+     */
+    private function summary(ImportProtocol $protocol, string $step, array $result): void
+    {
+        if ($result['wage_compensation_rows'] === 0) {
+            $protocol->info($step, 'sickness_compensation_source', sprintf(
+                'Tabulku náhrad mzdy `MZnahr` export nenese (nebo je prázdná). Vyplacená náhrada '
+                . 'se proto bere z nepřítomností (`MZneprit.KcNahr`) a slouží jen jako poznámka '
+                . 'u nepřítomnosti; MyÚčto si náhradu počítá samo z průměrného výdělku. '
+                . 'Případů bez jakékoli částky náhrady: %d.',
+                $this->withoutCompensation,
+            ));
+        } elseif ($this->compensationFromAbsence > 0) {
+            $protocol->info($step, 'sickness_compensation_source', sprintf(
+                'Případů, u kterých náhrada mzdy není v `MZnahr` a vzala se z `MZneprit.KcNahr`: %d.',
+                $this->compensationFromAbsence,
+            ));
+        }
+        if ($result['benefit_rows'] > 0) {
+            $protocol->warn($step, 'sickness_benefits_skipped', sprintf(
+                'Dávek nemocenského pojištění v exportu (`MZdavky`): %d. Nepřevádějí se - od roku 2009 '
+                . 'je nevyplácí zaměstnavatel, ale ČSSZ, takže MyÚčto pro ně evidenci nemá. '
+                . 'Rozpracované dávky dořešte s příslušnou OSSZ.',
+                $result['benefit_rows'],
+            ));
+        }
+        if ($result['benefit_claims'] > 0) {
+            $protocol->warn($step, 'sickness_claims_skipped', sprintf(
+                'Příloh k žádosti o dávku (`NEMPRIpol`): %d. Nepřevádějí se: rozhodné období '
+                . 'a vyloučené dny z nich MyÚčto v případu dávky nevede a odvozovat je z jiných '
+                . 'čísel by byl dopočet cizího výpočtu. Rozpracovaná podání zadejte v '
+                . 'Mzdy → Podání → Případy dávek nemocenského pojištění.',
+                $result['benefit_claims'],
+            ));
+        }
+        if ($result['unclassified'] !== []) {
+            arsort($result['unclassified']);
+            $top = [];
+            foreach (array_slice($result['unclassified'], 0, 8, true) as $name => $count) {
+                $top[] = "{$name} ({$count}×)";
+            }
+            $protocol->warn($step, 'sickness_unclassified', sprintf(
+                'Nemocenské složky, které evidence MyÚčta nezná: %s. Číselník `sMZneprit` je vede '
+                . 'jako dávku nemocenského, ale druh nepřítomnosti jim neodpovídá, takže se '
+                . 'nepřevedly; zadejte je ručně v Mzdy → Nepřítomnosti.',
+                implode(', ', $top),
+            ));
+        }
+    }
+
+    /**
+     * Pracovní vztah podle osobního čísla z PAMICA.
+     */
+    private function employmentFor(int $supplierId, ?string $number): ?int
+    {
+        if ($number === null || $number === '') {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? AND code = ? ORDER BY id LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $number]);
+        $id = $stmt->fetchColumn();
+
+        return $id === false ? null : (int) $id;
+    }
+
+    /** @param callable():array<string,int> $work */
+    private function part(ImportProtocol $protocol, string $step, string $number, string $label, callable $work): void
+    {
+        $pdo = $this->db->pdo();
+        $owns = !$pdo->inTransaction();
+        if ($owns) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT ' . self::SAVEPOINT);
+        }
+        try {
+            $counts = $work();
+            if ($owns) {
+                $pdo->commit();
+            } else {
+                $pdo->exec('RELEASE SAVEPOINT ' . self::SAVEPOINT);
+            }
+        } catch (PayrollAbsenceOverlapException $e) {
+            $this->rollback($pdo, $owns);
+            // Týž den už jinou nepřítomnost má: druhý zápis by evidenci rozdvojil.
+            $protocol->count($step, 'sickness_overlap');
+            $this->warn($protocol, $step, 'sickness_overlap',
+                "Osobní číslo {$number}: {$label} se překrývá s jinou nepřítomností, okno náhrady "
+                . 'nastavte ručně u té existující.', $number);
+            return;
+        } catch (\Exception $e) {
+            $this->rollback($pdo, $owns);
+            $protocol->count($step, 'sickness_failed');
+            $this->warn($protocol, $step, 'sickness_failed', "Osobní číslo {$number}: {$label}: {$e->getMessage()}", $number);
+            return;
+        }
+        foreach ($counts as $key => $value) {
+            if ($value > 0) {
+                $protocol->count($step, $key, $value);
+            }
+        }
+    }
+
+    private function rollback(\PDO $pdo, bool $owns): void
+    {
+        if ($owns) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return;
+        }
+        if ($pdo->inTransaction()) {
+            $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::SAVEPOINT);
+            $pdo->exec('RELEASE SAVEPOINT ' . self::SAVEPOINT);
+        }
+    }
+
+    private function warn(ImportProtocol $protocol, string $step, string $code, string $message, string $number): void
+    {
+        if ($this->messages++ < self::MESSAGE_LIMIT) {
+            $protocol->warn($step, $code, $message, ['personal_number' => $number]);
+        } elseif ($this->messages === self::MESSAGE_LIMIT + 1) {
+            $protocol->warn($step, 'messages_truncated', 'Další upozornění k nemocenské protokol nevypisuje, jejich počet je v počtech kroku.');
+        }
+    }
+}

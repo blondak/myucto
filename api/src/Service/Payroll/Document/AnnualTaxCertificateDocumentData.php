@@ -8,7 +8,11 @@ use MyInvoice\Service\Payroll\IncomeTax\EuropeanEconomicAreaCountries;
 
 final readonly class AnnualTaxCertificateDocumentData
 {
-    public const SCHEMA_VERSION = 'annual-tax-certificate-document.v3';
+    /**
+     * v4 přidává převzatou část roku — měsíce, které MyÚčto nepočítalo a jejichž
+     * úhrny jdou z počátečních stavů kumulací ({@see PayrollCarriedOverPeriod}).
+     */
+    public const SCHEMA_VERSION = 'annual-tax-certificate-document.v4';
 
     /**
      * @param array{
@@ -62,6 +66,23 @@ final readonly class AnnualTaxCertificateDocumentData
         public int $taxBonusMinorUnits,
         public string $paymentEvidenceCutoff,
         public string $lastProvenPaymentDate,
+        /**
+         * Převzatá část roku z předchozího mzdového programu, nebo `null`.
+         *
+         * Částky za tyhle měsíce JSOU započtené v úhrnech výše — jinak by
+         * potvrzení vykazovalo nižší roční příjem, než jaký poplatník měl.
+         * Doklad je ale musí umět pojmenovat, protože nevznikly výpočtem
+         * MyÚčta; proto tu jsou vedle úhrnů zvlášť.
+         *
+         * `$months` naopak převzaté měsíce NEOBSAHUJE. Váže se na ně evidence,
+         * kterou opening nemá — podepsané měsíce Prohlášení, rezidence, děti
+         * a invalidita. Kdyby se do nich převzaté měsíce přimíchaly, doklad by
+         * o nich tvrdil věci, které nikdo nedoložil (třeba že Prohlášení
+         * podepsané nebylo, jen proto, že o něm MyÚčto neví).
+         *
+         * @var ?array<string,mixed>
+         */
+        public ?array $carriedOver = null,
     ) {
         if (preg_match('/^[a-f0-9]{64}$/D', $sourceSnapshotSha256) !== 1) {
             throw new \InvalidArgumentException(
@@ -338,6 +359,36 @@ final readonly class AnnualTaxCertificateDocumentData
                 'Platební důkaz daňového potvrzení nemá platné rozhodné datum.',
             );
         }
+        if ($carriedOver !== null) {
+            $carriedMonths = $carriedOver['months'] ?? null;
+            if (!is_array($carriedMonths)
+                || !array_is_list($carriedMonths)
+                || $carriedMonths === []
+            ) {
+                throw new \InvalidArgumentException(
+                    'Převzatá část roku nemá seznam měsíců.',
+                );
+            }
+            foreach ($carriedMonths as $month) {
+                if (!is_int($month)
+                    || $month < 1
+                    || $month > 12
+                    || in_array($month, $months, true)
+                ) {
+                    // Překryv by znamenal, že tentýž měsíc je v úhrnu dvakrát:
+                    // jednou z vlastního výpočtu a jednou z počátečního stavu.
+                    throw new \InvalidArgumentException(
+                        'Převzatý měsíc není platný nebo se kryje s měsícem '
+                        . 'vlastního výpočtu.',
+                    );
+                }
+            }
+            if (!is_string($carriedOver['source_reference'] ?? null)) {
+                throw new \InvalidArgumentException(
+                    'Převzatá část roku nemá popis zdroje.',
+                );
+            }
+        }
     }
 
     /** @return array<string,mixed> */
@@ -367,10 +418,19 @@ final readonly class AnnualTaxCertificateDocumentData
                 'address' => $this->employeeAddress,
             ],
             'months' => $this->months,
-            'months_label' => implode(', ', array_map(
-                static fn (string $range): string => $range,
+            // Řádek 3 se ptá na měsíce, za které jsou uvedené částky — a ty
+            // jsou i za část převzatou z předchozího programu. Kdyby tu stály
+            // jen vlastní měsíce, doklad by si sám odporoval: úhrn za dvanáct
+            // měsíců nad výčtem pěti.
+            'months_label' => implode(
+                ', ',
+                self::monthRanges($this->reportedMonths()),
+            ),
+            'own_months_label' => implode(
+                ', ',
                 self::monthRanges($this->months),
-            )),
+            ),
+            'carried_over' => $this->carriedOverTemplate(),
             'tax_declaration' => [
                 'status' => $this->taxDeclarationStatus,
                 'status_label' => match ($this->taxDeclarationStatus) {
@@ -430,6 +490,41 @@ final readonly class AnnualTaxCertificateDocumentData
     private static function czk(int $minorUnits): int
     {
         return intdiv($minorUnits, 100);
+    }
+
+    /**
+     * Měsíce, za které doklad vykazuje částky: vlastní i převzaté.
+     *
+     * @return list<int>
+     */
+    private function reportedMonths(): array
+    {
+        $months = $this->months;
+        foreach ($this->carriedOver['months'] ?? [] as $month) {
+            $months[] = (int) $month;
+        }
+        sort($months, SORT_NUMERIC);
+
+        return array_values($months);
+    }
+
+    /** @return ?array{months_label:string,source_reference:string} */
+    private function carriedOverTemplate(): ?array
+    {
+        if ($this->carriedOver === null) {
+            return null;
+        }
+        $label = $this->carriedOver['months_label'] ?? null;
+
+        return [
+            'months_label' => is_string($label) && $label !== ''
+                ? $label
+                : implode(', ', self::monthRanges(
+                    array_map(intval(...), $this->carriedOver['months']),
+                )),
+            'source_reference' =>
+                (string) $this->carriedOver['source_reference'],
+        ];
     }
 
     /** @param list<array<string,mixed>> $rows */

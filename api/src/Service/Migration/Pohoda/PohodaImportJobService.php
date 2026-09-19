@@ -43,6 +43,7 @@ final class PohodaImportJobService
         'payroll_months' => 'Mzdy po měsících',
         'payroll_people' => 'Údaje osob a vztahů',
         'payroll_deductions' => 'Srážky, exekuce a insolvence',
+        'payroll_sickness' => 'Nemocenská a náhrady mzdy',
         'small_assets' => 'Drobný majetek',
         'reconciliation' => 'Rekonciliace',
         'done' => 'Dokončuji',

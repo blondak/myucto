@@ -1582,9 +1582,16 @@ final class PayrollRunSnapshotBuilder
             'issue_code' => 'annual_accumulator_missing',
             'state' => null,
         ];
-        $kinds = ['social_insurance', 'income_tax'];
-        // Oba druhy kumulace jednou dávkou: druh se liší jedinou hodnotou ve
-        // WHERE, takže volání po jednom platilo dvakrát tytéž tři dotazy.
+        /*
+         * Zdravotní pojištění je ve snímku, ale NENÍ podmínkou výpočtu: nemá
+         * roční strop ani roční slevu, takže z jeho kumulace do měsíce nic
+         * nevstupuje. Assembler ho proto nečte a osoba bez openingu ZP na něm
+         * běh neshodí — jinak by chybějící počáteční stav ZP zablokoval každou
+         * firmu, která mzdy vedla už před jeho zavedením.
+         */
+        $kinds = ['social_insurance', 'health_insurance', 'income_tax'];
+        // Všechny druhy kumulace jednou dávkou: druh se liší jedinou hodnotou ve
+        // WHERE, takže volání po jednom platilo tytéž tři dotazy znovu.
         $states = $this->statutoryAccumulators?->statesBeforePeriodByKind(
             $supplierId,
             $employeeIds,

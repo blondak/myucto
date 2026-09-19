@@ -832,7 +832,9 @@
         "1845_payroll_surcharge_fixed_hourly_amounts.sql",
         "1846_payroll_employer_surcharge_defaults.sql",
         "1847_payroll_component_jmhz_stravovani_mapping.sql",
-        "1848_supplier_purchase_import_received_at.sql"
+        "1848_supplier_purchase_import_received_at.sql",
+        "1849_payroll_migration_reference_totals.sql",
+        "1850_payroll_absence_sickness_window_carried.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -6605,6 +6607,7 @@
                 "partial_last_minutes": "int(10) unsigned NULL DEFAULT NULL",
                 "requested_by": "int(10) unsigned NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "sickness_window_carried_days": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "status": "enum('requested','approved','rejected','cancelled') NOT NULL DEFAULT 'requested'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "support_status": "enum('supported','manual_review','not_supported') NOT NULL DEFAULT 'manual_review'",
@@ -11148,6 +11151,47 @@
                 "chk_payroll_leave_delta": "`minutes_delta` <> 0",
                 "chk_payroll_leave_reason": "char_length(trim(`reason`)) > 0",
                 "chk_payroll_leave_reversal_shape": "`entry_type` = 'reversal' and `reversal_of_id` is not null or `entry_type` <> 'reversal' and `reversal_of_id` is null"
+            }
+        },
+        "payroll_migration_reference_totals": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "advance_tax_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "employee_health_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "employee_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employee_social_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "employer_health_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "employer_social_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "employment_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "external_person_ref": "varchar(64) NOT NULL COLLATE utf8mb4_bin",
+                "external_relationship_ref": "varchar(64) NOT NULL COLLATE utf8mb4_bin",
+                "gross_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "health_base_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "import_reference": "varchar(190) NULL DEFAULT NULL",
+                "net_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "period_start": "date NOT NULL",
+                "social_base_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "source": "enum('pamica','pohoda','money_s3') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "tax_bonus_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "withholding_tax_minor": "bigint(20) NOT NULL DEFAULT 0"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_pmrt_employee": "BTREE (supplier_id, employee_id, period_start)",
+                "ix_pmrt_period": "BTREE (supplier_id, period_start)",
+                "uq_pmrt_relationship_period": "UNIQUE BTREE (supplier_id, source, period_start, external_relationship_ref)"
+            },
+            "foreign_keys": {
+                "fk_pmrt_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_pmrt_period_first_day": "dayofmonth(`period_start`) = 1"
             }
         },
         "payroll_module_state": {

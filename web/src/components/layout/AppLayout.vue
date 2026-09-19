@@ -678,6 +678,10 @@ const navSections = computed<NavSection[]>(() => {
         // taktu: kdo se dozví o překročení až u prosincového vstupu, dozví se to
         // pozdě.
         { to: '/payroll/benefit-baskets', label: t('nav.payroll_benefit_baskets'), icon: ICONS.stats, permission: 'payroll' as PermissionKey },
+        // Kontrola převzatých mezd: porovná náš přepočet s tím, co původní systém
+        // už podal do JMHZ, na pojišťovny a na finanční úřad. Stojí tady, ne mezi
+        // nastavením — po převodu se k ní účetní vrací při každém přepočtu měsíce.
+        { to: '/payroll/migration-reconciliation', label: t('nav.payroll_migration_reconciliation'), icon: ICONS.stats, permission: 'payroll.reports' as PermissionKey },
         // 3) Jednorázové nastavení — sáhne se do něj při zavádění a pak výjimečně.
         { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey, dividerBefore: true },
         // Importy patří k zavádění: převzetí zaměstnanců z registrací ČSSZ

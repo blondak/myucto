@@ -627,6 +627,10 @@ export interface PayrollPersonSensitiveReveal {
 export interface PayrollOpeningMonth {
   month: number
   social_assessment_base_minor_units: number
+  health_assessment_base_minor_units: number
+  health_employee_contribution_minor_units: number
+  health_employer_contribution_minor_units: number
+  health_minimum_top_up_minor_units: number
   advance_base_minor_units: number
   advance_tax_minor_units: number
   withholding_base_minor_units: number
@@ -644,8 +648,51 @@ export interface PayrollOpeningBalances {
   openings: Record<string, number | null>
   /** Volitelná uživatelská dohledávka k převzatým úhrnům. */
   source_reference: string
-  /** Po schválené mzdě za daný rok už počáteční stavy měnit nelze. */
+  /** Podané hlášení nebo vydaný roční doklad — počáteční stavy už měnit nelze. */
   locked: boolean
+  /** Konkrétní důvod zámku ze serveru; klient si ho nevymýšlí. */
+  lock_reason: string | null
+  /** Měsíce `YYYY-MM`, které se počítaly nad tímhle stavem a samy se nepřepočítají. */
+  approved_periods: string[]
+}
+
+/** Jeden zamítnutý řádek tabulkového importu počátečních stavů. */
+export interface PayrollOpeningImportError {
+  row_number: number
+  error_code: string
+  field_name: string | null
+  error_message: string
+}
+
+export interface PayrollOpeningImportPerson {
+  employee_id: number
+  employee_name: string
+  year: number
+  months: PayrollOpeningMonth[]
+  status: 'ready' | 'unchanged' | 'blocked'
+  reason: string | null
+}
+
+export interface PayrollOpeningImportPreview {
+  format: string
+  source_name: string
+  row_count: number
+  errors: PayrollOpeningImportError[]
+  people: PayrollOpeningImportPerson[]
+}
+
+export interface PayrollOpeningImportResult {
+  format: string
+  source_name: string
+  saved: number
+  unchanged: number
+  skipped: { employee_id: number, employee_name: string, year: number, reason: string }[]
+}
+
+export interface PayrollOpeningImportPayload {
+  format: 'csv' | 'xlsx'
+  source_name: string
+  content_base64: string
 }
 
 /**
@@ -1448,7 +1495,21 @@ export interface PayrollCompensatoryTimeOffCheck {
   ungranted_rows: number
 }
 
-export interface PayrollTimeOverview {
+/**
+ * Hranice mezi historií a prací.
+ *
+ * `payroll_start_period` je první měsíc, který mzdy počítá MyÚčto; `null`
+ * znamená, že firma začátek nastavený nemá a historii nejde poznat.
+ * `historical` říká, že zobrazené období celé předchází tomu měsíci, takže ho
+ * zpracoval předchozí program. Data se dál vypisují — jen nejde o rozdělanou
+ * práci, protože mzdový běh za takové období nejde založit.
+ */
+export interface PayrollHistoricalPeriodInfo {
+  payroll_start_period?: string | null
+  historical?: boolean
+}
+
+export interface PayrollTimeOverview extends PayrollHistoricalPeriodInfo {
   period: string
   incomplete_only: boolean
   /** Zúžení na jeden vztah, které server SKUTEČNĚ uplatnil (§ zúžení z karty). */
@@ -1473,7 +1534,7 @@ export interface PayrollTimeHistoryItem {
   entry_count: number
 }
 
-export interface PayrollTimeHistory {
+export interface PayrollTimeHistory extends PayrollHistoricalPeriodInfo {
   employment: {
     id: number
     employee_id: number
@@ -2284,7 +2345,7 @@ export interface PayrollQuickInputRow {
   blockers: string[]
 }
 
-export interface PayrollQuickInputMonth {
+export interface PayrollQuickInputMonth extends PayrollHistoricalPeriodInfo {
   period: string
   items: PayrollQuickInputRow[]
   /** Počet vztahů v měsíci; `items` je jen aktuální stránka. */
@@ -2308,7 +2369,7 @@ export interface PayrollEmployeeCardRow extends PayrollQuickInputRow {
   absences: PayrollEmployeeCardAbsence[]
 }
 
-export interface PayrollEmployeeCardMonth {
+export interface PayrollEmployeeCardMonth extends PayrollHistoricalPeriodInfo {
   period: string
   items: PayrollEmployeeCardRow[]
   /** Počet vztahů odpovídajících serverovému filtru. */
@@ -2407,7 +2468,7 @@ export interface PayrollInputFacets {
   imports: Array<{ id: number, source_name: string, created_at: string, count: number }>
 }
 
-export interface PayrollInputsPage {
+export interface PayrollInputsPage extends PayrollHistoricalPeriodInfo {
   items: PayrollInput[]
   total: number
   summary: PayrollInputsSummary | null
@@ -6675,6 +6736,23 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/statutory-openings`,
       payload,
     ).then(response => response.data.openings),
+  /**
+   * Tabulkový import počátečních stavů za CELOU firmu. Soubor nese sloupec
+   * `employee_id`, takže jeden převod vyřídí všechny převzaté zaměstnance.
+   */
+  previewStatutoryOpeningImport: (payload: PayrollOpeningImportPayload) =>
+    api.post<{ preview: PayrollOpeningImportPreview }>(
+      '/payroll/statutory-openings/import/preview',
+      payload,
+    ).then(response => response.data.preview),
+  applyStatutoryOpeningImport: (payload: PayrollOpeningImportPayload) =>
+    api.post<{ import: PayrollOpeningImportResult }>(
+      '/payroll/statutory-openings/import/apply',
+      payload,
+    ).then(response => response.data.import),
+  statutoryOpeningImportTemplate: () =>
+    api.get<Blob>('/payroll/statutory-openings/import/template', { responseType: 'blob' })
+      .then(response => response.data),
   /** Označení vztahu pro import docházky — párovací klíč CSV, ne údaj o vztahu. */
   renameEmployment: (employmentId: number, rowVersion: number, code: string) =>
     api.patch<{ employment: PayrollEmployment }>(
@@ -8358,7 +8436,7 @@ export const payrollApi = {
       groups?: PayrollInputGroup[] | null
       group_total?: number | null
       facets?: PayrollInputFacets
-    }>('/payroll/inputs', {
+    } & PayrollHistoricalPeriodInfo>('/payroll/inputs', {
       params: {
         period,
         ...pageParams(page),
@@ -8374,6 +8452,8 @@ export const payrollApi = {
       groups: response.data.groups ?? null,
       group_total: response.data.group_total ?? null,
       facets: response.data.facets ?? null,
+      payroll_start_period: response.data.payroll_start_period ?? null,
+      historical: response.data.historical ?? false,
     })),
   /**
    * Stáhne CELÝ filtr výpisu jako XLSX nebo PDF, ne zobrazenou stránku.
@@ -8398,20 +8478,28 @@ export const payrollApi = {
       `mzdove-vstupy-${span}.${format}`,
     ).then(() => undefined)
   },
+  /**
+   * Hranice historie chodí vedle `month`, ne v něm — přibalí se tedy k měsíci,
+   * aby ji volající dostal bez druhého tvaru odpovědi.
+   */
   quickInputs: (period: string, page?: PayrollPageParams, employmentId?: number, q?: string) =>
-    api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', {
+    api.get<{ month: PayrollQuickInputMonth } & PayrollHistoricalPeriodInfo>('/payroll/quick-inputs', {
       params: {
         period,
         ...pageParams(page),
         ...(employmentId ? { employment_id: employmentId } : {}),
         ...(q ? { q } : {}),
       },
-    }).then(response => response.data.month),
+    }).then(response => ({
+      ...response.data.month,
+      payroll_start_period: response.data.payroll_start_period ?? null,
+      historical: response.data.historical ?? false,
+    })),
   employeeCards: (
     period: string,
     page: PayrollPageParams,
     filters: { search: string, status: PayrollEmployeeCardStatusFilter },
-  ) => api.get<{ month: PayrollEmployeeCardMonth }>('/payroll/quick-inputs', {
+  ) => api.get<{ month: PayrollEmployeeCardMonth } & PayrollHistoricalPeriodInfo>('/payroll/quick-inputs', {
     params: {
       period,
       view: 'cards',
@@ -8419,7 +8507,11 @@ export const payrollApi = {
       search: filters.search,
       status: filters.status,
     },
-  }).then(response => response.data.month),
+  }).then(response => ({
+    ...response.data.month,
+    payroll_start_period: response.data.payroll_start_period ?? null,
+    historical: response.data.historical ?? false,
+  })),
   /**
    * Zúžení se posílá i při ukládání — odpověď je táž stránka, ze které se
    * plní formulář, a ta musí zůstat zúžená.

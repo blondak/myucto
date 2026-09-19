@@ -37,9 +37,10 @@ final class PayrollSicknessRepository
             $from = $from->modify('+1 day');
         }
         // Stejné okno § 192 ZP jako v PayrollAbsenceRepository::publishedShiftSegments —
-        // jedno číslo z rulesetu, aby se uložené okno a spočítané segmenty nerozešly.
+        // jedno číslo z rulesetu a tytéž dny vyčerpané předchozím plátcem, aby se uložené
+        // okno a spočítané segmenty nerozešly.
         $windowEnd = AbsenceRuleset::forDate($this->rulesets, (string) $absence['date_from'])
-            ->sicknessWindowEnd($from);
+            ->sicknessWindowEnd($from, PayrollAbsenceRepository::carriedWindowDays($absence));
         $absenceTo = new \DateTimeImmutable((string) $absence['date_to']);
         $to = $absenceTo < $windowEnd ? $absenceTo : $windowEnd;
 

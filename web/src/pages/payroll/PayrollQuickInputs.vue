@@ -45,7 +45,7 @@ import {
   payrollQueryPeriod,
 } from '@/pages/payroll/payrollComponentsUi'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatMoneyMinor } from '@/composables/useFormat'
+import { formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 
 interface UiRow extends PayrollQuickInputRow {
   baseAmount: string
@@ -149,6 +149,15 @@ const fieldErrors = ref<Record<string, string>>({})
 /** Sloupce mzdových složek, které server v měsíci nabízí, a součty za celé období. */
 const componentColumns = ref<PayrollQuickComponentColumn[]>([])
 const periodTotals = ref<PayrollQuickInputTotals | null>(null)
+/*
+ * Měsíc před prvním mzdovým obdobím firmy.
+ *
+ * Po převodu mezd z předchozího programu se tu dá listovat i do měsíců, které
+ * MyÚčto vůbec nepočítá. Rychlé zadání je tam k ničemu, ale zakázat ho nemá
+ * smysl — stačí, aby to uživatel věděl dřív, než začne vyplňovat.
+ */
+const historicalMonth = ref(false)
+const payrollStartPeriod = ref<string | null>(null)
 const columnsMenuOpen = ref(false)
 /** Strop jedné dávky na serveru (PayrollQuickInputValidator). */
 const SAVE_CHUNK = 500
@@ -1256,6 +1265,10 @@ async function load(): Promise<void> {
     total.value = month.total
     componentColumns.value = month.columns ?? []
     periodTotals.value = month.totals ?? null
+    // Měsíc, který zpracoval předchozí program. Zadávat se v něm dá dál, jen
+    // se to nikde nepoužije — mzdový běh za takové období nejde založit.
+    historicalMonth.value = month.historical === true
+    payrollStartPeriod.value = month.payroll_start_period ?? null
     loadedPeriod.value = requestedPeriod
     // Skrytá sekce se otevře sama, drží-li nějaký řádek příplatek. Data, která
     // v měsíci jsou, se nesmí uživateli ztratit z očí jen proto, že přepínač
@@ -1487,6 +1500,21 @@ onMounted(() => {
         </button>
       </div>
     </header>
+
+    <!--
+      Měsíc, který zpracoval předchozí program. Vstupy se tu neschovávají,
+      jen se říká, proč je nemá smysl dodělávat.
+    -->
+    <div
+      v-if="historicalMonth"
+      data-testid="quick-inputs-historical-notice"
+      class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700"
+    >
+      <p class="font-medium text-neutral-900">{{ t('payroll.historical.title') }}</p>
+      <p class="mt-1">
+        {{ t('payroll.historical.quick_inputs', { period: formatPeriod(payrollStartPeriod ?? '') }) }}
+      </p>
+    </div>
 
     <div v-if="!historyMode" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       <p>{{ t('payroll.quick_inputs.info') }}</p>

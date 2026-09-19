@@ -56,6 +56,7 @@ import {
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
 import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
+import { isHistoricalPayrollPeriod } from '@/pages/payroll/payrollHistoricalPeriod'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -267,6 +268,31 @@ const selected = computed(() =>
  */
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
 const visibleItems = computed(() => overview.value?.items ?? [])
+/*
+ * Zobrazený měsíc zpracoval předchozí program.
+ *
+ * Po převodu mezd tu visely stovky neschválených měsíců jako rozdělaná práce,
+ * i když mzdový běh za ně nejde založit. Docházka se proto jen OZNAČÍ:
+ * záznamy zůstávají, protože jsou podkladem pro srovnávací sestavu a pro
+ * počáteční stavy kumulací, jen se nečtou jako nedodělek.
+ */
+const historicalMonth = computed(() => overview.value?.historical === true)
+const payrollStartPeriod = computed(() => overview.value?.payroll_start_period ?? null)
+
+function monthStatusKey(
+  item: PayrollTimeOverviewItem,
+): 'approved' | 'historical' | 'incomplete' | 'open' {
+  if (item.month.status === 'approved') return 'approved'
+  if (historicalMonth.value) return 'historical'
+  return item.summary.incomplete ? 'incomplete' : 'open'
+}
+
+function monthStatusClass(item: PayrollTimeOverviewItem): string {
+  const key = monthStatusKey(item)
+  if (key === 'approved') return 'bg-success-50 text-success-600'
+  if (key === 'historical') return 'bg-neutral-100 text-neutral-600'
+  return key === 'incomplete' ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'
+}
 const employmentOptions = computed(() => visibleItems.value.map(item => ({
   value: item.employment.id,
   label: item.employment.full_name,
@@ -357,14 +383,22 @@ function goToHistoryPage(nextPage: number) {
  * jinak otevřený. Kdyby si historie pořadí prohodila, tentýž měsíc by měl na
  * dvou obrazovkách jiný odznak.
  */
-function historyStatusKey(month: PayrollTimeHistoryItem): 'approved' | 'incomplete' | 'open' {
+function historyStatusKey(
+  month: PayrollTimeHistoryItem,
+): 'approved' | 'historical' | 'incomplete' | 'open' {
   if (month.month.status === 'approved') return 'approved'
+  // Historie jde přes víc měsíců naráz, takže se hranice porovnává řádek po
+  // řádku. Před prvním mzdovým obdobím není neschválený měsíc nedodělek.
+  if (isHistoricalPayrollPeriod(month.period, history.value?.payroll_start_period)) {
+    return 'historical'
+  }
   return month.summary.incomplete ? 'incomplete' : 'open'
 }
 
 function historyStatusClass(month: PayrollTimeHistoryItem): string {
   const key = historyStatusKey(month)
   if (key === 'approved') return 'bg-success-50 text-success-600'
+  if (key === 'historical') return 'bg-neutral-100 text-neutral-600'
   return key === 'incomplete' ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'
 }
 
@@ -1911,7 +1945,13 @@ async function saveGrid() {
         focusEmploymentId.value,
         incompleteOnly.value,
       )
-      overview.value = result.month
+      // Odpověď dávky nese jen přehled, ne hranici historie — ta se drží
+      // z načtení stránky, jinak by značka „historické" po uložení zmizela.
+      overview.value = {
+        payroll_start_period: payrollStartPeriod.value,
+        historical: historicalMonth.value,
+        ...result.month,
+      }
       total.value = result.month.total
       const failures = new Map(result.failures.map(failure => [failure.index, failure]))
       const afterRound = { ...gridDrafts.value }
@@ -2072,6 +2112,21 @@ onMounted(() => {
         </button>
       </div>
     </header>
+
+    <!--
+      Měsíc před začátkem vedení mezd v MyÚčtu. Data zůstávají na obrazovce,
+      jen se nečtou jako nedodělek — mzdový běh za takové období nejde založit.
+    -->
+    <section
+      v-if="!historyVisible && historicalMonth"
+      data-testid="payroll-time-historical-notice"
+      class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700"
+    >
+      <p class="font-medium text-neutral-900">{{ t('payroll.historical.title') }}</p>
+      <p class="mt-1">
+        {{ t('payroll.historical.attendance', { period: formatPeriod(payrollStartPeriod ?? '') }) }}
+      </p>
+    </section>
 
     <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
       <div class="flex flex-wrap items-end gap-4">
@@ -2668,7 +2723,7 @@ onMounted(() => {
               <td v-if="tbl.isVisible('plan')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.planned_minutes) }}</td>
               <td v-if="tbl.isVisible('actual')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.actual_minutes) }}</td>
               <td v-if="tbl.isVisible('difference')" class="px-4 py-3" :class="item.summary.difference_minutes === 0 ? 'text-success-600' : 'text-warning-700'">{{ formatPayrollMinutes(item.summary.difference_minutes) }}</td>
-              <td v-if="tbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.month.status === 'approved' ? 'bg-success-50 text-success-600' : item.summary.incomplete ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'">{{ t(`payroll.time.status.${item.month.status === 'approved' ? 'approved' : item.summary.incomplete ? 'incomplete' : 'open'}`) }}</span></td>
+              <td v-if="tbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="monthStatusClass(item)">{{ t(`payroll.time.status.${monthStatusKey(item)}`) }}</span></td>
               <td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2">
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
@@ -2726,7 +2781,7 @@ onMounted(() => {
       </div>
       <div class="space-y-3 p-4 md:hidden">
         <article v-for="item in visibleItems" :key="item.employment.id" class="rounded-lg border border-neutral-200 p-4">
-          <div class="flex flex-wrap items-start justify-between gap-2"><div class="flex items-start gap-3"><input v-if="item.month.status === 'open'" type="checkbox" class="mt-1" :checked="selectedEmploymentIds.includes(item.employment.id)" :aria-label="t('payroll.time.bulk.select', { name: item.employment.full_name })" @change="toggleSelection(item.employment.id)"><div><h2 class="font-semibold text-neutral-900">{{ item.employment.full_name }}</h2><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></div></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.month.status === 'approved' ? 'bg-success-50 text-success-600' : item.summary.incomplete ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'">{{ t(`payroll.time.status.${item.month.status === 'approved' ? 'approved' : item.summary.incomplete ? 'incomplete' : 'open'}`) }}</span></div>
+          <div class="flex flex-wrap items-start justify-between gap-2"><div class="flex items-start gap-3"><input v-if="item.month.status === 'open'" type="checkbox" class="mt-1" :checked="selectedEmploymentIds.includes(item.employment.id)" :aria-label="t('payroll.time.bulk.select', { name: item.employment.full_name })" @change="toggleSelection(item.employment.id)"><div><h2 class="font-semibold text-neutral-900">{{ item.employment.full_name }}</h2><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></div></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="monthStatusClass(item)">{{ t(`payroll.time.status.${monthStatusKey(item)}`) }}</span></div>
           <dl class="mt-4 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.fund') }}</dt><dd>{{ formatPayrollMinutes(item.summary.fund_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.plan') }}</dt><dd>{{ formatPayrollMinutes(item.summary.planned_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ formatPayrollMinutes(item.summary.actual_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ formatPayrollMinutes(item.summary.difference_minutes) }}</dd></div></dl>
           <div
             v-if="overtimeVisible(item)"

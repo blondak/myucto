@@ -6,9 +6,9 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
-use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use PDO;
 
 /**
@@ -58,7 +58,7 @@ final class PayrollRunReadinessService
         private readonly PayrollRunJmhzReadinessProbe $jmhzProbe,
         // První mzdové období firmy. Starší měsíc se nekontroluje, jen odmítne —
         // viz `moduleStartFinding()`.
-        private readonly PayrollModuleStateRepository $moduleState,
+        private readonly PayrollHistoricalPeriodService $historicalPeriods,
     ) {}
 
     /**
@@ -305,6 +305,10 @@ final class PayrollRunReadinessService
     /**
      * Nález „období předchází prvnímu mzdovému období firmy", nebo `null`.
      *
+     * Hranici i pravidlo drží {@see PayrollHistoricalPeriodService} — tentýž
+     * předěl odděluje historii i v přehledu docházky a ve výpisu mzdových
+     * vstupů, takže tady vlastní kopii mít nesmí.
+     *
      * Fail-soft jako zbytek služby: když se stav modulu nepodaří přečíst,
      * kontrola pokračuje po staru. Zamlčet měsíc kvůli chybě čtení by bylo
      * horší než ho zkontrolovat zbytečně.
@@ -313,12 +317,8 @@ final class PayrollRunReadinessService
      */
     private function moduleStartFinding(int $supplierId, string $periodStart): ?array
     {
-        try {
-            $startPeriod = $this->moduleState->get($supplierId)['start_period'];
-        } catch (\Throwable) {
-            return null;
-        }
-        if (!self::periodPrecedesModuleStart($startPeriod, $periodStart)) {
+        $startPeriod = $this->historicalPeriods->startPeriod($supplierId);
+        if (!PayrollHistoricalPeriodService::precedesStart($startPeriod, $periodStart)) {
             return null;
         }
 
@@ -337,26 +337,6 @@ final class PayrollRunReadinessService
             1,
             [],
         );
-    }
-
-    /**
-     * Je období starší než první mzdové období firmy?
-     *
-     * `null` (firma začátek nemá nastavený) znamená „nevíme", a to nikdy
-     * neodmítá: bez nastaveného začátku se choval modul odjakživa tak, že
-     * počítá cokoli.
-     */
-    private static function periodPrecedesModuleStart(
-        ?string $startPeriod,
-        string $periodStart,
-    ): bool {
-        if ($startPeriod === null || $startPeriod === '') {
-            return false;
-        }
-
-        // `start_period` chodí z repozitáře jako `YYYY-MM`, období jako
-        // `YYYY-MM-DD`; porovnává se proto na společných sedmi znacích.
-        return substr($periodStart, 0, 7) < substr($startPeriod, 0, 7);
     }
 
     /**
