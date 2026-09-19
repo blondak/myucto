@@ -54,6 +54,14 @@ final class PohodaExport
     /** Přehled účetních jednotek v kořeni exportu (název firmy k IČO a roku). */
     public const UNITS_FILE = '00_ucetni_jednotky.xml';
 
+    /**
+     * Pracovní složka exportního nástroje s ODESLANÝMI DOTAZY do POHODY. Leží v ní
+     * stejnojmenný `00_ucetni_jednotky.xml` jako v kořeni — jenže s dotazem, ne s odpovědí.
+     * Starší verze nástroje ji balila do ZIPu, takže přehled jednotek byl v archivu dvakrát
+     * a import se zastavil na kontrole duplicit. Pro převod v ní není nic použitelného.
+     */
+    private const REQUEST_DIR = '_pozadavky';
+
     public const MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024;
     private const MAX_ARCHIVE_ENTRIES = 20000;
     /** Agend (IČO a rok) v jednom ZIP: pár firem za pár let, ne tisíce náhledů. */
@@ -185,6 +193,9 @@ final class PohodaExport
             $seen = [];
             $agendas = [];
             $total = 0;
+            $unitsIndex = null;
+            $unitsDepth = 0;
+            $unitsSize = 0;
             $maxYear = (int) date('Y') + 1;
             for ($i = 0; $i < $zip->numFiles; $i++) {
                 $stat = $zip->statIndex($i);
@@ -193,6 +204,11 @@ final class PohodaExport
                 }
                 $parts = explode('/', str_replace('\\', '/', (string) $stat['name']));
                 $file = (string) array_pop($parts);
+                // Dotazy do POHODY do převodu nepatří a jejich přehled jednotek by se tvářil
+                // jako druhá kopie té z kořene (viz REQUEST_DIR).
+                if (in_array(self::REQUEST_DIR, $parts, true)) {
+                    continue;
+                }
                 $agenda = null;
                 foreach ($parts as $part) {
                     if (preg_match('/^\d{6,8}_(\d{4})$/', $part, $m) === 1 && (int) $m[1] >= self::MIN_YEAR && (int) $m[1] <= $maxYear) {
@@ -204,6 +220,19 @@ final class PohodaExport
                     $agendas[$agenda] = true;
                 } elseif ($agenda === null && $file === self::UNITS_FILE && count($parts) <= 1) {
                     $target = $file;
+                    // Přehled jednotek bereme z nejmělčí cesty. ZIP od uživatele, který si ho
+                    // sám přebalil, může tentýž soubor nést i o složku hloub; odmítnout kvůli
+                    // tomu celý převod by znamenalo poslat ho ZIP ručně opravovat.
+                    if ($unitsIndex !== null) {
+                        if (count($parts) >= $unitsDepth) {
+                            continue;
+                        }
+                        unset($plan[$unitsIndex], $seen[strtolower($target)]);
+                        $total -= $unitsSize;
+                    }
+                    $unitsIndex = $i;
+                    $unitsDepth = count($parts);
+                    $unitsSize = (int) $stat['size'];
                 } else {
                     continue;
                 }

@@ -436,7 +436,11 @@ $summary | Format-Table Ico, Rok, Soubor, Stav, Zaznamu, Velikost_kB, Poznamka -
 
 $zip = $Vystup.TrimEnd('\') + '.zip'
 if (Test-Path $zip) { Remove-Item $zip -Force }
-Compress-Archive -Path (Join-Path $Vystup '*') -DestinationPath $zip -CompressionLevel Optimal
+# Složka s odeslanými DOTAZY do ZIPu nepatří: leží v ní stejnojmenný 00_ucetni_jednotky.xml
+# jako v kořeni (jen s dotazem místo odpovědi), takže archiv nesl přehled jednotek dvakrát
+# a import ho odmítl jako duplicitu. Na disku zůstává pro případné dohledání.
+$obsah = Get-ChildItem -Path $Vystup -Force | Where-Object { $_.Name -ne '_pozadavky' }
+Compress-Archive -Path $obsah.FullName -DestinationPath $zip -CompressionLevel Optimal
 
 $ok = @($summary | Where-Object { $_.Stav -eq 'ok' }).Count
 Write-Host ''

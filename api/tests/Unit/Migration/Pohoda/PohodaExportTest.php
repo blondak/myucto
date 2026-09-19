@@ -168,6 +168,54 @@ final class PohodaExportTest extends TestCase
         self::assertSame(2, $agenda['counts']['partners']);
     }
 
+    /**
+     * Starší verze exportního nástroje balila do ZIPu i složku `_pozadavky` s ODESLANÝMI
+     * dotazy. Leží v ní stejnojmenný `00_ucetni_jednotky.xml` jako v kořeni, jen s dotazem
+     * místo odpovědi — import proto spadl na kontrole duplicit a uživatel musel soubor
+     * z archivu ručně vyhodit. Dotazy do převodu nepatří, takže se přeskakují.
+     */
+    public function testRequestFolderFromOlderExportToolDoesNotBlockImport(): void
+    {
+        $zipPath = $this->tmp . '/pozadavky.zip';
+        SyntheticPohodaExport::writeZip($zipPath, $this->tmp . '/src-req');
+        $zip = new \ZipArchive();
+        $zip->open($zipPath);
+        $zip->addFromString('_pozadavky/00_ucetni_jednotky.xml', '<dataPack><listAccountingUnitRequest/></dataPack>');
+        $zip->addFromString('_pozadavky/' . SyntheticPohodaExport::ICO . '_' . SyntheticPohodaExport::YEAR . '_01_ucetni_denik.xml', '<dataPack/>');
+        $zip->close();
+
+        $target = $this->tmp . '/out-req';
+        PohodaExport::extractArchive($zipPath, $target);
+
+        self::assertFileExists($target . '/00_ucetni_jednotky.xml');
+        self::assertStringNotContainsString(
+            'listAccountingUnitRequest',
+            (string) file_get_contents($target . '/00_ucetni_jednotky.xml'),
+            'Přehled jednotek musí zůstat ODPOVĚDÍ z kořene, ne dotazem z pracovní složky.',
+        );
+        self::assertDirectoryDoesNotExist($target . '/_pozadavky');
+    }
+
+    /** Přebalený ZIP se stejnojmenným přehledem o složku hloub: bereme ten z kořene, nepadáme. */
+    public function testDeeperUnitsOverviewDoesNotBlockImport(): void
+    {
+        $zipPath = $this->tmp . '/hloubka.zip';
+        SyntheticPohodaExport::writeZip($zipPath, $this->tmp . '/src-deep');
+        $zip = new \ZipArchive();
+        $zip->open($zipPath);
+        $zip->addFromString('kopie/00_ucetni_jednotky.xml', '<dataPack><listAccountingUnitRequest/></dataPack>');
+        $zip->close();
+
+        $target = $this->tmp . '/out-deep';
+        PohodaExport::extractArchive($zipPath, $target);
+
+        self::assertFileExists($target . '/00_ucetni_jednotky.xml');
+        self::assertStringNotContainsString(
+            'listAccountingUnitRequest',
+            (string) file_get_contents($target . '/00_ucetni_jednotky.xml'),
+        );
+    }
+
     public function testNonZipIsRejected(): void
     {
         file_put_contents($this->tmp . '/x.zip', 'neni zip');
