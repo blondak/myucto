@@ -159,7 +159,14 @@ async function createEditorRouter(path = '/purchase-invoices/new') {
 }
 
 describe('InvoiceEditor — strukturovaný import', () => {
+  // Náhled odloženého PDF si na soubor říká o object URL. Shim, kterým ho
+  // vitest v jsdom nahrazuje, si sahá do vnitřku jsdom Blobu — a `File` je
+  // v Node globál, takže tam ten vnitřek není a shim spadne na `_buffer`
+  // mimo test (neodchycené odmítnutí = pád celé sady, i když testy projdou).
+  // V prohlížeči je to korektní volání, proto se stubuje test, ne komponenta.
   beforeEach(() => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:synthetic-pending-pdf')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     m.importStructured.mockReset().mockResolvedValue({
       purchase_invoice_id: 42,
       purchase_invoice_ids: [42],
