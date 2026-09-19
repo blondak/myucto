@@ -18,12 +18,15 @@ export const PAYROLL_MANUAL_CHAPTERS: PayrollManualChapterRule[] = [
   [/^\/payroll\/insolvency(?:\/|$)/, '88_Srazky_a_exekuce'],
   [/^\/payroll\/benefit-baskets(?:\/|$)/, '89_Kose_benefitu'],
   [/^\/payroll\/settings(?:\/|$)/, '90_Nastaveni_mezd'],
+  // Agenda přechodu žije jako záložky Importů; `manualChapterPath()` je do cesty
+  // dopíše, aby Nápověda nevedla na Nastavení mezd. Musí stát PŘED obecným
+  // pravidlem Importů, které by jinak sebralo i tyhle cesty.
+  [/^\/payroll\/imports\/(takeover|reconciliation|posting_map)$/, '108_Prechod_z_PAMICA'],
   // Importy registrací, hlášení a docházky popisuje 90.9 v Nastavení mezd.
   [/^\/payroll\/imports(?:\/|$)/, '90_Nastaveni_mezd'],
-  // Srovnání převzatých mezd i kontace z původního programu patří k převodu.
+  // Staré adresy agendy přechodu dnes jen přesměrovávají, kapitolu ale drží dál:
+  // odkazuje na ně manuál i uložené záložky prohlížeče.
   [/^\/payroll\/migration-reconciliation(?:\/|$)/, '108_Prechod_z_PAMICA'],
-  [/^\/payroll\/posting-map(?:\/|$)/, '108_Prechod_z_PAMICA'],
-  // Kontace odvozené z převzatého zaúčtování jsou také krok přechodu.
   [/^\/payroll\/posting-map(?:\/|$)/, '108_Prechod_z_PAMICA'],
   [/^\/payroll\/components(?:\/|$)/, '91_Mzdove_slozky_a_vstupy'],
   [/^\/payroll\/rulesets(?:\/|$)/, '92_Legislativni_pravidla_mezd'],

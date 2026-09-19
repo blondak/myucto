@@ -75,9 +75,10 @@ describe('mzdové menu', () => {
   it('odděluje jednorázové nastavení od měsíční práce a řadí ho nakonec', () => {
     const items = payrollNavItems()
     const setup = [
-      // Kontace z původního programu stojí hned za nastavením mezd, protože do něj
-      // potvrzením zapisuje; je to zavádění, ne měsíční práce.
-      '/payroll/settings', '/payroll/posting-map', '/payroll/imports', '/payroll/components',
+      // Agenda přechodu z původního programu (převzaté mzdy, kontrola přepočtu,
+      // kontace) je jednorázová a sedí jako záložky v Importech — samostatné
+      // položky menu svítily i firmě, která nikdy nic nepřevzala.
+      '/payroll/settings', '/payroll/imports', '/payroll/components',
       '/payroll/rulesets', '/payroll/retention', '/payroll/erasure',
     ]
 

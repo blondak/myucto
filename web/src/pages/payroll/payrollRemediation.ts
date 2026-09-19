@@ -63,7 +63,7 @@ export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: numb
     path = '/payroll/runs' + (period ? `?period=${period}` : '')
     action = 'runs'
   } else if (kind === 'takeover') {
-    path = '/payroll/migration-reconciliation'
+    path = '/payroll/imports?tab=reconciliation'
     action = 'takeover'
   } else if (['activity', 'dates'].includes(kind) && hasEmployment) {
     path = `/payroll/people?employment=${employmentId}`

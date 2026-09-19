@@ -49,7 +49,7 @@ describe('mzdové úkony mají konkrétní nápravu', () => {
     // Chybějící údaj převzatého měsíce se doplňuje v Kontrole převodu mezd;
     // ve mzdách MyÚčta by nebylo co opravovat, ten měsíc modul nepočítal.
     expect(eldpRemediation({ code: 'eldp_takeover_insurance_days_missing', message: '', detail: { employment_id: 44, period_start: '2025-03-01' } }, 12, 2025).path)
-      .toBe('/payroll/migration-reconciliation')
+      .toBe('/payroll/imports?tab=reconciliation')
     // Naopak měsíc, který MyÚčto počítá a jen mu chybí schválení, patří do běhu.
     expect(eldpRemediation({ code: 'eldp_takeover_month_not_substitutable', message: '', detail: { period_start: '2025-03-01' } }, 12, 2025).path)
       .toBe('/payroll/runs?period=2025-03')

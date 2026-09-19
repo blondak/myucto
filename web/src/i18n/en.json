@@ -1029,8 +1029,6 @@
     "payroll_retention": "Retention periods",
     "payroll_erasure": "Erasure of personal data",
     "payroll_benefit_baskets": "Benefit baskets",
-    "payroll_posting_map": "Postings from the previous program",
-    "payroll_migration_reconciliation": "Migrated payroll check",
     "settings": "Settings",
     "company_settings": "Company settings",
     "branding": "Branding",
@@ -1774,9 +1772,6 @@
       },
       "empty_title": "Nothing to compare for the selected year",
       "empty_description": "Either no processed payroll was migrated from the previous system, or no payroll run exists for that year yet.",
-      "deviations_title": "Deviations",
-      "deviations_hint": "Sorted from the largest difference. Items where one side is missing come first — an unknown difference is worse than a known one.",
-      "no_deviations": "Every compared amount matches to the crown.",
       "period": "Period",
       "person": "Person",
       "side": "Side",
@@ -1787,7 +1782,6 @@
       "year_totals": "Yearly totals",
       "months_title": "By month and person",
       "month_total": "Total difference for the month",
-      "hide_matching": "Hide matching rows",
       "all_matching": "The figures match in every month.",
       "incomplete": "incomplete",
       "incomplete_hint": "Not every row contributed to the total — some have no counterpart.",
@@ -1821,6 +1815,18 @@
         "both": "both sides",
         "reference_only": "previous system only",
         "calculated_only": "MyÚčto only"
+      },
+      "months_hint": "Expanding a month shows its deviations; the full breakdown of every figure is drawn only on request.",
+      "only_deviating": "Only months with a deviation",
+      "state_ok": "Matches",
+      "month_no_deviations": "In this month our recalculation matches the migrated payroll.",
+      "show_full_breakdown": "Show full breakdown ({count} people)",
+      "hide_full_breakdown": "Hide full breakdown",
+      "column": {
+        "people": "People",
+        "deviations": "Deviations",
+        "max_difference": "Largest difference",
+        "state": "State"
       }
     },
     "tax_statement": {
@@ -19648,9 +19654,9 @@
       "title": "Run payroll",
       "label": "Run payroll",
       "hint": "Enables the standalone payroll module for this company in either accounting mode. It is disabled by default.",
-      "beta_warning": "The payroll module has been through testing, but we still consider it a beta. You can start using it in production, just please keep an eye on the pay, contribution and filing figures for social security, health insurers and the tax office and check them.",
+      "beta_warning": "The payroll module has been through extensive testing. Even so, please keep a close eye on the pay, contribution and filing figures for social security, health insurers and the tax office and check them.",
       "beta_report": "Please report any problems at",
-      "beta_report_thanks": "Thank you for them, we will fix them promptly.",
+      "beta_report_thanks": "Thank you for them, we fix every report right away.",
       "off_note": "Payroll disappears from the menu after saving. Payroll data is not deleted and remains available when enabled again.",
       "buy": "Activate payroll add-on"
     },
@@ -25721,7 +25727,10 @@
       "registration": "JMHZ",
       "attendance": "Attendance",
       "mapping": "Column mapping",
-      "pohoda_oic": "OIČ from POHODA"
+      "pohoda_oic": "OIČ from POHODA",
+      "takeover": "Migrated payroll",
+      "reconciliation": "Migration check",
+      "posting_map": "Migrated postings"
     },
     "common": {
       "working": "Working…",
@@ -26541,7 +26550,9 @@
         "unrecognized": "Unrecognised columns with data",
         "result_title": "Recognised columns by sheet"
       }
-    }
+    },
+    "no_access_title": "No import is available",
+    "no_access_description": "You have no permission for payroll data imports or for migrating from another payroll program."
   },
   "pamica": {
     "title": "Migration from PAMICA",

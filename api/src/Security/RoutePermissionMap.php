@@ -517,6 +517,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/settings/account-options$#', 'payroll.settings', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/employer$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/employer$#', 'payroll.settings', AccessLevel::WRITE],
+        // Jen příznaky „je co převzatého": rozhodnout o viditelnosti záložky musí
+        // i ten, kdo nesmí otevřít sestavu za ní, proto základní právo modulu.
+        ['GET', '#^/api/payroll/migration/state$#', 'payroll', AccessLevel::READ],
         // Návrh předkontací z převzatého zaúčtování (PAM-16). Potvrzení zapisuje
         // do nastavení zaměstnavatele, proto stejné oprávnění jako to nastavení.
         ['GET', '#^/api/payroll/migration/posting-map$#', 'payroll.settings', AccessLevel::READ],

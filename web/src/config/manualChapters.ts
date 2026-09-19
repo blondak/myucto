@@ -94,3 +94,14 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
 export function manualChapter(path: string): string | undefined {
   return MANUAL_CHAPTERS.find(([pattern]) => pattern.test(path))?.[1]
 }
+
+/**
+ * Cesta, podle které se hledá kapitola. Stránka se záložkami v query stringu
+ * (Importy mezd) by jinak na všech záložkách vedla do téže kapitoly — agenda
+ * přechodu z jiného mzdového programu ale má svou vlastní. Záložka se proto
+ * připojí jako segment; žádná z těch stránek nemá podroutu, takže se to
+ * s ničím nesrazí.
+ */
+export function manualChapterPath(path: string, tab: unknown): string {
+  return typeof tab === 'string' && /^[a-z_]+$/.test(tab) ? `${path}/${tab}` : path
+}

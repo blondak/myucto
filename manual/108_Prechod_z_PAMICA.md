@@ -289,8 +289,13 @@ převzatému měsíci údaj, který doklad potřebuje, doklad se raději nevysta
 a řekne, co doplnit.
 
 Převzaté mzdy plní převod z PAMICA sám. Zákazník, který přichází odjinud, je
-nahraje z CSV nebo XLSX v `Mzdy → Převzaté mzdy`; vzorový soubor je ke stažení
-tamtéž.
+nahraje z CSV nebo XLSX v `Mzdy → Importy → Převzaté mzdy`; vzorový soubor je
+ke stažení tamtéž.
+
+Celá agenda přechodu žije v `Mzdy → Importy` jako záložky **Převzaté mzdy**,
+**Kontrola převzetí** a **Kontace z převzetí**. Poslední dvě se nabízí, až
+když je co převzatého — firmě, která mzdy od začátku počítá v MyÚčtu, se
+neukážou vůbec.
 
 ## 108.9 Opakovaný převod
 
@@ -303,7 +308,7 @@ převod spusťte znovu.
 
 ## 108.10 Kontrola převzatých mezd
 
-**Cesta: `Mzdy → Kontrola převzatých mezd`**
+**Cesta: `Mzdy → Importy → Kontrola převzetí`**
 
 Převzatý měsíc jde v MyÚčtu přepočítat vlastní legislativní sadou. Jenže
 PAMICA ta čísla už podala — do jednotného měsíčního hlášení zaměstnavatele,
@@ -319,8 +324,11 @@ MyÚčto / rozdíl**:
 - pojistné zaměstnavatele na zdravotní,
 - záloha na daň, srážková daň a daňový bonus.
 
-Nad tabulkou stojí **seznam odchylek** seřazený od největšího rozdílu.
-Přepínačem *Skrýt shodné řádky* se schovají osoby, u kterých všechno sedí.
+Rozhodovací vrstvou je **přehled měsíců**: za každý měsíc roku počet osob,
+počet odchylek, největší rozdíl a stav. Rozkliknutý měsíc ukáže své odchylky
+po osobách a veličinách; tlačítkem *Zobrazit celý rozpad* se pod ním dokreslí
+úplná tabulka trojic za všechny osoby a všechny veličiny. Přepínačem *Jen
+měsíce s odchylkou* se schovají měsíce, ve kterých všechno sedí.
 
 Pojistné zaměstnavatele na **sociální** zabezpečení se porovnává jen
 v součtu za měsíc a za rok. Osobní veličina to není — počítá se z úhrnu
@@ -347,7 +355,7 @@ Sestavu vidí uživatel s oprávněním ke mzdovým sestavám (`payroll.reports`
 
 ## 108.11 Kontace mezd z původního programu
 
-**Cesta: `Mzdy → Kontace z původního programu`**
+**Cesta: `Mzdy → Importy → Kontace z převzetí`**
 
 Kontace mezd (které mzdové plnění jde na který účet) má původní program
 nastavené a export je nese. MyÚčto z nich odvodí **návrh nastavení**, takže

@@ -1029,8 +1029,6 @@
     "payroll_retention": "Retenční lhůty",
     "payroll_erasure": "Výmaz osobních údajů",
     "payroll_benefit_baskets": "Koše benefitů",
-    "payroll_posting_map": "Kontace z původního programu",
-    "payroll_migration_reconciliation": "Kontrola převzatých mezd",
     "settings": "Nastavení",
     "company_settings": "Nastavení firmy",
     "branding": "Branding",
@@ -1774,9 +1772,6 @@
       },
       "empty_title": "Za vybraný rok není co porovnávat",
       "empty_description": "Buď se z původního systému nepřevedly žádné zpracované mzdy, nebo za ten rok zatím neproběhl mzdový běh.",
-      "deviations_title": "Odchylky",
-      "deviations_hint": "Seřazeno od největšího rozdílu. Položky, kde jedna strana chybí, stojí první — neznámý rozdíl je horší než známý.",
-      "no_deviations": "Všechny porovnané částky sedí na korunu.",
       "period": "Období",
       "person": "Osoba",
       "side": "Strana",
@@ -1787,7 +1782,6 @@
       "year_totals": "Součty za rok",
       "months_title": "Po měsících a osobách",
       "month_total": "Rozdíl celkem za měsíc",
-      "hide_matching": "Skrýt shodné řádky",
       "all_matching": "Ve všech měsících čísla sedí.",
       "incomplete": "neúplné",
       "incomplete_hint": "Do součtu nepřispěly všechny řádky — některé nemají protějšek.",
@@ -1821,6 +1815,18 @@
         "both": "obě strany",
         "reference_only": "jen původní systém",
         "calculated_only": "jen MyÚčto"
+      },
+      "months_hint": "Měsíc rozkliknutím ukáže své odchylky; úplný rozpad všech veličin se dokresluje až na vyžádání.",
+      "only_deviating": "Jen měsíce s odchylkou",
+      "state_ok": "Sedí",
+      "month_no_deviations": "V tomto měsíci se přepočet s převzatými mzdami shoduje.",
+      "show_full_breakdown": "Zobrazit celý rozpad ({count} osob)",
+      "hide_full_breakdown": "Skrýt celý rozpad",
+      "column": {
+        "people": "Osob",
+        "deviations": "Odchylek",
+        "max_difference": "Největší rozdíl",
+        "state": "Stav"
       }
     },
     "tax_statement": {
@@ -19648,9 +19654,9 @@
       "title": "Vést mzdy",
       "label": "Vést mzdy",
       "hint": "Zpřístupní samostatný mzdový modul pro tuto firmu v obou účetních režimech. Ve výchozím stavu je vypnutý.",
-      "beta_warning": "Mzdový modul prošel testováním, ale považujeme jej stále za beta verzi. V produkci ho už používat můžete, jen prosím pečlivě sledujte a kontrolujte výpočty mezd, odvodů a podání pro ČSSZ, zdravotní pojišťovny a finanční úřad.",
-      "beta_report": "Případné problémy prosím nahlaste na",
-      "beta_report_thanks": "Děkujeme za ně, obratem je opravíme.",
+      "beta_warning": "Mzdový modul prošel rozsáhlým testováním. Prosím přesto pečlivě sledujte a kontrolujte výpočty mezd, odvodů a podání pro ČSSZ, zdravotní pojišťovny a finanční úřad.",
+      "beta_report": "Případné problémy nahlaste na",
+      "beta_report_thanks": "Děkujeme za ně, jakékoliv případné hlášení ihned opravíme.",
       "off_note": "Mzdy zmizí z menu po uložení. Mzdová data se nemažou a po opětovném zapnutí zůstanou dostupná.",
       "buy": "Aktivovat mzdový doplněk"
     },
@@ -25721,7 +25727,10 @@
       "registration": "JMHZ",
       "attendance": "Docházka",
       "mapping": "Mapování sloupců",
-      "pohoda_oic": "OIČ z POHODY"
+      "pohoda_oic": "OIČ z POHODY",
+      "takeover": "Převzaté mzdy",
+      "reconciliation": "Kontrola převzetí",
+      "posting_map": "Kontace z převzetí"
     },
     "common": {
       "working": "Pracuji…",
@@ -26541,7 +26550,9 @@
         "unrecognized": "Nerozpoznané sloupce s daty",
         "result_title": "Rozpoznané sloupce po listech"
       }
-    }
+    },
+    "no_access_title": "Žádný import není dostupný",
+    "no_access_description": "K importům mzdových podkladů ani k agendě přechodu z jiného mzdového programu nemáte oprávnění."
   },
   "pamica": {
     "title": "Přechod z PAMICA",

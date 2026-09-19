@@ -11,7 +11,7 @@
  * objemem peněz - rozhodnout to může jen účetní. Uloží se výhradně to, co je
  * v nabídce vybrané; ostatní významy zůstanou na dosavadní hodnotě.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { isAxiosError } from 'axios'
 import {
@@ -30,11 +30,13 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 import { formatMoneyMinor } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { payrollAccountOptions, type PayrollAccountKey } from './payrollEmployerAccounts'
+import { payrollAccountOptions, type PayrollAccountKey } from '@/pages/payroll/payrollEmployerAccounts'
+import { useMigrationWorkspace } from './migrationWorkspace'
 
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+const workspace = useMigrationWorkspace()
 const canRead = computed(() => auth.canRead('payroll.settings'))
 const canWrite = computed(() => auth.canWrite('payroll.settings'))
 
@@ -194,6 +196,9 @@ async function save(): Promise<void> {
   }
 }
 
+// Nahrání převzatých mezd může přepsat návrh; záložka zůstává namontovaná,
+// takže by jinak ukazovala starý stav, dokud ji uživatel sám neobnoví.
+watch(workspace.revision, () => { void load(proposal.value?.source ?? null) })
 onMounted(() => void load())
 </script>
 
@@ -201,7 +206,7 @@ onMounted(() => void load())
   <div v-if="canRead" class="space-y-6 pb-24" data-test="payroll-posting-map">
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 class="text-2xl font-semibold text-neutral-900">{{ t('payroll.posting_map.title') }}</h1>
+        <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.posting_map.title') }}</h2>
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.posting_map.intro') }}</p>
         <p class="mt-1 max-w-3xl text-sm text-warning-700">{{ t('payroll.posting_map.not_posted') }}</p>
       </div>
@@ -250,7 +255,7 @@ onMounted(() => void load())
       <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.posting_map.table_title') }}</h2>
+            <h3 class="font-semibold text-neutral-900">{{ t('payroll.posting_map.table_title') }}</h3>
             <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.posting_map.table_hint') }}</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -344,7 +349,7 @@ onMounted(() => void load())
       </section>
 
       <section v-if="unmapped.length" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
-        <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.posting_map.unmapped_title') }}</h2>
+        <h3 class="font-semibold text-neutral-900">{{ t('payroll.posting_map.unmapped_title') }}</h3>
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.posting_map.unmapped_hint') }}</p>
         <div class="mt-4 overflow-x-auto">
           <table class="min-w-full text-sm">

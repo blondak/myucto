@@ -34,7 +34,7 @@ import { formatShortcut, useKeyboardShortcuts, type ShortcutAction } from '@/com
 import { usesClientNavigation } from '@/security/clientRoutePolicy'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { manualChapter } from '@/config/manualChapters'
+import { manualChapter, manualChapterPath } from '@/config/manualChapters'
 import { canFitCompactNavigation, prefersCompactNavigation, shouldUseAutomaticSideNavigation } from '@/utils/navigationLayout'
 
 const { t, locale } = useI18n()
@@ -678,18 +678,15 @@ const navSections = computed<NavSection[]>(() => {
         // taktu: kdo se dozví o překročení až u prosincového vstupu, dozví se to
         // pozdě.
         { to: '/payroll/benefit-baskets', label: t('nav.payroll_benefit_baskets'), icon: ICONS.stats, permission: 'payroll' as PermissionKey },
-        // Kontrola převzatých mezd: porovná náš přepočet s tím, co původní systém
-        // už podal do JMHZ, na pojišťovny a na finanční úřad. Stojí tady, ne mezi
-        // nastavením — po převodu se k ní účetní vrací při každém přepočtu měsíce.
-        { to: '/payroll/migration-reconciliation', label: t('nav.payroll_migration_reconciliation'), icon: ICONS.stats, permission: 'payroll.reports' as PermissionKey },
         // 3) Jednorázové nastavení — sáhne se do něj při zavádění a pak výjimečně.
         { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey, dividerBefore: true },
-        // Kontace převzaté z původního mzdového programu. Stojí hned za
-        // nastavením mezd, protože do něj potvrzením zapisuje.
-        { to: '/payroll/posting-map', label: t('nav.payroll_posting_map'), icon: ICONS.swap, permission: 'payroll.settings' as PermissionKey },
         // Importy patří k zavádění: převzetí zaměstnanců z registrací ČSSZ
-        // a měsíčních podkladů z docházkového systému.
-        { to: '/payroll/imports', label: t('nav.payroll_imports'), icon: ICONS.exports, permission: 'payroll.inputs.write' as PermissionKey },
+        // a měsíčních podkladů z docházkového systému. Od přesunu agendy
+        // přechodu sem patří i převzaté mzdy, kontrola přepočtu a kontace
+        // z převzatého zaúčtování — jako záložky, které se nabízí jen firmě,
+        // která opravdu něco převzala. Právo je proto základní `payroll`,
+        // jednotlivé záložky si svoje hlídají samy.
+        { to: '/payroll/imports', label: t('nav.payroll_imports'), icon: ICONS.exports, permission: 'payroll' as PermissionKey },
         { to: '/payroll/components', label: t('nav.payroll_components'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
         // Legislativní pravidla: stránka existovala od commitu 88853785, ale
         // nevedl na ni jediný odkaz — dalo se tam jen ručně napsanou URL.
@@ -1275,7 +1272,7 @@ const tabletNavSections = computed(() => orderedNav.value.map(section => ({
 })))
 
 const manualHref = computed(() => {
-  const chapter = manualChapter(activeRoute.value.path)
+  const chapter = manualChapter(manualChapterPath(activeRoute.value.path, activeRoute.value.query.tab))
   const path = chapter ? `/manual?ch=${chapter}` : '/manual'
   const canonicalBaseUrl = auth.domainContext?.canonical_base_url
   if (!auth.domainContext?.locked || !canonicalBaseUrl) return path

@@ -100,6 +100,7 @@ use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollPostingMapAction;
+use MyInvoice\Action\Payroll\PayrollMigrationStateAction;
 use MyInvoice\Action\Payroll\PayrollOfficeRegistrationAction;
 use MyInvoice\Action\Payroll\PayrollAccidentInsuranceRateAction;
 use MyInvoice\Action\Payroll\PayrollOperationalHealthAction;
@@ -1984,6 +1985,9 @@ final class Routes
             // Návrh předkontací z převzatého zaúčtování (PAM-16). Potvrzení jde
             // dovnitř přes tutéž cestu jako `/settings/employer`, jen s účty,
             // které účetní vybrala.
+            // Jen příznaky „je co převzatého": Importy podle nich schovají celou
+            // agendu přechodu firmě, která mzdy od začátku počítá tady.
+            $g->get('/migration/state', [PayrollMigrationStateAction::class, 'show']);
             $g->get('/migration/posting-map', [PayrollPostingMapAction::class, 'show']);
             $g->post('/migration/posting-map/confirm', [PayrollPostingMapAction::class, 'confirm']);
             $g->get('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'list']);

@@ -144,16 +144,17 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // na Transport. Neznámý `:tab` stránka překlopí zpět na výchozí záložku,
       // takže zastaralý odkaz nekončí prázdnem.
       { path: 'payroll/submissions/:tab([a-z_]+)', name: 'payroll-submissions-tab', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
-      // Kontrola přepočtu proti mzdám převzatým z původního systému. Jede na
-      // `payroll.reports` jako ostatní mzdové sestavy — stejný klíč hlídá
-      // RoutePermissionMap u /api/payroll/reports/*.
-      { path: 'payroll/migration-reconciliation', name: 'payroll-migration-reconciliation', component: () => import('@/pages/payroll/PayrollMigrationReconciliation.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
-      // Návrh kontací mezd odvozený ze zaúčtování převzatého z původního
-      // programu. Jede na `payroll.settings`, protože potvrzení zapisuje do
-      // nastavení zaměstnavatele - stejný klíč hlídá RoutePermissionMap
-      // u /api/payroll/migration/posting-map.
-      { path: 'payroll/posting-map', name: 'payroll-posting-map', component: () => import('@/pages/payroll/PayrollPostingMap.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Agenda přechodu z jiného mzdového programu se přestěhovala do Importů
+      // jako záložky: je jednorázová a tři samostatné položky menu svítily i
+      // firmě, která nikdy nic nepřevzala. Staré adresy vedou na svou záložku,
+      // ať fungují odkazy z manuálu i uložené záložky prohlížeče.
+      { path: 'payroll/migration-reconciliation', name: 'payroll-migration-reconciliation', redirect: { path: '/payroll/imports', query: { tab: 'reconciliation' } } },
+      { path: 'payroll/posting-map', name: 'payroll-posting-map', redirect: { path: '/payroll/imports', query: { tab: 'posting_map' } } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Kromě měsíčních importů drží i agendu přechodu (převzaté mzdy, kontrola
+      // přepočtu, kontace). Právo je proto základní `payroll`: každá záložka si
+      // své právo hlídá sama a sestavu přechodu smí otevřít i ten, kdo nesmí
+      // nahrávat vstupy. Serverovou stranu drží RoutePermissionMap beze změny.
       { path: 'payroll/imports', name: 'payroll-imports', component: () => import('@/pages/payroll/PayrollImports.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Retenční lhůty ukazují katalog z kódu a pouštějí dvojí zápis — odchylku
       // firmy a zadržení výmazu. Jedou na `payroll.retention` — stejný klíč hlídá

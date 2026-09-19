@@ -129,12 +129,12 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-annual-settlement': ['payroll.documents'],
   'payroll-submissions': ['payroll.submissions'],
   'payroll-submissions-tab': ['payroll.submissions'],
-  'payroll-migration-reconciliation': ['payroll.reports'],
-  'payroll-posting-map': ['payroll.settings'],
   'payroll-settings': ['payroll.settings'],
-  // Importy zakládají osoby i mzdové vstupy; vstupní branou je zápis vstupů,
-  // import registrací si server hlídá vlastním právem `payroll.person.write`.
-  'payroll-imports': ['payroll.inputs.write'],
+  // Importy zakládají osoby i mzdové vstupy, ale drží i agendu přechodu
+  // (převzaté mzdy, kontrola přepočtu, kontace) s vlastními právy. Branou je
+  // proto základní `payroll` a jednotlivé záložky se filtrují podle práv;
+  // server si každou cestu hlídá sám v RoutePermissionMap.
+  'payroll-imports': ['payroll'],
   'payroll-rulesets': ['payroll.rulesets'],
   'payroll-retention': ['payroll.retention'],
   'payroll-erasure': ['payroll.erasure'],
