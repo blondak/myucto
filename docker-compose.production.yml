@@ -73,7 +73,9 @@ services:
     restart: unless-stopped
     # Tuning pro hosting s málo pamětí/diskem:
     #   - performance_schema OFF → ~100–200 MB méně RAM
-    #   - buffer pool 128 MB (RAM) — sniž na 64M přes DB_INNODB_BUFFER_POOL pro malý stroj
+    #   - buffer pool 128 MB (RAM) — přes DB_INNODB_BUFFER_POOL přizpůsob stroji:
+    #     64M na opravdu malý VPS, 1G při 3 GB RAM, 1536M při 4 GB RAM. Buffer pool
+    #     pod velikostí dat znamená, že se každý dotaz dočítá z disku.
     #   - redo log 48 MB místo default 96 MB → ~50 MB méně na disku (DB_INNODB_LOG_SIZE)
     # MariaDB redo log při startu bezpečně přesází (po čistém shutdownu), data zůstávají.
     command:
@@ -83,6 +85,29 @@ services:
       # Default 16 MB nestačí na dump ani obnovu s přílohami do 50 MB
       # (documents.max_file_bytes) — kontrola prostředí to hlásí jako varování.
       - --max-allowed-packet=${DB_MAX_ALLOWED_PACKET:-64M}
+      # Dočasné tabulky (ORDER BY/GROUP BY nad joinem). Default 16 MB posílá na disk
+      # i malý mezivýsledek — u deníku a sestav to stojí stovky ms navíc.
+      - --tmp-table-size=${DB_TMP_TABLE_SIZE:-64M}
+      - --max-heap-table-size=${DB_TMP_TABLE_SIZE:-64M}
+      # Úložiště je SSD/NVMe. Default io_capacity=200 a flush_neighbors=1 jsou
+      # hodnoty pro rotační disk a zbytečně brzdí zápis i čištění buffer poolu.
+      - --innodb-io-capacity=${DB_INNODB_IO_CAPACITY:-1000}
+      - --innodb-io-capacity-max=${DB_INNODB_IO_CAPACITY_MAX:-2000}
+      - --innodb-flush-neighbors=0
+      # Schéma má přes 550 tabulek, default 400 definic se recykluje pořád dokola.
+      - --table-definition-cache=${DB_TABLE_DEFINITION_CACHE:-1000}
+      # Přesnější statistiky = lepší plány. S defaultem 20 vzorků sahá optimalizátor
+      # u self-joinů deníku po scanu celé tabulky (BNL) místo indexu.
+      - --innodb-stats-persistent-sample-pages=64
+      # Strop spojení drží nejhorší případ per-connection bufferů v mezích;
+      # víc než 80 souběžných spojení tahle aplikace neotevře.
+      - --max-connections=${DB_MAX_CONNECTIONS:-80}
+      # Pomalé dotazy logovat trvale — bez nich se výkonový problém v produkci hádá.
+      # Log leží v datovém volume; při long_query_time=1 je za normálu prázdný.
+      - --slow-query-log=${DB_SLOW_QUERY_LOG:-1}
+      - --slow-query-log-file=/var/lib/mysql/slow.log
+      - --long-query-time=${DB_LONG_QUERY_TIME:-1}
+      - --log-slow-verbosity=query_plan,explain
     environment:
       # Fail-closed: bez .env se stack nespustí (žádný předvídatelný default).
       # Vytvoř .env s DB_PASSWORD a DB_ROOT_PASSWORD (viz hlavička výše).
