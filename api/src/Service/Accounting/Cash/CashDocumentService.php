@@ -669,7 +669,13 @@ final class CashDocumentService
             'entry_date'    => (string) $doc['issue_date'],
             'document_date' => (string) ($doc['tax_date'] ?? $doc['issue_date']),
             'document_no'   => $docNumber,
-            'description'   => (string) $doc['description'],
+            // Samotné `cash_documents.description` je u desítek dokladů shodné
+            // („Tržba v hotovosti"); do deníku patří i číslo dokladu, pokladna a
+            // účastník (§11/1/b) — skládá je SSOT
+            // {@see \MyInvoice\Service\Accounting\JournalDescriptionBuilder}.
+            'description'   => \MyInvoice\Service\Accounting\JournalDescriptionBuilder::forCashRow(
+                array_merge($doc, ['doc_number' => $docNumber, 'register_name' => $register['name'] ?? null]),
+            ),
             'posted'        => true,
             'user_id'       => $userId,
             'posted_by'     => $userId,
@@ -714,7 +720,9 @@ final class CashDocumentService
             'entry_date'    => (string) $doc['issue_date'],
             'document_date' => (string) ($doc['tax_date'] ?? $doc['issue_date']),
             'document_no'   => (string) $doc['doc_number'],
-            'description'   => (string) $doc['description'],
+            'description'   => \MyInvoice\Service\Accounting\JournalDescriptionBuilder::forCashRow(
+                array_merge($doc, ['register_name' => $register['name'] ?? null]),
+            ),
             'posted'        => true,
         ]);
 

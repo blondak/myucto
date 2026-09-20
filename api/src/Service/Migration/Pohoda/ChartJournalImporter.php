@@ -10,6 +10,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 
@@ -197,9 +198,20 @@ final class ChartJournalImporter
                 $entryDate = $entryDate < $period['starts_on'] ? $period['starts_on'] : $period['ends_on'];
                 $moved[] = $number ?: $groupKey;
             }
+            // Pohoda veze v řádku deníku JEN volný text (`act:text`), který je u celé
+            // řady dokladů shodný („Fakturujeme Vám za …"). Do popisu proto jde i
+            // agenda a číslo dokladu, ať se zápisy v deníku dají rozlišit; protistranu
+            // doplní {@see DocumentLinker} po navázání dokladů (source_id) přes
+            // {@see \MyInvoice\Service\Accounting\JournalDescriptionRebuilder}.
             $description = $isOpening
                 ? 'Počáteční stavy ' . $year . ' (převzato z Pohody)'
-                : (PohodaXml::text($first, 'text') ?: ($number !== '' ? $number : 'Účetní zápis z Pohody'));
+                : JournalDescriptionBuilder::composeParts([
+                    trim(PohodaJournal::shortLabel(PohodaJournal::source($first)) . ' ' . $number),
+                    PohodaXml::text($first, 'text'),
+                ]);
+            if ($description === '') {
+                $description = 'Účetní zápis z Pohody';
+            }
 
             $entryId = $this->journal->insert([
                 'supplier_id' => $ctx->supplierId,

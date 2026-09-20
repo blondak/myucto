@@ -187,9 +187,10 @@ final class BackfillAccountingTest extends TestCase
             self::assertSame(1, $this->sourceEntryCount('invoice', $id));
         }
         self::assertSame($before, $this->pending->count($this->supplierId, self::YEAR . '-01-01')['invoices']);
-        self::assertStringStartsWith('Vydaný dobropis', $this->sourceDescription('invoice', $ids[0]));
-        self::assertStringStartsWith('Daňový doklad k přijaté platbě', $this->sourceDescription('invoice', $ids[1]));
-        self::assertStringStartsWith('Penalizační faktura', $this->sourceDescription('invoice', $ids[2]));
+        // Popis skládá JournalDescriptionBuilder: „zkratka a číslo dokladu — protistrana — obsah".
+        self::assertStringStartsWith('Dobropis FV DB-BF-2098-1 — ', $this->sourceDescription('invoice', $ids[0]));
+        self::assertStringStartsWith('DD k platbě DD-BF-2098-1 — ', $this->sourceDescription('invoice', $ids[1]));
+        self::assertStringStartsWith('Penalizační FV PN-BF-2098-1 — ', $this->sourceDescription('invoice', $ids[2]));
 
         $this->backfill->run($this->supplierId, null, self::YEAR, false);
         foreach ($ids as $id) {

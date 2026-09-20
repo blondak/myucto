@@ -528,11 +528,16 @@ final class TransferPairService
         return $ref !== '' ? $ref : 'BANK-' . (int) $tx['id'];
     }
 
+    /**
+     * Popis bankovního zápisu — tatáž SSOT jako u {@see BankPostingService}
+     * ({@see \MyInvoice\Service\Accounting\JournalDescriptionBuilder::forBankRow()}).
+     * Dřív tady stála okopírovaná verze téhož pravidla, takže se obě větve mohly
+     * rozejít při první úpravě.
+     *
+     * @param array<string,mixed> $tx
+     */
     private function entryDescription(array $tx): string
     {
-        $name = trim((string) ($tx['counterparty_name'] ?? ''));
-        $description = trim((string) ($tx['description'] ?? ''));
-        $value = $name !== '' && $description !== '' ? $name . ' — ' . $description : ($name ?: $description);
-        return $value !== '' ? mb_substr($value, 0, 255) : 'BANK-' . (int) $tx['id'];
+        return \MyInvoice\Service\Accounting\JournalDescriptionBuilder::forBankRow($tx);
     }
 }

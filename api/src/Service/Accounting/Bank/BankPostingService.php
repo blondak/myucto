@@ -1722,7 +1722,11 @@ final class BankPostingService
         }
         return $this->cardSettlement->sync($supplierId, $txId, CardSettlementService::SOURCE_SETTLEMENT, $lines, [
             'txDate'      => substr((string) $tx['posted_at'], 0, 10),
-            'description' => mb_substr('Vypořádání platby kartou — ' . $this->entryDescription($tx), 0, 255),
+            // composeParts místo mb_substr: ořez na hranici slova (viz JournalDescriptionBuilder).
+            'description' => \MyInvoice\Service\Accounting\JournalDescriptionBuilder::composeParts([
+                'Vypořádání platby kartou',
+                $this->entryDescription($tx),
+            ]),
             'document_no' => $this->documentNo($tx),
             'user_id'     => $userId,
         ]);
@@ -2084,7 +2088,10 @@ final class BankPostingService
                     'entry_date' => (string) $tx['posted_at'],
                     'document_date' => (string) $tx['posted_at'],
                     'document_no' => $this->documentNo($tx),
-                    'description' => $detected->description ?: $this->entryDescription($tx),
+                    // Popis z detektoru je VĚCNÝ OBSAH („Záloha na daň z příjmů"),
+                    // ne identifikace pohybu — proto vstupuje jako detail, ne místo
+                    // celého popisu. Sám o sobě je u desítek plateb shodný.
+                    'description' => $this->entryDescription($tx, $detected->description),
                     'posted' => true,
                     'user_id' => $userId,
                     'posted_by' => $userId,
@@ -2205,7 +2212,9 @@ final class BankPostingService
                     'entry_date'    => $postedAt,
                     'document_date' => $postedAt,
                     'document_no'   => $this->documentNo($tx),
-                    'description'   => (string) ($rule['description'] ?? '') !== '' ? (string) $rule['description'] : $this->entryDescription($tx),
+                    // Popis pravidla je věcný obsah, ne identifikace pohybu — viz
+                    // stejné místo u detektoru výš.
+                    'description'   => $this->entryDescription($tx, (string) ($rule['description'] ?? '')),
                     'posted'        => true,
                     'user_id'       => $userId,
                     'posted_by'     => $userId,
@@ -4004,15 +4013,22 @@ final class BankPostingService
         return $ref ?? ('BANK-' . (int) $tx['id']);
     }
 
-    private function entryDescription(array $tx): string
+    /**
+     * Popis bankovního zápisu. Skládání je SSOT
+     * ({@see \MyInvoice\Service\Accounting\JournalDescriptionBuilder}), sdílená
+     * s fakturami, pokladnou i zpětným dogenerováním — dřív tady i v
+     * {@see TransferPairService} stála vlastní (a navzájem okopírovaná) verze, která
+     * z pohybu vzala jen protistranu a zprávu. Výpis bez protistrany a bez zprávy
+     * pak dal popis „BANK-123", několik plateb téže firmě zase popis shodný.
+     *
+     * `$detail` je věcný obsah nad rámec pohybu (popis z pravidla automatiky, text
+     * zadaný účetní v dialogu) — do popisu se přidá jako poslední segment.
+     *
+     * @param array<string,mixed> $tx
+     */
+    private function entryDescription(array $tx, ?string $detail = null): string
     {
-        $name = trim((string) ($tx['counterparty_name'] ?? ''));
-        $desc = trim((string) ($tx['description'] ?? ''));
-        if ($name !== '' && $desc !== '') {
-            return mb_substr($name . ' — ' . $desc, 0, 255);
-        }
-        $one = $name !== '' ? $name : $desc;
-        return $one !== '' ? mb_substr($one, 0, 255) : ('BANK-' . (int) $tx['id']);
+        return \MyInvoice\Service\Accounting\JournalDescriptionBuilder::forBankRow($tx, $detail);
     }
 
     /** @param array<string,mixed> $tx */

@@ -217,10 +217,10 @@ final class AutoPostAndBulkTest extends TestCase
 
         $entry = $this->journal->findBySource($this->supplierId, 'purchase_invoice', $purchaseId);
         self::assertNotNull($entry, 'Auto-post PF se zapnutým flagem projde.');
-        self::assertSame(
-            'Přijatá faktura Vodafone Czech Republic a.s. VF-2099-8473',
-            $entry['description'],
-            'Auto-post bez explicitního popisu dostane čitelný default (dodavatel + číslo dokladu).',
+        self::assertStringStartsWith(
+            'PF VF-2099-8473 — Vodafone Czech Republic a.s.',
+            (string) $entry['description'],
+            'Auto-post bez explicitního popisu dostane čitelný default (číslo dokladu + dodavatel).',
         );
     }
 
