@@ -50,7 +50,7 @@ final class JournalDescriptionRebuilder
      * Spočítá, kolik zápisů by se změnilo, a vrátí návrh „před → po".
      * Prohlédne nejvýše `limit` zápisů (výchozí {@see DEFAULT_LIMIT}).
      *
-     * @param array{supplier_id?:?int, source_type?:?string, limit?:?int, after_id?:int, entry_ids?:list<int>} $filter
+     * @param array{supplier_id:int, source_type?:?string, limit?:?int, after_id?:int, entry_ids?:list<int>} $filter
      * @return list<array{id:int, supplier_id:int, source_type:string, source_id:int, before:?string, after:string}>
      */
     public function plan(array $filter = []): array
@@ -63,7 +63,7 @@ final class JournalDescriptionRebuilder
      * zápisu (ne posledního změněného). Volající tím stránkuje přes kurzor; `null`
      * znamená, že další dávka už není.
      *
-     * @param array{supplier_id?:?int, source_type?:?string, limit?:?int, after_id?:int, entry_ids?:list<int>} $filter
+     * @param array{supplier_id:int, source_type?:?string, limit?:?int, after_id?:int, entry_ids?:list<int>} $filter
      * @return array{items:list<array{id:int, supplier_id:int, source_type:string, source_id:int, before:?string, after:string}>, last_id:?int}
      */
     public function planBatch(array $filter = []): array
@@ -154,7 +154,7 @@ final class JournalDescriptionRebuilder
      * Stránkuje přes kurzor `id`, ne přes OFFSET: přepsaný zápis z výběru vypadne
      * (jeho popis už odpovídá), takže by se s OFFSETem další dávka přeskakovala.
      *
-     * @param array{supplier_id?:?int, source_type?:?string, limit?:?int, entry_ids?:list<int>} $filter
+     * @param array{supplier_id:int, source_type?:?string, limit?:?int, entry_ids?:list<int>} $filter
      */
     public function rebuild(array $filter = []): int
     {
@@ -179,7 +179,7 @@ final class JournalDescriptionRebuilder
     }
 
     /**
-     * @param array{supplier_id?:?int, source_type?:?string, limit?:?int, after_id?:int, entry_ids?:list<int>} $filter
+     * @param array{supplier_id:int, source_type?:?string, limit?:?int, after_id?:int, entry_ids?:list<int>} $filter
      * @return list<array<string,mixed>>
      */
     private function candidates(array $filter): array
@@ -201,10 +201,20 @@ final class JournalDescriptionRebuilder
             $params[] = $t;
         }
 
-        if (isset($filter['supplier_id']) && $filter['supplier_id'] !== null) {
-            $where[]  = 'je.supplier_id = ?';
-            $params[] = (int) $filter['supplier_id'];
+        // Tenantová podmínka je POVINNÁ, ne volitelná. Dokud šlo `supplier_id`
+        // vynechat, projel jeden dotaz deník všech firem naráz — data by sice
+        // skončila u správné firmy (plán i UPDATE nesou supplier_id řádku), ale
+        // dávka bez tenantové podmínky je přesně ten tvar, který architektonická
+        // kontrola hlídá, a u instalace s víc firmami není z výstupu poznat, čeho
+        // se zásah vlastně týkal. Více firem = více běhů, viz CLI skript.
+        $supplierId = (int) ($filter['supplier_id'] ?? 0);
+        if ($supplierId <= 0) {
+            throw new \InvalidArgumentException(
+                'JournalDescriptionRebuilder: supplier_id je povinný — dávka se pouští po firmách.'
+            );
         }
+        $where[]  = 'je.supplier_id = ?';
+        $params[] = $supplierId;
         if ((int) ($filter['after_id'] ?? 0) > 0) {
             $where[]  = 'je.id > ?';
             $params[] = (int) $filter['after_id'];

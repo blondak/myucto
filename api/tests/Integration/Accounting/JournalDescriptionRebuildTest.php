@@ -173,6 +173,28 @@ final class JournalDescriptionRebuildTest extends TestCase
         self::assertSame($after, $this->journal->find($entryId, $this->supplierId)['description']);
     }
 
+    /**
+     * Dávka se pouští VŽDY po firmách. Dokud šel `supplier_id` vynechat, projel jeden
+     * dotaz deník všech firem naráz: data sice skončila u správné firmy (plán i UPDATE
+     * nesou `supplier_id` řádku), ale dotaz bez tenantové podmínky je přesně ten tvar,
+     * který architektonická kontrola hlídá, a u instalace s víc firmami nebylo z běhu
+     * poznat, čí deník se přepsal.
+     */
+    public function testSupplierIdIsMandatoryForEveryBatch(): void
+    {
+        foreach ([[], ['supplier_id' => null], ['supplier_id' => 0]] as $filter) {
+            try {
+                $this->rebuilder->plan($filter);
+                self::fail('Dávka bez supplier_id musí skončit výjimkou: ' . json_encode($filter));
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('supplier_id', $e->getMessage());
+            }
+        }
+
+        // S firmou naopak projít musí — guard nesmí zablokovat běžné použití.
+        self::assertSame([], $this->rebuilder->plan(['supplier_id' => $this->supplierId, 'entry_ids' => []]));
+    }
+
     /** Ruční zápis je popis účetní, ne dokladu — dogenerování se ho nesmí dotknout. */
     public function testManualEntryIsNeverTouched(): void
     {

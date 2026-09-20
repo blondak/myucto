@@ -29,6 +29,11 @@ declare(strict_types=1);
  *   --samples=N          kolik ukázek „před → po" vypsat (výchozí 20)
  */
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit("CLI only.\n");
+}
+
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
@@ -61,28 +66,52 @@ $container = $app->getContainer();
 /** @var JournalDescriptionRebuilder $rebuilder */
 $rebuilder = $container->get(JournalDescriptionRebuilder::class);
 
-$filter = [
-    'supplier_id' => $supplier !== null ? (int) $supplier : null,
-    'source_type' => $sourceType,
-    'limit'       => 2000, // velikost dávky, ne strop změn — ten hlídá --limit níž
-];
+// Dávka jede VŽDY po jedné firmě — rebuilder tenantovou podmínku vyžaduje, takže
+// bez `--supplier` si seznam firem vytáhneme sami a projdeme je popořadě. Na
+// instalaci s víc firmami je pak z výstupu vidět, čeho se zásah týkal; jeden
+// společný dotaz přes všechny firmy to nerozlišil.
+/** @var \MyInvoice\Infrastructure\Database\Connection $db */
+$db = $container->get(\MyInvoice\Infrastructure\Database\Connection::class);
+if ($supplier !== null) {
+    $supplierIds = [(int) $supplier];
+} else {
+    $supplierIds = array_map(
+        static fn (array $r): int => (int) $r['id'],
+        $db->pdo()->query('SELECT id FROM supplier ORDER BY id')->fetchAll(PDO::FETCH_ASSOC),
+    );
+}
+if ($supplierIds === []) {
+    fwrite(STDERR, "Žádná firma k projití.\n");
+    exit(1);
+}
+
 $max = $limit !== null ? max(1, (int) $limit) : null;
 
 // Stránkuje se přes kurzor `id`: přepsaný zápis z výběru vypadne, takže OFFSET by
 // další dávku přeskočil. Deník má u převedených instalací desítky tisíc zápisů.
-$plan    = [];
-$afterId = 0;
-while ($max === null || count($plan) < $max) {
-    $batch = $rebuilder->planBatch(array_merge($filter, ['after_id' => $afterId]));
-    if ($batch['last_id'] === null || $batch['last_id'] <= $afterId) {
-        break;
-    }
-    $afterId = $batch['last_id'];
-    foreach ($batch['items'] as $item) {
-        $plan[] = $item;
-        if ($max !== null && count($plan) >= $max) {
+$plan = [];
+foreach ($supplierIds as $supplierId) {
+    $filter = [
+        'supplier_id' => $supplierId,
+        'source_type' => $sourceType,
+        'limit'       => 2000, // velikost dávky, ne strop změn — ten hlídá --limit níž
+    ];
+    $afterId = 0;
+    while ($max === null || count($plan) < $max) {
+        $batch = $rebuilder->planBatch(array_merge($filter, ['after_id' => $afterId]));
+        if ($batch['last_id'] === null || $batch['last_id'] <= $afterId) {
             break;
         }
+        $afterId = $batch['last_id'];
+        foreach ($batch['items'] as $item) {
+            $plan[] = $item;
+            if ($max !== null && count($plan) >= $max) {
+                break;
+            }
+        }
+    }
+    if ($max !== null && count($plan) >= $max) {
+        break;
     }
 }
 $mode = $apply ? '' : '[DRY-RUN] ';
@@ -101,6 +130,20 @@ ksort($byType);
 echo "{$mode}Ke změně je " . count($plan) . " zápisů:\n";
 foreach ($byType as $type => $count) {
     printf("  %-18s %6d\n", $type, $count);
+}
+
+// Rozpad po firmách dává smysl jen u instalace s víc firmami — tam je ale zásadní,
+// ať je z výstupu vidět, čí deník se přepisuje.
+if (count($supplierIds) > 1) {
+    $bySupplier = [];
+    foreach ($plan as $item) {
+        $bySupplier[$item['supplier_id']] = ($bySupplier[$item['supplier_id']] ?? 0) + 1;
+    }
+    ksort($bySupplier);
+    echo "\nPo firmách:\n";
+    foreach ($bySupplier as $sid => $count) {
+        printf("  supplier_id=%-6d %6d\n", $sid, $count);
+    }
 }
 
 if ($samples > 0) {
