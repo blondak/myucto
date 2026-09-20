@@ -12,7 +12,7 @@ import {
 import type { SortPref } from '@/api/preferences'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
-import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
+import { ICONS, btnOutline, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -133,6 +133,16 @@ const filteredFlatRows = computed<FlatRow[]>(() => {
  * Sestava rozdělená na pohledávky a závazky — bloky konfrontace i řádky dokladů
  * dostane každá strana vlastní. Strana bez účtu v sestavě se vůbec nevykreslí.
  */
+/**
+ * Kolik řádků se vykreslí najednou. Saldokonto je kumulativní sestava „k datu" bez
+ * dolní hranice, takže na zavedené firmě jde o tisíce otevřených položek — na
+ * produkci 3 170 řádků v jedné tabulce, což prohlížeč vykresloval přes tři sekundy.
+ * Server vrací celou sestavu schválně (součty i export musí sedět na haléř), omezuje
+ * se tedy jen to, co je NAMALOVANÉ; `total` níž se dál počítá ze VŠECH řádků.
+ */
+const ROW_CHUNK = 200
+const shown = reactive<Record<string, number>>({})
+
 const sections = computed(() => {
   const r = report.value
   if (!r) return []
@@ -143,10 +153,24 @@ const sections = computed(() => {
         side,
         blocks: r.accounts.filter(b => sideOfAccount(b.account.normal_side) === side),
         rows,
+        visible: rows.slice(0, shown[side] ?? ROW_CHUNK),
+        hidden: Math.max(0, rows.length - (shown[side] ?? ROW_CHUNK)),
+        // Σ ze VŠECH řádků strany, ne jen z vykreslených — jinak by inventarizační
+        // sestava ukazovala součet, který neodpovídá zůstatku hlavní knihy.
         total: Math.round(rows.reduce((s, x) => s + x.remaining_czk, 0) * 100) / 100,
       }
     })
     .filter(s => s.blocks.length > 0)
+})
+
+function showMore(side: string, hidden: number) {
+  shown[side] = (shown[side] ?? ROW_CHUNK) + Math.min(hidden, ROW_CHUNK)
+}
+
+// Nová data nebo jiný filtr = zase od začátku; jinak by po zúžení filtru zůstalo
+// rozbalené okno z předchozí sestavy.
+watch([report, filteredFlatRows], () => {
+  for (const k of Object.keys(shown)) delete shown[k]
 })
 
 // ── Task #3: as_of napříč obdobími — UI upozornění, když se liší od výběru ──
@@ -406,7 +430,7 @@ onMounted(async () => {
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
-                <tr v-for="it in s.rows" :key="`${it.account_code}-${it.doc_type}-${it.doc_id}`" class="hover:bg-neutral-50">
+                <tr v-for="it in s.visible" :key="`${it.account_code}-${it.doc_type}-${it.doc_id}`" class="hover:bg-neutral-50">
                   <td class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ it.account_code }}</td>
                   <td class="px-3 py-2">{{ it.partner_name }}</td>
                   <td class="px-3 py-2">
@@ -430,6 +454,16 @@ onMounted(async () => {
                 </tr>
               </tbody>
               <tfoot class="bg-neutral-50 text-sm font-semibold">
+                <tr v-if="s.hidden > 0" class="font-normal">
+                  <td class="px-3 py-2 text-center" colspan="9">
+                    <button type="button" :class="btnOutlineSm" @click="showMore(s.side, s.hidden)">
+                      {{ t('accounting.saldo.show_more', { count: Math.min(s.hidden, ROW_CHUNK) }) }}
+                    </button>
+                    <span class="ml-3 text-xs text-neutral-500">
+                      {{ t('accounting.saldo.shown_of', { shown: s.visible.length, total: s.rows.length }) }}
+                    </span>
+                  </td>
+                </tr>
                 <tr>
                   <td class="px-3 py-2" colspan="8">{{ t(`accounting.saldo.side_${s.side}_total`) }}</td>
                   <td class="px-3 py-2 text-right font-mono">{{ formatMoney(s.total) }}</td>

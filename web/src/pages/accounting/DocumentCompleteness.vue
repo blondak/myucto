@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { documentCompletenessApi, type DocumentCompletenessResult, type Direction } from '@/api/documentCompleteness'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -15,6 +16,26 @@ const days = ref(30)
 const direction = ref<Direction>('all')
 
 const DIRECTIONS: Direction[] = ['all', 'outgoing', 'incoming']
+
+/**
+ * Kolik radku se vykresli najednou. Kontrola uplnosti vraci VSECHNY nalezy naraz
+ * (souhrny v zahlavi i export musi sedet), takze na zavedene firme slo o tri tisice
+ * radku ve dvou tabulkach a prohlizec je maloval sekundy. Omezuje se jen to, co je
+ * NAMALOVANE - `summary` v zahlavi se dal pocita ze vsech polozek.
+ */
+const ROW_CHUNK = 200
+const shownBank = ref(ROW_CHUNK)
+const shownDocs = ref(ROW_CHUNK)
+
+const bankItems = computed(() => data.value?.bank_without_document.items ?? [])
+const docsItems = computed(() => data.value?.documents_overdue_unpaid.items ?? [])
+const bankVisible = computed(() => bankItems.value.slice(0, shownBank.value))
+const docsVisible = computed(() => docsItems.value.slice(0, shownDocs.value))
+const bankHidden = computed(() => Math.max(0, bankItems.value.length - shownBank.value))
+const docsHidden = computed(() => Math.max(0, docsItems.value.length - shownDocs.value))
+
+// Nova data = zase od zacatku, jinak by po zmene filtru zustalo rozbalene okno.
+watch(data, () => { shownBank.value = ROW_CHUNK; shownDocs.value = ROW_CHUNK })
 
 let requestSeq = 0
 async function load() {
@@ -86,7 +107,7 @@ function bucketLabel(bucket: string): string {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="item in data.bank_without_document.items" :key="item.bank_transaction_id" class="hover:bg-neutral-50">
+              <tr v-for="item in bankVisible" :key="item.bank_transaction_id" class="hover:bg-neutral-50">
                 <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(item.date) }}</td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">{{ item.days }}</td>
                 <td class="px-3 py-2">
@@ -107,6 +128,16 @@ function bucketLabel(bucket: string): string {
                     class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
                     {{ t('documentCompleteness.open_statement') }} →
                   </RouterLink>
+                </td>
+              </tr>
+              <tr v-if="bankHidden > 0">
+                <td class="px-3 py-3 text-center" colspan="6">
+                  <button type="button" :class="btnOutlineSm" @click="shownBank += ROW_CHUNK">
+                    {{ t('documentCompleteness.show_more', { count: Math.min(bankHidden, ROW_CHUNK) }) }}
+                  </button>
+                  <span class="ml-3 text-xs text-neutral-500">
+                    {{ t('documentCompleteness.shown_of', { shown: bankVisible.length, total: bankItems.length }) }}
+                  </span>
                 </td>
               </tr>
             </tbody>
@@ -141,7 +172,7 @@ function bucketLabel(bucket: string): string {
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="item in data.documents_overdue_unpaid.items" :key="item.doc_type + item.doc_id" class="hover:bg-neutral-50">
+            <tr v-for="item in docsVisible" :key="item.doc_type + item.doc_id" class="hover:bg-neutral-50">
               <td class="px-3 py-2 whitespace-nowrap">
                 <span class="text-xs text-neutral-400">{{ t(`documentCompleteness.doc_type.${item.doc_type}`) }}</span>
                 <div>{{ item.doc_no }}</div>
@@ -155,6 +186,16 @@ function bucketLabel(bucket: string): string {
                   class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
                   {{ t('documentCompleteness.open_doc') }} →
                 </RouterLink>
+              </td>
+            </tr>
+            <tr v-if="docsHidden > 0">
+              <td class="px-3 py-3 text-center" colspan="7">
+                <button type="button" :class="btnOutlineSm" @click="shownDocs += ROW_CHUNK">
+                  {{ t('documentCompleteness.show_more', { count: Math.min(docsHidden, ROW_CHUNK) }) }}
+                </button>
+                <span class="ml-3 text-xs text-neutral-500">
+                  {{ t('documentCompleteness.shown_of', { shown: docsVisible.length, total: docsItems.length }) }}
+                </span>
               </td>
             </tr>
           </tbody>
