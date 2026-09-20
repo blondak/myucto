@@ -13305,7 +13305,9 @@
       "flat_empty": "Žádné otevřené položky neodpovídají zvoleným filtrům.",
       "period_mismatch_hint": "Zvolený rozvahový den spadá do účetního období {fiscal_year}, ne do vybraného období v dropdownu — sestava je i tak spočtená správně.",
       "period_mismatch_switch": "Přepnout na období {fiscal_year}",
-      "period_missing_hint": "Pro zvolený rozvahový den není založené žádné účetní období — zůstatky se počítají kumulativně od počátku historie."
+      "period_missing_hint": "Pro zvolený rozvahový den není založené žádné účetní období — zůstatky se počítají kumulativně od počátku historie.",
+      "show_more": "Zobrazit dalších {count}",
+      "shown_of": "Zobrazeno {shown} z {total} řádků"
     },
     "account_statement": {
       "title": "Opis účtu",
@@ -18965,7 +18967,9 @@
     "field_constant_symbol": "Konstantní symbol",
     "field_message": "Zpráva",
     "field_bank_ref": "Reference banky",
-    "field_balance": "Disponibilní zůstatek"
+    "field_balance": "Disponibilní zůstatek",
+    "ingest_notices": "Načítat bankovní avíza",
+    "ingest_notices_hint": "Z těla e-mailu se čte avízo o pohybu a založí se z něj bankovní transakce. Vypněte, pokud vám banka posílá i PDF výpisy a avíza by pohyby zdvojovala — přílohy se dál zpracují podle přepínačů níže."
   },
   "settings": {
     "client_company_settings_title": "Nastavení firmy",
@@ -23015,7 +23019,9 @@
       "invoice": "Vydaná faktura",
       "purchase_invoice": "Přijatá faktura"
     },
-    "open_doc": "Otevřít doklad"
+    "open_doc": "Otevřít doklad",
+    "show_more": "Zobrazit dalších {count}",
+    "shown_of": "Zobrazeno {shown} z {total} řádků"
   },
   "manualQueue": {
     "title": "K doúčtování",

@@ -437,6 +437,7 @@ export interface BankEmailImapSettings {
   validate_cert: boolean
   require_email_auth: boolean
   allow_forwarded: boolean
+  ingest_notices: boolean
   ingest_pdf_invoices: boolean
   ingest_pdf_statements: boolean
   forwarded_from: string | null

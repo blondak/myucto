@@ -171,6 +171,9 @@ final class BankEmailNoticeScanner
                 } elseif ($status === 'attachment_imported') {
                     // Zpráva nebyla avízo, ale nesla fakturu. Není to chyba skenu —
                     // počítá se jen do příloh, ne do zpracovaných avíz.
+                } elseif ($status === 'notices_disabled') {
+                    // Účet má vypnutá avíza (`ingest_notices`), tělo zprávy se
+                    // nerozebíralo. Taky to není chyba skenu — přílohy se zpracovaly.
                 } elseif ($status === 'skipped_known') {
                     $summary['known_skipped']++;
                 } elseif ($status === 'skipped_old') {
@@ -274,6 +277,15 @@ final class BankEmailNoticeScanner
         $attachments['statements'] = $statements;
         $attachments['details'] = array_merge($statements['details'], $attachments['details']);
         $attachmentSummary = ['attachments' => $attachments];
+
+        // Avizo z TELA zpravy lze vypnout samostatne (`ingest_notices`, migrace 1857).
+        // Kdo od banky dostava jen PDF vypisy, nechce aviza zaroven - dublovala by
+        // pohyby, ktere stejne prijdou vypisem. Guard stoji az ZA zpracovanim priloh,
+        // takze kombinace "jen vypisy, zadna aviza" funguje; vypnout cely ucet by
+        // znamenalo prijit i o ty vypisy. Chybejici klic = zapnuto (stav pred migraci).
+        if (!(bool) ($settings['ingest_notices'] ?? true)) {
+            return $attachmentSummary + ['status' => 'notices_disabled', 'message_id' => $messageId];
+        }
 
         try {
             $resolved = $this->parseAndResolveMapping($supplierId, $imapAccountId, $message);

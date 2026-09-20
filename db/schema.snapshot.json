@@ -840,7 +840,8 @@
         "1853_payroll_takeover_runs.sql",
         "1854_bank_daily_statement_ingest.sql",
         "1855_supplier_default_note_below_items.sql",
-        "1856_journal_entries_list_indexes.sql"
+        "1856_journal_entries_list_indexes.sql",
+        "1857_bank_email_ingest_notices_toggle.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -2159,6 +2160,7 @@
                 "forwarded_from": "varchar(190) NULL DEFAULT NULL",
                 "host": "varchar(190) NOT NULL DEFAULT ''",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "ingest_notices": "tinyint(1) NOT NULL DEFAULT 1",
                 "ingest_pdf_invoices": "tinyint(1) NOT NULL DEFAULT 0",
                 "ingest_pdf_statements": "tinyint(1) NOT NULL DEFAULT 0",
                 "last_scan_at": "timestamp NULL DEFAULT NULL",

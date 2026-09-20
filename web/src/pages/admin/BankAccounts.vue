@@ -221,6 +221,9 @@ function defaultImapDraft(): Partial<BankEmailImapSettings> & { password?: strin
     validate_cert: true,
     require_email_auth: true,
     allow_forwarded: false,
+    // Aviza jsou puvodni ucel schranky, takze novy ucet je ma zapnuta;
+    // PDF prilohy nize jsou naopak opt-in.
+    ingest_notices: true,
     ingest_pdf_invoices: false,
     ingest_pdf_statements: false,
     forwarded_from: '',
@@ -1288,6 +1291,13 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <p class="text-xs text-neutral-500 mt-1">{{ t('bank_accounts.email_auth_serv_id_hint') }}</p>
             </div>
             <div class="md:col-span-3 grid md:grid-cols-2 gap-4 mt-7 items-start">
+              <label class="flex items-start gap-2 text-sm md:col-span-2">
+                <input v-model="imapDraft.ingest_notices" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                <span>
+                  {{ t('bank_accounts.ingest_notices') }}
+                  <span class="block text-xs text-neutral-500">{{ t('bank_accounts.ingest_notices_hint') }}</span>
+                </span>
+              </label>
               <label class="flex items-start gap-2 text-sm">
                 <input v-model="imapDraft.allow_forwarded" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
                 <span>

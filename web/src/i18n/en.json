@@ -13305,7 +13305,9 @@
       "flat_empty": "No open items match the selected filters.",
       "period_mismatch_hint": "The selected balance-sheet date falls into accounting period {fiscal_year}, not the period selected in the dropdown — the report is still computed correctly.",
       "period_mismatch_switch": "Switch to period {fiscal_year}",
-      "period_missing_hint": "No accounting period is defined for the selected balance-sheet date — balances are computed cumulatively from the beginning of history."
+      "period_missing_hint": "No accounting period is defined for the selected balance-sheet date — balances are computed cumulatively from the beginning of history.",
+      "show_more": "Show {count} more",
+      "shown_of": "Showing {shown} of {total} rows"
     },
     "account_statement": {
       "title": "Account statement",
@@ -18965,7 +18967,9 @@
     "field_constant_symbol": "Constant symbol",
     "field_message": "Message",
     "field_bank_ref": "Bank reference",
-    "field_balance": "Available balance"
+    "field_balance": "Available balance",
+    "ingest_notices": "Read bank notifications",
+    "ingest_notices_hint": "Reads the payment notification from the e-mail body and creates a bank transaction from it. Turn off if your bank also sends PDF statements and the notifications would duplicate the transactions - attachments are still processed per the switches below."
   },
   "settings": {
     "client_company_settings_title": "Company settings",
@@ -23015,7 +23019,9 @@
       "invoice": "Issued invoice",
       "purchase_invoice": "Received invoice"
     },
-    "open_doc": "Open document"
+    "open_doc": "Open document",
+    "show_more": "Show {count} more",
+    "shown_of": "Showing {shown} of {total} rows"
   },
   "manualQueue": {
     "title": "To post manually",

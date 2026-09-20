@@ -98,6 +98,12 @@ final class BankEmailNoticeRepository
                 ? (int) (bool) $body['require_email_auth']
                 : (int) (bool) ($current['require_email_auth'] ?? 1),
             'allow_forwarded' => !empty($body['allow_forwarded']) ? 1 : 0,
+            // Avizo z TELA zpravy. Jako jedine z teto trojice je ve vychozim stavu
+            // ZAPNUTE - je to puvodni a hlavni ucel schranky; PDF prilohy jsou opt-in.
+            // Kdo od banky dostava jen PDF vypisy, vypne tohle a nechá si `ingest_pdf_statements`.
+            'ingest_notices' => array_key_exists('ingest_notices', $body)
+                ? (int) (bool) $body['ingest_notices']
+                : (int) (bool) ($current['ingest_notices'] ?? 1),
             // Načítání PDF faktur z příloh — opt-in, mimo jiné proto, že jako jediné
             // nastavení účtu si z IMAPu tahá obsah příloh (paměť + čas skenu).
             'ingest_pdf_invoices' => array_key_exists('ingest_pdf_invoices', $body)
@@ -130,7 +136,8 @@ final class BankEmailNoticeRepository
             $sql = 'UPDATE bank_email_imap_settings
                        SET name = :name, enabled = :enabled, host = :host, port = :port, encryption = :encryption,
                            validate_cert = :validate_cert, require_email_auth = :require_email_auth,
-                           allow_forwarded = :allow_forwarded, ingest_pdf_invoices = :ingest_pdf_invoices,
+                           allow_forwarded = :allow_forwarded, ingest_notices = :ingest_notices,
+                           ingest_pdf_invoices = :ingest_pdf_invoices,
                            ingest_pdf_statements = :ingest_pdf_statements,
                            forwarded_from = :forwarded_from,
                            email_auth_serv_id = :email_auth_serv_id, username = :username, password_enc = :password_enc,
@@ -146,12 +153,12 @@ final class BankEmailNoticeRepository
         }
 
         $sql = 'INSERT INTO bank_email_imap_settings
-                  (supplier_id, name, enabled, host, port, encryption, validate_cert, require_email_auth, allow_forwarded, ingest_pdf_invoices, ingest_pdf_statements, forwarded_from, email_auth_serv_id,
+                  (supplier_id, name, enabled, host, port, encryption, validate_cert, require_email_auth, allow_forwarded, ingest_notices, ingest_pdf_invoices, ingest_pdf_statements, forwarded_from, email_auth_serv_id,
                    username, password_enc, folder,
                    max_messages_per_run, process_from_date, success_action, success_flag, success_move_folder,
                    failure_action, failure_flag, failure_move_folder, retry_failed, max_attempts)
                 VALUES
-                  (:supplier_id, :name, :enabled, :host, :port, :encryption, :validate_cert, :require_email_auth, :allow_forwarded, :ingest_pdf_invoices, :ingest_pdf_statements, :forwarded_from, :email_auth_serv_id,
+                  (:supplier_id, :name, :enabled, :host, :port, :encryption, :validate_cert, :require_email_auth, :allow_forwarded, :ingest_notices, :ingest_pdf_invoices, :ingest_pdf_statements, :forwarded_from, :email_auth_serv_id,
                    :username, :password_enc, :folder,
                    :max_messages_per_run, :process_from_date, :success_action, :success_flag, :success_move_folder,
                    :failure_action, :failure_flag, :failure_move_folder, :retry_failed, :max_attempts)';
@@ -704,6 +711,7 @@ final class BankEmailNoticeRepository
             'require_email_auth' => true,
             'allow_forwarded' => false,
             'ingest_pdf_invoices' => false,
+            'ingest_notices' => true,
             'ingest_pdf_statements' => false,
             'forwarded_from' => null,
             'email_auth_serv_id' => null,
@@ -822,6 +830,7 @@ final class BankEmailNoticeRepository
         $row['require_email_auth'] = (bool) ($row['require_email_auth'] ?? false);
         $row['allow_forwarded'] = (bool) ($row['allow_forwarded'] ?? false);
         $row['ingest_pdf_invoices'] = (bool) ($row['ingest_pdf_invoices'] ?? false);
+        $row['ingest_notices'] = (bool) ($row['ingest_notices'] ?? true);
         $row['ingest_pdf_statements'] = (bool) ($row['ingest_pdf_statements'] ?? false);
         $row['max_messages_per_run'] = (int) $row['max_messages_per_run'];
         $row['retry_failed'] = (bool) $row['retry_failed'];

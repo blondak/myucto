@@ -420,6 +420,7 @@ Každý dodavatel může mít více IMAP účtů, typicky jeden pro každou bank
 | Zpracovat od data | Starší e-maily se ignorují i když spadnou do limitu |
 | Vyžadovat ověření autenticity | Zpracují se jen e-maily, u kterých přijímací server potvrdil DKIM/DMARC; **zapnuto** |
 | Důvěryhodné authserv-id | Povinné při zapnutém ověření autenticity; přesný identifikátor přijímacího serveru z jeho hlavičky `Authentication-Results` (např. `mx.mojedomena.cz`) |
+| Načítat bankovní avíza | Z těla e-mailu se čte avízo o pohybu a zakládá se z něj bankovní transakce. Vypni, když ti banka posílá i PDF výpisy a avíza by pohyby zdvojovala — přílohy se dál zpracují podle přepínačů níže; **zapnuto** |
 | Přijímat přeposlaná (FW) avíza | Rozpozná banku i z těla e-mailu, když avíza chodí do schránky přeposlaná (odesílatel je tvoje adresa, ne banka) |
 | E-mail přeposílatele | Volitelné omezení, od koho smí přeposlaná avíza chodit — adresa (`jan@firma.cz`) nebo doména (`firma.cz`); prázdné = libovolný |
 | Načítat PDF faktury z příloh | Vedle avíz se z každé zprávy posoudí i PDF přílohy a doklady adresované tvé firmě se založí do Nákup → Příchozí doklady; **vypnuto** |
@@ -519,7 +520,12 @@ zamítnutá jako `security_rejected` do fronty dokladů nedostane nic.
 
 Banky bez přímého API posílají výpisy e-mailem jako PDF. Komerční banka navíc
 umí **denní výpis při pohybu** — za každý den, kdy se na účtu něco stalo, jedno
-PDF, a zvlášť za každou měnu účtu. Přepínač **Načítat PDF výpisy z příloh** u
+PDF, a zvlášť za každou měnu účtu. Samotná avíza jde vypnout přepínačem **Načítat bankovní avíza**. Hodí se,
+když od banky chodí avízo i výpis na tentýž pohyb — vypnutím avíz zůstane jako
+zdroj jen výpis a pohyby se nezdvojí. Vypnout celý účet by znamenalo přijít
+i o ty výpisy.
+
+Přepínač **Načítat PDF výpisy z příloh** u
 IMAP účtu zapne třetí větev zpracování: u každé nové zprávy se PDF přílohy zkusí
 přečíst jako bankovní výpis a ten, který k tvé firmě patří, se naimportuje —
 stejnou cestou jako ruční *Nahrát PDF*, tedy **včetně párování plateb s fakturami**.
