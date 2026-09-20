@@ -50,6 +50,25 @@ final class Ms3Journal
         return trim((string) ($row['Zdroj'] ?? '')) . '|' . trim((string) ($row['Doklad'] ?? '')) . '|' . (string) ($row['Datum'] ?? '');
     }
 
+    /**
+     * Zkratka agendy do popisu zápisu v deníku. Zrcadlí zkratky, kterými doklady
+     * pojmenovává {@see \MyInvoice\Service\Accounting\JournalDescriptionBuilder}, ať
+     * se převzatý zápis čte stejně jako zápis vzniklý v MyÚčtu. Neznámý zdroj si
+     * ponechá svůj dvoupísmenný kód z Money (ID, KZ, KP…).
+     */
+    public static function shortLabel(string $moneySource): string
+    {
+        $code = strtoupper(trim($moneySource));
+
+        return match ($code) {
+            'FV' => 'FV',
+            'FP' => 'PF',
+            'BK' => 'Banka',
+            'PK' => 'Pokladna',
+            default => $code,
+        };
+    }
+
     /** Zdroj dokladu v Money → `journal_entries.source_type`. */
     public static function sourceType(string $moneySource): string
     {

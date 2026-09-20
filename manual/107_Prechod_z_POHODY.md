@@ -175,6 +175,13 @@ a doklady se k němu jen připojí podle čísla dokladu. Z dokladu je proto vid
 jeho zápis a naopak a automatika už doklad znovu nezaúčtuje. Uzávěrkové zápisy
 se nepřebírají. Doklad s datem mimo převáděný rok se zaúčtuje k hranici období.
 
+**Popisy zápisů se dogenerují.** POHODA veze v řádku deníku jen volný text, který
+je u celé řady dokladů shodný („Fakturujeme Vám za …"). Po navázání dokladů proto
+převod popisy přeskládá do tvaru **doklad — protistrana — obsah**, aby se zápisy
+v deníku daly rozlišit; v protokolu to uvidíš jako *„U N převedených zápisů se popis
+doplnil o číslo dokladu a protistranu."* Částek, účtů ani dat se to nedotýká a jde
+to kdykoli zopakovat — viz [§ 52.12.1](52_Ucetni_denik.md#52121-dogenerovani-popisu-u-prevzatych-zapisu).
+
 **Doklady v režimu OSS.** Vydaná faktura, jejíž členění DPH stojí mimo přiznání
 a přesto nese daň, je typicky prodej koncovému zákazníkovi do jiného členského
 státu — v POHODĚ se vede vlastní zkratkou členění bez řádku přiznání, sazbou

@@ -89,6 +89,36 @@ proto **nikdy nevytvoří druhý zápis**:
 Ruční zápisy (`source_type` = Ruční) žádné `source_id` nemají, takže se na ně
 idempotence nevztahuje — každé uložení ručního zápisu je vždy nový samostatný zápis.
 
+### 52.1.2 Jak vzniká popis zápisu
+
+Popis je to jediné, podle čeho účetní v seznamu pozná, o jaký účetní případ jde, proto
+ho systém skládá **z údajů dokladu**, ne jen z jeho textu. Segmenty jsou oddělené
+pomlčkou a jdou vždy v pořadí **doklad — protistrana — věcný obsah**:
+
+| Zdroj | Tvar popisu | Příklad |
+|---|---|---|
+| Vydaná faktura | zkratka a číslo dokladu, odběratel, obsah prvního řádku | `FV 2099001234 — Odběratel s.r.o. — pronájem místa` |
+| Přijatá faktura | zkratka a číslo řady, dodavatelské číslo, dodavatel, obsah | `PF 2099-0007 / dod. VF-2099-88 — Dodavatel a.s. — leasing vozidla` |
+| Banka | číslo výpisu, směr platby, protistrana a variabilní symbol, zpráva pro příjemce | `Banka 2099/004 — příchozí platba — Odběratel s.r.o. (VS 2099001234) — Platba faktury` |
+| Pokladna | číslo dokladu, pokladna, účastník (§ 11/1/b), obsah | `PPD-2099-0042 — Pokladna Hlavní — Jan Novák — nákup kancelářských potřeb` |
+| Majetek a odpisy | druh operace, rok, karta majetku | `Účetní odpis 2099 — Užitkový vůz` |
+| Uzávěrka, mzdy, zápočty | druh operace a období | `Uzavření účetních knih 2099` |
+
+Pravidla, která přitom platí:
+
+- **Chybí-li některý údaj** (nespárovaná platba bez názvu protistrany), segment se
+  vynechá — místo názvu se použije alespoň protiúčet nebo zpráva pro příjemce.
+- **Text zadaný ručně** (popis v dialogu zaúčtování, popis pravidla automatiky) se
+  nezahazuje — zůstane jako poslední segment za identifikací dokladu.
+- **Popis je deterministický**: opakované zaúčtování téhož dokladu vyrobí týž text,
+  takže se v historii zápisu neobjeví změna, ke které věcně nedošlo.
+- **Délka** je omezená na 255 znaků a zkracuje se na hranici slova (na konci je `…`).
+
+> [!TIP]
+> Máš-li deník **převzatý z jiného systému** (POHODA, Money S3), nesou starší zápisy
+> popis z jediného pole původní agendy a bývají navlas stejné. Popisy jde kdykoli
+> dogenerovat — viz [§ 52.12.1](#52121-dogenerovani-popisu-u-prevzatych-zapisu).
+
 ## 52.2 Seznam zápisů
 
 Stránka **Účetní deník** zobrazuje stránkovaný seznam zápisů (50 na stránku,
@@ -513,7 +543,8 @@ u kterých popis nespravuje jiný doklad) se u popisu zobrazí ikona **tužky** 
 otevřeš textové pole (max. 255 znaků, Enter uloží, Esc zruší). U ostatních zdrojů
 (faktura, banka, pokladna, majetek…) je popis **uzamčen** — text „Popis se edituje na
 zdrojovém dokladu" vysvětluje, že popis patří k dokladu samotnému (pokus o editaci na
-serveru vždy skončí stejnou chybou, i kdyby se ji frontend nepokusil zabránit).
+serveru vždy skončí stejnou chybou, i kdyby se ji frontend nepokusil zabránit). Popis
+takového zápisu se skládá z údajů dokladu, viz [§ 52.1.2](#5212-jak-vznika-popis-zapisu).
 
 Úprava popisu funguje i na **už zaúčtovaném** zápisu — nejde o obcházení neměnnosti
 účetnictví, protože je **auditovaná**: u zaúčtovaného zápisu se navíc zobrazí varování
@@ -983,3 +1014,33 @@ běhu se kontroluje **podvojnost celého deníku** a nevyrovnaný stav se hlás�
 Účtuje se týmž kódem jako v průvodci aktivací účetnictví, takže výsledek je stejný,
 jako by doklady prošly aktivací. Oproti hromadnému zaúčtování z výběru v seznamu faktur
 tu není strop 500 dokladů na dávku.
+
+### 52.12.1 Dogenerování popisů u převzatých zápisů
+
+Deník převzatý z POHODY nebo Money S3 nese v popisu jen jedno pole původní agendy, takže
+desítky zápisů za sebou mívají navlas stejný text (typicky „Fakturujeme Vám za …"). Převod
+popisy dopočítá sám hned po navázání dokladů na zápisy — v protokolu převodu to uvidíš jako
+**„U N převedených zápisů se popis doplnil o číslo dokladu a protistranu."**
+
+Doplnit je jde i kdykoli později, příkazem na serveru:
+
+```bash
+php api/bin/rebuild-journal-descriptions.php                    # nanečisto, jen vypíše
+php api/bin/rebuild-journal-descriptions.php --apply            # skutečně přepíše
+php api/bin/rebuild-journal-descriptions.php --supplier=2 --apply
+php api/bin/rebuild-journal-descriptions.php --source-type=bank --limit=200
+```
+
+Bez `--apply` skript **nic nezapisuje** — vypíše, kolika zápisů se změna týká, po typech
+zdroje, a ukázku „před → po". Přepínač `--samples=N` řídí počet ukázek.
+
+Co se nikdy nepřepíše:
+
+- **ruční zápisy** a zápisy uzavření/otevření knih — jejich popis psala účetní,
+- zápisy **bez vazby na doklad** (storna, zápisy bez `source_id`) — není z čeho skládat,
+- zápisy **uzávěrky, mezd, majetku a zápočtů** — jejich popis vychází z údajů, které
+  v deníku nejsou, a už číslo i obsah nese,
+- popis, který **uživatel sám změnil** (auditovaná inline editace, § 35).
+
+Mění se **jen text popisu**. Částky, účty, data, období ani čísla dokladů zůstávají, takže
+se sestavy ani výkazy nezmění. Opakované spuštění už nic nepřepíše.

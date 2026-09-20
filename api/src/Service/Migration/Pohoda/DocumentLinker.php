@@ -93,7 +93,37 @@ final class DocumentLinker
             $p->warn(self::STEP_LINK, 'orphan_documents', count($orphans) . ' dokladů nemá v deníku Pohody zápis se stejným číslem. '
                 . 'Nejsou zaúčtované; zaúčtujte je ručně nebo v Účetnictví → Doúčtovat doklady.', ['documents' => array_slice($orphans, 0, 50)]);
         }
+        $this->refreshDescriptions($ctx->supplierId, $p);
         $p->finish(self::STEP_LINK);
+    }
+
+    /**
+     * Popisy zápisů se dogenerují AŽ TADY: deník z Pohody nese jen `act:text`, který je
+     * u celé řady dokladů shodný („Fakturujeme Vám za …"), a teprve navázáním `source_id`
+     * výš je z čeho doplnit číslo dokladu a protistranu
+     * ({@see \MyInvoice\Service\Accounting\JournalDescriptionRebuilder}).
+     *
+     * Ručních zápisů, zápisů bez dokladu ani popisů změněných uživatelem se to netýká —
+     * rozhoduje o tom rebuilder, ne tenhle krok. Selhání se jen ohlásí: popis je
+     * komfort, kvůli kterému nesmí spadnout celý převod.
+     */
+    private function refreshDescriptions(int $supplierId, ImportProtocol $p): void
+    {
+        try {
+            $rebuilder = new \MyInvoice\Service\Accounting\JournalDescriptionRebuilder(
+                $this->db,
+                new \MyInvoice\Service\Accounting\JournalDescriptionBuilder($this->db),
+            );
+            $changed = $rebuilder->rebuild(['supplier_id' => $supplierId]);
+            if ($changed > 0) {
+                $p->info(self::STEP_LINK, 'descriptions_rebuilt',
+                    "U {$changed} převedených zápisů se popis doplnil o číslo dokladu a protistranu.");
+            }
+        } catch (\Throwable $e) {
+            $p->warn(self::STEP_LINK, 'descriptions_rebuild_failed',
+                'Popisy převedených zápisů se nepodařilo doplnit: ' . $e->getMessage()
+                . ' Doplníš je kdykoli později skriptem api/bin/rebuild-journal-descriptions.php.');
+        }
     }
 
     public function matchPayments(PohodaContext $ctx): void

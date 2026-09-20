@@ -66,6 +66,23 @@ final class PohodaJournal
         return self::source($item) . '|' . self::number($item) . '|' . (PohodaXml::date($item, 'date') ?? '');
     }
 
+    /**
+     * Zkratka agendy do popisu zápisu v deníku. Zrcadlí zkratky, kterými doklady
+     * pojmenovává {@see \MyInvoice\Service\Accounting\JournalDescriptionBuilder}, ať
+     * se převzatý zápis čte stejně jako zápis vzniklý v MyÚčtu. Neznámá agenda si
+     * ponechá svůj český název z exportu (interní doklady, ostatní pohledávky…).
+     */
+    public static function shortLabel(string $source): string
+    {
+        return match ($source) {
+            self::ISSUED   => 'FV',
+            self::RECEIVED => 'PF',
+            self::BANK     => 'Banka',
+            self::CASH     => 'Pokladna',
+            default        => $source,
+        };
+    }
+
     /** Zdroj zápisu → `journal_entries.source_type`. */
     public static function sourceType(string $source): string
     {

@@ -81,6 +81,7 @@ final class DocumentLinker
             $p->warn(self::STEP_LINK, 'orphan_documents', count($orphans) . ' dokladů nemá v deníku Money zápis se stejným číslem. '
                 . 'Nejsou zaúčtované; zaúčtujte je ručně nebo v Účetnictví → Doúčtovat doklady.');
         }
+        $this->refreshDescriptions($ctx->supplierId, $p);
         $p->finish(self::STEP_LINK);
     }
 
@@ -248,6 +249,35 @@ final class DocumentLinker
         }
         if ($marked > 0) {
             $ctx->protocol->count(self::STEP_PAYMENTS, 'booked_without_invoice', $marked);
+        }
+    }
+
+    /**
+     * Popisy zápisů se dogenerují AŽ TADY: deník z Money nese jen pole `Popis`, které je
+     * u celé řady dokladů shodné („Fakturujeme Vám za …"), a teprve navázáním `source_id`
+     * výš je z čeho doplnit číslo dokladu a protistranu
+     * ({@see \MyInvoice\Service\Accounting\JournalDescriptionRebuilder}).
+     *
+     * Ručních zápisů, zápisů bez dokladu ani popisů změněných uživatelem se to netýká —
+     * rozhoduje o tom rebuilder, ne tenhle krok. Selhání se jen ohlásí: popis je
+     * komfort, kvůli kterému nesmí spadnout celý převod.
+     */
+    private function refreshDescriptions(int $supplierId, ImportProtocol $p): void
+    {
+        try {
+            $rebuilder = new \MyInvoice\Service\Accounting\JournalDescriptionRebuilder(
+                $this->db,
+                new \MyInvoice\Service\Accounting\JournalDescriptionBuilder($this->db),
+            );
+            $changed = $rebuilder->rebuild(['supplier_id' => $supplierId]);
+            if ($changed > 0) {
+                $p->info(self::STEP_LINK, 'descriptions_rebuilt',
+                    "U {$changed} převedených zápisů se popis doplnil o číslo dokladu a protistranu.");
+            }
+        } catch (\Throwable $e) {
+            $p->warn(self::STEP_LINK, 'descriptions_rebuild_failed',
+                'Popisy převedených zápisů se nepodařilo doplnit: ' . $e->getMessage()
+                . ' Doplníš je kdykoli později skriptem api/bin/rebuild-journal-descriptions.php.');
         }
     }
 

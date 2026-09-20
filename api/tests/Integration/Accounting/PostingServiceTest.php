@@ -269,11 +269,12 @@ final class PostingServiceTest extends TestCase
             ['entry_date' => self::YEAR . '-06-20', 'posted_by' => $this->userId],
         );
 
-        $entry = $this->journal->find($entryId, $this->supplierId);
+        $entry    = $this->journal->find($entryId, $this->supplierId);
+        $expected = 'PF VF-2099-8473 — Vodafone Czech Republic a.s. — Test položka';
         self::assertSame(
-            'Přijatá faktura Vodafone Czech Republic a.s. VF-2099-8473',
+            $expected,
             $entry['description'],
-            'Bez explicitního popisu se dopočítá default z dodavatele + čísla dokladu.',
+            'Bez explicitního popisu se dopočítá default z dodavatele, čísla dokladu a obsahu.',
         );
 
         // Idempotence: re-post (přepis) vygeneruje TÝŽ deterministický popis.
@@ -286,7 +287,7 @@ final class PostingServiceTest extends TestCase
         );
         self::assertSame($entryId, $again);
         $entry = $this->journal->find($entryId, $this->supplierId);
-        self::assertSame('Přijatá faktura Vodafone Czech Republic a.s. VF-2099-8473', $entry['description']);
+        self::assertSame($expected, $entry['description']);
     }
 
     public function testMissingDescriptionGetsDefaultFromIssuedInvoice(): void
@@ -305,9 +306,9 @@ final class PostingServiceTest extends TestCase
 
         $entry = $this->journal->find($entryId, $this->supplierId);
         self::assertSame(
-            'Vydaná faktura Odběratel s.r.o. FV-2099-042',
+            'FV FV-2099-042 — Odběratel s.r.o. — Test položka',
             $entry['description'],
-            'Bez explicitního popisu se dopočítá default z klienta + varsymbolu.',
+            'Bez explicitního popisu se dopočítá default z klienta, varsymbolu a obsahu.',
         );
     }
 

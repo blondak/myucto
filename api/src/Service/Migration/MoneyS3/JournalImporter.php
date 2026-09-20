@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\PostingService;
 
 /**
@@ -253,9 +254,19 @@ final class JournalImporter
                 $stats['moved'][] = trim((string) ($first['Doklad'] ?? '')) ?: $groupKey;
             }
             $docNo = $isOpening ? null : (mb_substr(trim((string) ($first['Doklad'] ?? '')), 0, 50) ?: null);
+            // Money veze v řádku deníku jen `Popis`, který je u celé řady dokladů
+            // shodný. Do popisu proto jde i agenda a číslo dokladu; protistranu
+            // doplní {@see DocumentLinker} po navázání dokladů (source_id) přes
+            // {@see \MyInvoice\Service\Accounting\JournalDescriptionRebuilder}.
             $description = $isOpening
                 ? 'Počáteční stavy ' . $year . ' (převzato z Money S3)'
-                : (trim((string) ($first['Popis'] ?? '')) ?: ($docNo ?? 'Účetní zápis z Money S3'));
+                : JournalDescriptionBuilder::composeParts([
+                    trim(Ms3Journal::shortLabel((string) ($first['Zdroj'] ?? '')) . ' ' . ($docNo ?? '')),
+                    (string) ($first['Popis'] ?? ''),
+                ]);
+            if ($description === '') {
+                $description = 'Účetní zápis z Money S3';
+            }
 
             $entryId = $this->journal->insert([
                 'supplier_id' => $ctx->supplierId,

@@ -2525,78 +2525,26 @@ final class PostingService
     /**
      * Deterministický default popisu zápisu, když volající žádný nedodá (auto-post
      * přes {@see DocumentAutoPoster}, bulk zaúčtování, ruční post bez textu) — deník
-     * jinak zůstane s prázdným POPISEM („—"). Text se skládá čistě z dat dokladu
-     * (typ + protistrana + číslo), takže idempotentní re-post vygeneruje TÝŽ popis.
+     * jinak zůstane s prázdným POPISEM („—").
      *
-     * Pokrývá vydané a přijaté faktury; bank/cash cesty si popis vždy předávají samy
-     * (BankPostingService::entryDescription, cash_documents.description). Neznámý typ,
-     * ruční zápis bez zdroje nebo chybějící doklad → null (chování beze změny).
+     * Skládání samo žije v {@see JournalDescriptionBuilder} — je to SSOT sdílená
+     * s bankovní a pokladní cestou i se zpětným dogenerováním, aby se popis
+     * ve všech cestách deníku tvořil stejně. Neznámý typ, ruční zápis bez zdroje
+     * nebo chybějící doklad → null (chování beze změny).
      */
     private function defaultDescription(int $supplierId, string $sourceType, ?int $sourceId): ?string
     {
-        if ($sourceId === null) {
-            return null;
-        }
-        if ($sourceType === 'purchase_invoice') {
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT pi.vendor_invoice_number, pi.document_kind, c.company_name
-                   FROM purchase_invoices pi
-                   LEFT JOIN clients c ON c.id = pi.vendor_id
-                  WHERE pi.id = ? AND pi.supplier_id = ?'
-            );
-            $stmt->execute([$sourceId, $supplierId]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($row === false) {
-                return null;
-            }
-            $label = match ((string) ($row['document_kind'] ?? 'invoice')) {
-                'credit_note'  => 'Přijatý dobropis',
-                'receipt'      => 'Přijatá účtenka',
-                'advance'      => 'Přijatá zálohová faktura',
-                'tax_document' => 'Daňový doklad k platbě',
-                default        => 'Přijatá faktura',
-            };
-            return self::composeDescription($label, [$row['company_name'], $row['vendor_invoice_number']]);
-        }
-        if ($sourceType === 'invoice') {
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT i.varsymbol, i.invoice_type, c.company_name
-                   FROM invoices i
-                   LEFT JOIN clients c ON c.id = i.client_id
-                  WHERE i.id = ? AND i.supplier_id = ?'
-            );
-            $stmt->execute([$sourceId, $supplierId]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($row === false) {
-                return null;
-            }
-            $label = match ((string) ($row['invoice_type'] ?? 'invoice')) {
-                'credit_note'  => 'Vydaný dobropis',
-                'tax_document' => 'Daňový doklad k přijaté platbě',
-                'penalty'      => 'Penalizační faktura',
-                default        => 'Vydaná faktura',
-            };
-            return self::composeDescription($label, [$row['company_name'], $row['varsymbol']]);
-        }
-        return null;
+        return $this->descriptions()->forSource($supplierId, $sourceType, $sourceId);
     }
 
     /**
-     * Poskládá „label protistrana číslo" z neprázdných částí; ořez na délku sloupce
-     * journal_entries.description (VARCHAR 255).
-     *
-     * @param list<mixed> $parts
+     * Skládačka popisů. Staví se tady, ne v konstruktoru — stejný důvod i vzor jako
+     * {@see provisioner()}: potřebuje jen spojení, které tahle služba už má, a další
+     * parametr ctoru by se protáhl do každého místa, které PostingService skládá ručně.
      */
-    private static function composeDescription(string $label, array $parts): string
+    private function descriptions(): JournalDescriptionBuilder
     {
-        $out = $label;
-        foreach ($parts as $part) {
-            $part = trim((string) ($part ?? ''));
-            if ($part !== '') {
-                $out .= ' ' . $part;
-            }
-        }
-        return mb_substr($out, 0, 255);
+        return new JournalDescriptionBuilder($this->db);
     }
 
     /**
