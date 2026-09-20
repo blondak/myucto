@@ -839,7 +839,8 @@
         "1852_payroll_posting_map_proposals.sql",
         "1853_payroll_takeover_runs.sql",
         "1854_bank_daily_statement_ingest.sql",
-        "1855_supplier_default_note_below_items.sql"
+        "1855_supplier_default_note_below_items.sql",
+        "1856_journal_entries_list_indexes.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -5723,7 +5724,9 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_je_posted_by": "BTREE (posted_by)",
                 "fk_je_reversed_by": "BTREE (reversed_by)",
+                "idx_je_supplier_entry_date": "BTREE (supplier_id, entry_date, id)",
                 "idx_je_supplier_period": "BTREE (supplier_id, period_id)",
+                "idx_je_supplier_reversed_by": "BTREE (supplier_id, reversed_by)",
                 "idx_je_supplier_source": "BTREE (supplier_id, source_type, source_id)",
                 "uq_je_supplier_active_source": "UNIQUE BTREE (supplier_id, source_type, active_source_id)",
                 "uq_je_supplier_id": "UNIQUE BTREE (supplier_id, id)"

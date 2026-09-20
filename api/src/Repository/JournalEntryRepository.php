@@ -571,7 +571,8 @@ final class JournalEntryRepository
         // jinak účetní vidí (typicky vyšší) číslo, které s tím, podle čeho filtroval,
         // vůbec nesouvisí — u zápisu s víc nohama na různých účtech to bylo klidně
         // několikanásobně nadhodnocené. Select-param(y) MUSÍ jít PŘED $params z
-        // buildWhere(), protože SELECT v SQL textu předchází WHERE.
+        // buildWhere(), protože SELECT v SQL textu předchází WHERE — i po vnoření
+        // WHERE do poddotazu `pick` níž, ten stojí ve FROM, tedy pořád až za SELECTem.
         $accountFiltered = self::hasAccountRangeFilter($filters);
         if ($accountFiltered) {
             $amountSelect = self::FILTERED_NET_AMOUNT_SUBQUERY . ' AS amount,';
@@ -585,6 +586,21 @@ final class JournalEntryRepository
         // Majetek — čitelný label u source_type 'asset'/'asset_disposal' (source_id = ID
         // karty majetku) i 'depreciation' (source_id = ID řádku depreciation_entries, proto
         // se ID karty dohledává přes mezi-JOIN na dep — viz FEATURA C, audit 2026-07 follow-up).
+        //
+        // Stránka se VYBÍRÁ DŘÍV, než se připojí dekorační JOINy (poddotaz `pick`).
+        // Dokud filtr, řazení i LIMIT visely až nad joinem přes jedenáct tabulek,
+        // musela databáze celý ten join sestavit pro VŠECHNY zápisy firmy a teprve
+        // z něj vzít padesát řádků. Na produkci to znamenalo `Rows_examined: 69786`
+        // a 10,6 s na jedno otevření deníku, protože si optimalizátor na self-join
+        // `rev_src` nevzal index a jel přes něj BNL scan (viz migrace 1856, která
+        // ten index doplňuje). S předvýběrem se dekorace počítá jen pro `$limit`
+        // řádků, takže cena přestane záviset na velikosti tabulky — a zůstane nízká
+        // i u instalace, kde zápisů přibývají statisíce.
+        //
+        // Poddotaz `pick` si drží alias `je`, protože `buildWhere()` prefixuje
+        // podmínky `je.` — vnější `je` je jiný rozsah platnosti a je to schválně.
+        // ORDER BY musí být v OBOU úrovních: vnitřní určuje, KTERÝCH padesát řádků
+        // se vybere, vnější jejich pořadí ve výsledku (JOIN ho jinak nezaručuje).
         $sql = "SELECT je.id, je.supplier_id, je.period_id, je.entry_date, je.document_date,
                        COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no,
                        je.description, je.source_type, je.source_id, je.posted_at,
@@ -603,7 +619,12 @@ final class JournalEntryRepository
                        -- i cesta zpět na stornovaný zápis, takže ze storna nevede nikam nic.
                        rev_src.id AS reverses_entry_id,
                        COALESCE(je.source_id, rev_src.source_id) AS source_link_id
-                  FROM journal_entries je
+                  FROM (SELECT je.id
+                          FROM journal_entries je
+                         WHERE {$whereSql}
+                         ORDER BY je.entry_date DESC, je.id DESC
+                         LIMIT {$limit} OFFSET {$offset}) AS pick
+                  JOIN journal_entries je ON je.id = pick.id
              LEFT JOIN users u ON u.id = je.posted_by
              LEFT JOIN journal_entries rev_src ON rev_src.supplier_id = je.supplier_id
                     AND rev_src.reversed_by = je.id
@@ -627,9 +648,7 @@ final class JournalEntryRepository
                         WHEN je.source_type = 'depreciation' THEN dep.asset_id
                         ELSE NULL
                     END
-                 WHERE {$whereSql}
-                 ORDER BY je.entry_date DESC, je.id DESC
-                 LIMIT {$limit} OFFSET {$offset}";
+                 ORDER BY je.entry_date DESC, je.id DESC";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([...$selectParams, ...$params]);
         $items = array_map(fn (array $r): array => $this->castListRow($r, $accountFiltered), $stmt->fetchAll(PDO::FETCH_ASSOC));
