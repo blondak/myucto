@@ -38,6 +38,9 @@ final class SyntheticPohodaExport
     public const OSS_COUNTRY = 'SK';
     public const OSS_RATE = 23.0;
 
+    /** Konečná faktura s odpočtem nedaňové zálohy (`$withAdvanceDeduction`). */
+    public const ADVANCE_DOCUMENT = '26FV0003';
+
     /**
      * Zapíše export do `$root` (kořen jako rozbalený ZIP) a vrátí složku agendy.
      *
@@ -48,8 +51,13 @@ final class SyntheticPohodaExport
      * `$withOss`: navíc doklad v režimu OSS tak, jak ho vede POHODA - členění `UN` mimo
      * přiznání, sazba státu spotřeby (SK 23 %), odběratel bez IČ a DIČ se slovenskou
      * adresou, měna EUR. V deníku 311/604 a 311/343.090.
+     *
+     * `$withAdvanceDeduction`: navíc konečná faktura 1 000 + 21 % s odpočtem nedaňové
+     * zálohy 1 210 Kč (k úhradě 0). Deník ji má tak, jak ji zaúčtovala POHODA u reálné
+     * agendy: odpočet zálohy KLADNĚ 311/602 1 210, takže 311 z dokladu drží 2 420 Kč
+     * a rozdíl dokladů proti deníku je už v POHODĚ.
      */
-    public static function write(string $root, bool $withAssets = false, bool $withOss = false): string
+    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false): string
     {
         $dir = rtrim($root, '/\\') . '/' . self::ICO . '_' . self::YEAR;
         if (!is_dir($dir)) {
@@ -58,7 +66,7 @@ final class SyntheticPohodaExport
         self::file($root . '/00_ucetni_jednotky.xml', '<acu:listAccountingUnit version="1.1"><acu:itemAccountingUnit><acu:unitType>doubleEntry</acu:unitType>'
             . '<acu:year>' . self::YEAR . '</acu:year><acu:unitIdentity><typ:address><typ:company>' . self::NAME . '</typ:company><typ:ico>' . self::ICO . '</typ:ico></typ:address></acu:unitIdentity>'
             . '<acu:dataFile>StwPh_' . self::ICO . '_' . self::YEAR . '.mdb</acu:dataFile></acu:itemAccountingUnit></acu:listAccountingUnit>');
-        foreach (self::files($withAssets, $withOss) as $name => $body) {
+        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction) as $name => $body) {
             self::file($dir . '/' . $name, $body);
         }
         if ($withAssets) {
@@ -103,7 +111,7 @@ final class SyntheticPohodaExport
     }
 
     /** @return array<string,string> soubor => obsah listu */
-    private static function files(bool $withAssets = false, bool $withOss = false): array
+    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false): array
     {
         $journal = self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '221001', '701000', '2026-01-01')
             . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '701000', '411000', '2026-01-01')
@@ -127,6 +135,11 @@ final class SyntheticPohodaExport
         if ($withOss) {
             $journal .= self::entry('Vydané faktury', '26FV0002', 'Zboží na dálku SK', 1000, '311001', '604000', '2026-02-10')
                 . self::entry('Vydané faktury', '26FV0002', 'DPH OSS', 230, '311001', '343090', '2026-02-10');
+        }
+        if ($withAdvanceDeduction) {
+            $journal .= self::entry('Vydané faktury', self::ADVANCE_DOCUMENT, 'Služby', 1000, '311001', '602000', '2026-03-02')
+                . self::entry('Vydané faktury', self::ADVANCE_DOCUMENT, 'DPH', 210, '311001', '343021', '2026-03-02')
+                . self::entry('Vydané faktury', self::ADVANCE_DOCUMENT, 'Tržby z prodeje služeb', 1210, '311001', '602000', '2026-03-02');
         }
 
         $accounts = '';
@@ -190,6 +203,20 @@ final class SyntheticPohodaExport
                 . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>1000</typ:priceHigh><typ:priceHighVAT rate="23">230</typ:priceHighVAT>'
                 . '<typ:priceHighSum>1230</typ:priceHighSum><typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency>'
                 . '<inv:foreignCurrency><typ:currency><typ:ids>EUR</typ:ids></typ:currency><typ:rate>25</typ:rate><typ:priceSum>49.20</typ:priceSum></inv:foreignCurrency></inv:invoiceSummary></lst:invoice>';
+        }
+
+        if ($withAdvanceDeduction) {
+            $issued .= '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::ADVANCE_DOCUMENT . '</typ:numberRequested></inv:number>'
+                . '<inv:symVar>260003</inv:symVar><inv:date>2026-03-02</inv:date><inv:dateTax>2026-03-02</inv:dateTax><inv:dateAccounting>2026-03-02</inv:dateAccounting><inv:dateDue>2026-03-16</inv:dateDue>'
+                . '<inv:classificationVAT><typ:ids>UD</typ:ids></inv:classificationVAT><inv:text>Vyúčtování služeb po záloze</inv:text>'
+                . self::partner('inv', 'Odběratel Test s.r.o.', self::CUSTOMER_ICO, 'CZ' . self::CUSTOMER_ICO)
+                . '<inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType><inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-03-02</typ:date></inv:liquidation></inv:invoiceHeader>'
+                . '<inv:invoiceDetail><inv:invoiceItem><inv:text>Služby</inv:text><inv:quantity>1.0</inv:quantity><inv:rateVAT value="21">high</inv:rateVAT>'
+                . '<inv:homeCurrency><typ:unitPrice>1000</typ:unitPrice><typ:price>1000</typ:price><typ:priceVAT>210</typ:priceVAT><typ:priceSum>1210</typ:priceSum></inv:homeCurrency></inv:invoiceItem>'
+                . '<inv:invoiceAdvancePaymentItem><inv:text>Uhrazená záloha</inv:text><inv:quantity>1.0</inv:quantity><inv:rateVAT value="0">none</inv:rateVAT>'
+                . '<inv:homeCurrency><typ:unitPrice>-1210</typ:unitPrice><typ:price>-1210</typ:price><typ:priceVAT>0</typ:priceVAT><typ:priceSum>-1210</typ:priceSum></inv:homeCurrency>'
+                . '<inv:sourceDocument><typ:number>26ZF0001</typ:number></inv:sourceDocument></inv:invoiceAdvancePaymentItem></inv:invoiceDetail>'
+                . self::summary('inv', 1000, 210) . '</lst:invoice>';
         }
 
         $received = '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType><inv:number><typ:numberRequested>26PF0001</typ:numberRequested></inv:number>'

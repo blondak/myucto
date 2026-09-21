@@ -135,4 +135,27 @@ describe('MoneyS3Protocol', () => {
     expect(text).not.toContain('money_s3.')
     expect(wrapper.find('[data-testid="unmapped-accounts"]').text()).toContain('395100')
   })
+
+  it('rozdíl, který je už ve zdrojovém programu, vypíše po dokladech', () => {
+    const wrapper = mount(MoneyS3Protocol, {
+      props: {
+        run: run({
+          reconciliation: [{
+            year: 2024,
+            period_id: 1,
+            ok: true,
+            checks: [{ key: 'documents_issued_invoices', ok: true }],
+            journal_diffs: [],
+            money_report: null,
+            documents: [{ key: 'issued_invoices', documents: 2420, journal: 3630, ok: true, source_differences: [{ document_no: 'FV-0003', difference: -1210, reason: 'advance_deduction' }] }],
+          }],
+        }),
+      },
+    })
+    const note = wrapper.find('[data-testid="source-differences"]')
+
+    expect(note.text()).toContain('money_s3.protocol.source_differences')
+    expect(note.text()).toContain('FV-0003')
+    expect(note.text()).toMatch(/1\s?210,00/)
+  })
 })

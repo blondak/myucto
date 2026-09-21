@@ -85,6 +85,13 @@ export interface MoneyS3Step {
   messages: { level: 'error' | 'warning' | 'info'; code: string; text: string; context: Record<string, unknown> }[]
 }
 
+/** Doklad, jehož rozdíl proti deníku je už ve zdrojovém programu (převod ho převzal věrně). */
+export interface SourceDifference {
+  document_no: string
+  difference: number
+  reason?: 'advance_deduction' | 'amount'
+}
+
 export interface MoneyS3ReconciliationYear {
   year: number
   period_id: number
@@ -92,7 +99,7 @@ export interface MoneyS3ReconciliationYear {
   checks: { key: string; ok: boolean }[]
   journal_diffs: MoneyS3Diff[]
   money_report: { accounts: number; skipped_lines: number; diffs: MoneyS3Diff[] } | null
-  documents: { key: string; documents: number; journal: number; ok: boolean }[]
+  documents: { key: string; documents: number; journal: number; ok: boolean; source_differences?: SourceDifference[] }[]
 }
 
 export interface MoneyS3ClosingYear {

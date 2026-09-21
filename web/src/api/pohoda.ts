@@ -1,7 +1,7 @@
 import { api } from './client'
 import { uploadChunked, type ChunkedUploadProgress } from './chunkedUpload'
 import { downloadApiFile } from '@/utils/downloadFile'
-import type { MoneyS3Diff, MoneyS3RunStatus, MoneyS3Step } from './moneyS3'
+import type { MoneyS3Diff, MoneyS3RunStatus, MoneyS3Step, SourceDifference } from './moneyS3'
 
 /**
  * Průvodce „Přechod z POHODA": XML export agendy vytvořený exportním nástrojem,
@@ -101,7 +101,7 @@ export interface PohodaReconciliationYear {
   checks: { key: string; ok: boolean }[]
   /** `money` = hodnoty z deníku POHODY (backend sdílí tvar s Money S3). */
   journal_diffs: MoneyS3Diff[]
-  documents: { key: string; documents: number; journal: number; ok: boolean; other_accounts?: unknown }[]
+  documents: { key: string; documents: number; journal: number; ok: boolean; other_accounts?: unknown; source_differences?: SourceDifference[] }[]
   unmapped_accounts?: unknown
 }
 

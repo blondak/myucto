@@ -332,7 +332,13 @@ s počty, upozornění a chyby a rekonciliaci převáděného roku:
   neznají, protokol vypíše k přiřazení v mapování výkazů,
 - doklady proti deníku: přijaté faktury proti 321, vydané proti 311, pokladna
   proti 211 a banka proti 221. Doklady účtované jinak (zápočet, úhrada v témže
-  zápisu) protokol uvede zvlášť.
+  zápisu) protokol uvede zvlášť. Rozdíl, který je už v deníku POHODY, převod
+  nehlásí jako chybu, ale vypíše ho po dokladech: doklad zní na jinou částku,
+  než kolik jeho zápis v deníku POHODY dá na účet dokladu, a MyÚčto převzalo
+  obojí beze změny. Typicky jde o odpočet nedaňové zálohy, který POHODA
+  zaúčtovala kladně na stranu MD účtu 311 (například 311/602). Faktura je
+  uhrazená, účet 311 ale v deníku drží navíc částku zálohy. Saldo takových
+  dokladů zkontrolujte a případně opravte interním dokladem.
 
 Doklad, ke kterému v deníku POHODY není zápis se stejným číslem, protokol
 vypíše jako doklad bez zápisu. Takový doklad není zaúčtovaný. Zaúčtujte ho

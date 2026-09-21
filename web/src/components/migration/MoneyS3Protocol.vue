@@ -20,7 +20,7 @@ interface ReconciliationView {
   checks: { key: string; ok: boolean }[]
   journalDiffs: MoneyS3Diff[]
   reportDiffs: MoneyS3Diff[]
-  documents: { key: string; documents: number; journal: number; ok: boolean; other: string }[]
+  documents: { key: string; documents: number; journal: number; ok: boolean; other: string; source: string }[]
   unmapped: string
 }
 
@@ -39,7 +39,11 @@ const reconciliation = computed<ReconciliationView[]>(() => (protocol.value?.rec
   checks: year.checks,
   journalDiffs: year.journal_diffs ?? [],
   reportDiffs: 'money_report' in year ? year.money_report?.diffs ?? [] : [],
-  documents: year.documents.map(d => ({ ...d, other: 'other_accounts' in d ? listed(d.other_accounts) : '' })),
+  documents: year.documents.map(d => ({
+    ...d,
+    other: 'other_accounts' in d ? listed(d.other_accounts) : '',
+    source: ('source_differences' in d ? d.source_differences ?? [] : []).map(s => `${s.document_no} (${money.value.format(s.difference)})`).join(', '),
+  })),
   unmapped: 'unmapped_accounts' in year ? listed(year.unmapped_accounts) : '',
 })))
 const closing = computed(() => {
@@ -175,6 +179,7 @@ function levelClass(level: string): string {
                   <td class="px-2 py-1">
                     <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="d.ok ? statusClass('ok') : statusClass('error')">{{ d.ok ? t(k('protocol.ok')) : t(k('protocol.not_ok')) }}</span>
                     <span v-if="d.other" class="ml-2 text-xs text-neutral-500">{{ t(k('protocol.other_accounts'), { accounts: d.other }) }}</span>
+                    <p v-if="d.source && te(k('protocol.source_differences'))" class="mt-1 text-xs text-neutral-500" data-testid="source-differences">{{ t(k('protocol.source_differences'), { documents: d.source }) }}</p>
                   </td>
                 </tr>
               </tbody>

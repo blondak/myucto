@@ -339,6 +339,43 @@ final class PohodaImportTest extends TestCase
         self::assertStringContainsString('OSS', $reason, 'Hláška musí pojmenovat příčinu, ne jen konstatovat členění.');
     }
 
+    /**
+     * Odpočet nedaňové zálohy, který POHODA zaúčtovala kladně 311/602: faktura zní na
+     * 1 210 Kč, zálohou je uhrazená, ale 311 z ní v deníku POHODY drží 2 420 Kč. Převod
+     * doklad i deník převzal věrně (předvaha sedí), rekonciliace proto rozdíl vysvětlí jako
+     * rozdíl, který je už v POHODĚ, a převod neshodí. Stalo se u reálné agendy (-314 114 Kč).
+     */
+    public function testAdvanceDeductionBookedOnReceivableInPohodaIsExplainedAsSourceDifference(): void
+    {
+        $supplierId = $this->supplier();
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, false, false, true));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $reconciliation = $protocol->get('reconciliation')[0];
+        self::assertTrue($reconciliation['ok'], json_encode($reconciliation, JSON_UNESCAPED_UNICODE));
+        self::assertSame([], $reconciliation['journal_diffs']);
+        $issued = array_column($reconciliation['documents'], null, 'key')['issued_invoices'];
+        self::assertEqualsWithDelta(2420.0, $issued['documents'], 0.005);
+        self::assertEqualsWithDelta(3630.0, $issued['journal'], 0.005);
+        self::assertSame([['document_no' => SyntheticPohodaExport::ADVANCE_DOCUMENT, 'difference' => -1210.0, 'reason' => 'advance_deduction']], $issued['source_differences'] ?? null);
+        self::assertContains('source_difference', $this->messageCodes($protocol));
+
+        // Doklad sám je převedený správně: zní na 1 210 Kč a je uhrazený zálohou.
+        self::assertSame(1, $this->rows('invoices', $supplierId, sprintf(
+            "varsymbol = '%s' AND total_with_vat = 1210.00 AND advance_paid_amount = 1210.00 AND status = 'paid'", SyntheticPohodaExport::ADVANCE_DOCUMENT)));
+
+        // Rozdíl, který v POHODĚ není (doklad v MyÚčtu zní na jinou částku), zůstává chybou.
+        $this->db->pdo()->prepare('UPDATE invoices SET total_with_vat = 1000.00 WHERE supplier_id = ? AND varsymbol = ?')
+            ->execute([$supplierId, SyntheticPohodaExport::ADVANCE_DOCUMENT]);
+        $again = $this->importer->run($supplierId, $this->userId, $export, false);
+        $reconciliation = $again->get('reconciliation')[0];
+        self::assertFalse($reconciliation['ok'], json_encode($reconciliation, JSON_UNESCAPED_UNICODE));
+        $issued = array_column($reconciliation['documents'], null, 'key')['issued_invoices'];
+        self::assertFalse($issued['ok']);
+        self::assertArrayNotHasKey('source_differences', $issued);
+    }
+
     /** @return list<string> */
     private function messageCodes(ImportProtocol $protocol): array
     {
