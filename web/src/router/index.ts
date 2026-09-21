@@ -92,6 +92,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'imports-money-s3': ['utilities.import', 'write'],
   'imports-pohoda': ['utilities.import', 'write'],
   'imports-pamica': ['utilities.import', 'write'],
+  'imports-premier': ['utilities.import', 'write'],
   // AI import jede na purchase_invoices.scan (write) — stejný klíč kontroluje BE
   // AiExtractPdfAction; readonly/client roli položka nesvítí a route ji nepustí.
   'purchase-invoice-ai-import': ['purchase_invoices.scan', 'write'],

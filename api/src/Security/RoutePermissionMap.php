@@ -819,6 +819,9 @@ final class RoutePermissionMap
         // Průvodce „Přechod z POHODA" (PohodaMigrationAction) - stejná pravidla jako Money S3.
         ['POST',   '#^/api/admin/imports/pohoda/uploads(/chunked|/[a-f0-9]+/(start|chunks|complete))$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/pohoda/(uploads/[a-f0-9]+|runs(/[0-9]+)?|tool(/download)?)$#', 'utilities.import', AccessLevel::READ],
+        // Průvodce „Přechod z PREMIER" (PremierMigrationAction) - stejná pravidla jako POHODA/Money S3.
+        ['POST',   '#^/api/admin/imports/premier/uploads(/chunked|/[a-f0-9]+/(start|chunks|complete))$#', 'utilities.import', AccessLevel::WRITE],
+        ['GET',    '#^/api/admin/imports/premier/(uploads/[a-f0-9]+|runs(/[0-9]+)?)$#', 'utilities.import', AccessLevel::READ],
         // Credentials importních integrací — {Idoklad,Fakturoid}CredentialsAction hlídají
         // WRITE i u `status` (odpověď prozrazuje, že je integrace nastavená).
         ['*', '#^/api/admin/imports/(idoklad|fakturoid)/credentials$#', 'utilities.import', AccessLevel::WRITE],

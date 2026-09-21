@@ -94,6 +94,7 @@
     "pohoda",
     "portal",
     "portfolio",
+    "premier",
     "price_list",
     "profile_signing",
     "project",
@@ -192,6 +193,7 @@
       "pohoda",
       "portal",
       "portfolio",
+      "premier",
       "price_list",
       "profile_signing",
       "project",
@@ -413,6 +415,10 @@
       "imports",
       "pamica",
       "pohoda"
+    ],
+    "imports-premier": [
+      "imports",
+      "premier"
     ],
     "purchase-invoices-payment-orders": [
       "bank_connection",

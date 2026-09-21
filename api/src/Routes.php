@@ -2539,6 +2539,14 @@ final class Routes
         $app->get    ('/api/admin/imports/pohoda/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'run']);
         $app->get    ('/api/admin/imports/pohoda/tool', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'tool']);
         $app->get    ('/api/admin/imports/pohoda/tool/download', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'toolDownload']);
+        // Průvodce „Přechod z PREMIER" - záloha dat (.izip/.icab), náhled, zkouška nanečisto, převod, protokoly.
+        $app->post   ('/api/admin/imports/premier/uploads/chunked', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'initChunked']);
+        $app->post   ('/api/admin/imports/premier/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'chunk']);
+        $app->post   ('/api/admin/imports/premier/uploads/{token:[a-f0-9]{16}}/complete', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'complete']);
+        $app->get    ('/api/admin/imports/premier/uploads/{token:[a-f0-9]{16}}', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'show']);
+        $app->post   ('/api/admin/imports/premier/uploads/{token:[a-f0-9]{16}}/start', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'start']);
+        $app->get    ('/api/admin/imports/premier/runs', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'runs']);
+        $app->get    ('/api/admin/imports/premier/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'run']);
 
         // Kompletní export dat firmy (H-14) — DB + PDF doklady + přílohy do jednoho
         // archivu s manifestem a kontrolními součty. Běží na pozadí

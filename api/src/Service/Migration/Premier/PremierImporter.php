@@ -1,0 +1,300 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Migration\Premier;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\PremierImportRepository;
+use MyInvoice\Service\Migration\MoneyS3\AccountingUnitSwitch;
+use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
+use PDO;
+
+/**
+ * Převod jednoho účetního roku ze zálohy dat PREMIER do existující firmy v MyÚčtu.
+ *
+ * Záloha nese všechny roky firmy; převádí se rok po roku, nejlépe od nejstaršího.
+ * Pořadí kroků: osnova → období, počáteční stavy a deník → režim účetní jednotky →
+ * adresář → přijaté a vydané faktury → doklady s DPH mimo faktury a pokladna → banka →
+ * vazby dokladů na deník a úhrady → majetek → rekonciliace → kontrola proti podáním KH
+ * a DPPO uloženým v PREMIER. Automatika účtování je po celou dobu vypnutá
+ * ({@see AccountingUnitSwitch}).
+ *
+ * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí.
+ * **Ostrý převod** zapisuje po krocích, každý krok je idempotentní ({@see PremierImportRepository}):
+ * opakovaný běh téhož roku nic nezdvojí.
+ */
+final class PremierImporter
+{
+    public const STEP_PREFLIGHT = 'preflight';
+    public const STEP_ACCOUNTING_MODE = 'accounting_mode';
+
+    /** Kroky, bez kterých nemá smysl pokračovat. */
+    private const CRITICAL_STEPS = [ChartJournalImporter::STEP_CHART, ChartJournalImporter::STEP_JOURNAL, self::STEP_ACCOUNTING_MODE];
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PremierImportRepository $map,
+        private readonly AccountingPeriodRepository $periods,
+        private readonly ChartJournalImporter $journal,
+        private readonly AccountingUnitSwitch $unit,
+        private readonly PartnerImporter $partners,
+        private readonly InvoiceImporter $invoices,
+        private readonly VatDocumentImporter $vatDocuments,
+        private readonly BankImporter $bank,
+        private readonly DocumentLinker $linker,
+        private readonly AssetImporter $assets,
+        private readonly PremierReconciler $reconciler,
+        private readonly TaxReturnImporter $taxReturn,
+        private readonly PremierVerifier $verifier,
+    ) {}
+
+    /** @return list<string> */
+    public static function stepKeys(): array
+    {
+        return [
+            ChartJournalImporter::STEP_CHART,
+            ChartJournalImporter::STEP_JOURNAL,
+            self::STEP_ACCOUNTING_MODE,
+            PartnerImporter::STEP,
+            InvoiceImporter::STEP_PURCHASE,
+            InvoiceImporter::STEP_ISSUED,
+            VatDocumentImporter::STEP,
+            BankImporter::STEP,
+            DocumentLinker::STEP_LINK,
+            DocumentLinker::STEP_PAYMENTS,
+            AssetImporter::STEP,
+            PremierReconciler::STEP,
+            TaxReturnImporter::STEP,
+            PremierVerifier::STEP,
+        ];
+    }
+
+    /**
+     * Kontrola před převodem - nic nezapisuje. Chyba převod zastaví, upozornění ne.
+     *
+     * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
+     */
+    public function preflight(int $supplierId, PremierBackup $backup, int $year): array
+    {
+        $out = [];
+        $add = static function (string $level, string $code, string $message, array $context = []) use (&$out): void {
+            $out[] = ['level' => $level, 'code' => $code, 'message' => $message, 'context' => $context];
+        };
+        $stmt = $this->db->pdo()->prepare('SELECT id, ic, accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $supplier = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($supplier === false) {
+            $add('error', 'supplier_missing', 'Cílová firma neexistuje.');
+            return $out;
+        }
+        $supplierIco = PohodaPartners::ico((string) ($supplier['ic'] ?? ''));
+        if ($backup->ico === '' || $supplierIco === '' || $backup->ico !== $supplierIco) {
+            // Záloha cizí firmy by se jinak vmíchala do účetnictví téhle.
+            $add('error', 'ico_mismatch', "Záloha je firma IČO {$backup->ico}, firma v MyÚčtu má IČO {$supplierIco}.", ['backup' => $backup->ico, 'supplier' => $supplierIco]);
+        }
+        $years = $backup->years();
+        if (!in_array($year, $years, true)) {
+            $add('error', 'year_missing', "Záloha neobsahuje účetní zápisy roku {$year}.", ['years' => $years]);
+            return $out;
+        }
+        foreach (['FA_OUT', 'FA_IN', 'PARTNERY'] as $table) {
+            if (!$backup->hasTable($table)) {
+                $add('warning', 'table_missing', "Záloha neobsahuje tabulku {$table}, doklady z ní se nepřevedou.", ['table' => $table]);
+            }
+        }
+        $period = $this->periods->findByYear($supplierId, $year);
+        if ($period !== null) {
+            $mapped = $this->map->get($supplierId, PremierImportRepository::KIND_PERIOD, (string) $year) !== null
+                || $this->map->all($supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY) !== [];
+            $foreign = $this->journal->foreignEntryCount($supplierId, (int) $period['id']);
+            if ($foreign > 0) {
+                $add('error', 'journal_not_empty', "Účetní období {$year} už obsahuje {$foreign} zápisů, které nevznikly převodem z PREMIER. Deník z PREMIER se do rozjetého účetnictví nepřimíchává.", ['entries' => $foreign]);
+            }
+            if ((string) $period['status'] !== 'open' && !$mapped) {
+                $add('error', 'period_not_open', "Účetní období {$year} je v MyÚčtu uzavřené.");
+            }
+        }
+        $earlier = array_values(array_filter($years, static fn (int $y): bool => $y < $year));
+        $missing = [];
+        foreach ($earlier as $y) {
+            if ($this->map->get($supplierId, PremierImportRepository::KIND_PERIOD, (string) $y) === null && $this->periods->findByYear($supplierId, $y) === null) {
+                $missing[] = $y;
+            }
+        }
+        if ($missing !== []) {
+            $add('info', 'earlier_years_not_imported', 'Starší roky zálohy (' . implode(', ', $missing) . ') v MyÚčtu nejsou. Počáteční stavy roku ' . $year
+                . ' se dopočtou z deníku těchto let, jejich doklady ale převedené nebudou - doporučujeme převádět od nejstaršího roku.', ['years' => $missing]);
+        }
+        if (($supplier['accounting_mode'] ?? '') !== 'double_entry') {
+            $add('info', 'switch_to_double_entry', 'Firma se převodem přepne do podvojného účetnictví.');
+        }
+        if ($backup->hasRows('MZDY')) {
+            $add('info', 'payroll_separate', 'Záloha obsahuje mzdy. Převod účetnictví je nepřevádí - mzdové zápisy jsou v deníku, zaměstnance a mzdy zadejte v modulu Mzdy.');
+        }
+        return $out;
+    }
+
+    /**
+     * @param (callable(string,int,int):void)|null $progress
+     * @param (callable():bool)|null $shouldCancel
+     */
+    public function run(int $supplierId, int $userId, PremierBackup $backup, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null): ImportProtocol
+    {
+        $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
+        $protocol->set('agenda', [
+            'ico' => $backup->ico,
+            'year' => $year,
+            'program' => 'PREMIER',
+            'company' => $backup->company,
+        ]);
+        $preflight = $this->preflight($supplierId, $backup, $year);
+        $protocol->set('preflight', $preflight);
+        $protocol->begin(self::STEP_PREFLIGHT);
+        foreach ($preflight as $m) {
+            if ($m['level'] === 'error') {
+                $protocol->error(self::STEP_PREFLIGHT, $m['code'], $m['message'], $m['context']);
+            }
+        }
+        if ($protocol->hasErrors()) {
+            $protocol->fail(self::STEP_PREFLIGHT);
+            return $protocol;
+        }
+        $protocol->finish(self::STEP_PREFLIGHT);
+
+        $journal = new PremierJournal($backup);
+        $vat = PremierVat::fromBackup($backup);
+        $documents = PremierDocuments::fromBackup($backup, $journal, $vat);
+        $ctx = new PremierContext($supplierId, $userId, $backup, $year, $journal, $vat, $dryRun, $protocol);
+        $ctx->runId = $runId;
+        $ctx->progress = $progress;
+
+        $pdo = $this->db->pdo();
+        // Zkouška nanečisto uvnitř cizí transakce (testy) jede přes savepoint.
+        $savepoint = $dryRun && $pdo->inTransaction();
+        if ($savepoint) {
+            $pdo->exec('SAVEPOINT premier_dry_run');
+        } elseif ($dryRun) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $snapshot = ($dryRun ? null : $this->map->pendingAutomationSnapshot($supplierId)) ?? $this->unit->snapshot($supplierId);
+            if (!$dryRun && $runId !== null) {
+                $this->map->saveAutomationSnapshot($runId, $supplierId, $snapshot);
+            }
+            if (!$dryRun) {
+                $this->unit->disableAutomation($supplierId, $ctx->userOrNull());
+            }
+            $automation = ['before' => $snapshot, 'during' => $dryRun ? 'off' : $this->unit->automationLevel($supplierId), 'restored' => false, 'after' => null];
+
+            $steps = $this->steps($ctx, $documents);
+            $total = count($steps);
+            $index = 0;
+            foreach ($steps as $key => $fn) {
+                if ($shouldCancel !== null && $shouldCancel()) {
+                    $protocol->fail('cancelled');
+                    break;
+                }
+                $ctx->report($key, $index++, $total);
+                $protocol->begin($key);
+                try {
+                    $dryRun ? $fn() : $this->transactional($fn);
+                    $protocol->finish($key);
+                } catch (\Throwable $e) {
+                    if ($e instanceof PremierException) {
+                        $protocol->error($key, $e->errorCode, $e->getMessage());
+                    } else {
+                        error_log(sprintf('PREMIER: krok %s převodu firmy %d selhal: %s', $key, $supplierId, (string) $e));
+                        $protocol->error($key, 'unexpected', 'Krok převodu selhal na neočekávané chybě, podrobnosti jsou v logu serveru.');
+                    }
+                    $protocol->fail($key);
+                    break;
+                }
+                if (in_array($key, self::CRITICAL_STEPS, true) && $this->stepFailed($protocol, $key)) {
+                    $protocol->fail($key);
+                    break;
+                }
+            }
+            $ctx->report('done', $total, $total);
+            if (!$dryRun) {
+                $this->invoices->recomputeClientStats($ctx);
+            }
+            if (!$dryRun && !$protocol->hasErrors()) {
+                $this->unit->restoreAutomation($supplierId, $snapshot, $ctx->userOrNull());
+                $this->map->markAutomationRestored($supplierId);
+                $automation['restored'] = true;
+                $automation['after'] = $this->unit->automationLevel($supplierId);
+            }
+            $protocol->set('automation', $automation);
+        } finally {
+            if ($savepoint) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT premier_dry_run');
+            } elseif ($dryRun && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
+        return $protocol;
+    }
+
+    /** @return array<string,callable():void> */
+    private function steps(PremierContext $ctx, PremierDocuments $documents): array
+    {
+        return [
+            ChartJournalImporter::STEP_CHART => fn () => $this->journal->chart($ctx),
+            ChartJournalImporter::STEP_JOURNAL => fn () => $this->journal->journal($ctx),
+            self::STEP_ACCOUNTING_MODE => fn () => $this->switchMode($ctx),
+            PartnerImporter::STEP => fn () => $this->partners->import($ctx),
+            InvoiceImporter::STEP_PURCHASE => fn () => $this->invoices->importPurchases($ctx, $documents),
+            InvoiceImporter::STEP_ISSUED => fn () => $this->invoices->importIssued($ctx, $documents),
+            VatDocumentImporter::STEP => fn () => $this->vatDocuments->import($ctx, $documents),
+            BankImporter::STEP => fn () => $this->bank->import($ctx),
+            DocumentLinker::STEP_LINK => fn () => $this->linker->link($ctx, $documents),
+            DocumentLinker::STEP_PAYMENTS => fn () => $this->linker->matchPayments($ctx, $documents),
+            AssetImporter::STEP => fn () => $this->assets->import($ctx),
+            PremierReconciler::STEP => fn () => $this->reconciler->run($ctx),
+            TaxReturnImporter::STEP => fn () => $this->taxReturn->import($ctx),
+            PremierVerifier::STEP => fn () => $this->verifier->run($ctx),
+        ];
+    }
+
+    private function switchMode(PremierContext $ctx): void
+    {
+        if ($ctx->period === null) {
+            return;
+        }
+        $this->unit->switchToDoubleEntry($ctx->supplierId, $ctx->period['starts_on'], !$ctx->dryRun, $ctx->period['ends_on']);
+        $ctx->protocol->info(self::STEP_ACCOUNTING_MODE, 'double_entry', 'Podvojné účetnictví od ' . $ctx->period['starts_on'] . '.');
+    }
+
+    private function stepFailed(ImportProtocol $protocol, string $key): bool
+    {
+        foreach ($protocol->toArray()['steps'] as $s) {
+            if ($s['key'] === $key) {
+                return $s['status'] === 'error';
+            }
+        }
+        return false;
+    }
+
+    private function transactional(callable $fn): void
+    {
+        $pdo = $this->db->pdo();
+        $own = !$pdo->inTransaction();
+        if ($own) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $fn();
+            if ($own) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($own && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+}

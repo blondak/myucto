@@ -3,14 +3,15 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { MoneyS3Diff, MoneyS3Run } from '@/api/moneyS3'
 import type { PohodaRun } from '@/api/pohoda'
+import type { PremierRun } from '@/api/premier'
 
 /**
- * Protokol převodu agendy (Money S3, POHODA) — důkaz pro účetní: kroky s počty, zprávy,
- * rekonciliace po letech (předvaha proti deníku zdrojového programu, proti sestavě,
- * doklady proti deníku), uzávěrka historických let, doklady bez zápisu a stav automatiky.
- * Texty se berou z jmenného prostoru `prefix` (`money_s3`, `pohoda`).
+ * Protokol převodu agendy (Money S3, POHODA, PREMIER) — důkaz pro účetní: kroky s počty,
+ * zprávy, rekonciliace po letech (předvaha proti deníku zdrojového programu, proti
+ * sestavě, doklady proti deníku), uzávěrka historických let, doklady bez zápisu a stav
+ * automatiky. Texty se berou z jmenného prostoru `prefix` (`money_s3`, `pohoda`, `premier`).
  */
-const props = withDefaults(defineProps<{ run: MoneyS3Run | PohodaRun; prefix?: string }>(), { prefix: 'money_s3' })
+const props = withDefaults(defineProps<{ run: MoneyS3Run | PohodaRun | PremierRun; prefix?: string }>(), { prefix: 'money_s3' })
 const { t, te, locale } = useI18n()
 
 interface ReconciliationView {

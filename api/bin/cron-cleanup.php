@@ -180,6 +180,8 @@ $report['scan_attach_staging'] = (new ScanStagingCleaner($connection))->purge();
 $report['money_s3_uploads'] = \MyInvoice\Service\Migration\MoneyS3\MoneyS3Uploads::purgeStaleAll();
 // 8b) Nahrané exporty z POHODY - totéž, celé účetnictví firmy v XML.
 $report['pohoda_uploads'] = \MyInvoice\Service\Migration\Pohoda\PohodaUploads::purgeStaleAll();
+// 8c) Nahrané zálohy dat z PREMIER - totéž, celá databáze firmy (všechny roky).
+$report['premier_uploads'] = \MyInvoice\Service\Migration\Premier\PremierUploads::purgeStaleAll();
 
 // Pročisti cron_runs — drž max 500 posledních záznamů na skript.
 $report['cron_runs_purged'] = CronRun::purgeOld($pdo, 500);

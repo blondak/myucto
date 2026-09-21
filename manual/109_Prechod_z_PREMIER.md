@@ -1,0 +1,198 @@
+# 109. Přechod z PREMIER
+
+**Cesta: `Systém → Přechod z PREMIER`**
+
+Průvodce převede účetní rok z programu PREMIER do firmy v MyÚčtu. Vstupem je
+záloha dat, kterou vytvoříte přímo v PREMIERu. Na rozdíl od POHODY tu není
+samostatný exportní nástroj ke stažení.
+
+Průvodce převádí jen **účetnictví**. Záloha obsahuje i mzdy, ty ale průvodce
+nepřevádí: mzdové zápisy jsou v převedeném deníku, zaměstnance a mzdy
+zadejte v modulu Mzdy.
+
+Položka je v menu Systém, které vidí administrátor. Jiný uživatel s potřebnými
+oprávněními otevře průvodce přímým odkazem `/imports/premier`.
+
+Průvodce vidí a zkoušku nanečisto spouští uživatel s oprávněním
+`utilities.import` pro zápis. Ostrý převod zapisuje účetní deník a mění
+nastavení firmy, proto navíc vyžaduje zápis do účetního deníku
+(`accounting.journal.write`) a do nastavení firmy (`settings.company.write`).
+Chybějící oprávnění průvodce ukáže a převod nespustí.
+
+Průvodce je dostupný i firmě, která zatím vede daňovou evidenci: převod ji sám
+přepne do podvojného účetnictví od začátku převáděného roku.
+
+## 109.1 Záloha z PREMIER
+
+### 109.1.1 Vytvoření zálohy
+
+1. V PREMIERu otevřete **Správce → Záloha dat** (klávesa **F11**).
+2. Zálohu uložte na disk. PREMIER nabízí formát **iZIP** nebo **iCAB**,
+   průvodci vyhovuje kterýkoli z nich.
+3. Vzniklý soubor nahrajte do průvodce beze změny.
+
+### 109.1.2 Co je v záloze
+
+- Záloha obsahuje **všechny účetní roky** vedené v PREMIERu, ne jen jeden.
+  Průvodce v ní najde všechny roky a k převodu nabídne ty, které podle IČO
+  patří firmě v MyÚčtu.
+- Firma musí v MyÚčtu existovat a mít vyplněné stejné IČO jako v PREMIERu.
+  Převádí se do firmy, ve které právě pracujete; novou firmu nejdřív založte
+  (kapitola [Multi supplier](95_Multi_supplier.md)).
+- Nahraná záloha zůstává na serveru pro převod dalších let. Aplikace ji smaže
+  po 7 dnech, kdy se s ní nepracovalo.
+- Soubor může mít až 2 GB. Průvodce ho posílá po částech a ukazuje průběh
+  v procentech; při výpadku spojení část zopakuje a naváže tam, kde server
+  data má. Stránku nechte během nahrávání otevřenou.
+
+### 109.1.3 Pořadí let
+
+Záloha nese celé účetnictví najednou, ale **převádí se vždy jeden rok**.
+Postupujte **chronologicky od nejstaršího nepřevedeného roku**. PREMIER
+počáteční ani uzávěrkové zápisy do deníku neukládá, převod proto počáteční
+stavy roku spočte z deníku všech předchozích let v záloze: zůstatky
+rozvahových účtů a výsledek hospodaření minulých let na účet 431. Doklady
+předchozích let ale převede jen převod těch let, a proto se vyplatí začít
+nejstarším. Průvodce v přehledu let sám nabídne nejstarší rok, který
+v MyÚčtu ještě není. Další rok převedete zopakováním postupu (§ 109.4).
+
+## 109.2 Co převod přenese
+
+| Z PREMIER | Do MyÚčta |
+|---|---|
+| účtová osnova (jen účty, na které se účtovalo) | analytiky pod syntetiky osnovy (`518100` → `518.100`) včetně daňové uznatelnosti účtu |
+| účetní rok | účetní období 1. 1. až 31. 12. |
+| počáteční stavy spočtené z předchozích let | otevírací zápis k 1. dni období (účty proti 701, výsledek na 431) |
+| účetní deník | účetní zápisy, přesná kopie |
+| adresář partnerů | klienti, párování podle IČO |
+| přijaté a vydané faktury a zálohové listy včetně položek | doklady se stavem zaúčtováno nebo uhrazeno; doklad nejisté daňové povahy jako koncept k ruční kontrole |
+| pokladní doklady z deníku | pokladní doklady, u tuzemského kódu DPH i s řádky DPH |
+| ostatní doklady s DPH mimo faktury (bankovní poplatky, interní doklady) | přijaté nebo vydané doklady s položkami po kódech DPH |
+| bankovní řady deníku | výpisy a bankovní pohyby v měně účtu |
+| vazby úhrad na faktury | spárování faktury s bankovním pohybem nebo pokladním dokladem |
+| dlouhodobý majetek | karty s daňovými a účetními odpisy let převodu |
+| ruční úpravy základu daně z přiznání k DPPO | položky rozpracovaného přiznání k DPPO |
+
+**Částky v Kč.** Faktura v cizí měně se převede v Kč podle zaúčtování
+v deníku, stejně jako z deníku počítá přiznání PREMIER. Položky faktury se
+přepočtou kurzem dokladu a haléřový rozdíl dorovná největší položka.
+
+**Klasifikace DPH.** PREMIER vede u každé položky dokladu kód DPH a jeho
+definici v číselníku kódů: řádky přiznání a oddíl kontrolního hlášení. Převod
+položku klasifikuje **podle definice kódu**, ne podle jeho čísla, účtu ani
+textu dokladu. Platí to i pro samovyměření u přijatých plnění (pořízení
+zboží a služby z EU, služby ze třetích zemí, dovoz, tuzemský přenos
+daňové povinnosti): položka dostane nulovou daň a kód zařazení a daň na
+výstupu i odpočet dopočte evidence DPH MyÚčta. Nezáleží na tom, jestli
+účetní samovyměření zaúčtovala na účet 343. Vydaná položka s kódem mimo
+přiznání, která nese daň, je plnění v režimu OSS a posoudí ji stejné
+pravidlo jako ostatní importy.
+
+**Období odpočtu.** Datum pro DPH a datum pro kontrolní hlášení
+z přijaté faktury převod přebírá. Pokud PREMIER uplatnil odpočet dřív, než
+je datum plnění nebo vystavení dokladu, MyÚčto ho tak brzy nepřipustí a
+doklad zařadí do období podle data dokladu. Protokol takový doklad vypíše.
+
+**Zaúčtování se nepřepočítává.** Deník je přesná kopie toho, co bylo
+v PREMIERu, a doklady se k němu jen připojí. Zápisy na 702 a 710 se
+nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.
+
+**Doklady k ruční kontrole.** Doklad, jehož daňovou povahu záloha spolehlivě
+neurčuje (například kód opravy podle § 44 nebo § 74), převod převezme jako
+koncept. Koncept nevstoupí do přiznání k DPH, kontrolního hlášení ani do
+účtování. Protokol ho vypíše i s důvodem. Po opravě klasifikace DPH ho
+potvrďte.
+
+Číslo dokladu, které už ve firmě je, dostane příponu roku.
+
+## 109.3 Co převod nepřenese
+
+- **Mzdy.** Zaměstnance a mzdy zadejte v modulu Mzdy.
+- **Sklad, zakázky a CRM.** Zápisy jsou v převedeném deníku, evidence se
+  zakládá v MyÚčtu.
+- **Objednávky, nabídky a přílohy dokladů.** Skeny dokladů připojíte zvlášť
+  v `Dokumenty → Skeny k dokladům`.
+- **Podaná přiznání a hlášení.** Zůstávají v PREMIERu, proti nim ale
+  probíhá kontrola, viz § 109.5.
+
+## 109.4 Postup
+
+1. **Záloha z PREMIER.** Vytvořte zálohu (109.1) a nahrajte soubor `.izip`
+   nebo `.icab`. Rozbalení a načtení běží na serveru na pozadí, u velké
+   zálohy i několik minut; obnovení stránky mezitím průvodce nepřeruší.
+2. **Náhled a volby.** Tabulka ukáže roky nalezené v záloze s IČO firmy
+   a počtem zápisů deníku. Vyberte převáděný rok, výchozí je nejstarší
+   nepřevedený (§ 109.1.3).
+
+   Kontrola před převodem zvoleného roku zastaví převod, když:
+   - záloha patří firmě s jiným IČO,
+   - v záloze chybí deník, osnova nebo číselník kódů DPH,
+   - účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem,
+   - období je v MyÚčtu uzavřené.
+3. **Zkouška nanečisto.** Proběhne celý převod zvoleného roku včetně
+   rekonciliace a kontroly proti podáním, na konci se ale všechno vrátí.
+   Výsledkem je protokol; v MyÚčtu nic nezůstane a nastavení automatiky se
+   nezmění. Zkouška běží v jedné databázové transakci, spouštějte ji proto
+   mimo běžnou práci ve firmě.
+4. **Ostrý převod.** Po potvrzení běží na pozadí, stránku můžete zavřít. Po
+   dokončení průvodce nabídne účetní deník a obratovou předvahu. Převod jedné
+   firmy běží vždy jen jeden, druhý se do jeho konce nespustí.
+
+## 109.5 Rekonciliace, kontrola a protokol
+
+Každý běh (zkouška i převod) končí protokolem s kroky převodu, počty,
+upozorněními a chybami a rekonciliací převáděného roku, obdobně jako
+u přechodu z POHODY, viz [§ 107.5](107_Prechod_z_POHODY.md#1075-rekonciliace-a-protokol).
+Obratová předvaha MyÚčta se porovná s předvahou spočtenou přímo z deníku
+PREMIER na haléř, včetně počátečních stavů.
+
+**Úpravy základu daně.** Výsledek hospodaření, odpisy a nedaňové účty spočte
+MyÚčto z převedených dat samo. Ruční úpravy, které účetní zadala do přiznání
+k DPPO v PREMIERu (například paušální výdaj na dopravu, příjmy osvobozené,
+ztráta minulých let, zaplacené zálohy), převod zapíše jako položky
+rozpracovaného přiznání k DPPO s odkazem na řádek PREMIERu. Přiznání, které
+už ve firmě je, nemění.
+
+**Kontrola proti podáním z PREMIER.** Kontrolní hlášení DPH za každý měsíc
+a přiznání k DPPO spočtené v MyÚčtu z převedených dat se porovnají s podáními,
+která má PREMIER uložená v záloze (u KH vždy s posledním podáním měsíce).
+Rozdíl protokol vypíše jako upozornění, převod kvůli němu neselže. Typické
+příčiny:
+
+- doklad upravený v PREMIERu až po podání (podání neodpovídá aktuálním datům),
+- kód DPH, který PREMIER podle vlastního nastavení do kontrolního hlášení
+  nezahrnul, přestože tam podle zákona patří (například služba od
+  dodavatele ze třetí země v oddílu A.2),
+- odpočet, který PREMIER uplatnil dřív, než MyÚčto připustí (§ 109.2),
+- zaokrouhlení částek přiznání k DPPO: PREMIER zaokrouhluje na koruny
+  nahoru, MyÚčto matematicky. Rozdíl do 1 Kč protokol neoznačí jako
+  neshodu, daň vychází stejně.
+
+Přiznání k DPH PREMIER v záloze neukládá, proto se s ním nekontroluje.
+
+## 109.6 Režim účetnictví a automatika
+
+Chování je stejné jako u přechodu z POHODY: převod zapíše podvojné
+účetnictví od začátku převáděného roku, automatika účtování je během
+převodu vypnutá a po úspěšném převodu se vrátí do stavu před ním, viz
+[§ 107.6](107_Prechod_z_POHODY.md#1076-rezim-ucetnictvi-a-automatika).
+
+Odpisy majetku, které PREMIER v převedeném roce zaúčtoval, jsou v převedeném
+deníku. Hromadné zaúčtování odpisů v uzávěrce je proto pro převedené roky
+znovu neúčtuje a plán odpisů naváže dalším měsícem.
+
+## 109.7 Opakovaný převod
+
+Převod si pamatuje, co z které zálohy už vzniklo. Opakovaný převod téže nebo
+novější zálohy založí jen to, co ještě chybí, a nic nezdvojí. Převod
+přerušený chybou tak stačí po opravě spustit znovu. Takhle se převádí i další
+rok: ve stejné záloze zvolte další rok v pořadí.
+
+## 109.8 Omezení
+
+- Převádí se kalendářní účetní rok, období se vždy založí od 1. 1. do 31. 12.
+- Převod čte jen nahranou zálohu, nikdy živou databázi PREMIER.
+- Jeden běh převede jeden rok jedné firmy. Záloha musí mít IČO firmy
+  v MyÚčtu.
+- Záloha ve formátu iCAB musí být jeden soubor s kompresí MSZIP, jak ji
+  PREMIER ukládá. Jiný archiv CAB uložte v PREMIERu jako iZIP.

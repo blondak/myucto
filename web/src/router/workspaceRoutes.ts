@@ -88,6 +88,16 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
           return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
         },
       },
+      // Průvodce „Přechod z PREMIER" — záloha dat (iZIP/iCAB) vytvořená přímo v programu,
+      // převádí se jen účetnictví (mzdy PREMIER v téže záloze nevede).
+      {
+        path: 'imports/premier', name: 'imports-premier',
+        component: () => import('@/pages/imports/PremierMigration.vue'), meta: { requiresSupplier: true },
+        beforeEnter: () => {
+          const auth = useAuthStore()
+          return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
+        },
+      },
       { path: 'purchase-invoices/payment-orders',  name: 'purchase-invoices-payment-orders', component: () => import('@/pages/purchase-invoices/PaymentOrders.vue') },
       // AI import přijaté faktury (§12b) — extrakční flow vytažený z admin Integrations
       // (?tab=ai zůstává jen nastavení brány). Oprávnění purchase_invoices.scan zrcadlí

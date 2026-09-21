@@ -781,6 +781,9 @@ const navSections = computed<NavSection[]>(() => {
           // v daňové evidenci (převod ji přepne).
           { to: '/imports/money-s3', label: t('nav.money_s3_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
           { to: '/imports/pohoda', label: t('nav.pohoda_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
+          // PREMIER je jiný program se zálohou přímo z aplikace (F11), bez exportního
+          // nástroje — vlastní položka hned vedle POHODY, ne volba uvnitř jejího průvodce.
+          { to: '/imports/premier', label: t('nav.premier_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
           // PAMICA je samostatný mzdový program s vlastním datovým souborem — jiný nástroj
           // i jiný obsah převodu, proto vlastní položka, ne volba uvnitř převodu POHODY.
           { to: '/imports/pamica', label: t('nav.pamica_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },

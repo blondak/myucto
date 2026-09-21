@@ -137,8 +137,10 @@ final class DepreciationPostingService
                     }
                 }
 
-                // 1) účetní řádek roku → upsert (posted) + journal 551/oprávky
-                if (!$taxEvidence && $asset['accumulated_account_code'] !== null) {
+                // 1) účetní řádek roku → upsert (posted) + journal 551/oprávky. Rok, jehož
+                //    odpisy zaúčtoval deník převzatý z jiného programu, se znovu neúčtuje.
+                if (!$taxEvidence && $asset['accumulated_account_code'] !== null
+                    && !DepreciationEntryRepository::isBookedByMigratedJournal($this->entries->findYear($assetId, 'accounting', $fiscalYear))) {
                     $accRow = $this->calculator->accountingYearRow(
                         $ctx,
                         $fiscalYear,
