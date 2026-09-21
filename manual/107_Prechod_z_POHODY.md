@@ -2,9 +2,14 @@
 
 **Cesta: `Systém → Přechod z POHODA`**
 
-Průvodce převede účetní rok z programu POHODA do firmy v MyÚčtu. Vstupem je XML
-export agendy, který vytvoří exportní nástroj stažený přímo z průvodce. Nástroj
-data z POHODY jen čte, v POHODĚ nic nemění.
+Průvodce převede účetní rok z programu POHODA do firmy v MyÚčtu. Vstupem je ZIP
+s XML, který připravíte jednou ze dvou cest: exportem přes XML rozhraní POHODY,
+nebo místním převodem kopie datového souboru MDB na Windows. Nástroje stáhnete
+přímo z průvodce. Zdrojová data jen čtou, v POHODĚ nic nemění.
+
+Průvodce obě varianty ZIP automaticky rozpozná. Následuje stejný náhled,
+zkouška nanečisto a převod. Samotný MDB ani původní zálohu POHODY na server
+nenahrávejte.
 
 Průvodce převádí jen **účetnictví**. Mzdy z datového souboru POHODA Mzdy nebo
 z programu PAMICA převádí samostatný průvodce, viz kapitola
@@ -33,16 +38,19 @@ nástroje:
 |---|---|
 | `Export-Pohoda.cmd` | spouštěč, který se otevírá dvojklikem |
 | `Export-Pohoda.ps1` | vlastní exportní skript |
+| `Export-PohodaMdbAccounting.cmd`, `Export-PohodaMdbAccounting.ps1` | převod účetnictví z kopie MDB do ZIP s XML bez spouštění XML exportu POHODY |
 | `Export-PohodaMdb.cmd`, `Export-PohodaMdb.ps1` | majetek a mzdy z datového souboru POHODY (XML export je neobsahuje) |
 
 Stáhněte každý soubor zvlášť, nebo všechny najednou tlačítkem *Stáhnout vše (ZIP)*
 jako `pohoda-export.zip`. Všechny soubory musí ležet ve stejné složce.
 
-Nástroj zkopírujte na počítač s nainstalovanou POHODOU. Běží na Windows
-v PowerShellu 5.1, který je součástí Windows 10 a 11. POHODU spouští v režimu
-XML komunikace z příkazového řádku.
+Balíček rozbalte na počítači s Windows. Nástroje běží v PowerShellu 5.1,
+který je součástí Windows 10 a 11. Pro první cestu je potřeba nainstalovaná
+POHODA, kterou exportér spouští v režimu XML komunikace z příkazového řádku.
+Pro druhou cestu potřebujete kopii MDB a ovladač Microsoft Access Database
+Engine (ACE).
 
-### 107.1.2 Vytvoření exportu
+### 107.1.2 Cesta 1: export XML přes POHODU
 
 1. Spusťte `Export-Pohoda.cmd` dvojklikem, nebo z příkazového řádku s parametry:
 
@@ -128,6 +136,39 @@ mzdy zpracuje [Přechod z PAMICA](108_Prechod_z_PAMICA.md). Systémové údaje
 Pro `.mdb` je potřeba ovladač Microsoft Access Database Engine, který se
 instaluje s POHODOU. Když ho 64bitový PowerShell nenajde, skript se sám spustí
 v 32bitovém.
+
+### 107.1.5 Cesta 2: účetnictví z MDB přes místní převodník
+
+Tato cesta čte datový soubor přímo a vynechává postupné exportní požadavky
+na XML rozhraní POHODY. Hodí se, když máte datový soubor MDB a export přes
+POHODU trvá dlouho. Pro POHODA SQL použijte první cestu.
+
+1. V POHODĚ ověřte firmu a účetní rok, které chcete převést. Připravte
+   odpovídající datový soubor `.mdb`. Zavřete POHODU u všech uživatelů
+   a pracujte s kopií souboru. Pokud máte zálohu v ZIP, nejprve z ní obnovte
+   datový soubor. ZIP zálohy není MDB a do převodníku nepatří.
+2. V průvodci stáhněte *exportér a převodník (ZIP)* a rozbalte celý
+   `pohoda-export.zip` do jedné složky na Windows.
+3. Spusťte `Export-PohodaMdbAccounting.cmd` dvojklikem a vyberte připravenou
+   kopii MDB. Převodník běží ve Windows PowerShellu 5.1, PHP na svém počítači
+   instalovat nemusíte. Potřebuje ovladač Access. Pokud chybí, nainstalujte
+   [Microsoft 365 Access Runtime z webu Microsoftu](https://support.microsoft.com/en-us/access/download-and-install-microsoft-365-access-runtime).
+   Zvolte 32bitovou (x86) nebo 64bitovou (x64) variantu podle nainstalovaného
+   Office.
+4. Počkejte na vytvoření výsledného ZIP s XML účetnictví, majetku a mezd.
+   Doplněk pro majetek a mzdy zvlášť spouštět nemusíte, převodník jej používá
+   automaticky. Převodník vypíše cestu k výsledku. Zdrojový MDB zůstává
+   na vašem počítači.
+5. Do průvodce nahrajte až tento výsledný ZIP. Nerozbalujte jej
+   a nenahrávejte místo něj MDB, původní zálohu ani stažený balíček nástrojů.
+6. Průvodce formát automaticky rozpozná. Zkontrolujte firmu, rok a počty
+   dokladů, spusťte zkoušku nanečisto a projděte její protokol před ostrým
+   převodem.
+
+Převod MDB běží na Windows, následný import ZIP funguje stejně i na serveru
+s Linuxem. Server pro tuto cestu nepotřebuje ovladač Access ani přístup
+k původnímu MDB. Mzdy se nadále převádějí samostatným průvodcem
+[Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 
 ## 107.2 Co převod přenese
 
