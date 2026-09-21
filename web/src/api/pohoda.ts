@@ -161,6 +161,9 @@ export const pohodaApi = {
     api.get<{ items: PohodaRun[] }>(`${POHODA_BASE}/runs`).then(r => r.data),
   run: (id: number): Promise<PohodaRun> =>
     api.get<PohodaRun>(`${POHODA_BASE}/runs/${id}`).then(r => r.data),
+  /** Jen doběhlá zkouška nanečisto; protokol ostrého převodu API smazat nedovolí. */
+  deleteRun: (id: number): Promise<{ ok: boolean }> =>
+    api.delete<{ ok: boolean }>(`${POHODA_BASE}/runs/${id}`).then(r => r.data),
   // Nástroj se liší podle programu: POHODA exportuje účetní agendu přes XML rozhraní,
   // PAMICA se čte přímo z mzdového datového souboru.
   toolFiles: (system: PohodaSystem = 'pohoda'): Promise<{ files: PohodaToolFile[] }> =>

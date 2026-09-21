@@ -2568,6 +2568,7 @@ final class Routes
         $app->post   ('/api/admin/imports/pohoda/uploads/{token:[a-f0-9]{16}}/start', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'start']);
         $app->get    ('/api/admin/imports/pohoda/runs', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'runs']);
         $app->get    ('/api/admin/imports/pohoda/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'run']);
+        $app->delete ('/api/admin/imports/pohoda/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'deleteRun']);
         $app->get    ('/api/admin/imports/pohoda/tool', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'tool']);
         $app->get    ('/api/admin/imports/pohoda/tool/download', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'toolDownload']);
         // Průvodce „Přechod z PREMIER" - záloha dat (.izip/.icab), náhled, zkouška nanečisto, převod, protokoly.

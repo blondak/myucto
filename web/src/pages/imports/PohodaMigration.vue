@@ -339,6 +339,24 @@ async function showRun(item: PohodaRun): Promise<void> {
   }
 }
 
+// Smazat jde jen doběhlou zkoušku nanečisto, protokol ostrého převodu zůstává.
+const canWrite = computed(() => missingRights.value.length === 0)
+const deletingRun = ref<number | null>(null)
+async function deleteRun(item: PohodaRun): Promise<void> {
+  if (!confirm(tt('run_delete_confirm', { id: item.id }))) return
+  deletingRun.value = item.id
+  try {
+    await pohodaApi.deleteRun(item.id)
+    if (run.value?.id === item.id) run.value = null
+    await loadRuns()
+    toast.success(tt('run_deleted'))
+  } catch (error: any) {
+    toast.error(errorMessage(error, t('common.error')))
+  } finally {
+    deletingRun.value = null
+  }
+}
+
 async function load(): Promise<void> {
   busy.value = true
   try {
@@ -661,11 +679,19 @@ onBeforeUnmount(() => {
       <h2 class="border-b border-neutral-200 px-4 py-3 text-lg font-semibold">{{ tt('history_title') }}</h2>
       <p v-if="!runs.length" class="px-4 py-3 text-sm text-neutral-500">{{ tt('history_empty') }}</p>
       <div class="divide-y divide-neutral-100">
-        <button v-for="item in runs" :key="item.id" type="button" class="flex w-full cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 text-left hover:bg-neutral-50" @click="showRun(item)">
-          <span><strong>#{{ item.id }} · {{ tt(`kind.${item.kind ?? 'accounting'}`) }} · {{ tt(`mode.${item.mode}`) }}</strong><span class="ml-2 text-xs text-neutral-500">{{ [item.agenda_ico, item.agenda_year].filter(Boolean).join(' · ') }} · {{ item.created_at }}</span></span>
-          <span class="rounded-full px-2.5 py-1 text-xs font-medium"
-            :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : item.status === 'completed_with_warnings' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">{{ tt(`status.${item.status}`) }}</span>
-        </button>
+        <div v-for="item in runs" :key="item.id" class="flex items-center gap-2 pr-3 hover:bg-neutral-50">
+          <button type="button" class="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 text-left" @click="showRun(item)">
+            <span><strong>#{{ item.id }} · {{ tt(`kind.${item.kind ?? 'accounting'}`) }} · {{ tt(`mode.${item.mode}`) }}</strong><span class="ml-2 text-xs text-neutral-500">{{ [item.agenda_ico, item.agenda_year].filter(Boolean).join(' · ') }} · {{ item.created_at }}</span></span>
+            <span class="rounded-full px-2.5 py-1 text-xs font-medium"
+              :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : item.status === 'completed_with_warnings' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">{{ tt(`status.${item.status}`) }}</span>
+          </button>
+          <button v-if="item.mode === 'dry_run' && item.status !== 'running' && canWrite" type="button"
+            class="shrink-0 rounded p-1.5 text-neutral-400 hover:bg-danger-50 hover:text-danger-600 disabled:opacity-40"
+            :title="tt('run_delete')" :aria-label="tt('run_delete')" :disabled="deletingRun === item.id"
+            :data-testid="`pohoda-run-delete-${item.id}`" @click="deleteRun(item)">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+          </button>
+        </div>
       </div>
     </section>
 

@@ -39,6 +39,7 @@ use Psr\Http\Message\UploadedFileInterface;
  *   POST /api/admin/imports/pohoda/uploads/{token}/start          {mode, year, kind: accounting|payroll}
  *   GET  /api/admin/imports/pohoda/runs
  *   GET  /api/admin/imports/pohoda/runs/{id}
+ *   DELETE /api/admin/imports/pohoda/runs/{id}                    jen zkouška nanečisto
  *   GET  /api/admin/imports/pohoda/tool                           soubory exportního nástroje
  *   GET  /api/admin/imports/pohoda/tool/download[?name=]          ZIP celého nástroje nebo jeden soubor
  *
@@ -52,9 +53,7 @@ final class PohodaMigrationAction
     private const MAX_EXPORT_BYTES = 2 * 1024 * 1024 * 1024;
     /** Nahraných exportů firmy najednou (nové nahrání smaže nejstarší nečinný). */
     private const MAX_ACTIVE_UPLOADS = 3;
-    /** Část exportu: pod `upload_max_filesize`, IIS `maxAllowedContentLength` i nginx `client_max_body_size`. */
-    // Pod výchozím limitem nginx (client_max_body_size 1m): u instalací za cizí reverzní
-    // proxy by 8MB kousky skončily chybou 413 dřív, než dorazí do aplikace.
+    /** Část exportu: pod `upload_max_filesize`, IIS `maxAllowedContentLength` i nginx `client_max_body_size`, včetně výchozího 1 MB u nginx bez nastavení (cizí reverzní proxy). */
     public const CHUNK_BYTES = 768 * 1024;
     /**
      * Exportní nástroje po programech. POHODA se exportuje přes XML rozhraní, PAMICA nemá
@@ -417,6 +416,35 @@ final class PohodaMigrationAction
             return Json::error($response, 'not_found', 'Protokol převodu nenalezen.', 404);
         }
         return Json::ok($response, $run);
+    }
+
+    /**
+     * Smaže protokol zkoušky nanečisto. Protokol ostrého převodu a běžící zkouška zůstávají
+     * ({@see PohodaImportRepository::deleteDryRun()}).
+     *
+     * @param array<string,string> $args
+     */
+    public function deleteRun(Request $request, Response $response, array $args): Response
+    {
+        $denied = $this->deny($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $run = $this->runs->findRun($id, $supplierId);
+        if ($run === null) {
+            return Json::error($response, 'not_found', 'Protokol převodu nenalezen.', 404);
+        }
+        if (!$this->runs->deleteDryRun($id, $supplierId)) {
+            return Json::error($response, 'run_not_deletable',
+                'Smazat jde jen doběhlou zkoušku nanečisto. Protokol ostrého převodu zůstává jako záznam převzatých dat.', 409);
+        }
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $this->logger->log('import.pohoda_dry_run_deleted', (int) ($user['id'] ?? 0), 'pohoda_import', $id,
+            ['year' => $run['agenda_year'] ?? null, 'ico' => $run['agenda_ico'] ?? null],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
+        return Json::ok($response, ['ok' => true]);
     }
 
     /** Soubory exportního nástroje, které si uživatel stáhne k POHODĚ. */

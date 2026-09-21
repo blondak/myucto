@@ -50,9 +50,7 @@ final class PremierMigrationAction
     private const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
     /** Nahraných záloh firmy najednou (nové nahrání smaže nejstarší nečinnou). */
     private const MAX_ACTIVE_UPLOADS = 3;
-    /** Část zálohy: pod `upload_max_filesize`, IIS `maxAllowedContentLength` i nginx `client_max_body_size`. */
-    // Pod výchozím limitem nginx (client_max_body_size 1m): u instalací za cizí reverzní
-    // proxy by 8MB kousky skončily chybou 413 dřív, než dorazí do aplikace.
+    /** Část zálohy: pod `upload_max_filesize`, IIS `maxAllowedContentLength` i nginx `client_max_body_size`, včetně výchozího 1 MB u nginx bez nastavení (cizí reverzní proxy). */
     public const CHUNK_BYTES = 768 * 1024;
     private const ALLOWED_EXTENSIONS = ['izip', 'icab', 'zip'];
 

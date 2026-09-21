@@ -166,6 +166,20 @@ final class PohodaImportRepository
         return $row;
     }
 
+    /**
+     * Smaže protokol doběhlé zkoušky nanečisto. Zkouška se na konci celá vrací, v MyÚčtu po ní
+     * nic nezůstává, takže jde jen o záznam. Protokol ostrého převodu ani běžící zkoušku
+     * smazat nejde - ostrý převod je auditní stopa převzatých dat.
+     */
+    public function deleteDryRun(int $id, int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "DELETE FROM pohoda_imports WHERE id = ? AND supplier_id = ? AND mode = 'dry_run' AND status <> 'running'"
+        );
+        $stmt->execute([$id, $supplierId]);
+        return $stmt->rowCount() > 0;
+    }
+
     /** @return list<array<string,mixed>> běhy bez protokolu (ten je velký - stahuje se v detailu) */
     public function listRuns(int $supplierId, int $limit = 20): array
     {

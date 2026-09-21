@@ -25266,6 +25266,9 @@
     "open_trial_balance": "Obratová předvaha",
     "history_title": "Protokoly převodů",
     "history_empty": "Zatím žádný převod.",
+    "run_delete": "Smazat protokol zkoušky nanečisto",
+    "run_delete_confirm": "Smazat protokol zkoušky nanečisto #{id}? Zkouška v MyÚčtu nic nezměnila, maže se jen záznam.",
+    "run_deleted": "Protokol zkoušky nanečisto smazán.",
     "mode": {
       "dry_run": "Zkouška nanečisto",
       "import": "Převod"
