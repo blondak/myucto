@@ -12958,6 +12958,11 @@
       "blocked_period_not_open": "Období původního zápisu je „{status}“ a pro dnešek není otevřené účetní období — opravu není kam zapsat. Otevři účetní období v Účetnictví → Uzávěrka.",
       "confirm_date_shift": "Rozumím, že storno i oprava se zaúčtují k {to} místo k původnímu {from}.",
       "tax_neutral_available": "Rok není uzavřený, zámek drží jen podané DPH. Když jen přesuneš částky mezi účty (např. 511 → 518.100) a nezměníš DPH, daňové účty ani celkové částky, zápis se přepíše na místě k původnímu datu, bez storna. Po podání přiznání k dani z příjmů za rok navíc jen v rámci téže třídy a bez změny daňové uznatelnosti. Jinak vznikne storno a nový zápis a posun data je potřeba potvrdit.",
+      "dimensions_title": "Dimenze dokladu",
+      "dimensions_hint": "Dimenze jsou jen analytika. „Uložit jen dimenze“ je promítne do řádků zápisu bez storna a bez změny účtů či částek, i v uzavřeném období. S přeúčtováním se uloží spolu s ním.",
+      "dimensions_preview": "Řádky zápisu po uložení dimenzí",
+      "dimensions_refused": "Takhle dimenze uložit nejde: položky dokladu mají různé dimenze, zaúčtovaný řádek je jen jeden a zápis leží v uzavřeném nebo zamčeném období. Rozdělit řádek by změnilo částky, a to jde jen přeúčtováním.",
+      "save_dimensions_only": "Uložit jen dimenze",
       "hint": "Zápis musí být vyrovnaný (Σ MD = Σ Dal). Kontrolu podvojnosti, otevřenosti období i zámku k datu dělá server — DPH se přeúčtováním nemění, ta se opravuje editací dokladu."
     },
     "posting_origin": {

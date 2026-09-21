@@ -2250,6 +2250,8 @@ final class Routes
                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'getDocument']);
             $g->put   ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|journal-templates}/{id:[0-9]+}',
                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'saveDocument']);
+            $g->post  ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions}/{id:[0-9]+}/preview',
+                [\MyInvoice\Action\Accounting\DimensionAction::class, 'previewDocument']);
             $g->get   ('/dimensions/journal/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\DimensionAction::class, 'getJournal']);
             $g->put   ('/dimensions/journal/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\DimensionAction::class, 'saveJournal']);
             $g->get   ('/dimensions/group',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'group']);

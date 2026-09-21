@@ -608,7 +608,8 @@ final class JournalAction
     /**
      * POST /api/accounting/journal/repost/{source}/{id} — přeúčtování dokladu.
      *
-     * Tělo: `{ lines: [{account_code, side, amount}], description?, confirm_date_shift? }`.
+     * Tělo: `{ lines: [{account_code, side, amount}], description?, confirm_date_shift?, dimensions? }`;
+     * `dimensions` = `{header, items?}` dimenze dokladu, uložené v téže transakci.
      * Řádky jsou POVINNÉ: přeúčtování bez nich by bylo obyčejné znovuzaúčtování, na
      * které je `post-purchase/{id}`.
      */
@@ -652,7 +653,30 @@ final class JournalAction
             'description' => $this->nullableString($body['description'] ?? null),
         ], static fn ($v) => $v !== null));
 
+        // Dimenze z dialogu se ukládají v TÉŽE transakci jako přeúčtování: nový zápis
+        // si je při zaúčtování orazítkuje (a řádek nákladu rozdělí podle položek).
+        // Odmítnuté přeúčtování tak nenechá doklad s dimenzemi, které deník nenese.
+        $dimensionBody = is_array($body['dimensions'] ?? null) ? $body['dimensions'] : null;
+        $dimensionDocType = match ($sourceType) {
+            'purchase_invoice' => 'purchase_invoice',
+            'bank'             => 'bank_transaction',
+            default            => 'invoice',
+        };
+        $dimensionResult = null;
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        $ownTx ? $pdo->beginTransaction() : $pdo->exec('SAVEPOINT repost_with_dimensions');
         try {
+            if ($dimensionBody !== null) {
+                $dimensionResult = $this->dimensions->saveDocument(
+                    $supplierId,
+                    $dimensionDocType,
+                    $docId,
+                    (array) ($dimensionBody['header'] ?? []),
+                    array_key_exists('items', $dimensionBody) ? (array) $dimensionBody['items'] : null,
+                    true,
+                );
+            }
             $result = $this->repost->repost(
                 $supplierId,
                 $sourceType,
@@ -661,8 +685,35 @@ final class JournalAction
                 $meta,
                 (bool) ($body['confirm_date_shift'] ?? false),
             );
+            $ownTx ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT repost_with_dimensions');
         } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $ownTx ? $pdo->rollBack() : $pdo->exec('ROLLBACK TO SAVEPOINT repost_with_dimensions');
+            }
+            if ($e instanceof DimensionException) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
             return $this->mapPostingError($response, $e);
+        }
+        if ($dimensionResult !== null) {
+            $this->logger->log(
+                'dimension.document_updated',
+                $this->userId($request),
+                'dimension',
+                $docId,
+                [
+                    'doc_type'        => $dimensionDocType,
+                    'via'             => 'repost',
+                    'header'          => $dimensionResult['header'],
+                    'items'           => $dimensionResult['items'],
+                    'restamped_lines' => $dimensionResult['restamp']['lines'],
+                    'locked_period'   => $dimensionResult['restamp']['locked'],
+                    'entry_id'        => $result['entry_id'],
+                ],
+                $meta['ip'] ?? null,
+                $meta['user_agent'] ?? null,
+                $supplierId,
+            );
         }
 
         // Po stornu původního zápisu je doklad odemčený jen do chvíle, než opravu

@@ -521,7 +521,8 @@ function candidateReject() {
   <Teleport to="body">
     <RepostModal v-if="repostTx" :open="true" source="bank-transactions" :doc-id="repostTx.id"
       :doc-label="repostTx.description || repostTx.variable_symbol"
-      @close="repostTx = null" @reposted="repostTx = null; emit('changed')" />
+      @close="repostTx = null" @reposted="repostTx = null; emit('changed')"
+      @dimensions-saved="repostTx = null; emit('changed')" />
     <RuleFormModal v-if="ruleTemplateOpen" :prefill="rulePrefill" :base-amount="Math.abs(tx.amount)"
       @saved="ruleTemplateOpen = false; emit('changed')" @close="ruleTemplateOpen = false" />
   </Teleport>

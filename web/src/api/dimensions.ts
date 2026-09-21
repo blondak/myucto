@@ -73,7 +73,41 @@ export interface DocumentDimensions {
 }
 
 export interface DocumentDimensionsSaveResult extends DocumentDimensions {
-  restamp: { lines: number; needs_repost: boolean }
+  /** `locked` = zápis leží v uzavřeném nebo zamčeném období (mění se jen analytika). */
+  restamp: { lines: number; needs_repost: boolean; locked?: boolean }
+}
+
+/** Zaúčtovaný řádek dokladu s dimenzemi, jaké by nesl po uložení (náhled). */
+export interface DocumentDimensionsPreviewLine {
+  id: number
+  entry_id: number
+  account_code: string | null
+  account_name: string | null
+  side: 'debit' | 'credit'
+  amount: number
+  dimensions: Record<number, number>
+}
+
+export interface DocumentDimensionsPreview extends DocumentDimensionsSaveResult {
+  /** Uložení by se odmítlo: řádek by bylo nutné rozdělit, ale zápis je v uzavřeném období. */
+  refused: boolean
+  lines: DocumentDimensionsPreviewLine[]
+}
+
+export interface DocumentDimensionsPayload {
+  header: DimensionMap
+  /** Bez položek zůstanou dimenze položek dokladu beze změny. */
+  items?: Record<number, DimensionMap>
+}
+
+/** Tělo pro uložení i náhled; `items` jen tehdy, když je volající opravdu posílá. */
+export function documentDimensionsBody(payload: DocumentDimensionsPayload) {
+  return {
+    header: compactDimensions(payload.header),
+    ...(payload.items === undefined ? {} : {
+      items: Object.fromEntries(Object.entries(payload.items).map(([no, map]) => [no, compactDimensions(map)])),
+    }),
+  }
 }
 
 export type DimensionDocType = 'purchase-invoices' | 'invoices' | 'cash-documents' | 'bank-transactions' | 'journal-templates'
@@ -182,11 +216,13 @@ export const dimensionsApi = {
 
   getDocument: (doc: DimensionDocType, id: number) =>
     api.get<DocumentDimensions>(`/accounting/dimensions/documents/${doc}/${id}`).then(r => r.data),
-  saveDocument: (doc: DimensionDocType, id: number, payload: { header: DimensionMap; items?: Record<number, DimensionMap> }) =>
-    api.put<DocumentDimensionsSaveResult>(`/accounting/dimensions/documents/${doc}/${id}`, {
-      header: compactDimensions(payload.header),
-      items: Object.fromEntries(Object.entries(payload.items ?? {}).map(([no, map]) => [no, compactDimensions(map)])),
-    }).then(r => r.data),
+  saveDocument: (doc: DimensionDocType, id: number, payload: DocumentDimensionsPayload) =>
+    api.put<DocumentDimensionsSaveResult>(`/accounting/dimensions/documents/${doc}/${id}`, documentDimensionsBody(payload))
+      .then(r => r.data),
+  /** Co by po uložení nesl každý zaúčtovaný řádek dokladu — nic se neuloží. */
+  previewDocument: (doc: DimensionDocType, id: number, payload: DocumentDimensionsPayload) =>
+    api.post<DocumentDimensionsPreview>(`/accounting/dimensions/documents/${doc}/${id}/preview`, documentDimensionsBody(payload))
+      .then(r => r.data),
 
   getDefaults: (entity: DimensionDefaultsEntity, id: number) =>
     api.get<{ dimensions: Record<number, number> }>(`/${entity}/${id}/dimensions`).then(r => r.data.dimensions),

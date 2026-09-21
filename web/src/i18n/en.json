@@ -12958,6 +12958,11 @@
       "blocked_period_not_open": "The original entry sits in a “{status}” period and there is no open accounting period for today — there is nowhere to write the correction. Open a period in Accounting → Closing.",
       "confirm_date_shift": "I understand that the reversal and the correction will be posted on {to} instead of the original {from}.",
       "tax_neutral_available": "The year is not closed, the lock only protects the filed VAT return. If you only move amounts between accounts (e.g. 511 → 518.100) without changing VAT, tax accounts or the totals, the entry is rewritten in place on its original date, without a reversal. Once the income tax return for the year is filed, only within the same account class and without changing tax deductibility. Otherwise a reversal and a new entry are posted and the date shift has to be confirmed.",
+      "dimensions_title": "Document dimensions",
+      "dimensions_hint": "Dimensions are analytics only. “Save dimensions only” applies them to the entry lines without a reversal and without changing accounts or amounts, even in a closed period. With a re-post they are saved together with it.",
+      "dimensions_preview": "Entry lines after saving the dimensions",
+      "dimensions_refused": "The dimensions cannot be saved like this: the document items have different dimensions, there is only one posted line and the entry sits in a closed or locked period. Splitting the line would change amounts, which only a re-post may do.",
+      "save_dimensions_only": "Save dimensions only",
       "hint": "The entry must balance (Σ debit = Σ credit). Double entry, period status and the date lock are enforced by the server — re-posting does not change VAT, that is corrected by editing the document."
     },
     "posting_origin": {

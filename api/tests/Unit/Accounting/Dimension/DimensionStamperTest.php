@@ -94,6 +94,22 @@ final class DimensionStamperTest extends TestCase
         self::assertSame([self::CENTER => 7], $needs['lines'][0]['dimensions'], 'Do přeúčtování nese jen hlavičku.');
     }
 
+    /** Jediný nerozdělený řádek, jehož dimenze náhodou sedí na jednu položku, rozdělený není. */
+    public function testSingleUnsplitLineMatchingOneItemStillNeedsSplit(): void
+    {
+        $items = [
+            ['dims' => [self::PROJECT => 1], 'weight' => 60.0, 'account_id' => null],
+            ['dims' => [self::PROJECT => 2], 'weight' => 40.0, 'account_id' => null],
+        ];
+        $single = [[
+            'id' => 1, 'account_id' => 1, 'side' => 'debit', 'amount' => 100.00,
+            'current_dimensions' => [self::PROJECT => 1], 'split_siblings' => 1,
+        ]];
+        $result = DimensionStamper::assign($single, [], $items, self::TYPES, false);
+        self::assertTrue($result['needs_split'], 'Celá částka by jinak zůstala na projektu první položky.');
+        self::assertArrayNotHasKey('split_siblings', $result['lines'][0]);
+    }
+
     public function testExplicitLineDimensionWins(): void
     {
         $lines = [['account_id' => 1, 'side' => 'debit', 'amount' => 10.00, 'dimensions' => [self::PROJECT => 9]]];

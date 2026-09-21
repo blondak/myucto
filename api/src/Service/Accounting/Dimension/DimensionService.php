@@ -10,6 +10,7 @@ use MyInvoice\Repository\CostCenterRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Service\Accounting\DocumentRepostService;
 use MyInvoice\Service\Accounting\PostingService;
 use PDO;
 
@@ -295,22 +296,75 @@ final class DimensionService
      * Uloží dimenze dokladu (hlavička + položky podle pořadí od 1) a promítne je do
      * už zaúčtovaných řádků dokladu.
      *
+     * Přerazítkování mění jen analytiku (účet, strana, částka ani datum řádku se
+     * nemění), proto jde i u zápisu v uzavřeném nebo zamčeném období a nevzniká
+     * protizápis. Jedinou výjimkou je rozdělení řádku mezi položky s různými
+     * dimenzemi: to mění částky řádků, a smí tedy jen přeúčtování. U zápisu, který
+     * se nedá přepsat na místě ({@see DocumentRepostService::decide()}), se takové
+     * uložení ODMÍTNE — řádek s hlavičkovými dimenzemi by sestavy po dimenzích tiše
+     * zkreslil a přeúčtování, které by to spravilo, tam vede přes storno.
+     * `$forRepost` = volá přeúčtování, které řádky hned potom zapíše znovu a rozdělí.
+     *
      * @param array<int|string,mixed> $header
-     * @param array<int|string,mixed> $items pořadí položky => mapa typ => hodnota
-     * @return array{header:array<int,int>, items:array<int,array<int,int>>, restamp:array{lines:int,needs_repost:bool}}
+     * @param array<int|string,mixed>|null $items pořadí položky => mapa typ => hodnota; null = ponechat
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>, restamp:array{lines:int,needs_repost:bool,locked:bool}}
      */
-    public function saveDocument(int $supplierId, string $docType, int $docId, array $header, array $items): array
+    public function saveDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, bool $forRepost = false): array
     {
         $this->requireEnabled($supplierId);
         $this->requireDocument($supplierId, $docType, $docId);
+        return $this->atomically(function () use ($supplierId, $docType, $docId, $header, $items, $forRepost): array {
+            $result = $this->applyDocument($supplierId, $docType, $docId, $header, $items);
+            if (!$forRepost && $result['restamp']['needs_repost'] && $result['restamp']['locked']) {
+                throw new DimensionException('split_in_locked_period', self::SPLIT_LOCKED_MESSAGE, 409);
+            }
+            return $result;
+        });
+    }
+
+    public const SPLIT_LOCKED_MESSAGE = 'Položky dokladu mají různé dimenze, ale zaúčtovaný řádek je jen jeden a zápis '
+        . 'leží v uzavřeném nebo zamčeném období — rozdělit ho podle položek by změnilo částky řádků, a to jde jen '
+        . 'přeúčtováním. Dejte položkám stejnou dimenzi (nebo ji zadejte jen v hlavičce dokladu), případně upravte '
+        . 'dimenze přímo na řádcích zápisu v účetním deníku.';
+
+    /**
+     * Náhled uložení dimenzí dokladu: co by po uložení neslo každý řádek jeho živých
+     * zápisů. Počítá se TOUTÉŽ cestou jako {@see saveDocument()} (zápis + rollback),
+     * takže se náhled s výsledkem nemůže rozejít.
+     *
+     * @param array<int|string,mixed> $header
+     * @param array<int|string,mixed>|null $items
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>,
+     *               restamp:array{lines:int,needs_repost:bool,locked:bool}, refused:bool,
+     *               lines:list<array{id:int, entry_id:int, account_code:?string, account_name:?string, side:string, amount:float, dimensions:array<int,int>}>}
+     */
+    public function previewDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items): array
+    {
+        $this->requireEnabled($supplierId);
+        $this->requireDocument($supplierId, $docType, $docId);
+        return $this->atomically(function () use ($supplierId, $docType, $docId, $header, $items): array {
+            $result = $this->applyDocument($supplierId, $docType, $docId, $header, $items);
+            $result['refused'] = $result['restamp']['needs_repost'] && $result['restamp']['locked'];
+            $result['lines'] = $this->postedLines($supplierId, self::DOCUMENTS[$docType][1], $docId);
+            return $result;
+        }, true);
+    }
+
+    /**
+     * @param array<int|string,mixed> $header
+     * @param array<int|string,mixed>|null $items
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>, restamp:array{lines:int,needs_repost:bool,locked:bool}}
+     */
+    private function applyDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items): array
+    {
         $current = $this->assignments->documentDimensions($supplierId, $docType, $docId);
         $currentIds = array_values($current['header']);
         foreach ($current['items'] as $dims) {
             array_push($currentIds, ...array_values($dims));
         }
         $normHeader = $this->normalize($supplierId, $header, $currentIds);
-        $normItems = [];
-        foreach ($items as $itemNo => $dims) {
+        $normItems = $items === null ? $current['items'] : [];
+        foreach ($items ?? [] as $itemNo => $dims) {
             if ((int) $itemNo <= 0 || !is_array($dims)) {
                 continue;
             }
@@ -319,27 +373,114 @@ final class DimensionService
                 $normItems[(int) $itemNo] = $norm;
             }
         }
+        $this->assignments->replaceDocumentDimensions($supplierId, $docType, $docId, $normHeader, $normItems);
+        $sourceType = self::DOCUMENTS[$docType][1];
+        $restamp = $sourceType !== null
+            ? $this->posting->restampDimensions($supplierId, $sourceType, $docId)
+            : ['lines' => 0, 'needs_repost' => false];
+        $restamp['locked'] = $sourceType !== null && $this->postedOutsideOpenPeriod($supplierId, $sourceType, $docId);
+        return ['header' => $normHeader, 'items' => $normItems, 'restamp' => $restamp];
+    }
+
+    /**
+     * Leží některý živý zápis dokladu tam, kde ho nejde přepsat na místě (uzavřené
+     * období, zamčené datum)? Rozhoduje totéž pravidlo jako dialog Přeúčtovat.
+     */
+    public function postedOutsideOpenPeriod(int $supplierId, string $sourceType, int $docId): bool
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT je.entry_date, ap.status
+               FROM journal_entries je
+               LEFT JOIN accounting_periods ap ON ap.id = je.period_id AND ap.supplier_id = je.supplier_id
+              WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id = ? AND je.reversed_by IS NULL'
+        );
+        $stmt->execute([$supplierId, $sourceType, $docId]);
+        $entries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($entries === []) {
+            return false;
+        }
+        $lock = $pdo->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?');
+        $lock->execute([$supplierId]);
+        $lockedUntil = $lock->fetchColumn();
+        $lockedUntil = $lockedUntil === false || $lockedUntil === null ? null : (string) $lockedUntil;
+        $today = date('Y-m-d');
+        foreach ($entries as $entry) {
+            $decision = DocumentRepostService::decide(
+                false,
+                $entry['status'] === null ? null : (string) $entry['status'],
+                (string) $entry['entry_date'],
+                $lockedUntil,
+                null,
+                $today,
+            );
+            if ($decision['strategy'] !== DocumentRepostService::STRATEGY_REPLACE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Řádky živých (nestornovaných) zápisů dokladu i s dimenzemi.
+     *
+     * @return list<array{id:int, entry_id:int, account_code:?string, account_name:?string, side:string, amount:float, dimensions:array<int,int>}>
+     */
+    private function postedLines(int $supplierId, ?string $sourceType, int $docId): array
+    {
+        if ($sourceType === null) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT l.id, l.entry_id, a.account_code, a.name AS account_name, l.side, l.amount
+               FROM journal_entries je
+               JOIN journal_entry_lines l ON l.entry_id = je.id AND l.supplier_id = je.supplier_id
+               LEFT JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = je.supplier_id
+              WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id = ? AND je.reversed_by IS NULL
+              ORDER BY je.id, l.line_no, l.id'
+        );
+        $stmt->execute([$supplierId, $sourceType, $docId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $dims = $this->assignments->lineDimensions($supplierId, array_map(static fn (array $r): int => (int) $r['id'], $rows));
+        return array_map(static fn (array $r): array => [
+            'id' => (int) $r['id'],
+            'entry_id' => (int) $r['entry_id'],
+            'account_code' => $r['account_code'] === null ? null : (string) $r['account_code'],
+            'account_name' => $r['account_name'] === null ? null : (string) $r['account_name'],
+            'side' => (string) $r['side'],
+            'amount' => (float) $r['amount'],
+            'dimensions' => $dims[(int) $r['id']] ?? [],
+        ], $rows);
+    }
+
+    /**
+     * Provede `$fn` atomicky: ve vlastní transakci, nebo uvnitř transakce volajícího
+     * přes savepoint (odmítnuté uložení tak po sobě nenechá půlku změn ani tam).
+     * `$discard` = výsledek jen spočítat a změny zahodit (náhled).
+     *
+     * @template T
+     * @param callable():T $fn
+     * @return T
+     */
+    private function atomically(callable $fn, bool $discard = false): mixed
+    {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
-        if ($ownTx) {
-            $pdo->beginTransaction();
-        }
+        $ownTx ? $pdo->beginTransaction() : $pdo->exec('SAVEPOINT dimension_document');
         try {
-            $this->assignments->replaceDocumentDimensions($supplierId, $docType, $docId, $normHeader, $normItems);
-            $sourceType = self::DOCUMENTS[$docType][1];
-            $restamp = $sourceType !== null
-                ? $this->posting->restampDimensions($supplierId, $sourceType, $docId)
-                : ['lines' => 0, 'needs_repost' => false];
-            if ($ownTx) {
-                $pdo->commit();
-            }
+            $result = $fn();
         } catch (\Throwable $e) {
-            if ($ownTx && $pdo->inTransaction()) {
-                $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $ownTx ? $pdo->rollBack() : $pdo->exec('ROLLBACK TO SAVEPOINT dimension_document');
             }
             throw $e;
         }
-        return ['header' => $normHeader, 'items' => $normItems, 'restamp' => $restamp];
+        if ($discard) {
+            $ownTx ? $pdo->rollBack() : $pdo->exec('ROLLBACK TO SAVEPOINT dimension_document');
+        } else {
+            $ownTx ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT dimension_document');
+        }
+        return $result;
     }
 
     /** @return array<int,array<int,int>> řádek => typ => hodnota */

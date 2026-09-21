@@ -1666,6 +1666,8 @@ export interface RepostPayload {
   lines: Array<{ account_code: string; side: 'debit' | 'credit'; amount: number }>
   description?: string | null
   confirm_date_shift?: boolean
+  /** Dimenze dokladu uložené v téže transakci (bez `items` zůstanou dimenze položek). */
+  dimensions?: { header: Record<number, number>; items?: Record<number, Record<number, number>> }
 }
 
 /**

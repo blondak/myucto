@@ -9724,6 +9724,17 @@ paths:
                   type: boolean
                   default: false
                   description: Souhlas s tím, že storno i oprava padnou na jiné datum než původní zápis.
+                dimensions:
+                  type: object
+                  description: >-
+                    Dimenze dokladu (Firma → Dimenze) uložené v téže transakci jako přeúčtování;
+                    nový zápis je orazítkuje. Bez `items` zůstanou dimenze položek beze změny.
+                  properties:
+                    header: { type: object, additionalProperties: { type: integer }, description: "Id typu → id hodnoty." }
+                    items:
+                      type: object
+                      description: Pořadí položky (od 1) → mapa id typu → id hodnoty.
+                      additionalProperties: { type: object, additionalProperties: { type: integer } }
       responses:
         '200':
           description: Přeúčtováno

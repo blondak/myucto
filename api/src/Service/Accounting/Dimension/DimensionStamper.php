@@ -112,10 +112,17 @@ final class DimensionStamper
             );
             $stmt->execute([$supplierId, $entryId]);
             $current = $assignments->entryLineDimensions($supplierId, $entryId);
-            $lines = array_map(static function (array $l) use ($current): array {
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $siblings = [];
+            foreach ($rows as $l) {
+                $key = $l['account_id'] . '|' . $l['side'];
+                $siblings[$key] = ($siblings[$key] ?? 0) + 1;
+            }
+            $lines = array_map(static function (array $l) use ($current, $siblings): array {
                 $l['current_dimensions'] = $current[(int) $l['id']] ?? [];
+                $l['split_siblings'] = $siblings[$l['account_id'] . '|' . $l['side']];
                 return $l;
-            }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+            }, $rows);
             $result = self::assign($lines, $header, $items, $types, false);
             $needsRepost = $needsRepost || $result['needs_split'];
             foreach ($result['lines'] as $line) {
@@ -169,8 +176,12 @@ final class DimensionStamper
             $weights = array_column($combos, 'weight');
             $splittable = min($weights) > 0.0 && ($line['currency_code'] ?? null) === null;
             // Řádek rozdělený už při zaúčtování nese jednu z kombinací — tu si ponechá.
+            // Rozdělený je jen tehdy, když má zápis na tomtéž účtu a straně aspoň tolik
+            // řádků, kolik je kombinací; jediný nerozdělený řádek by si jinak ponechal
+            // dimenzi jedné položky pro celou částku a zbytek by v sestavách chyběl.
             $current = isset($line['current_dimensions']) ? self::merge([], (array) $line['current_dimensions']) : null;
-            if (!$allowSplit && $current !== null && isset($combos[self::key(self::merge($current, $explicit))])) {
+            $wasSplit = ($line['split_siblings'] ?? PHP_INT_MAX) >= count($combos);
+            if (!$allowSplit && $current !== null && $wasSplit && isset($combos[self::key(self::merge($current, $explicit))])) {
                 $out[] = self::withDims($line, self::merge($current, $explicit));
                 continue;
             }
@@ -320,7 +331,7 @@ final class DimensionStamper
      */
     private static function withDims(array $line, array $dims): array
     {
-        unset($line['current_dimensions']);
+        unset($line['current_dimensions'], $line['split_siblings']);
         if ($dims === []) {
             unset($line['dimensions']);
         } else {

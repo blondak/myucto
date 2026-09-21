@@ -139,7 +139,7 @@ defineExpose({ reload: () => load(props.docId) })
     <!-- Teleport: kořen sekce má overflow-hidden (zaoblené rohy boxu), dialog by se v něm ořízl. -->
     <Teleport to="body">
       <RepostModal v-if="repostOpen" :open="repostOpen" :source="source" :doc-id="docId" :doc-label="docLabel"
-        @close="repostOpen = false" @reposted="onReposted" />
+        @close="repostOpen = false" @reposted="onReposted" @dimensions-saved="onReposted" />
     </Teleport>
   </div>
 </template>

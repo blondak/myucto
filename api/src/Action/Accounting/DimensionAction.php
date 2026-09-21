@@ -30,6 +30,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   DELETE /api/accounting/dimensions/values/{id}              — smazat (použitá se jen uzavře)
  *   GET    /api/accounting/dimensions/responsible-candidates   — uživatelé firmy (odpovědná osoba)
  *   GET|PUT /api/accounting/dimensions/documents/{doc}/{id}    — dimenze dokladu (hlavička + položky)
+ *   POST   /api/accounting/dimensions/documents/{doc}/{id}/preview — náhled dimenzí zaúčtovaných řádků
  *   GET|PUT /api/accounting/dimensions/journal/{id}            — dimenze řádků účetního zápisu
  *   GET|POST|PUT|DELETE /api/accounting/dimensions/group       — skupina firem (globální dimenze)
  *
@@ -175,16 +176,59 @@ final class DimensionAction
                 $docType,
                 $docId,
                 (array) ($body['header'] ?? []),
-                (array) ($body['items'] ?? []),
+                self::itemsFromBody($body),
             );
-            $this->log($request, 'dimension.document_updated', $docId, [
-                'doc_type' => $docType,
-                'header' => $result['header'],
-                'items' => $result['items'],
-                'restamped_lines' => $result['restamp']['lines'],
-            ]);
+            $this->logDocument($request, $docId, $docType, $result, 'document');
             return $result;
         });
+    }
+
+    /**
+     * POST …/documents/{doc}/{id}/preview — co by po uložení dimenzí neslo každý
+     * zaúčtovaný řádek dokladu (dialog Přeúčtovat). Nic se neuloží.
+     */
+    public function previewDocument(Request $request, Response $response, array $args): Response
+    {
+        return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
+            $body = (array) ($request->getParsedBody() ?? []);
+            return $this->dimensions->previewDocument(
+                $supplierId,
+                self::DOCUMENTS[(string) ($args['doc'] ?? '')] ?? '',
+                (int) ($args['id'] ?? 0),
+                (array) ($body['header'] ?? []),
+                self::itemsFromBody($body),
+            );
+        });
+    }
+
+    /**
+     * Položky jen tehdy, když je tělo posílá — panel na detailu dokladu (a dialog
+     * Přeúčtovat) mění jen hlavičku a dimenze položek z editoru smazat nesmí.
+     *
+     * @param array<string,mixed> $body
+     * @return array<int|string,mixed>|null
+     */
+    private static function itemsFromBody(array $body): ?array
+    {
+        return array_key_exists('items', $body) ? (array) $body['items'] : null;
+    }
+
+    /**
+     * Audit změny dimenzí dokladu — kdo a kdy změnil analytiku i zaúčtovaných řádků
+     * (i v uzavřeném období, kde jinak žádná změna zápisu projít nesmí).
+     *
+     * @param array{header:array<int,int>, items:array<int,array<int,int>>, restamp:array{lines:int,needs_repost:bool,locked:bool}} $result
+     */
+    private function logDocument(Request $request, int $docId, string $docType, array $result, string $via): void
+    {
+        $this->log($request, 'dimension.document_updated', $docId, [
+            'doc_type' => $docType,
+            'via' => $via,
+            'header' => $result['header'],
+            'items' => $result['items'],
+            'restamped_lines' => $result['restamp']['lines'],
+            'locked_period' => $result['restamp']['locked'],
+        ]);
     }
 
     public function getJournal(Request $request, Response $response, array $args): Response

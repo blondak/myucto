@@ -10,18 +10,31 @@
  * Rozhodnutí přepsat × stornovat × odmítnout NEDĚLÁ tenhle popup: přichází ze
  * serveru z `repost-plan` a provede ho tatáž služba, takže se náhled s výsledkem
  * nemůže rozejít. Popup jen ukáže, co se stane, a nechá upravit řádky.
+ *
+ * Dimenze dokladu (Firma → Dimenze) se tu upravují taky. Jsou jen analytika, takže
+ * jejich změna přeúčtování nepotřebuje: „Uložit jen dimenze" přerazítkuje řádky
+ * zápisu bez storna i v uzavřeném období, kde samotné přeúčtování zůstává
+ * zablokované. S přeúčtováním se dimenze uloží v téže transakci.
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   accountingApi, postingErrorI18nKey,
   type ChartAccount, type JournalPostingSource, type RepostPlan,
 } from '@/api/accounting'
+import {
+  dimensionsApi, compactDimensions,
+  type DimensionMap, type DocumentDimensionsPreview,
+} from '@/api/dimensions'
 import Modal from '../ui/Modal.vue'
 import JournalLinesEditor, { type EditorLine } from './JournalLinesEditor.vue'
 import PostingOriginRow from './PostingOriginRow.vue'
-import { btnOutline, btnFilled } from '../ui/buttonStyles'
-import { formatDate } from '@/composables/useFormat'
+import DimensionFields from '../dimensions/DimensionFields.vue'
+import DimensionChips from '../dimensions/DimensionChips.vue'
+import { btnOutline, btnFilled, ICONS } from '../ui/buttonStyles'
+import { formatDate, formatMoney } from '@/composables/useFormat'
+import { useDimensions } from '@/composables/useDimensions'
+import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
   open: boolean
@@ -32,9 +45,83 @@ const props = defineProps<{
   docLabel?: string | null
 }>()
 
-const emit = defineEmits<{ close: []; reposted: [] }>()
+const emit = defineEmits<{ close: []; reposted: []; dimensionsSaved: [] }>()
 
 const { t } = useI18n()
+const toast = useToast()
+const dims = useDimensions()
+
+const dimHeader = ref<DimensionMap>({})
+const dimSaved = ref('{}')
+const dimPreview = ref<DocumentDimensionsPreview | null>(null)
+const dimPreviewLoading = ref(false)
+const dimSaving = ref(false)
+let previewTimer: ReturnType<typeof setTimeout> | null = null
+let previewSeq = 0
+
+const dimsShown = computed(() => dims.enabled.value && dims.documentTypes.value.length > 0)
+const dimsDirty = computed(() => JSON.stringify(compactDimensions(dimHeader.value)) !== dimSaved.value)
+const dimsRefused = computed(() => dimsDirty.value && dimPreview.value?.refused === true)
+const canSaveDimensions = computed(() =>
+  dimsShown.value && dims.canEdit.value && dimsDirty.value && !dimsRefused.value
+  && !dimPreviewLoading.value && !dimSaving.value && !saving.value)
+
+async function loadDimensions(): Promise<void> {
+  dimHeader.value = {}
+  dimSaved.value = '{}'
+  dimPreview.value = null
+  if (!dims.enabled.value) return
+  try {
+    await dims.load()
+    const data = await dimensionsApi.getDocument(props.source, props.docId)
+    dimHeader.value = { ...data.header }
+    dimSaved.value = JSON.stringify(compactDimensions(data.header))
+  } catch {
+    dimHeader.value = {}
+  }
+}
+
+/** Náhled, co ponesou řádky zápisu — počítá ho server stejnou cestou jako uložení. */
+function schedulePreview(): void {
+  if (previewTimer) clearTimeout(previewTimer)
+  if (!dimsDirty.value) {
+    dimPreview.value = null
+    return
+  }
+  dimPreviewLoading.value = true
+  previewTimer = setTimeout(async () => {
+    const seq = ++previewSeq
+    try {
+      const result = await dimensionsApi.previewDocument(props.source, props.docId, { header: dimHeader.value })
+      if (seq === previewSeq) dimPreview.value = result
+    } catch {
+      if (seq === previewSeq) dimPreview.value = null
+    } finally {
+      if (seq === previewSeq) dimPreviewLoading.value = false
+    }
+  }, 400)
+}
+
+watch(dimHeader, schedulePreview, { deep: true })
+onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
+
+async function saveDimensionsOnly(): Promise<void> {
+  if (!canSaveDimensions.value) return
+  dimSaving.value = true
+  error.value = ''
+  try {
+    const result = await dimensionsApi.saveDocument(props.source, props.docId, { header: dimHeader.value })
+    toast.success(result.restamp.lines > 0
+      ? t('dimensions.saved_restamped', { count: result.restamp.lines })
+      : t('dimensions.saved'))
+    emit('dimensionsSaved')
+    emit('close')
+  } catch (e: any) {
+    error.value = e?.response?.data?.error?.message || t('common.error')
+  } finally {
+    dimSaving.value = false
+  }
+}
 
 const plan = ref<RepostPlan | null>(null)
 const lines = ref<EditorLine[]>([])
@@ -76,7 +163,12 @@ async function load(): Promise<void> {
   }
 }
 
-watch(() => [props.open, props.docId], ([open]) => { if (open) load() }, { immediate: true })
+watch(() => [props.open, props.docId], ([open]) => {
+  if (open) {
+    load()
+    void loadDimensions()
+  }
+}, { immediate: true })
 
 const canSubmit = computed(() =>
   !!plan.value && !blocked.value && !loading.value && !saving.value
@@ -96,11 +188,15 @@ async function submit(): Promise<void> {
       })),
       description: description.value.trim() || null,
       confirm_date_shift: confirmShift.value,
+      ...(dimsShown.value && dimsDirty.value ? { dimensions: { header: compactDimensions(dimHeader.value) } } : {}),
     })
     emit('reposted')
     emit('close')
   } catch (e: any) {
-    error.value = t(postingErrorI18nKey(e?.response?.data?.error?.code))
+    const code = e?.response?.data?.error?.code
+    error.value = code === 'split_in_locked_period' || code === 'invalid_dimension'
+      ? (e?.response?.data?.error?.message || t('common.error'))
+      : t(postingErrorI18nKey(code))
   } finally {
     saving.value = false
   }
@@ -173,6 +269,30 @@ async function submit(): Promise<void> {
              na ni místo nemá. -->
         <PostingOriginRow :source="source" :doc-id="docId" />
 
+        <!-- Dimenze jsou jen analytika: samotná změna přeúčtování nepotřebuje a jde
+             i tam, kde je přeúčtování zablokované (uzavřené období). -->
+        <section v-if="dimsShown" class="space-y-2 rounded-md border border-neutral-200 p-3" data-test="repost-dimensions">
+          <h4 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('accounting.repost.dimensions_title') }}</h4>
+          <DimensionFields v-model="dimHeader" :disabled="!dims.canEdit.value || saving || dimSaving" teleport />
+          <p class="text-xs text-neutral-500">{{ t('accounting.repost.dimensions_hint') }}</p>
+          <div v-if="dimsDirty && dimPreviewLoading" class="text-xs text-neutral-500">{{ t('common.loading') }}</div>
+          <p v-else-if="dimsRefused" class="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-800"
+             data-test="repost-dimensions-refused">
+            {{ t('accounting.repost.dimensions_refused') }}
+          </p>
+          <div v-else-if="dimsDirty && dimPreview && dimPreview.lines.length > 0" class="text-sm" data-test="repost-dimensions-preview">
+            <p class="text-xs text-neutral-500 mb-1">{{ t('accounting.repost.dimensions_preview') }}</p>
+            <ul class="divide-y divide-neutral-100">
+              <li v-for="line in dimPreview.lines" :key="line.id" class="flex flex-wrap items-center gap-x-2 gap-y-1 py-1">
+                <span class="font-mono font-medium">{{ line.account_code }}</span>
+                <span class="text-xs text-neutral-500">{{ line.side === 'debit' ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit') }}</span>
+                <span class="font-mono">{{ formatMoney(line.amount) }}</span>
+                <DimensionChips :dimensions="line.dimensions" class="ml-auto" />
+              </li>
+            </ul>
+          </div>
+        </section>
+
         <template v-if="!blocked">
           <label class="block text-sm">
             <span class="block text-neutral-500 mb-1">{{ t('accounting.repost.description') }}</span>
@@ -201,6 +321,11 @@ async function submit(): Promise<void> {
       <div class="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-neutral-200">
         <button type="button" :class="btnOutline('neutral')" @click="emit('close')">
           {{ t('common.cancel') }}
+        </button>
+        <button v-if="dimsShown && dims.canEdit.value && dimsDirty" type="button" :class="btnOutline('primary')"
+          class="whitespace-nowrap" :disabled="!canSaveDimensions" data-test="repost-save-dimensions" @click="saveDimensionsOnly">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.tag" /></svg>
+          {{ dimSaving ? t('common.saving') : t('accounting.repost.save_dimensions_only') }}
         </button>
         <button type="button" :class="btnFilled('warning')" :disabled="!canSubmit" @click="submit">
           {{ saving ? t('common.saving') : t('accounting.repost.confirm') }}

@@ -192,7 +192,7 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
     <Teleport to="body">
       <RepostModal v-if="repostOpen" :open="repostOpen" source="bank-transactions" :doc-id="tx.id"
         :doc-label="tx.description || tx.variable_symbol"
-        @close="repostOpen = false" @reposted="onReposted" />
+        @close="repostOpen = false" @reposted="onReposted" @dimensions-saved="emit('changed')" />
     </Teleport>
   </div>
 </template>
