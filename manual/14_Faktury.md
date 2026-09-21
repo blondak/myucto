@@ -139,7 +139,7 @@ pracují se skutečným prodlením.
 | 💰 **Zaplaceno** (`paid`) | Platba přišla a byla spárována | (terminální) |
 | 🟠 **Částečně uhrazeno** | Přišla jen část peněz (evidence plateb) — zbytek je dál pohledávka | Doplatit, částečná úhrada, upomínka |
 | 🟣 **Přeplaceno** | Evidované platby převyšují částku k úhradě | (řeší se ručně — vratka / dobropis) |
-| ⚫ **Storno** (`cancellation`) | Interní storno — faktura ztratila platnost | (terminální) |
+| ⚫ **Storno** (`cancellation`) | Interní storno — faktura ztratila platnost | Zrušit storno (viz 16.7.4), smazat (admin) |
 | 🔄 **Dobropis** (`credit_note`) | Vytvořen opravný daňový doklad | (terminální) |
 
 > 💡 **Edituj jen koncepty.** Vystavená faktura má immutable snapshot dodavatele,

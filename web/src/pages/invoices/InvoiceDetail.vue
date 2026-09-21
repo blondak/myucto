@@ -642,6 +642,7 @@ function actionLabel(a: string): string {
     'invoice.issued': 'invoice.actions.issued',
     'invoice.paid': 'invoice.actions.paid',
     'invoice.cancelled': 'invoice.actions.cancelled',
+    'invoice.uncancelled': 'invoice.actions.uncancelled',
     'invoice.cloned': 'invoice.actions.cloned',
     'invoice.credit_note_created': 'invoice.actions.credit_note_created',
     'invoice.reminder_sent': 'invoice.actions.reminder_sent',
@@ -901,6 +902,21 @@ async function unmarkPaid() {
     toast.success(t('invoice.unmark_paid_done'))
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('invoice.operation_failed'))
+  } finally {
+    busy.value = null
+  }
+}
+
+async function uncancelInvoice() {
+  if (!invoice.value) return
+  if (!window.confirm(t('invoice.uncancel_confirm', { varsymbol: invoice.value.varsymbol || `#${invoice.value.id}` }))) return
+  busy.value = 'uncancel'
+  try {
+    await invoicesApi.uncancel(invoice.value.id)
+    await load()
+    toast.success(t('invoice.uncancel_done'))
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('invoice.uncancel_failed'))
   } finally {
     busy.value = null
   }
@@ -1613,6 +1629,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'cancel', label: isCreditNoteSource.value ? t('invoice.cancel_credit_note') : t('invoice.cancel_or_credit'),
       icon: 'trash', tier: 'advanced', variant: 'danger',
       show: canCancel.value && canCancelPermission && !lockedForMe.value, disabled: b, run: openCancelModal },
+    { key: 'uncancel', label: t('invoice.uncancel'), icon: 'uturn', tier: 'advanced', variant: 'warning',
+      show: inv.status === 'cancelled' && ['invoice', 'proforma'].includes(inv.invoice_type) && canCancelPermission && !lockedForMe.value,
+      disabled: b, loading: busy.value === 'uncancel', run: uncancelInvoice },
     { key: 'delete-cancelled', label: t('invoice.delete_cancelled'), icon: 'trash', tier: 'advanced', variant: 'danger',
       show: isAdmin.value && canDeletePermission && (inv.status === 'cancelled' || (inv.invoice_type === 'cancellation' && !!inv.parent_invoice_id)),
       disabled: b, loading: busy.value === 'delete', run: deleteInvoice },

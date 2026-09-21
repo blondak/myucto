@@ -441,9 +441,18 @@ Třetí možnost **nenávratně odstraní účetní doklad** z databáze:
   cascade_deleted_ids, počet smazaných souborů).
 
 Pokud faktura ani žádný navázaný doklad nebyly zaúčtovány, admin force-delete
-provede smazání přímo. U zaúčtovaného dokladu zůstává aktivní retenční ochrana
-účetních a daňových záznamů; v běžící retenční lhůtě proto použij storno nebo
-dobropis.
+provede smazání přímo.
+
+Je-li faktura zaúčtovaná a její zápisy by šlo smazat i ručně v **Účetnictví →
+Deník** (otevřené období, datum mimo uzamčenou část účetnictví), force-delete
+nejdřív smaže tyto zápisy, u stornované faktury celou storno dvojici, a teprve
+pak fakturu. V deníku tak po faktuře nic nezůstane a retenční lhůta se na ni
+nevztahuje. Smazání zápisů se zapíše do activity logu (`accounting.entry_deleted`,
+`accounting.reversal_pair_deleted` s důvodem `invoice_force_delete`).
+
+Když zápis smazat nejde (uzavřené období, uzamčené datum), zůstává aktivní
+retenční ochrana účetních a daňových záznamů; v běžící retenční lhůtě proto
+použij storno nebo dobropis.
 
 Před skutečným smazáním systém ukáže **detailní per-status varování**
 (jiné pro vystavenou / odeslanou / zaplacenou / stornovanou) s doporučenou
@@ -456,6 +465,32 @@ alternativou (storno / dobropis / Nezaplacené).
 
 > 💡 **Typický legální use case:** vystavil jsi fakturu omylem (jiný klient,
 > špatná částka) a klient ji ještě nedostal. Pokud už dostal, vystav dobropis.
+
+### 16.7.4 Zrušit storno
+
+Tlačítko **Zrušit storno** v sekci **Další akce** vrátí interně stornovanou
+fakturu nebo zálohu do stavu, ve kterém byla před stornem. Hodí se, když byla
+faktura stornovaná omylem a má dál platit se stejným číslem.
+
+- Stornovací doklad se smaže a faktura dostane zpět stav vystavená, odeslaná,
+  upomínaná nebo zaplacená podle evidovaných plateb.
+- Zaúčtované storno se z deníku smaže celé (zápis faktury i protizápis). Má-li
+  firma zapnuté automatické zaúčtování, faktura se zaúčtuje znovu, jinak ji
+  najdeš mezi nezaúčtovanými doklady.
+- Skladová výdejka, hotovostní úhrada do pokladny a prodej majetku se obnoví
+  stejně jako při vystavení faktury.
+
+Storno nejde zrušit, když:
+
+- faktura spadá do uzavřeného účetního období nebo uzamčené části účetnictví
+  (například po podaném přiznání k DPH), protože by se vrátila do už uzavřené
+  evidence DPH,
+- storno je zaúčtované v deníku a zápisy nejde smazat,
+- faktura je zrušená vystaveným dobropisem. Dobropis dostal zákazník, ruší se
+  jeho vlastním stornem.
+
+V těchto případech vystav novou fakturu. Akce se zapíše do activity logu jako
+`invoice.uncancelled`.
 
 ## 16.8 Změna bankovního účtu po vystavení
 

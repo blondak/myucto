@@ -760,7 +760,7 @@ export const invoicesApi = {
    * smazány zároveň přes ON DELETE CASCADE (migrace 0015).
    */
   delete: (id: number, force = false) =>
-    api.delete<{ ok: boolean; cascade_deleted: number }>(`/invoices/${id}`, {
+    api.delete<{ ok: boolean; cascade_deleted: number; journal_entries_deleted?: number }>(`/invoices/${id}`, {
       params: force ? { force: 1 } : undefined,
     }).then(r => r.data),
 
@@ -813,6 +813,9 @@ export const invoicesApi = {
       `/invoices/${id}/cancel`,
       { mode, reason },
     ).then(r => r.data),
+  /** Zrušení interního storna — faktura se vrátí do stavu před stornem (issue #80). */
+  uncancel: (id: number) =>
+    api.post<{ invoice: Invoice; journal_entries_deleted: number }>(`/invoices/${id}/uncancel`).then(r => r.data),
   issueFinal: (proformaId: number, opts?: { tax_date?: string; due_date?: string; advance_paid_amount?: number | null }) =>
     api.post<{ final_invoice_id: number; edit_url: string; invoice: Invoice }>(
       `/invoices/${proformaId}/issue-final`,

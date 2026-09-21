@@ -18,6 +18,7 @@ use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentRepostService;
+use MyInvoice\Service\Accounting\JournalEntryDeletionRules;
 use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
@@ -68,13 +69,6 @@ final class JournalAction
 
     /** Strop počtu dokladů v jedné dávce hromadného zaúčtování (audit Fáze A review). */
     private const BULK_POST_LIMIT = 500;
-
-    /**
-     * Zdroje, u kterých jde smazat celá storno dvojice ({@see deleteReversalPair()}).
-     * Shodné s allowlistem mazání jednoho zápisu, bez odpisů: u nich se maže i řádek
-     * v `depreciation_entries` a dvojice po stornu odpisu vzniká jinou cestou.
-     */
-    private const PAIR_DELETABLE_SOURCE_TYPES = ['manual', 'invoice', 'purchase_invoice', 'bank'];
 
     public function __construct(
         private readonly PostingService $posting,
@@ -1103,44 +1097,20 @@ final class JournalAction
                 if ($ownTx) $pdo->rollBack();
                 return Json::error($response, 'not_found', 'Účetní zápis nenalezen.', 404);
             }
-            if ((string) $entry['period_status'] !== 'open') {
-                if ($ownTx) $pdo->rollBack();
-                return Json::error(
-                    $response,
-                    'period_not_open',
-                    'Zápis je v období „' . $entry['period_status'] . '“ — smazat lze jen zápis v otevřeném období.',
-                    409,
-                );
-            }
-            if ($entry['reversed_by'] !== null || (bool) $entry['is_reversal']) {
-                if ($ownTx) $pdo->rollBack();
-                return Json::error(
-                    $response,
-                    'entry_has_reversal',
-                    'Stornovaný zápis ani jeho protizápis nelze smazat samostatně.',
-                    409,
-                );
-            }
-
             $lock = $pdo->prepare(
                 'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE'
             );
             $lock->execute([$supplierId]);
             $lockedUntil = $lock->fetchColumn();
-            if ($lockedUntil !== false && $lockedUntil !== null && (string) $entry['entry_date'] <= (string) $lockedUntil) {
+            $lockedUntil = ($lockedUntil === false || $lockedUntil === null) ? null : (string) $lockedUntil;
+            if ($block = JournalEntryDeletionRules::blockSingle($entry, $lockedUntil)) {
                 if ($ownTx) $pdo->rollBack();
-                return Json::error(
-                    $response,
-                    'date_locked',
-                    'Datum zápisu spadá do uzamčené části účetnictví.',
-                    409,
-                );
+                return Json::error($response, $block['code'], $block['message'], 409);
             }
 
             $sourceType = (string) $entry['source_type'];
             $sourceId = $entry['source_id'] === null ? null : (int) $entry['source_id'];
-            $deletableSourceTypes = ['manual', 'invoice', 'purchase_invoice', 'bank', 'depreciation'];
-            if (!in_array($sourceType, $deletableSourceTypes, true)
+            if (!in_array($sourceType, JournalEntryDeletionRules::SINGLE_SOURCE_TYPES, true)
                 || ($sourceType !== 'manual' && $sourceId === null)
             ) {
                 if ($ownTx) $pdo->rollBack();
@@ -1437,33 +1407,19 @@ final class JournalAction
                 );
             }
 
-            foreach ([$original, $reversal] as $row) {
-                if ((string) $row['period_status'] !== 'open') {
-                    if ($ownTx) $pdo->rollBack();
-                    return Json::error(
-                        $response,
-                        'period_not_open',
-                        'Zápis #' . (int) $row['id'] . ' je v období „' . $row['period_status']
-                            . '“ — smazat lze jen dvojici v otevřeném období.',
-                        409,
-                    );
-                }
-            }
-
             $lock = $pdo->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE');
             $lock->execute([$supplierId]);
             $lockedUntil = $lock->fetchColumn();
-            if ($lockedUntil !== false && $lockedUntil !== null) {
-                foreach ([$original, $reversal] as $row) {
-                    if ((string) $row['entry_date'] <= (string) $lockedUntil) {
-                        if ($ownTx) $pdo->rollBack();
-                        return Json::error($response, 'date_locked', 'Datum zápisu spadá do uzamčené části účetnictví.', 409);
-                    }
+            $lockedUntil = ($lockedUntil === false || $lockedUntil === null) ? null : (string) $lockedUntil;
+            foreach ([$original, $reversal] as $row) {
+                if ($block = JournalEntryDeletionRules::blockPeriod($row, $lockedUntil)) {
+                    if ($ownTx) $pdo->rollBack();
+                    return Json::error($response, $block['code'], $block['message'], 409);
                 }
             }
 
             $sourceType = (string) $original['source_type'];
-            if (!in_array($sourceType, self::PAIR_DELETABLE_SOURCE_TYPES, true)) {
+            if (!in_array($sourceType, JournalEntryDeletionRules::PAIR_SOURCE_TYPES, true)) {
                 if ($ownTx) $pdo->rollBack();
                 return Json::error(
                     $response,

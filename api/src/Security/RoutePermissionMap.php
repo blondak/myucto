@@ -71,7 +71,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/invoices(/[0-9]+)?/(reminder|reminder-test)$#', 'invoices.reminder', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/[0-9]+/(mark-paid|unmark-paid|payments)(/|$)#', 'invoices.mark_paid', AccessLevel::WRITE],
         ['DELETE', '#^/api/invoices/[0-9]+/payments(/|$)#', 'invoices.mark_paid', AccessLevel::WRITE],
-        ['POST', '#^/api/invoices/[0-9]+/cancel$#', 'invoices.cancel', AccessLevel::WRITE],
+        ['POST', '#^/api/invoices/[0-9]+/(cancel|uncancel)$#', 'invoices.cancel', AccessLevel::WRITE],
         // Obnova snapshotů stran u vystaveného dokladu — sdílí oprávnění s editací
         // faktury; navíc je v akci tvrdý admin-only check (superadmin).
         ['POST', '#^/api/invoices/[0-9]+/rebuild-snapshots$#', 'invoices.create', AccessLevel::WRITE],

@@ -13,6 +13,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\InvoiceAttachmentRepository;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentJournalPurge;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingException;
@@ -68,6 +69,7 @@ final class DeleteInvoiceAction
         private readonly DocumentJournalSync $journalSync,
         private readonly StockIssueService $stockIssue,
         private readonly RetentionGuard $retention,
+        private readonly DocumentJournalPurge $journalPurge,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -127,46 +129,14 @@ final class DeleteInvoiceAction
             }
         }
 
-        // Retenční brána (§ 31/§ 32 ZoÚ, § 35a ZDPH). Explicitní admin force-delete
-        // smí bez dalšího potvrzení odstranit vydaný doklad jen tehdy, když target ani
-        // žádný CASCADE child nikdy nebyl zaúčtován (booked_at ani aktivní posted zápis).
-        // Zaúčtované doklady zůstávají chráněné retenční lhůtou; draft se jí netýká.
-        //
-        // Přehlasování `?ack_retention=1` existuje vědomě. Povinnost uchovávat váže účetní
-        // jednotku, ne software, a tvrdý zákaz by uživatele s vadným dokladem (omylem
-        // vystaveným v ostrém tenantu) hnal k zásahu přímo do databáze — tedy k horšímu
-        // řešení, po kterém nezůstane žádná stopa. Takhle je smazání vědomý úkon, který
-        // se i s prošlapanou lhůtou zapíše do auditní stopy.
-        $retentionOverride = null;
-        if ($status !== 'draft' && !($forceDelete && $allUnposted)) {
-            $periodYear = (int) (new \DateTimeImmutable(
-                (string) ($existing['tax_date'] ?: $existing['issue_date'])
-            ))->format('Y');
-            try {
-                $this->retention->assertDeletable(
-                    $supplierId,
-                    $periodYear,
-                    'Faktura ' . (string) ($existing['varsymbol'] ?? $id),
-                );
-            } catch (RetentionViolationException $e) {
-                $acknowledged = ($request->getQueryParams()['ack_retention'] ?? '') === '1'
-                    && RequestAuthorization::isCompanyAdmin($request);
-                if (!$acknowledged) {
-                    return Json::error($response, 'retention_period', $e->getMessage(), 422);
-                }
-                $retentionOverride = [
-                    'reason'       => $e->getMessage(),
-                    'retain_until' => $this->retention->retainUntil($supplierId, $periodYear),
-                ];
-            }
-        }
-
         // Zachyt stats závislosti PŘED delete (po delete už client_id/project_id nepřečteme)
         $clientId  = isset($existing['client_id'])  ? (int) $existing['client_id']  : null;
         $projectId = isset($existing['project_id']) && $existing['project_id'] ? (int) $existing['project_id'] : null;
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $counterReleased = [];
+        $retentionOverride = null;
+        $journalPurge = null;
 
         // A3 (audit H4): mazání zaúčtované faktury NESMÍ nechat v deníku aktivní sirotčí
         // zápis. Reverze aktivního zápisu + PDF/soubory + counter release + vlastní delete
@@ -179,6 +149,8 @@ final class DeleteInvoiceAction
             'ip'         => $ip,
             'user_agent' => $request->getHeaderLine('User-Agent'),
         ];
+        $deleteIds = array_map(static fn(array $row): int => (int) $row['id'], $childRows);
+        $deleteIds[] = $id;
 
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -186,8 +158,54 @@ final class DeleteInvoiceAction
             $pdo->beginTransaction();
         }
         try {
-            $deleteIds = array_map(static fn(array $row): int => (int) $row['id'], $childRows);
-            $deleteIds[] = $id;
+            // Admin force-delete zaúčtované faktury: dají-li se její zápisy (i storno
+            // dvojice) smazat v deníku, smažou se nejdřív a faktura pak odchází jako
+            // nezaúčtovaná. Nejde-li to u kteréhokoli dokladu skupiny, nesmaže se nic
+            // a platí dosavadní cesta — protizápis a retenční brána.
+            if ($forceDelete && !$allUnposted) {
+                $purge = $this->journalPurge->purge($supplierId, 'invoice', $deleteIds, $reverseMeta, 'invoice_force_delete');
+                if ($purge['blocked'] === null && $purge['deleted'] !== []) {
+                    $journalPurge = $purge;
+                    $allUnposted = !$this->hasPostingTrace($supplierId, $deleteIds);
+                }
+            }
+
+            // Retenční brána (§ 31/§ 32 ZoÚ, § 35a ZDPH). Explicitní admin force-delete
+            // smí bez dalšího potvrzení odstranit vydaný doklad jen tehdy, když target ani
+            // žádný CASCADE child nikdy nebyl zaúčtován (booked_at ani aktivní posted zápis).
+            // Zaúčtované doklady zůstávají chráněné retenční lhůtou; draft se jí netýká.
+            //
+            // Přehlasování `?ack_retention=1` existuje vědomě. Povinnost uchovávat váže účetní
+            // jednotku, ne software, a tvrdý zákaz by uživatele s vadným dokladem (omylem
+            // vystaveným v ostrém tenantu) hnal k zásahu přímo do databáze — tedy k horšímu
+            // řešení, po kterém nezůstane žádná stopa. Takhle je smazání vědomý úkon, který
+            // se i s prošlapanou lhůtou zapíše do auditní stopy.
+            if ($status !== 'draft' && !($forceDelete && $allUnposted)) {
+                $periodYear = (int) (new \DateTimeImmutable(
+                    (string) ($existing['tax_date'] ?: $existing['issue_date'])
+                ))->format('Y');
+                try {
+                    $this->retention->assertDeletable(
+                        $supplierId,
+                        $periodYear,
+                        'Faktura ' . (string) ($existing['varsymbol'] ?? $id),
+                    );
+                } catch (RetentionViolationException $e) {
+                    $acknowledged = ($request->getQueryParams()['ack_retention'] ?? '') === '1'
+                        && RequestAuthorization::isCompanyAdmin($request);
+                    if (!$acknowledged) {
+                        if ($ownTx && $pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        return Json::error($response, 'retention_period', $e->getMessage(), 422);
+                    }
+                    $retentionOverride = [
+                        'reason'       => $e->getMessage(),
+                        'retain_until' => $this->retention->retainUntil($supplierId, $periodYear),
+                    ];
+                }
+            }
+
             $this->journalSync->onDeleteMany($supplierId, 'invoice', $deleteIds, $reverseMeta);
             foreach ($deleteIds as $deleteId) {
                 $this->stockIssue->reverseForInvoice($supplierId, $deleteId, isset($user['id']) ? (int) $user['id'] : null);
@@ -279,6 +297,10 @@ final class DeleteInvoiceAction
             throw $e;
         }
 
+        if ($journalPurge !== null && $ownTx) {
+            $this->journalPurge->cleanupAttachments($supplierId, $journalPurge['attachments']);
+        }
+
         // 3. Recompute revenue stats (po smazání issued/sent/paid se mění agregát)
         if ($clientId !== null) {
             $this->stats->recomputeForIds($clientId, $projectId);
@@ -303,12 +325,30 @@ final class DeleteInvoiceAction
             // Prošlapaná retenční lhůta MUSÍ zůstat dohledatelná — bez toho by se
             // z vědomého přehlasování stalo obyčejné smazání.
             'retention_override'  => $retentionOverride,
+            'journal_entries_deleted' => $journalPurge['deleted'] ?? [],
         ], $ip, $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, [
             'ok'               => true,
             'cascade_deleted'  => count($childRows),
             'counter_released' => count($counterReleased),
+            'journal_entries_deleted' => count($journalPurge['deleted'] ?? []),
         ]);
+    }
+
+    /** Zůstala některému z dokladů po odklizení deníku stopa zaúčtování? */
+    private function hasPostingTrace(int $supplierId, array $invoiceIds): bool
+    {
+        $place = implode(',', array_fill(0, count($invoiceIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT EXISTS(SELECT 1 FROM invoices
+                            WHERE supplier_id = ? AND id IN ($place) AND booked_at IS NOT NULL)
+                 OR EXISTS(SELECT 1 FROM journal_entries
+                            WHERE supplier_id = ? AND source_type = 'invoice' AND source_id IN ($place)
+                              AND posted_at IS NOT NULL AND reversed_by IS NULL)"
+        );
+        $stmt->execute(array_merge([$supplierId], $invoiceIds, [$supplierId], $invoiceIds));
+
+        return (bool) $stmt->fetchColumn();
     }
 }
