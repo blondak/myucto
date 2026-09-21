@@ -137,7 +137,9 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . 'imported_pdf_path VARCHAR(255) NULL,'
             . 'pdf_path VARCHAR(255) NULL,'
             . 'pdf_generated_at DATETIME NULL,'
-            . 'supplier_snapshot JSON NULL'
+            . 'supplier_snapshot JSON NULL,'
+            . 'client_snapshot JSON NULL,'
+            . 'bank_snapshot JSON NULL'
             . ') ENGINE=InnoDB',
         );
         $pdo->exec(
@@ -475,6 +477,11 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             ['id' => 102, 'supplier_snapshot' => self::invoiceSupplierSnapshot(8, 12)],
         ], $this->fetchRows($pdo, 'SELECT id,supplier_snapshot FROM invoices ORDER BY id'));
         self::assertSame([
+            ['id' => 101, 'client_snapshot' => null, 'bank_snapshot' => null],
+            ['id' => 102, 'client_snapshot' => self::invoiceClientSnapshot(),
+                'bank_snapshot' => self::invoiceBankSnapshot()],
+        ], $this->fetchRows($pdo, 'SELECT id,client_snapshot,bank_snapshot FROM invoices ORDER BY id'));
+        self::assertSame([
             ['id' => 11, 'supplier_id' => 7], ['id' => 12, 'supplier_id' => 8],
         ], $this->fetchRows($pdo, 'SELECT id,supplier_id FROM email_profiles ORDER BY id'));
         $restoredLogo = $this->root . DIRECTORY_SEPARATOR . 'live'
@@ -577,6 +584,20 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         ));
     }
 
+    private static function invoiceClientSnapshot(): string
+    {
+        return ' { "company_name":"Historical customer", "zip":"00123",'
+            . ' "main_email":"historical@example.test", "id":999,'
+            . ' "legacy":{"code":"0007","amount":1.2300} } ';
+    }
+
+    private static function invoiceBankSnapshot(): string
+    {
+        return '{ "currency":"CZK", "account_number":"1000000005",'
+            . ' "bank_code":"0100", "iban":"CZ1801000000001000000005",'
+            . ' "bank_name":"Synthetic historical bank", "id":888 }';
+    }
+
     private static function invoiceSupplierSnapshot(int $supplierId, int $emailProfileId): string
     {
         return ' { "id" : ' . $supplierId . ', "company_name":"Synthetic archive",'
@@ -622,6 +643,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             'table:email_profiles' => [['id' => 11, 'supplier_id' => 7]],
             'table:invoices' => [[
                 'supplier_snapshot' => self::invoiceSupplierSnapshot(7, 11),
+                'client_snapshot' => self::invoiceClientSnapshot(),
+                'bank_snapshot' => self::invoiceBankSnapshot(),
                 'id' => 101,
                 'supplier_id' => 7,
                 'invoice_number' => 'restored-invoice',
@@ -1003,7 +1026,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 $this->tableDefinition(
                     'table:invoices',
                     TenantDataPolicy::TenantOwned,
-                    ['id', 'supplier_id', 'invoice_number', 'imported_pdf_path', 'pdf_path', 'pdf_generated_at', 'supplier_snapshot'],
+                    ['id', 'supplier_id', 'invoice_number', 'imported_pdf_path', 'pdf_path', 'pdf_generated_at', 'supplier_snapshot',
+                        'client_snapshot', 'bank_snapshot'],
                     ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
                     [$this->reference('supplier_id', 'table:supplier')],
                     \MyInvoice\Service\Backup\Company\CompanyBackupInvoicesProjection::restoreOverrides(),

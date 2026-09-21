@@ -51,6 +51,18 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                     $reference->column,
                 );
             }
+            // SnapshotBuilder freezes client and bank values without live IDs;
+            // PDF/export consumers read their historical values directly. Only
+            // supplier_snapshot carries live supplier/email-profile references.
+            if ($registryKey === CompanyBackupInvoiceSupplierSnapshotContract::REGISTRY_KEY
+                && in_array($reference->column, ['client_snapshot', 'bank_snapshot'], true)
+            ) {
+                throw new CompanyBackupDataSourceException(
+                    'data_embedded_reference_metadata_invalid',
+                    $registryKey,
+                    $reference->column,
+                );
+            }
             $signature = $reference->signature();
             $document = $reference->column
                 . ':'
