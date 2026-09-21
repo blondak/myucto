@@ -155,8 +155,9 @@ final class CodebookImporter
         $insert = $pdo->prepare(
             'INSERT INTO posting_rules
                 (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
-             VALUES (?, ?, ?, ?, ?, 100, 1)'
+             VALUES (?, ?, ?, ?, ?, 100, ?)'
         );
+        $recent = $this->recentlyUsedKeys($ctx);
         $seen = [];
         foreach ($ctx->backup->rowsAcrossYears('UcPrKont') as $r) {
             $key = mb_substr(trim((string) ($r['Zkrat'] ?? '')), 0, 64);
@@ -183,11 +184,53 @@ final class CodebookImporter
                 mb_substr($desc, 0, 255),
                 $this->knownAccount($ctx, (string) ($r['UcMD'] ?? '')),
                 $this->knownAccount($ctx, (string) ($r['UcD'] ?? '')),
+                $recent === null || isset($recent[$key]) ? 1 : 0,
             ]);
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_POSTING_RULE, $key, (int) $pdo->lastInsertId(), $ctx->runId);
             $p->count(self::STEP_POSTING_RULES, 'created');
+            if ($recent !== null && !isset($recent[$key])) {
+                $p->count(self::STEP_POSTING_RULES, 'inactive');
+            }
         }
         $p->finish(self::STEP_POSTING_RULES);
+    }
+
+    /**
+     * Zkratky předkontací, které doklady Money použily v posledních dvou převáděných
+     * letech. Číselník Money se za roky nabalí stovkami starých variant — aktivní
+     * zůstanou jen tyto, ostatní se převedou vypnuté. Bez známých let (null) aktivní všechny.
+     *
+     * @return array<string,true>|null
+     */
+    private function recentlyUsedKeys(ImportContext $ctx): ?array
+    {
+        if ($ctx->dirYears === []) {
+            return null;
+        }
+        $from = max($ctx->dirYears) - 1;
+        $used = [];
+        foreach ($ctx->backup->yearDirs() as $dir) {
+            if (($ctx->dirYears[basename($dir)] ?? 0) < $from) {
+                continue;
+            }
+            foreach (glob($dir . DIRECTORY_SEPARATOR . '*.[Dd][Aa][Tt]') ?: [] as $path) {
+                $name = pathinfo($path, PATHINFO_FILENAME);
+                if (preg_match('/^(BankKnih|IntDokl|KnihPohl|KnihZav|PoklKnih|PolUcD\w*)$/i', $name) !== 1) {
+                    continue;
+                }
+                $table = $ctx->backup->table($name, $dir);
+                if ($table === null || !$table->hasData()) {
+                    continue;
+                }
+                foreach ($table->rows() as $row) {
+                    $key = mb_substr(trim((string) ($row['PrKont'] ?? '')), 0, 64);
+                    if ($key !== '') {
+                        $used[$key] = true;
+                    }
+                }
+            }
+        }
+        return $used;
     }
 
     /** Účet předkontace jen tehdy, když je v osnově — `xxxxxx` (nedosazeno) a neznámý kód jsou NULL. */

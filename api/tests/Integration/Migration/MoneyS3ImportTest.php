@@ -440,6 +440,19 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(1, $cash['counts']['zero_amount'] ?? 0);
     }
 
+    /** Předkontace, kterou doklady posledních dvou let nepoužily, se převede vypnutá. */
+    public function testUnusedPostingRulesAreTransferredInactive(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rowCount('posting_rules', $supplierId, "rule_key = 'PV001' AND is_active = 1"));
+        self::assertSame(1, $this->rowCount('posting_rules', $supplierId, "rule_key = 'PF001' AND is_active = 0"));
+        $rules = array_column($protocol->toArray()['steps'], null, 'key')['posting_rules'];
+        self::assertSame(2, $rules['counts']['inactive'] ?? 0);
+    }
+
     /**
      * Money rok uzavřelo i s fakturou, kterou nezaúčtovalo. Průvodce uzávěrkou MyÚčta by
      * kvůli ní historický rok neuzavřel nikdy — u dokladů převzatých z Money proto uzavře

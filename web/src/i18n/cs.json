@@ -24988,6 +24988,7 @@
     "counts": {
       "seeded": "osnova ze šablony",
       "created": "založeno",
+      "inactive": "převedeno vypnuté",
       "existing": "už převedeno",
       "matched": "spárováno s existujícím",
       "kept": "ponecháno",

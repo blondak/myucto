@@ -24988,6 +24988,7 @@
     "counts": {
       "seeded": "chart from template",
       "created": "created",
+      "inactive": "transferred inactive",
       "existing": "already transferred",
       "matched": "matched to existing",
       "kept": "kept",
