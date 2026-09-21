@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
@@ -846,6 +847,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
               {{ invoice.vendor_company_name }}
             </RouterLink>
             <template v-else>{{ invoice.vendor_company_name }}</template>
+            <ClientQuickLinks v-if="invoice.vendor_id" :client-id="invoice.vendor_id" vendor />
           </div>
           <div class="text-sm text-neutral-600 font-mono">
             {{ t('purchase_invoice.fields.vendor_invoice_number') }}: {{ invoice.vendor_invoice_number }}

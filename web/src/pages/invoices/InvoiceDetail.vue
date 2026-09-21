@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
@@ -1701,6 +1702,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
               :title="t('invoice.show_invoices_for_client')">
               {{ invoice.client_company_name }}
             </RouterLink>
+            <ClientQuickLinks v-if="invoice.client_id" :client-id="invoice.client_id" />
           </div>
           <div v-if="invoice.project_name" class="text-sm text-neutral-600">
             {{ invoice.project_name }}

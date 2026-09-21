@@ -1090,6 +1090,16 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('invoice.subtitle_grouping') }}</p>
       </div>
       <div class="flex items-center gap-2 flex-wrap justify-end">
+        <template v-if="clientFilter !== '' && !auth.isClientRole && auth.canRead('clients')">
+          <RouterLink :to="{ name: 'client-detail', params: { id: clientFilter } }" :class="btnOutline('neutral')" data-test="filter-client-detail">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+            {{ t('invoice.client_detail') }}
+          </RouterLink>
+          <RouterLink v-if="auth.canWrite('clients')" :to="{ name: 'client-edit', params: { id: clientFilter } }" :class="btnOutline('neutral')" data-test="filter-client-edit">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+            {{ t('invoice.client_edit') }}
+          </RouterLink>
+        </template>
         <RouterLink
           v-if="auth.canWrite('invoices.create') || auth.isDemo"
           to="/invoices/new"
@@ -1247,16 +1257,6 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
             :placeholder="t('project.all_clients')"
           />
         </div>
-        <template v-if="clientFilter !== '' && !auth.isClientRole && auth.canRead('clients')">
-          <RouterLink :to="{ name: 'client-detail', params: { id: clientFilter } }" :class="btnOutline('neutral')" data-test="filter-client-detail">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
-            {{ t('invoice.client_detail') }}
-          </RouterLink>
-          <RouterLink v-if="auth.canWrite('clients')" :to="{ name: 'client-edit', params: { id: clientFilter } }" :class="btnOutline('neutral')" data-test="filter-client-edit">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
-            {{ t('invoice.client_edit') }}
-          </RouterLink>
-        </template>
         <select v-model="currencyFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('invoice.all_currencies') }}</option>
           <option v-for="c in currencies" :key="c.id" :value="c.code">{{ c.code }}</option>

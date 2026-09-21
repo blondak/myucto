@@ -365,6 +365,7 @@
       "linked_documents",
       "lock",
       "payment_method",
+      "purchase_invoice",
       "recurring",
       "settings",
       "smtp_logs",
