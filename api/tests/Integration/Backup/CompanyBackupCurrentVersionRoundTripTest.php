@@ -112,6 +112,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_pdfs');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_attachments');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoices');
+        $pdo->exec('DROP TEMPORARY TABLE IF EXISTS email_profiles');
         $pdo->exec(
             'CREATE TEMPORARY TABLE supplier ('
             . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
@@ -124,6 +125,10 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . 'id BIGINT UNSIGNED NOT NULL PRIMARY KEY'
             . ') ENGINE=InnoDB',
         );
+        $pdo->exec('CREATE TEMPORARY TABLE email_profiles ('
+            . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
+            . 'supplier_id BIGINT UNSIGNED NOT NULL) ENGINE=InnoDB');
+        $pdo->exec('INSERT INTO email_profiles (id,supplier_id) VALUES (11,7)');
         $pdo->exec(
             'CREATE TEMPORARY TABLE invoices ('
             . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
@@ -131,7 +136,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . 'invoice_number VARCHAR(64) NOT NULL,'
             . 'imported_pdf_path VARCHAR(255) NULL,'
             . 'pdf_path VARCHAR(255) NULL,'
-            . 'pdf_generated_at DATETIME NULL'
+            . 'pdf_generated_at DATETIME NULL,'
+            . 'supplier_snapshot JSON NULL'
             . ') ENGINE=InnoDB',
         );
         $pdo->exec(
@@ -283,6 +289,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_pdfs');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_attachments');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoices');
+            $pdo->exec('DROP TEMPORARY TABLE IF EXISTS email_profiles');
             if ($this->recordsTable !== '') {
                 $pdo->exec(
                     'DROP TABLE IF EXISTS `' . $this->recordsTable . '`',
@@ -327,8 +334,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             $validation,
             $pdo,
         );
-        self::assertSame(7, $preflight->rowCount);
-        self::assertSame(7, $preflight->identityCount);
+        self::assertSame(8, $preflight->rowCount);
+        self::assertSame(8, $preflight->identityCount);
         self::assertSame([], $preflight->externalReferences->requirements);
         $decisions = CompanyBackupReferenceDecisionPlan::fromArray([
             'format' => CompanyBackupReferenceDecisionPlan::FORMAT,
@@ -372,11 +379,11 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
 
         self::assertFalse($pdo->inTransaction());
         self::assertSame(8, $result->database->supplierId);
-        self::assertSame(7, $result->database->insertedRows);
-        self::assertSame(2, $result->database->deferredRows);
-        self::assertSame(1, $result->database->updatedRows);
-        self::assertSame(6, $result->postImport->checkedTableCount);
-        self::assertSame(7, $result->postImport->checkedTenantRows);
+        self::assertSame(8, $result->database->insertedRows);
+        self::assertSame(3, $result->database->deferredRows);
+        self::assertSame(2, $result->database->updatedRows);
+        self::assertSame(7, $result->postImport->checkedTableCount);
+        self::assertSame(8, $result->postImport->checkedTenantRows);
         self::assertSame(3,
             $result->postImport->invariantReport->invariantCount);
         self::assertSame(0, $result->postImport->invariantReport->checkCount);
@@ -463,6 +470,13 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'archived_at' => '2025-01-31 12:00:00',
             ],
         ], $this->pdfRows($pdo));
+        self::assertSame([
+            ['id' => 101, 'supplier_snapshot' => null],
+            ['id' => 102, 'supplier_snapshot' => self::invoiceSupplierSnapshot(8, 12)],
+        ], $this->fetchRows($pdo, 'SELECT id,supplier_snapshot FROM invoices ORDER BY id'));
+        self::assertSame([
+            ['id' => 11, 'supplier_id' => 7], ['id' => 12, 'supplier_id' => 8],
+        ], $this->fetchRows($pdo, 'SELECT id,supplier_id FROM email_profiles ORDER BY id'));
         $restoredLogo = $this->root . DIRECTORY_SEPARATOR . 'live'
             . DIRECTORY_SEPARATOR . 'supplier-logos'
             . DIRECTORY_SEPARATOR . 'sup-8.png';
@@ -563,6 +577,13 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         ));
     }
 
+    private static function invoiceSupplierSnapshot(int $supplierId, int $emailProfileId): string
+    {
+        return ' { "id" : ' . $supplierId . ', "company_name":"Synthetic archive",'
+            . ' "email_profile_id":' . $emailProfileId . ', "branding_profile_id":999,'
+            . ' "branding_profile_name":"Historical brand", "zip":"00123" } ';
+    }
+
     private static function purchaseVendorSnapshot(): string
     {
         // Historical contact ID need not exist in the current tenant graph.
@@ -597,7 +618,9 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'company_name' => 'Restored tenant',
                 'logo_path' => 'storage/supplier-logos/sup-7.png',
             ]],
+            'table:email_profiles' => [['id' => 11, 'supplier_id' => 7]],
             'table:invoices' => [[
+                'supplier_snapshot' => self::invoiceSupplierSnapshot(7, 11),
                 'id' => 101,
                 'supplier_id' => 7,
                 'invoice_number' => 'restored-invoice',
@@ -974,10 +997,17 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 $this->tableDefinition(
                     'table:invoices',
                     TenantDataPolicy::TenantOwned,
-                    ['id', 'supplier_id', 'invoice_number', 'imported_pdf_path', 'pdf_path', 'pdf_generated_at'],
+                    ['id', 'supplier_id', 'invoice_number', 'imported_pdf_path', 'pdf_path', 'pdf_generated_at', 'supplier_snapshot'],
                     ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
                     [$this->reference('supplier_id', 'table:supplier')],
                     \MyInvoice\Service\Backup\Company\CompanyBackupInvoicesProjection::restoreOverrides(),
+                    \MyInvoice\Service\Backup\Company\CompanyBackupInvoicesProjection::embeddedReferences(),
+                ),
+                $this->tableDefinition(
+                    'table:email_profiles', TenantDataPolicy::TenantOwned,
+                    ['id', 'supplier_id'],
+                    ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                    [$this->reference('supplier_id', 'table:supplier')],
                 ),
                 $this->tableDefinition(
                     'table:' . $this->recordsTable,

@@ -82,6 +82,12 @@ final class CompanyBackupInvoicesProjection
     }
 
     /** @return list<array<string,mixed>> */
+    public static function embeddedReferences(): array
+    {
+        return CompanyBackupInvoiceSupplierSnapshotContract::embeddedReferences();
+    }
+
+    /** @return list<array<string,mixed>> */
     public static function references(): array
     {
         return [

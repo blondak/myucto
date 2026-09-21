@@ -8,6 +8,45 @@ namespace MyInvoice\Service\Backup\Company;
 final class CompanyBackupInvoiceSupplierSnapshotRemapper
 {
     /**
+     * Přenese výsledek společného mapování zpět do původních JSON bajtů.
+     * Null u původně kladného ID znamená dočasný odklad v prvním průchodu.
+     *
+     * @param array<string,mixed> $mapped
+     */
+    public static function rewriteMapped(string $source, int $sourceSupplierId, array $mapped): string
+    {
+        $references = CompanyBackupInvoiceSupplierSnapshotContract::inspect($source, $sourceSupplierId);
+        if ($references === null) {
+            throw self::invalid('invoice_supplier_snapshot_invalid');
+        }
+        $replacements = [];
+        foreach (['id' => 'supplier_id', 'email_profile_id' => 'email_profile_id'] as $path => $key) {
+            if ($references[$key] === null) {
+                continue;
+            }
+            if (!array_key_exists($path, $mapped)) {
+                throw self::invalid('invoice_supplier_snapshot_mapping_missing');
+            }
+            $target = $mapped[$path];
+            if ($target !== null && (!is_int($target) || $target < 1)) {
+                throw self::invalid('invoice_supplier_snapshot_mapping_invalid');
+            }
+            $replacements[$path] = $target ?? CompanyBackupReferenceRemapDirective::Defer;
+        }
+        try {
+            return CompanyBackupLosslessJson::rewriteIntegerTokens(
+                $source,
+                static fn (array $path, string $_token): int|CompanyBackupReferenceRemapDirective|null =>
+                    count($path) === 1 && is_string($path[0])
+                        ? ($replacements[$path[0]] ?? null)
+                        : null,
+            );
+        } catch (\Throwable $e) {
+            throw self::invalid('invoice_supplier_snapshot_invalid', $e);
+        }
+    }
+
+    /**
      * Volající dodává mapování z ověřených tenantových identit; samotný helper
      * nedokazuje oprávnění cílového ID. Hodnoty kontroluje i za běhu.
      *

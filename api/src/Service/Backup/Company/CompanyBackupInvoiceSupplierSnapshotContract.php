@@ -23,6 +23,33 @@ final class CompanyBackupInvoiceSupplierSnapshotContract
         'pdf_logo_show_name',
     ];
 
+    /** @return list<array<string,mixed>> */
+    public static function embeddedReferences(): array
+    {
+        return [
+            [
+                'column' => self::COLUMN,
+                'path' => ['email_profile_id'],
+                'target' => 'table:email_profiles',
+                'target_columns' => ['id'],
+                'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                'nullable' => true,
+                'condition' => null,
+                'fallbacks' => [],
+            ],
+            [
+                'column' => self::COLUMN,
+                'path' => ['id'],
+                'target' => 'table:supplier',
+                'target_columns' => ['id'],
+                'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                'nullable' => true,
+                'condition' => null,
+                'fallbacks' => [],
+            ],
+        ];
+    }
+
     /**
      * @return null|array{supplier_id:?int,email_profile_id:?int}
      */

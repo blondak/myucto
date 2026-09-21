@@ -1095,7 +1095,9 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
     ): array {
         return [
             'data_columns' => $columns,
-            'embedded_references' => [],
+            'embedded_references' => in_array('supplier_snapshot', $columns, true)
+                ? \MyInvoice\Service\Backup\Company\CompanyBackupInvoicesProjection::embeddedReferences()
+                : [],
             'generated_columns' => [],
             'omit_columns' => [],
             'references' => $references,

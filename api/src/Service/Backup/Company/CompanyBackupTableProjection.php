@@ -494,11 +494,39 @@ final readonly class CompanyBackupTableProjection
     /** @param array<string,mixed> $row */
     public function assertExportRow(array $row): void
     {
+        $this->assertInvoiceSupplierSnapshot($row);
         $this->encodedReferences->assertSourceRow($row);
         $this->hashReferences->assertSourceRow($row);
         $this->embeddedHashReferences->assertSourceRow($row);
         $this->embeddedHashes->assertSourceRow($row);
         $this->derivedHashes->assertSourceRow($row);
+    }
+
+    /** @param array<string,mixed> $row */
+    private function assertInvoiceSupplierSnapshot(array $row): void
+    {
+        if ($this->registryKey !== CompanyBackupInvoiceSupplierSnapshotContract::REGISTRY_KEY
+            || !in_array(CompanyBackupInvoiceSupplierSnapshotContract::COLUMN, $this->dataColumns, true)
+        ) {
+            return;
+        }
+        $column = CompanyBackupInvoiceSupplierSnapshotContract::COLUMN;
+        $supplierId = $row['supplier_id'] ?? null;
+        if (!is_int($supplierId) || $supplierId < 1
+            || !array_key_exists($column, $row)
+            || ($row[$column] !== null && !is_string($row[$column]))
+        ) {
+            throw new CompanyBackupDataSourceException(
+                'invoice_supplier_snapshot_invalid', $this->registryKey, $column,
+            );
+        }
+        try {
+            CompanyBackupInvoiceSupplierSnapshotContract::inspect($row[$column], $supplierId);
+        } catch (CompanyBackupPreflightException $e) {
+            throw new CompanyBackupDataSourceException(
+                $e->errorCode, $this->registryKey, $column, $e,
+            );
+        }
     }
 
     public function assertRegistryTargets(TenantDataRegistry $registry): void
@@ -526,6 +554,7 @@ final readonly class CompanyBackupTableProjection
      */
     public function inspectCompleteSourceRow(array $row, callable $visitor): void
     {
+        $this->assertInvoiceSupplierSnapshot($row);
         if ($this->registryKey === 'table:bank_statements'
             && ($this->ownership['strategy'] ?? null) === 'bank_statement_owner'
             && ($row['supplier_id'] ?? null) === null

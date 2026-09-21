@@ -122,6 +122,28 @@ final readonly class CompanyBackupEmbeddedReferenceSet
             }
         }
 
+        if ($registryKey === CompanyBackupInvoiceSupplierSnapshotContract::REGISTRY_KEY
+            && isset($exported[CompanyBackupInvoiceSupplierSnapshotContract::COLUMN])
+        ) {
+            $expected = array_map(
+                static fn (array $item): CompanyBackupEmbeddedReference =>
+                    CompanyBackupEmbeddedReference::fromArray($item, $registryKey),
+                CompanyBackupInvoiceSupplierSnapshotContract::embeddedReferences(),
+            );
+            $actual = array_values(array_filter(
+                $references,
+                static fn (CompanyBackupEmbeddedReference $reference): bool =>
+                    $reference->column === CompanyBackupInvoiceSupplierSnapshotContract::COLUMN,
+            ));
+            if ($actual != $expected) {
+                throw new CompanyBackupDataSourceException(
+                    'data_embedded_reference_metadata_invalid',
+                    $registryKey,
+                    CompanyBackupInvoiceSupplierSnapshotContract::COLUMN,
+                );
+            }
+        }
+
         return new self($registryKey, $references);
     }
 
@@ -210,6 +232,35 @@ final readonly class CompanyBackupEmbeddedReferenceSet
                 throw $this->valueError($column);
             }
             $raw = $row[$column];
+            if ($this->registryKey === CompanyBackupInvoiceSupplierSnapshotContract::REGISTRY_KEY
+                && $column === CompanyBackupInvoiceSupplierSnapshotContract::COLUMN
+            ) {
+                if ($raw === null) {
+                    continue;
+                }
+                if (!is_string($raw)) {
+                    throw $this->valueError($column);
+                }
+                if (strlen($raw) > CompanyBackupLosslessJson::DEFAULT_MAX_BYTES) {
+                    throw new CompanyBackupPreflightException(
+                        'invoice_supplier_snapshot_invalid', $this->registryKey, $column,
+                    );
+                }
+                $value = json_decode($raw, true);
+                $sourceSupplierId = is_array($value) && is_int($value['id'] ?? null)
+                    && $value['id'] > 0 ? $value['id'] : 1;
+                CompanyBackupInvoiceSupplierSnapshotContract::inspect($raw, $sourceSupplierId);
+                if (!is_array($value)) {
+                    throw $this->valueError($column);
+                }
+                foreach ($documents as $document) {
+                    $this->remapGroups($value, $document['groups'], $mapper);
+                }
+                $row[$column] = CompanyBackupInvoiceSupplierSnapshotRemapper::rewriteMapped(
+                    $raw, $sourceSupplierId, $value,
+                );
+                continue;
+            }
             $taxSummary = $this->registryKey === 'table:tax_submissions';
             if ($taxSummary) {
                 CompanyBackupTaxSubmissionSummaryContract::assertRow($row);
