@@ -36,6 +36,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupSecretEnvelopeDescriptor;
 use MyInvoice\Service\Backup\Company\CompanyBackupSecretInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableSchema;
+use MyInvoice\Service\Backup\Company\CompanyBackupTenantSqlSelector;
 use MyInvoice\Service\Backup\Company\CompanyBackupTechnicalValidation;
 use MyInvoice\Service\Backup\Company\Upcast\BackupUpcasterRegistry;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -107,6 +108,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         $pdo = $this->db->pdo();
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS supplier');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS users');
+        $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_attachments');
+        $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoices');
         $pdo->exec(
             'CREATE TEMPORARY TABLE supplier ('
             . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
@@ -117,6 +120,20 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         $pdo->exec(
             'CREATE TEMPORARY TABLE users ('
             . 'id BIGINT UNSIGNED NOT NULL PRIMARY KEY'
+            . ') ENGINE=InnoDB',
+        );
+        $pdo->exec(
+            'CREATE TEMPORARY TABLE invoices ('
+            . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
+            . 'supplier_id BIGINT UNSIGNED NOT NULL,'
+            . 'invoice_number VARCHAR(64) NOT NULL'
+            . ') ENGINE=InnoDB',
+        );
+        $pdo->exec(
+            'CREATE TEMPORARY TABLE invoice_attachments ('
+            . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
+            . 'invoice_id BIGINT UNSIGNED NOT NULL,'
+            . 'filename VARCHAR(255) NOT NULL'
             . ') ENGINE=InnoDB',
         );
         $pdo->exec(
@@ -135,11 +152,32 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         );
         $pdo->exec('INSERT INTO users (id) VALUES (91)');
         $pdo->exec(
+            "INSERT INTO invoices (id, supplier_id, invoice_number)"
+            . " VALUES (101, 7, 'existing-invoice')",
+        );
+        $pdo->exec(
+            "INSERT INTO invoice_attachments (id, invoice_id, filename)"
+            . " VALUES (11, 101, 'same.pdf')",
+        );
+        $pdo->exec(
             'INSERT INTO `' . $this->recordsTable . '`'
             . ' (id, supplier_id, parent_id, code) VALUES'
             . " (31, 7, NULL, 'existing-parent'),"
             . " (32, 7, 31, 'existing-child')",
         );
+        $existingFile = $this->root . DIRECTORY_SEPARATOR . 'live'
+            . DIRECTORY_SEPARATOR . 'invoices'
+            . DIRECTORY_SEPARATOR . 'sup-7'
+            . DIRECTORY_SEPARATOR . 'attachments'
+            . DIRECTORY_SEPARATOR . '101';
+        if (!mkdir($existingFile, 0700, true)
+            || file_put_contents(
+                $existingFile . DIRECTORY_SEPARATOR . 'same.pdf',
+                "existing-tenant-attachment\n",
+            ) === false
+        ) {
+            throw new \RuntimeException('Nelze vytvořit izolovanou existující přílohu.');
+        }
     }
 
     protected function tearDown(): void
@@ -151,6 +189,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             }
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS supplier');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS users');
+            $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_attachments');
+            $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoices');
             if ($this->recordsTable !== '') {
                 $pdo->exec(
                     'DROP TABLE IF EXISTS `' . $this->recordsTable . '`',
@@ -195,8 +235,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             $validation,
             $pdo,
         );
-        self::assertSame(3, $preflight->rowCount);
-        self::assertSame(3, $preflight->identityCount);
+        self::assertSame(5, $preflight->rowCount);
+        self::assertSame(5, $preflight->identityCount);
         self::assertSame([], $preflight->externalReferences->requirements);
         $decisions = CompanyBackupReferenceDecisionPlan::fromArray([
             'format' => CompanyBackupReferenceDecisionPlan::FORMAT,
@@ -240,14 +280,15 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
 
         self::assertFalse($pdo->inTransaction());
         self::assertSame(8, $result->database->supplierId);
-        self::assertSame(3, $result->database->insertedRows);
+        self::assertSame(5, $result->database->insertedRows);
         self::assertSame(2, $result->database->deferredRows);
         self::assertSame(1, $result->database->updatedRows);
-        self::assertSame(2, $result->postImport->checkedTableCount);
-        self::assertSame(3, $result->postImport->checkedTenantRows);
-        self::assertSame(3, $result->postImport->invariantReport->invariantCount);
+        self::assertSame(4, $result->postImport->checkedTableCount);
+        self::assertSame(5, $result->postImport->checkedTenantRows);
+        self::assertSame(3,
+            $result->postImport->invariantReport->invariantCount);
         self::assertSame(0, $result->postImport->invariantReport->checkCount);
-        self::assertSame(1, $result->publishedFileCount);
+        self::assertSame(2, $result->publishedFileCount);
 
         self::assertSame([
             [
@@ -291,6 +332,16 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'updated_at' => '2022-01-01 12:00:00',
             ],
         ], $this->recordRows($pdo));
+        self::assertSame([
+            ['id' => 101, 'supplier_id' => 7,
+                'invoice_number' => 'existing-invoice'],
+            ['id' => 102, 'supplier_id' => 8,
+                'invoice_number' => 'restored-invoice'],
+        ], $this->invoiceRows($pdo));
+        self::assertSame([
+            ['id' => 11, 'invoice_id' => 101, 'filename' => 'same.pdf'],
+            ['id' => 12, 'invoice_id' => 102, 'filename' => 'same.pdf'],
+        ], $this->attachmentRows($pdo));
         $restoredLogo = $this->root . DIRECTORY_SEPARATOR . 'live'
             . DIRECTORY_SEPARATOR . 'supplier-logos'
             . DIRECTORY_SEPARATOR . 'sup-8.png';
@@ -298,6 +349,27 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertSame(
             "synthetic-round-trip-logo\n",
             file_get_contents($restoredLogo),
+        );
+        $restoredAttachment = $this->root . DIRECTORY_SEPARATOR . 'live'
+            . DIRECTORY_SEPARATOR . 'invoices'
+            . DIRECTORY_SEPARATOR . 'sup-8'
+            . DIRECTORY_SEPARATOR . 'attachments'
+            . DIRECTORY_SEPARATOR . '102'
+            . DIRECTORY_SEPARATOR . 'same.pdf';
+        self::assertFileExists($restoredAttachment);
+        self::assertSame(
+            "synthetic-round-trip-attachment\n",
+            file_get_contents($restoredAttachment),
+        );
+        $existingAttachment = $this->root . DIRECTORY_SEPARATOR . 'live'
+            . DIRECTORY_SEPARATOR . 'invoices'
+            . DIRECTORY_SEPARATOR . 'sup-7'
+            . DIRECTORY_SEPARATOR . 'attachments'
+            . DIRECTORY_SEPARATOR . '101'
+            . DIRECTORY_SEPARATOR . 'same.pdf';
+        self::assertSame(
+            "existing-tenant-attachment\n",
+            file_get_contents($existingAttachment),
         );
         self::assertSame([], $this->entries(
             $this->root . DIRECTORY_SEPARATOR . 'staging',
@@ -311,6 +383,16 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'id' => 7,
                 'company_name' => 'Restored tenant',
                 'logo_path' => 'storage/supplier-logos/sup-7.png',
+            ]],
+            'table:invoices' => [[
+                'id' => 101,
+                'supplier_id' => 7,
+                'invoice_number' => 'restored-invoice',
+            ]],
+            'table:invoice_attachments' => [[
+                'id' => 11,
+                'invoice_id' => 101,
+                'filename' => 'same.pdf',
             ]],
             'table:' . $this->recordsTable => [[
                 'id' => 31,
@@ -354,12 +436,39 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         }
         $logoHash = hash('sha256', $logoContents);
         $logoArchivePath = 'files/supplier-logos/' . $logoHash . '.png';
+        $attachmentContents = "synthetic-round-trip-attachment\n";
+        $attachmentPath = $this->root . DIRECTORY_SEPARATOR
+            . 'source-attachment.pdf';
+        if (file_put_contents($attachmentPath, $attachmentContents)
+            !== strlen($attachmentContents)
+        ) {
+            throw new \RuntimeException('Nelze zapsat syntetickou přílohu.');
+        }
+        $attachmentHash = hash('sha256', $attachmentContents);
+        $attachmentArchivePath = 'files/invoice-attachments/'
+            . $attachmentHash . '.pdf';
         $fileInventory = CompanyBackupFileInventory::fromArray([
             'format' => CompanyBackupFileInventory::FORMAT,
             'version' => CompanyBackupFileInventory::VERSION,
             'areas' => [[
-                'registry_key' => 'file-area:supplier-logos',
+                'registry_key' => 'file-area:invoice-attachments',
                 'order' => 1,
+                'entries' => [[
+                    'source_path' => 'sup-7/attachments/101/same.pdf',
+                    'archive_path' => $attachmentArchivePath,
+                    'state' => 'present',
+                    'bytes' => strlen($attachmentContents),
+                    'sha256' => $attachmentHash,
+                    'owners' => [[
+                        'registry_key' => 'table:invoice_attachments',
+                        'primary_key' => ['id' => 11],
+                        'column' => 'filename',
+                        'path' => [],
+                    ]],
+                ]],
+            ], [
+                'registry_key' => 'file-area:supplier-logos',
+                'order' => 2,
                 'entries' => [[
                     'source_path' => 'sup-7.png',
                     'archive_path' => $logoArchivePath,
@@ -375,6 +484,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 ]],
             ]],
         ], $registry);
+        $sourceFiles[$attachmentArchivePath] = $attachmentPath;
         $sourceFiles[$logoArchivePath] = $logoPath;
         $snapshot = new CompanyBackupMachineSnapshot(
             7,
@@ -404,6 +514,49 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
             1,
             [
+                $this->tableDefinition(
+                    'table:invoice_attachments',
+                    TenantDataPolicy::TenantOwnedIndirect,
+                    ['id', 'invoice_id', 'filename'],
+                    [
+                        'strategy' => 'foreign_key_path',
+                        'path' => [[
+                            'from_column' => 'invoice_id',
+                            'to_table' => 'invoices',
+                            'to_column' => 'id',
+                        ], [
+                            'from_column' => 'supplier_id',
+                            'to_table' => 'supplier',
+                            'to_column' => 'id',
+                        ]],
+                    ],
+                    [$this->reference('invoice_id', 'table:invoices')],
+                ),
+                new TenantDataDefinition(
+                    'file-area:invoice-attachments',
+                    TenantDataObjectKind::FileArea,
+                    TenantDataPolicy::TenantOwned,
+                    [$profile],
+                    [
+                        'file_policy' => 'historical_optional',
+                        'path_policy' => 'supplier_invoice_attachment',
+                        'file_owners' => [[
+                            'registry_key' => 'table:invoice_attachments',
+                            'column' => 'filename',
+                            'path' => [],
+                            'stored_prefix' => '',
+                        ]],
+                        'ownership' => ['strategy' => 'database_references'],
+                        'storage_subdirectory' => 'invoices',
+                    ],
+                ),
+                $this->tableDefinition(
+                    'table:invoices',
+                    TenantDataPolicy::TenantOwned,
+                    ['id', 'supplier_id', 'invoice_number'],
+                    ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                    [$this->reference('supplier_id', 'table:supplier')],
+                ),
                 $this->tableDefinition(
                     'table:' . $this->recordsTable,
                     TenantDataPolicy::TenantOwned,
@@ -570,6 +723,34 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         ], $rows);
     }
 
+    /** @return list<array{id:int,supplier_id:int,invoice_number:string}> */
+    private function invoiceRows(PDO $pdo): array
+    {
+        $rows = $this->fetchRows(
+            $pdo,
+            'SELECT id, supplier_id, invoice_number FROM invoices ORDER BY id',
+        );
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'supplier_id' => (int) $row['supplier_id'],
+            'invoice_number' => (string) $row['invoice_number'],
+        ], $rows);
+    }
+
+    /** @return list<array{id:int,invoice_id:int,filename:string}> */
+    private function attachmentRows(PDO $pdo): array
+    {
+        $rows = $this->fetchRows(
+            $pdo,
+            'SELECT id, invoice_id, filename FROM invoice_attachments ORDER BY id',
+        );
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'invoice_id' => (int) $row['invoice_id'],
+            'filename' => (string) $row['filename'],
+        ], $rows);
+    }
+
     /** @return list<array<string,mixed>> */
     private function fetchRows(PDO $pdo, string $sql): array
     {
@@ -654,23 +835,25 @@ final readonly class CurrentRoundTripRowSource implements CompanyBackupDataRowSo
         TenantDataDefinition $definition,
     ): iterable {
         $projection = CompanyBackupTableProjection::fromDefinition($definition);
-        $column = $definition->policy === TenantDataPolicy::TenantRoot
-            ? 'id'
-            : 'supplier_id';
+        $selection = (new CompanyBackupTenantSqlSelector())->select(
+            $projection, $supplierId,
+        );
+        $alias = CompanyBackupTenantSqlSelector::SOURCE_ALIAS;
         $columns = implode(', ', array_map(
-            static fn (string $name): string => '`' . $name . '`',
+            static fn (string $name): string => '`' . $alias . '`.`' . $name . '`',
             $projection->dataColumns,
         ));
         $order = implode(', ', array_map(
-            static fn (string $name): string => '`' . $name . '`',
+            static fn (string $name): string => '`' . $alias . '`.`' . $name . '`',
             $projection->primaryKey,
         ));
         $statement = $snapshot->prepare(
             'SELECT ' . $columns . ' FROM `' . $projection->name . '`'
-                . ' WHERE `' . $column . '` = ? ORDER BY ' . $order,
+                . ' AS `' . $alias . '` WHERE ' . $selection->where
+                . ' ORDER BY ' . $order,
         );
         if (!$statement instanceof PDOStatement
-            || !$statement->execute([$supplierId])
+            || !$statement->execute($selection->params)
         ) {
             throw new \RuntimeException('Round-trip registry replay selhal.');
         }

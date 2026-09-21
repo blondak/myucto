@@ -8,6 +8,7 @@ use MyInvoice\Service\Backup\CanonicalJson;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileInventory;
 use MyInvoice\Service\Backup\Company\CompanyBackupArchiveLimits;
 use MyInvoice\Service\Backup\Company\CompanyBackupFileRestoreException;
+use MyInvoice\Service\Backup\Company\CompanyBackupInvoiceAttachmentFileBinding;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlFilePathMap;
 use MyInvoice\Service\Backup\Company\CompanyBackupTableProjection;
 use MyInvoice\Service\Backup\Registry\TenantDataDefinition;
@@ -389,6 +390,251 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
         self::assertTrue($database->rollBack());
     }
 
+    public function testInvoiceAttachmentsRemapInvoicePathButPreserveSharedBasename(): void
+    {
+        $database = $this->database();
+        $snapshot = $this->attachmentSnapshot();
+        $inventory = $this->attachmentInventory($snapshot);
+        self::assertTrue($database->beginTransaction());
+        $map = new CompanyBackupSqlFilePathMap(
+            $database, $inventory, $snapshot, $snapshot,
+        );
+        $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7], ['id' => 41], true,
+        );
+        foreach ([[11, 91], [12, 92]] as [$sourceId, $targetId]) {
+            $sourceRow = [
+                'id' => $sourceId, 'invoice_id' => 101,
+                'filename' => 'same.pdf',
+            ];
+            $targetRow = [
+                'id' => $targetId, 'invoice_id' => 901,
+                'filename' => 'same.pdf',
+            ];
+            self::assertSame($targetRow, $map->transform(
+                $this->projection($snapshot, 'table:invoice_attachments'),
+                $sourceRow, $targetRow, true,
+            ));
+            self::assertSame($targetRow, $map->transform(
+                $this->projection($snapshot, 'table:invoice_attachments'),
+                $sourceRow, $targetRow, false,
+            ));
+        }
+
+        $map->finish();
+        $plan = $map->publicationPlan();
+        self::assertSame(1, $plan->missingEntryCount());
+        self::assertSame(2, $map->ownerEntryCount());
+        self::assertSame(
+            'sup-41/attachments/901/same.pdf',
+            $plan->entries[0]->targetPath,
+        );
+        self::assertSame([
+            (new CompanyBackupInvoiceAttachmentFileBinding(11, 91, 101, 901))
+                ->bindingValue(),
+            (new CompanyBackupInvoiceAttachmentFileBinding(12, 92, 101, 901))
+                ->bindingValue(),
+        ], array_map(
+            static fn (CompanyBackupInvoiceAttachmentFileBinding $binding): array =>
+                $binding->bindingValue(),
+            $plan->invoiceAttachmentBindings,
+        ));
+        $map->close();
+        self::assertTrue($database->rollBack());
+    }
+
+    public function testInvoiceAttachmentAcceptsCanonicalStringIdsWithExactOwnerPayload(): void
+    {
+        $database = $this->database();
+        $snapshot = $this->attachmentSnapshot();
+        $raw = $this->attachmentInventory($snapshot)->toArray();
+        $raw['areas'][0]['entries'][0]['owners'][0]['primary_key']['id'] = '11';
+        $inventory = CompanyBackupFileInventory::fromArray($raw, $snapshot);
+        self::assertTrue($database->beginTransaction());
+        $map = new CompanyBackupSqlFilePathMap(
+            $database, $inventory, $snapshot, $snapshot,
+        );
+        $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7], ['id' => 41], true,
+        );
+        self::assertSame(
+            ['id' => '91', 'invoice_id' => '901', 'filename' => 'same.pdf'],
+            $map->transform(
+                $this->projection($snapshot, 'table:invoice_attachments'),
+                ['id' => '11', 'invoice_id' => '101',
+                    'filename' => 'same.pdf'],
+                ['id' => '91', 'invoice_id' => '901',
+                    'filename' => 'same.pdf'],
+                true,
+            ),
+        );
+        $map->transform(
+            $this->projection($snapshot, 'table:invoice_attachments'),
+            ['id' => 12, 'invoice_id' => 101, 'filename' => 'same.pdf'],
+            ['id' => 92, 'invoice_id' => 901, 'filename' => 'same.pdf'],
+            true,
+        );
+        $map->finish();
+        self::assertSame(
+            (new CompanyBackupInvoiceAttachmentFileBinding(11, 91, 101, 901))
+                ->bindingValue(),
+            $map->publicationPlan()->invoiceAttachmentBindings[0]
+                ->bindingValue(),
+        );
+        $map->close();
+        self::assertTrue($database->rollBack());
+    }
+
+    public function testInvoiceAttachmentRejectsSourceInvoiceIdDifferentFromManifestPath(): void
+    {
+        $database = $this->database();
+        $snapshot = $this->attachmentSnapshot();
+        self::assertTrue($database->beginTransaction());
+        $map = new CompanyBackupSqlFilePathMap(
+            $database,
+            $this->attachmentInventory($snapshot),
+            $snapshot, $snapshot,
+        );
+        $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7], ['id' => 41], true,
+        );
+        try {
+            $map->transform(
+                $this->projection($snapshot, 'table:invoice_attachments'),
+                ['id' => 11, 'invoice_id' => 102, 'filename' => 'same.pdf'],
+                ['id' => 91, 'invoice_id' => 901, 'filename' => 'same.pdf'],
+                true,
+            );
+            self::fail('Archivní invoice_id musí souhlasit s cestou v manifestu.');
+        } catch (CompanyBackupFileRestoreException $e) {
+            self::assertSame(
+                'file_restore_invoice_attachment_binding_invalid',
+                $e->errorCode,
+            );
+        }
+        $map->close();
+        self::assertTrue($database->rollBack());
+    }
+
+    public function testInvoiceAttachmentBindingTamperFailsDeferredAndFinish(): void
+    {
+        $database = new PDO('sqlite::memory:', options: [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        ]);
+        $snapshot = $this->attachmentSnapshot();
+        $inventory = $this->attachmentInventory($snapshot);
+        self::assertTrue($database->beginTransaction());
+        $map = new CompanyBackupSqlFilePathMap(
+            $database, $inventory, $snapshot, $snapshot,
+        );
+        $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7], ['id' => 41], true,
+        );
+        foreach ([[11, 91], [12, 92]] as [$sourceId, $targetId]) {
+            $map->transform(
+                $this->projection($snapshot, 'table:invoice_attachments'),
+                ['id' => $sourceId, 'invoice_id' => 101,
+                    'filename' => 'same.pdf'],
+                ['id' => $targetId, 'invoice_id' => 901,
+                    'filename' => 'same.pdf'],
+                true,
+            );
+        }
+        $tempStatement = $database->query(
+            "SELECT name FROM sqlite_temp_master WHERE name LIKE 'company_backup_file_path_%'",
+        );
+        self::assertInstanceOf(PDOStatement::class, $tempStatement);
+        $temporaryName = $tempStatement->fetchColumn();
+        self::assertTrue($tempStatement->closeCursor());
+        self::assertIsString($temporaryName);
+        $owner = $inventory->areas[0]->entries[0]->owners[0];
+        $ownerId = hash('sha256', CanonicalJson::encode($owner));
+        $tampered = CanonicalJson::encode(
+            (new CompanyBackupInvoiceAttachmentFileBinding(
+                11, 91, 101, 902,
+            ))->bindingValue(),
+        );
+        $update = $database->prepare(
+            'UPDATE "' . $temporaryName . '" SET attachment_binding = ?'
+                . ' WHERE owner_id = ?',
+        );
+        self::assertInstanceOf(PDOStatement::class, $update);
+        self::assertTrue($update->execute([$tampered, $ownerId]));
+        self::assertSame(1, $update->rowCount());
+        self::assertTrue($update->closeCursor());
+
+        try {
+            $map->transform(
+                $this->projection($snapshot, 'table:invoice_attachments'),
+                ['id' => 11, 'invoice_id' => 101, 'filename' => 'same.pdf'],
+                ['id' => 91, 'invoice_id' => 901, 'filename' => 'same.pdf'],
+                false,
+            );
+            self::fail('Odložená vazba musí souhlasit se skutečným ID mapperem.');
+        } catch (CompanyBackupFileRestoreException $e) {
+            self::assertSame(
+                'file_restore_publication_path_mismatch', $e->errorCode,
+            );
+        }
+        try {
+            $map->finish();
+            self::fail('Publikace nesmí obejít cílovou fakturu v SQL cestě.');
+        } catch (CompanyBackupFileRestoreException $e) {
+            self::assertSame(
+                'file_restore_attachment_binding_invalid', $e->errorCode,
+            );
+        }
+        $map->close();
+        self::assertTrue($database->rollBack());
+    }
+
+    public function testInvoiceAttachmentBindingBytesCountAgainstSqlMapLimit(): void
+    {
+        $database = $this->database();
+        $snapshot = $this->attachmentSnapshot();
+        $inventory = $this->attachmentInventory($snapshot);
+        self::assertTrue($database->beginTransaction());
+        $unlimited = new CompanyBackupSqlFilePathMap(
+            $database, $inventory, $snapshot, $snapshot,
+        );
+        $initialBytes = $unlimited->indexedBytes();
+        $unlimited->close();
+        $targetPath = 'sup-41/attachments/901/same.pdf';
+        $bindingBytes = strlen(CanonicalJson::encode(
+            (new CompanyBackupInvoiceAttachmentFileBinding(11, 91, 101, 901))
+                ->bindingValue(),
+        ));
+        $map = new CompanyBackupSqlFilePathMap(
+            $database, $inventory, $snapshot, $snapshot,
+            new CompanyBackupArchiveLimits(
+                maxSourceIndexBytes:
+                    $initialBytes + strlen($targetPath) + $bindingBytes - 1,
+            ),
+        );
+        $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7], ['id' => 41], true,
+        );
+        try {
+            $map->transform(
+                $this->projection($snapshot, 'table:invoice_attachments'),
+                ['id' => 11, 'invoice_id' => 101, 'filename' => 'same.pdf'],
+                ['id' => 91, 'invoice_id' => 901, 'filename' => 'same.pdf'],
+                true,
+            );
+            self::fail('Vazba a cesta musí společně respektovat indexový limit.');
+        } catch (CompanyBackupFileRestoreException $e) {
+            self::assertSame('file_restore_owner_size_exceeded', $e->errorCode);
+        }
+        self::assertSame($initialBytes, $map->indexedBytes());
+        $map->close();
+        self::assertTrue($database->rollBack());
+    }
+
     private function database(): PDO
     {
         $dsn = getenv('COMPANY_BACKUP_FILE_MAP_TEST_DSN');
@@ -648,6 +894,115 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
                         'registry_key' => 'table:stock_media',
                         'primary_key' => ['id' => 31],
                         'column' => 'storage_key',
+                        'path' => [],
+                    ]],
+                ]],
+            ]],
+        ], $snapshot);
+    }
+
+    private function attachmentSnapshot(): TenantDataRegistrySnapshot
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        $supplier = new TenantDataDefinition(
+            'table:supplier', TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRoot, [$profile], [
+                'primary_key' => ['id'],
+                'ownership' => ['strategy' => 'selected_supplier', 'column' => 'id'],
+                'secrets' => [],
+                'company_backup' => $this->tableProjection(['id']),
+            ],
+        );
+        $invoices = new TenantDataDefinition(
+            'table:invoices', TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned, [$profile], [
+                'primary_key' => ['id'],
+                'ownership' => ['strategy' => 'supplier_id',
+                    'column' => 'supplier_id'],
+                'secrets' => [],
+                'company_backup' => $this->tableProjection(
+                    ['id', 'supplier_id'], [[
+                        'columns' => ['supplier_id'],
+                        'target' => 'table:supplier',
+                        'target_columns' => ['id'],
+                        'mapping' => 'tenant_id',
+                        'constraint' => 'required',
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ]],
+                ),
+            ],
+        );
+        $attachments = new TenantDataDefinition(
+            'table:invoice_attachments', TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwnedIndirect, [$profile], [
+                'primary_key' => ['id'],
+                'ownership' => ['strategy' => 'foreign_key_path', 'path' => [
+                    ['from_column' => 'invoice_id', 'to_table' => 'invoices',
+                        'to_column' => 'id'],
+                    ['from_column' => 'supplier_id', 'to_table' => 'supplier',
+                        'to_column' => 'id'],
+                ]],
+                'secrets' => [],
+                'company_backup' => $this->tableProjection(
+                    ['id', 'invoice_id', 'filename'], [[
+                        'columns' => ['invoice_id'],
+                        'target' => 'table:invoices',
+                        'target_columns' => ['id'],
+                        'mapping' => 'tenant_id',
+                        'constraint' => 'required',
+                        'nullable_columns' => [],
+                        'fallbacks' => [],
+                    ]],
+                ),
+            ],
+        );
+        $area = new TenantDataDefinition(
+            'file-area:invoice-attachments', TenantDataObjectKind::FileArea,
+            TenantDataPolicy::TenantOwned, [$profile], [
+                'file_policy' => 'historical_optional',
+                'path_policy' => 'supplier_invoice_attachment',
+                'file_owners' => [[
+                    'registry_key' => 'table:invoice_attachments',
+                    'column' => 'filename',
+                    'path' => [],
+                    'stored_prefix' => '',
+                ]],
+                'ownership' => ['strategy' => 'database_references'],
+                'storage_subdirectory' => 'invoices',
+            ],
+        );
+        return TenantDataRegistrySnapshot::fromRegistry(
+            new TenantDataRegistry(1, [$supplier, $invoices, $attachments, $area],
+                [$profile]),
+            $profile,
+        );
+    }
+
+    private function attachmentInventory(
+        TenantDataRegistrySnapshot $snapshot,
+    ): CompanyBackupFileInventory {
+        return CompanyBackupFileInventory::fromArray([
+            'format' => CompanyBackupFileInventory::FORMAT,
+            'version' => CompanyBackupFileInventory::VERSION,
+            'areas' => [[
+                'registry_key' => 'file-area:invoice-attachments',
+                'order' => 1,
+                'entries' => [[
+                    'source_path' => 'sup-7/attachments/101/same.pdf',
+                    'archive_path' => null,
+                    'state' => 'missing',
+                    'bytes' => null,
+                    'sha256' => null,
+                    'owners' => [[
+                        'registry_key' => 'table:invoice_attachments',
+                        'primary_key' => ['id' => 11],
+                        'column' => 'filename',
+                        'path' => [],
+                    ], [
+                        'registry_key' => 'table:invoice_attachments',
+                        'primary_key' => ['id' => 12],
+                        'column' => 'filename',
                         'path' => [],
                     ]],
                 ]],

@@ -91,6 +91,7 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
                 $registry,
                 $publication->sourceSupplierId,
                 $result->supplierId,
+                $publication->invoiceAttachmentBindings,
             );
         } catch (CompanyBackupFileRestoreException $e) {
             throw self::error(
@@ -104,6 +105,9 @@ final readonly class CompanyBackupRegistryPostImportValidator implements
         )) {
             throw self::error('post_import_publication_plan_mismatch');
         }
+        CompanyBackupInvoiceAttachmentPostImportValidator::assertValid(
+            $database, $fileInventory, $registry, $publication, $result->supplierId,
+        );
 
         $checkedTables = 0;
         $checkedTenantRows = 0;

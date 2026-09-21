@@ -95,6 +95,7 @@ final class CompanyBackupSqlFilePathMap
                         . ' COLLATE ascii_bin NOT NULL,'
                         . '`source_path` VARBINARY(1024) NOT NULL,'
                         . '`target_path` VARBINARY(1024) NULL,'
+                        . '`attachment_binding` VARBINARY(1024) NULL,'
                         . '`consumed` TINYINT UNSIGNED NOT NULL DEFAULT 0,'
                         . 'PRIMARY KEY (`owner_id`)'
                         . ') ENGINE=InnoDB',
@@ -106,6 +107,7 @@ final class CompanyBackupSqlFilePathMap
                         . 'area_registry_key TEXT NOT NULL,'
                         . 'source_path BLOB NOT NULL,'
                         . 'target_path BLOB NULL,'
+                        . 'attachment_binding BLOB NULL,'
                         . 'consumed INTEGER NOT NULL DEFAULT 0'
                         . ')',
                 );
@@ -116,7 +118,7 @@ final class CompanyBackupSqlFilePathMap
             }
             $select = $database->prepare(
                 'SELECT owner_payload, area_registry_key, source_path,'
-                    . ' target_path, consumed'
+                    . ' target_path, attachment_binding, consumed'
                     . ' FROM ' . $this->quotedTable
                     . ' WHERE owner_id = ?',
             );
@@ -127,7 +129,7 @@ final class CompanyBackupSqlFilePathMap
             );
             $consume = $database->prepare(
                 'UPDATE ' . $this->quotedTable
-                    . ' SET consumed = 1, target_path = ?'
+                    . ' SET consumed = 1, target_path = ?, attachment_binding = ?'
                     . ' WHERE owner_id = ? AND consumed = 0',
             );
             if (!$select instanceof PDOStatement
@@ -192,7 +194,10 @@ final class CompanyBackupSqlFilePathMap
                 $area->registryKey,
             );
             if ($binding === null) {
-                if ($sourceStoredPath !== null || $targetStoredPath !== null) {
+                if ($area->pathPolicy
+                    === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment
+                    || $sourceStoredPath !== null || $targetStoredPath !== null
+                ) {
                     throw self::error(
                         'file_restore_inventory_owner_missing',
                         $area->registryKey,
@@ -220,6 +225,60 @@ final class CompanyBackupSqlFilePathMap
                     $area->registryKey,
                 );
             }
+            $attachmentBinding = null;
+            $targetInvoiceId = null;
+            if ($area->pathPolicy
+                === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment
+            ) {
+                $sourceAttachmentId = CompanyBackupInvoiceAttachmentFileBinding::canonicalPositiveId(
+                    $sourceRow['id'] ?? null,
+                );
+                $targetAttachmentId = CompanyBackupInvoiceAttachmentFileBinding::canonicalPositiveId(
+                    $targetRow['id'] ?? null,
+                );
+                $sourceInvoiceId = CompanyBackupInvoiceAttachmentFileBinding::canonicalPositiveId(
+                    $sourceRow['invoice_id'] ?? null,
+                );
+                $targetInvoiceId = CompanyBackupInvoiceAttachmentFileBinding::canonicalPositiveId(
+                    $targetRow['invoice_id'] ?? null,
+                );
+                if ($sourceAttachmentId === null
+                    || $targetAttachmentId === null
+                    || $sourceInvoiceId === null
+                    || $targetInvoiceId === null
+                ) {
+                    throw self::error(
+                        'file_restore_invoice_attachment_binding_invalid',
+                        $area->registryKey,
+                    );
+                }
+                try {
+                    $sourcePathInvoiceId =
+                        CompanyBackupInvoiceAttachmentFilePath::parseInvoiceId(
+                            $binding['source_path'],
+                            $sourceSupplierId,
+                        );
+                } catch (\InvalidArgumentException) {
+                    throw self::error(
+                        'file_restore_invoice_attachment_binding_invalid',
+                        $area->registryKey,
+                    );
+                }
+                if ($sourcePathInvoiceId !== $sourceInvoiceId) {
+                    throw self::error(
+                        'file_restore_invoice_attachment_binding_invalid',
+                        $area->registryKey,
+                    );
+                }
+                $attachmentBinding = CanonicalJson::encode(
+                    (new CompanyBackupInvoiceAttachmentFileBinding(
+                        $sourceAttachmentId,
+                        $targetAttachmentId,
+                        $sourceInvoiceId,
+                        $targetInvoiceId,
+                    ))->bindingValue(),
+                );
+            }
             try {
                 $expected = $owner->storedPrefix
                     . $area->pathPolicy->storedRelativePath(
@@ -230,6 +289,7 @@ final class CompanyBackupSqlFilePathMap
                     $binding['source_path'],
                     $sourceSupplierId,
                     $targetSupplierId,
+                    $targetInvoiceId,
                 );
                 $targetStoredPathValue = $owner->storedPrefix
                     . $area->pathPolicy->storedRelativePath(
@@ -245,6 +305,8 @@ final class CompanyBackupSqlFilePathMap
             }
             if ($sourceStoredPath !== $expected
                 || $targetStoredPath !== $expected
+                || ($attachmentBinding !== null
+                    && $targetStoredPathValue !== $expected)
             ) {
                 throw self::error(
                     'file_restore_owner_path_mismatch',
@@ -266,8 +328,11 @@ final class CompanyBackupSqlFilePathMap
                     );
                 }
                 $targetPathBytes = strlen($targetPath);
+                $attachmentBindingBytes = $attachmentBinding === null
+                    ? 0 : strlen($attachmentBinding);
                 if ($targetPathBytes > 1_024
-                    || $targetPathBytes
+                    || $attachmentBindingBytes > 1_024
+                    || $targetPathBytes + $attachmentBindingBytes
                         > $this->limits->maxSourceIndexBytes - $this->indexedBytes
                 ) {
                     throw self::error(
@@ -275,12 +340,19 @@ final class CompanyBackupSqlFilePathMap
                         $area->registryKey,
                     );
                 }
-                $this->markConsumed($ownerId, $targetPath, $area->registryKey);
+                $this->markConsumed(
+                    $ownerId,
+                    $targetPath,
+                    $attachmentBinding,
+                    $area->registryKey,
+                );
                 $this->consumedOwners++;
-                $this->indexedBytes += $targetPathBytes;
+                $this->indexedBytes += $targetPathBytes + $attachmentBindingBytes;
             } elseif (!$binding['consumed']) {
                 throw self::error('file_restore_owner_not_consumed', $area->registryKey);
-            } elseif ($binding['target_path'] !== $targetPath) {
+            } elseif ($binding['target_path'] !== $targetPath
+                || $binding['attachment_binding'] !== $attachmentBinding
+            ) {
                 throw self::error(
                     'file_restore_publication_path_mismatch',
                     $area->registryKey,
@@ -337,13 +409,18 @@ final class CompanyBackupSqlFilePathMap
         ) {
             throw self::error('file_restore_owner_unconsumed');
         }
+        $invoiceAttachmentBindings = $this->collectInvoiceAttachmentBindings();
         $publicationPlan = CompanyBackupFilePublicationPlan::fromInventory(
             $this->inventory,
             $this->targetRegistry,
             $this->sourceSupplierId,
             $this->targetSupplierId,
+            $invoiceAttachmentBindings,
         );
-        $this->assertPublicationPaths($publicationPlan);
+        $this->assertPublicationPaths(
+            $publicationPlan,
+            $invoiceAttachmentBindings,
+        );
         $this->publicationPlan = $publicationPlan;
         $this->finished = true;
     }
@@ -607,10 +684,80 @@ final class CompanyBackupSqlFilePathMap
         $this->targetSupplierId = $targetId;
     }
 
+    /** @return list<CompanyBackupInvoiceAttachmentFileBinding> */
+    private function collectInvoiceAttachmentBindings(): array
+    {
+        $sourceSupplierId = $this->sourceSupplierId;
+        if (!is_int($sourceSupplierId)) {
+            throw self::error('file_restore_supplier_identity_missing');
+        }
+        $bindings = [];
+        foreach ($this->inventory->areas as $area) {
+            $contract = $this->areas[$area->registryKey] ?? null;
+            if (!$contract instanceof CompanyBackupFileAreaProjection) {
+                throw self::error('file_restore_area_contract_mismatch', $area->registryKey);
+            }
+            if ($contract->pathPolicy
+                !== CompanyBackupFilePathPolicy::SupplierInvoiceAttachment
+            ) {
+                continue;
+            }
+            foreach ($area->entries as $entry) {
+                foreach ($entry->owners as $owner) {
+                    $payload = CanonicalJson::encode($owner);
+                    $record = $this->lookup(hash('sha256', $payload), $area->registryKey);
+                    $raw = $record['attachment_binding'] ?? null;
+                    if ($record === null
+                        || !hash_equals($payload, $record['owner_payload'])
+                        || $record['area_registry_key'] !== $area->registryKey
+                        || $record['source_path'] !== $entry->sourcePath
+                        || !$record['consumed']
+                        || !is_string($raw)
+                    ) {
+                        throw self::error(
+                            'file_restore_publication_binding_mismatch',
+                            $area->registryKey,
+                        );
+                    }
+                    try {
+                        $decoded = json_decode($raw, true, 8, JSON_THROW_ON_ERROR);
+                        $binding = CompanyBackupInvoiceAttachmentFileBinding::fromArray(
+                            $decoded,
+                        );
+                        if (CanonicalJson::encode($binding->bindingValue()) !== $raw
+                            || CompanyBackupInvoiceAttachmentFileBinding::canonicalPositiveId(
+                                $owner['primary_key']['id'] ?? null,
+                            )
+                                !== $binding->sourceAttachmentId
+                            || CompanyBackupInvoiceAttachmentFilePath::parseInvoiceId(
+                                $entry->sourcePath,
+                                $sourceSupplierId,
+                            ) !== $binding->sourceInvoiceId
+                        ) {
+                            throw new \InvalidArgumentException(
+                                'Vazba přílohy v dočasné mapě nesouhlasí.',
+                            );
+                        }
+                    } catch (\JsonException|\InvalidArgumentException) {
+                        throw self::error(
+                            'file_restore_publication_binding_mismatch',
+                            $area->registryKey,
+                        );
+                    }
+                    $bindings[] = $binding;
+                }
+            }
+        }
+        return $bindings;
+    }
+
+    /** @param list<CompanyBackupInvoiceAttachmentFileBinding> $actualBindings */
     private function assertPublicationPaths(
         CompanyBackupFilePublicationPlan $plan,
+        array $actualBindings,
     ): void {
         $entryIndex = 0;
+        $bindingIndex = 0;
         foreach ($this->inventory->areas as $area) {
             foreach ($area->entries as $entry) {
                 $published = $plan->entries[$entryIndex] ?? null;
@@ -641,12 +788,51 @@ final class CompanyBackupSqlFilePathMap
                             $area->registryKey,
                         );
                     }
+                    if (($this->areas[$area->registryKey]->pathPolicy
+                            ?? null) === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment
+                    ) {
+                        $expectedBinding = $actualBindings[$bindingIndex] ?? null;
+                        if (!$expectedBinding instanceof
+                            CompanyBackupInvoiceAttachmentFileBinding
+                            || $binding['attachment_binding'] !== CanonicalJson::encode(
+                                $expectedBinding->bindingValue(),
+                            )
+                        ) {
+                            throw self::error(
+                                'file_restore_publication_binding_mismatch',
+                                $area->registryKey,
+                            );
+                        }
+                        $bindingIndex++;
+                    } elseif ($binding['attachment_binding'] !== null) {
+                        throw self::error(
+                            'file_restore_publication_binding_mismatch',
+                            $area->registryKey,
+                        );
+                    }
                 }
                 $entryIndex++;
             }
         }
         if ($entryIndex !== count($plan->entries)) {
             throw self::error('file_restore_publication_path_mismatch');
+        }
+        $sortedActual = $actualBindings;
+        usort($sortedActual, static fn (
+            CompanyBackupInvoiceAttachmentFileBinding $left,
+            CompanyBackupInvoiceAttachmentFileBinding $right,
+        ): int => $left->sourceAttachmentId <=> $right->sourceAttachmentId);
+        if ($bindingIndex !== count($actualBindings)
+            || count($sortedActual) !== count($plan->invoiceAttachmentBindings)
+        ) {
+            throw self::error('file_restore_publication_binding_mismatch');
+        }
+        foreach ($sortedActual as $index => $binding) {
+            if ($binding->bindingValue()
+                !== $plan->invoiceAttachmentBindings[$index]->bindingValue()
+            ) {
+                throw self::error('file_restore_publication_binding_mismatch');
+            }
         }
     }
 
@@ -834,6 +1020,7 @@ final class CompanyBackupSqlFilePathMap
      *   area_registry_key:string,
      *   source_path:string,
      *   target_path:?string,
+     *   attachment_binding:?string,
      *   consumed:bool
      * }|null
      */
@@ -879,14 +1066,19 @@ final class CompanyBackupSqlFilePathMap
                 'area_registry_key',
                 'source_path',
                 'target_path',
+                'attachment_binding',
                 'consumed',
             ]
             || !is_string($row['owner_payload'])
             || !is_string($row['area_registry_key'])
             || !is_string($row['source_path'])
             || !($row['target_path'] === null || is_string($row['target_path']))
+            || !($row['attachment_binding'] === null
+                || is_string($row['attachment_binding']))
             || !in_array($row['consumed'], [0, 1, '0', '1'], true)
             || ((int) $row['consumed'] === 1) !== is_string($row['target_path'])
+            || ((int) $row['consumed'] === 0
+                && $row['attachment_binding'] !== null)
         ) {
             throw self::error(
                 'file_restore_map_corrupted',
@@ -912,6 +1104,7 @@ final class CompanyBackupSqlFilePathMap
             'area_registry_key' => $row['area_registry_key'],
             'source_path' => $sourcePath,
             'target_path' => $targetPath,
+            'attachment_binding' => $row['attachment_binding'],
             'consumed' => (int) $row['consumed'] === 1,
         ];
     }
@@ -959,6 +1152,7 @@ final class CompanyBackupSqlFilePathMap
     private function markConsumed(
         string $ownerId,
         string $targetPath,
+        ?string $attachmentBinding,
         string $areaRegistryKey,
     ): void {
         $statement = $this->consume;
@@ -966,7 +1160,9 @@ final class CompanyBackupSqlFilePathMap
             throw self::error('file_restore_map_closed', $areaRegistryKey);
         }
         try {
-            if (!$statement->execute([$targetPath, $ownerId])
+            if (!$statement->execute([
+                $targetPath, $attachmentBinding, $ownerId,
+            ])
                 || $statement->rowCount() !== 1
                 || !$statement->closeCursor()
             ) {
