@@ -89,8 +89,14 @@ final class BankPostingSuggestionAction
         // Stav zaúčtování počítáme STEJNOU logikou jako detail výpisu (posted i suggested,
         // ne jen pending suggestion) — viz BankPostingService::transactionPostingInfo().
         $postingByTx = $this->service->transactionPostingInfo($supplierId, array_column($result['items'], 'id'));
-        $items = array_map(static function (array $item) use ($postingByTx): array {
+        // Dimenze pohybu jako štítky v řádku, stejně jako v detailu výpisu.
+        $dimensionsByTx = (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))
+            ->headerDimensionsIfEnabled($supplierId, 'bank_transaction', array_map('intval', array_column($result['items'], 'id')));
+        $items = array_map(static function (array $item) use ($postingByTx, $dimensionsByTx): array {
             $item['posting'] = $postingByTx[$item['id']] ?? null;
+            if ($dimensionsByTx !== null) {
+                $item['dimensions'] = (object) ($dimensionsByTx[(int) $item['id']] ?? []);
+            }
             return $item;
         }, $result['items']);
         return Json::ok($response, [

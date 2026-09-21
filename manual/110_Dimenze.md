@@ -76,7 +76,7 @@ Při zapnutých dimenzích mají výběr dimenzí:
 
 - přijaté a vydané faktury, v hlavičce i u každé položky,
 - pokladní doklady,
-- bankovní pohyby (v rozbaleném řádku pohybu, spolu s dokumenty),
+- bankovní pohyby (v detailu výpisu i v seznamu všech pohybů, viz níže),
 - ruční zápisy, u každého řádku,
 - šablony ručních zápisů (dimenze se předvyplní do zápisu).
 
@@ -85,6 +85,15 @@ i hodnotu Brno, která pod Moravou leží.
 
 Na detailu faktury a pokladního dokladu lze dimenze změnit i u zaúčtovaného
 dokladu.
+
+### Bankovní pohyby
+
+V detailu bankovního výpisu ukazuje každý pohyb své dimenze jako štítky pod
+protistranou. Dimenze se nastavují v nabídce **…** u pohybu položkou **Dimenze**
+(nebo kliknutím na štítky), která pod pohybem otevře výběr dimenzí; tlačítko
+**Uložit dimenze** je uloží. Zaúčtování pohybu je zapíše na všechny řádky jeho
+zápisu v deníku. Změna dimenzí už zaúčtovaného pohybu se do řádků deníku promítne
+hned, i v uzavřeném období, protože mění jen analytické členění.
 
 ### Jak se dimenze dostanou do deníku
 
@@ -101,6 +110,14 @@ dokladu.
 U řádků zápisu lze dimenze upravit i ručně v rozbaleném zápisu deníku tlačítkem
 **Upravit dimenze**. U zápisu z dokladu platí doklad: další změna dimenzí dokladu
 ruční úpravu řádků přepíše.
+
+## Účetní deník
+
+Účetní deník má ve filtrech výběr dimenze: typ, hodnotu a volbu **včetně
+podřízených**. Deník pak ukáže celé zápisy, u kterých aspoň jeden řádek nese
+vybranou hodnotu (nebo hodnotu pod ní). U Střediska se počítají i řádky, které
+nesou jen kód navázaného střediska, stejně jako v sestavách. Filtr se ukládá do
+adresy stránky i do uložených pohledů a platí i pro export deníku do PDF a XLSX.
 
 ## Sestavy
 

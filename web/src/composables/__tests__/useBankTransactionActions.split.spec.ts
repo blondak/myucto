@@ -18,6 +18,14 @@ vi.mock('@/api/documentRequests', () => ({ documentRequestsApi: {} }))
 vi.mock('vue-router', () => ({ useRouter: () => ({}), RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
+// Dimenze (Firma → Dimenze) jsou u firmy vypnuté — řádek pohybu je nevykreslí.
+vi.mock('@/composables/useDimensions', () => ({
+  useDimensions: () => ({
+    enabled: { value: false }, canEdit: { value: false }, documentTypes: { value: [] },
+    valueById: { value: new Map() }, typeById: { value: new Map() },
+    load: () => Promise.resolve(), valueLabel: () => '', pathOf: () => [],
+  }),
+}))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: mocks.toast, error: mocks.toast, info: mocks.toast }) }))
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => {} }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number, currency: string) => `${v} ${currency}` }))

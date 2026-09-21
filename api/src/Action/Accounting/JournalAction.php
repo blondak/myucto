@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Accounting;
 
+use MyInvoice\Action\Accounting\Reports\DimensionFilterParam;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -59,6 +60,7 @@ final class JournalAction
 {
     use AccountingActionSupport;
     use GuardsAccountingMode;
+    use DimensionFilterParam;
 
     private const MAX_PER_PAGE = 200;
 
@@ -113,7 +115,9 @@ final class JournalAction
         $perPage = max(1, min(self::MAX_PER_PAGE, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $result = $this->journal->paginate($supplierId, $this->parseFilters($q, $supplierId), $perPage, $offset);
+        $filters = $this->parseFilters($q, $supplierId);
+        if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
+        $result = $this->journal->paginate($supplierId, $filters, $perPage, $offset);
         $provenance = $this->automationProvenance->forJournalEntries(
             $supplierId,
             array_map(static fn (array $item): int => (int) $item['id'], $result['items']),
@@ -152,6 +156,7 @@ final class JournalAction
         }
 
         $filters = $this->parseFilters($request->getQueryParams(), $supplierId);
+        if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
         try {
             $data = $this->exportService->build($supplierId, $filters);
             $out = $format === 'pdf'
@@ -259,6 +264,24 @@ final class JournalAction
             $filters['amount_to'] = (float) $q['amount_to'];
         }
         return $filters;
+    }
+
+    /**
+     * Filtr na hodnotu dimenze (`dimension_value_id`, `dimension_descendants`) se
+     * stejnými parametry i sémantikou řádku jako sestavy. Seznam i export ho sdílí.
+     *
+     * @param array<string,mixed> $filters
+     */
+    private function applyDimensionFilter(Request $request, Response $response, int $supplierId, array &$filters, ?Response &$err): bool
+    {
+        $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
+        if ($dimension === false) {
+            return false;
+        }
+        if ($dimension !== null) {
+            $filters['dimension'] = $dimension;
+        }
+        return true;
     }
 
     /** @return array<string,mixed>|null */

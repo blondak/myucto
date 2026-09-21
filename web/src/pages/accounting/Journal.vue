@@ -28,6 +28,8 @@ import JournalEntryDetailPanel from '@/components/accounting/JournalEntryDetailP
 import { journalSourceLink } from '@/utils/journalSourceLink'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
+import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import { useDimensions } from '@/composables/useDimensions'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -35,6 +37,7 @@ const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 const pageId = useId()
+const dims = useDimensions()
 
 const entries = ref<JournalEntry[]>([])
 const periods = ref<AccountingPeriod[]>([])
@@ -66,6 +69,9 @@ const filters = reactive({
   // seznam dotčených zápisů dopočítá naživo — proklik z dashboardu jinak umí
   // ukázat jen JEDEN zápis a u víc nálezů skončí na nefiltrovaném deníku.
   integrity: '' as '' | 'amount_mismatch',
+  // Hodnota dimenze (Firma → Dimenze) včetně podřízených, stejně jako u sestav.
+  dimension_value_id: null as number | null,
+  dimension_descendants: true,
 })
 
 // Účtová osnova pro našeptávání rozsahu účtu ve filtru. Datalist je stejný vzor,
@@ -119,6 +125,8 @@ async function load() {
       amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
       amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
       integrity: filters.integrity || undefined,
+      dimension_value_id: filters.dimension_value_id ?? undefined,
+      dimension_descendants: filters.dimension_descendants,
     })
     entries.value = r.items
     total.value = r.total
@@ -163,8 +171,19 @@ function resetFilters() {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
+  filters.dimension_value_id = null
+  filters.dimension_descendants = true
   sourceIdFilter.value = ''
   entryIdFilter.value = ''
+  applyFilters()
+}
+
+function onDimensionValue(valueId: number | null) {
+  filters.dimension_value_id = valueId
+  applyFilters()
+}
+function onDimensionDescendants(value: boolean) {
+  filters.dimension_descendants = value
   applyFilters()
 }
 
@@ -189,6 +208,10 @@ function buildQuery(): Record<string, string> {
   if (filters.amount_from !== '') q.amount_from = String(filters.amount_from)
   if (filters.amount_to !== '') q.amount_to = String(filters.amount_to)
   if (filters.integrity) q.integrity = filters.integrity
+  if (filters.dimension_value_id) {
+    q.dimension_value_id = String(filters.dimension_value_id)
+    if (!filters.dimension_descendants) q.dimension_descendants = '0'
+  }
   return q
 }
 
@@ -233,6 +256,9 @@ function hydrateFilters(q: Record<string, unknown>) {
   filters.amount_from = numberValue('amount_from')
   filters.amount_to = numberValue('amount_to')
   filters.integrity = value('integrity') === 'amount_mismatch' ? 'amount_mismatch' : ''
+  const dimensionValueId = numberValue('dimension_value_id')
+  filters.dimension_value_id = dimensionValueId !== '' && dimensionValueId > 0 ? dimensionValueId : null
+  filters.dimension_descendants = value('dimension_descendants') !== '0'
 }
 
 function applyQueryToPage(q: Record<string, string>) {
@@ -266,6 +292,7 @@ const activeFilterCount = computed(() => {
   if (filters.account_from || filters.account_to) n++
   if (filters.amount_from !== '' || filters.amount_to !== '') n++
   if (filters.integrity) n++
+  if (filters.dimension_value_id) n++
   return n
 })
 
@@ -296,6 +323,15 @@ const filterChips = computed<FilterChip[]>(() => {
     chips.push({ key: 'amount_range', label: t('accounting.journal.filter_amount_from'), value: `${filters.amount_from !== '' ? filters.amount_from : '…'} – ${filters.amount_to !== '' ? filters.amount_to : '…'}` })
   }
   if (filters.integrity) chips.push({ key: 'integrity', value: t('accounting.journal.filter_integrity') })
+  if (filters.dimension_value_id) {
+    const value = dims.valueById.value.get(filters.dimension_value_id)
+    chips.push({
+      key: 'dimension',
+      label: (value && dims.typeById.value.get(value.type_id)?.name) || t('dimensions.filter_value'),
+      value: dims.valueLabel(filters.dimension_value_id)
+        + (filters.dimension_descendants ? '' : ` (${t('accounting.journal.filter_dimension_only_value')})`),
+    })
+  }
   return chips
 })
 
@@ -312,6 +348,7 @@ function clearFilter(key: string) {
     case 'account_range': filters.account_from = ''; filters.account_to = ''; break
     case 'amount_range': filters.amount_from = ''; filters.amount_to = ''; break
     case 'integrity': filters.integrity = ''; break
+    case 'dimension': filters.dimension_value_id = null; filters.dimension_descendants = true; break
   }
   applyFilters()
 }
@@ -391,6 +428,10 @@ function exportQueryParams(): Record<string, string | number> {
   if (filters.amount_from !== '') q.amount_from = filters.amount_from
   if (filters.amount_to !== '') q.amount_to = filters.amount_to
   if (filters.integrity) q.integrity = filters.integrity
+  if (filters.dimension_value_id) {
+    q.dimension_value_id = filters.dimension_value_id
+    if (!filters.dimension_descendants) q.dimension_descendants = 0
+  }
   return q
 }
 async function exportFile(format: 'pdf' | 'xlsx') {
@@ -417,6 +458,8 @@ onMounted(async () => {
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
   // Osnova jen pro našeptávání filtru — výpadek nesmí zabránit načtení deníku.
   accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
+  // Číselník dimenzí pro popisek chipu filtru; při vypnutých dimenzích nic nenačte.
+  dims.load().catch(() => { /* chip ukáže #id */ })
   hydrateFilters(route.query)
   const qSourceId = Number(route.query.source_id || 0)
   if (qSourceId > 0) sourceIdFilter.value = qSourceId
@@ -598,6 +641,8 @@ async function focusEntry(entryId: number): Promise<boolean> {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
+  filters.dimension_value_id = null
+  filters.dimension_descendants = true
   sourceIdFilter.value = ''
   entryIdFilter.value = entryId
   filters.date_from = d.entry_date
@@ -840,6 +885,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
       </div>
+      <!-- Hodnota dimenze: jen u firmy se zapnutými dimenzemi (komponenta se jinak nevykreslí). -->
+      <DimensionReportFilter class="mt-3"
+        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
+        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
       <template #actions>
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
         <SavedFiltersMenu :ctrl="saved" />

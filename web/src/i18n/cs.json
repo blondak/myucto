@@ -12612,6 +12612,7 @@
       "filter_integrity": "Nesrovnalosti doklad ↔ deník",
       "filter_integrity_amount_mismatch": "Částka zápisu nesedí na doklad",
       "filter_integrity_hint": "Zápisy, u kterých se celková částka dokladu v zaúčtování vůbec neobjeví — typicky doklad změněný po zaúčtování.",
+      "filter_dimension_only_value": "jen hodnota",
       "reset_filters": "Zrušit filtry",
       "posted": "Zaúčtováno",
       "draft": "Koncept",
@@ -17949,6 +17950,8 @@
     "create_purchase_submit": "Vytvořit koncept",
     "documents_action": "Dokumenty",
     "documents_hide": "Skrýt dokumenty",
+    "dimensions_action": "Dimenze",
+    "dimensions_hide": "Skrýt dimenze",
     "document_request": {
       "action": "Vyžádat doklad",
       "title": "Vyžádat doklad od klienta",

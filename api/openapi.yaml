@@ -26781,6 +26781,10 @@ components:
             document_no: { type: [string, "null"] }
             suggestion_source: { type: [string, "null"], enum: [rule, learned, payment_match, transfer, null] }
             transfer: { $ref: '#/components/schemas/BankTransferPostingInfo' }
+        dimensions:
+          type: object
+          description: "Dimenze pohybu (Firma → Dimenze) jako mapa id typu → id hodnoty. Jen v detailu výpisu a jen u firmy se zapnutými dimenzemi."
+          additionalProperties: { type: integer, format: int64 }
 
     SupplierUpdate:
       type: object

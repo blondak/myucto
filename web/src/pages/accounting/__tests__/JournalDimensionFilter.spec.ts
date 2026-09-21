@@ -1,0 +1,152 @@
+import { ref } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+
+const m = vi.hoisted(() => ({
+  listPeriods: vi.fn(),
+  listAccounts: vi.fn(),
+  listJournal: vi.fn(),
+  exportReport: vi.fn(),
+  replace: vi.fn(),
+  routeQuery: {} as Record<string, string>,
+}))
+
+// Dimenze zapnuté: hodnota 5 typu Projekt (Firma → Dimenze).
+vi.mock('@/composables/useDimensions', () => ({
+  useDimensions: () => ({
+    enabled: { value: true }, canEdit: { value: true }, loading: { value: false },
+    types: { value: [] }, values: { value: [] }, documentTypes: { value: [] },
+    valueById: { value: new Map([[5, { id: 5, type_id: 1, code: 'P5', name: 'Projekt pět', is_active: true }]]) },
+    typeById: { value: new Map([[1, { id: 1, name: 'Projekt' }]]) },
+    load: () => Promise.resolve(), reload: () => Promise.resolve(),
+    options: () => [], treeOf: () => [], pathOf: () => [], labelOf: () => '',
+    valueLabel: (id: number) => (id === 5 ? 'P5 – Projekt pět' : `#${id}`),
+  }),
+}))
+vi.mock('@/api/accounting', () => ({
+  accountingApi: {
+    listPeriods: m.listPeriods,
+    listAccounts: m.listAccounts,
+    listJournal: m.listJournal,
+    exportReport: m.exportReport,
+    getEntry: vi.fn(),
+  },
+}))
+vi.mock('vue-router', () => ({
+  RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+  useRoute: () => ({ query: m.routeQuery }),
+  useRouter: () => ({ replace: m.replace }),
+}))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true, isDemo: false }) }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
+vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
+vi.mock('@/composables/useTablePrefs', () => ({
+  useTablePrefs: (_key: string, columns: unknown[]) => ({
+    columns, isVisible: () => true, densityClass: ref(''), setFlag: vi.fn(), flag: () => false,
+  }),
+}))
+vi.mock('@/composables/useSavedFilters', () => ({
+  savedFilterTone: () => 'neutral',
+  useSavedFilters: () => ({
+    filters: ref([]), activeId: ref(null), clearActive: vi.fn(), apply: vi.fn(),
+    applyDefaultIfAny: vi.fn().mockResolvedValue(false),
+  }),
+}))
+
+import Journal from '@/pages/accounting/Journal.vue'
+import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+
+const FilterBarStub = {
+  name: 'FilterBar',
+  props: ['chips', 'activeCount', 'collapsible'],
+  template: `<div>
+    <span v-for="c in chips" :key="c.key" class="chip" :data-key="c.key">{{ c.label }}: {{ c.value }}</span>
+    <slot name="primary" /><slot /><slot name="actions" />
+  </div>`,
+}
+
+function mountJournal() {
+  return mount(Journal, {
+    global: {
+      stubs: {
+        FilterBar: FilterBarStub,
+        DimensionReportFilter: true,
+        ActivationBanner: true,
+        SavedFiltersMenu: true,
+        ColumnPicker: true,
+        DensityToggle: true,
+        EmptyState: true,
+        DateInput: true,
+        JournalSourceDrawer: true,
+        JournalEntryDetailPanel: true,
+        AutomationBadge: true,
+      },
+    },
+  })
+}
+
+function lastListCall(): Record<string, unknown> {
+  return m.listJournal.mock.calls.at(-1)?.[0] ?? {}
+}
+
+describe('Journal – filtr dimenze', () => {
+  beforeEach(() => {
+    for (const fn of [m.listPeriods, m.listAccounts, m.listJournal, m.exportReport, m.replace]) fn.mockReset()
+    m.listPeriods.mockResolvedValue([])
+    m.listAccounts.mockResolvedValue([])
+    m.listJournal.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 50 })
+    m.routeQuery = {}
+  })
+
+  it('převezme hodnotu dimenze z URL, pošle ji serveru a ukáže chip', async () => {
+    m.routeQuery = { dimension_value_id: '5', dimension_descendants: '0' }
+    const wrapper = mountJournal()
+    await flushPromises()
+
+    expect(lastListCall()).toMatchObject({ dimension_value_id: 5, dimension_descendants: false })
+    const filter = wrapper.findComponent(DimensionReportFilter)
+    expect(filter.exists()).toBe(true)
+    expect(filter.props()).toMatchObject({ valueId: 5, descendants: false })
+    const chip = wrapper.find('.chip[data-key="dimension"]')
+    expect(chip.text()).toContain('Projekt')
+    expect(chip.text()).toContain('P5 – Projekt pět')
+    expect(chip.text()).toContain('accounting.journal.filter_dimension_only_value')
+  })
+
+  it('výběr hodnoty filtruje deník a zrcadlí se do URL; zrušení chipu filtr odebere', async () => {
+    const wrapper = mountJournal()
+    await flushPromises()
+    expect(lastListCall().dimension_value_id).toBeUndefined()
+
+    wrapper.findComponent(DimensionReportFilter).vm.$emit('update:valueId', 5)
+    await flushPromises()
+    expect(lastListCall()).toMatchObject({ dimension_value_id: 5, dimension_descendants: true })
+    expect(m.replace).toHaveBeenLastCalledWith({ query: { dimension_value_id: '5' } })
+
+    wrapper.findComponent(DimensionReportFilter).vm.$emit('update:descendants', false)
+    await flushPromises()
+    expect(m.replace).toHaveBeenLastCalledWith({ query: { dimension_value_id: '5', dimension_descendants: '0' } })
+
+    wrapper.findComponent({ name: 'FilterBar' }).vm.$emit('clear', 'dimension')
+    await flushPromises()
+    expect(lastListCall().dimension_value_id).toBeUndefined()
+    expect(m.replace).toHaveBeenLastCalledWith({ query: {} })
+  })
+
+  it('export posílá stejný filtr dimenze jako seznam', async () => {
+    m.routeQuery = { dimension_value_id: '5', dimension_descendants: '0' }
+    m.exportReport.mockResolvedValue({ data: new Blob(['x']) })
+    const createObjectURL = vi.fn(() => 'blob:x')
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const wrapper = mountJournal()
+    await flushPromises()
+
+    const xlsx = wrapper.findAll('button').find(b => b.text().includes('accounting.journal.export_xlsx'))
+    await xlsx!.trigger('click')
+    await flushPromises()
+    expect(m.exportReport).toHaveBeenCalledWith('/accounting/reports/journal/export',
+      expect.objectContaining({ dimension_value_id: 5, dimension_descendants: 0, format: 'xlsx' }))
+  })
+})

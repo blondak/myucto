@@ -102,6 +102,8 @@ export interface BankTransaction {
   matched_at: string | null
   /** Datum pohybu nemá otevřené účetní období nebo spadá do účetního zámku. */
   period_closed?: boolean
+  /** Dimenze pohybu (typ → hodnota); jen u firmy se zapnutými dimenzemi. */
+  dimensions?: import('./dimensions').DimensionMap
   /** Stav zaúčtování transakce (Epic AUTOMATIZACE) — jen u double_entry firmy, jinak null. */
   posting?: {
     status: 'posted' | 'suggested' | null

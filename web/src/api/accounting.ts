@@ -521,6 +521,10 @@ export interface JournalFilters {
   amount_to?: number
   /** Jen zápisy s nálezem noční kontroly integrity deníku (JournalIntegrityService). */
   integrity?: 'amount_mismatch'
+  /** Hodnota dimenze; zápis projde, nese-li ji (nebo podřízenou) aspoň jeden řádek. */
+  dimension_value_id?: number
+  /** false = jen hodnota sama, bez podřízených (výchozí je celá větev). */
+  dimension_descendants?: boolean
   page?: number
   per_page?: number
 }
@@ -1751,6 +1755,10 @@ export const accountingApi = {
     if (filters?.amount_from !== undefined) params.amount_from = filters.amount_from
     if (filters?.amount_to !== undefined) params.amount_to = filters.amount_to
     if (filters?.integrity) params.integrity = filters.integrity
+    if (filters?.dimension_value_id) {
+      params.dimension_value_id = filters.dimension_value_id
+      if (filters.dimension_descendants === false) params.dimension_descendants = 0
+    }
     if (filters?.page) params.page = filters.page
     if (filters?.per_page) params.per_page = filters.per_page
     return api.get<JournalListResponse>('/accounting/journal', { params }).then(r => r.data)

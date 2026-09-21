@@ -90,6 +90,21 @@ final class DimensionAssignmentRepository
     }
 
     /**
+     * Hlavičkové dimenze dokladů pro seznam, jen je-li sekce u firmy zapnutá.
+     * Null = dimenze vypnuté, seznam je vůbec neposílá.
+     *
+     * @param list<int> $docIds
+     * @return array<int,array<int,int>>|null
+     */
+    public function headerDimensionsIfEnabled(int $supplierId, string $docType, array $docIds): ?array
+    {
+        if ($docIds === [] || !(new DimensionRepository($this->db))->enabled($supplierId)) {
+            return null;
+        }
+        return $this->headerDimensionsFor($supplierId, $docType, $docIds);
+    }
+
+    /**
      * Hlavičkové dimenze více dokladů najednou (seznamy, přehledy).
      *
      * @param list<int> $docIds

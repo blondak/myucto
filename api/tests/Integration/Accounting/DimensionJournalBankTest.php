@@ -1,0 +1,328 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Accounting;
+
+use MyInvoice\Action\Accounting\JournalAction;
+use MyInvoice\Action\Bank\BankStatementAction;
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\DimensionAssignmentRepository;
+use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Reports\JournalExportService;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+use Psr\Http\Message\ResponseInterface;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response as Psr7Response;
+
+/**
+ * Dimenze v účetním deníku a na bankovních pohybech (Firma → Dimenze).
+ *
+ *  • Filtr deníku na hodnotu dimenze: zápis projde, nese-li hodnotu (nebo podřízenou)
+ *    aspoň jeden jeho řádek; stejné parametry i sémantika jako filtr sestav, platí
+ *    i pro export.
+ *  • Bankovní pohyb: dimenze jdou uložit i u výpisu, který firmě patří přes číslo
+ *    účtu (bez supplier_id), zaúčtování pohybu je orazítkuje do řádků deníku a detail
+ *    výpisu je vrací u každého pohybu.
+ *
+ * Vše v jedné transakci nad izolovanou firmou, tearDown rollbackne.
+ */
+#[Group('integration')]
+final class DimensionJournalBankTest extends TestCase
+{
+    use IsolatedSupplierTrait;
+
+    private const YEAR = 2096;
+    private const ACCOUNT = '3000000004';
+
+    private Connection $db;
+    private JournalAction $journalAction;
+    private BankStatementAction $statementAction;
+    private JournalEntryRepository $journal;
+    private JournalExportService $export;
+    private PostingService $posting;
+    private DimensionService $dimensions;
+    private DimensionAssignmentRepository $assignments;
+
+    private int $supplierId = 0;
+    private int $userId = 0;
+    private int $projectType = 0;
+    private int $centerType = 0;
+    private bool $inTx = false;
+
+    protected function setUp(): void
+    {
+        if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
+            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
+        }
+        try {
+            $container = Bootstrap::buildApp()->getContainer();
+            $this->db = $container->get(Connection::class);
+            $this->journalAction = $container->get(JournalAction::class);
+            $this->statementAction = $container->get(BankStatementAction::class);
+            $this->journal = $container->get(JournalEntryRepository::class);
+            $this->export = $container->get(JournalExportService::class);
+            $this->posting = $container->get(PostingService::class);
+            $this->dimensions = $container->get(DimensionService::class);
+            $this->assignments = $container->get(DimensionAssignmentRepository::class);
+            $periods = $container->get(AccountingPeriodRepository::class);
+            $seeder = $container->get(ChartOfAccountsSeeder::class);
+        } catch (\Throwable $e) {
+            $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
+        }
+
+        $pdo = $this->db->pdo();
+        $sourceSupplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $this->userId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        if ($sourceSupplierId === 0 || $this->userId === 0) {
+            $this->markTestSkipped('Chybí základní data (supplier/user) v DB.');
+        }
+
+        $pdo->beginTransaction();
+        $this->inTx = true;
+        $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
+        $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry', supplier_group_id = NULL WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $seeder->seedForSupplier($this->supplierId);
+        $periods->create($this->supplierId, self::YEAR, self::YEAR . '-01-01', self::YEAR . '-12-31');
+        $this->dimensions->setEnabled($this->supplierId, true);
+        $types = $this->dimensions->ensureDefaultTypes($this->supplierId, ['projekt', 'stredisko']);
+        $this->projectType = $types['project'];
+        $this->centerType = $types['cost_center'];
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->db) && $this->inTx) {
+            $pdo = $this->db->pdo();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $this->db->close();
+        }
+    }
+
+    // ── deník ────────────────────────────────────────────────────────────────
+
+    public function testJournalListFiltersByDimensionValueIncludingDescendants(): void
+    {
+        $parent = $this->value($this->projectType, 'J-ROOT');
+        $child = $this->value($this->projectType, 'J-CHILD', $parent);
+        $other = $this->value($this->projectType, 'J-OTHER');
+        $onParent = $this->entryWithExpenseDimension([$this->projectType => $parent], 100.00);
+        $onChild = $this->entryWithExpenseDimension([$this->projectType => $child], 200.00);
+        $onOther = $this->entryWithExpenseDimension([$this->projectType => $other], 300.00);
+        $plain = $this->entryWithExpenseDimension([], 400.00);
+
+        $all = $this->listIds([]);
+        foreach ([$onParent, $onChild, $onOther, $plain] as $id) {
+            self::assertContains($id, $all, 'Bez filtru je v deníku každý zápis.');
+        }
+
+        $branch = $this->call('list', ['dimension_value_id' => (string) $parent]);
+        self::assertSame(200, $branch['status']);
+        self::assertEqualsCanonicalizing([$onParent, $onChild], array_column($branch['body']['items'], 'id'),
+            'Nadřízená hodnota bere celou větev, ne cizí projekt ani zápis bez dimenze.');
+        self::assertSame(2, $branch['body']['total']);
+        $entry = $this->findItem($branch['body']['items'], $onChild);
+        self::assertEqualsWithDelta(200.00, (float) $entry['amount'], 0.001, 'Filtr zobrazí celý zápis, ne jen řádek s dimenzí.');
+
+        self::assertEqualsCanonicalizing([$onParent], $this->listIds([
+            'dimension_value_id' => (string) $parent,
+            'dimension_descendants' => '0',
+        ]), 'Bez podřízených jen hodnota sama.');
+        self::assertEqualsCanonicalizing([$onOther], $this->listIds(['dimension_value_id' => (string) $other]));
+    }
+
+    public function testJournalFilterCombinesWithOtherFiltersAndExport(): void
+    {
+        $project = $this->value($this->projectType, 'J-EXP');
+        $march = $this->entryWithExpenseDimension([$this->projectType => $project], 150.00, self::YEAR . '-03-10');
+        $june = $this->entryWithExpenseDimension([$this->projectType => $project], 250.00, self::YEAR . '-06-10');
+        $this->entryWithExpenseDimension([], 350.00, self::YEAR . '-06-11');
+
+        self::assertEqualsCanonicalizing([$june], $this->listIds([
+            'dimension_value_id' => (string) $project,
+            'date_from' => self::YEAR . '-06-01',
+        ]), 'Dimenze se sčítá s ostatními filtry deníku.');
+
+        $filter = $this->dimensions->filter($this->supplierId, $project);
+        $data = $this->export->build($this->supplierId, ['dimension' => $filter]);
+        self::assertEqualsCanonicalizing([$march, $june], array_column($data['entries'], 'id'), 'Export respektuje filtr dimenze.');
+    }
+
+    public function testJournalFilterCountsCostCentreTextOnLinesWithoutDimension(): void
+    {
+        $center = $this->dimensions->createValue($this->supplierId, $this->centerType, ['code' => 'J-REZ', 'name' => 'Režie']);
+        $payroll = (int) $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '521', 'side' => 'debit', 'amount' => 1_000.00, 'cost_center' => 'J-REZ'],
+            ['account_code' => '331', 'side' => 'credit', 'amount' => 1_000.00],
+        ], ['entry_date' => self::YEAR . '-04-30', 'posted_by' => $this->userId]);
+        $this->entryWithExpenseDimension([], 50.00);
+
+        self::assertSame([$payroll], $this->listIds(['dimension_value_id' => (string) $center['id']]),
+            'Mzdový řádek s textovým kódem střediska patří pod navázanou hodnotu jako v sestavách.');
+    }
+
+    public function testJournalFilterRejectsForeignOrUnknownValue(): void
+    {
+        $res = $this->call('list', ['dimension_value_id' => '999999999']);
+        self::assertSame(404, $res['status'], 'Neznámá hodnota je chyba, ne tiše nefiltrovaný deník.');
+    }
+
+    // ── banka ────────────────────────────────────────────────────────────────
+
+    public function testBankTransactionDimensionsSaveOnAccountOwnedStatementAndStampPosting(): void
+    {
+        $project = $this->value($this->projectType, 'B-PRJ');
+        $moved = $this->value($this->projectType, 'B-MOVED');
+        [$statementId, $txId] = $this->accountOwnedTransaction(-1_210.00);
+
+        // Výpis nemá supplier_id, firmě patří přes číslo účtu — jako v detailu výpisu.
+        $saved = $this->dimensions->saveDocument($this->supplierId, 'bank_transaction', $txId, [$this->projectType => $project], []);
+        self::assertSame([$this->projectType => $project], $saved['header']);
+
+        $entryId = $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 1_210.00],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => 1_210.00],
+        ], ['entry_date' => self::YEAR . '-05-05', 'posted_by' => $this->userId]);
+        $lineDims = $this->assignments->entryLineDimensions($this->supplierId, $entryId);
+        $lines = $this->journal->linesForEntry($entryId, $this->supplierId);
+        self::assertCount(2, $lines);
+        foreach ($lines as $line) {
+            self::assertSame([$this->projectType => $project], $lineDims[$line['id']] ?? [], 'Zaúčtování pohybu nese jeho dimenzi.');
+        }
+        self::assertSame([$entryId], $this->listIds(['dimension_value_id' => (string) $project]));
+
+        $restamped = $this->dimensions->saveDocument($this->supplierId, 'bank_transaction', $txId, [$this->projectType => $moved], []);
+        self::assertSame(2, $restamped['restamp']['lines'], 'Změna dimenze pohybu přerazítkuje už zaúčtované řádky.');
+        self::assertSame([$entryId], $this->listIds(['dimension_value_id' => (string) $moved]));
+        self::assertSame([], $this->listIds(['dimension_value_id' => (string) $project]));
+
+        $detail = $this->statementDetail($statementId);
+        self::assertSame(200, $detail['status']);
+        $tx = $this->findItem($detail['body']['transactions'], $txId);
+        self::assertNotNull($tx);
+        self::assertSame([(string) $this->projectType => $moved], $tx['dimensions'], 'Detail výpisu vrací dimenze pohybu pro štítky v řádku.');
+    }
+
+    public function testStatementDetailOmitsDimensionsWhenDisabled(): void
+    {
+        [$statementId, $txId] = $this->accountOwnedTransaction(500.00);
+        $this->dimensions->setEnabled($this->supplierId, false);
+
+        $detail = $this->statementDetail($statementId);
+        self::assertSame(200, $detail['status']);
+        $tx = $this->findItem($detail['body']['transactions'], $txId);
+        self::assertNotNull($tx);
+        self::assertArrayNotHasKey('dimensions', $tx, 'Vypnuté dimenze se v seznamu neposílají.');
+    }
+
+    // ── pomocné ──────────────────────────────────────────────────────────────
+
+    private function value(int $typeId, string $code, ?int $parentId = null): int
+    {
+        return (int) $this->dimensions->createValue($this->supplierId, $typeId, [
+            'code' => $code, 'name' => 'Hodnota ' . $code, 'parent_id' => $parentId,
+        ])['id'];
+    }
+
+    /** @param array<int,int> $dims dimenze nákladového řádku (protistrana 211 je bez dimenze) */
+    private function entryWithExpenseDimension(array $dims, float $amount, string $date = self::YEAR . '-05-15'): int
+    {
+        $expense = ['account_code' => '518', 'side' => 'debit', 'amount' => $amount];
+        if ($dims !== []) {
+            $expense['dimensions'] = $this->dimensions->normalize($this->supplierId, $dims);
+        }
+        return (int) $this->posting->postDocument($this->supplierId, 'manual', null, [
+            $expense,
+            ['account_code' => '211', 'side' => 'credit', 'amount' => $amount],
+        ], ['entry_date' => $date, 'posted_by' => $this->userId]);
+    }
+
+    /** @return array{0:int,1:int} výpis a pohyb */
+    private function accountOwnedTransaction(float $amount): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO currencies
+                (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default, account_number, bank_code)
+             VALUES (?, 'CZK', 'Běžný účet', 'Kč', 'Česká koruna', 'Czech koruna', 2, 1, 1, ?, '0100')"
+        )->execute([$this->supplierId, self::ACCOUNT]);
+        $pdo->prepare(
+            "INSERT INTO bank_statements
+                (file_name, file_hash, account_number, bank_code, currency, statement_date, transaction_count, matched_count)
+             VALUES (?, ?, ?, '0100', 'CZK', ?, 1, 0)"
+        )->execute(['dim-' . uniqid() . '.gpc', sha1(uniqid('', true)), self::ACCOUNT, self::YEAR . '-05-05']);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, description)
+             VALUES (?, ?, ?, 'CZK', 'Pohyb s dimenzí')"
+        )->execute([$statementId, self::YEAR . '-05-05', $amount]);
+        return [$statementId, (int) $pdo->lastInsertId()];
+    }
+
+    /**
+     * @param array<string,string> $query
+     * @return list<int>
+     */
+    private function listIds(array $query): array
+    {
+        $res = $this->call('list', $query + ['per_page' => '200']);
+        self::assertSame(200, $res['status']);
+        return array_map('intval', array_column($res['body']['items'], 'id'));
+    }
+
+    /** @return array<string,mixed>|null */
+    private function findItem(array $items, int $id): ?array
+    {
+        foreach ($items as $item) {
+            if ((int) $item['id'] === $id) {
+                return $item;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string,string> $query
+     * @return array{status:int, body:array<string,mixed>}
+     */
+    private function call(string $method, array $query): array
+    {
+        return $this->decode($this->journalAction->{$method}($this->request($query), new Psr7Response()));
+    }
+
+    /** @return array{status:int, body:array<string,mixed>} */
+    private function statementDetail(int $statementId): array
+    {
+        return $this->decode($this->statementAction->detail($this->request([]), new Psr7Response(), ['id' => (string) $statementId]));
+    }
+
+    /** @param array<string,string> $query */
+    private function request(array $query): \Psr\Http\Message\ServerRequestInterface
+    {
+        return (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/test')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withQueryParams($query);
+    }
+
+    /** @return array{status:int, body:array<string,mixed>} */
+    private function decode(ResponseInterface $resp): array
+    {
+        $resp->getBody()->rewind();
+        $decoded = json_decode((string) $resp->getBody(), true);
+        return ['status' => $resp->getStatusCode(), 'body' => is_array($decoded) ? $decoded : []];
+    }
+}

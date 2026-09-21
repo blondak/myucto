@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -16,6 +16,9 @@ import MatchSuggestionPanel from './MatchSuggestionPanel.vue'
 import WhyChip from '@/components/automation/WhyChip.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
+import DimensionChips from '@/components/dimensions/DimensionChips.vue'
+import { useDimensions } from '@/composables/useDimensions'
+import type { DimensionMap } from '@/api/dimensions'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
 import { BTN_ICON_SM_BASE, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
 import type { BankTransactionActions } from '@/composables/useBankTransactionActions'
@@ -56,6 +59,20 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const auth = useAuthStore()
 const ruleTemplateOpen = ref(false)
+
+// Dimenze pohybu (Firma → Dimenze): štítky v řádku a vlastní rozbalovací editor.
+// Dřív byl editor jen v panelu „Dokumenty" a v řádku nebylo nic vidět.
+const dims = useDimensions()
+const dimensionsAvailable = computed(() => dims.enabled.value && dims.documentTypes.value.length > 0)
+const dimensionsOpen = ref(false)
+const savedDimensions = ref<DimensionMap | null>(null)
+const txDimensions = computed<DimensionMap>(() => savedDimensions.value ?? props.tx.dimensions ?? {})
+const hasDimensions = computed(() => Object.values(txDimensions.value).some(v => !!v))
+// Číselník je sdílený a načte se jednou za firmu, ne za každý řádek.
+onMounted(() => { dims.load().catch(() => { /* bez číselníku se dimenze jen neukážou */ }) })
+function toggleDimensions() {
+  dimensionsOpen.value = !dimensionsOpen.value
+}
 const payrollMatched = computed(() => props.tx.posting?.payroll_matched === true)
 // Vlastní převod fakturu nečeká: jeho protějškem je druhá noha na jiném vlastním účtu.
 const ownTransfer = computed(() => props.tx.match_status === 'unmatched' && props.tx.posting?.transfer != null)
@@ -197,6 +214,12 @@ function matchActions(tx: BankTransaction): RowAction[] {
       run: () => toggleDocs(tx.id),
     },
     {
+      key: 'dimensions', label: dimensionsOpen.value ? t('bank.dimensions_hide') : t('bank.dimensions_action'),
+      icon: 'tag', variant: 'neutral',
+      run: toggleDimensions,
+      show: dimensionsAvailable.value,
+    },
+    {
       key: 'create-posting-rule', label: t('bank.posting.create_rule_from_movement'), icon: 'doc', variant: 'neutral',
       run: () => { ruleTemplateOpen.value = true },
       show: !tx.posting?.payroll_matched && props.isDoubleEntry && auth.canWrite('bank.rules') && tx.source !== 'email_notice' && st !== 'ignored',
@@ -265,6 +288,11 @@ function candidateReject() {
         </div>
         <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
         <div v-if="tx.description" class="text-neutral-500 truncate max-w-xs">{{ tx.description }}</div>
+        <button v-if="dimensionsAvailable && hasDimensions" type="button"
+          class="cursor-pointer mt-1 flex text-left" :title="t('bank.dimensions_action')" data-test="tx-dimensions"
+          @click="toggleDimensions">
+          <DimensionChips :dimensions="txDimensions" />
+        </button>
       </td>
       <td class="px-3 py-2 text-xs">
         <template v-if="(tx.matched_invoices?.length ?? 0) > 1">
@@ -347,8 +375,12 @@ function candidateReject() {
     <tr v-if="expandedDocs.has(tx.id)">
       <td :colspan="colspan" class="bg-neutral-50 px-4 py-3">
         <LinkedDocumentsPanel entity-type="bank_transaction" :entity-id="tx.id" />
-        <!-- Dimenze pohybu (Firma → Dimenze) — promítnou se i do jeho zaúčtování. -->
-        <DocumentDimensionsPanel class="mt-3" doc-type="bank-transactions" :doc-id="tx.id" />
+      </td>
+    </tr>
+    <!-- Dimenze pohybu (Firma → Dimenze) — promítnou se i do jeho zaúčtování. -->
+    <tr v-if="dimensionsAvailable && dimensionsOpen">
+      <td :colspan="colspan" class="bg-neutral-50 px-4 py-3">
+        <DocumentDimensionsPanel doc-type="bank-transactions" :doc-id="tx.id" @saved="savedDimensions = $event" />
       </td>
     </tr>
   </template>
@@ -413,6 +445,10 @@ function candidateReject() {
       </div>
       <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
         <div v-if="tx.description" class="text-neutral-500 truncate">{{ tx.description }}</div>
+      <button v-if="dimensionsAvailable && hasDimensions" type="button"
+        class="cursor-pointer mt-1 flex text-left" :title="t('bank.dimensions_action')" @click="toggleDimensions">
+        <DimensionChips :dimensions="txDimensions" />
+      </button>
     </div>
     <div v-if="(tx.matched_invoices?.length ?? 0) > 1" class="text-xs">
       <RouterLink v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :to="`/invoices/${mi.invoice_id}`"
@@ -448,8 +484,9 @@ function candidateReject() {
       :can-review="auth.canWrite('bank.match')" @accept="candidateAccept" @reject="candidateReject" />
     <div v-if="expandedDocs.has(tx.id)" class="pt-1">
       <LinkedDocumentsPanel entity-type="bank_transaction" :entity-id="tx.id" />
-      <DocumentDimensionsPanel class="mt-3" doc-type="bank-transactions" :doc-id="tx.id" />
     </div>
+    <DocumentDimensionsPanel v-if="dimensionsAvailable && dimensionsOpen" class="mt-1"
+      doc-type="bank-transactions" :doc-id="tx.id" @saved="savedDimensions = $event" />
     <!-- Akce mobilní karty jedou ze stejného `matchActions(tx)` jako desktopový
          řádek. Dřív tu byla ručně psaná mřížka tlačítek se stejným obsahem:
          duplicitní, bez ikon a hlavně s `flex-1`, které třem tlačítkům přidělilo

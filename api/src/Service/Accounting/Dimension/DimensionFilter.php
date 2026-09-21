@@ -45,15 +45,56 @@ final class DimensionFilter
                           AND dim_f.dimension_type_id = ? AND dim_f.dimension_value_id IN ({$marks}))";
         $params = [$this->typeId, ...$this->valueIds];
         if ($this->costCenterCodes !== []) {
-            $ccMarks = implode(',', array_fill(0, count($this->costCenterCodes), '?'));
-            $sql .= " OR ({$lineAlias}.cost_center IN ({$ccMarks})
-                     AND NOT EXISTS (SELECT 1 FROM journal_entry_line_dimensions dim_c
-                          WHERE dim_c.line_id = {$lineAlias}.id
-                            AND dim_c.dimension_type_id = ?))";
-            array_push($params, ...$this->costCenterCodes);
-            $params[] = $this->typeId;
+            [$ccSql, $ccParams] = $this->costCenterCondition($lineAlias);
+            $sql .= " OR ({$ccSql})";
+            array_push($params, ...$ccParams);
         }
         return [$sql . ')', $params];
+    }
+
+    /**
+     * Samostatná podmínka (bez vedoucího AND) nad aliasem ZÁPISU deníku: zápis projde,
+     * nese-li hodnotu (nebo podřízenou) aspoň jeden jeho řádek. Stejná sémantika řádku
+     * jako {@see sql()}, jen povýšená na zápis, protože seznam deníku ukazuje celé zápisy.
+     *
+     * Hodnoty jdou přes nekorelovaný IN poddotaz: optimalizátor ho zmaterializuje
+     * jednou z indexu idx_jeld_type_value a pro každý zápis firmy pak jen hledá v
+     * dočasné tabulce, místo aby pro každý zápis procházel jeho řádky.
+     *
+     * @return array{0:string,1:list<int|string>}
+     */
+    public function entrySql(string $entryAlias): array
+    {
+        $marks = implode(',', array_fill(0, count($this->valueIds), '?'));
+        $sql = "({$entryAlias}.id IN (SELECT jel_f.entry_id
+                          FROM journal_entry_line_dimensions dim_f
+                          JOIN journal_entry_lines jel_f ON jel_f.id = dim_f.line_id
+                         WHERE dim_f.dimension_type_id = ? AND dim_f.dimension_value_id IN ({$marks}))";
+        $params = [$this->typeId, ...$this->valueIds];
+        if ($this->costCenterCodes !== []) {
+            [$lineSql, $lineParams] = $this->costCenterCondition('jel_c');
+            $sql .= " OR EXISTS (SELECT 1 FROM journal_entry_lines jel_c
+                                  WHERE jel_c.entry_id = {$entryAlias}.id AND {$lineSql})";
+            array_push($params, ...$lineParams);
+        }
+        return [$sql . ')', $params];
+    }
+
+    /**
+     * Řádek bez dimenze tohoto typu, který nese textový kód navázaného střediska.
+     *
+     * @return array{0:string,1:list<int|string>}
+     */
+    private function costCenterCondition(string $lineAlias): array
+    {
+        $ccMarks = implode(',', array_fill(0, count($this->costCenterCodes), '?'));
+        return [
+            "{$lineAlias}.cost_center IN ({$ccMarks})
+              AND NOT EXISTS (SELECT 1 FROM journal_entry_line_dimensions dim_c
+                   WHERE dim_c.line_id = {$lineAlias}.id
+                     AND dim_c.dimension_type_id = ?)",
+            [...$this->costCenterCodes, $this->typeId],
+        ];
     }
 
     /** @return array{type_id:int, value_id:int, value_ids:list<int>} */

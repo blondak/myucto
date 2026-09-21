@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Dimension;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\CostCenterRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionRepository;
@@ -493,13 +494,19 @@ final class DimensionService
             throw new DimensionException('not_found', 'Neznámý typ dokladu.', 404);
         }
         $table = self::DOCUMENTS[$docType][0];
-        $stmt = $table === null
-            ? $this->db->pdo()->prepare(
+        if ($table === null) {
+            // Výpis nemusí mít supplier_id vyplněné (starší import, avízo) a firmě
+            // patří přes číslo účtu. Vlastnictví proto rozhoduje týž resolver jako
+            // detail výpisu, jinak by se dimenze pohybu nedaly načíst ani uložit.
+            $stmt = $this->db->pdo()->prepare(
                 'SELECT 1 FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
-                  WHERE bt.id = ? AND bs.supplier_id = ?'
-            )
-            : $this->db->pdo()->prepare("SELECT 1 FROM {$table} WHERE id = ? AND supplier_id = ?");
-        $stmt->execute([$docId, $supplierId]);
+                  WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql()
+            );
+            $stmt->execute([$docId, ...BankStatementOwnershipResolver::params($supplierId)]);
+        } else {
+            $stmt = $this->db->pdo()->prepare("SELECT 1 FROM {$table} WHERE id = ? AND supplier_id = ?");
+            $stmt->execute([$docId, $supplierId]);
+        }
         if ($stmt->fetchColumn() === false) {
             throw new DimensionException('not_found', 'Doklad nenalezen.', 404);
         }

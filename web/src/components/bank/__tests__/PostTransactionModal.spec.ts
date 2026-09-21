@@ -32,6 +32,14 @@ vi.mock('@/composables/useToast', () => ({
 
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => {} }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
+// Dimenze (Firma → Dimenze) jsou u firmy vypnuté — řádek pohybu je nevykreslí.
+vi.mock('@/composables/useDimensions', () => ({
+  useDimensions: () => ({
+    enabled: { value: false }, canEdit: { value: false }, documentTypes: { value: [] },
+    valueById: { value: new Map() }, typeById: { value: new Map() },
+    load: () => Promise.resolve(), valueLabel: () => '', pathOf: () => [],
+  }),
+}))
 
 vi.mock('@/composables/useFormat', () => ({
   formatMoney: (v: number) => String(v),

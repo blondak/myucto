@@ -1702,6 +1702,10 @@ final class BankStatementAction
         $postingByTx = $this->loadPostingInfo($sid, $txIds);
         // Platba kartou → karta firmy a její držitel (podle koncovky a data pohybu).
         $cardByTx = (new \MyInvoice\Repository\PaymentCardRepository($this->db))->resolveForTransactions($sid, $transactions);
+        // Dimenze pohybu (Firma → Dimenze) jako štítky přímo v řádku; dřív byly
+        // vidět jen po rozbalení dokladů pohybu v nabídce „…".
+        $dimensionsByTx = (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))
+            ->headerDimensionsIfEnabled($sid, 'bank_transaction', $txIds);
 
         foreach ($transactions as &$t) {
             $t['card'] = $cardByTx[(int) $t['id']] ?? null;
@@ -1715,6 +1719,9 @@ final class BankStatementAction
             $t['matched_invoices'] = $matchedByTx[$t['id']] ?? [];
             $t['matched_purchase_invoices'] = $matchedPurchasesByTx[$t['id']] ?? [];
             $t['posting'] = $postingByTx[$t['id']] ?? null;
+            if ($dimensionsByTx !== null) {
+                $t['dimensions'] = (object) ($dimensionsByTx[$t['id']] ?? []);
+            }
         }
         unset($t);
         $s['id'] = (int) $s['id'];

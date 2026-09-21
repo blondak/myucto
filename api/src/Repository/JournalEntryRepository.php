@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
 use PDO;
@@ -560,7 +561,7 @@ final class JournalEntryRepository
      * Stránkovaný seznam zápisů pro firmu s filtry (období / rozsah dat / typ zdroje /
      * stav zaúčtování). Vrací hlavičky (bez řádků) + celkový počet pro paginaci.
      *
-     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
+     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float, dimension?:DimensionFilter} $filters
      * @return array{items:list<array<string,mixed>>, total:int}
      */
     public function paginate(int $supplierId, array $filters, int $limit, int $offset): array
@@ -699,7 +700,7 @@ final class JournalEntryRepository
      * ukazoval v hlavičkovém řádku (ReportXlsxExporter::journal(), journal.twig)
      * cizí číslo (Σ MD celého zápisu), ne částku vybraného účtu.
      *
-     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
+     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float, dimension?:DimensionFilter} $filters
      * @return list<array<string,mixed>> hlavičky BEZ lines (viz linesForEntries)
      */
     public function forExport(int $supplierId, array $filters, int $limit): array
@@ -876,7 +877,7 @@ final class JournalEntryRepository
     }
 
     /**
-     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
+     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float, dimension?:DimensionFilter} $filters
      * @return array{0:string, 1:list<mixed>}
      */
     private function buildWhere(int $supplierId, array $filters): array
@@ -940,6 +941,13 @@ final class JournalEntryRepository
             )";
             $params[] = isset($filters['amount_from']) ? (float) $filters['amount_from'] : 0.0;
             $params[] = isset($filters['amount_to']) ? (float) $filters['amount_to'] : 999999999999.99;
+        }
+        // Hodnota dimenze (včetně podřízených): zápis projde, nese-li ji aspoň jeden
+        // jeho řádek. Sémantiku řádku sdílí se sestavami přes DimensionFilter.
+        if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
+            [$dimSql, $dimParams] = $filters['dimension']->entrySql('je');
+            $where[] = $dimSql;
+            array_push($params, ...$dimParams);
         }
         if (!empty($filters['period_id'])) {
             $where[] = 'je.period_id = ?';
