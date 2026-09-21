@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeMessage;
 use MyInvoice\Service\Bank\EmailNotice\EmailAttachment;
 use MyInvoice\Service\Bank\EmailNotice\EmailPdfInvoiceIngestor;
+use MyInvoice\Service\PurchaseInvoice\SubmissionFolder;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -95,6 +96,9 @@ final class EmailPdfInvoiceIngestorTest extends TestCase
         foreach ($documentIds as $documentId) {
             $this->pdo->prepare('DELETE FROM documents WHERE id = ?')->execute([(int) $documentId]);
         }
+        $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+        $this->pdo->prepare('DELETE FROM document_folders WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
         $this->pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplierId]);
     }
 
@@ -111,6 +115,48 @@ final class EmailPdfInvoiceIngestorTest extends TestCase
         // Data se z dokladu netěží automaticky — fronta čeká na účetní.
         self::assertSame('not_started', (string) $row['extraction_status']);
         self::assertNull($row['purchase_invoice_id']);
+
+        // Originál nekončí v kořeni Dokumentů, ale v „Příchozí doklady / rok / měsíc".
+        $path = [];
+        $stmt = $this->pdo->prepare('SELECT folder_id FROM documents WHERE id = ?');
+        $stmt->execute([(int) $row['document_id']]);
+        $folderId = $stmt->fetchColumn();
+        $folder = $this->pdo->prepare('SELECT parent_id, name FROM document_folders WHERE id = ?');
+        while ($folderId !== null && $folderId !== false) {
+            $folder->execute([(int) $folderId]);
+            $f = $folder->fetch(PDO::FETCH_ASSOC);
+            array_unshift($path, (string) $f['name']);
+            $folderId = $f['parent_id'];
+        }
+        self::assertSame([SubmissionFolder::ROOT, date('Y'), date('m')], $path);
+    }
+
+    /** Backfill přesune jen originál podání z kořene, běžný dokument v kořeni nechá být. */
+    public function testFolderBackfillMovesOnlySubmissionOriginals(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $ingest = $container->get(\MyInvoice\Service\Document\DocumentIngestService::class);
+        $storage = $container->get(\MyInvoice\Service\Document\DocumentStorage::class);
+
+        $this->ingest($this->pdf('FAKTURA - DANOVY DOKLAD c. 2026002 Odberatel ICO: ' . $this->ic));
+        $submissionDoc = (int) $this->submissionRow()['document_id'];
+        // Stav před opravou: originál podání ležel v kořeni.
+        $this->pdo->prepare('UPDATE documents SET folder_id = NULL WHERE id = ?')->execute([$submissionDoc]);
+
+        $tmp = $storage->tmpPath($this->supplierId);
+        file_put_contents($tmp, $this->pdf('Bezny dokument ' . $this->ic));
+        $plainDoc = (int) $ingest->ingestOriginalTemp($tmp, $this->supplierId, null, 'smlouva.pdf', null)['created_ids'][0];
+        @unlink($tmp);
+
+        $backfill = new \MyInvoice\Service\PurchaseInvoice\SubmissionFolderBackfill($this->pdo, $ingest);
+        $backfill->run(true);
+
+        $folderOf = $this->pdo->prepare('SELECT folder_id FROM documents WHERE id = ?');
+        $folderOf->execute([$submissionDoc]);
+        self::assertNotNull($folderOf->fetchColumn(), 'Originál podání se přesunul do složky.');
+        $folderOf->execute([$plainDoc]);
+        self::assertNull($folderOf->fetchColumn(), 'Běžný dokument v kořeni zůstal.');
+        $this->pdo->prepare('DELETE FROM documents WHERE id = ?')->execute([$plainDoc]);
     }
 
     public function testAttachmentWithoutOurIdentityIsRejectedAndLogged(): void

@@ -303,6 +303,14 @@ function runAutoBackfills(\PDO $db, string $binDir): void
             'count'   => static fn (): int => (new \MyInvoice\Service\Bank\Card\CardLast4Backfill($db))->pending(),
             'script'  => 'backfill-card-last4.php',
         ],
+        [
+            // Originály příchozích dokladů uložené do kořene Dokumentů před zavedením
+            // složky „Příchozí doklady / rok / měsíc", viz SubmissionFolderBackfill.
+            'name'    => 'submission-folders',
+            'reason'  => 'příchozích dokladů v kořeni Dokumentů',
+            'count'   => static fn (): int => (new \MyInvoice\Service\PurchaseInvoice\SubmissionFolderBackfill($db))->pending(),
+            'script'  => 'backfill-submission-folders.php',
+        ],
     ];
 
     echo "\n=== Auto-backfill check ===\n";

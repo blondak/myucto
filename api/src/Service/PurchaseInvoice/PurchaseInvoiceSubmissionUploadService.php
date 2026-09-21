@@ -193,10 +193,16 @@ final class PurchaseInvoiceSubmissionUploadService
             $ownTransaction = !$pdo->inTransaction();
             if ($ownTransaction) $pdo->beginTransaction();
             try {
+                $folderId = $this->ingest->ensureFolderPath(
+                    $supplierId,
+                    null,
+                    SubmissionFolder::segments(new \DateTimeImmutable()),
+                    $userId,
+                );
                 $ingested = $this->ingest->ingestOriginalTemp(
                     $tmp,
                     $supplierId,
-                    null,
+                    $folderId,
                     $originalName,
                     $userId,
                 );

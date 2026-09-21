@@ -63,6 +63,10 @@ Do fronty vede několik cest:
 fronty sama a zpracuje to stejným postupem. Podrobný průchod klientskou stranou je v
 [§ 9.8 Klientský portál](09_Klientsky_portal.md#98-vyzadane-doklady-od-klienta).
 
+Originály všech příchozích dokladů (z portálu, e-mailu i nahrané ručně) se ukládají
+v Dokumentech do složky **Příchozí doklady / rok / měsíc** podle data převzetí, ne do
+kořene. Fronta ukazuje všechny podání bez ohledu na to, ve které podsložce originál je.
+
 > **Odmítnutí originál nemaže.** Přepne podání do stavu Odmítnuto a napíše klientovi
 > důvod; samotný soubor zůstává v Dokumentech i v auditní stopě. Uklidit frontu i
 > s originálem (omylem nahraná fotka, spam) jde tlačítkem **Smazat z fronty** — má
