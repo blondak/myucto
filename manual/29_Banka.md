@@ -87,6 +87,12 @@ Vyber soubor (drag & drop nebo klik). Po nahrání:
    VS, zbývající částka, číslo dokladu ve zprávě a známý účet protistrany. Ve
    druhém průchodu se u dosud volných odchozích plateb bez VS zkusí přesná shoda
    částky, měny a data. Jednoznačná shoda se potvrdí, slabší se jen nabídne.
+   Příchozí platba se k vydané faktuře páruje podle čísla faktury i podle
+   **platebního variabilního symbolu**, pokud ho faktura má vyplněný
+   ([§ 15.2.5](15_Faktura_editor.md)). Stejný platební VS může mít víc faktur,
+   například u pravidelné fakturace. Rozhodne pak částka a měna mezi
+   nezaplacenými fakturami. Když se ani tak nenajde právě jedna faktura, platba
+   se automaticky nepřiřadí a zůstane k ručnímu spárování.
 5. **Update faktur** — plně uhrazený doklad dostane stav `paid` a datum úhrady
    podle bankovní transakce; nižší platba se zapíše jako částečná a sníží
    zbývající částku.

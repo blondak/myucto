@@ -602,6 +602,13 @@ final class RecurringTemplateAction
                 $err['discount_percent'][] = 'Sleva musí být mezi 0 a 100 %';
             }
         }
+        if (array_key_exists('payment_variable_symbol', $data)) {
+            try {
+                InvoiceRepository::normalizePaymentVariableSymbol($data['payment_variable_symbol']);
+            } catch (\InvalidArgumentException $e) {
+                $err['payment_variable_symbol'][] = $e->getMessage();
+            }
+        }
         // Pevná kategorie tržby (#119) — IDOR guard: musí existovat a patřit dodavateli
         // šablony. Archivovanou nezakazujeme (edit dřív uložené šablony musí projít).
         if (!empty($data['revenue_category_id'])) {

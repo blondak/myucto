@@ -44,6 +44,19 @@ final class VariableSymbolNormalizer
     }
 
     /**
+     * Platební VS vydané faktury: samostatný `payment_variable_symbol`, pokud je
+     * vyplněný, jinak odvozený z čísla dokladu (`varsymbol`). Jediné místo, odkud
+     * PDF, QR, e-maily, exporty i API berou VS, který klient zadá do příkazu.
+     *
+     * @param array<string,mixed> $invoice řádek `invoices` (stačí varsymbol + payment_variable_symbol)
+     */
+    public static function forInvoicePayment(array $invoice): string
+    {
+        $explicit = self::forPayment((string) ($invoice['payment_variable_symbol'] ?? ''));
+        return $explicit !== '' ? $explicit : self::forPayment((string) ($invoice['varsymbol'] ?? ''));
+    }
+
+    /**
      * Kanonický klíč pro párování: číslice bez vodicích nul (konzistentní s GPC
      * parserem i bankovními e-mailovými avízy). Když by ořez vodicích nul vrátil
      * prázdno (samé nuly), vrátí původní číslice — VS „0" tak nezmizí.

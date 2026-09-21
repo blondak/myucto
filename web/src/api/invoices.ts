@@ -208,6 +208,10 @@ export interface PaymentScheduleRow {
 export interface Invoice {
   id: number
   varsymbol: string | null
+  /** Samostatný platební VS (#249); null = odvodí se z čísla dokladu. */
+  payment_variable_symbol?: string | null
+  /** Efektivní platební VS (payment_variable_symbol, jinak číslice z čísla dokladu). */
+  payment_varsymbol?: string
   invoice_type: InvoiceType
   parent_invoice_id: number | null
   client_id: number
@@ -501,6 +505,8 @@ export interface InvoicePayload {
   // s fallbackem na cfg.varsymbol.templates. Backend ho akceptuje jen u draftu;
   // po vystavení je číslo immutable (snapshot).
   varsymbol?: string | null
+  // Platební VS (#249) — jen číslice, max 10, nemusí být unikátní; null = z čísla dokladu.
+  payment_variable_symbol?: string | null
   vat_classification_code?: string | null
   revenue_category?: string | null
   revenue_category_id?: number | null

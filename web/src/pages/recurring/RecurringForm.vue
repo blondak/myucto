@@ -184,6 +184,7 @@ const form = ref<{
   reminder_days_before: number
   note_above_items: string
   note_below_items: string
+  payment_variable_symbol: string
   increment_month_in_descriptions: boolean
   auto_issue: boolean
   auto_send_email: boolean
@@ -213,6 +214,7 @@ const form = ref<{
   reminder_days_before: 1,
   note_above_items: '',
   note_below_items: '',
+  payment_variable_symbol: '',
   increment_month_in_descriptions: true,
   auto_issue: true,
   auto_send_email: true,
@@ -725,6 +727,7 @@ onMounted(async () => {
         form.value.discount_percent = inv.discount_percent ?? 0
         form.value.note_above_items = inv.note_above_items ?? ''
         form.value.note_below_items = inv.note_below_items ?? ''
+        form.value.payment_variable_symbol = inv.payment_variable_symbol ?? ''
         // Slevová položka se do šablony nepřenáší — drží se jako discount_percent.
         form.value.items = inv.items.filter(it => it.item_kind !== 'discount').map((it, i) => ({
           description: it.description,
@@ -788,6 +791,7 @@ onMounted(async () => {
         reminder_days_before: tpl.reminder_days_before ?? 1,
         note_above_items: tpl.note_above_items ?? '',
         note_below_items: tpl.note_below_items ?? '',
+        payment_variable_symbol: tpl.payment_variable_symbol ?? '',
         increment_month_in_descriptions: tpl.increment_month_in_descriptions,
         auto_issue: tpl.auto_issue,
         auto_send_email: tpl.auto_send_email,
@@ -898,6 +902,7 @@ async function submit() {
       reminder_days_before: form.value.reminder_days_before,
       note_above_items: form.value.note_above_items || null,
       note_below_items: form.value.note_below_items || null,
+      payment_variable_symbol: form.value.payment_variable_symbol.replace(/\s+/g, '') || null,
       increment_month_in_descriptions: form.value.increment_month_in_descriptions,
       auto_issue: form.value.auto_issue,
       auto_send_email: form.value.auto_send_email,
@@ -1485,6 +1490,15 @@ async function submit() {
           <textarea v-model="form.note_below_items" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
         </div>
         <p class="text-xs text-neutral-500">{{ t('recurring.notes_placeholders_hint') }}</p>
+      </div>
+
+      <!-- Platební VS (#249) — stabilní VS pro všechny vygenerované faktury (trvalý příkaz). -->
+      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.payment_variable_symbol') }}</label>
+        <input v-model="form.payment_variable_symbol" type="text" inputmode="numeric" maxlength="10"
+          :placeholder="t('invoice.payment_variable_symbol_placeholder')"
+          class="w-full sm:w-64 h-10 px-3 border border-neutral-300 rounded-md font-mono" />
+        <p class="text-xs text-neutral-500 mt-1">{{ t('recurring.payment_variable_symbol_hint') }}</p>
       </div>
 
       <!-- Automation -->

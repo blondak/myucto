@@ -186,8 +186,8 @@ final class FinalFromProformaCreator
                    (invoice_type, parent_invoice_id, client_id, project_id, supplier_id, branding_profile_id,
                     issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
                      supplier_order_number, note_above_items, note_below_items, advance_paid_amount, discount_percent, payment_method,
-                    revenue_category_id, status, created_by)
-                 VALUES ("invoice", ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?)'
+                    revenue_category_id, payment_variable_symbol, status, created_by)
+                 VALUES ("invoice", ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?)'
             );
             $stmt->execute([
                 $proformaId,
@@ -213,6 +213,8 @@ final class FinalFromProformaCreator
                 (string) ($proforma['payment_method'] ?? 'bank_transfer'),
                 // Kategorii tržby zdědíme z proformy (daňový doklad patří do stejné kategorie).
                 $proforma['revenue_category_id'] ?? null,
+                // Platební VS proformy (#249) — doplatek pokračuje pod stejným VS.
+                $proforma['payment_variable_symbol'] ?? null,
                 $userId ?: null,
             ]);
             $finalId = (int) $pdo->lastInsertId();

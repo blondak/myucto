@@ -36,6 +36,8 @@ export interface PublicInvoiceVatRow {
 
 export interface PublicInvoiceHeader {
   varsymbol: string | null
+  /** Efektivní platební VS (#249) — samostatný, jinak číslice z čísla dokladu. */
+  payment_varsymbol?: string
   invoice_type: 'invoice' | 'proforma' | 'credit_note' | 'cancellation' | 'tax_document'
   status: 'issued' | 'sent' | 'reminded' | 'paid' | 'cancelled'
   payment_status: 'unpaid' | 'partially_paid' | 'paid' | 'overpaid' | null

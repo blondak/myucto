@@ -293,9 +293,9 @@ onMounted(async () => {
                       <span class="text-neutral-500 text-xs block">{{ tt('Číslo účtu', 'Account number') }}</span>
                       <span class="font-mono">{{ data.bank.account_number }}<template v-if="data.bank.bank_code"> / {{ data.bank.bank_code }}</template></span>
                     </div>
-                    <div v-if="inv.varsymbol">
+                    <div v-if="inv.payment_varsymbol || inv.varsymbol">
                       <span class="text-neutral-500 text-xs block">{{ tt('Variabilní symbol', 'Variable symbol') }}</span>
-                      <span class="font-mono">{{ inv.varsymbol }}</span>
+                      <span class="font-mono">{{ inv.payment_varsymbol || inv.varsymbol }}</span>
                     </div>
                     <div v-if="data.bank.iban">
                       <span class="text-neutral-500 text-xs block">IBAN</span>

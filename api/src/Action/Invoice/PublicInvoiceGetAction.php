@@ -110,7 +110,7 @@ final class PublicInvoiceGetAction
             array_intersect_key($src, array_flip($keys));
 
         $publicInvoice = $pick($invoice, [
-            'varsymbol', 'invoice_type', 'status', 'payment_status', 'language',
+            'varsymbol', 'payment_varsymbol', 'invoice_type', 'status', 'payment_status', 'language',
             'currency', 'currency_decimals',
             'issue_date', 'tax_date', 'due_date', 'paid_at',
             'payment_method', 'reverse_charge', 'prices_include_vat',

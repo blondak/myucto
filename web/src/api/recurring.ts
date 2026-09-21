@@ -93,6 +93,8 @@ export interface RecurringTemplate {
   reminder_days_before: number
   note_above_items: string | null
   note_below_items: string | null
+  /** Platební VS předávaný vygenerovaným fakturám (#249); null = z čísla dokladu. */
+  payment_variable_symbol?: string | null
   increment_month_in_descriptions: boolean
 
   auto_issue: boolean
@@ -140,6 +142,7 @@ export interface RecurringTemplatePayload {
   reminder_days_before?: number
   note_above_items?: string | null
   note_below_items?: string | null
+  payment_variable_symbol?: string | null
   increment_month_in_descriptions?: boolean
   auto_issue?: boolean
   auto_send_email?: boolean

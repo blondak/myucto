@@ -6,7 +6,7 @@
 
 {% if is_proforma %}Potvrzujeme přijetí zálohy k zálohové faktuře č. {{ invoice.varsymbol }}. Děkujeme!{% else %}Potvrzujeme přijetí úhrady faktury č. {{ invoice.varsymbol }}. Děkujeme!{% endif %}
 
-Variabilní symbol: {{ invoice.varsymbol }}
+Variabilní symbol: {{ payment_varsymbol|default(invoice.varsymbol) }}
 Datum úhrady:      {{ paid_at|date('j.n.Y') }}
 {% if payment_method == 'card' %}Způsob platby:     platební karta
 {% elseif payment_method == 'cash' %}Způsob platby:     hotovost

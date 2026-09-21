@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\CzkRecap;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Invoice\TimeBilling;
@@ -191,6 +192,8 @@ final class InvoiceRepository
                 $discountAmount -= (float) $it['total_without_vat'];
             }
         }
+        // Efektivní platební VS (#249): payment_variable_symbol, jinak z čísla dokladu.
+        $row['payment_varsymbol'] = VariableSymbolNormalizer::forInvoicePayment($row);
         $row['totals'] = [
             'without_vat'        => $row['total_without_vat'],
             'vat'                => $row['total_vat'],
@@ -906,9 +909,10 @@ final class InvoiceRepository
             // Hledá i v TEXTU POLOŽEK faktury (EXISTS, ne JOIN — JOIN by fakturu znásobil na
             // počet položek a rozbil COUNT i stránkování). $whereSql je sdílený mezi count
             // i hlavním dotazem, takže stačí doplnit tady jednou.
-            $where[] = '(i.varsymbol LIKE ? OR c.company_name LIKE ?'
+            $where[] = '(i.varsymbol LIKE ? OR i.payment_variable_symbol LIKE ? OR c.company_name LIKE ?'
                 . ' OR EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.id'
                 . ' AND ii.description LIKE ?))';
+            $params[] = $q . '%';
             $params[] = $q . '%';
             $params[] = '%' . $q . '%';
             $params[] = '%' . $q . '%';
@@ -1133,13 +1137,13 @@ final class InvoiceRepository
             (invoice_type, parent_invoice_id, client_id, project_id, supplier_id, branding_profile_id,
              issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
              note_above_items, note_below_items, advance_paid_amount, discount_percent, varsymbol,
-             supplier_order_number,
+             payment_variable_symbol, supplier_order_number,
              payment_method, status, vat_classification_code, revenue_category, revenue_category_id,'
             . ($hasExempt ? ' income_tax_exempt, income_tax_exempt_reason,' : '')
             . ($hasReminders ? ' auto_send_reminders,' : '')
             . ($hasSimplified ? ' is_simplified,' : '')
             . ' created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
             . ($hasExempt ? ' ?, ?,' : '')
             . ($hasReminders ? ' ?,' : '')
             . ($hasSimplified ? ' ?,' : '')
@@ -1164,6 +1168,7 @@ final class InvoiceRepository
             (float) ($data['advance_paid_amount'] ?? 0),
             self::clampDiscountPercent($data['discount_percent'] ?? 0),
             $manualVarsymbol,
+            self::normalizePaymentVariableSymbol($data['payment_variable_symbol'] ?? null),
             self::normalizeSupplierOrderNumber($data['supplier_order_number'] ?? null),
             $paymentMethod,
             !empty($data['vat_classification_code']) ? (string) $data['vat_classification_code'] : null,
@@ -1212,6 +1217,11 @@ final class InvoiceRepository
             }
         }
 
+        // Platební VS (#249) — jen když je klíč v payloadu, ať ho importy a jiné cesty
+        // ukládající doklad bez tohoto pole tiše nesmažou.
+        $hasPaymentVs = array_key_exists('payment_variable_symbol', $data);
+        $paymentVs = $hasPaymentVs ? self::normalizePaymentVariableSymbol($data['payment_variable_symbol']) : null;
+
         $hasPaymentMethod = array_key_exists('payment_method', $data);
         $paymentMethod = null;
         if ($hasPaymentMethod) {
@@ -1250,6 +1260,7 @@ final class InvoiceRepository
               . ($hasReminders ? ', auto_send_reminders = ?' : '')
               . ($hasSimplified ? ', is_simplified = ?' : '')
               . ($hasVarsymbol ? ', varsymbol = ?' : '')
+              . ($hasPaymentVs ? ', payment_variable_symbol = ?' : '')
               . ($hasPaymentMethod ? ', payment_method = ?' : '')
               . ($hasType ? ', invoice_type = ?' : '')
               . ' WHERE id = ?'
@@ -1284,6 +1295,7 @@ final class InvoiceRepository
         }
         if ($hasSimplified) $params[] = !empty($data['is_simplified']) ? 1 : 0;
         if ($hasVarsymbol) $params[] = $manualVarsymbol;
+        if ($hasPaymentVs) $params[] = $paymentVs;
         if ($hasPaymentMethod) $params[] = $paymentMethod;
         if ($hasType) $params[] = (string) $data['invoice_type'];
         $params[] = $id;
@@ -1790,6 +1802,23 @@ final class InvoiceRepository
             return null;
         }
         return mb_substr($s, 0, 190);
+    }
+
+    /**
+     * Platební VS vydané faktury (#249): prázdné → null (VS se odvodí z čísla dokladu),
+     * jinak jen číslice, max 10 znaků podle tuzemského platebního styku. Mezery se
+     * tolerují (kopírování z výpisu), cokoli jiného je chyba vstupu.
+     */
+    public static function normalizePaymentVariableSymbol(mixed $value): ?string
+    {
+        $vs = preg_replace('/\s+/', '', (string) ($value ?? '')) ?? '';
+        if ($vs === '') {
+            return null;
+        }
+        if (!preg_match('/^\d{1,10}$/', $vs)) {
+            throw new \InvalidArgumentException('Platební variabilní symbol smí obsahovat jen číslice, nejvýše 10.');
+        }
+        return $vs;
     }
 
     private static function normalizeSupplierOrderNumber(mixed $value): ?string

@@ -82,7 +82,7 @@ final class MatchCandidateProvider
     private function issuedPool(int $supplierId, string $posted): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT 'invoice' AS candidate_type, i.id, i.client_id, i.varsymbol AS ref,
+            "SELECT 'invoice' AS candidate_type, i.id, i.client_id, i.varsymbol AS ref, i.payment_variable_symbol AS payment_vs,
                     i.amount_to_pay, i.paid_total, i.invoice_type, i.status,
                     i.exchange_rate, i.issue_date, i.due_date, cur.code AS currency,
                     c.company_name AS party
@@ -138,7 +138,10 @@ final class MatchCandidateProvider
         $flags = $fx ? ['currency_mismatch'] : [];
         $vs = VariableSymbolNormalizer::forMatching((string) ($tx['variable_symbol'] ?? ''));
         $refDigits = VariableSymbolNormalizer::forMatching((string) ($row['ref'] ?? ''));
-        $vsExact = $vs !== '' && $refDigits !== '' && $vs === $refDigits;
+        // Vydaná faktura může nést samostatný platební VS (#249) — shoda s ním je stejně
+        // silná jako shoda s číslem dokladu.
+        $paymentVsDigits = VariableSymbolNormalizer::forMatching((string) ($row['payment_vs'] ?? ''));
+        $vsExact = $vs !== '' && (($refDigits !== '' && $vs === $refDigits) || ($paymentVsDigits !== '' && $vs === $paymentVsDigits));
         if ($vsExact) $signals['vs_exact'] = MatchScorer::W_VS_EXACT;
         $amountExact = abs($amount - $converted) <= $tol;
         if ($amountExact) $signals['amount_remaining'] = MatchScorer::W_AMOUNT_REMAINING;

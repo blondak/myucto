@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Validation;
 
+use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Oss\OssItemDecision;
 use MyInvoice\Service\Oss\OssPeriod;
 use MyInvoice\Support\PaymentMethods;
@@ -205,6 +206,15 @@ final class InvoiceValidation
             }
             if (preg_match('/[\x00-\x1f\x7f]/', $vs)) {
                 $err['varsymbol'][] = 'Číslo faktury obsahuje neplatné znaky';
+            }
+        }
+
+        // Platební VS (#249) — volitelný, jen číslice, max 10. Nemusí být unikátní.
+        if (array_key_exists('payment_variable_symbol', $data)) {
+            try {
+                InvoiceRepository::normalizePaymentVariableSymbol($data['payment_variable_symbol']);
+            } catch (\InvalidArgumentException $e) {
+                $err['payment_variable_symbol'][] = $e->getMessage();
             }
         }
 

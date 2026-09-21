@@ -87,6 +87,13 @@ sdělení pro zákazníka. Obě pole podporují **placeholdery období** (viz
 datu vystavení), takže např. „Vyúčtování za období {BOM} – {EOM}" se na
 faktuře propíše jako konkrétní rozsah měsíce.
 
+Pod poznámkami je pole **Platební variabilní symbol**. Vyplněný VS dostane
+každá vygenerovaná faktura, takže zákazník může platit trvalým příkazem pod
+stále stejným symbolem. Číslo faktury se dál přiděluje z číselné řady. Prázdné
+pole znamená, že se VS odvodí z čísla faktury (viz
+[§ 15.2.5](15_Faktura_editor.md)). Jak se takové platby párují, popisuje
+[§ 29.2](29_Banka.md).
+
 ### 17.2.4 Položky
 
 Položky šablony se 1:1 kopírují na každou vygenerovanou fakturu (popis, mn.,

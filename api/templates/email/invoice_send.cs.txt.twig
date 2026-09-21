@@ -10,7 +10,7 @@
 {{ note_text }}
 {% endif %}
 
-Variabilní symbol: {{ invoice.varsymbol }}
+Variabilní symbol: {{ payment_varsymbol|default(invoice.varsymbol) }}
 Datum vystavení:   {{ invoice.issue_date|date('j.n.Y') }}
 Splatnost:         {{ invoice.due_date|date('j.n.Y') }}
 {% if is_paid %}Uhrazeno:          {{ amount_to_pay|number_format(2, ',', ' ') }} {{ invoice.currency }} ✓{% else %}K úhradě:          {{ amount_to_pay|number_format(2, ',', ' ') }} {{ invoice.currency }}{% endif %}

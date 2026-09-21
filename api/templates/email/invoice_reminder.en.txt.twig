@@ -9,7 +9,7 @@ Hello,
 this is a friendly reminder that invoice no. {{ invoice.varsymbol }}
 is {{ days_overdue }} day{% if days_overdue != 1 %}s{% endif %} overdue and has not been paid yet.
 
-Variable symbol: {{ invoice.varsymbol }}
+Variable symbol: {{ payment_varsymbol|default(invoice.varsymbol) }}
 Issue date:      {{ invoice.issue_date|date('M j, Y') }}
 Due date:        {{ invoice.due_date|date('M j, Y') }}
 Days overdue:    {{ days_overdue }}

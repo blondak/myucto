@@ -841,7 +841,8 @@
         "1854_bank_daily_statement_ingest.sql",
         "1855_supplier_default_note_below_items.sql",
         "1856_journal_entries_list_indexes.sql",
-        "1857_bank_email_ingest_notices_toggle.sql"
+        "1857_bank_email_ingest_notices_toggle.sql",
+        "1858_invoice_payment_variable_symbol.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -5529,6 +5530,7 @@
                 "payment_method": "enum('bank_transfer','direct_debit','card','cash','cash_on_delivery','offset','other') NOT NULL DEFAULT 'bank_transfer'",
                 "payment_thanks_sent_at": "timestamp NULL DEFAULT NULL",
                 "payment_thanks_sent_to": "varchar(512) NULL DEFAULT NULL",
+                "payment_variable_symbol": "varchar(10) NULL DEFAULT NULL",
                 "pdf_generated_at": "timestamp NULL DEFAULT NULL",
                 "pdf_path": "varchar(255) NULL DEFAULT NULL",
                 "penalty_covered_through": "date NULL DEFAULT NULL",
@@ -5573,6 +5575,7 @@
                 "idx_inv_status": "BTREE (status, due_date)",
                 "idx_inv_supplier": "BTREE (supplier_id)",
                 "idx_inv_supplier_efftax": "BTREE (supplier_id, effective_tax_date)",
+                "idx_inv_supplier_payment_vs": "BTREE (supplier_id, payment_variable_symbol)",
                 "idx_inv_supplier_status_due": "BTREE (supplier_id, status, due_date)",
                 "idx_inv_supplier_status_issue": "BTREE (supplier_id, status, issue_date)",
                 "idx_inv_supplier_status_type_efftax": "BTREE (supplier_id, status, invoice_type, effective_tax_date)",
@@ -16502,6 +16505,7 @@
                 "payment_due_days": "int(10) unsigned NOT NULL DEFAULT 14",
                 "payment_due_unit": "enum('days','month') NULL DEFAULT NULL",
                 "payment_method": "enum('bank_transfer','card','cash','other') NOT NULL DEFAULT 'bank_transfer'",
+                "payment_variable_symbol": "varchar(10) NULL DEFAULT NULL",
                 "prices_include_vat": "tinyint(1) NOT NULL DEFAULT 0",
                 "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "reminder_days_before": "tinyint(3) unsigned NOT NULL DEFAULT 1",

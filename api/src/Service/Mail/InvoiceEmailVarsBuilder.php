@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Mail;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoicePublicLinkService;
 use MyInvoice\Service\Qr\PaymentQrDueDate;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
@@ -57,6 +58,7 @@ final class InvoiceEmailVarsBuilder
                 2,
             ),
             'days_overdue'   => $daysOverdue,
+            'payment_varsymbol' => VariableSymbolNormalizer::forInvoicePayment($invoice),
             'subject'        => $subject,
             'qr_data_uri'    => $this->paymentQrDataUri($invoice),
             'supplier'       => $this->loadSupplierFooter($invoice),
@@ -113,6 +115,7 @@ final class InvoiceEmailVarsBuilder
             'invoice'        => $invoice,
             'client_name'    => $invoice['client_company_name'] ?? '',
             'amount_to_pay'  => $amount,
+            'payment_varsymbol' => VariableSymbolNormalizer::forInvoicePayment($invoice),
             'is_test'        => $isTest,
             'subject'        => $this->buildSubject($invoice, $isTest, $locale),
             'qr_data_uri'    => $this->paymentQrDataUri($invoice),
@@ -134,7 +137,7 @@ final class InvoiceEmailVarsBuilder
     {
         // QR na zbývající částku — po částečné úhradě (#89) se platí jen zbytek.
         $remaining = round((float) ($invoice['amount_to_pay'] ?? 0) - (float) ($invoice['paid_total'] ?? 0), 2);
-        if (empty($invoice['varsymbol'])) return null;
+        if (VariableSymbolNormalizer::forInvoicePayment($invoice) === '') return null;
         if ($remaining <= 0) return null;
         if (($invoice['status'] ?? '') === 'paid') return null;
         if (($invoice['payment_method'] ?? 'bank_transfer') !== 'bank_transfer') return null;
@@ -161,7 +164,7 @@ final class InvoiceEmailVarsBuilder
         return $this->qr->generate(
             (string) $invoice['currency'],
             $remaining,
-            (string) $invoice['varsymbol'],
+            VariableSymbolNormalizer::forInvoicePayment($invoice),
             $bank,
             (string) ($supplierName ?: 'MyÚčto.cz'),
             PaymentQrDueDate::parse($invoice['due_date'] ?? null),

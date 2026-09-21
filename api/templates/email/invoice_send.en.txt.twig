@@ -10,7 +10,7 @@
 {{ note_text }}
 {% endif %}
 
-Variable symbol: {{ invoice.varsymbol }}
+Variable symbol: {{ payment_varsymbol|default(invoice.varsymbol) }}
 Issue date:      {{ invoice.issue_date|date('M j, Y') }}
 Due date:        {{ invoice.due_date|date('M j, Y') }}
 {% if is_paid %}Paid:            {{ amount_to_pay|number_format(2, '.', ',') }} {{ invoice.currency }} ✓{% else %}Amount due:      {{ amount_to_pay|number_format(2, '.', ',') }} {{ invoice.currency }}{% endif %}

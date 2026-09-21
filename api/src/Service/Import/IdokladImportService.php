@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
@@ -486,6 +487,8 @@ final class IdokladImportService
             'language'         => 'cs',
             // varsymbol = číslo dokladu (unikátní per dodavatel), NE platební VariableSymbol (#196).
             'varsymbol'        => $this->sanitizeVarsymbol(self::idokladDocNumber($i)),
+            // Platební VS z iDokladu, liší-li se od čísla dokladu (#249).
+            'payment_variable_symbol' => self::idokladPaymentVariableSymbol($i),
             'payment_method'   => 'bank_transfer',
             'discount_percent' => $docDiscountPercent,
         ];
@@ -1440,6 +1443,7 @@ final class IdokladImportService
                     'language'          => 'cs',
                     // varsymbol = číslo dokladu (unikátní per dodavatel), NE platební VariableSymbol (#196).
                     'varsymbol'         => $this->sanitizeVarsymbol(self::idokladDocNumber($i)),
+                    'payment_variable_symbol' => self::idokladPaymentVariableSymbol($i),
                     'payment_method'    => 'bank_transfer',
                     'discount_percent'  => $docDiscountPercent,
                 ];
@@ -1658,6 +1662,22 @@ final class IdokladImportService
         $doc = trim((string) ($i['DocumentNumber'] ?? ''));
         if ($doc !== '') return $doc;
         return trim((string) ($i['VariableSymbol'] ?? ''));
+    }
+
+    /**
+     * Platební VS importované vydané faktury (#249): iDokladový `VariableSymbol`, pokud
+     * se liší od čísla dokladu. Shodný VS nebo nečíselný/delší než 10 znaků vrací null —
+     * platební VS se pak odvodí z čísla dokladu, jako u ručně vystavených faktur.
+     *
+     * @param array<string,mixed> $i iDoklad doklad (v3 GET model)
+     */
+    public static function idokladPaymentVariableSymbol(array $i): ?string
+    {
+        $vs = trim((string) ($i['VariableSymbol'] ?? ''));
+        if (!preg_match('/^\d{1,10}$/', $vs)) {
+            return null;
+        }
+        return $vs === VariableSymbolNormalizer::forPayment(self::idokladDocNumber($i)) ? null : $vs;
     }
 
     /**

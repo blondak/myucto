@@ -25348,6 +25348,8 @@ components:
         parent_invoice_id: { type: [integer, "null"], description: "Pro credit_note / cancellation / final-z-proformy odkaz na původní fakturu" }
         recurring_template_id: { type: [integer, "null"], description: "Pro faktury vygenerované ze šablony pravidelné fakturace — odkaz na šablonu (NULL pokud byla šablona smazána, viz ON DELETE SET NULL)." }
         varsymbol: { type: [string, "null"], description: "Variabilní symbol = číslo faktury. Přiděluje se při issue (u draft je null nebo manuální override)." }
+        payment_variable_symbol: { type: [string, "null"], pattern: "^[0-9]{1,10}$", description: "Samostatný platební VS (jen číslice, max 10, nemusí být unikátní). null = platební VS se odvodí z čísla dokladu." }
+        payment_varsymbol: { type: string, description: "Efektivní platební VS (payment_variable_symbol, jinak číslice z čísla dokladu, max 10). Ten jde do PDF, QR platby, e-mailů a exportů." }
         invoice_type:
           type: string
           enum: [invoice, proforma, credit_note, cancellation, tax_document, penalty, payment_calendar]
@@ -25603,6 +25605,10 @@ components:
           type: [string, "null"]
           maxLength: 20
           description: "Volitelný manuální override automatického číslování. U draftu lze ponechat null — číslo se přidělí při /issue."
+        payment_variable_symbol:
+          type: [string, "null"]
+          pattern: "^[0-9]{1,10}$"
+          description: "Platební VS odlišný od čísla dokladu (jen číslice, max 10, nemusí být unikátní). null = odvodit z čísla dokladu. Chybějící klíč při update hodnotu nemění."
         advance_paid_amount: { type: number, format: float, default: 0, description: "Záloha k odečtení od total_with_vat" }
         discount_percent:
           type: number
@@ -27124,6 +27130,7 @@ components:
         reminder_days_before: { type: integer, description: "0–14; připomenutí konceptu N dní před vystavením (0 = vypnuto; jen pro period_start)." }
         note_above_items: { type: [string, "null"] }
         note_below_items: { type: [string, "null"] }
+        payment_variable_symbol: { type: [string, "null"], pattern: "^[0-9]{1,10}$", description: "Platební VS předávaný všem vygenerovaným fakturám (např. trvalý příkaz). null = VS z čísla dokladu." }
         increment_month_in_descriptions:
           type: boolean
           description: "Posun M/YYYY v popiscích položek (např. „Hosting 3/2026\" → „Hosting 4/2026\"). Pro frequency != monthly se posouvá o odpovídající počet měsíců."
@@ -27226,6 +27233,7 @@ components:
             se ořízne do 0–14.
         note_above_items: { type: [string, "null"] }
         note_below_items: { type: [string, "null"] }
+        payment_variable_symbol: { type: [string, "null"], pattern: "^[0-9]{1,10}$", description: "Platební VS předávaný všem vygenerovaným fakturám (např. trvalý příkaz). null = VS z čísla dokladu." }
         increment_month_in_descriptions:
           type: boolean
           default: false

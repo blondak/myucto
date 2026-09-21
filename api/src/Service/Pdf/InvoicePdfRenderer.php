@@ -303,7 +303,7 @@ final class InvoicePdfRenderer
         $remaining = round((float) $invoice['amount_to_pay'] - (float) ($invoice['paid_total'] ?? 0), 2);
         $hasAmount = $remaining > 0;
         $isCzk = ((string) $invoice['currency']) === 'CZK';
-        $hasVs = !empty($invoice['varsymbol']);
+        $hasVs = VariableSymbolNormalizer::forInvoicePayment($invoice) !== '';
         $isPaid = ($invoice['status'] ?? '') === 'paid';
         $paymentMethod = (string) ($invoice['payment_method'] ?? 'bank_transfer');
         $isBankTransfer = $paymentMethod === 'bank_transfer';
@@ -316,7 +316,7 @@ final class InvoicePdfRenderer
             $qrUri = $this->qr->generate(
                 (string) $invoice['currency'],
                 $remaining,
-                (string) ($invoice['varsymbol'] ?? ''),
+                VariableSymbolNormalizer::forInvoicePayment($invoice),
                 $bankData,
                 (string) ($supplierData['display_name'] ?? $supplierData['company_name'] ?? 'MyÚčto.cz'),
                 PaymentQrDueDate::parse($invoice['due_date'] ?? null),
@@ -378,10 +378,10 @@ final class InvoicePdfRenderer
             'client'            => $clientData,
             'bank'              => $bankData,
             'qr_data_uri'       => $qrUri,
-            // Platební VS = jen číslice (max 10) — `varsymbol` může nést pomlčku z čísla
-            // dokladu, kterou banka nepřijme. Velký titulek dokladu zůstává s pomlčkou,
-            // ale do platebního řádku tiskneme validní VS (shodné s QR a párováním).
-            'payment_varsymbol' => VariableSymbolNormalizer::forPayment((string) ($invoice['varsymbol'] ?? '')),
+            // Platební VS = samostatný payment_variable_symbol, jinak číslice z čísla
+            // dokladu (max 10). Velký titulek dokladu zůstává s pomlčkou, do platebního
+            // řádku tiskneme validní VS (shodné s QR a párováním).
+            'payment_varsymbol' => VariableSymbolNormalizer::forInvoicePayment($invoice),
             'is_paid'           => $isPaid,
             'payment_method'    => $paymentMethod,
             'locale'            => $locale,

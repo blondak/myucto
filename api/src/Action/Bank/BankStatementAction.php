@@ -32,6 +32,7 @@ use MyInvoice\Service\Bank\Match\MatchSuggestionException;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
 use MyInvoice\Service\Bank\Match\SubsetSumSolver;
 use MyInvoice\Service\Bank\StatementScanner;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
@@ -2922,6 +2923,27 @@ final class BankStatementAction
             );
             $stmt->execute([$sid, $varsymbol]);
             $invoiceId = (int) $stmt->fetchColumn();
+            if ($invoiceId <= 0) {
+                // Samostatný platební VS vydané faktury (#249) — není unikátní, proto jen
+                // mezi nezaplacenými doklady a jen když je shoda jediná.
+                $paymentVs = VariableSymbolNormalizer::forPayment($varsymbol);
+                if ($paymentVs !== '') {
+                    $stmt = $this->db->pdo()->prepare(
+                        "SELECT id FROM invoices
+                          WHERE supplier_id = ? AND payment_variable_symbol REGEXP '[1-9]'
+                            AND CAST(payment_variable_symbol AS UNSIGNED) = CAST(? AS UNSIGNED)
+                            AND status IN ('issued', 'sent', 'reminded')
+                          LIMIT 2"
+                    );
+                    $stmt->execute([$sid, $paymentVs]);
+                    $byPaymentVs = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+                    if (count($byPaymentVs) > 1) {
+                        return Json::error($response, 'ambiguous_payment_vs',
+                            "Platební VS '$varsymbol' má víc nezaplacených faktur — vyberte fakturu ze seznamu.", 409);
+                    }
+                    $invoiceId = (int) ($byPaymentVs[0] ?? 0);
+                }
+            }
             if ($invoiceId <= 0) {
                 // Fallback: purchase_invoice match (přijatá faktura, my platíme dodavateli)
                 $stmt = $this->db->pdo()->prepare(

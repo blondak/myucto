@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Export;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use Rikudou\Iban\Iban\CzechIbanAdapter;
 
 /**
@@ -430,7 +431,7 @@ final class IsdocExporter
         // (ID, BankCode, Name, IBAN, BIC — všech 5 elementů REQUIRED v schema, posíláme
         // prázdné jako fallback), pak volitelně VariableSymbol/ConstantSymbol/SpecificSymbol.
         $bank = $this->resolveBank($invoice);
-        $explicitPaymentVariableSymbol = trim((string) ($invoice['payment_variable_symbol'] ?? ''));
+        $explicitPaymentVariableSymbol = VariableSymbolNormalizer::forPayment((string) ($invoice['payment_variable_symbol'] ?? ''));
         $paymentVariableSymbol = $explicitPaymentVariableSymbol !== ''
             ? $explicitPaymentVariableSymbol
             : trim((string) ($invoice['varsymbol'] ?? ''));

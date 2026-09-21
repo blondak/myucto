@@ -6,7 +6,7 @@
 
 {% if is_proforma %}We confirm receipt of your advance payment for proforma invoice No. {{ invoice.varsymbol }}. Thank you!{% else %}We confirm receipt of your payment for invoice No. {{ invoice.varsymbol }}. Thank you!{% endif %}
 
-Variable symbol: {{ invoice.varsymbol }}
+Variable symbol: {{ payment_varsymbol|default(invoice.varsymbol) }}
 Payment date:    {{ paid_at|date('M j, Y') }}
 {% if payment_method == 'card' %}Payment method:  card
 {% elseif payment_method == 'cash' %}Payment method:  cash

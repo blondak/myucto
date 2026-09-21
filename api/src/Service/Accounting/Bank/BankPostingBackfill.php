@@ -332,7 +332,9 @@ final class BankPostingBackfill
     private function discoverLegacyIncomingInvoice(int $supplierId, int $txId): ?int
     {
         $pdo = $this->db->pdo();
-        $normalizedInvoiceVs = "TRIM(LEADING '0' FROM REGEXP_REPLACE(COALESCE(i.varsymbol, ''), '[^0-9]', ''))";
+        // Efektivní platební VS faktury (#249): samostatný payment_variable_symbol,
+        // jinak číslo dokladu — stejně jako VariableSymbolNormalizer::forInvoicePayment().
+        $normalizedInvoiceVs = "TRIM(LEADING '0' FROM REGEXP_REPLACE(COALESCE(NULLIF(i.payment_variable_symbol, ''), i.varsymbol, ''), '[^0-9]', ''))";
         $normalizedTxVs = "TRIM(LEADING '0' FROM REGEXP_REPLACE(COALESCE(bt.variable_symbol, ''), '[^0-9]', ''))";
         $stmt = $pdo->prepare(
             "SELECT i.id
@@ -373,7 +375,7 @@ final class BankPostingBackfill
               WHERE other.source = 'statement' AND other.amount > 0
                 AND other.matched_invoice_id IS NULL AND other.match_status = 'unmatched'
                 AND TRIM(LEADING '0' FROM REGEXP_REPLACE(COALESCE(other.variable_symbol, ''), '[^0-9]', ''))
-                    = TRIM(LEADING '0' FROM REGEXP_REPLACE(COALESCE(i.varsymbol, ''), '[^0-9]', ''))
+                    = TRIM(LEADING '0' FROM REGEXP_REPLACE(COALESCE(NULLIF(i.payment_variable_symbol, ''), i.varsymbol, ''), '[^0-9]', ''))
                 AND UPPER(cur.code) = UPPER(COALESCE(NULLIF(other.currency, ''), other_bs.currency))
                 AND ABS(ip.amount - other.amount) <= 0.05
                 AND ABS(DATEDIFF(DATE(other.posted_at), ip.paid_on)) <= 31

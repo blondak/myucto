@@ -230,7 +230,10 @@ final class PohodaXmlExporter
             // Variabilní symbol je platební pole Pohody → musí být číselný (max 10). `varsymbol`
             // může nést nečíselné znaky (číslo dokladu dodavatele i naše řada `2026-00001`),
             // proto normalizujeme stejně jako pro banku/QR. Prázdný symVar neemitujeme.
-            $symVar = VariableSymbolNormalizer::forPayment($vs);
+            // Vydaná faktura může nést samostatný platební VS (payment_variable_symbol).
+            $symVar = $isPurchase
+                ? VariableSymbolNormalizer::forPayment($vs)
+                : VariableSymbolNormalizer::forInvoicePayment($invoice);
             if ($symVar !== '') {
                 $this->el($dom, $hdr, self::NS_INV, 'inv:symVar', $symVar);
             }

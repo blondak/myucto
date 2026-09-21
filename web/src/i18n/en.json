@@ -15658,6 +15658,7 @@
     "section_invoice_meta": "Invoice",
     "section_notes": "Notes",
     "notes_placeholders_hint": "Period placeholders are supported (see the items help) — evaluated when each invoice is generated.",
+    "payment_variable_symbol_hint": "All generated invoices get this variable symbol (e.g. for a standing order). Empty = derived from the document number.",
     "section_automation": "Automation",
     "generated_invoices": "Generated invoices",
     "amount": "Amount",
@@ -17348,6 +17349,10 @@
     "supplier_order_number": "Supplier order number",
     "supplier_order_number_placeholder": "e.g. MYU000023",
     "supplier_order_number_hint": "Optional order reference used to match the document to a payment automatically.",
+    "payment_variable_symbol": "Payment variable symbol",
+    "payment_variable_symbol_placeholder": "derived from the document number",
+    "payment_variable_symbol_invalid": "The payment variable symbol may contain digits only, up to 10.",
+    "payment_variable_symbol_hint": "Fill in only if the client should pay under a variable symbol other than the document number. It does not have to be unique.",
     "dates_section": "Dates",
     "modals": {
       "mark_paid_title": "Mark as paid",

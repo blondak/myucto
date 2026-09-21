@@ -203,10 +203,10 @@ final class BulkReissueAction
                    (invoice_type, client_id, project_id, supplier_id, branding_profile_id,
                     issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
                      supplier_order_number, note_above_items, note_below_items, discount_percent, payment_method,
-                    revenue_category_id,'
+                    revenue_category_id, payment_variable_symbol,'
                 . ($hasReminders ? ' auto_send_reminders,' : '')
                 . ' status, created_by)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,'
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,'
                 . ($hasReminders ? ' ?,' : '')
                 . ' "draft", ?)'
             );
@@ -232,6 +232,8 @@ final class BulkReissueAction
                 (string) ($source['payment_method'] ?? 'bank_transfer'),
                 // Reissue zachová kategorii tržby zdrojové faktury.
                 $source['revenue_category_id'] ?? null,
+                // Stabilní platební VS (#249) se u kopie zachová (pravidelná fakturace).
+                $source['payment_variable_symbol'] ?? null,
             ];
             if ($hasReminders) {
                 $params[] = !empty($source['auto_send_reminders']) ? 1 : 0;

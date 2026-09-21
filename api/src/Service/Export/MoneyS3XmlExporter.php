@@ -9,6 +9,7 @@ use DOMElement;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 
 /**
  * Money S3 (Seyfor) XML export for issued invoices — the "Faktury vydané"
@@ -135,7 +136,7 @@ final class MoneyS3XmlExporter
         $this->el($xml, $node, 'DatSkPoh', $this->date((string) ($invoice['issue_date'] ?? '')));
         $this->el($xml, $node, 'KonstSym', (string) ($invoice['constant_symbol'] ?? ''));
         $this->el($xml, $node, 'ZjednD', '0');
-        $this->el($xml, $node, 'VarSymbol', (string) ($invoice['varsymbol'] ?? ''));
+        $this->el($xml, $node, 'VarSymbol', VariableSymbolNormalizer::forInvoicePayment($invoice));
         $this->el($xml, $node, 'Ucet', 'BAN');
         $this->el($xml, $node, 'Druh', 'N');
         $this->el($xml, $node, 'Dobropis', ($invoice['invoice_type'] ?? '') === 'credit_note' ? '1' : '0');

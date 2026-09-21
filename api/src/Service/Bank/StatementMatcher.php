@@ -215,6 +215,55 @@ final class StatementMatcher
         return $matches;
     }
 
+    /**
+     * Víc faktur se shodným SAMOSTATNÝM platebním VS (#249) — typicky pravidelná
+     * fakturace, kde zákazník platí trvalým příkazem pod jedním VS. Samotný VS tu nestačí:
+     * rozhodne částka v měně transakce mezi NEZAPLACENÝMI doklady (zbývající dluh, tolerance
+     * jako u běžné shody). Vrací jediného kandidáta, nebo původní seznam, když částka
+     * nerozhodne — platba pak zůstane k ručnímu spárování, nikdy se nepřiřadí náhodně.
+     *
+     * Kolize čistě mezi čísly dokladů (bez platebního VS) se tu záměrně neřeší — ty dál
+     * končí jako `ambiguous_vs`, stejně jako dřív.
+     *
+     * @param list<array<string,mixed>> $matches
+     * @return list<array<string,mixed>>
+     */
+    private function resolveSharedPaymentVs(array $matches, float $amount, ?string $txCurrency, ?float $exactTolerance): array
+    {
+        $viaPaymentVs = array_filter($matches, static fn (array $m): bool => !empty($m['payment_vs_match']));
+        if ($viaPaymentVs === []) {
+            return $matches;
+        }
+        $exact = [];
+        $partial = [];
+        foreach ($matches as $m) {
+            if (($m['status'] ?? '') === 'paid') {
+                continue;
+            }
+            $remaining = round((float) $m['amount_to_pay'] - (float) ($m['paid_total'] ?? 0), 2);
+            if ($remaining <= 0.005) {
+                continue;
+            }
+            $expected = $this->expectedMatch($remaining, (string) $m['currency'], (float) ($m['exchange_rate'] ?: 0), $txCurrency, $exactTolerance);
+            if ($expected === null) {
+                continue;
+            }
+            $diff = abs($amount - $expected['expected']);
+            if ($diff <= $expected['exact']) {
+                $exact[] = $m;
+            } elseif ($diff <= $expected['partial']) {
+                $partial[] = $m;
+            }
+        }
+        if (count($exact) === 1) {
+            return $exact;
+        }
+        if ($exact === [] && count($partial) === 1) {
+            return $partial;
+        }
+        return $matches;
+    }
+
     public function match(int $transactionId): array
     {
         return $this->rememberReason($transactionId, $this->afterMatch($transactionId, $this->doMatch($transactionId, false)));
@@ -495,27 +544,39 @@ final class StatementMatcher
         // („202600001"). CAST(REGEXP_REPLACE(...) AS UNSIGNED) zrcadlí
         // VariableSymbolNormalizer::forMatching (číslice bez vodicích nul). REGEXP '[1-9]'
         // vyřadí prázdné / samé-nuly varsymboly (CAST '' → 0), aby nevznikla planá shoda.
+        //
+        // Samostatný platební VS (#249, `payment_variable_symbol`, jen číslice) se hledá
+        // vedle čísla dokladu. Na rozdíl od čísla dokladu NENÍ unikátní — pravidelná
+        // fakturace mívá jeden VS pro všechny doklady — proto víc shod rozhodne až částka
+        // (resolveSharedPaymentVs) a limit kandidátů je vyšší.
         $vsDigits = VariableSymbolNormalizer::digits((string) $vs);
         $sql = "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type, i.parent_invoice_id, cur.code AS currency,
-                       CASE WHEN i.varsymbol = ? THEN 2 ELSE 1 END AS vs_match_rank
+                       CASE WHEN i.varsymbol = ? OR i.payment_variable_symbol = ? THEN 2 ELSE 1 END AS vs_match_rank,
+                       (i.payment_variable_symbol REGEXP '[1-9]'
+                        AND CAST(i.payment_variable_symbol AS UNSIGNED) = CAST(? AS UNSIGNED)) AS payment_vs_match
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
                    AND (i.varsymbol = ?
                         OR (i.varsymbol REGEXP '[1-9]'
-                            AND CAST(REGEXP_REPLACE(i.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))
+                            AND CAST(REGEXP_REPLACE(i.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED))
+                        OR (i.payment_variable_symbol REGEXP '[1-9]'
+                            AND CAST(i.payment_variable_symbol AS UNSIGNED) = CAST(? AS UNSIGNED)))
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'proforma')
-                 ORDER BY vs_match_rank DESC, i.id LIMIT 3";
+                 ORDER BY vs_match_rank DESC, i.id LIMIT 100";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$vs, $supplierId, $vs, $vsDigits]);
+        $stmt->execute([$vs, $vs, $vsDigits, $supplierId, $vs, $vsDigits, $vsDigits]);
         $matches = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         // Pořadí je podstatné: pár „proforma + její finál" se zúží DŘÍV, než se sáhne po
         // doslovné shodě — jinak by přednost dostal finál („2408001") před proformou
         // („Z2408001") a přesměrování platby proforma→finál by se nikdy nespustilo.
         $matches = $this->preferExactVsMatches($this->collapseProformaFinalPair($matches));
         if (count($matches) > 1) {
-            return ['status' => 'unmatched', 'reason' => 'ambiguous_vs', 'tx_currency' => $txCurrency];
+            $matches = $this->resolveSharedPaymentVs($matches, $amount, $txCurrency, $exactTolerance);
+            if (count($matches) !== 1) {
+                return ['status' => 'unmatched', 'reason' => 'ambiguous_vs', 'tx_currency' => $txCurrency];
+            }
         }
         $inv = $matches[0] ?? null;
         if ($inv === null) {

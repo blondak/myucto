@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Pohoda;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Stats\StatsRecomputer;
 
@@ -252,6 +253,10 @@ final class InvoiceImporter
                 $type,
                 $clientId,
                 $number['number'],
+                // Platební VS z Pohody, liší-li se od čísla dokladu (#249).
+                preg_match('/^\d{1,10}$/', $doc['symvar']) === 1
+                    && $doc['symvar'] !== VariableSymbolNormalizer::forPayment((string) $number['number'])
+                    ? $doc['symvar'] : null,
                 $doc['issue'],
                 $type === 'proforma' ? $doc['tax'] : ($doc['tax'] ?? $doc['issue']),
                 $doc['due'],
@@ -1001,11 +1006,11 @@ final class InvoiceImporter
     {
         return [
             $this->stmt('issued', 'INSERT INTO invoices
-                (supplier_id, invoice_type, client_id, varsymbol, issue_date, tax_date, due_date, currency_id,
+                (supplier_id, invoice_type, client_id, varsymbol, payment_variable_symbol, issue_date, tax_date, due_date, currency_id,
                  note_above_items, note_below_items, client_snapshot, total_without_vat, total_vat, total_with_vat,
                  rounding, advance_paid_amount, paid_total, paid_at, status, booked_at, booked_by,
                  vat_classification_code, payment_method, prices_include_vat, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'),
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'),
             $this->stmt('issued_item', 'INSERT INTO invoice_items
                 (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,

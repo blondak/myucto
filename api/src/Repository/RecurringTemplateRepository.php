@@ -521,9 +521,9 @@ final class RecurringTemplateRepository
              invoice_type, currency_id, language, payment_method, reverse_charge, prices_include_vat, discount_percent,
              revenue_category_id,
              payment_due_days, payment_due_unit, tax_date_mode, draft_open_mode, reminder_days_before,
-             note_above_items, note_below_items,
+             note_above_items, note_below_items, payment_variable_symbol,
              increment_month_in_descriptions, auto_issue, auto_send_email, status, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -553,6 +553,7 @@ final class RecurringTemplateRepository
             self::normalizeReminderDays($data['reminder_days_before'] ?? null),
             $data['note_above_items'] ?? null,
             $data['note_below_items'] ?? null,
+            InvoiceRepository::normalizePaymentVariableSymbol($data['payment_variable_symbol'] ?? null),
             !empty($data['increment_month_in_descriptions']) ? 1 : 0,
             !empty($data['auto_issue']) ? 1 : 0,
             !empty($data['auto_send_email']) ? 1 : 0,
@@ -608,6 +609,8 @@ final class RecurringTemplateRepository
             $nextRunDate = (string) $existing['next_run_date'];
         }
 
+        // Platební VS (#249) se přepisuje jen když je klíč v payloadu.
+        $hasPaymentVs = array_key_exists('payment_variable_symbol', $data);
         $sql = 'UPDATE recurring_invoice_templates SET
                 client_id = ?, project_id = ?, branding_profile_id = ?, name = ?,
                 frequency = ?, day_of_month = ?, end_of_month = ?,
@@ -618,8 +621,9 @@ final class RecurringTemplateRepository
                 payment_due_days = ?, payment_due_unit = ?, tax_date_mode = ?,
                 draft_open_mode = ?, reminder_days_before = ?,
                 note_above_items = ?, note_below_items = ?,
-                increment_month_in_descriptions = ?, auto_issue = ?, auto_send_email = ?
-              WHERE id = ?';
+                increment_month_in_descriptions = ?, auto_issue = ?, auto_send_email = ?'
+            . ($hasPaymentVs ? ', payment_variable_symbol = ?' : '')
+            . ' WHERE id = ?';
         $this->db->pdo()->prepare($sql)->execute([
             (int) $data['client_id'],
             !empty($data['project_id']) ? (int) $data['project_id'] : null,
@@ -649,6 +653,7 @@ final class RecurringTemplateRepository
             !empty($data['increment_month_in_descriptions']) ? 1 : 0,
             !empty($data['auto_issue']) ? 1 : 0,
             !empty($data['auto_send_email']) ? 1 : 0,
+            ...($hasPaymentVs ? [InvoiceRepository::normalizePaymentVariableSymbol($data['payment_variable_symbol'])] : []),
             $id,
         ]);
     }

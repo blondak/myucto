@@ -15658,6 +15658,7 @@
     "section_invoice_meta": "Faktura",
     "section_notes": "Poznámky",
     "notes_placeholders_hint": "Podporují placeholdery období (viz nápověda u položek) — vyhodnotí se při generování každé faktury.",
+    "payment_variable_symbol_hint": "Stejný VS dostanou všechny vygenerované faktury (např. pro trvalý příkaz). Prázdné = VS z čísla dokladu.",
     "section_automation": "Automatizace",
     "generated_invoices": "Vygenerované faktury",
     "amount": "Částka",
@@ -17348,6 +17349,10 @@
     "supplier_order_number": "Číslo objednávky dodavatele",
     "supplier_order_number_placeholder": "např. MYU000023",
     "supplier_order_number_hint": "Volitelná reference objednávky, podle které lze doklad automaticky párovat s platbou.",
+    "payment_variable_symbol": "Platební variabilní symbol",
+    "payment_variable_symbol_placeholder": "odvodí se z čísla dokladu",
+    "payment_variable_symbol_invalid": "Platební VS smí obsahovat jen číslice, nejvýše 10.",
+    "payment_variable_symbol_hint": "Vyplňte, jen pokud má klient platit pod jiným VS než číslem dokladu. Nemusí být unikátní.",
     "dates_section": "Datumy",
     "modals": {
       "mark_paid_title": "Označit jako zaplacené",

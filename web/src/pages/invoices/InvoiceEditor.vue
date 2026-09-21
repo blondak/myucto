@@ -117,6 +117,16 @@ const editorTitle = computed(() => {
   const key = (isEdit.value ? 'invoice.edit_title' : 'invoice.new_title') + suffix
   return t(key)
 })
+// Platební VS odvozený z čísla dokladu (jen číslice, max 10) — ukazuje se jako placeholder,
+// když uživatel vlastní platební VS nevyplní (#249).
+const derivedPaymentVs = computed(() => {
+  const source = form.value.varsymbol.trim() || editedVarsymbol.value || varsymbolAutoPreview.value || ''
+  return source.replace(/\D+/g, '').slice(0, 10)
+})
+const paymentVsInvalid = computed(() => {
+  const vs = form.value.payment_variable_symbol.replace(/\s+/g, '')
+  return vs !== '' && !/^\d{1,10}$/.test(vs)
+})
 const varsymbolLabelKey = computed(() => {
   if (form.value.invoice_type === 'proforma') return 'invoice.varsymbol_label_proforma'
   if (form.value.invoice_type === 'credit_note') return 'invoice.varsymbol_label_credit_note'
@@ -797,6 +807,7 @@ const form = ref<{
   income_tax_exempt_reason: string
   language: 'cs' | 'en'
   supplier_order_number: string
+  payment_variable_symbol: string
   note_above_items: string
   note_below_items: string
   advance_paid_amount: number
@@ -829,6 +840,7 @@ const form = ref<{
   income_tax_exempt_reason: '',
   language: 'cs',
   supplier_order_number: '',
+  payment_variable_symbol: '',
   note_above_items: '',
   note_below_items: '',
   advance_paid_amount: 0,
@@ -1149,6 +1161,7 @@ onMounted(async () => {
       income_tax_exempt_reason: (inv as { income_tax_exempt_reason?: string | null }).income_tax_exempt_reason ?? '',
       language: inv.language,
       supplier_order_number: inv.supplier_order_number ?? '',
+      payment_variable_symbol: inv.payment_variable_symbol ?? '',
       note_above_items: inv.note_above_items ?? '',
       note_below_items: inv.note_below_items ?? '',
       advance_paid_amount: inv.advance_paid_amount,
@@ -2121,6 +2134,7 @@ async function submit() {
       income_tax_exempt_reason: form.value.income_tax_exempt ? (form.value.income_tax_exempt_reason || null) : null,
       language: form.value.language,
       supplier_order_number: form.value.supplier_order_number.trim() || null,
+      payment_variable_symbol: form.value.payment_variable_symbol.replace(/\s+/g, '') || null,
       note_above_items: form.value.note_above_items || null,
       note_below_items: form.value.note_below_items || null,
       advance_paid_amount: form.value.advance_paid_amount,
@@ -2552,6 +2566,15 @@ async function deleteDraft() {
             <div v-else-if="editedVarsymbol" class="rounded-md bg-neutral-50 border border-neutral-200 p-3 text-sm">
               <span class="text-neutral-500">{{ t(varsymbolLabelKey) }}:</span>
               <code class="ml-2 font-mono font-semibold">{{ editedVarsymbol }}</code>
+            </div>
+            <!-- Platební VS (#249) — prázdné = odvodí se z čísla dokladu; nemusí být unikátní. -->
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.payment_variable_symbol') }}</label>
+              <input v-model="form.payment_variable_symbol" type="text" inputmode="numeric" maxlength="10"
+                :placeholder="derivedPaymentVs || t('invoice.payment_variable_symbol_placeholder')"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
+              <p v-if="paymentVsInvalid" class="text-xs text-danger-600 mt-1">{{ t('invoice.payment_variable_symbol_invalid') }}</p>
+              <p v-else class="text-xs text-neutral-500 mt-1">{{ t('invoice.payment_variable_symbol_hint') }}</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.supplier_order_number') }}</label>

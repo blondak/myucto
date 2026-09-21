@@ -9,6 +9,7 @@ use DOMElement;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 
 /**
  * Stereo for Windows DocumentPack exporter for issued invoices.
@@ -126,7 +127,7 @@ final class StereoXmlExporter
         if (!empty($bank['bic'])) {
             $this->el($xml, $payment, 'Swift', (string) $bank['bic']);
         }
-        $this->el($xml, $payment, 'VariableSymbol', (string) ($invoice['varsymbol'] ?? ''));
+        $this->el($xml, $payment, 'VariableSymbol', VariableSymbolNormalizer::forInvoicePayment($invoice));
         $this->el($xml, $payment, 'ConstantSymbol', (string) ($invoice['constant_symbol'] ?? ''));
         if (!empty($bank['bank_name'])) {
             $this->el($xml, $payment, 'BankName', (string) $bank['bank_name']);

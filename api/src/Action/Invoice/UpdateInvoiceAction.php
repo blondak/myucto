@@ -632,7 +632,7 @@ final class UpdateInvoiceAction
         // s editovatelnými sloupci v InvoiceRepository::updateDraft().
         $columns = [
             'client_id', 'currency_id', 'project_id', 'revenue_category_id', 'branding_profile_id',
-            'issue_date', 'tax_date', 'due_date', 'varsymbol',
+            'issue_date', 'tax_date', 'due_date', 'varsymbol', 'payment_variable_symbol',
             'invoice_type', 'payment_method', 'supplier_order_number', 'note_above_items', 'note_below_items',
             'discount_percent', 'advance_paid_amount', 'reverse_charge',
             'prices_include_vat', 'vat_classification_code', 'income_tax_exempt', 'language',

@@ -2112,6 +2112,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
             <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.issue_date') }}</dt><dd>{{ formatDate(invoice.issue_date) }}</dd></div>
             <div v-if="invoice.tax_date && !isProforma" class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.tax_date') }}</dt><dd>{{ formatDate(invoice.tax_date) }}</dd></div>
             <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.due_date') }}</dt><dd>{{ formatDate(invoice.due_date) }}</dd></div>
+            <div v-if="invoice.payment_variable_symbol" class="flex justify-between gap-3">
+              <dt class="text-neutral-500">{{ t('invoice.payment_variable_symbol') }}</dt>
+              <dd class="font-mono text-right">{{ invoice.payment_variable_symbol }}</dd>
+            </div>
             <div v-if="invoice.supplier_order_number" class="flex justify-between gap-3">
               <dt class="text-neutral-500">{{ t('invoice.supplier_order_number') }}</dt>
               <dd class="font-mono text-right">{{ invoice.supplier_order_number }}</dd>
@@ -3181,7 +3185,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
     />
     <Teleport to="body">
       <RuleFormModal v-if="postingRuleOpen && invoice"
-        :prefill="{ name: invoice.client_company_name || invoice.varsymbol || '', direction: invoice.total_with_vat < 0 ? 'outgoing' : 'incoming', applies_currency: invoice.currency, variable_symbol: invoice.varsymbol || null }"
+        :prefill="{ name: invoice.client_company_name || invoice.varsymbol || '', direction: invoice.total_with_vat < 0 ? 'outgoing' : 'incoming', applies_currency: invoice.currency, variable_symbol: invoice.payment_varsymbol || invoice.varsymbol || null }"
         @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />
     </Teleport>
   </div>

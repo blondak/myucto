@@ -376,6 +376,13 @@ U vydané faktury se bankovní účet přebírá z historických údajů `MyAddr
 konkrétního dokladu. Výchozí účet měny se použije jen tehdy, když doklad účet
 neobsahuje nebo jej nelze jednoznačně spojit s aktivním účtem v MyÚčtu.
 
+Číslo vydané faktury i dobropisu se bere z iDokladového čísla dokladu
+(`DocumentNumber`). Liší-li se od něj platební variabilní symbol
+(`VariableSymbol`), uloží se jako **platební variabilní symbol** faktury
+([§ 15.2.5](15_Faktura_editor.md)). PDF, QR platba i párování plateb pak
+používají VS, pod kterým klient skutečně platí. Stejně se převezme `symVar`
+z Pohody při migraci vydaných dokladů.
+
 ### 21.10.5 Platební stav
 
 API import přebírá **skutečný platební stav ze zdrojového systému** — na rozdíl

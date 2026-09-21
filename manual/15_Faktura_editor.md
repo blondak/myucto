@@ -82,6 +82,31 @@ V hlavičce konceptu je pole **Číslo faktury** (resp. „Číslo zálohové fa
 Šablonu pro automatické generování nastavuješ v **Systém → Firmy →
 [tvůj dodavatel] → Číslování faktur** — viz [§ 95.5.3](95_Multi_supplier.md#9553-cislovani-faktur).
 
+#### Platební variabilní symbol
+
+Číslo faktury a variabilní symbol, pod kterým klient platí, můžou být dvě různé
+hodnoty. Pole **Platební variabilní symbol** v hlavičce je volitelné:
+
+- **Prázdné** — platební VS se odvodí z čísla faktury (jen číslice, nejvýše
+  10 znaků, pomlčky a písmena se vynechají). Placeholder pole ukazuje, jaký VS
+  z čísla vznikne.
+- **Vyplněné** — na PDF, v QR platbě, v e-mailu, v upomínce, na webové faktuře
+  i v exportech (ISDOC, Pohoda, Money S3, Stereo) se použije tahle hodnota.
+  Číslo faktury se nemění. Povolené jsou jen číslice, nejvýše 10.
+
+Platební VS **nemusí být unikátní**. Hodí se třeba u pravidelné fakturace, kdy
+zákazník platí trvalým příkazem pod stále stejným VS:
+
+| Číslo faktury | Platební VS |
+|---|---|
+| `20260001` | `12345` |
+| `20260002` | `12345` |
+
+Platební VS lze změnit i u vystavené faktury přes úpravu správcem. Na účetnictví
+ani DPH nemá vliv. Při kopii faktury a při vystavení daňového dokladu ze zálohy
+se převezme. Jak se podle něj párují platby, popisuje
+[§ 29](29_Banka.md).
+
 ### 15.2.6 Ceny „s DPH" vs „bez DPH" (brutto / netto režim)
 
 Přepínač **Ceny zadávám s DPH / bez DPH** (v hlavičce u DPH) určuje, jak se na
