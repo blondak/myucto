@@ -39,7 +39,7 @@ use Psr\Http\Message\UploadedFileInterface;
  *   POST /api/admin/imports/money-s3/uploads/{token}/complete
  *   GET  /api/admin/imports/money-s3/uploads/{token}
  *   POST /api/admin/imports/money-s3/uploads/{token}/reports        multipart `report` + `year`
- *   POST /api/admin/imports/money-s3/uploads/{token}/start          {mode, close_history, first_period_start, from_year}
+ *   POST /api/admin/imports/money-s3/uploads/{token}/start          {mode, close_history, first_period_start, from_year, disposal_year_tax}
  *   GET  /api/admin/imports/money-s3/runs
  *   GET  /api/admin/imports/money-s3/runs/{id}
  *
@@ -412,6 +412,7 @@ final class MoneyS3MigrationAction
                 [],
                 filter_var($body['confirm_ico'] ?? false, FILTER_VALIDATE_BOOL),
                 $fromYear > 0 ? $fromYear : null,
+                (string) ($body['disposal_year_tax'] ?? ImportOptions::DISPOSAL_YEAR_TAX_HALF),
             );
         } catch (MoneyS3Exception $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 422);
@@ -452,6 +453,7 @@ final class MoneyS3MigrationAction
             'first_period_start' => $options->firstPeriodStart,
             'confirm_ico' => $options->confirmedIco,
             'from_year' => $options->fromYear,
+            'disposal_year_tax' => $options->disposalYearTax,
         ], $userId);
         $stored = $this->jobs->find($jobId, $supplierId);
         if ($stored === null || ($stored['source'] ?? '') !== MoneyS3ImportJobService::SOURCE) {

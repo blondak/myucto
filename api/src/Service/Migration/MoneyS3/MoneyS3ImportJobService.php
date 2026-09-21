@@ -110,6 +110,7 @@ final class MoneyS3ImportJobService
                 MoneyS3Uploads::reports($supplierId, $token),
                 (bool) ($params['confirm_ico'] ?? false),
                 (int) ($params['from_year'] ?? 0) > 0 ? (int) $params['from_year'] : null,
+                (string) ($params['disposal_year_tax'] ?? ImportOptions::DISPOSAL_YEAR_TAX_HALF),
             );
             $agenda = (array) ($meta['agenda'] ?? []);
             $runId = $this->runs->startRun($supplierId, $jobId, $mode, [

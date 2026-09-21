@@ -12,11 +12,17 @@ final class ImportOptions
     public const MODE_DRY_RUN = 'dry_run';
     public const MODE_IMPORT = 'import';
 
+    /** Daňový odpis hmotného majetku v roce vyřazení: poloviční podle §26 odst. 7 ZDP. */
+    public const DISPOSAL_YEAR_TAX_HALF = 'half';
+    /** Daňový odpis v roce vyřazení se neuplatní (firma ho v přiznání neuplatňovala). */
+    public const DISPOSAL_YEAR_TAX_NONE = 'none';
+
     /**
      * @param list<string> $relatedPartyIcos IČO partnerů, které se v adresáři označí jako spřízněné osoby
      * @param array<int,string> $moneyReports rok => cesta k obratové předvaze vyexportované z Money (CSV)
      * @param bool $confirmedIco uživatel výslovně potvrdil, že záloha patří firmě, i když to IČO ověřit nejde
      * @param int|null $fromYear první převáděný účetní rok; starší roky zálohy (a jejich doklady) se vynechají
+     * @param string $disposalYearTax daňový odpis majetku v roce vyřazení (half|none)
      */
     public function __construct(
         public readonly string $mode = self::MODE_DRY_RUN,
@@ -26,9 +32,13 @@ final class ImportOptions
         public readonly array $moneyReports = [],
         public readonly bool $confirmedIco = false,
         public readonly ?int $fromYear = null,
+        public readonly string $disposalYearTax = self::DISPOSAL_YEAR_TAX_HALF,
     ) {
         if (!in_array($mode, [self::MODE_DRY_RUN, self::MODE_IMPORT], true)) {
             throw new MoneyS3Exception('invalid_mode', 'Neznámý režim převodu.');
+        }
+        if (!in_array($disposalYearTax, [self::DISPOSAL_YEAR_TAX_HALF, self::DISPOSAL_YEAR_TAX_NONE], true)) {
+            throw new MoneyS3Exception('invalid_disposal_year_tax', 'Daňový odpis v roce vyřazení čeká „half" (poloviční) nebo „none" (bez odpisu).');
         }
         if ($firstPeriodStart !== null && preg_match('/^\d{4}-\d{2}-\d{2}$/', $firstPeriodStart) !== 1) {
             throw new MoneyS3Exception('invalid_first_period_start', 'Začátek prvního účetního období čeká datum RRRR-MM-DD.');
@@ -54,6 +64,7 @@ final class ImportOptions
             'money_reports' => array_map('intval', array_keys($this->moneyReports)),
             'confirmed_ico' => $this->confirmedIco,
             'from_year' => $this->fromYear,
+            'disposal_year_tax' => $this->disposalYearTax,
         ];
     }
 }

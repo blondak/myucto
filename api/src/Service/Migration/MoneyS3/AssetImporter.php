@@ -20,8 +20,11 @@ use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
  * Pohyby karty (`MjInvPoh.Typ`): Z zařazení, V zvýšení ceny, H technické zhodnocení,
  * S snížení ceny (dotace, dobropis), U účetní odpis, D daňový odpis zaúčtovaný jako
  * účetní (karty, kde se účetní odpis rovná daňovému), X účetní zůstatková cena při roční
- * uzávěrce karty, Y vyřazení. `ZustCena` u odpisů je účetní zůstatková cena po pohybu.
- * Daňové odpisy hmotného majetku Money neukládá, počítá je z parametrů karty.
+ * uzávěrce karty, Y vyřazení. `ZustCena` u odpisů je účetní zůstatková cena po pohybu,
+ * `OdpZustCen` označí odpis zůstatkové ceny (při vyřazení ho Money účtuje na 541).
+ * Daňové odpisy hmotného majetku Money neukládá, počítá je z parametrů karty. Výjimkou je
+ * pomocná karta bez majetkového účtu („pomocná karta - výpočet daňových odpisů"), na které
+ * Money vede daňové odpisy karty „jen ÚČETNÍ odpis" s jinou daňovou vstupní cenou.
  *
  * Zařazení, odpisy i vyřazení Money zaúčtovalo interními doklady, které jsou v převzatém
  * deníku. Karta proto vznikne bez zápisu v deníku a vede se stejně jako karta převodu
@@ -45,6 +48,13 @@ final class AssetImporter
     /** `MajInv.ZpusobOdpi` - způsob daňového odpisu. */
     private const TAX_METHODS = ['Z' => 'accelerated', 'R' => 'straight', 'N' => 'straight'];
 
+    /**
+     * `MajInv.FL_LGMajSk` - odpisová skupina z číselníku Money, když karta nemá `OdpisSkupi`.
+     * 5 je mimořádný odpis bezemisního vozidla (§30a), 20 FVE a 25 neodpisovaný majetek.
+     */
+    private const FL_GROUPS = [1 => 1, 4 => 2, 6 => 3, 7 => 4, 8 => 5, 9 => 6];
+    private const FL_ZERO_EMISSION = 5;
+
     public function __construct(
         private readonly Connection $db,
         private readonly MoneyS3ImportRepository $map,
@@ -66,11 +76,15 @@ final class AssetImporter
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_ASSET);
         $end = sprintf('%04d-12-31', max($years));
         $evidence = [];
+        $helpers = self::pairHelpers($cards, $moves);
         foreach ($cards as $no => $card) {
             if ((int) ($card['TypMajetku'] ?? -1) !== self::TYPE_LONG_TERM) {
                 continue;
             }
-            $this->importCard($ctx, $existing, $years, $card, $moves[$no] ?? []);
+            $helperNo = $helpers[$no] ?? null;
+            $this->importCard($ctx, $existing, $years, $card, $moves[$no] ?? [],
+                $helperNo !== null ? ['card' => $cards[$helperNo], 'moves' => $moves[$helperNo] ?? []] : null,
+                array_search($no, $helpers, true) ?: null);
             // Evidence Money po syntetických účtech: majetek nevyřazený do konce převodu.
             $synthetic = AccountCode::synthetic((string) ($card['PrUcMaj'] ?? ''));
             $disposed = self::date($card['DatVyrazen'] ?? null);
@@ -219,8 +233,11 @@ final class AssetImporter
      * @param list<int> $years převedené roky vzestupně
      * @param array<string,mixed> $card
      * @param list<array<string,mixed>> $list pohyby karty podle data
+     * @param array{card:array<string,mixed>,moves:list<array<string,mixed>>}|null $helper pomocná karta
+     *        Money s daňovými odpisy této karty
+     * @param int|null $helperOf karta, jejíž daňové odpisy tato pomocná karta počítá
      */
-    private function importCard(ImportContext $ctx, array $existing, array $years, array $card, array $list): void
+    private function importCard(ImportContext $ctx, array $existing, array $years, array $card, array $list, ?array $helper = null, ?int $helperOf = null): void
     {
         $p = $ctx->protocol;
         $no = (int) $card['Cislo'];
@@ -246,21 +263,26 @@ final class AssetImporter
         }
         // Karta bez majetkového účtu je v Money pomocná evidence (výpočet daňových odpisů
         // k majetku vedenému na jiné kartě, licence), majetkem v účetnictví není.
-        if (in_array(AccountCode::synthetic((string) ($card['PrUcMaj'] ?? '')), [null, '000'], true)) {
+        if (self::isHelper($card)) {
             $p->count(self::STEP, 'helper_cards');
-            $p->info(self::STEP, 'helper_card', "Karta {$no} ({$name}) nemá v Money majetkový účet, jde o pomocnou evidenci; nepřevádí se.", ['document_no' => (string) $no]);
+            if ($helperOf !== null) {
+                $p->info(self::STEP, 'helper_card_paired', "Pomocná karta {$no} ({$name}) počítá v Money daňové odpisy karty {$helperOf}; nepřevádí se, její daňové parametry a odpisy převzala karta {$helperOf}.", ['document_no' => (string) $no]);
+            } else {
+                $p->info(self::STEP, 'helper_card', "Karta {$no} ({$name}) nemá v Money majetkový účet, jde o pomocnou evidenci; nepřevádí se.", ['document_no' => (string) $no]);
+            }
             return;
         }
         $key = (string) $no;
-        [$taxMethod, $taxGroup] = self::taxSetup($card, $list, $disposal);
-        $plan = $this->taxPlan($taxMethod, $taxGroup, $list, $inUse, $disposal);
+        $review = [];
+        $tax = self::taxSetup($card, $list, $disposal, $helper['card'] ?? null);
+        $taxMethod = $tax['method'];
+        $plan = $this->taxPlan($ctx, $tax, $helper['card'] ?? $card, $helper['moves'] ?? $list, $inUse, $disposal, $helper !== null, $review);
         if (isset($existing[$key])) {
-            $this->depreciation($ctx, $existing[$key], $years, $list, $inUse, $disposal, $plan);
+            $this->depreciation($ctx, $existing[$key], $years, $list, $inUse, $disposal, $plan, $tax['equal']);
             $p->count(self::STEP, 'existing');
             return;
         }
 
-        $review = [];
         if ($noInUseDate) {
             $review[] = 'Money nemá datum zařazení, doplňte ho';
         }
@@ -282,8 +304,7 @@ final class AssetImporter
             if ($m['Datum'] > $priceDate && $m['Datum'] <= $end && isset(self::PRICE_MOVES[$m['Typ']])) {
                 if (self::PRICE_MOVES[$m['Typ']] < 0) {
                     // Snížení ceny (dotace, dobropis) se zapíše jako záporné zhodnocení, aby karta
-                    // seděla na účet; daňový dopad snížení vstupní ceny ale ověří účetní.
-                    $review[] = 'snížení ceny ' . self::money($m['Castka']) . ' z ' . $m['Datum'] . ' (' . ($m['Popis'] ?: $m['Doklad'] ?: 'bez popisu') . ') je zapsané jako záporné technické zhodnocení, ověřte daňovou vstupní cenu';
+                    // seděla na účet; daňový plán ho promítne do daňové vstupní ceny ({@see taxPlan()}).
                     $improvements[] = $m;
                 } elseif ($m['Typ'] !== 'Z' || $m['Datum'] > $inUse) {
                     $improvements[] = $m;
@@ -315,6 +336,7 @@ final class AssetImporter
         $taxBefore = array_filter($plan, static fn (array $r): bool => $r['fiscal_year'] < $first);
         $taxYears = count($taxBefore);
         $taxAmount = round(array_sum(array_column($taxBefore, 'full_amount')), 2);
+        $planned = in_array($taxMethod, ['straight', 'accelerated', 'extraordinary'], true);
 
         $card0 = [
             'inventory_number' => $this->inventoryNumber($ctx, trim((string) ($card['InventCisl'] ?? '')) ?: trim((string) ($card['KodMaj'] ?? '')), $no),
@@ -325,9 +347,11 @@ final class AssetImporter
             'put_into_use_date' => $inUse,
             'status' => 'in_use',
             'tax_method' => $taxMethod,
-            'tax_group' => in_array($taxMethod, ['straight', 'accelerated'], true) ? $taxGroup : null,
-            'opening_tax_years' => in_array($taxMethod, ['straight', 'accelerated'], true) ? $taxYears : 0,
-            'opening_tax_amount' => in_array($taxMethod, ['straight', 'accelerated'], true) ? min($taxAmount, $inputPrice) : 0.0,
+            'tax_group' => in_array($taxMethod, ['straight', 'accelerated'], true) ? $tax['group'] : null,
+            'is_first_owner' => $taxMethod === 'extraordinary',
+            'is_zero_emission' => $tax['zero_emission'],
+            'opening_tax_years' => $planned ? $taxYears : 0,
+            'opening_tax_amount' => $planned ? min($taxAmount, $inputPrice) : 0.0,
             'opening_acc_months' => $depreciable ? $openingMonths : 0,
             'opening_acc_amount' => $depreciable ? min($openingAcc, $inputPrice) : 0.0,
             'acc_useful_life_months' => $depreciable ? self::usefulLife($inUseMonth, $accMoves) : null,
@@ -348,6 +372,9 @@ final class AssetImporter
         if ($review !== []) {
             $card0['status'] = 'draft';
             $card0['description'] = 'Převod z Money S3 (karta č. ' . $no . ') - ke kontrole: ' . implode('; ', $review) . '.';
+        } elseif ($helper !== null) {
+            $card0['description'] = 'Převod z Money S3 (karta č. ' . $no . '), daňové odpisy podle pomocné karty Money č. '
+                . (int) $helper['card']['Cislo'] . ' (daňová vstupní cena ' . self::money(self::priceAt($helper['moves'], $inUse)) . ').';
         } else {
             $card0['description'] = 'Převod z Money S3 (karta č. ' . $no . ')' . (self::accountingOnly($card) ? ', interní karta jen pro účetní odpisy, bez daňových odpisů.' : '.');
         }
@@ -378,7 +405,7 @@ final class AssetImporter
         if ($plan !== []) {
             $p->count(self::STEP, 'tax_computed');
         }
-        $this->depreciation($ctx, $assetId, $years, $list, $inUse, $disposal, $plan);
+        $this->depreciation($ctx, $assetId, $years, $list, $inUse, $disposal, $plan, $tax['equal']);
         if ($disposal !== null && $disposal <= $end) {
             $this->db->pdo()->prepare(
                 "UPDATE assets SET status = 'disposed', disposal_date = ?, disposal_type = ? WHERE id = ? AND supplier_id = ?"
@@ -396,8 +423,9 @@ final class AssetImporter
      * @param list<int> $years
      * @param list<array<string,mixed>> $list
      * @param array<int,array<string,mixed>> $plan daňový plán karty podle roku
+     * @param bool $taxEqualsAccounting hmotný majetek s daňovým odpisem rovným účetnímu (`UcRovnyDan`)
      */
-    private function depreciation(ImportContext $ctx, int $assetId, array $years, array $list, string $inUse, ?string $disposal, array $plan): void
+    private function depreciation(ImportContext $ctx, int $assetId, array $years, array $list, string $inUse, ?string $disposal, array $plan, bool $taxEqualsAccounting = false): void
     {
         $asset = $this->db->pdo()->prepare('SELECT status, tax_method FROM assets WHERE id = ? AND supplier_id = ?');
         $asset->execute([$assetId, $ctx->supplierId]);
@@ -415,11 +443,7 @@ final class AssetImporter
             $inYear = array_values(array_filter($accMoves, static fn (array $m): bool => $m['Datum'] >= $from && $m['Datum'] <= $to));
             $booked = round(array_sum(array_column($inYear, 'Castka')), 2);
             if ($booked > 0.0) {
-                $months = [];
-                foreach ($inYear as $m) {
-                    $months[substr($m['Datum'], 0, 7)] = true;
-                }
-                $this->upsertMigrated($ctx, $assetId, 'accounting', $year, $booked, $booked, round((float) end($inYear)['ZustCena'], 2), count($months), false, 'posted');
+                $this->upsertMigrated($ctx, $assetId, 'accounting', $year, $booked, $booked, round((float) end($inYear)['ZustCena'], 2), self::monthCount($inYear), false, 'posted');
             }
             $closed = $ctx->isLocked($year) || ($disposal !== null && $disposal <= $to) || $year < max($years);
             if (!$closed) {
@@ -428,6 +452,11 @@ final class AssetImporter
             if ($row['tax_method'] === 'by_accounting') {
                 $residual = $inYear !== [] ? round((float) end($inYear)['ZustCena'], 2) : 0.0;
                 $this->upsertMigrated($ctx, $assetId, 'tax', $year, $booked, $booked, $residual, null, false, 'confirmed');
+            } elseif ($taxEqualsAccounting) {
+                $r = self::equalTaxRow($list, $inYear, $year);
+                if ($r !== null) {
+                    $this->upsertMigrated($ctx, $assetId, 'tax', $year, $r[0], $r[0], $r[1], null, false, 'confirmed');
+                }
             } elseif (isset($plan[$year])) {
                 $r = $plan[$year];
                 $this->upsertMigrated($ctx, $assetId, 'tax', $year, (float) $r['amount'], (float) $r['full_amount'],
@@ -437,17 +466,44 @@ final class AssetImporter
     }
 
     /**
-     * Daňový způsob a skupina karty. Hmotný majetek podle `ZpusobOdpi` (Z zrychlený,
-     * N a R rovnoměrný) a `OdpisSkupi`; nehmotný odpisuje daňově podle účetních odpisů;
-     * karta bez odpisů (pozemky, skupina „N") se daňově neodpisuje.
+     * Daňový odpis roku hmotného majetku, u kterého Money vede daňový odpis rovný účetnímu
+     * (`UcRovnyDan`): roční odpis je měsíční účetní odpis za každý odepisovaný měsíc roku,
+     * nejvýš daňová zůstatková cena na začátku roku zvýšená o letošní zhodnocení. Hmotný
+     * majetek daňově podle účetních odpisů odpisovat nejde (§24/2/v je jen nehmotný), karta
+     * proto nese daňovou metodu „none" a převedené roky potvrzený daňový řádek.
      *
-     * @param array<string,mixed> $card
      * @param list<array<string,mixed>> $list
-     * @return array{0:string,1:?int}
+     * @param list<array<string,mixed>> $inYear účetní odpisy roku
+     * @return array{0:float,1:float}|null [odpis, daňová zůstatková cena na konci roku]
      */
+    private static function equalTaxRow(array $list, array $inYear, int $year): ?array
+    {
+        if ($inYear === []) {
+            return null;
+        }
+        $regular = array_values(array_filter($inYear, static fn (array $m): bool => $m['OdpZC'] !== 1)) ?: $inYear;
+        $monthly = (float) end($regular)['Castka'];
+        $first = $inYear[0];
+        $cap = (float) $first['ZustCena'] + (float) $first['Castka']
+            + self::priceAt($list, sprintf('%04d-12-31', $year)) - self::priceAt($list, $first['Datum']);
+        $amount = round(max(0.0, min(self::monthCount($inYear) * $monthly, $cap)), 2);
+        return [$amount, round(max(0.0, $cap - $amount), 2)];
+    }
+
+    /** @param list<array<string,mixed>> $moves */
+    private static function monthCount(array $moves): int
+    {
+        $months = [];
+        foreach ($moves as $m) {
+            $months[substr($m['Datum'], 0, 7)] = true;
+        }
+        return count($months);
+    }
+
     /**
      * Karta „jen ÚČETNÍ odpis": interní záznam Money pro účetní odpisy bez vazby na kartu
-     * majetku. Nese hodnotu na majetkovém účtu a účetní odpisy, daňově se neodpisuje.
+     * majetku. Nese hodnotu na majetkovém účtu a účetní odpisy; daňové odpisy k ní vede
+     * pomocná karta ({@see pairHelpers()}), bez ní se daňově neodpisuje.
      *
      * @param array<string,mixed> $card
      */
@@ -456,57 +512,215 @@ final class AssetImporter
         return preg_match('/jen\s+[uú]četn[ií]/iu', (string) ($card['Nazev'] ?? '')) === 1;
     }
 
-    private static function taxSetup(array $card, array $list, ?string $disposal): array
+    /**
+     * Karta bez majetkového účtu je v Money pomocná evidence (výpočet daňových odpisů
+     * k majetku vedenému na jiné kartě, licence), majetkem v účetnictví není.
+     *
+     * @param array<string,mixed> $card
+     */
+    private static function isHelper(array $card): bool
     {
-        if (self::accountingMoves($list, $disposal) === []) {
-            return ['none', null];
-        }
-        if (self::accountingOnly($card)) {
-            return ['none', null];
-        }
-        if (strtoupper(trim((string) ($card['Druh'] ?? ''))) === 'N') {
-            return ['by_accounting', null];
-        }
-        $group = (int) trim((string) ($card['OdpisSkupi'] ?? ''));
-        $method = self::TAX_METHODS[strtoupper(trim((string) ($card['ZpusobOdpi'] ?? '')))] ?? null;
-        if ($method === null || $group < 1 || $group > 6) {
-            return ['none', null];
-        }
-        return [$method, $group];
+        return in_array(AccountCode::synthetic((string) ($card['PrUcMaj'] ?? '')), [null, '000'], true);
     }
 
     /**
-     * Daňový plán karty od zařazení. Money daňové odpisy hmotného majetku neukládá, počítá
-     * je z parametrů karty; stejně je spočte kalkulačka MyÚčta podle ZDP (§31, §32) ze
-     * vstupní ceny ke dni zařazení a pozdějších zvýšení ceny jako technických zhodnocení.
+     * Pomocné karty pro výpočet daňových odpisů a karty „jen ÚČETNÍ odpis", ke kterým patří.
+     * Money vede majetek s rozdílnou účetní a daňovou vstupní cenou na dvou kartách: účetní
+     * s majetkovým účtem a pomocnou bez něj (`000000`). Obě mají stejné datum zařazení, kód
+     * SKP, odpisovou skupinu číselníku a stejná zvýšení, zhodnocení a snížení ceny, liší se
+     * jen vstupní cenou. Bez jednoznačné shody pomocná karta zůstane nespárovaná.
+     *
+     * @param array<int,array<string,mixed>> $cards
+     * @param array<int,list<array<string,mixed>>> $moves
+     * @return array<int,int> číslo karty => číslo její pomocné karty
+     */
+    private static function pairHelpers(array $cards, array $moves): array
+    {
+        $pairs = [];
+        foreach ($cards as $no => $helper) {
+            if ((int) ($helper['TypMajetku'] ?? -1) !== self::TYPE_LONG_TERM || !self::isHelper($helper)) {
+                continue;
+            }
+            $inUse = self::date($helper['DatZarazen'] ?? null);
+            if ($inUse === null) {
+                continue;
+            }
+            $signature = self::priceSignature($moves[$no] ?? []);
+            $candidates = [];
+            foreach ($cards as $other => $card) {
+                if ($other === $no || isset($pairs[$other]) || (int) ($card['TypMajetku'] ?? -1) !== self::TYPE_LONG_TERM || self::isHelper($card)
+                    || self::date($card['DatZarazen'] ?? null) !== $inUse
+                    || trim((string) ($card['KodSKP'] ?? '')) !== trim((string) ($helper['KodSKP'] ?? ''))
+                    || (int) ($card['FL_LGMajSk'] ?? 0) !== (int) ($helper['FL_LGMajSk'] ?? 0)
+                    || self::priceSignature($moves[$other] ?? []) !== $signature) {
+                    continue;
+                }
+                $candidates[] = $other;
+            }
+            $accountingOnly = array_values(array_filter($candidates, static fn (int $c): bool => self::accountingOnly($cards[$c])));
+            if ($accountingOnly !== []) {
+                $candidates = $accountingOnly;
+            } elseif ($signature === []) {
+                // Bez pohybů ceny by shoda stála jen na datu a skupině, to nestačí.
+                $candidates = [];
+            }
+            if (count($candidates) === 1) {
+                $pairs[$candidates[0]] = $no;
+            }
+        }
+        return $pairs;
+    }
+
+    /**
+     * Pohyby ceny karty kromě zařazení, po dnech: zvýšení a zhodnocení zvlášť od snížení.
      *
      * @param list<array<string,mixed>> $list
+     * @return array<string,float>
+     */
+    private static function priceSignature(array $list): array
+    {
+        $signature = [];
+        foreach ($list as $m) {
+            if (in_array($m['Typ'], ['V', 'H', 'S'], true)) {
+                $key = $m['Datum'] . ($m['Typ'] === 'S' ? '-' : '+');
+                $signature[$key] = ($signature[$key] ?? 0.0) + (float) $m['Castka'];
+            }
+        }
+        ksort($signature);
+        return array_map(static fn (float $v): float => round($v, 2), $signature);
+    }
+
+    /**
+     * Daňový způsob a skupina karty. Hmotný majetek podle `ZpusobOdpi` (Z zrychlený,
+     * N a R rovnoměrný) a `OdpisSkupi`, bez ní podle skupiny číselníku (`FL_LGMajSk`);
+     * bezemisní vozidlo mimořádně (§30a). Karta s daňovým odpisem rovným účetnímu
+     * (`UcRovnyDan`): nehmotná odpisuje daňově podle účetních odpisů, hmotná nese potvrzené
+     * daňové řádky ({@see equalTaxRow()}). Nehmotná karta bez `UcRovnyDan`, karta bez
+     * odpisů (pozemky, skupina „N") a karta „jen ÚČETNÍ" bez pomocné karty se daňově
+     * neodpisují. Karta s pomocnou kartou přebírá její daňové parametry.
+     *
+     * @param array<string,mixed> $card
+     * @param list<array<string,mixed>> $list
+     * @param array<string,mixed>|null $helper pomocná karta s daňovými odpisy karty
+     * @return array{method:string,group:?int,zero_emission:bool,equal:bool}
+     */
+    private static function taxSetup(array $card, array $list, ?string $disposal, ?array $helper = null): array
+    {
+        $none = ['method' => 'none', 'group' => null, 'zero_emission' => false, 'equal' => false];
+        if (self::accountingMoves($list, $disposal) === []) {
+            return $none;
+        }
+        if ($helper !== null) {
+            return self::taxParameters($helper);
+        }
+        if (self::accountingOnly($card)) {
+            return $none;
+        }
+        // `UcRovnyDan` 1 účetní odpis rovný daňovému, 2 daňový zaúčtovaný jako účetní (pohyby D).
+        $equal = (int) ($card['UcRovnyDan'] ?? 0) !== 0;
+        if (strtoupper(trim((string) ($card['Druh'] ?? ''))) === 'N') {
+            return $equal ? ['method' => 'by_accounting'] + $none : $none;
+        }
+        if ($equal) {
+            return ['equal' => true] + $none;
+        }
+        return self::taxParameters($card);
+    }
+
+    /**
+     * @param array<string,mixed> $card
+     * @return array{method:string,group:?int,zero_emission:bool,equal:bool}
+     */
+    private static function taxParameters(array $card): array
+    {
+        $none = ['method' => 'none', 'group' => null, 'zero_emission' => false, 'equal' => false];
+        $group = (int) trim((string) ($card['OdpisSkupi'] ?? ''));
+        if ($group < 1 || $group > 6) {
+            $catalog = (int) ($card['FL_LGMajSk'] ?? 0);
+            if ($catalog === self::FL_ZERO_EMISSION) {
+                return ['method' => 'extraordinary', 'zero_emission' => true] + $none;
+            }
+            $group = self::FL_GROUPS[$catalog] ?? 0;
+        }
+        $method = self::TAX_METHODS[strtoupper(trim((string) ($card['ZpusobOdpi'] ?? '')))] ?? null;
+        if ($method === null || $group < 1 || $group > 6) {
+            return $none;
+        }
+        return ['method' => $method, 'group' => $group] + $none;
+    }
+
+    /**
+     * Daňový plán karty. Money daňové odpisy hmotného majetku neukládá, počítá je z parametrů
+     * karty; stejně je spočte kalkulačka MyÚčta podle ZDP (§30a, §31, §32):
+     *   - od zařazení, nebo od roku zahájení daňových odpisů (`DatZDanOdp`), je-li pozdější,
+     *   - ze vstupní ceny k tomu dni, pozdější zvýšení ceny jsou technická zhodnocení,
+     *   - snížení ceny (dotace) téhož dne jako zhodnocení se s ním započte, samotné snížení do
+     *     konce roku po zahájení odpisů sníží vstupní cenu, pozdější je ke kontrole,
+     *   - v roce vyřazení podle volby převodu půlodpis (§26/7), nebo bez odpisu,
+     *   - daňové odpisy vedené na pomocné kartě (pohyby D) jsou potvrzené roky plánu.
+     *
+     * @param array{method:string,group:?int,zero_emission:bool,equal:bool} $tax
+     * @param array<string,mixed> $card karta s daňovými parametry (pomocná, je-li)
+     * @param list<array<string,mixed>> $list její pohyby
+     * @param list<string> $review
      * @return array<int,array<string,mixed>> rok => řádek plánu
      */
-    private function taxPlan(string $method, ?int $group, array $list, string $inUse, ?string $disposal): array
+    private function taxPlan(ImportContext $ctx, array $tax, array $card, array $list, string $inUse, ?string $disposal, bool $fromHelper, array &$review): array
     {
-        if (!in_array($method, ['straight', 'accelerated'], true)) {
+        $method = $tax['method'];
+        if (!in_array($method, ['straight', 'accelerated', 'extraordinary'], true)) {
             return [];
         }
-        $price = self::priceAt($list, $inUse);
-        $improvements = [];
+        $start = $inUse;
+        $taxStart = self::date($card['DatZDanOdp'] ?? null);
+        if ($taxStart !== null && substr($taxStart, 0, 4) > substr($inUse, 0, 4)) {
+            $start = $taxStart;
+        }
+        $startYear = (int) substr($start, 0, 4);
+        $price = self::priceAt($list, $start);
+        $byDate = [];
         foreach ($list as $m) {
-            if ($m['Datum'] > $inUse && isset(self::PRICE_MOVES[$m['Typ']]) && self::PRICE_MOVES[$m['Typ']] > 0) {
-                $improvements[] = ['completed_on' => $m['Datum'], 'amount' => $m['Castka']];
+            if ($m['Datum'] > $start && isset(self::PRICE_MOVES[$m['Typ']])) {
+                $byDate[$m['Datum']] = ($byDate[$m['Datum']] ?? 0.0) + self::PRICE_MOVES[$m['Typ']] * (float) $m['Castka'];
+            }
+        }
+        $improvements = [];
+        foreach ($byDate as $date => $amount) {
+            $amount = round($amount, 2);
+            if ($amount < 0.0 && (int) substr($date, 0, 4) <= $startYear + 1) {
+                $price = round($price + $amount, 2);
+            } elseif ($amount < 0.0) {
+                $review[] = 'snížení ceny ' . self::money(-$amount) . ' z ' . $date . ' daňový plán nezahrnuje, ověřte daňovou zůstatkovou cenu';
+            } elseif ($amount > 0.0 && $method !== 'extraordinary') {
+                $improvements[] = ['completed_on' => $date, 'amount' => $amount];
             }
         }
         if ($price <= 0.0) {
             return [];
         }
+        // Daňové odpisy pomocné karty: roky, které Money už odepsalo.
+        $confirmed = [];
+        $residuals = [];
+        if ($fromHelper) {
+            foreach ($list as $m) {
+                if ($m['Typ'] === 'D') {
+                    $year = (int) substr($m['Datum'], 0, 4);
+                    $confirmed[$year] = round(($confirmed[$year] ?? 0.0) + (float) $m['Castka'], 2);
+                    $residuals[$year] = round((float) $m['ZustCena'], 2);
+                }
+            }
+        }
+        ksort($confirmed);
+        $noDisposalYear = $ctx->options->disposalYearTax === ImportOptions::DISPOSAL_YEAR_TAX_NONE;
         $context = new DepreciationContext(
             inputPrice: $price,
-            taxGroup: $group,
+            taxGroup: $tax['group'],
             firstYearIncrease: 'none',
             isFirstOwner: true,
             isM1Vehicle: false,
             m1LimitException: false,
-            putIntoUseDate: $inUse,
-            disposalDate: $disposal,
+            putIntoUseDate: $start,
+            disposalDate: $noDisposalYear ? null : $disposal,
             accUsefulLifeMonths: null,
             accResidualValue: 0.0,
             openingTaxYears: 0,
@@ -514,13 +728,24 @@ final class AssetImporter
             openingAccMonths: 0,
             openingAccAmount: 0.0,
             improvements: $improvements,
+            confirmedEntries: array_map(static fn (int $year, float $amount): array => [
+                'fiscal_year' => $year, 'kind' => 'tax', 'amount' => $amount, 'full_amount' => $amount, 'is_paused' => false, 'is_half' => false,
+            ], array_keys($confirmed), array_values($confirmed)),
         );
         $plan = [];
         foreach ($this->calculator->plan($context, $method)['tax'] as $r) {
-            $plan[(int) $r['fiscal_year']] = $r;
+            $year = (int) $r['fiscal_year'];
+            if ($noDisposalYear && $disposal !== null && $year >= (int) substr($disposal, 0, 4)) {
+                continue;
+            }
+            if (isset($residuals[$year])) {
+                $r['residual_end'] = $residuals[$year];
+            }
+            $plan[$year] = $r;
         }
         return $plan;
     }
+
     /**
      * Řádek odpisů převedeného roku. Řádek, který mezitím zaúčtovalo nebo potvrdilo MyÚčto
      * (ne převod), se nepřepisuje; převodem vzniklý se po opakovaném převodu srovná s Money.
@@ -580,6 +805,7 @@ final class AssetImporter
                 'Popis' => trim((string) ($r['Popis'] ?? '')),
                 'PrUcMaj' => trim((string) ($r['PrUcMaj'] ?? '')),
                 'PrUcOpr' => trim((string) ($r['PrUcOpr'] ?? '')),
+                'OdpZC' => (int) ($r['OdpZustCen'] ?? 0),
             ];
         }
         foreach ($moves as &$list) {
@@ -634,21 +860,29 @@ final class AssetImporter
     }
 
     /**
-     * Účetní odpisy karty: pohyby U, u karty bez nich (účetní odpis = daňový, typicky
-     * nehmotný majetek) pohyby D. Odpis zůstatkové ceny ke dni vyřazení odpisem není.
+     * Účetní odpisy karty: pohyby U, v měsících bez nich (účetní odpis = daňový, typicky
+     * nehmotný majetek) pohyby D. Odpis zůstatkové ceny ke dni vyřazení (`OdpZustCen`,
+     * v Money na 541) odpisem není; drobný doodpis zůstatku u karty v užívání ano.
      *
      * @param list<array<string,mixed>> $list
      * @return list<array<string,mixed>>
      */
     private static function accountingMoves(array $list, ?string $disposal): array
     {
-        $u = array_values(array_filter($list, static fn (array $m): bool => $m['Typ'] === 'U'));
-        return $u !== [] ? $u : array_values(array_filter($list,
-            static fn (array $m): bool => $m['Typ'] === 'D' && $m['Datum'] !== $disposal));
+        $uMonths = [];
+        foreach ($list as $m) {
+            if ($m['Typ'] === 'U') {
+                $uMonths[substr($m['Datum'], 0, 7)] = true;
+            }
+        }
+        // Karta mohla během let přejít z účetních odpisů na daňové zaúčtované jako účetní
+        // (a zpět): měsíc bez pohybu U nese účetní odpis v pohybu D.
+        return array_values(array_filter($list, static fn (array $m): bool => match ($m['Typ']) {
+            'U' => !(($m['OdpZC'] ?? 0) === 1 && $m['Datum'] === $disposal),
+            'D' => !isset($uMonths[substr($m['Datum'], 0, 7)]) && $m['Datum'] !== $disposal && ($m['OdpZC'] ?? 0) !== 1,
+            default => false,
+        }));
     }
-
-
-
 
     /**
      * Doba účetního odpisování v měsících: uplynulé měsíce do posledního odpisu a zbytek

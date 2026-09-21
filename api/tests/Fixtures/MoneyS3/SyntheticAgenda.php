@@ -52,10 +52,12 @@ final class SyntheticAgenda
         ['ZpusobOdpi', 'C', 1], ['OdpisSkupi', 'C', 2], ['DatZarazen', 'D', 2], ['DatVyrazen', 'D', 2],
         ['PrUcMaj', 'C', 6], ['PrUcOpr', 'C', 6], ['UcOdpPorC', 'E', 10], ['Umisteno', 'C', 40],
         ['SDodavatel', 'C', 60], ['CDodavatel', 'L', 4], ['ZpVyrazeni', 'C', 20],
+        ['KodSKP', 'C', 10], ['FL_LGMajSk', 'L', 4], ['UcRovnyDan', 'L', 4], ['DatZDanOdp', 'D', 2],
     ];
     private const ASSET_MOVE_FIELDS = [
         ['CisloMajet', 'L', 4], ['Cislo', 'L', 4], ['Datum', 'D', 2], ['Typ', 'C', 1], ['Castka', 'E', 10],
         ['ZustCena', 'E', 10], ['Doklad', 'C', 20], ['Popis', 'C', 40], ['PrUcMaj', 'C', 6], ['PrUcOpr', 'C', 6],
+        ['OdpZustCen', 'L', 4],
     ];
     private const PURCHASE_FIELDS = [
         ['Doklad', 'C', 10], ['Storno', 'B', 1], ['PrijatDokl', 'C', 20], ['VarSymbol', 'C', 10], ['D_ICO', 'C', 12], ['D_DIC', 'C', 14],
@@ -533,6 +535,80 @@ final class SyntheticAgenda
             }
         }
         $files['MjInvPoh.DAT'] = Ms3FixtureWriter::table(self::ASSET_MOVE_FIELDS, $moves);
+        return $files;
+    }
+
+    /**
+     * {@see filesWithAssets()} a karty s daňovými zvláštnostmi Money (bez zápisů v deníku):
+     *   - 5 auto 200 000 Kč (2. sk. rovnoměrně) zařazené 1. 3. 2023, účetně 3 000 Kč měsíčně,
+     *     vyřazené 15. 10. 2024 s odpisem zůstatkové ceny 146 000 Kč (`OdpZustCen`),
+     *   - 6 hala „jen ÚČETNÍ odpis" 1,3 mil. Kč a 7 její pomocná karta (`000000`) s daňovou
+     *     vstupní cenou 1,1 mil. Kč (zrychleně, skupina jen v číselníku `FL_LGMajSk` 8 = 5. sk.)
+     *     a daňovým odpisem 2023 40 000 Kč (pohyb D),
+     *   - 8 stroj 300 000 Kč bez `OdpisSkupi`, skupina z číselníku (`FL_LGMajSk` 6 = 3. sk.),
+     *   - 9 elektromobil 1 mil. Kč zařazený 10. 3. 2024 (`FL_LGMajSk` 5, mimořádně §30a),
+     *   - 10 FVE 120 000 Kč s daňovým odpisem rovným účetnímu (`UcRovnyDan`), první měsíc
+     *     účetně poloviční.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithAssetTaxCases(): array
+    {
+        $files = self::filesWithAssets();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        foreach (['ROK.001', 'ROK.002'] as $dir) {
+            $append($dir . '/UcOsnova.DAT', self::CHART_FIELDS, [
+                ['Ucet' => '021100', 'Nazev' => 'Stavby'],
+                ['Ucet' => '081100', 'Nazev' => 'Oprávky ke stavbám'],
+            ]);
+        }
+        $append('MajInv.DAT', self::ASSET_FIELDS, [
+            ['Cislo' => 5, 'TypMajetku' => 1, 'Nazev' => 'Auto', 'InventCisl' => 'DM-005', 'Druh' => 'H', 'ZpusobOdpi' => 'N', 'OdpisSkupi' => '2', 'FL_LGMajSk' => 4,
+                'DatZarazen' => '2023-03-01', 'DatVyrazen' => '2024-10-15', 'ZpVyrazeni' => 'PRODEJ', 'PrUcMaj' => '022100', 'PrUcOpr' => '082100'],
+            ['Cislo' => 6, 'TypMajetku' => 1, 'Nazev' => 'Hala, jen ÚČETNÍ odpis', 'InventCisl' => 'DM-006', 'Druh' => 'H', 'ZpusobOdpi' => 'Z', 'OdpisSkupi' => '5', 'FL_LGMajSk' => 8,
+                'KodSKP' => '5-1', 'DatZarazen' => '2023-06-01', 'PrUcMaj' => '021100', 'PrUcOpr' => '081100'],
+            ['Cislo' => 7, 'TypMajetku' => 1, 'Nazev' => 'pomocná karta-výpočet daň.odpisů', 'InventCisl' => 'DM-006 DAŇ.', 'Druh' => 'H', 'ZpusobOdpi' => 'Z', 'FL_LGMajSk' => 8,
+                'KodSKP' => '5-1', 'DatZarazen' => '2023-06-01', 'PrUcMaj' => '000000', 'PrUcOpr' => '000000'],
+            ['Cislo' => 8, 'TypMajetku' => 1, 'Nazev' => 'Stroj', 'InventCisl' => 'DM-008', 'Druh' => 'H', 'ZpusobOdpi' => 'R', 'FL_LGMajSk' => 6,
+                'DatZarazen' => '2023-01-10', 'PrUcMaj' => '022100', 'PrUcOpr' => '082100'],
+            ['Cislo' => 9, 'TypMajetku' => 1, 'Nazev' => 'Elektromobil', 'InventCisl' => 'DM-009', 'Druh' => 'H', 'FL_LGMajSk' => 5,
+                'DatZarazen' => '2024-03-10', 'DatZDanOdp' => '2024-12-31', 'PrUcMaj' => '022100', 'PrUcOpr' => '082100'],
+            ['Cislo' => 10, 'TypMajetku' => 1, 'Nazev' => 'FVE', 'InventCisl' => 'DM-010', 'Druh' => 'H', 'FL_LGMajSk' => 20, 'UcRovnyDan' => 1,
+                'DatZarazen' => '2024-05-31', 'PrUcMaj' => '022100', 'PrUcOpr' => '082100'],
+        ]);
+        $moves = [];
+        $monthly = static function (int $card, string $from, string $to, float $amount, float $price, array $first = []) use (&$moves): void {
+            $residual = $price;
+            $no = 100;
+            for ($month = new \DateTimeImmutable($from); $month <= new \DateTimeImmutable($to); $month = $month->modify('last day of next month')) {
+                $castka = $first[$month->format('Y-m')] ?? $amount;
+                $residual -= $castka;
+                $moves[] = ['CisloMajet' => $card, 'Cislo' => ++$no, 'Datum' => $month->format('Y-m-d'), 'Typ' => 'U', 'Castka' => $castka, 'ZustCena' => $residual,
+                    'PrUcOpr' => $card === 6 ? '081100' : '082100'];
+            }
+        };
+        $moves[] = ['CisloMajet' => 5, 'Cislo' => 1, 'Datum' => '2023-03-01', 'Typ' => 'Z', 'Castka' => 200000.0, 'ZustCena' => 200000.0];
+        $monthly(5, '2023-04-30', '2024-09-30', 3000.0, 200000.0);
+        $moves[] = ['CisloMajet' => 5, 'Cislo' => 90, 'Datum' => '2024-10-15', 'Typ' => 'U', 'Castka' => 146000.0, 'ZustCena' => 0.0, 'OdpZustCen' => 1, 'PrUcOpr' => '082100'];
+        $moves[] = ['CisloMajet' => 5, 'Cislo' => 91, 'Datum' => '2024-10-15', 'Typ' => 'Y', 'Castka' => 200000.0, 'ZustCena' => 0.0];
+        foreach ([6 => 1000000.0, 7 => 800000.0] as $card => $input) {
+            $moves[] = ['CisloMajet' => $card, 'Cislo' => 1, 'Datum' => '2023-06-01', 'Typ' => 'Z', 'Castka' => $input, 'ZustCena' => $input];
+            $moves[] = ['CisloMajet' => $card, 'Cislo' => 2, 'Datum' => '2023-06-01', 'Typ' => 'V', 'Castka' => 500000.0, 'ZustCena' => $input + 500000.0];
+            $moves[] = ['CisloMajet' => $card, 'Cislo' => 3, 'Datum' => '2023-06-01', 'Typ' => 'S', 'Castka' => 200000.0, 'ZustCena' => $input + 300000.0, 'Popis' => 'dotace'];
+        }
+        $monthly(6, '2023-07-31', '2025-12-31', 5000.0, 1300000.0);
+        $moves[] = ['CisloMajet' => 7, 'Cislo' => 4, 'Datum' => '2023-12-31', 'Typ' => 'D', 'Castka' => 40000.0, 'ZustCena' => 1060000.0];
+        $moves[] = ['CisloMajet' => 8, 'Cislo' => 1, 'Datum' => '2023-01-10', 'Typ' => 'Z', 'Castka' => 300000.0, 'ZustCena' => 300000.0];
+        $monthly(8, '2023-02-28', '2025-12-31', 2500.0, 300000.0);
+        $moves[] = ['CisloMajet' => 9, 'Cislo' => 1, 'Datum' => '2024-03-10', 'Typ' => 'Z', 'Castka' => 1000000.0, 'ZustCena' => 1000000.0];
+        $monthly(9, '2024-04-30', '2025-12-31', 10000.0, 1000000.0);
+        $moves[] = ['CisloMajet' => 10, 'Cislo' => 1, 'Datum' => '2024-05-31', 'Typ' => 'Z', 'Castka' => 120000.0, 'ZustCena' => 120000.0];
+        $monthly(10, '2024-06-30', '2025-12-31', 1000.0, 120000.0, ['2024-06' => 500.0]);
+        $append('MjInvPoh.DAT', self::ASSET_MOVE_FIELDS, $moves);
         return $files;
     }
 

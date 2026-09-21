@@ -857,6 +857,89 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(2, $this->rowCount('small_assets', $supplierId));
     }
 
+    /**
+     * Daňové zvláštnosti evidence Money: odpis zůstatkové ceny při vyřazení není účetní odpis,
+     * pomocná karta nese daňové odpisy karty „jen ÚČETNÍ", skupina z číselníku `FL_LGMajSk`,
+     * mimořádný odpis bezemisního vozidla a daňový odpis rovný účetnímu u hmotného majetku.
+     */
+    public function testAssetTaxCasesFromMoney(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithAssetTaxCases());
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $steps = array_column($protocol->toArray()['steps'], null, 'key');
+        self::assertSame(2, $steps['assets']['counts']['helper_cards'] ?? 0, $this->explain($protocol));
+        self::assertContains('helper_card_paired', array_column($steps['assets']['messages'], 'code'), 'Pomocná karta 7 patří k hale 6.');
+
+        $cards = $this->assetsByInventory($supplierId);
+        self::assertArrayNotHasKey('DM-006 DAŇ.', $cards, 'Pomocná karta se nepřevádí.');
+
+        // Auto: odpis zůstatkové ceny 146 000 Kč ke dni vyřazení účetním odpisem není; daňově půlodpis 2. roku.
+        $car = $cards['DM-005'];
+        self::assertSame(['disposed', '2024-10-15', 'straight', 2], [$car['status'], $car['disposal_date'], $car['tax_method'], (int) $car['tax_group']]);
+        self::assertSame([27000.0, 22000.0], [(float) $car['opening_acc_amount'], (float) $car['opening_tax_amount']]);
+        self::assertSame(['accounting' => [2024 => 27000.0], 'tax' => [2024 => 22250.0]], $this->entries((int) $car['id']));
+
+        // Hala „jen ÚČETNÍ": daňově podle pomocné karty (vstupní cena 1,1 mil. Kč, 5. sk. z číselníku,
+        // odpis 2023 z pohybu D), účetně podle vlastních odpisů.
+        $hall = $cards['DM-006'];
+        self::assertSame(['in_use', 'accelerated', 5, 1, 40000.0, 30000.0], [$hall['status'], $hall['tax_method'], (int) $hall['tax_group'],
+            (int) $hall['opening_tax_years'], (float) $hall['opening_tax_amount'], (float) $hall['opening_acc_amount']]);
+        self::assertEqualsWithDelta(1300000.0, (float) $hall['input_price'], 0.001);
+        self::assertStringContainsString('pomocné karty Money č. 7', (string) $hall['description']);
+        // 2. rok zrychleně: 2 × (1 100 000 − 40 000) / (31 − 1).
+        self::assertSame(['accounting' => [2024 => 60000.0, 2025 => 60000.0], 'tax' => [2024 => 70667.0]], $this->entries((int) $hall['id']));
+
+        // Stroj bez OdpisSkupi: 3. skupina z číselníku, rovnoměrně 5,5 % a 10,5 %.
+        $machine = $cards['DM-008'];
+        self::assertSame(['straight', 3, 16500.0], [$machine['tax_method'], (int) $machine['tax_group'], (float) $machine['opening_tax_amount']]);
+        self::assertSame(31500.0, $this->entries((int) $machine['id'])['tax'][2024] ?? null);
+
+        // Elektromobil: mimořádné odpisy §30a, 60 % za prvních 12 měsíců od dubna 2024.
+        $ev = $cards['DM-009'];
+        self::assertSame(['extraordinary', null, 1, 1], [$ev['tax_method'], $ev['tax_group'], (int) $ev['is_zero_emission'], (int) $ev['is_first_owner']]);
+        self::assertSame(450000.0, $this->entries((int) $ev['id'])['tax'][2024] ?? null);
+
+        // FVE s daňovým odpisem rovným účetnímu: 7 měsíců × měsíční odpis 1 000 Kč, karta bez daňové metody.
+        $pv = $cards['DM-010'];
+        self::assertSame('none', $pv['tax_method']);
+        self::assertSame(['accounting' => [2024 => 6500.0, 2025 => 12000.0], 'tax' => [2024 => 7000.0]], $this->entries((int) $pv['id']));
+    }
+
+    public function testDisposalYearTaxDepreciationCanBeSkipped(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithAssetTaxCases());
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(),
+            new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], [], false, null, ImportOptions::DISPOSAL_YEAR_TAX_NONE));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $car = $this->assetsByInventory($supplierId)['DM-005'];
+        self::assertSame(['accounting' => [2024 => 27000.0]], $this->entries((int) $car['id']), 'V roce vyřazení bez daňového odpisu.');
+        self::assertSame(22000.0, (float) $car['opening_tax_amount']);
+    }
+
+    /** @return array<string,array<string,mixed>> */
+    private function assetsByInventory(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM assets WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), null, 'inventory_number');
+    }
+
+    /** @return array<string,array<int,float>> druh => rok => odpis */
+    private function entries(int $assetId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT kind, fiscal_year, amount FROM depreciation_entries WHERE asset_id = ? ORDER BY kind, fiscal_year');
+        $stmt->execute([$assetId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[$r['kind']][(int) $r['fiscal_year']] = (float) $r['amount'];
+        }
+        ksort($out);
+        return $out;
+    }
+
     public function testHistoricalYearIsClosedWithoutDoublingOpeningBalances(): void
     {
         $supplierId = $this->supplier();
