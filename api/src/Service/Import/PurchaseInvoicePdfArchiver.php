@@ -120,16 +120,6 @@ final class PurchaseInvoicePdfArchiver
         }
     }
 
-    /** Přípona souboru na disku pro daný source_format (strojový originál). */
-    private const SOURCE_EXT = [
-        'isdoc'          => 'isdoc',
-        'isdocx'         => 'isdocx',
-        'pdf'            => 'pdf',
-        'pohoda_xml'     => 'xml',
-        'idoklad_json'   => 'json',
-        'fakturoid_json' => 'json',
-    ];
-
     /**
      * Uloží ZDROJOVÝ artefakt (strojově čitelný originál — ISDOC/ISDOCX/Pohoda XML/…)
      * přijaté faktury do odděleného `sources/` podstromu archivu + zapíše `source_*`
@@ -143,7 +133,7 @@ final class PurchaseInvoicePdfArchiver
      */
     public function archiveSourceBytes(int $invoiceId, int $supplierId, string $bytes, ?string $originalName, string $format): void
     {
-        $ext = self::SOURCE_EXT[$format] ?? null;
+        $ext = PurchaseInvoiceSourceFormat::extension($format);
         if ($bytes === '' || $ext === null || !self::sourceMagicOk($format, $bytes)) {
             return;
         }

@@ -151,4 +151,20 @@ final class PurchaseInvoicePdfArchiverTest extends TestCase
             @unlink($src);
         }
     }
+
+    public function testArchiveSourceBytesPreservesOriginalArtifact(): void
+    {
+        $bytes = "PK\x03\x04synthetic-isdocx";
+        $sha = hash('sha256', $bytes);
+        $relative = 'sources/' . PurchaseInvoicePdfArchiver::shardedRelPath(7, $sha, 'isdocx');
+        $repo = $this->createMock(PurchaseInvoiceRepository::class);
+        $repo->expects(self::once())->method('setSourceMetadata')->with(
+            42, 7, $relative, $sha, strlen($bytes), 'source.isdocx', 'isdocx',
+        );
+
+        (new PurchaseInvoicePdfArchiver($this->makeConfig(), $repo))
+            ->archiveSourceBytes(42, 7, $bytes, 'source.isdocx', 'isdocx');
+
+        self::assertSame($bytes, file_get_contents($this->archiveRoot . '/' . $relative));
+    }
 }

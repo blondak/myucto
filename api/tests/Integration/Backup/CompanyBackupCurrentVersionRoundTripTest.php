@@ -137,7 +137,12 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
             . 'supplier_id BIGINT UNSIGNED NOT NULL,'
             . 'pdf_path VARCHAR(255) NULL,'
-            . 'pdf_hash CHAR(64) NULL'
+            . 'pdf_hash CHAR(64) NULL,'
+            . 'source_path VARCHAR(255) NULL,'
+            . 'source_hash CHAR(64) NULL,'
+            . 'source_format VARCHAR(32) NULL,'
+            . 'source_size_bytes BIGINT UNSIGNED NULL,'
+            . 'source_original_name VARCHAR(255) NULL'
             . ') ENGINE=InnoDB',
         );
         $pdo->exec(
@@ -197,6 +202,16 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertSame(strlen($existingPurchase), file_put_contents(
             $purchaseDirectory . '/1234567890abcdef.pdf', $existingPurchase,
         ));
+        $existingSourcePath = $this->root . '/live/custom-purchase-archive/' . self::purchaseSourcePath(7);
+        self::assertTrue(mkdir(dirname($existingSourcePath), 0700, true));
+        self::assertSame(8, file_put_contents($existingSourcePath, 'original'));
+        $sourceUpdate = $pdo->prepare('UPDATE purchase_invoices SET source_path=?, source_hash=?,'
+            . ' source_format=?, source_size_bytes=?, source_original_name=? WHERE id=201');
+        self::assertInstanceOf(PDOStatement::class, $sourceUpdate);
+        self::assertTrue($sourceUpdate->execute([
+            self::purchaseSourcePath(7), hash('sha256', 'original'), 'isdocx', 8, 'existing.isdocx',
+        ]));
+        self::assertTrue($sourceUpdate->closeCursor());
         $pdfFilename = '20250131-120000-aaaaaaaa-invoice.pdf';
         $pdfContents = "existing-tenant-archived-pdf\n";
         $pdfInsert = $pdo->prepare(
@@ -356,7 +371,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertSame(3,
             $result->postImport->invariantReport->invariantCount);
         self::assertSame(0, $result->postImport->invariantReport->checkCount);
-        self::assertSame(5, $result->publishedFileCount);
+        self::assertSame(6, $result->publishedFileCount);
 
         self::assertSame([
             [
@@ -505,10 +520,40 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             $this->root . '/live/custom-purchase-archive/supplier-7/1234567890abcdef.pdf',
         ));
         self::assertDirectoryDoesNotExist($this->root . '/live/purchase-invoices');
+        self::assertSame([
+            ['id' => 201, 'source_path' => self::purchaseSourcePath(7),
+                'source_hash' => hash('sha256', 'original'), 'source_format' => 'isdocx',
+                'source_size_bytes' => 8, 'source_original_name' => 'existing.isdocx'],
+            ['id' => 202, 'source_path' => self::purchaseSourcePath(8),
+                'source_hash' => hash('sha256', self::purchaseSourceBytes()), 'source_format' => 'isdocx',
+                'source_size_bytes' => strlen(self::purchaseSourceBytes()),
+                'source_original_name' => 'synthetic-origin.isdocx'],
+        ], $this->fetchRows($pdo, 'SELECT id,source_path,source_hash,source_format,source_size_bytes,'
+            . 'source_original_name FROM purchase_invoices ORDER BY id'));
+        self::assertSame(self::purchaseSourceBytes(), file_get_contents(
+            $this->root . '/live/custom-purchase-archive/' . self::purchaseSourcePath(8),
+        ));
+        self::assertSame('original', file_get_contents(
+            $this->root . '/live/custom-purchase-archive/' . self::purchaseSourcePath(7),
+        ));
+
 
         self::assertSame([], $this->entries(
             $this->root . DIRECTORY_SEPARATOR . 'staging',
         ));
+    }
+
+    private static function purchaseSourceBytes(): string
+    {
+        // Opaque binary fixture: backup must not parse or rewrite the source container.
+        return "PK\x03\x04synthetic-origin\x00\xff\r\n";
+    }
+
+    private static function purchaseSourcePath(int $supplierId): string
+    {
+        $hash = hash('sha256', self::purchaseSourceBytes());
+        return 'sources/supplier-' . $supplierId . '/' . substr($hash, 0, 2)
+            . '/' . substr($hash, 0, 16) . '.isdocx';
     }
 
     private function archive(TenantDataRegistrySnapshot $registry): string
@@ -528,6 +573,11 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             'table:purchase_invoices' => [[
                 'id' => 201, 'supplier_id' => 7,
                 'pdf_path' => 'supplier-7/1234567890abcdef.pdf',
+                'source_path' => self::purchaseSourcePath(7),
+                'source_hash' => hash('sha256', self::purchaseSourceBytes()),
+                'source_format' => 'isdocx',
+                'source_size_bytes' => strlen(self::purchaseSourceBytes()),
+                'source_original_name' => 'synthetic-origin.isdocx',
                 // pdf_hash may identify an ISDOCX container, not these PDF bytes.
                 'pdf_hash' => str_repeat('b', 64),
             ]],
@@ -617,6 +667,10 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertSame(strlen($purchaseContents), file_put_contents($purchasePath, $purchaseContents));
         $purchaseHash = hash('sha256', $purchaseContents);
         $purchaseArchivePath = 'files/purchase-invoice-pdfs/' . $purchaseHash . '.pdf';
+        $purchaseSourceFile = $this->root . DIRECTORY_SEPARATOR . 'source-original.isdocx';
+        self::assertSame(strlen(self::purchaseSourceBytes()), file_put_contents($purchaseSourceFile, self::purchaseSourceBytes()));
+        $purchaseSourceHash = hash('sha256', self::purchaseSourceBytes());
+        $purchaseSourceArchivePath = 'files/purchase-invoice-sources/' . $purchaseSourceHash . '.isdocx';
         $fileInventory = CompanyBackupFileInventory::fromArray([
             'format' => CompanyBackupFileInventory::FORMAT,
             'version' => CompanyBackupFileInventory::VERSION,
@@ -686,8 +740,23 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                     ]],
                 ]],
             ], [
-                'registry_key' => 'file-area:supplier-logos',
+                'registry_key' => 'file-area:purchase-invoice-sources',
                 'order' => 5,
+                'entries' => [[
+                    'source_path' => self::purchaseSourcePath(7),
+                    'archive_path' => $purchaseSourceArchivePath,
+                    'state' => 'present',
+                    'bytes' => strlen(self::purchaseSourceBytes()),
+                    'sha256' => $purchaseSourceHash,
+                    'owners' => [[
+                        'registry_key' => 'table:purchase_invoices',
+                        'primary_key' => ['id' => 201],
+                        'column' => 'source_path', 'path' => [],
+                    ]],
+                ]],
+            ], [
+                'registry_key' => 'file-area:supplier-logos',
+                'order' => 6,
                 'entries' => [[
                     'source_path' => 'sup-7.png',
                     'archive_path' => $logoArchivePath,
@@ -707,6 +776,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         $sourceFiles[$importedArchivePath] = $importedPath;
         $sourceFiles[$pdfArchivePath] = $pdfPath;
         $sourceFiles[$purchaseArchivePath] = $purchasePath;
+        $sourceFiles[$purchaseSourceArchivePath] = $purchaseSourceFile;
         $sourceFiles[$logoArchivePath] = $logoPath;
         $snapshot = new CompanyBackupMachineSnapshot(
             7,
@@ -831,7 +901,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 ),
                 $this->tableDefinition(
                     'table:purchase_invoices', TenantDataPolicy::TenantOwned,
-                    ['id', 'supplier_id', 'pdf_path', 'pdf_hash'],
+                    ['id', 'supplier_id', 'pdf_path', 'pdf_hash', 'source_path',
+                        'source_hash', 'source_format', 'source_size_bytes', 'source_original_name'],
                     ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
                     [$this->reference('supplier_id', 'table:supplier')],
                 ),
@@ -845,6 +916,19 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                         'file_owners' => [[
                             'registry_key' => 'table:purchase_invoices',
                             'column' => 'pdf_path', 'path' => [], 'stored_prefix' => '',
+                        ]],
+                    ],
+                ),
+                new TenantDataDefinition(
+                    'file-area:purchase-invoice-sources', TenantDataObjectKind::FileArea,
+                    TenantDataPolicy::TenantOwned, [$profile], [
+                        'file_policy' => 'historical_optional',
+                        'path_policy' => 'supplier_purchase_invoice_source',
+                        'storage_subdirectory' => 'purchase-invoices',
+                        'ownership' => ['strategy' => 'database_references'],
+                        'file_owners' => [[
+                            'registry_key' => 'table:purchase_invoices',
+                            'column' => 'source_path', 'path' => [], 'stored_prefix' => '',
                         ]],
                     ],
                 ),

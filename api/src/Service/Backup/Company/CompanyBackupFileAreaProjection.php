@@ -56,6 +56,7 @@ final readonly class CompanyBackupFileAreaProjection
                         CompanyBackupFilePathPolicy::SupplierInvoicePdf,
                         CompanyBackupFilePathPolicy::SupplierImportedInvoicePdf,
                         CompanyBackupFilePathPolicy::SupplierPurchaseInvoicePdf,
+                        CompanyBackupFilePathPolicy::SupplierPurchaseInvoiceSource,
                     ], true)
                     !== ($owner->storedPrefix === '')
                 ) {
@@ -74,6 +75,12 @@ final readonly class CompanyBackupFileAreaProjection
                 self::assertDirectInvoiceDocumentContract(
                     $subdirectory, $owners, $registry,
                     'purchase-invoices', 'table:purchase_invoices', 'pdf_path', 'PDF přijaté faktury',
+                );
+            }
+            if ($pathPolicy === CompanyBackupFilePathPolicy::SupplierPurchaseInvoiceSource) {
+                self::assertDirectInvoiceDocumentContract(
+                    $subdirectory, $owners, $registry,
+                    'purchase-invoices', 'table:purchase_invoices', 'source_path', 'Zdroj přijaté faktury',
                 );
             }
             if ($pathPolicy === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment) {

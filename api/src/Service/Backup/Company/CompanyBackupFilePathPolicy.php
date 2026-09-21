@@ -19,6 +19,7 @@ enum CompanyBackupFilePathPolicy: string
     case SupplierInvoicePdf = 'supplier_invoice_pdf';
     case SupplierImportedInvoicePdf = 'supplier_imported_invoice_pdf';
     case SupplierPurchaseInvoicePdf = 'supplier_purchase_invoice_pdf';
+    case SupplierPurchaseInvoiceSource = 'supplier_purchase_invoice_source';
 
     public static function fromDefinition(TenantDataDefinition $definition): self
     {
@@ -39,6 +40,7 @@ enum CompanyBackupFilePathPolicy: string
     {
         return match ($this) {
             self::SupplierImportedInvoicePdf, self::SupplierPurchaseInvoicePdf => CompanyBackupImportedInvoicePdfFilePath::accepts($sourcePath, $supplierId),
+            self::SupplierPurchaseInvoiceSource => CompanyBackupPurchaseInvoiceSourceFilePath::accepts($sourcePath, $supplierId),
             self::Relative => true,
             self::SupplierContentHash => self::contentHash(
                 $sourcePath,
@@ -69,6 +71,9 @@ enum CompanyBackupFilePathPolicy: string
         );
         if ($this === self::SupplierImportedInvoicePdf || $this === self::SupplierPurchaseInvoicePdf) {
             return CompanyBackupImportedInvoicePdfFilePath::sourcePath($storedRelativePath, $supplierId);
+        }
+        if ($this === self::SupplierPurchaseInvoiceSource) {
+            return CompanyBackupPurchaseInvoiceSourceFilePath::sourcePath($storedRelativePath, $supplierId);
         }
         if ($this === self::SupplierInvoiceAttachment) {
             if ($invoiceId === null) {
@@ -156,6 +161,11 @@ enum CompanyBackupFilePathPolicy: string
         }
         if ($this === self::SupplierImportedInvoicePdf || $this === self::SupplierPurchaseInvoicePdf) {
             return CompanyBackupImportedInvoicePdfFilePath::restoreTargetPath(
+                $sourcePath, $sourceSupplierId, $targetSupplierId,
+            );
+        }
+        if ($this === self::SupplierPurchaseInvoiceSource) {
+            return CompanyBackupPurchaseInvoiceSourceFilePath::restoreTargetPath(
                 $sourcePath, $sourceSupplierId, $targetSupplierId,
             );
         }
