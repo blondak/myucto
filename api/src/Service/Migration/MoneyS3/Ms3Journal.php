@@ -51,6 +51,49 @@ final class Ms3Journal
     }
 
     /**
+     * Středisko řádku (`Stred`) — v MyÚčtu kód střediska na řádku deníku.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function costCenter(array $row): ?string
+    {
+        return mb_substr(trim((string) ($row['Stred'] ?? '')), 0, 50) ?: null;
+    }
+
+    /**
+     * Zakázka řádku (`Zakazka`) — v MyÚčtu zakázka (`projects`). Registrační značka
+     * vozidla, kterou účetní do zakázky píšou v různých tvarech (`5E6 7890`, `5E67890`,
+     * `5E6 7890.`), se sjednotí na jeden tvar, ať z ní nevzniknou tři zakázky.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function jobCode(array $row): ?string
+    {
+        $code = trim((string) ($row['Zakazka'] ?? ''));
+        if ($code === '') {
+            return null;
+        }
+        return self::vehiclePlate($code) ?? mb_substr($code, 0, 50);
+    }
+
+    /**
+     * Registrační značka v jednotném tvaru (`1AB 2345`, `EL 456 CD`), nebo null, když
+     * kód značkou není. Běžná značka je číslice, písmeno, znak a čtyři číslice, starší
+     * šestimístná číslice, písmeno a čtyři číslice, elektromobil EL, tři číslice a dvě písmena.
+     */
+    public static function vehiclePlate(string $code): ?string
+    {
+        $plain = strtoupper((string) preg_replace('/[\s.\-]+/u', '', $code));
+        if (preg_match('/^(\d[A-Z][A-Z0-9]?)(\d{4})$/', $plain, $m) === 1) {
+            return $m[1] . ' ' . $m[2];
+        }
+        if (preg_match('/^EL(\d{3})([A-Z]{2})$/', $plain, $m) === 1) {
+            return 'EL ' . $m[1] . ' ' . $m[2];
+        }
+        return null;
+    }
+
+    /**
      * Zkratka agendy do popisu zápisu v deníku. Zrcadlí zkratky, kterými doklady
      * pojmenovává {@see \MyInvoice\Service\Accounting\JournalDescriptionBuilder}, ať
      * se převzatý zápis čte stejně jako zápis vzniklý v MyÚčtu. Neznámý zdroj si

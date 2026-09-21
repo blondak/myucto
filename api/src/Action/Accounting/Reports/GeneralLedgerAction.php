@@ -9,6 +9,7 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\Reports\GeneralLedgerService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
@@ -29,6 +30,7 @@ final class GeneralLedgerAction
 {
     use AccountingActionSupport;
     use GuardsAccountingMode;
+    use DimensionFilterParam;
 
     public function __construct(
         private readonly GeneralLedgerService $ledger,
@@ -39,6 +41,7 @@ final class GeneralLedgerAction
         private readonly IpMatcher $ipMatcher,
         private readonly LoggerInterface $log,
         private readonly Connection $db,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -166,6 +169,9 @@ final class GeneralLedgerAction
         if (!empty($q['vendor'])) $filters['vendor'] = mb_substr(trim((string) $q['vendor']), 0, 100);
         if (!empty($q['client'])) $filters['client'] = mb_substr(trim((string) $q['client']), 0, 100);
         if (!empty($q['item']))   $filters['item']   = mb_substr(trim((string) $q['item']), 0, 100);
+        $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
+        if ($dimension === false) return null;
+        if ($dimension !== null) $filters['dimension'] = $dimension;
 
         $err = null;
         return [

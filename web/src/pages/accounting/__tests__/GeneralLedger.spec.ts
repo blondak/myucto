@@ -16,6 +16,16 @@ const routeQuery = {
   account_id: '3138611',
 }
 
+// Dimenze (Firma → Dimenze) jsou u firmy vypnuté — jejich komponenty se nevykreslí.
+vi.mock('@/composables/useDimensions', () => ({
+  useDimensions: () => ({
+    enabled: { value: false }, canEdit: { value: false }, loading: { value: false },
+    types: { value: [] }, values: { value: [] }, documentTypes: { value: [] },
+    valueById: { value: new Map() }, typeById: { value: new Map() },
+    load: () => Promise.resolve(), reload: () => Promise.resolve(),
+    options: () => [], treeOf: () => [], pathOf: () => [], labelOf: () => '', valueLabel: () => '',
+  }),
+}))
 vi.mock('@/api/accounting', () => ({
   accountingApi: {
     listPeriods: m.listPeriods,

@@ -44,7 +44,7 @@ final class SyntheticAgenda
 
     private const JOURNAL_FIELDS = [
         ['Cislo', 'L', 4], ['Zdroj', 'C', 2], ['Doklad', 'C', 10], ['Datum', 'D', 2], ['DatPlnDPH', 'D', 2],
-        ['Popis', 'C', 50], ['UcMD', 'C', 6], ['UcD', 'C', 6], ['Castka', 'E', 10], ['Zakazka', 'C', 10], ['Del', 'B', 1],
+        ['Popis', 'C', 50], ['UcMD', 'C', 6], ['UcD', 'C', 6], ['Castka', 'E', 10], ['Stred', 'C', 10], ['Zakazka', 'C', 10], ['ParICO', 'C', 12], ['Del', 'B', 1],
     ];
     private const CHART_FIELDS = [['Ucet', 'C', 6], ['Nazev', 'C', 50]];
     private const PURCHASE_FIELDS = [
@@ -194,15 +194,15 @@ final class SyntheticAgenda
                 ['Cislo' => -2, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '221001', 'UcD' => '701000', 'Castka' => 50000.0],
                 ['Cislo' => -3, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '701000', 'UcD' => '411000', 'Castka' => 60000.0],
                 ['Cislo' => -4, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '211000', 'UcD' => '211000', 'Castka' => 0.0],
-                ['Cislo' => 1, 'Zdroj' => 'FP', 'Doklad' => 'FP24001', 'Datum' => '2024-02-10', 'DatPlnDPH' => '2024-02-10', 'Popis' => 'Účetní služby', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 10000.0, 'Zakazka' => 'ZAK01'],
+                ['Cislo' => 1, 'Zdroj' => 'FP', 'Doklad' => 'FP24001', 'Datum' => '2024-02-10', 'DatPlnDPH' => '2024-02-10', 'Popis' => 'Účetní služby', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 10000.0, 'Stred' => 'REZIE', 'Zakazka' => 'ZAK01'],
                 ['Cislo' => 2, 'Zdroj' => 'FP', 'Doklad' => 'FP24001', 'Datum' => '2024-02-10', 'DatPlnDPH' => '2024-02-10', 'Popis' => 'Účetní služby', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => 2100.0],
                 ['Cislo' => 3, 'Zdroj' => 'FP', 'Doklad' => 'FP24001', 'Datum' => '2024-02-10', 'Popis' => 'Nulový řádek', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 0.0],
                 ['Cislo' => 4, 'Zdroj' => 'FP', 'Doklad' => 'FP24099', 'Datum' => '2024-02-11', 'Popis' => 'Smazaný doklad', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 999.0, 'Del' => 1],
                 ['Cislo' => 5, 'Zdroj' => 'BK', 'Doklad' => 'BV24001', 'Datum' => '2024-02-20', 'Popis' => 'Úhrada FP24001', 'UcMD' => '321000', 'UcD' => '221001', 'Castka' => 12100.0],
-                ['Cislo' => 6, 'Zdroj' => 'FV', 'Doklad' => 'FV24001', 'Datum' => '2024-03-05', 'DatPlnDPH' => '2024-03-05', 'Popis' => 'Poradenství', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => 20000.0],
+                ['Cislo' => 6, 'Zdroj' => 'FV', 'Doklad' => 'FV24001', 'Datum' => '2024-03-05', 'DatPlnDPH' => '2024-03-05', 'Popis' => 'Poradenství', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => 20000.0, 'Zakazka' => 'ZAK02', 'ParICO' => self::CUSTOMER_ICO],
                 ['Cislo' => 7, 'Zdroj' => 'FV', 'Doklad' => 'FV24001', 'Datum' => '2024-03-05', 'DatPlnDPH' => '2024-03-05', 'Popis' => 'Poradenství', 'UcMD' => '311000', 'UcD' => '343200', 'Castka' => 4200.0],
                 ['Cislo' => 8, 'Zdroj' => 'BK', 'Doklad' => 'BP24002', 'Datum' => '2024-03-20', 'Popis' => 'Úhrada FV24001', 'UcMD' => '221001', 'UcD' => '311000', 'Castka' => 24200.0],
-                ['Cislo' => 9, 'Zdroj' => 'PK', 'Doklad' => 'PV24001', 'Datum' => '2024-04-01', 'Popis' => 'Nákup materiálu', 'UcMD' => '501100', 'UcD' => '211000', 'Castka' => 1500.0],
+                ['Cislo' => 9, 'Zdroj' => 'PK', 'Doklad' => 'PV24001', 'Datum' => '2024-04-01', 'Popis' => 'Nákup materiálu', 'UcMD' => '501100', 'UcD' => '211000', 'Castka' => 1500.0, 'Stred' => 'REZIE', 'Zakazka' => '1AB2345'],
                 ['Cislo' => 10, 'Zdroj' => 'BK', 'Doklad' => 'BP24003', 'Datum' => '2024-06-30', 'Popis' => 'Vratka poplatku', 'UcMD' => '568000', 'UcD' => '221001', 'Castka' => -50.0],
                 ['Cislo' => 11, 'Zdroj' => 'ID', 'Doklad' => 'ID24001', 'Datum' => '2024-12-31', 'Popis' => 'Dohadná položka', 'UcMD' => '518000', 'UcD' => '325000', 'Castka' => 300.0],
                 // Uzávěrka roku v Money (zdroj XZ) — převod ji nepřebírá, rok uzavře MyÚčto.

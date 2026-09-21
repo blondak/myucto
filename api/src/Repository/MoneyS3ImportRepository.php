@@ -31,6 +31,8 @@ final class MoneyS3ImportRepository
     public const KIND_BANK_STATEMENT = 'bank_statement';
     public const KIND_BANK_TRANSACTION = 'bank_transaction';
     public const KIND_PAYMENT = 'payment';
+    public const KIND_COST_CENTER = 'cost_center';
+    public const KIND_DIMENSION_VALUE = 'dimension_value';
 
     /** Jméno zámku je na serveru globální — obsahuje proto i databázi (instalace sdílí server). */
     private const LOCK_SQL = "CONCAT('money_s3:', DATABASE(), ':', ?)";
@@ -78,6 +80,17 @@ final class MoneyS3ImportRepository
             }
             throw new MoneyS3Exception('map_conflict', "Záznam {$kind} {$key} z Money už v MyÚčtu převedený je — převod se zastavil, aby nic nezdvojil.");
         }
+    }
+
+    /**
+     * Přesměruje existující záznam mapy na jiný cíl — jen tam, kde převod cíl vědomě
+     * nahrazuje (cíl mezitím zmizel, např. uživatel smazal hodnotu dimenze).
+     */
+    public function repoint(int $supplierId, string $kind, string $key, int $targetId, ?int $runId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE money_s3_import_map SET target_id = ?, run_id = ? WHERE supplier_id = ? AND kind = ? AND money_key = ?'
+        )->execute([$targetId, $runId, $supplierId, $kind, self::key($key)]);
     }
 
     public function countAll(int $supplierId): int

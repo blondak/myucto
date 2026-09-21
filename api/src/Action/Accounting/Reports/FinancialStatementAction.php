@@ -10,6 +10,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\StatementDefinitionRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\StatementMapResolver;
@@ -35,6 +36,7 @@ final class FinancialStatementAction
 {
     use AccountingActionSupport;
     use GuardsAccountingMode;
+    use DimensionFilterParam;
 
     public function __construct(
         private readonly FinancialStatementService $statements,
@@ -48,6 +50,7 @@ final class FinancialStatementAction
         private readonly Connection $db,
         private readonly StatementDefinitionRepository $definitions,
         private readonly StatementMapResolver $maps,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function balanceSheet(Request $request, Response $response): Response
@@ -305,7 +308,7 @@ final class FinancialStatementAction
             'balance_sheet' => $this->statements->balanceSheet($supplierId, $params['period_id'], $params['as_of'], $params['scope']),
             FinancialStatementService::TYPE_PURPOSE => $this->statements
                 ->incomeStatementByFunction($supplierId, $params['period_id'], $params['as_of'], $params['scope']),
-            default => $this->statements->incomeStatement($supplierId, $params['period_id'], $params['as_of'], $params['scope']),
+            default => $this->statements->incomeStatement($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null),
         };
     }
 
@@ -349,11 +352,16 @@ final class FinancialStatementAction
             return null;
         }
 
+        // Filtr na dimenzi (Firma → Dimenze) — jen druhová výsledovka, rozvaha po dimenzi nedává smysl.
+        $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
+        if ($dimension === false) return null;
+
         $err = null;
         return [
             'period_id' => $periodId,
             'as_of'     => $asOf === '' ? null : $asOf,
             'scope'     => $scope,
+            'dimension' => $dimension,
         ];
     }
 

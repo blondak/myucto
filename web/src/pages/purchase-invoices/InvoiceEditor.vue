@@ -58,6 +58,8 @@ import { useSupplierStore } from '@/stores/supplier'
 import { appIsoDate } from '@/utils/date'
 import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
 import DateInput from '@/components/ui/DateInput.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import { isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
 
@@ -209,6 +211,9 @@ const accountingAccounts = ref<ChartAccount[]>([])
 // jestli datum přijetí po uložení do období odpočtu vstoupí, nebo zůstane jen otiskem importu.
 const savedReceivedAt = ref<string | null>(null)
 const savedReceivedAtSource = ref<'manual' | 'import' | null>(null)
+
+// Firma → Dimenze — hlavička a položky; ukládají se až po uložení dokladu.
+const docDims = useDocumentDimensions('purchase-invoices')
 
 const today = appIsoDate()
 
@@ -653,6 +658,7 @@ async function loadInvoice(id: number) {
     }
     aiPostingSuggestion.value = inv.ai_posting_suggestion ?? null
     populate(inv)
+    void docDims.load(id, form.value.items)
     void loadExpenseSuggestions(id)
   } catch (e) {
     error.value = apiErrorMessage(e)
@@ -1352,6 +1358,7 @@ async function submit() {
         stock_item_id: it.stock_item_id ?? null,
       })),
     }
+    const itemDimsSnapshot = docDims.snapshot(form.value.items)
     let inv: PurchaseInvoice
     if (isEdit.value && invoiceId.value) {
       // Force flag z URL query (?force=1) — pro admin edit received/booked faktur
@@ -1360,6 +1367,7 @@ async function submit() {
     } else {
       inv = await purchaseInvoicesApi.create(payload)
     }
+    await docDims.save(inv.id, itemDimsSnapshot)
     // Upload pending PDF pokud byl drop před save
     if (pendingPdfFile.value && !submissionId.value) {
       await uploadPdfToInvoice(inv.id, pendingPdfFile.value)
@@ -1914,6 +1922,10 @@ function fieldErr(key: string): string | null {
                   @select="(v: number | null) => onStockSelect(i, v)"
                 />
                 <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
+                <DimensionFields v-if="docDims.enabled.value" class="mt-1" compact teleport
+                  :model-value="docDims.itemDimsOf(it)" :disabled="!docDims.canEdit.value"
+                  data-test="purchase-item-dimensions"
+                  @update:model-value="docDims.setItemDims(it, $event)" />
               </td>
               <td class="py-2 px-1">
                 <DurationInput v-if="isTimeItem(it)" v-model="it.quantity" v-model:duration-minutes="it.duration_minutes" :allow-negative="true" />
@@ -2064,6 +2076,11 @@ function fieldErr(key: string): string | null {
                   </div>
                 </div>
               </template>
+            </div>
+            <div v-if="docDims.enabled.value">
+              <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('dimensions.items_title') }}</label>
+              <DimensionFields compact :model-value="docDims.itemDimsOf(it)" :disabled="!docDims.canEdit.value"
+                @update:model-value="docDims.setItemDims(it, $event)" />
             </div>
             <div class="flex items-baseline justify-between pt-1 border-t border-neutral-200">
               <span class="text-xs font-medium text-neutral-500 uppercase tracking-wide">{{ t('purchase_invoice.items.total_with_vat') }}</span>
@@ -2309,6 +2326,10 @@ function fieldErr(key: string): string | null {
               </option>
             </select>
             <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.classification.project_hint') }}</p>
+          </div>
+          <div v-if="docDims.enabled.value" class="sm:col-span-2" data-test="purchase-header-dimensions">
+            <p class="text-xs text-neutral-500 mb-1">{{ t('dimensions.header_title') }}</p>
+            <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
           </div>
           <div>
             <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.classification.vat_classification') }}</label>

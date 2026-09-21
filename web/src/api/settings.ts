@@ -256,6 +256,8 @@ export interface Supplier {
   accounting_enabled?: boolean
   // „Vést mzdy" (migrace 1187) — výchozí opt-in modulu. Na licenci zatím nemá vliv.
   payroll_enabled?: boolean
+  /** Firma → Dimenze (migrace 1860) — opt-in analytického členění. */
+  dimensions_enabled?: boolean
   // Skladová evidence (Epic SKLAD, migrace 1022) — nezávislé na accounting_mode.
   // Smí přepínat i účetní (ne jen admin) — viz SettingsAction::$stockOnlyFields.
   stock_enabled?: boolean

@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
 use PDO;
 
@@ -45,7 +46,7 @@ final class LedgerReportRepository
     public function trialBalanceRows(int $supplierId, string $from, string $to, string $periodStart, bool $analytics = false, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
         $anchor = $this->openingAnchor($supplierId, $from);
-        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
+        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e', 'l');
         // Inventarizace/rozvaha k rozvahovému dni potřebuje zůstatky PŘED uzavřením knih —
         // close_books zápis (source_type='closing', source_id = period_id < STOCK_SLOT_BASE, UZ)
         // převádí rozvahové účty na 702/710 a jinak by je vynuloval. Otevírací
@@ -139,7 +140,7 @@ final class LedgerReportRepository
      */
     public function monthlyTurnovers(int $supplierId, string $from, string $to, bool $analytics, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
-        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
+        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e', 'l');
         $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
         $openingSql = $excludeAllOpenings
@@ -368,10 +369,11 @@ final class LedgerReportRepository
      *
      * @return array{md: float, d: float}
      */
-    public function journalTotals(int $supplierId, string $from, string $to, bool $excludeClosing = false): array
+    public function journalTotals(int $supplierId, string $from, string $to, bool $excludeClosing = false, ?DimensionFilter $dimension = null): array
     {
         $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
+        [$dimSql, $dimParams] = $dimension !== null ? $dimension->sql('l') : ['', []];
         $stmt = $this->db->pdo()->prepare(
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS md,
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS d
@@ -379,9 +381,9 @@ final class LedgerReportRepository
                JOIN journal_entries e ON e.id = l.entry_id
               " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.entry_date = ? AND e.source_type = 'opening'){$closingSql}"
+                AND NOT (e.entry_date = ? AND e.source_type = 'opening'){$dimSql}{$closingSql}"
         );
-        $stmt->execute([$supplierId, $from, $to, $from, ...$closingParams]);
+        $stmt->execute([$supplierId, $from, $to, $from, ...$dimParams, ...$closingParams]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return [
             'md' => round((float) ($row['md'] ?? 0), 2),
@@ -425,11 +427,13 @@ final class LedgerReportRepository
         ?string $plFrom,
         array $splitCodes = [],
         array $preserveCodes = [],
+        ?DimensionFilter $dimension = null,
     ): array
     {
         $anchor = $this->openingAnchor($supplierId, $asOf);
         $plCond = '';
-        $params = [$supplierId, ClosingSourceId::STOCK_SLOT_BASE, $asOf];
+        [$dimSql, $dimParams] = $dimension !== null ? $dimension->sql('l') : ['', []];
+        $params = [$supplierId, ...$dimParams, ClosingSourceId::STOCK_SLOT_BASE, $asOf];
         if ($plFrom !== null) {
             $plCond = " AND (a.account_type NOT IN ('revenue','expense') OR e.entry_date >= ?)";
             $params[] = $plFrom;
@@ -463,7 +467,7 @@ final class LedgerReportRepository
                " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
-              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL{$dimSql}
                 AND a.account_type NOT IN ('offbalance','closing')
                 AND " . JournalTaxOrigin::includedSql() . "
                 AND e.entry_date <= ?{$plCond}
@@ -637,14 +641,21 @@ final class LedgerReportRepository
      * zároveň) — vrátí prázdný výsledek, což je akceptovatelné (dvě různá pole, typicky
      * se plní jen jedno).
      *
-     * @param array{vendor?:string, client?:string, item?:string} $filters
+     * `dimension` ({@see DimensionFilter}) na rozdíl od ostatních filtruje ŘÁDKY — sestava
+     * po dimenzi má obsahovat jen řádky dané hodnoty, ne protistranu zápisu.
+     *
+     * @param array{vendor?:string, client?:string, item?:string, dimension?:DimensionFilter} $filters
      * @param string $alias alias `journal_entries` v dotazu (vždy `e`)
+     * @param string $lineAlias alias `journal_entry_lines` v dotazu
      * @return array{0:string, 1:list<mixed>} SQL fragment (s vedoucím ' AND ...') + params
      */
-    private function counterpartyFilter(array $filters, string $alias): array
+    private function counterpartyFilter(array $filters, string $alias, string $lineAlias = 'l'): array
     {
         $sql = '';
         $params = [];
+        if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
+            [$sql, $params] = $filters['dimension']->sql($lineAlias);
+        }
         if (!empty($filters['vendor'])) {
             $needle = '%' . self::escapeLike((string) $filters['vendor']) . '%';
             $sql .= " AND ({$alias}.source_type = 'purchase_invoice' AND EXISTS (

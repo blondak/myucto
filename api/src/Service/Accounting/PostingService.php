@@ -9,6 +9,8 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Repository\DimensionAssignmentRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\ActivityLogger;
@@ -117,6 +119,17 @@ final class PostingService
     private array $nonDeductibleAccountCache = [];
 
     /**
+     * Účet, na který builder poslal položku dokladu: "zdroj|id dokladu" => [id položky => kód účtu].
+     * Podle něj {@see DimensionStamper} rozdělí výsledkový řádek jen mezi položky, které
+     * na něj opravdu patří.
+     *
+     * @var array<string,array<int,string>>
+     */
+    private array $itemAccountTrace = [];
+
+    private ?DimensionStamper $dimensionStamper = null;
+
+    /**
      * Syntetiky, u kterých analytiku vybírá KONTEXT dokladu, ne osnova — proto se na ně
      * automatický přesměr {@see singleAnalyticMap()} nikdy nepoužije:
      *
@@ -210,6 +223,13 @@ final class PostingService
         $codeMap = $this->accounts->codeToIdMap($supplierId);
         $resolved = $this->resolveLines($supplierId, $lines, $codeMap, $sourceType);
         $resolved = $this->stampProjectDimension($supplierId, $sourceType, $sourceId, $resolved);
+        $resolved = $this->dimensionStamper()->stamp(
+            $supplierId,
+            $sourceType,
+            $sourceId,
+            $resolved,
+            $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
+        );
         self::assertBalanced($resolved); // v haléřích; UnbalancedEntryException při nerovnosti
 
         // R7 (Epic F4): flag allow_closing_period smí nastavit VÝHRADNĚ ClosingService —
@@ -528,6 +548,12 @@ final class PostingService
         }
 
         // Zrcadlo: stejný účet, opačná strana, stejná částka (vč. cizoměnové stopy).
+        // Dimenze se přenáší ze stejného důvodu jako zakázka — storno musí odečíst
+        // tam, kam původní řádek přičetl.
+        $origDims = (new DimensionAssignmentRepository($this->db))->lineDimensions(
+            $supplierId,
+            array_map(static fn (array $l): int => (int) ($l['id'] ?? 0), $origLines),
+        );
         $mirror = [];
         foreach ($origLines as $line) {
             $mirror[] = [
@@ -541,6 +567,7 @@ final class PostingService
                 // Zakázka se do storna MUSÍ přenést, jinak by protizápis náklad akce
                 // odečetl z „bez zakázky" a v marži by původní řádek zůstal navždy.
                 'project_id'     => isset($line['project_id']) ? (int) $line['project_id'] : null,
+                'dimensions'     => $origDims[(int) ($line['id'] ?? 0)] ?? [],
             ];
         }
 
@@ -815,6 +842,7 @@ final class PostingService
      */
     public function buildFromInvoice(int $supplierId, int $invoiceId, array $opts = []): array
     {
+        unset($this->itemAccountTrace['invoice|' . $invoiceId]);
         $inv = $this->fetchDocHeader('invoices', $supplierId, $invoiceId);
         if ($inv === null) {
             throw new PostingException('entry_not_found', 'Vydaná faktura #' . $invoiceId . ' neexistuje.', 404);
@@ -1093,6 +1121,7 @@ final class PostingService
      */
     public function buildFromPurchaseInvoice(int $supplierId, int $purchaseInvoiceId, array $opts = []): array
     {
+        unset($this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId]);
         $pi = $this->fetchDocHeader('purchase_invoices', $supplierId, $purchaseInvoiceId);
         if ($pi === null) {
             throw new PostingException('entry_not_found', 'Přijatá faktura #' . $purchaseInvoiceId . ' neexistuje.', 404);
@@ -1392,6 +1421,8 @@ final class PostingService
                 $account = $this->nonDeductibleExpenseAccount($supplierId, $account);
             }
 
+            $this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId][(int) $row['id']] = $account;
+
             $net = round((float) $row['total_without_vat'] * $rate, 2);
             $vat = round((float) $row['total_vat'] * $rate, 2);
             $w = match (true) {
@@ -1448,7 +1479,7 @@ final class PostingService
     private function revenueWeights(int $supplierId, int $invoiceId, float $rate, string $defaultAccount): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT small_asset_id, asset_id, total_without_vat
+            'SELECT id, small_asset_id, asset_id, total_without_vat
                FROM invoice_items
               WHERE invoice_id = ?'
         );
@@ -1472,6 +1503,7 @@ final class PostingService
             } else {
                 $account = $defaultAccount;
             }
+            $this->itemAccountTrace['invoice|' . $invoiceId][(int) $row['id']] = $account;
 
             $w = round((float) $row['total_without_vat'] * $rate, 2);
             $weights[$account] = round(($weights[$account] ?? 0.0) + $w, 2);
@@ -2244,7 +2276,47 @@ final class PostingService
         return $stmt->rowCount();
     }
 
+    /**
+     * Promítne změněné dimenze dokladu do jeho už zaúčtovaných řádků (Firma → Dimenze).
+     * Stejná výjimka z §35 jako {@see restampProjectDimension()}: mění jen analytické
+     * členění, ne účet, stranu, částku ani období.
+     *
+     * @return array{lines:int, needs_repost:bool}
+     */
+    public function restampDimensions(int $supplierId, string $sourceType, int $sourceId): array
+    {
+        return $this->dimensionStamper()->restamp($supplierId, $sourceType, $sourceId);
+    }
+
     // ── interní ───────────────────────────────────────────────────────────────
+
+    private function dimensionStamper(): DimensionStamper
+    {
+        return $this->dimensionStamper ??= new DimensionStamper($this->db);
+    }
+
+    /**
+     * Stopa builderu (položka => kód účtu) převedená na id účtů osnovy, se stejným
+     * přesměrováním na jedinou analytiku, jakým prošly řádky v resolveLines().
+     *
+     * @param array<string, array{id:int, is_active:bool, account_type:string}> $codeMap
+     * @return array<int,int>|null
+     */
+    private function itemAccountIds(int $supplierId, string $sourceType, ?int $sourceId, array $codeMap): ?array
+    {
+        $trace = $sourceId !== null ? ($this->itemAccountTrace[$sourceType . '|' . $sourceId] ?? null) : null;
+        if ($trace === null) {
+            return null;
+        }
+        $out = [];
+        foreach ($trace as $itemId => $code) {
+            $code = $this->redirectedAccountCode($supplierId, (string) $code);
+            if (isset($codeMap[$code])) {
+                $out[(int) $itemId] = (int) $codeMap[$code]['id'];
+            }
+        }
+        return $out;
+    }
 
     /**
      * Zdrojové doklady, které zakázku (`project_id`) na hlavičce nesou — sloupec je
@@ -2362,6 +2434,11 @@ final class PostingService
                     ? (int) $line['project_id']
                     : null,
             ];
+            // Dimenze řádku (Firma → Dimenze): typ => hodnota, zvalidované volajícím
+            // (ruční zápis); dokladové dimenze dorazítkuje DimensionStamper.
+            if (!empty($line['dimensions']) && is_array($line['dimensions'])) {
+                $resolvedLine['dimensions'] = array_map('intval', $line['dimensions']);
+            }
             // cizoměnová stopa (jen saldokontní řádky cizoměnových dokladů)
             if (isset($line['currency_code'])) {
                 $resolvedLine['currency_code']  = $line['currency_code'];

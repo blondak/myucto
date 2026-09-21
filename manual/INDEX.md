@@ -150,6 +150,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 97. [Datová schránka](97_Datova_schranka.md)
 98. [Odesílací brána ISDS](98_Odesilaci_brana_ISDS.md)
 99. [Elektronické podpisy](99_Elektronicke_podpisy.md)
+110. [Dimenze](110_Dimenze.md)
 
 ### Systém
 

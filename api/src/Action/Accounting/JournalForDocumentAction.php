@@ -8,6 +8,7 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -45,6 +46,7 @@ final class JournalForDocumentAction
         private readonly JournalEntryRepository $journal,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly Connection $db,
+        private readonly DimensionAssignmentRepository $dimensions,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -63,11 +65,20 @@ final class JournalForDocumentAction
         $entries = $this->journal->listBySourceWithLines($supplierId, $sourceType, $docId);
         if ($entries !== []) {
             $accMap = $this->accounts->idToAccountMap($supplierId);
+            // Dimenze řádků (Firma → Dimenze) — štítky v sekci Zaúčtování.
+            $lineIds = [];
+            foreach ($entries as $entry) {
+                foreach ($entry['lines'] as $line) {
+                    $lineIds[] = (int) $line['id'];
+                }
+            }
+            $lineDims = $this->dimensions->lineDimensions($supplierId, $lineIds);
             foreach ($entries as $i => $entry) {
-                $entries[$i]['lines'] = array_map(static function (array $line) use ($accMap): array {
+                $entries[$i]['lines'] = array_map(static function (array $line) use ($accMap, $lineDims): array {
                     $acc = $accMap[(int) $line['account_id']] ?? null;
                     $line['account_code'] = $acc['code'] ?? null;
                     $line['account_name'] = $acc['name'] ?? null;
+                    $line['dimensions'] = (object) ($lineDims[(int) $line['id']] ?? []);
                     return $line;
                 }, $entry['lines']);
             }

@@ -17,8 +17,12 @@ import DocumentLinkPicker from '@/components/accounting/DocumentLinkPicker.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import { compactDimensions, type DimensionMap } from '@/api/dimensions'
+import { useDimensions } from '@/composables/useDimensions'
 
 const { t } = useI18n()
+const dims = useDimensions()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
@@ -35,10 +39,12 @@ interface LineRow {
   side: JournalSide
   amount: number | null
   cost_center: string
+  /** Dimenze řádku (Firma → Dimenze) — typ → hodnota. */
+  dimensions: DimensionMap
 }
 
 function emptyLine(side: JournalSide = 'debit'): LineRow {
-  return { account_code: '', side, amount: null, cost_center: '' }
+  return { account_code: '', side, amount: null, cost_center: '', dimensions: {} }
 }
 
 const form = reactive({
@@ -99,6 +105,7 @@ onMounted(async () => {
         side: l.side,
         amount: l.amount,
         cost_center: l.cost_center ?? '',
+        dimensions: { ...(l.dimensions ?? {}) },
       }))
       // Vazby na doklady jedou s kopií: opravný zápis se skoro vždy váže na tentýž
       // doklad jako ten původní. Doklad mezitím smazaný (bez popisu) se vynechá.
@@ -163,6 +170,8 @@ async function save(andNew = false) {
       amount: Number(l.amount),
     }
     if (l.cost_center.trim()) line.cost_center = l.cost_center.trim()
+    const lineDims = compactDimensions(l.dimensions)
+    if (dims.enabled.value && Object.keys(lineDims).length > 0) line.dimensions = lineDims
     return line
   })
 
@@ -227,6 +236,7 @@ async function submitSaveTemplate() {
     amount: templateForm.keepAmounts && Number(l.amount) > 0 ? Number(l.amount) : null,
     label: templateLineLabels.value[i]?.trim() || undefined,
     cost_center: l.cost_center.trim() || undefined,
+    ...(dims.enabled.value ? { dimensions: compactDimensions(l.dimensions) } : {}),
   }))
 
   templateSaving.value = true
@@ -282,6 +292,7 @@ async function applyTemplate(id: number): Promise<void> {
       side: l.side,
       amount: l.default_amount,
       cost_center: l.cost_center ?? '',
+      dimensions: { ...(l.dimensions ?? {}) },
     }))
     if (!form.description.trim()) form.description = tpl.name
     showLoadTemplate.value = false
@@ -309,6 +320,7 @@ async function importTemplateCsv() {
       side: l.side,
       amount: l.amount,
       cost_center: l.cost_center ?? '',
+      dimensions: {},
     }))
     const tpl = templates.value.find(t2 => t2.id === selectedTemplateId.value)
     if (tpl && !form.description.trim()) form.description = tpl.name
@@ -532,6 +544,8 @@ async function submitTransfer(force = false) {
                 class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-30 disabled:cursor-not-allowed"
                 :title="t('accounting.manual.remove_line')">✕</button>
             </div>
+            <!-- Dimenze řádku (Firma → Dimenze) — jen id hodnot, nikdy jména osob. -->
+            <DimensionFields v-if="dims.enabled.value" v-model="l.dimensions" compact class="col-span-12 sm:col-span-11" />
           </div>
         </div>
       </div>

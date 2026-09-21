@@ -17,6 +17,9 @@ import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/butt
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import { compactDimensions, type DimensionMap } from '@/api/dimensions'
+import { useDimensions } from '@/composables/useDimensions'
 
 const props = defineProps<{
   embedded?: boolean
@@ -32,6 +35,7 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const dims = useDimensions()
 const templates = ref<JournalTemplateSummary[]>([])
 const accounts = ref<ChartAccount[]>([])
 const costCenters = ref<CostCenter[]>([])
@@ -47,6 +51,8 @@ interface EditableLine {
   default_amount: number | null
   label: string
   cost_center: string
+  /** Dimenze řádku (Firma → Dimenze) — předvyplní se do ručního zápisu. */
+  dimensions: DimensionMap
 }
 
 const form = reactive({
@@ -60,7 +66,7 @@ const pickable = computed(() =>
 )
 
 function emptyLine(): EditableLine {
-  return { account_code: '', side: 'debit', default_amount: null, label: '', cost_center: '' }
+  return { account_code: '', side: 'debit', default_amount: null, label: '', cost_center: '', dimensions: {} }
 }
 
 async function loadTemplates() {
@@ -132,6 +138,7 @@ function fillForm(detail: JournalTemplateDetail) {
     default_amount: line.default_amount,
     label: line.label ?? '',
     cost_center: line.cost_center ?? '',
+    dimensions: { ...(line.dimensions ?? {}) },
   }))
 }
 
@@ -161,6 +168,7 @@ async function saveTemplate() {
     amount: nullableAmount(line.default_amount),
     label: line.label.trim() || null,
     cost_center: line.cost_center.trim() || null,
+    ...(dims.enabled.value ? { dimensions: compactDimensions(line.dimensions) } : {}),
   }))
   const payload = {
     name: form.name.trim(),
@@ -309,6 +317,7 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
             </button>
             <input v-model="line.label" type="text" maxlength="255" :placeholder="t('accounting.templates.line_label')" class="col-span-12 sm:col-span-6 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
             <input v-model="line.cost_center" :list="`${pageId}-journal-template-cost-centers`" type="text" maxlength="50" :placeholder="t('accounting.manual.cost_center')" class="col-span-12 sm:col-span-6 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <DimensionFields v-if="dims.enabled.value" v-model="line.dimensions" compact class="col-span-12" />
           </div>
         </div>
       </div>

@@ -14,6 +14,8 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\JournalEntryAttachmentRepository;
 use MyInvoice\Repository\JournalEntryDocumentLinkRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
@@ -97,6 +99,7 @@ final class JournalAction
         private readonly JournalAttachmentStorage $attachmentStorage,
         private readonly JournalIntegrityService $integrity,
         private readonly LoggerInterface $log,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -286,10 +289,13 @@ final class JournalAction
         }
 
         $accMap = $this->accounts->idToAccountMap($supplierId);
-        $entry['lines'] = array_map(static function (array $line) use ($accMap): array {
+        // Dimenze řádků (Firma → Dimenze) — jen id hodnot, názvy má klient v číselníku.
+        $lineDims = $this->dimensions->entryLineDimensions($supplierId, $id);
+        $entry['lines'] = array_map(static function (array $line) use ($accMap, $lineDims): array {
             $acc = $accMap[(int) $line['account_id']] ?? null;
             $line['account_code'] = $acc['code'] ?? null;
             $line['account_name'] = $acc['name'] ?? null;
+            $line['dimensions'] = (object) ($lineDims[(int) $line['id']] ?? []);
             return $line;
         }, $entry['lines']);
         $entry['automation'] = $this->automationProvenance->forJournalEntries($supplierId, [$id])[$id] ?? null;
@@ -335,6 +341,13 @@ final class JournalAction
             ];
             if (isset($l['cost_center']) && trim((string) $l['cost_center']) !== '') {
                 $line['cost_center'] = (string) $l['cost_center'];
+            }
+            if (!empty($l['dimensions']) && is_array($l['dimensions'])) {
+                try {
+                    $line['dimensions'] = $this->dimensions->normalize($supplierId, $l['dimensions']);
+                } catch (DimensionException $e) {
+                    return Json::error($response, $e->errorCode, "Řádek #{$i}: " . $e->getMessage(), $e->httpStatus);
+                }
             }
             $lines[] = $line;
         }

@@ -2229,6 +2229,27 @@ final class Routes
             $g->post  ('/cost-centers',                 [CostCenterAction::class, 'create']);
             $g->patch ('/cost-centers/{id:[0-9]+}',     [CostCenterAction::class, 'update']);
             $g->delete('/cost-centers/{id:[0-9]+}',     [CostCenterAction::class, 'delete']);
+            // Firma → Dimenze (migrace 1860) — typy, stromy hodnot, dimenze dokladů a řádků deníku.
+            $g->get   ('/dimensions',                                    [\MyInvoice\Action\Accounting\DimensionAction::class, 'overview']);
+            $g->put   ('/dimensions/settings',                           [\MyInvoice\Action\Accounting\DimensionAction::class, 'settings']);
+            $g->post  ('/dimensions/defaults',                           [\MyInvoice\Action\Accounting\DimensionAction::class, 'defaults']);
+            $g->post  ('/dimensions/types',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'createType']);
+            $g->patch ('/dimensions/types/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateType']);
+            $g->delete('/dimensions/types/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'deleteType']);
+            $g->post  ('/dimensions/types/{id:[0-9]+}/values',           [\MyInvoice\Action\Accounting\DimensionAction::class, 'createValue']);
+            $g->patch ('/dimensions/values/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateValue']);
+            $g->delete('/dimensions/values/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'deleteValue']);
+            $g->get   ('/dimensions/responsible-candidates',             [\MyInvoice\Action\Accounting\DimensionAction::class, 'responsibleCandidates']);
+            $g->get   ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|journal-templates}/{id:[0-9]+}',
+                [\MyInvoice\Action\Accounting\DimensionAction::class, 'getDocument']);
+            $g->put   ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|journal-templates}/{id:[0-9]+}',
+                [\MyInvoice\Action\Accounting\DimensionAction::class, 'saveDocument']);
+            $g->get   ('/dimensions/journal/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\DimensionAction::class, 'getJournal']);
+            $g->put   ('/dimensions/journal/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\DimensionAction::class, 'saveJournal']);
+            $g->get   ('/dimensions/group',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'group']);
+            $g->post  ('/dimensions/group',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'createGroup']);
+            $g->put   ('/dimensions/group',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateGroup']);
+            $g->delete('/dimensions/group',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'leaveGroup']);
             // Kontační pravidla
             $g->get   ('/posting-rules',                            [PostingRuleAction::class, 'list']);
             // Srovnání kontací s analytickou osnovou. MUSÍ být nad {rule_key} — jinak by
@@ -2285,6 +2306,7 @@ final class Routes
             $g->post  ('/reports/statement-overrides/suggestions', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'suggestFromUpload']);
             $g->put   ('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'update']);
             $g->delete('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'delete']);
+            $g->get('/reports/dimension-profit',                  \MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class);
             $g->get('/reports/saldo',                             [SaldoAction::class, 'get']);
             $g->get('/reports/saldo/export',                      [SaldoAction::class, 'export']);
             // Kontrola úplnosti dokladů proti bance (REAL_data_followup_UX.md E) — read-only

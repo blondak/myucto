@@ -329,6 +329,7 @@ final class JournalEntryRepository
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $n = 0;
+        $assignments = null;
         foreach ($lines as $line) {
             $lineStmt->execute([
                 $entryId,
@@ -343,6 +344,12 @@ final class JournalEntryRepository
                 isset($line['project_id']) && (int) $line['project_id'] > 0 ? (int) $line['project_id'] : null,
                 $line['line_no'] ?? $n,
             ]);
+            // Dimenze řádku (migrace 1860) — typ => hodnota, zvalidované PostingService
+            // resp. volajícím. Řádek se při přepisu maže celý, vazba odejde kaskádou.
+            if (!empty($line['dimensions']) && is_array($line['dimensions'])) {
+                $assignments ??= new DimensionAssignmentRepository($this->db);
+                $assignments->insertLineDimensions($supplierId, (int) $pdo->lastInsertId(), $line['dimensions']);
+            }
             $n++;
         }
     }

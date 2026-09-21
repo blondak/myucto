@@ -70,6 +70,8 @@ export interface SupplierBrief {
   accounting_mode?: 'tax_evidence' | 'double_entry'
   /** Skladová evidence (Epic SKLAD) — gate sekce Sklad v menu + editorů. Funguje nezávisle na accounting_mode. */
   stock_enabled?: boolean
+  /** Firma → Dimenze zapnuté (opt-in, migrace 1860) — bez něj se dimenze nikde neukazují. */
+  dimensions_enabled?: boolean
   /**
    * „Vést účetnictví" (migrace 1179) — firemní opt-out účetní nadstavby. `false` schová
    * účetní sekce z menu stejně jako chybějící licence; fakturace, DPH a sklad zůstávají.

@@ -388,6 +388,8 @@ const navSections = computed<NavSection[]>(() => {
   const isTaxEvidence = accountingEnabled && supplierStore.currentSupplier?.accounting_mode === 'tax_evidence'
   // Sklad (Epic SKLAD) — nezávislé na accounting_mode (funguje i pro tax_evidence).
   const isStockEnabled = auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled === true
+  // Firma → Dimenze (migrace 1860) — opt-in; vypnuté nesmí v menu nic přidat.
+  const dimensionsEnabled = supplierStore.currentSupplier?.dimensions_enabled === true
   const sections: NavSection[] = [
     {
       // Grafy — přehledové/analytické položky nahoře v menu: akce k řešení, náhled
@@ -568,6 +570,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/balance-sheet',    label: t('nav.accounting_balance_sheet'),    icon: ICONS.reports },
         { to: '/accounting/income-statement', label: t('nav.accounting_income_statement'), icon: ICONS.tax_income },
         { to: '/accounting/income-statement-by-function', label: t('nav.accounting_income_statement_by_function'), icon: ICONS.tax_income },
+        ...(dimensionsEnabled ? [{ to: '/accounting/dimension-profit', label: t('nav.accounting_dimension_profit'), icon: ICONS.tax_income, permission: 'accounting' as PermissionKey }] : []),
         { to: '/accounting/statement-mapping', label: t('nav.accounting_statement_mapping'), icon: ICONS.codebooks, permission: 'accounting' },
         { to: '/accounting/saldo',            label: t('nav.accounting_saldo'),            icon: ICONS.coin },
         { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
@@ -722,6 +725,7 @@ const navSections = computed<NavSection[]>(() => {
       { to: '/admin/integrations?tab=ai',   label: t('nav.ai_settings'),     icon: ICONS.ai },
       { to: '/admin/branding',              label: t('nav.branding'),        icon: ICONS.branding },
       { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'),     icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
+      ...(dimensionsEnabled ? [{ to: '/company/dimensions', label: t('nav.dimensions'), icon: ICONS.codebooks, permission: 'accounting' as PermissionKey }] : []),
       { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
       { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
       { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },

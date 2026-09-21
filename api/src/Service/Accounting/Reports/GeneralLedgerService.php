@@ -158,6 +158,7 @@ final class GeneralLedgerService
             'vendor'      => $filters['vendor'] ?? null,
             'client'      => $filters['client'] ?? null,
             'item'        => $filters['item'] ?? null,
+            'dimension'   => isset($filters['dimension']) ? $filters['dimension']->toArray() : null,
             'draft_count' => $this->ledger->draftCount($supplierId, $from, $to),
             'months'      => $months,
             'accounts'    => $accounts,

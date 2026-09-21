@@ -25,6 +25,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { usePaneDom } from '@/composables/usePaneDom'
 import { allAccountingPeriodsRange, findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
+import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -46,7 +47,20 @@ const filters = reactive({
   vendor: '',
   client: '',
   item: '',
+  // Filtr na hodnotu dimenze (Firma → Dimenze) — bere jen řádky deníku s hodnotou.
+  dimension_value_id: null as number | null,
+  dimension_descendants: true,
 })
+
+function onDimensionValue(valueId: number | null) {
+  filters.dimension_value_id = valueId
+  load()
+}
+
+function onDimensionDescendants(value: boolean) {
+  filters.dimension_descendants = value
+  load()
+}
 
 function queryParams() {
   return {
@@ -60,6 +74,9 @@ function queryParams() {
     vendor: filters.vendor || undefined,
     client: filters.client || undefined,
     item: filters.item || undefined,
+    ...(filters.dimension_value_id
+      ? { dimension_value_id: filters.dimension_value_id, dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
+      : {}),
   }
 }
 
@@ -67,6 +84,7 @@ function resetFilters() {
   filters.vendor = ''
   filters.client = ''
   filters.item = ''
+  filters.dimension_value_id = null
   load()
 }
 
@@ -575,10 +593,17 @@ onMounted(async () => {
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
       </div>
+      <DimensionReportFilter class="mt-3"
+        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
+        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
       <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.general_ledger.reset_filters') }}</button>
       </div>
     </div>
+
+    <p v-if="report?.dimension" class="mb-4 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">
+      {{ t('dimensions.filter_active_note') }}
+    </p>
 
     <div v-if="report && report.draft_count > 0"
       class="mb-4 px-3 py-2 rounded-md bg-warning-50 border border-warning-500/30 text-warning-600 text-sm">

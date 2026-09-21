@@ -52,6 +52,7 @@
     "dashboard",
     "databox",
     "diagnostics",
+    "dimensions",
     "documentCompleteness",
     "document_requests",
     "documents",
@@ -151,6 +152,7 @@
       "dashboard",
       "databox",
       "diagnostics",
+      "dimensions",
       "documentCompleteness",
       "document_requests",
       "documents",
@@ -335,6 +337,7 @@
     "invoice-new": [
       "cash",
       "cash_settlement",
+      "dimensions",
       "errors",
       "lock",
       "payment_method",
@@ -351,6 +354,7 @@
       "bank",
       "cash",
       "cash_settlement",
+      "dimensions",
       "documents",
       "linked_documents",
       "lock",
@@ -364,6 +368,7 @@
     "invoice-edit": [
       "cash",
       "cash_settlement",
+      "dimensions",
       "errors",
       "lock",
       "payment_method",
@@ -422,6 +427,7 @@
     ],
     "purchase-invoices-payment-orders": [
       "bank_connection",
+      "dimensions",
       "payment_method",
       "payment_order",
       "purchase_invoice"
@@ -434,6 +440,7 @@
       "automation",
       "cash",
       "cash_settlement",
+      "dimensions",
       "errors",
       "lock",
       "payment_method",
@@ -450,6 +457,7 @@
       "bank",
       "cash",
       "cash_settlement",
+      "dimensions",
       "documents",
       "linked_documents",
       "lock",
@@ -462,6 +470,7 @@
       "automation",
       "cash",
       "cash_settlement",
+      "dimensions",
       "errors",
       "lock",
       "payment_method",
@@ -569,20 +578,33 @@
       "codebookTransfer",
       "users"
     ],
+    "accounting-account-detail": [
+      "dimensions"
+    ],
     "accounting-journal": [
       "activation",
       "automation",
+      "dimensions",
       "documents",
       "linked_documents"
     ],
+    "accounting-journal-new": [
+      "dimensions"
+    ],
     "accounting-setup-assistant": [
+      "dimensions",
       "imports"
     ],
     "accounting-general-ledger": [
-      "activation"
+      "activation",
+      "dimensions"
     ],
     "accounting-trial-balance": [
-      "activation"
+      "activation",
+      "dimensions"
+    ],
+    "accounting-account-statement": [
+      "dimensions"
     ],
     "accounting-balance-sheet": [
       "activation",
@@ -590,7 +612,11 @@
     ],
     "accounting-income-statement": [
       "activation",
+      "dimensions",
       "reports"
+    ],
+    "accounting-dimension-profit": [
+      "dimensions"
     ],
     "accounting-statement-mapping": [
       "settings"
@@ -625,15 +651,18 @@
     "accounting-cash": [
       "attachment_check",
       "cash",
+      "dimensions",
       "documents",
       "linked_documents"
     ],
     "accounting-cash-new": [
       "cash",
+      "dimensions",
       "purchase_invoice"
     ],
     "accounting-cash-edit": [
       "cash",
+      "dimensions",
       "purchase_invoice"
     ],
     "accounting-cash-book": [
@@ -793,6 +822,7 @@
       "bank_accounts",
       "bank_connection",
       "creditas_bank",
+      "dimensions",
       "document_requests",
       "documents",
       "errors",
@@ -810,6 +840,7 @@
       "activation",
       "automation",
       "bank",
+      "dimensions",
       "document_requests",
       "documents",
       "errors",
@@ -871,6 +902,9 @@
       "settings",
       "vat_classifications"
     ],
+    "company-dimensions": [
+      "dimensions"
+    ],
     "admin-electronic-signatures": [
       "electronic_signatures",
       "profile_signing",
@@ -895,6 +929,7 @@
       "activation",
       "automation",
       "bank",
+      "dimensions",
       "purchase_invoice",
       "template_tools",
       "vendor"

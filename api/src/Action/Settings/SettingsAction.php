@@ -601,6 +601,8 @@ final class SettingsAction
             // `stock_in_transit_from` (migrace 1331) rozhoduje, od kterého stavu objednávky
             // se zboží počítá „na cestě" — čte ho InTransitRepository::inTransitStates().
             'stock_enabled', 'stock_auto_issue', 'stock_in_transit_from',
+            // Firma → Dimenze (migrace 1860) — opt-in sekce analytického členění.
+            'dimensions_enabled',
             // Rozpis balení na základní jednotky na PDF faktury (issue #17, migrace 1832).
             'invoice_pdf_show_base_qty',
             // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po
@@ -1025,7 +1027,7 @@ final class SettingsAction
             }
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', DefaultInvoiceNote::ENABLED_COLUMN], true)
+                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'dimensions_enabled', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', DefaultInvoiceNote::ENABLED_COLUMN], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }
@@ -1327,6 +1329,7 @@ final class SettingsAction
         ) ? (string) $row['proforma_payment_document'] : ProformaPaymentDocuments::MODE_ALWAYS_TAX_DOCUMENT;
         // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; FE nav sekci gatuje MeAction.
         $row['stock_enabled']            = (bool) ($row['stock_enabled'] ?? false);
+        $row['dimensions_enabled']       = (bool) ($row['dimensions_enabled'] ?? false);
         $row['stock_auto_issue']         = (bool) ($row['stock_auto_issue'] ?? true);
         // Od kterého stavu objednávky se zboží počítá „na cestě" (migrace 1331,
         // rozhodnutí #2). Výchozí 'sent' musí odpovídat fallbacku

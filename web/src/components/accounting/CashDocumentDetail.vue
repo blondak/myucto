@@ -5,6 +5,7 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
 import type { CashDocument } from '@/api/cash'
 
@@ -70,5 +71,7 @@ const auth = useAuthStore()
       <LinkedDocumentsPanel entity-type="cash_document" :entity-id="doc.id" uploadable
         :title="t('linked_documents.title')" />
     </div>
+    <!-- Dimenze dokladu (Firma → Dimenze) — promítnou se i do jeho zaúčtování. -->
+    <DocumentDimensionsPanel class="mt-3" doc-type="cash-documents" :doc-id="doc.id" @click.stop />
   </div>
 </template>

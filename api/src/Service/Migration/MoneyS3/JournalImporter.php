@@ -171,15 +171,7 @@ final class JournalImporter
         $table = $ctx->backup->table('UcDenik', $ctx->backup->dir() . DIRECTORY_SEPARATOR . $item['dir']);
         $rows = $table !== null ? iterator_to_array($table->rows(), false) : [];
 
-        $groups = [];
-        $closingRows = 0;
-        foreach ($rows as $r) {
-            if (Ms3Journal::isYearEndClosing($r)) {
-                $closingRows++;
-                continue;
-            }
-            $groups[Ms3Journal::groupKey($r)][] = $r;
-        }
+        [$groups, $closingRows] = self::groupRows($rows);
         if ($closingRows > 0) {
             $p->info(self::STEP, 'year_end_closing_skipped', "Rok {$year}: uzávěrkové zápisy z Money ({$closingRows} řádků) se nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.", ['year' => $year]);
         }
@@ -226,7 +218,7 @@ final class JournalImporter
                     ));
                 }
                 $amount = number_format($effect['amount'], 2, '.', '');
-                $cc = mb_substr(trim((string) ($r['Zakazka'] ?? '')), 0, 50) ?: null;
+                $cc = Ms3Journal::costCenter($r);
                 $lines[] = ['account_id' => $debitId, 'side' => 'debit', 'amount' => $amount, 'cost_center' => $cc, 'line_no' => ++$lineNo];
                 $lines[] = ['account_id' => $creditId, 'side' => 'credit', 'amount' => $amount, 'cost_center' => $cc, 'line_no' => ++$lineNo];
             }
@@ -311,6 +303,62 @@ final class JournalImporter
             $p->error(self::STEP, 'journal_unbalanced', "Rok {$year}: Σ MD ≠ Σ D.", ['year' => $year]);
         }
         return $stats;
+    }
+
+    /**
+     * Dimenze z Money po řádcích převedeného deníku: klíč zápisu v mapě převodu
+     * (`rok|skupina`) => číslo řádku => středisko a zakázka. Řádky se číslují stejně
+     * jako v {@see importYear()} (každý řádek Money = řádek MD a řádek D), takže jde
+     * dimenze doplnit i do zápisů z dřívějšího převodu.
+     *
+     * @return array<string,array<int,array{stred:?string,zakazka:?string}>>
+     */
+    public function lineDimensions(ImportContext $ctx): array
+    {
+        $out = [];
+        foreach ($ctx->dirYears as $dir => $year) {
+            $table = $ctx->backup->table('UcDenik', $ctx->backup->dir() . DIRECTORY_SEPARATOR . $dir);
+            if ($table === null || !$table->hasData()) {
+                continue;
+            }
+            [$groups] = self::groupRows(iterator_to_array($table->rows(), false));
+            foreach ($groups as $groupKey => $groupRows) {
+                $lineNo = 0;
+                $lines = [];
+                foreach ($groupRows as $r) {
+                    if (Ms3Journal::effect($r) === null) {
+                        continue;
+                    }
+                    $dims = ['stred' => Ms3Journal::costCenter($r), 'zakazka' => Ms3Journal::jobCode($r)];
+                    $lines[++$lineNo] = $dims;
+                    $lines[++$lineNo] = $dims;
+                }
+                if ($lines !== []) {
+                    $out[$year . '|' . $groupKey] = $lines;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Řádky deníku roku po účetních zápisech, bez uzávěrkových zápisů Money.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array{0:array<string,list<array<string,mixed>>>,1:int} skupiny a počet vynechaných uzávěrkových řádků
+     */
+    private static function groupRows(array $rows): array
+    {
+        $groups = [];
+        $closingRows = 0;
+        foreach ($rows as $r) {
+            if (Ms3Journal::isYearEndClosing($r)) {
+                $closingRows++;
+                continue;
+            }
+            $groups[Ms3Journal::groupKey($r)][] = $r;
+        }
+        return [$groups, $closingRows];
     }
 
     /**

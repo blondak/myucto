@@ -9,6 +9,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Repository\JournalEntryTemplateRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\TemplateCsvMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -40,6 +42,7 @@ final class JournalTemplateAction
         private readonly JournalEntryTemplateRepository $templates,
         private readonly TemplateCsvMatcher $matcher,
         private readonly Connection $db,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -64,7 +67,7 @@ final class JournalTemplateAction
         if ($template === null) {
             return Json::error($response, 'not_found', 'Šablona nenalezena.', 404);
         }
-        return Json::ok($response, $template);
+        return Json::ok($response, $this->withDimensions($supplierId, $template));
     }
 
     public function create(Request $request, Response $response): Response
@@ -92,6 +95,7 @@ final class JournalTemplateAction
         }
 
         $lines = [];
+        $lineDims = [];
         foreach ($rawLines as $i => $l) {
             if (!is_array($l)) {
                 return Json::error($response, 'validation_failed', "Řádek #{$i} má neplatný formát.", 422);
@@ -118,10 +122,14 @@ final class JournalTemplateAction
                 'label'        => $this->nullableString($l['label'] ?? null),
                 'cost_center'  => $this->nullableString($l['cost_center'] ?? null),
             ];
+            if (array_key_exists('dimensions', $l)) {
+                $lineDims[count($lines)] = is_array($l['dimensions']) ? $l['dimensions'] : [];
+            }
         }
 
         $id = $this->templates->create($supplierId, $name, $description, $this->userId($request), $lines);
-        return Json::ok($response, $this->templates->find($supplierId, $id), 201);
+        if ($err = $this->saveDimensions($supplierId, $id, $lineDims, $response)) return $err;
+        return Json::ok($response, $this->withDimensions($supplierId, (array) $this->templates->find($supplierId, $id)), 201);
     }
 
     public function delete(Request $request, Response $response, array $args): Response
@@ -134,6 +142,7 @@ final class JournalTemplateAction
         if (!$this->templates->delete($supplierId, $id)) {
             return Json::error($response, 'not_found', 'Šablona nenalezena.', 404);
         }
+        $this->dimensions->forgetDocument($supplierId, 'journal_template', $id);
         return Json::ok($response, ['ok' => true]);
     }
 
@@ -163,6 +172,7 @@ final class JournalTemplateAction
         }
 
         $lines = [];
+        $lineDims = [];
         foreach ($rawLines as $i => $l) {
             if (!is_array($l)) {
                 return Json::error($response, 'validation_failed', "Řádek #{$i} má neplatný formát.", 422);
@@ -189,12 +199,16 @@ final class JournalTemplateAction
                 'label'        => $this->nullableString($l['label'] ?? null),
                 'cost_center'  => $this->nullableString($l['cost_center'] ?? null),
             ];
+            if (array_key_exists('dimensions', $l)) {
+                $lineDims[count($lines)] = is_array($l['dimensions']) ? $l['dimensions'] : [];
+            }
         }
 
         if (!$this->templates->update($supplierId, $id, $name, $description, $lines)) {
             return Json::error($response, 'not_found', 'Šablona nenalezena.', 404);
         }
-        return Json::ok($response, $this->templates->find($supplierId, $id));
+        if ($err = $this->saveDimensions($supplierId, $id, $lineDims, $response)) return $err;
+        return Json::ok($response, $this->withDimensions($supplierId, (array) $this->templates->find($supplierId, $id)));
     }
 
     /**
@@ -232,6 +246,42 @@ final class JournalTemplateAction
         }
 
         return Json::ok($response, $this->matcher->match($template['lines'], $content));
+    }
+
+    /**
+     * Dimenze řádků šablony (Firma → Dimenze) — podle pořadí řádku od 1. Ukládají se
+     * jen u firmy se zapnutými dimenzemi; šablona je pak předvyplní do ručního zápisu.
+     *
+     * @param array<int,array<int|string,mixed>> $lineDims pořadí (od 1) => mapa typ => hodnota
+     */
+    private function saveDimensions(int $supplierId, int $templateId, array $lineDims, Response $response): ?Response
+    {
+        if (!$this->dimensions->enabled($supplierId)) {
+            return null;
+        }
+        // Klient, který dimenze neposílá (starší rozhraní, API), je nesmaže.
+        if ($lineDims === []) {
+            return null;
+        }
+        try {
+            $this->dimensions->saveDocument($supplierId, 'journal_template', $templateId, [], $lineDims);
+        } catch (DimensionException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string,mixed> $template
+     * @return array<string,mixed>
+     */
+    private function withDimensions(int $supplierId, array $template): array
+    {
+        $dims = $this->dimensions->documentDimensions($supplierId, 'journal_template', (int) $template['id'])['items'];
+        foreach ((array) ($template['lines'] ?? []) as $i => $line) {
+            $template['lines'][$i]['dimensions'] = (object) ($dims[$i + 1] ?? []);
+        }
+        return $template;
     }
 
     private function nullableString(mixed $v): ?string

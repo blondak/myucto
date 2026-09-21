@@ -11,6 +11,7 @@ import JournalEntryExtras from './JournalEntryExtras.vue'
 import WhyPanel from '@/components/automation/WhyPanel.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
+import JournalLineDimensionsEditor from '@/components/dimensions/JournalLineDimensionsEditor.vue'
 
 /**
  * Obsah rozbaleného zápisu deníku (rozpad na účty, Souvisí, přílohy, akce).
@@ -19,7 +20,7 @@ import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
  * v buňce tabulky i mobilní karta. Dvě kopie šedesáti řádků markupu by se
  * rozešly hned při první změně.
  */
-defineProps<{
+const props = defineProps<{
   detail: JournalEntryDetail
   /** Verze vazeb — bump překreslí panel „Souvisí" po přidání/zrušení vazby. */
   relatedKey: number
@@ -50,6 +51,13 @@ const { t } = useI18n()
 const extrasCount = ref(0)
 const documentCount = ref(0)
 const extrasTotal = computed(() => extrasCount.value + documentCount.value)
+
+// Uložené dimenze řádků se propíšou do načteného detailu, ať štítky v rozpadu sedí.
+function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>) {
+  for (const line of props.detail.lines) {
+    line.dimensions = { ...(byLine[line.id] ?? {}) }
+  }
+}
 </script>
 
 <template>
@@ -57,6 +65,7 @@ const extrasTotal = computed(() => extrasCount.value + documentCount.value)
     <!-- Rozpad na účty — sdílená karta, tutéž ukazuje panel Souvisí
          u protějšku, aby je účetní poznal jako stejnou věc. -->
     <JournalLinesTable class="mb-3" :lines="detail.lines" :date-from="dateFrom" :date-to="dateTo" />
+    <JournalLineDimensionsEditor v-if="canWrite" class="mb-3" :entry-id="detail.id" :lines="detail.lines" @saved="onLineDimensionsSaved" />
     <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
          je to první, co účetní po rozpadu na účty hledá. -->
     <JournalRelatedPanel class="mt-3 block"

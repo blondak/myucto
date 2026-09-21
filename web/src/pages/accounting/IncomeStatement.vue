@@ -17,6 +17,7 @@ import ActivationBanner from '@/components/settings/activation/ActivationBanner.
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
+import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -39,6 +40,8 @@ const filters = reactive({
   period_id: '' as number | '',
   as_of: '',
   scope: 'auto' as StatementScope,
+  dimension_value_id: null as number | null,
+  dimension_descendants: true,
 })
 
 function queryParams() {
@@ -46,7 +49,20 @@ function queryParams() {
     period_id: Number(filters.period_id),
     as_of: filters.as_of || undefined,
     scope: filters.scope,
+    ...(filters.dimension_value_id
+      ? { dimension_value_id: filters.dimension_value_id, dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
+      : {}),
   }
+}
+
+function onDimensionValue(valueId: number | null) {
+  filters.dimension_value_id = valueId
+  void load()
+}
+
+function onDimensionDescendants(value: boolean) {
+  filters.dimension_descendants = value
+  void load()
 }
 
 async function load() {
@@ -190,7 +206,13 @@ onMounted(async () => {
           </span>
         </div>
       </div>
+      <DimensionReportFilter class="mt-3"
+        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
+        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
     </div>
+    <p v-if="report?.dimension" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">
+      {{ t('dimensions.filter_active_note') }}
+    </p>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 

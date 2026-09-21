@@ -83,6 +83,9 @@ async function onReposted(): Promise<void> {
   await originRef.value?.reload()
   emit('reposted')
 }
+
+// Po změně dimenzí dokladu (přerazítkování řádků) si detail sekci obnoví.
+defineExpose({ reload: () => load(props.docId) })
 </script>
 
 <template>

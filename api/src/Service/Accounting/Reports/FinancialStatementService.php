@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Repository\StatementDefinitionRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use PDO;
 
 /**
@@ -211,9 +212,9 @@ final class FinancialStatementService
      * @param 'full'|'small'|'micro'|'auto' $scope
      * @return array<string,mixed> struktura dle spec §2.7
      */
-    public function incomeStatement(int $supplierId, int $periodId, ?string $asOf, string $scope): array
+    public function incomeStatement(int $supplierId, int $periodId, ?string $asOf, string $scope, ?DimensionFilter $dimension = null): array
     {
-        return $this->incomeStatementFor('income_statement', $supplierId, $periodId, $asOf, $scope);
+        return $this->incomeStatementFor('income_statement', $supplierId, $periodId, $asOf, $scope, $dimension);
     }
 
     /**
@@ -224,9 +225,9 @@ final class FinancialStatementService
      * @param 'full'|'small'|'micro'|'auto' $scope
      * @return array<string,mixed>
      */
-    private function incomeStatementFor(string $type, int $supplierId, int $periodId, ?string $asOf, string $scope): array
+    private function incomeStatementFor(string $type, int $supplierId, int $periodId, ?string $asOf, string $scope, ?DimensionFilter $dimension = null): array
     {
-        $ctx = $this->buildStatement($type, $supplierId, $periodId, $asOf, $scope);
+        $ctx = $this->buildStatement($type, $supplierId, $periodId, $asOf, $scope, $dimension);
 
         $rows = [];
         foreach ($ctx['rows'] as $r) {
@@ -260,6 +261,7 @@ final class FinancialStatementService
             'period'         => $this->periodOut($ctx['period']),
             'prev_period'    => $ctx['prev_period'] === null ? null : $this->periodOut($ctx['prev_period']),
             'rows'           => $rows,
+            'dimension'      => $dimension?->toArray(),
             'checks'         => [
                 'profit_current' => $profitCurrent,
                 'net_turnover'   => $this->netOf($ctx['values'], 'OBRAT'),
@@ -275,7 +277,7 @@ final class FinancialStatementService
      * @param 'balance_sheet'|'income_statement'|'income_statement_purpose' $type
      * @return array<string,mixed>
      */
-    private function buildStatement(string $type, int $supplierId, int $periodId, ?string $asOf, string $scope): array
+    private function buildStatement(string $type, int $supplierId, int $periodId, ?string $asOf, string $scope, ?DimensionFilter $dimension = null): array
     {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
@@ -311,6 +313,7 @@ final class FinancialStatementService
             (string) $period['starts_on'],
             $splitCodes,
             $analyticPrefixes,
+            $dimension,
         );
         $mapped   = $this->mapper->map($rows, $map, $balances);
         $unmapped = $this->mapper->unmappedBalances(
@@ -332,6 +335,7 @@ final class FinancialStatementService
                 (string) $prevPeriod['starts_on'],
                 $splitCodes,
                 $this->mapper->analyticPrefixes($baseMap),
+                $dimension,
             );
             $mappedPrev = $this->mapper->map($rows, $baseMap, $balancesPrev);
             $valuesPrev = $this->computeValues($rows, $mappedPrev, $balancesPrev, $type, (string) $prevPeriod['starts_on'], $turnoverExtra);

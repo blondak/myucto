@@ -132,6 +132,7 @@ final class MoneyS3ImportTest extends TestCase
         // Tři vydané faktury a ostatní pohledávka PH25001, která je v přiznání DPH.
         self::assertSame(4, $this->rowCount('invoices', $supplierId));
         self::assertSame(4, $this->rowCount('cash_documents', $supplierId));
+        // Šest partnerů z adresáře a dokladů; zakázky z Money jsou dimenze, klienta nezakládají.
         self::assertSame(7, $this->rowCount('clients', $supplierId));
         // Dva záznamy adresáře se stejným IČO (s vodicími nulami i bez) = jedna karta, doplněná z obou.
         self::assertSame(1, $this->rowCount('clients', $supplierId,
@@ -680,6 +681,112 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame($before, $this->snapshotCounts($supplierId));
         $journal = array_column($second->toArray()['steps'], null, 'key')['journal'];
         self::assertSame(0, $journal['counts']['entries'] ?? 0);
+    }
+
+    public function testMoneyCostCentreAndJobBecomeDimensions(): void
+    {
+        $supplierId = $this->supplier();
+        $pdo = $this->db->pdo();
+        // Vůz z knihy jízd se značkou zapsanou jinak než v Money (bez mezery).
+        $pdo->prepare("INSERT INTO cars (supplier_id, registration, name) VALUES (?, '1AB2345', 'Dodávka')")->execute([$supplierId]);
+        $carId = (int) $pdo->lastInsertId();
+
+        $protocol = $this->import($supplierId);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $enabled = $pdo->prepare('SELECT dimensions_enabled FROM supplier WHERE id = ?');
+        $enabled->execute([$supplierId]);
+        self::assertSame(1, (int) $enabled->fetchColumn(), 'Převod dimenzí sekci Dimenze zapne.');
+
+        $values = $pdo->prepare(
+            'SELECT t.kind, t.supplier_group_id, v.id, v.code, v.name, v.is_active, v.car_id, cc.code AS cost_center_code
+               FROM dimension_values v
+               JOIN dimension_types t ON t.id = v.type_id
+          LEFT JOIN cost_centers cc ON cc.id = v.cost_center_id
+              WHERE v.supplier_id = ?'
+        );
+        $values->execute([$supplierId]);
+        $byCode = [];
+        foreach ($values->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $byCode[(string) $row['code']] = $row;
+        }
+        ksort($byCode);
+        self::assertSame(['1AB 2345', 'REZIE', 'ZAK01', 'ZAK02'], array_keys($byCode));
+        self::assertSame('cost_center', $byCode['REZIE']['kind']);
+        self::assertSame('REZIE', $byCode['REZIE']['cost_center_code'], 'Středisko je navázané na číselník středisek.');
+        self::assertSame('vehicle', $byCode['1AB 2345']['kind']);
+        self::assertSame($carId, (int) $byCode['1AB 2345']['car_id'], 'Vozidlo je navázané na knihu jízd.');
+        self::assertSame('1AB 2345 - Dodávka', $byCode['1AB 2345']['name']);
+        self::assertSame('project', $byCode['ZAK01']['kind']);
+        self::assertNull($byCode['ZAK01']['supplier_group_id'], 'Firma bez skupiny má projekt firemní.');
+        // Zakázky použil jen rok 2024, poslední převáděný rok je 2025.
+        self::assertSame(0, (int) $byCode['ZAK01']['is_active']);
+        $projects = $pdo->prepare('SELECT COUNT(*) FROM projects p JOIN clients c ON c.id = p.client_id WHERE c.supplier_id = ?');
+        $projects->execute([$supplierId]);
+        self::assertSame(0, (int) $projects->fetchColumn(), 'Zakázka z Money nezakládá fakturační zakázku.');
+
+        $line = $pdo->prepare(
+            "SELECT jel.cost_center, GROUP_CONCAT(v.code ORDER BY v.code SEPARATOR ',') AS dims
+               FROM journal_entry_lines jel
+               JOIN journal_entries je ON je.id = jel.entry_id
+               JOIN chart_of_accounts a ON a.id = jel.account_id
+          LEFT JOIN journal_entry_line_dimensions jd ON jd.line_id = jel.id
+          LEFT JOIN dimension_values v ON v.id = jd.dimension_value_id
+              WHERE je.supplier_id = ? AND je.document_no = ? AND a.account_code LIKE ?
+              GROUP BY jel.id"
+        );
+        foreach ([['FP24001', '518%', 'REZIE,ZAK01'], ['PV24001', '501%', '1AB 2345,REZIE']] as [$doc, $account, $dims]) {
+            $line->execute([$supplierId, $doc, $account]);
+            $row = $line->fetch(PDO::FETCH_ASSOC);
+            self::assertSame(['REZIE', $dims], [$row['cost_center'], $row['dims']], $doc);
+        }
+
+        $purchase = $pdo->prepare(
+            "SELECT GROUP_CONCAT(v.code ORDER BY v.code SEPARATOR ',')
+               FROM purchase_invoices pi
+               JOIN document_dimensions d ON d.supplier_id = pi.supplier_id AND d.doc_type = 'purchase_invoice'
+                AND d.doc_id = pi.id AND d.item_no = 0
+               JOIN dimension_values v ON v.id = d.dimension_value_id
+              WHERE pi.supplier_id = ? AND pi.vendor_invoice_number = 'DF-2024-017'"
+        );
+        $purchase->execute([$supplierId]);
+        self::assertSame('REZIE,ZAK01', $purchase->fetchColumn(), 'Doklad přebírá dimenze ze svých řádků.');
+
+        $second = $this->import($supplierId);
+        $step = array_column($second->toArray()['steps'], null, 'key')['dimensions'];
+        self::assertSame(0, $step['counts']['lines'] ?? 0, 'Opakovaný převod dimenze nemění.');
+        self::assertSame(0, $step['counts']['documents'] ?? 0);
+        self::assertSame(4, $step['counts']['values_existing'] ?? 0);
+        self::assertSame(0, $step['counts']['values_created'] ?? 0);
+    }
+
+    public function testMoneyJobIsGlobalProjectOfSupplierGroup(): void
+    {
+        $supplierId = $this->supplier();
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO supplier_groups (name) VALUES ('Syntetická skupina')")->execute();
+        $groupId = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE supplier SET supplier_group_id = ? WHERE id = ?')->execute([$groupId, $supplierId]);
+
+        $protocol = $this->import($supplierId);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $types = $pdo->prepare(
+            'SELECT kind, supplier_id, supplier_group_id FROM dimension_types
+              WHERE supplier_id = ? OR supplier_group_id = ? ORDER BY kind'
+        );
+        $types->execute([$supplierId, $groupId]);
+        $byKind = [];
+        foreach ($types->fetchAll(PDO::FETCH_ASSOC) as $t) {
+            $byKind[$t['kind']] = $t;
+        }
+        self::assertSame($groupId, (int) $byKind['project']['supplier_group_id'], 'Projekt firmy ve skupině je globální.');
+        self::assertNull($byKind['project']['supplier_id']);
+        self::assertSame($supplierId, (int) $byKind['cost_center']['supplier_id'], 'Středisko zůstává firemní.');
+        self::assertSame($supplierId, (int) $byKind['vehicle']['supplier_id'], 'Vozidlo zůstává firemní.');
+        $global = $pdo->prepare('SELECT COUNT(*) FROM dimension_values WHERE supplier_group_id = ?');
+        $global->execute([$groupId]);
+        self::assertSame(2, (int) $global->fetchColumn(), 'ZAK01 a ZAK02 jsou hodnoty skupiny.');
     }
 
     public function testHistoricalYearIsClosedWithoutDoublingOpeningBalances(): void

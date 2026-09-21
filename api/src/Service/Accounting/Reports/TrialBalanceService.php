@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\LedgerReportRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 
 /**
  * Obratová předvaha (Epic F2): PS (R6) / obraty / KS per účet + kontrolní rovnice
@@ -23,7 +24,7 @@ final class TrialBalanceService
     /**
      * @return array<string,mixed> struktura dle spec §2.5
      */
-    public function build(int $supplierId, int $periodId, ?string $from, ?string $to, bool $analytics = false, bool $afterClosing = false): array
+    public function build(int $supplierId, int $periodId, ?string $from, ?string $to, bool $analytics = false, bool $afterClosing = false, ?DimensionFilter $dimension = null): array
     {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
@@ -32,7 +33,7 @@ final class TrialBalanceService
         $from = ($from === null || $from === '') ? (string) $period['starts_on'] : $from;
         $to   = ($to === null || $to === '') ? (string) $period['ends_on'] : $to;
 
-        $raw = $this->ledger->trialBalanceRows($supplierId, $from, $to, (string) $period['starts_on'], $analytics, [], !$afterClosing);
+        $raw = $this->ledger->trialBalanceRows($supplierId, $from, $to, (string) $period['starts_on'], $analytics, $dimension !== null ? ['dimension' => $dimension] : [], !$afterClosing);
 
         $rows = [];
         $totals = ['ps_md' => 0, 'ps_d' => 0, 'turnover_md' => 0, 'turnover_d' => 0, 'ks_md' => 0, 'ks_d' => 0];
@@ -72,7 +73,7 @@ final class TrialBalanceService
         // Stejná množina řádků jako v $raw výše (viz journalTotals()) — kontrola
         // „obrat předvahy = obrat deníku" jinak nemůže projít u období s počátečním
         // stavem ani u uzavřeného roku v pohledu před uzavřením knih.
-        $journal = $this->ledger->journalTotals($supplierId, $from, $to, !$afterClosing);
+        $journal = $this->ledger->journalTotals($supplierId, $from, $to, !$afterClosing, $dimension);
 
         return [
             'period' => [
@@ -84,6 +85,8 @@ final class TrialBalanceService
             'from'        => $from,
             'to'          => $to,
             'draft_count' => $this->ledger->draftCount($supplierId, $from, $to),
+            // Filtr na dimenzi bere jen řádky hodnoty, předvaha pak vyvážená být nemusí.
+            'dimension'   => $dimension?->toArray(),
             'rows'        => $rows,
             'totals'      => array_map(static fn (int $c): float => $c / 100, $totals),
             'checks'      => [

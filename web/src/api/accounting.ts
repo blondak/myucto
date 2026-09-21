@@ -114,6 +114,8 @@ export interface JournalLine {
   amount_foreign: number | null
   cost_center: string | null
   line_no: number
+  /** Dimenze řádku (Firma → Dimenze): typ → hodnota; chodí v detailu zápisu. */
+  dimensions?: Record<number, number>
   /** Obohaceno v detailu (GET /journal/{id}). */
   account_code?: string | null
   account_name?: string | null
@@ -528,6 +530,8 @@ export interface ManualLinePayload {
   side: JournalSide
   amount: number
   cost_center?: string
+  /** Dimenze řádku: typ → hodnota. */
+  dimensions?: Record<number, number>
 }
 
 /** Tělo zaúčtování dokladu. `lines` = kontace upravená v popupu; bez nich staví server. */
@@ -563,6 +567,8 @@ export interface JournalTemplateLine {
   side: JournalSide
   default_amount: number | null
   cost_center: string | null
+  /** Dimenze řádku šablony: typ → hodnota. */
+  dimensions?: Record<number, number>
 }
 
 export interface JournalTemplateSummary {
@@ -590,6 +596,7 @@ export interface JournalTemplateLinePayload {
   amount?: number | null
   label?: string | null
   cost_center?: string | null
+  dimensions?: Record<number, number>
 }
 
 export interface CreateJournalTemplatePayload {
@@ -869,6 +876,10 @@ export interface LedgerReportParams {
    * účetní by k rozvahovému dni neviděla žádné zůstatky.
    */
   after_closing?: 0 | 1
+  /** Filtr na hodnotu dimenze (Firma → Dimenze); bere jen řádky deníku s touto hodnotou. */
+  dimension_value_id?: number
+  /** 0 = jen hodnota sama, bez podřízených (výchozí je celá větev). */
+  dimension_descendants?: 0 | 1
 }
 
 export interface GeneralLedgerAccount {
@@ -891,9 +902,17 @@ export interface GeneralLedgerAccount {
   closing_d: number
 }
 
+/** Použitý filtr na dimenzi (hodnota a celá její větev). */
+export interface ReportDimensionFilter {
+  type_id: number
+  value_id: number
+  value_ids: number[]
+}
+
 export interface GeneralLedgerReport {
   period: ReportPeriod | null
   all_periods: boolean
+  dimension?: ReportDimensionFilter | null
   from: string
   to: string
   analytics: boolean
@@ -936,6 +955,7 @@ export interface TrialBalanceChecks {
 
 export interface TrialBalanceReport {
   period: ReportPeriod
+  dimension?: ReportDimensionFilter | null
   from: string
   to: string
   draft_count: number
@@ -1131,6 +1151,9 @@ export interface StatementParams {
   period_id: number
   as_of?: string
   scope?: StatementScope
+  /** Filtr druhové výsledovky na hodnotu dimenze (rozvaha ho ignoruje). */
+  dimension_value_id?: number
+  dimension_descendants?: 0 | 1
 }
 
 export interface StatementRowAccount {
@@ -1345,6 +1368,7 @@ export interface StatementOverrideSuggestions {
 }
 
 export interface IncomeStatementReport {
+  dimension?: ReportDimensionFilter | null
   statement_type: 'income_statement' | 'income_statement_purpose'
   version_code: string
   as_of: string

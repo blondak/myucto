@@ -173,6 +173,12 @@ final class TenantPredicateTest extends TestCase
         'scan_matches',
         // Kontrola zaúčtovaných dokladů proti vytěžení příloh — výsledky a potvrzení.
         'attachment_checks',
+        // Dimenze (1860) — přiřazení hodnot řádkům deníku a dokladům. Číselníky
+        // `dimension_types`/`dimension_values` tu nejsou: globální řádek patří skupině
+        // firem (supplier_id NULL) a viditelnost hlídá DimensionRepository::visibleSql(),
+        // což pokrývá DimensionVisibilityTest.
+        'journal_entry_line_dimensions',
+        'document_dimensions',
     ];
 
     /**

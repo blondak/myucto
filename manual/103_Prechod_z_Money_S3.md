@@ -44,7 +44,8 @@ přepne do podvojného účetnictví.
 | účtový rozvrh (jen účty, na které se účtovalo) | analytiky pod syntetiky osnovy, `042000` → `042.000` |
 | účetní roky | účetní období |
 | účetní deník včetně počátečních stavů | účetní zápisy, počáteční stavy jako otevírací zápis k 1. dni období |
-| zakázka na řádku deníku | středisko na řádku zápisu |
+| středisko na řádku deníku | dimenze Středisko a středisko na řádku zápisu, viz níže |
+| zakázka na řádku deníku | dimenze Projekt nebo Vozidlo na řádku zápisu a v hlavičce dokladu, viz níže |
 | adresář a bankovní spojení partnerů | klienti a jejich bankovní účty |
 | předkontace | pravidla zaúčtování se zkratkou z Money |
 | přijaté a vydané faktury | doklady se stavem zaúčtováno nebo uhrazeno, položka na každou sazbu DPH; doklad nejisté daňové povahy jako koncept k ruční kontrole |
@@ -56,6 +57,30 @@ přepne do podvojného účetnictví.
 a doklady se k němu jen připojí. Z dokladu je proto vidět jeho zápis a naopak,
 detail faktury ukazuje úhradu jako zaúčtovanou a automatika už doklad znovu
 nezaúčtuje.
+
+**Střediska a zakázky jako dimenze.** Převod u firmy zapne
+[Dimenze](110_Dimenze.md) a středisko i zakázku z deníku Money převede na
+hodnoty dimenzí. Doklad dostane hodnotu do hlavičky, když všechny jeho řádky
+s daným typem nesou tutéž; hlavičku, kterou už někdo vyplnil, převod nemění.
+
+- Středisko z Money je hodnota firemní dimenze **Středisko**. Založí se i
+  v `Nástroje → Střediska` a kód střediska zůstane na řádcích zápisů.
+- Zakázka ve tvaru registrační značky (`1AB 2345`, `3CD4567`, `EL123AB`) je
+  hodnota firemní dimenze **Vozidlo**. Je-li vůz v knize jízd, hodnota se na
+  něj naváže a nese jeho název. Různé zápisy téže značky (`5E6 7890`, `5E67890`)
+  se sloučí do jedné hodnoty.
+- Ostatní zakázky jsou hodnoty dimenze **Projekt**. Patří-li firma do skupiny
+  firem, je Projekt globální: stejný kód zakázky v mateřské firmě i v SPV je
+  jeden projekt a výsledovka po dimenzi ho sečte přes všechny firmy skupiny.
+  Skupinu je proto dobré založit před převodem.
+- Hodnota, kterou poslední převáděný rok nepoužil, se založí jako uzavřená.
+  Hodnotu, kterou poslední rok použil, převod znovu otevře.
+- Fakturační zakázky (`Zakázky`) ani klienty převod ze zakázek Money nezakládá.
+- Činnost z Money se nepřevádí.
+
+Dimenze dostanou i zápisy z let, která převod uzavřel už dříve; obraty ani výkazy
+se tím nemění. U řádků převzatých z Money platí Money: opakovaný převod přepíše
+středisko, projekt nebo vozidlo, které jsi u nich změnil ručně.
 
 **Popisy zápisů se dogenerují.** Money veze v řádku deníku jen pole `Popis`, které
 je u celé řady dokladů shodné. Po navázání dokladů proto převod popisy přeskládá do

@@ -9888,6 +9888,7 @@ paths:
                       amount: { type: number, minimum: 0 }
                       label: { type: string }
                       cost_center: { type: string }
+                      dimensions: { type: object, additionalProperties: { type: integer }, description: "Dimenze (Firma → Dimenze): id typu → id hodnoty." }
       responses:
         '201': { description: Vytvořená šablona, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -9934,6 +9935,7 @@ paths:
                       amount: { type: number, minimum: 0 }
                       label: { type: string }
                       cost_center: { type: string }
+                      dimensions: { type: object, additionalProperties: { type: integer }, description: "Dimenze (Firma → Dimenze): id typu → id hodnoty." }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -10297,6 +10299,8 @@ paths:
       description: Jen zaúčtované zápisy; `draft_count` informuje o konceptech v rozsahu. Vyžaduje buď `period_id`, nebo `all_periods=1` pro rozsah všech účetních období firmy.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
         - { in: query, name: period_id, description: "Konkrétní účetní období; povinné bez all_periods=1", schema: { type: integer } }
         - { in: query, name: all_periods, description: "1 = všechna účetní období firmy", schema: { type: boolean } }
         - { in: query, name: from, description: "Zúžení rozsahu uvnitř vybraného období nebo celkového rozsahu období", schema: { type: string, format: date } }
@@ -10317,6 +10321,8 @@ paths:
       summary: Export hlavní knihy (PDF / XLSX)
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
         - { in: query, name: period_id, description: "Konkrétní účetní období; povinné bez all_periods=1", schema: { type: integer } }
         - { in: query, name: all_periods, description: "1 = všechna účetní období firmy", schema: { type: boolean } }
         - { in: query, name: from, schema: { type: string, format: date } }
@@ -10338,6 +10344,8 @@ paths:
       summary: Obratová předvaha (PS/obraty/KS + kontrolní vazby)
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
         - { in: query, name: from, schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
@@ -10353,6 +10361,8 @@ paths:
       summary: Export obratové předvahy (PDF / XLSX)
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
         - { in: query, name: from, schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
@@ -10436,6 +10446,8 @@ paths:
       summary: Výkaz zisku a ztráty (druhové členění)
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
         - { in: query, name: as_of, schema: { type: string, format: date } }
         - { in: query, name: scope, schema: { type: string, enum: [auto, full, small, micro], default: auto } }
@@ -10454,6 +10466,8 @@ paths:
         jednotku volí `unit` (default Kč).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
         - { in: query, name: as_of, schema: { type: string, format: date } }
         - { in: query, name: scope, schema: { type: string, enum: [auto, full, small, micro], default: auto } }
@@ -10461,6 +10475,38 @@ paths:
         - { in: query, name: unit, description: "Jen XLSX; PDF je vždy v tis. Kč", schema: { type: string, enum: [czk, thousands], default: czk } }
       responses:
         '200': { description: Soubor výkazu, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/dimensions:
+    get:
+      tags: [Accounting]
+      summary: Dimenze firmy — typy a stromy hodnot (firemní i globální skupiny firem)
+      description: |
+        Číselník dimenzí (Firma → Dimenze): `enabled` (sekce zapnutá u firmy), `group`
+        (skupina firem a její členové), `types` a `values`. Hodnota nese `parent_id`
+        (strom), `is_active` (uzavřená hodnota) a volitelné vazby na vůz, zakázku a
+        středisko. Změny číselníku přes token nejdou (účetní vrstva je jednosměrná).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+
+  /api/v1/accounting/reports/dimension-profit:
+    get:
+      tags: [Accounting]
+      summary: Výsledovka po dimenzi (výnosy, náklady a výsledek po hodnotách typu)
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: type_id, required: true, schema: { type: integer } }
+        - { in: query, name: from, required: true, schema: { type: string, format: date } }
+        - { in: query, name: to, required: true, schema: { type: string, format: date } }
+        - in: query
+          name: scope
+          description: '`group` u globálního typu sečte firmy skupiny, ke kterým má uživatel účetní přístup.'
+          schema: { type: string, enum: [group] }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
@@ -20771,6 +20817,22 @@ components:
         na konkrétního supplier-a, hlavička se ignoruje.
       schema: { type: integer }
 
+    DimensionValueId:
+      in: query
+      name: dimension_value_id
+      required: false
+      description: |
+        Filtr na hodnotu dimenze (Firma → Dimenze). Sestava vezme jen řádky deníku
+        s touto hodnotou (výchozí včetně podřízených hodnot), ne protistranu zápisu.
+      schema: { type: integer }
+
+    DimensionDescendants:
+      in: query
+      name: dimension_descendants
+      required: false
+      description: '`0` = jen hodnota sama, bez podřízených hodnot.'
+      schema: { type: integer, enum: [0, 1], default: 1 }
+
   responses:
     Unauthorized:
       description: Neplatný nebo chybějící token
@@ -24531,6 +24593,7 @@ components:
           properties:
             account_code: { type: [string, "null"] }
             account_name: { type: [string, "null"] }
+            dimensions: { type: object, additionalProperties: { type: integer }, description: "Dimenze (Firma → Dimenze): id typu → id hodnoty." }
 
     ManualJournalEntry:
       type: object
@@ -24550,6 +24613,7 @@ components:
               side: { type: string, enum: [debit, credit] }
               amount: { type: number, format: float, example: 1000.00 }
               cost_center: { type: [string, "null"] }
+              dimensions: { type: object, additionalProperties: { type: integer }, description: "Dimenze (Firma → Dimenze): id typu → id hodnoty." }
 
     PostingRule:
       type: object

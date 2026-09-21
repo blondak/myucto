@@ -52,6 +52,7 @@ function syncSupplierStore(s: Supplier) {
     stock_enabled: s.stock_enabled ?? false,
     accounting_enabled: s.accounting_enabled ?? true,
     payroll_enabled: s.payroll_enabled ?? false,
+    dimensions_enabled: s.dimensions_enabled ?? false,
   })
 }
 
@@ -587,6 +588,8 @@ async function saveSupplier() {
       accounting_enabled: supplier.value.accounting_enabled ?? true,
       // „Vést mzdy" (1187, opt-in od 1290) — výchozí vypnuto jako sklad; licence bez vlivu.
       payroll_enabled: supplier.value.payroll_enabled ?? false,
+      // Firma → Dimenze (1860) — opt-in analytického členění dokladů a deníku.
+      dimensions_enabled: supplier.value.dimensions_enabled ?? false,
       // Auto-post hook (A2) — auto-zaúčtování FV/PF; účinek jen v double_entry.
       auto_post_invoices: supplier.value.auto_post_invoices ?? false,
       auto_post_purchases: supplier.value.auto_post_purchases ?? false,
@@ -1443,6 +1446,18 @@ async function confirmTaxRepDelete() {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
           {{ t('settings.payroll_enabled.buy') }}
         </RouterLink>
+      </section>
+
+      <!-- Firma → Dimenze (migrace 1860) — opt-in; číselník typů a hodnot je v menu Firma. -->
+      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm" data-test="settings-dimensions">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.dimensions_enabled.title') }}</h2>
+        <label class="flex items-start gap-2 cursor-pointer">
+          <input v-model="supplier.dimensions_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300" />
+          <span>
+            <span class="font-medium">{{ t('settings.dimensions_enabled.label') }}</span>
+            <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.dimensions_enabled.hint') }}</p>
+          </span>
+        </label>
       </section>
 
       <!-- Sklad (Epic SKLAD) — samostatný box, nezávislé na accounting_mode.

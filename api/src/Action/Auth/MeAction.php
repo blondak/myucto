@@ -93,7 +93,7 @@ final class MeAction
                                 is_vat_payer, is_identified, taxpayer_type,
                                 default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
                                 auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
-                                accounting_mode, accounting_enabled, payroll_enabled, stock_enabled, ' . $ossSelect . ',
+                                accounting_mode, accounting_enabled, payroll_enabled, stock_enabled, dimensions_enabled, ' . $ossSelect . ',
                                 ai_provider, ai_data_region, ai_eu_residency_required, '
                         // Výchozí poznámka pod položkami (#79) — editor faktury ji
                         // předvyplní, a ten běží i pod rolí bez `settings.company.write`,
@@ -138,6 +138,8 @@ final class MeAction
             // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; nav sekce Sklad se řídí
             // touto hodnotou (stejný vzor jako accounting_mode výše).
             $s['stock_enabled']            = (bool) ($s['stock_enabled'] ?? false);
+            // Firma → Dimenze (migrace 1860) — opt-in; vypnuté schová sekci i výběr dimenzí na dokladech.
+            $s['dimensions_enabled']       = (bool) ($s['dimensions_enabled'] ?? false);
             $s['oss_enabled']              = (bool) ($s['oss_enabled'] ?? false);
             // Identifikovaná osoba (§ 6g–6l, issue #94) — neplátce s přeshraničními
             // povinnostmi; editor podle ní nabídne RC u zahraničních faktur.

@@ -23,6 +23,7 @@ import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
+import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import ExpenseRuleTemplateModal from '@/components/accounting/ExpenseRuleTemplateModal.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
@@ -43,6 +44,7 @@ const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore
 const stockEnabled = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled === true)
 
 const invoice = ref<PurchaseInvoice | null>(null)
+const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(null)
 // Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
 // nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
 const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
@@ -1185,9 +1187,13 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </div>
       </div>
 
+      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
+           se přerazítkují. -->
+      <DocumentDimensionsPanel doc-type="purchase-invoices" :doc-id="invoice.id" @saved="postingPanelRef?.reload()" />
+
       <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
            samotná kontace se dál načítá na pozadí. -->
-      <DocumentPostingPanel source="purchase-invoices" :doc-id="invoice.id" always-visible
+      <DocumentPostingPanel ref="postingPanelRef" source="purchase-invoices" :doc-id="invoice.id" always-visible
         :doc-label="invoice.vendor_invoice_number || invoice.varsymbol" @reposted="onReposted">
         <dl class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-3 text-sm">
           <div class="flex justify-between gap-3">

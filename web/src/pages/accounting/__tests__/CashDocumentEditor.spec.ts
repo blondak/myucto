@@ -45,6 +45,10 @@ vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number) => String(v
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'double_entry' } }),
 }))
+// Dimenze jsou u firmy vypnuté (currentSupplier bez dimensions_enabled) — editor nesmí nic načítat.
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ canRead: () => true, canWrite: () => true }),
+}))
 vi.mock('@/components/ui/buttonStyles', () => ({
   ICONS: { check: 'M0 0', x: 'M0 0', plus: 'M0 0' },
   btnOutline: () => 'btn-outline',

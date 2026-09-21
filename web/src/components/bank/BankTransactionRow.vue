@@ -15,6 +15,7 @@ import PostingStatusBadge from './PostingStatusBadge.vue'
 import MatchSuggestionPanel from './MatchSuggestionPanel.vue'
 import WhyChip from '@/components/automation/WhyChip.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
 import { BTN_ICON_SM_BASE, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
 import type { BankTransactionActions } from '@/composables/useBankTransactionActions'
@@ -346,6 +347,8 @@ function candidateReject() {
     <tr v-if="expandedDocs.has(tx.id)">
       <td :colspan="colspan" class="bg-neutral-50 px-4 py-3">
         <LinkedDocumentsPanel entity-type="bank_transaction" :entity-id="tx.id" />
+        <!-- Dimenze pohybu (Firma → Dimenze) — promítnou se i do jeho zaúčtování. -->
+        <DocumentDimensionsPanel class="mt-3" doc-type="bank-transactions" :doc-id="tx.id" />
       </td>
     </tr>
   </template>
@@ -445,6 +448,7 @@ function candidateReject() {
       :can-review="auth.canWrite('bank.match')" @accept="candidateAccept" @reject="candidateReject" />
     <div v-if="expandedDocs.has(tx.id)" class="pt-1">
       <LinkedDocumentsPanel entity-type="bank_transaction" :entity-id="tx.id" />
+      <DocumentDimensionsPanel class="mt-3" doc-type="bank-transactions" :doc-id="tx.id" />
     </div>
     <!-- Akce mobilní karty jedou ze stejného `matchActions(tx)` jako desktopový
          řádek. Dřív tu byla ručně psaná mřížka tlačítek se stejným obsahem:

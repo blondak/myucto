@@ -6,6 +6,7 @@ import { formatMoney } from '@/composables/useFormat'
 import type { JournalLine } from '@/api/accounting'
 import { calendarYearRange } from '@/utils/accountingPeriod'
 import { canPair, pairLines } from '@/utils/journalPairs'
+import DimensionChips from '@/components/dimensions/DimensionChips.vue'
 
 /**
  * Rozpad účetního zápisu na účty (MD/DAL) jako samostatná karta.
@@ -159,6 +160,7 @@ function movementLink(line: JournalLine) {
               <span class="font-mono font-medium">{{ p.debit.account_code }}</span>
               <span class="text-neutral-600">{{ p.debit.account_name }}</span>
             </RouterLink>
+            <DimensionChips v-if="p.debit" class="mt-0.5 flex" :dimensions="p.debit.dimensions" />
           </td>
           <td v-if="creditSpans[i].render" :rowspan="creditSpans[i].span" class="align-middle" :class="[cell, rowBorder(i)]">
             <RouterLink v-if="p.credit" :to="movementLink(p.credit)"
@@ -167,6 +169,7 @@ function movementLink(line: JournalLine) {
               <span class="font-mono font-medium">{{ p.credit.account_code }}</span>
               <span class="text-neutral-600">{{ p.credit.account_name }}</span>
             </RouterLink>
+            <DimensionChips v-if="p.credit" class="mt-0.5 flex" :dimensions="p.credit.dimensions" />
           </td>
           <td v-if="showsCostCenter" class="text-neutral-500 text-xs" :class="[cell, rowBorder(i)]">{{ p.costCenter || '—' }}</td>
           <td class="text-right font-mono font-medium text-neutral-900 whitespace-nowrap" :class="[cell, rowBorder(i)]">
@@ -210,6 +213,7 @@ function movementLink(line: JournalLine) {
               <span class="font-mono font-medium">{{ l.account_code }}</span>
               <span class="text-neutral-600">{{ l.account_name }}</span>
             </RouterLink>
+            <DimensionChips class="mt-0.5 flex" :dimensions="l.dimensions" />
           </td>
           <td v-if="showsCostCenter" class="text-neutral-500 text-xs" :class="cell">{{ l.cost_center || '—' }}</td>
           <td class="text-right font-mono font-medium text-neutral-900" :class="cell">
@@ -266,6 +270,7 @@ function movementLink(line: JournalLine) {
               <span class="block text-xs text-neutral-600">{{ leg.line.account_name }}</span>
             </span>
           </RouterLink>
+          <DimensionChips v-if="leg.line" class="mt-0.5 ml-9 flex" :dimensions="leg.line.dimensions" />
         </div>
         <div v-if="p.costCenter" class="text-xs text-neutral-500">
           {{ t('accounting.journal.cost_center') }}: {{ p.costCenter }}
@@ -307,6 +312,7 @@ function movementLink(line: JournalLine) {
         <div v-if="l.cost_center" class="text-xs text-neutral-500">
           {{ t('accounting.journal.cost_center') }}: {{ l.cost_center }}
         </div>
+        <DimensionChips class="flex" :dimensions="l.dimensions" />
       </div>
       <div v-if="showsTotal" class="px-3 py-2 bg-neutral-50 space-y-1">
         <div class="flex justify-between text-sm font-semibold">

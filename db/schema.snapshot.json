@@ -843,7 +843,8 @@
         "1856_journal_entries_list_indexes.sql",
         "1857_bank_email_ingest_notices_toggle.sql",
         "1858_invoice_payment_variable_symbol.sql",
-        "1859_premier_migration.sql"
+        "1859_premier_migration.sql",
+        "1860_dimensions.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -3691,6 +3692,109 @@
                 "detail": "json_valid(`detail`)"
             }
         },
+        "dimension_types": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "code": "varchar(30) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "kind": "enum('cost_center','project','vehicle','location','deal','custom') NOT NULL DEFAULT 'custom'",
+                "name": "varchar(100) NOT NULL",
+                "show_on_documents": "tinyint(1) NOT NULL DEFAULT 1",
+                "sort_order": "smallint(6) NOT NULL DEFAULT 0",
+                "supplier_group_id": "int(10) unsigned NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NULL DEFAULT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "uq_dimension_type_group_code": "UNIQUE BTREE (supplier_group_id, code)",
+                "uq_dimension_type_supplier_code": "UNIQUE BTREE (supplier_id, code)"
+            },
+            "foreign_keys": {
+                "fk_dimension_type_group": "(supplier_group_id) -> supplier_groups (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dimension_type_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_dimension_type_owner": "`supplier_id` is null <> (`supplier_group_id` is null)"
+            }
+        },
+        "dimension_values": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "car_id": "int(10) unsigned NULL DEFAULT NULL",
+                "code": "varchar(50) NOT NULL",
+                "cost_center_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "name": "varchar(190) NOT NULL",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "parent_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "responsible_note": "varchar(190) NULL DEFAULT NULL",
+                "responsible_user_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "sort_order": "smallint(6) NOT NULL DEFAULT 0",
+                "supplier_group_id": "int(10) unsigned NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NULL DEFAULT NULL",
+                "type_id": "bigint(20) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_dimension_value_car": "BTREE (car_id)",
+                "idx_dimension_value_cost_center": "BTREE (cost_center_id)",
+                "idx_dimension_value_group": "BTREE (supplier_group_id, type_id)",
+                "idx_dimension_value_parent": "BTREE (parent_id)",
+                "idx_dimension_value_project": "BTREE (project_id)",
+                "idx_dimension_value_responsible": "BTREE (responsible_user_id)",
+                "idx_dimension_value_supplier": "BTREE (supplier_id, type_id)",
+                "uq_dimension_value_type_code": "UNIQUE BTREE (type_id, code)",
+                "uq_dimension_value_type_id": "UNIQUE BTREE (type_id, id)"
+            },
+            "foreign_keys": {
+                "fk_dimension_value_car": "(car_id) -> cars (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_dimension_value_cost_center": "(cost_center_id) -> cost_centers (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_dimension_value_group": "(supplier_group_id) -> supplier_groups (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dimension_value_parent": "(parent_id) -> dimension_values (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_dimension_value_project": "(project_id) -> projects (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_dimension_value_responsible": "(responsible_user_id) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_dimension_value_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dimension_value_type": "(type_id) -> dimension_types (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_dimension_value_active": "`is_active` in (0,1)",
+                "chk_dimension_value_owner": "`supplier_id` is null <> (`supplier_group_id` is null)"
+            }
+        },
+        "document_dimensions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "doc_id": "bigint(20) unsigned NOT NULL",
+                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template') NOT NULL",
+                "item_no": "smallint(5) unsigned NOT NULL DEFAULT 0",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, doc_type, doc_id, item_no, dimension_type_id)",
+                "idx_docdim_type_value": "BTREE (dimension_type_id, dimension_value_id)",
+                "idx_docdim_value": "BTREE (supplier_id, dimension_value_id)"
+            },
+            "foreign_keys": {
+                "fk_docdim_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_docdim_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": []
+        },
         "document_dms_messages": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -5800,6 +5904,28 @@
                 "fk_jedl_entry": "(supplier_id, entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_jedl_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_jedl_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": []
+        },
+        "journal_entry_line_dimensions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "line_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (line_id, dimension_type_id)",
+                "idx_jeld_supplier_value": "BTREE (supplier_id, dimension_value_id)",
+                "idx_jeld_type_value": "BTREE (dimension_type_id, dimension_value_id)"
+            },
+            "foreign_keys": {
+                "fk_jeld_line": "(line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_jeld_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_jeld_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -19429,6 +19555,7 @@
                 "default_prices_include_vat": "tinyint(1) NOT NULL DEFAULT 0",
                 "default_vat_rate_id": "int(10) unsigned NOT NULL",
                 "dic": "varchar(20) NULL DEFAULT NULL",
+                "dimensions_enabled": "tinyint(1) NOT NULL DEFAULT 0",
                 "display_name": "varchar(190) NULL DEFAULT NULL",
                 "email": "varchar(190) NOT NULL",
                 "email_accent_color": "varchar(7) NOT NULL DEFAULT '#3B2D83'",
@@ -19511,6 +19638,7 @@
                 "street": "varchar(190) NOT NULL",
                 "street_number_orient": "varchar(20) NULL DEFAULT NULL",
                 "street_number_pop": "varchar(20) NULL DEFAULT NULL",
+                "supplier_group_id": "int(10) unsigned NULL DEFAULT NULL",
                 "tagline": "varchar(190) NULL DEFAULT NULL",
                 "tax_accounting_decree": "varchar(3) NOT NULL DEFAULT '500'",
                 "tax_atad_cfc": "tinyint(1) NOT NULL DEFAULT 0",
@@ -19531,12 +19659,14 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_sup_country": "BTREE (country_id)",
                 "fk_sup_currency": "BTREE (default_currency_id)",
-                "fk_sup_vat": "BTREE (default_vat_rate_id)"
+                "fk_sup_vat": "BTREE (default_vat_rate_id)",
+                "idx_supplier_group": "BTREE (supplier_group_id)"
             },
             "foreign_keys": {
                 "fk_sup_country": "(country_id) -> countries (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_sup_currency": "(default_currency_id) -> currencies (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "fk_sup_vat": "(default_vat_rate_id) -> vat_rates (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "fk_sup_vat": "(default_vat_rate_id) -> vat_rates (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_supplier_group": "(supplier_group_id) -> supplier_groups (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
                 "ai_dpa_confirmations": "json_valid(`ai_dpa_confirmations`)",
@@ -19693,6 +19823,22 @@
                 "chk_supplier_domains_primary_portal": "`is_primary_portal` in (0,1) and (`is_primary_portal` = 0 or `purpose` in ('portal','all'))",
                 "chk_supplier_domains_primary_public": "`is_primary_public` in (0,1) and (`is_primary_public` = 0 or `purpose` in ('public_links','all'))"
             }
+        },
+        "supplier_groups": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "name": "varchar(190) NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)"
+            },
+            "foreign_keys": [],
+            "checks": []
         },
         "supplier_osvc_month_statuses": {
             "type": "BASE TABLE",

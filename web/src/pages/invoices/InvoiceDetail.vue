@@ -29,6 +29,7 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
+import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import { accountingApi } from '@/api/accounting'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
@@ -61,6 +62,7 @@ const route = useRoute()
 const router = useRouter()
 
 const invoice = ref<Invoice | null>(null)
+const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(null)
 // Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
 // nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
 const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
@@ -2170,8 +2172,11 @@ const invoiceActions = computed<ActionItem[]>(() => {
       </div>
 
       <!-- Zaúčtování — sbalené, načítá se na pozadí a zobrazí se jen u zaúčtovaného dokladu. -->
-      <DocumentPostingPanel source="invoices" :doc-id="invoice.id" :doc-label="invoice.varsymbol"
+      <DocumentPostingPanel ref="postingPanelRef" source="invoices" :doc-id="invoice.id" :doc-label="invoice.varsymbol"
         @reposted="onReposted" />
+      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
+           se přerazítkují. -->
+      <DocumentDimensionsPanel doc-type="invoices" :doc-id="invoice.id" @saved="postingPanelRef?.reload()" />
 
       <!-- Položky -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

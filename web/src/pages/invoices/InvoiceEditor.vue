@@ -47,6 +47,8 @@ import { cashApi, type CashRegister } from '@/api/cash'
 import { appIsoDate, addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import DurationInput from '@/components/ui/DurationInput.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { durationTotal, isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey } from './invoiceStockAvailability'
 import {
@@ -789,6 +791,9 @@ const showReverseChargeUI = computed(() => supplierIsVatPayer.value || supplierI
 const nonPayerTotalLabel = computed(() =>
   form.value.reverse_charge ? t('invoice.totals.without_vat') : t('invoice.totals.total'))
 
+// Firma → Dimenze — hlavička a položky; ukládají se až po uložení dokladu.
+const docDims = useDocumentDimensions('invoices')
+
 const form = ref<{
   invoice_type: 'invoice' | 'proforma' | 'credit_note' | 'payment_calendar'
   parent_invoice_id: number | null
@@ -1179,6 +1184,8 @@ onMounted(async () => {
       revenue_category_id: (inv as any).revenue_category_id ?? null,
       payment_schedule: (inv.payment_schedule ?? []).map(r => ({ ...r })),
     })
+    // Pořadí položek bez slevových řádků = pořadí na serveru (sleva se generuje na konec).
+    void docDims.load(inv.id, form.value.items)
     loadedRate.value = (inv.exchange_rate && inv.currency !== 'CZK')
       ? { rate: inv.exchange_rate, date: (inv.exchange_rate_date ?? inv.issue_date).slice(0, 10), currency: inv.currency }
       : null
@@ -2195,12 +2202,14 @@ async function submit() {
       })),
     }
 
+    const itemDimsSnapshot = docDims.snapshot(form.value.items)
     let saved: Invoice
     if (isEdit.value && invoiceId.value) {
       saved = await invoicesApi.update(invoiceId.value, payload, isForce.value)
     } else {
       saved = await invoicesApi.create(payload)
     }
+    await docDims.save(saved.id, itemDimsSnapshot)
 
     // EUR / cizí měna: backend stáhl kurz ČNB. Pokud byl použit fallback
     // (víkend, svátek nebo last-known kurz), upozorni uživatele.
@@ -2442,6 +2451,10 @@ async function deleteDraft() {
                   <span class="hidden sm:inline">{{ t('invoice.new_project_short') }}</span>
                 </button>
               </div>
+            </div>
+            <div v-if="docDims.enabled.value" data-test="invoice-header-dimensions">
+              <p class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.header_title') }}</p>
+              <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
             </div>
             <div class="grid grid-cols-2 gap-3">
               <div>
@@ -2710,6 +2723,10 @@ async function deleteDraft() {
                   <span v-if="stockRowPriceBadge(item)" :title="t('invoice.stock_pricing.source_hint')"
                     class="px-1.5 py-0.5 rounded-full border whitespace-nowrap" :class="stockRowPriceBadge(item)!.cls">{{ stockRowPriceBadge(item)!.label }}</span>
                 </div>
+                <DimensionFields v-if="docDims.enabled.value" class="mt-1" compact teleport
+                  :model-value="docDims.itemDimsOf(item)" :disabled="!docDims.canEdit.value"
+                  data-test="invoice-item-dimensions"
+                  @update:model-value="docDims.setItemDims(item, $event)" />
               </td>
               <td class="px-3 py-2">
                 <DurationInput v-if="isTimeItem(item)" v-model="item.quantity" v-model:duration-minutes="item.duration_minutes" :allow-negative="true" />
@@ -2850,6 +2867,11 @@ async function deleteDraft() {
                 <button type="button" @click="moveDown(i)" :disabled="i === form.items.length - 1" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-neutral-300 rounded hover:bg-neutral-50 disabled:opacity-30 disabled:cursor-not-allowed">▼</button>
                 <button type="button" @click="removeItem(i)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded text-lg leading-none">×</button>
               </div>
+            </div>
+            <div v-if="docDims.enabled.value">
+              <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('dimensions.items_title') }}</label>
+              <DimensionFields compact :model-value="docDims.itemDimsOf(item)" :disabled="!docDims.canEdit.value"
+                @update:model-value="docDims.setItemDims(item, $event)" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.description') }}</label>

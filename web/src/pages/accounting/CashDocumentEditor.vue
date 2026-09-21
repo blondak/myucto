@@ -19,11 +19,15 @@ import CashVatBreakdown from '@/components/cash/CashVatBreakdown.vue'
 import { ICONS, btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+// Firma → Dimenze — dimenze hlavičky pokladního dokladu.
+const docDims = useDocumentDimensions('cash-documents')
 const pageId = useId()
 const supplierStore = useSupplierStore()
 
@@ -236,6 +240,7 @@ function vatLinesInDocumentCurrency(doc: CashDocument): CashVatLine[] {
  */
 async function loadDocument(id: number): Promise<void> {
   hydrating.value = true
+  void docDims.load(id)
   try {
     const doc = await cashApi.getDocument(id)
     loadedStatus.value = doc.status
@@ -550,6 +555,8 @@ async function save(post = true) {
   try {
     if (isEdit.value) {
       await cashApi.updateDocument(editId.value, payload)
+      // Dimenze před zaúčtováním, ať je zápis dostane rovnou.
+      await docDims.save(editId.value)
       if (post) {
         const res = await cashApi.postDocument(editId.value)
         toast.success(t('cash.new_document') + ' ' + res.doc_number)
@@ -559,6 +566,8 @@ async function save(post = true) {
       }
     } else {
       const res = await cashApi.createDocument(payload)
+      // Zaúčtovaný doklad dostane dimenze přerazítkováním (mění se jen analytika).
+      await docDims.save(res.id)
       toast.success(post ? t('cash.new_document') + ' ' + (res.doc_number ?? '') : t('common.saved'))
       for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
     }
@@ -720,6 +729,11 @@ async function save(post = true) {
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.description') }}</label>
           <input v-model="form.description" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+        </div>
+
+        <div v-if="docDims.enabled.value" data-test="cash-header-dimensions">
+          <p class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.header_title') }}</p>
+          <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
         </div>
 
         <!-- Částka + DPH přepínač -->

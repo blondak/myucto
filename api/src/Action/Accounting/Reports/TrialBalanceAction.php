@@ -9,6 +9,7 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
@@ -29,6 +30,7 @@ final class TrialBalanceAction
 {
     use AccountingActionSupport;
     use GuardsAccountingMode;
+    use DimensionFilterParam;
 
     public function __construct(
         private readonly TrialBalanceService $trialBalance,
@@ -39,6 +41,7 @@ final class TrialBalanceAction
         private readonly IpMatcher $ipMatcher,
         private readonly LoggerInterface $log,
         private readonly Connection $db,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -47,9 +50,11 @@ final class TrialBalanceAction
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
         $params = $this->validateParams($request, $response, $supplierId, $err);
         if ($params === null) return $err;
+        $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
+        if ($dimension === false) return $err;
 
         try {
-            $data = $this->trialBalance->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['after_closing']);
+            $data = $this->trialBalance->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['after_closing'], $dimension);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -71,9 +76,11 @@ final class TrialBalanceAction
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
         }
+        $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
+        if ($dimension === false) return $err;
 
         try {
-            $data = $this->trialBalance->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['after_closing']);
+            $data = $this->trialBalance->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['after_closing'], $dimension);
             $out = $format === 'pdf'
                 ? [
                     'bytes'    => $this->pdf->render($data),
