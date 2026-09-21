@@ -55,6 +55,7 @@ export interface SupplierCreatePayload {
   tagline?: string
   commercial_register?: string
   taxpayer_type?: 'fo' | 'po'
+  vat_period?: 'monthly' | 'quarterly'
   default_payment_due_days?: number
   default_payment_due_unit?: 'days' | 'month'
   default_hourly_rate?: number

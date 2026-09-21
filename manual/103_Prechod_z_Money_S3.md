@@ -52,6 +52,39 @@ přepne do podvojného účetnictví.
 | pokladny a pokladní doklady | pokladny a zaúčtované pokladní doklady |
 | bankovní účty a bankovní doklady | výpis na účet a rok se zdrojem „import", bankovní pohyby |
 | úhrady faktur | spárování faktury s bankovním pohybem nebo pokladním dokladem |
+| karty dlouhodobého majetku a jejich pohyby | karty majetku s počátečními stavy, technickými zhodnoceními a odpisy převedených let, viz níže |
+| karty drobného majetku | evidence drobného majetku včetně vyřazených karet |
+
+### 103.2.1 Majetek
+
+Převod přebírá evidenci majetku Money (karty a jejich pohyby). Zařazení, odpisy
+i vyřazení jsou už v převedeném deníku, karta proto vzniká bez zápisu v deníku.
+
+- **Karta dlouhodobého majetku** přebírá název, inventární číslo, datum zařazení,
+  majetkový a oprávkový účet a daňovou skupinu a způsob odpisu (Z zrychlený,
+  N rovnoměrný). Vstupní cena je cena na začátku prvního převáděného roku,
+  pozdější zvýšení ceny a technická zhodnocení jsou technická zhodnocení karty.
+- **Účetní odpisy** před prvním převáděným rokem jsou počáteční stav karty,
+  odpisy převedených let se zapíší přesně podle Money jako zaúčtované převzatým
+  deníkem. Hromadné účtování odpisů je znovu neúčtuje a plán naváže dalším měsícem.
+- **Daňové odpisy** hmotného majetku Money na kartách neukládá, počítá je
+  z parametrů karty. Převod je stejně spočte podle zákona o daních z příjmů
+  a uzavřené roky zapíše jako potvrzené. Otevřený rok dostane daňový odpis až
+  uzávěrkou. Nehmotný majetek se daňově odpisuje podle účetních odpisů.
+- **Neodpisovaný majetek** (pozemky, skupina N) se převede bez odpisů.
+- **Vyřazená karta** z převedených let se převede jako vyřazená. Karta vyřazená
+  před prvním převáděným rokem se nepřevádí.
+- **Pomocná karta** bez majetkového účtu (Money na ní počítá například daňové
+  odpisy k majetku vedenému jinde) se nepřevádí, protokol ji vypíše. Karta
+  „jen ÚČETNÍ odpis" se převede jen s účetními odpisy.
+- **Snížení ceny** (dotace, dobropis) z převedených let se zapíše jako záporné
+  technické zhodnocení a karta zůstane konceptem ke kontrole daňové vstupní ceny.
+- **Drobný majetek** přebírá název, inventární číslo, datum pořízení, cenu,
+  dodavatele a umístění, vyřazené karty s datem vyřazení.
+
+Na konci kroku převod porovná karty se zůstatky majetkových a oprávkových účtů
+po syntetikách. Rozdíl, který je už v evidenci Money (majetek účtovaný bez karty),
+protokol označí zvlášť.
 
 **Zaúčtování se nepřepočítává.** Deník je přesná kopie toho, co bylo v Money,
 a doklady se k němu jen připojí. Z dokladu je proto vidět jeho zápis a naopak,
@@ -112,8 +145,8 @@ bankovních účtech nebo ve dvou pokladnách.
 
 - **Přílohy a elektronický archiv.** Money je drží v šifrovaných souborech,
   které ze zálohy číst nejde. Skeny dokladů se připojují zvlášť.
-- **Majetek, mzdy a sklad.** Jejich zápisy jsou v převedeném deníku, evidence
-  (karty majetku, zaměstnanci, zásoby) se zakládá v MyÚčtu.
+- **Mzdy a sklad.** Jejich zápisy jsou v převedeném deníku, evidence
+  (zaměstnanci, zásoby) se zakládá v MyÚčtu.
 - **Interní doklady, kniha pohledávek a závazků.** V deníku jsou jako ruční
   zápisy s původním číslem dokladu, samostatný doklad z nich nevzniká.
 - **Číselné řady a řádky DPH pokladních dokladů.** Podaná přiznání k DPH za

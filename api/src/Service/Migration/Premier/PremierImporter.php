@@ -18,9 +18,9 @@ use PDO;
  * Záloha nese všechny roky firmy; převádí se rok po roku, nejlépe od nejstaršího.
  * Pořadí kroků: osnova → období, počáteční stavy a deník → režim účetní jednotky →
  * adresář → přijaté a vydané faktury → doklady s DPH mimo faktury a pokladna → banka →
- * vazby dokladů na deník a úhrady → majetek → rekonciliace → kontrola proti podáním KH
- * a DPPO uloženým v PREMIER. Automatika účtování je po celou dobu vypnutá
- * ({@see AccountingUnitSwitch}).
+ * vazby dokladů na deník a úhrady → majetek → zaměstnanci a mzdy (bez účetních zápisů,
+ * ty jsou v deníku) → rekonciliace → kontrola proti podáním KH a DPPO uloženým v PREMIER
+ * → uzávěrka. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí.
  * **Ostrý převod** zapisuje po krocích, každý krok je idempotentní ({@see PremierImportRepository}):
@@ -46,9 +46,12 @@ final class PremierImporter
         private readonly BankImporter $bank,
         private readonly DocumentLinker $linker,
         private readonly AssetImporter $assets,
+        private readonly SmallAssetImporter $smallAssets,
+        private readonly PayrollImporter $payroll,
         private readonly PremierReconciler $reconciler,
         private readonly TaxReturnImporter $taxReturn,
         private readonly PremierVerifier $verifier,
+        private readonly ClosingImporter $closing,
     ) {}
 
     /** @return list<string> */
@@ -66,9 +69,12 @@ final class PremierImporter
             DocumentLinker::STEP_LINK,
             DocumentLinker::STEP_PAYMENTS,
             AssetImporter::STEP,
+            SmallAssetImporter::STEP,
+            PayrollImporter::STEP,
             PremierReconciler::STEP,
             TaxReturnImporter::STEP,
             PremierVerifier::STEP,
+            ClosingImporter::STEP,
         ];
     }
 
@@ -132,7 +138,12 @@ final class PremierImporter
             $add('info', 'switch_to_double_entry', 'Firma se převodem přepne do podvojného účetnictví.');
         }
         if ($backup->hasRows('MZDY')) {
-            $add('info', 'payroll_separate', 'Záloha obsahuje mzdy. Převod účetnictví je nepřevádí - mzdové zápisy jsou v deníku, zaměstnance a mzdy zadejte v modulu Mzdy.');
+            $blocker = $this->payroll->prerequisite($supplierId);
+            if ($blocker === null) {
+                $add('info', 'payroll_included', 'Záloha obsahuje mzdy. Převod založí zaměstnance a převezme zpracované mzdy jako evidenci předchozího systému; jejich účetní zápisy jsou v deníku a znovu nevznikají.');
+            } else {
+                $add('warning', 'payroll_module_missing', "Záloha obsahuje mzdy. {$blocker} Bez toho se zaměstnanci a mzdy nepřevedou, účetnictví ano.");
+            }
         }
         return $out;
     }
@@ -170,6 +181,8 @@ final class PremierImporter
         $ctx = new PremierContext($supplierId, $userId, $backup, $year, $journal, $vat, $dryRun, $protocol);
         $ctx->runId = $runId;
         $ctx->progress = $progress;
+        $ctx->smallAssets = PremierSmallAssets::fromBackup($backup);
+        $ctx->payroll = PremierPayroll::fromBackup($backup);
 
         $pdo = $this->db->pdo();
         // Zkouška nanečisto uvnitř cizí transakce (testy) jede přes savepoint.
@@ -253,9 +266,12 @@ final class PremierImporter
             DocumentLinker::STEP_LINK => fn () => $this->linker->link($ctx, $documents),
             DocumentLinker::STEP_PAYMENTS => fn () => $this->linker->matchPayments($ctx, $documents),
             AssetImporter::STEP => fn () => $this->assets->import($ctx),
+            SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
+            PayrollImporter::STEP => fn () => $this->payroll->import($ctx),
             PremierReconciler::STEP => fn () => $this->reconciler->run($ctx),
             TaxReturnImporter::STEP => fn () => $this->taxReturn->import($ctx),
             PremierVerifier::STEP => fn () => $this->verifier->run($ctx),
+            ClosingImporter::STEP => fn () => $this->closing->run($ctx),
         ];
     }
 

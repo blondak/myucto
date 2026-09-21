@@ -455,13 +455,19 @@ final class InvoiceImporter
         $id = (int) $this->db->pdo()->lastInsertId();
         $insertItem = $this->stmt('purchase_item', 'INSERT INTO purchase_invoice_items
                 (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
-                 total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code, is_fixed_asset)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                 total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code, is_fixed_asset, expense_kind)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($items as $i => $item) {
+            // Drobný majetek odvozený z účtu položky, když PREMIER evidenci nevede ({@see PremierSmallAssets}).
+            $qty = (float) $item['quantity'];
+            $expenseKind = $ctx->smallAssets?->expenseKind((string) ($item['account'] ?? ''), $qty != 0.0 ? (float) $item['base'] / $qty : (float) $item['base']);
+            if ($expenseKind !== null && $expenseKind !== 'material') {
+                $p->count($step, 'small_asset_items');
+            }
             $insertItem->execute([
                 $id, $item['description'], $item['quantity'], $item['unit'] ?? 'ks', $item['unit_price'],
                 $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
-                $item['target_code'], $item['fixed_asset'] ? 1 : 0,
+                $item['target_code'], $item['fixed_asset'] ? 1 : 0, $expenseKind,
             ]);
         }
         $this->map->put($ctx->supplierId, isset($doc['map_key']) ? PremierImportRepository::KIND_VAT_DOCUMENT : PremierImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);

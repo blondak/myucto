@@ -39,9 +39,12 @@ final class PremierImportJobService
         'link' => 'Vazby dokladů na deník',
         'payments' => 'Úhrady dokladů',
         'assets' => 'Dlouhodobý majetek',
+        'small_assets' => 'Drobný majetek',
+        'payroll' => 'Zaměstnanci a mzdy',
         'reconciliation' => 'Rekonciliace',
         'tax_return' => 'Úpravy základu daně z přiznání PREMIER',
         'verification' => 'Kontrola proti podáním z PREMIER',
+        'closing' => 'Uzávěrka roku',
         'done' => 'Dokončuji',
     ];
 

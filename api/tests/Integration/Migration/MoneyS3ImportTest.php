@@ -789,6 +789,61 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(2, (int) $global->fetchColumn(), 'ZAK01 a ZAK02 jsou hodnoty skupiny.');
     }
 
+    public function testAssetRegisterBecomesAssetCardsWithMigratedDepreciation(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithAssets());
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $steps = array_column($protocol->toArray()['steps'], null, 'key');
+        self::assertSame(1, $steps['assets']['counts']['created'] ?? 0, $this->explain($protocol));
+        self::assertSame(1, $steps['assets']['counts']['helper_cards'] ?? 0, 'Pomocná karta bez majetkového účtu se nepřevádí.');
+        self::assertContains('ledger_match', array_column($steps['assets']['messages'], 'code'), 'Karta sedí na 022 a 082.');
+
+        $pdo = $this->db->pdo();
+        $card = $pdo->prepare('SELECT * FROM assets WHERE supplier_id = ?');
+        $card->execute([$supplierId]);
+        $assets = $card->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(1, $assets);
+        $a = $assets[0];
+        self::assertSame(['DM-001', 'in_use', 'straight', 2, '022.100', '082.100', '2023-07-01'],
+            [$a['inventory_number'], $a['status'], $a['tax_method'], (int) $a['tax_group'], $a['asset_account_code'], $a['accumulated_account_code'], $a['put_into_use_date']]);
+        self::assertEqualsWithDelta(120000.0, (float) $a['input_price'], 0.001);
+        // Účetně před převodem srpen až prosinec 2023, daňově první rok 2023 (11 % ve 2. skupině).
+        self::assertSame([5, 10000.0, 1, 13200.0, 60],
+            [(int) $a['opening_acc_months'], (float) $a['opening_acc_amount'], (int) $a['opening_tax_years'], (float) $a['opening_tax_amount'], (int) $a['acc_useful_life_months']]);
+
+        $entries = $pdo->prepare('SELECT kind, fiscal_year, amount, status, detail FROM depreciation_entries WHERE asset_id = ? ORDER BY kind, fiscal_year');
+        $entries->execute([(int) $a['id']]);
+        $rows = array_map(static fn (array $r): array => [$r['kind'], (int) $r['fiscal_year'], (float) $r['amount'], $r['status']], $entries->fetchAll(PDO::FETCH_ASSOC));
+        self::assertSame([
+            // Daňový odpis 2. roku 22,25 %; otevřený rok 2025 daňový řádek zatím nemá.
+            ['tax', 2024, 26700.0, 'confirmed'],
+            ['accounting', 2024, 24000.0, 'posted'],
+            ['accounting', 2025, 24000.0, 'posted'],
+        ], $rows);
+        $entries->execute([(int) $a['id']]);
+        foreach ($entries->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            if ($r['kind'] === 'accounting') {
+                self::assertTrue(\MyInvoice\Repository\DepreciationEntryRepository::isBookedByMigratedJournal($r), 'Odpis je v převzatém deníku, znovu se neúčtuje.');
+            }
+        }
+
+        $small = $pdo->prepare('SELECT inventory_number, status, price, location, disposed_at FROM small_assets WHERE supplier_id = ? ORDER BY inventory_number');
+        $small->execute([$supplierId]);
+        self::assertSame([
+            ['DR-001', 'in_use', 15000.0, 'Kancelář Brno', null],
+            ['DR-002', 'disposed', 8000.0, null, '2025-02-01'],
+        ], array_map(static fn (array $r): array => [$r['inventory_number'], $r['status'], (float) $r['price'], $r['location'], $r['disposed_at']], $small->fetchAll(PDO::FETCH_ASSOC)));
+
+        $second = $this->import($supplierId);
+        $steps = array_column($second->toArray()['steps'], null, 'key');
+        self::assertSame(1, $steps['assets']['counts']['existing'] ?? 0);
+        self::assertSame(2, $steps['small_assets']['counts']['existing'] ?? 0);
+        self::assertSame(1, $this->rowCount('assets', $supplierId));
+        self::assertSame(2, $this->rowCount('small_assets', $supplierId));
+    }
+
     public function testHistoricalYearIsClosedWithoutDoublingOpeningBalances(): void
     {
         $supplierId = $this->supplier();

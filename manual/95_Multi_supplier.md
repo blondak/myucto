@@ -59,13 +59,28 @@ Tlačítko **+ Nový dodavatel** vpravo nahoře.
 |---|---|
 | IČO | Zadej a klikni **Načíst z ARES** — předvyplní zbytek |
 | Firma | Název |
-| DIČ | (volitelné, OSVČ neplátce nech prázdné) |
+| DIČ | (volitelné, OSVČ neplátce nech prázdné). S DIČ se po načtení z ARES rovnou dotáhne registr plátců DPH — potvrdí plátcovství a předvyplní zveřejněný účet |
+| Typ poplatníka | *Podle ARES* (výchozí), fyzická osoba, nebo právnická osoba |
+| Plátce DPH + zdaňovací období | Nový plátce je ze zákona měsíční (§ 99 ZDPH); čtvrtletní zvol, jen pokud splňuješ § 99a |
 | Adresa | Ulice / Město / PSČ / Stát |
 | E-mail / telefon | Kontakt |
 | První bankovní účet | CZK účet (číslo + bank kód) — automaticky se založí v měně CZK |
 
 Po **Vytvořit** je dodavatel okamžitě v dropdownu. Admin Plus k nové firmě
 automaticky získá práva Admin a může na ni rovnou přepnout.
+
+Nová firma dostane stejné výchozí nastavení jako firma založená v prvotním
+průvodci:
+
+- **Právnická osoba** vzniká v **podvojném účetnictví** se směrnou účtovou
+  osnovou, otevřeným účetním obdobím pro aktuální rok a zapnutým automatickým
+  účtováním vydaných i přijatých faktur (preset automatiky *plná automatika*).
+- **Fyzická osoba** vzniká v **daňové evidenci**.
+- Když typ poplatníka nevybereš, rozhodne právní forma z ARES.
+- Plátci se nastaví zdaňovací období, bez výslovné volby měsíční.
+- Chybějící údaje (čísla domu, CZ-NACE, spisová značka, kód finančního úřadu,
+  zveřejněný bankovní účet) se doplní z veřejných registrů. Účet evidovaný
+  u jiné firmy se nedoplní.
 
 ## 95.3 Co je per-dodavatel (izolované)
 

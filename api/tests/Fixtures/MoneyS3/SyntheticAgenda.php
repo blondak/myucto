@@ -47,6 +47,16 @@ final class SyntheticAgenda
         ['Popis', 'C', 50], ['UcMD', 'C', 6], ['UcD', 'C', 6], ['Castka', 'E', 10], ['Stred', 'C', 10], ['Zakazka', 'C', 10], ['ParICO', 'C', 12], ['Del', 'B', 1],
     ];
     private const CHART_FIELDS = [['Ucet', 'C', 6], ['Nazev', 'C', 50]];
+    private const ASSET_FIELDS = [
+        ['Cislo', 'L', 4], ['TypMajetku', 'L', 4], ['Nazev', 'C', 60], ['InventCisl', 'C', 20], ['Druh', 'C', 1],
+        ['ZpusobOdpi', 'C', 1], ['OdpisSkupi', 'C', 2], ['DatZarazen', 'D', 2], ['DatVyrazen', 'D', 2],
+        ['PrUcMaj', 'C', 6], ['PrUcOpr', 'C', 6], ['UcOdpPorC', 'E', 10], ['Umisteno', 'C', 40],
+        ['SDodavatel', 'C', 60], ['CDodavatel', 'L', 4], ['ZpVyrazeni', 'C', 20],
+    ];
+    private const ASSET_MOVE_FIELDS = [
+        ['CisloMajet', 'L', 4], ['Cislo', 'L', 4], ['Datum', 'D', 2], ['Typ', 'C', 1], ['Castka', 'E', 10],
+        ['ZustCena', 'E', 10], ['Doklad', 'C', 20], ['Popis', 'C', 40], ['PrUcMaj', 'C', 6], ['PrUcOpr', 'C', 6],
+    ];
     private const PURCHASE_FIELDS = [
         ['Doklad', 'C', 10], ['Storno', 'B', 1], ['PrijatDokl', 'C', 20], ['VarSymbol', 'C', 10], ['D_ICO', 'C', 12], ['D_DIC', 'C', 14],
         ['D_Nazev', 'C', 60], ['D_Ulice', 'C', 40], ['D_Mesto', 'C', 40], ['D_Psc', 'C', 10],
@@ -448,6 +458,81 @@ final class SyntheticAgenda
             ['Doklad' => 'BE25001', 'Ucet' => 'BE', 'Vydej' => 1, 'DatUcPr' => '2025-03-10', 'DatPlat' => '2025-03-10', 'Celkem' => 500.0,
                 'Popis' => 'Výdej z devizového účtu', 'Vypis' => 1, 'Mena' => 'EUR', 'Kurs' => 25.0, 'ValutyKUhr' => 20.0],
         ]);
+        return $files;
+    }
+
+    /**
+     * Agenda s evidencí majetku (`MajInv`, `MjInvPoh`):
+     *   - traktor DM-001 zařazený 1. 7. 2023 za 120 000 Kč, rovnoměrně ve 2. skupině, účetně
+     *     2 000 Kč měsíčně od srpna 2023 (před převodem 5 měsíců = 10 000 Kč), v deníku
+     *     odpisy 24 000 Kč za 2024 i 2025,
+     *   - drobný majetek: notebook v používání a tiskárna vyřazená 1. 2. 2025,
+     *   - pomocná karta bez majetkového účtu (`000000`), která se nepřevádí.
+     * Odpisy vyrovnává výnos na 648/378, takže výsledek hospodaření ani počáteční stavy
+     * ostatních účtů se proti základní agendě nemění.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithAssets(): array
+    {
+        $files = self::files();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        foreach (['ROK.001', 'ROK.002'] as $dir) {
+            $append($dir . '/UcOsnova.DAT', self::CHART_FIELDS, [
+                ['Ucet' => '022100', 'Nazev' => 'Stroje'],
+                ['Ucet' => '082100', 'Nazev' => 'Oprávky ke strojům'],
+                ['Ucet' => '551000', 'Nazev' => 'Odpisy'],
+                ['Ucet' => '378000', 'Nazev' => 'Jiné pohledávky'],
+                ['Ucet' => '648000', 'Nazev' => 'Ostatní provozní výnosy'],
+            ]);
+        }
+        $append('ROK.001/UcDenik.DAT', self::JOURNAL_FIELDS, [
+            ['Cislo' => -20, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '022100', 'UcD' => '701000', 'Castka' => 120000.0],
+            ['Cislo' => -21, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '701000', 'UcD' => '082100', 'Castka' => 10000.0],
+            ['Cislo' => -22, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '701000', 'UcD' => '411000', 'Castka' => 110000.0],
+            ['Cislo' => 40, 'Zdroj' => 'ID', 'Doklad' => 'IDH24012', 'Datum' => '2024-12-31', 'Popis' => 'Odpisy majetku 2024', 'UcMD' => '551000', 'UcD' => '082100', 'Castka' => 24000.0],
+            ['Cislo' => 41, 'Zdroj' => 'ID', 'Doklad' => 'ID24090', 'Datum' => '2024-12-31', 'Popis' => 'Ostatní výnos', 'UcMD' => '378000', 'UcD' => '648000', 'Castka' => 24000.0],
+        ]);
+        $append('ROK.002/UcDenik.DAT', self::JOURNAL_FIELDS, [
+            ['Cislo' => -20, 'Zdroj' => 'XP', 'Datum' => '2025-01-01', 'Popis' => 'Počáteční stav roku 2025', 'UcMD' => '022100', 'UcD' => '701000', 'Castka' => 120000.0],
+            ['Cislo' => -21, 'Zdroj' => 'XP', 'Datum' => '2025-01-01', 'Popis' => 'Počáteční stav roku 2025', 'UcMD' => '701000', 'UcD' => '082100', 'Castka' => 34000.0],
+            ['Cislo' => -22, 'Zdroj' => 'XP', 'Datum' => '2025-01-01', 'Popis' => 'Počáteční stav roku 2025', 'UcMD' => '378000', 'UcD' => '701000', 'Castka' => 24000.0],
+            ['Cislo' => -23, 'Zdroj' => 'XP', 'Datum' => '2025-01-01', 'Popis' => 'Počáteční stav roku 2025', 'UcMD' => '701000', 'UcD' => '411000', 'Castka' => 110000.0],
+            ['Cislo' => 40, 'Zdroj' => 'ID', 'Doklad' => 'IDH25012', 'Datum' => '2025-12-31', 'Popis' => 'Odpisy majetku 2025', 'UcMD' => '551000', 'UcD' => '082100', 'Castka' => 24000.0],
+            ['Cislo' => 41, 'Zdroj' => 'ID', 'Doklad' => 'ID25090', 'Datum' => '2025-12-31', 'Popis' => 'Ostatní výnos', 'UcMD' => '378000', 'UcD' => '648000', 'Castka' => 24000.0],
+        ]);
+        $files['MajInv.DAT'] = Ms3FixtureWriter::table(self::ASSET_FIELDS, [
+            ['Cislo' => 1, 'TypMajetku' => 1, 'Nazev' => 'Traktor', 'InventCisl' => 'DM-001', 'Druh' => 'H', 'ZpusobOdpi' => 'N', 'OdpisSkupi' => '2',
+                'DatZarazen' => '2023-07-01', 'PrUcMaj' => '022100', 'PrUcOpr' => '082100', 'UcOdpPorC' => 120000.0],
+            ['Cislo' => 2, 'TypMajetku' => 0, 'Nazev' => 'Notebook', 'InventCisl' => 'DR-001', 'Druh' => 'H', 'DatZarazen' => '2024-03-01',
+                'Umisteno' => 'Kancelář Brno', 'SDodavatel' => 'Dodavatel techniky s.r.o.', 'UcOdpPorC' => 15000.0],
+            ['Cislo' => 3, 'TypMajetku' => 0, 'Nazev' => 'Tiskárna', 'InventCisl' => 'DR-002', 'Druh' => 'H', 'DatZarazen' => '2024-02-01',
+                'DatVyrazen' => '2025-02-01', 'ZpVyrazeni' => 'LIKVIDACE', 'UcOdpPorC' => 8000.0],
+            ['Cislo' => 4, 'TypMajetku' => 1, 'Nazev' => 'pomocná karta - výpočet daňových odpisů', 'InventCisl' => 'POM-1', 'Druh' => 'H',
+                'ZpusobOdpi' => 'Z', 'OdpisSkupi' => '2', 'DatZarazen' => '2023-07-01', 'PrUcMaj' => '000000', 'PrUcOpr' => '000000', 'UcOdpPorC' => 50000.0],
+        ]);
+        $moves = [
+            ['CisloMajet' => 1, 'Cislo' => 1, 'Datum' => '2023-07-01', 'Typ' => 'Z', 'Castka' => 120000.0, 'ZustCena' => 120000.0, 'Doklad' => 'IDH23001', 'PrUcMaj' => '022100', 'PrUcOpr' => '082100'],
+            ['CisloMajet' => 2, 'Cislo' => 1, 'Datum' => '2024-03-01', 'Typ' => 'Z', 'Castka' => 15000.0, 'ZustCena' => 15000.0],
+            ['CisloMajet' => 3, 'Cislo' => 1, 'Datum' => '2024-02-01', 'Typ' => 'Z', 'Castka' => 8000.0, 'ZustCena' => 8000.0],
+            ['CisloMajet' => 3, 'Cislo' => 2, 'Datum' => '2025-02-01', 'Typ' => 'Y', 'Castka' => 8000.0, 'ZustCena' => 0.0],
+            ['CisloMajet' => 4, 'Cislo' => 1, 'Datum' => '2023-07-01', 'Typ' => 'Z', 'Castka' => 50000.0, 'ZustCena' => 50000.0],
+        ];
+        $residual = 120000.0;
+        $no = 1;
+        for ($month = new \DateTimeImmutable('2023-08-31'); $month <= new \DateTimeImmutable('2025-12-31'); $month = $month->modify('last day of next month')) {
+            $residual -= 2000.0;
+            $moves[] = ['CisloMajet' => 1, 'Cislo' => ++$no, 'Datum' => $month->format('Y-m-d'), 'Typ' => 'U', 'Castka' => 2000.0, 'ZustCena' => $residual,
+                'Popis' => 'účetní odpis', 'PrUcMaj' => '022100', 'PrUcOpr' => '082100'];
+            if ($month->format('m') === '12') {
+                $moves[] = ['CisloMajet' => 1, 'Cislo' => ++$no, 'Datum' => $month->format('Y-m-d'), 'Typ' => 'X', 'Castka' => 0.0, 'ZustCena' => $residual];
+            }
+        }
+        $files['MjInvPoh.DAT'] = Ms3FixtureWriter::table(self::ASSET_MOVE_FIELDS, $moves);
         return $files;
     }
 
