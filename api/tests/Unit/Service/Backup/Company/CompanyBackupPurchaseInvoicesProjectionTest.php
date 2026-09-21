@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupPurchaseInvoicesProjection as Projection;
+use MyInvoice\Service\Backup\Company\CompanyBackupEmbeddedReferenceSet;
 use MyInvoice\Service\Backup\Company\CompanyBackupReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
@@ -105,5 +106,55 @@ final class CompanyBackupPurchaseInvoicesProjectionTest extends TestCase
             }
         }
         self::assertSame($original, $row);
+    }
+
+    public function testCurrentVendorAndSupplierRemapWhileHistoricalSnapshotsStayByteExact(): void
+    {
+        $references = CompanyBackupReferenceSet::fromArray(
+            Projection::references(), 'table:purchase_invoices',
+        );
+        $embedded = CompanyBackupEmbeddedReferenceSet::fromArray(
+            Projection::embeddedReferences(), 'table:purchase_invoices', Projection::dataColumns(),
+        );
+        $vendorSnapshot = " {\n\"id\":2,\"company_name\":\"D\\u00f3m\","
+            . '"unknown_nested":{"old_id":17,"amount":1.2300},"code":"0007"} ';
+        $ownSnapshot = '{"id":4,"name":"Historie","unknown":[{"id":5}],"ratio":1e-2}';
+        foreach ([
+            [$vendorSnapshot, $ownSnapshot],
+            ['{"company_name":"Bez historického ID"}', null],
+        ] as [$vendor, $own]) {
+            $source = array_fill_keys(Projection::dataColumns(), null);
+            foreach (Projection::references() as $reference) {
+                $column = $reference['columns'][0];
+                if ($reference['nullable_columns'] === []) {
+                    $source[$column] = 1;
+                }
+            }
+            $source['id'] = 9;
+            $source['vendor_id'] = 7;
+            $source['supplier_id'] = 3;
+            $source['vendor_snapshot'] = $vendor;
+            $source['own_snapshot'] = $own;
+            $mapped = $references->remap(
+                $source,
+                static function (CompanyBackupReference $reference, array $values): array {
+                    self::assertIsInt($values[0]);
+                    return [$values[0] + 100];
+                },
+            );
+            $mapped = $embedded->remap(
+                $mapped,
+                static function (): never {
+                    self::fail('Historický snapshot nesmí vyvolat mapování ID.');
+                },
+            );
+            self::assertSame(107, $mapped['vendor_id']);
+            self::assertSame(103, $mapped['supplier_id']);
+            self::assertSame($vendor, $mapped['vendor_snapshot']);
+            self::assertSame($own, $mapped['own_snapshot']);
+            self::assertSame(9, $mapped['id']);
+            self::assertSame(7, $source['vendor_id']);
+            self::assertSame(3, $source['supplier_id']);
+        }
     }
 }

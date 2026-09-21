@@ -144,7 +144,9 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . 'source_hash CHAR(64) NULL,'
             . 'source_format VARCHAR(32) NULL,'
             . 'source_size_bytes BIGINT UNSIGNED NULL,'
-            . 'source_original_name VARCHAR(255) NULL'
+            . 'source_original_name VARCHAR(255) NULL,'
+            . 'vendor_snapshot JSON NOT NULL,'
+            . 'own_snapshot JSON NULL'
             . ') ENGINE=InnoDB',
         );
         $pdo->exec(
@@ -196,8 +198,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertSame(strlen("existing-imported-tenant7\n"), file_put_contents(
             $existingImported . '/abcdef0123456789.pdf', "existing-imported-tenant7\n",
         ));
-        $pdo->exec("INSERT INTO purchase_invoices (id,supplier_id,pdf_path,pdf_hash)"
-            . " VALUES (201,7,'supplier-7/1234567890abcdef.pdf',NULL)");
+        $pdo->exec("INSERT INTO purchase_invoices (id,supplier_id,pdf_path,pdf_hash,vendor_snapshot)"
+            . " VALUES (201,7,'supplier-7/1234567890abcdef.pdf',NULL,'{}')");
         $purchaseDirectory = $this->root . '/live/custom-purchase-archive/supplier-7';
         self::assertTrue(mkdir($purchaseDirectory, 0700, true));
         $existingPurchase = "existing-purchase-tenant7\n";
@@ -525,6 +527,12 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'pdf_path' => 'supplier-8/1234567890abcdef.pdf',
                 'pdf_hash' => str_repeat('b', 64)],
         ], $this->fetchRows($pdo, 'SELECT id,supplier_id,pdf_path,pdf_hash FROM purchase_invoices ORDER BY id'));
+        self::assertSame([
+            ['id' => 201, 'vendor_snapshot' => '{}', 'own_snapshot' => null],
+            ['id' => 202, 'vendor_snapshot' => self::purchaseVendorSnapshot(),
+                'own_snapshot' => self::purchaseOwnSnapshot()],
+        ], $this->fetchRows($pdo, 'SELECT id,vendor_snapshot,own_snapshot'
+            . ' FROM purchase_invoices ORDER BY id'));
         self::assertSame("synthetic-purchase-pdf\n", file_get_contents(
             $this->root . '/live/custom-purchase-archive/supplier-8/1234567890abcdef.pdf',
         ));
@@ -553,6 +561,19 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertSame([], $this->entries(
             $this->root . DIRECTORY_SEPARATOR . 'staging',
         ));
+    }
+
+    private static function purchaseVendorSnapshot(): string
+    {
+        // Historical contact ID need not exist in the current tenant graph.
+        return ' { "id" : 999, "company_name":"Historical vendor",'
+            . ' "zip":"00123", "legacy":{"amount":123.4500,"id":888} } ';
+    }
+
+    private static function purchaseOwnSnapshot(): string
+    {
+        // Opaque historical payload: even the original tenant marker stays intact.
+        return '{ "id":7, "company_name":"Historical owner", "legacy":[1.2300,null] }';
     }
 
     private static function purchaseSourceBytes(): string
@@ -586,6 +607,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             ]],
             'table:purchase_invoices' => [[
                 'id' => 201, 'supplier_id' => 7,
+                'vendor_snapshot' => self::purchaseVendorSnapshot(),
+                'own_snapshot' => self::purchaseOwnSnapshot(),
                 'pdf_path' => 'supplier-7/1234567890abcdef.pdf',
                 'source_path' => self::purchaseSourcePath(7),
                 'source_hash' => hash('sha256', self::purchaseSourceBytes()),
@@ -916,9 +939,11 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 $this->tableDefinition(
                     'table:purchase_invoices', TenantDataPolicy::TenantOwned,
                     ['id', 'supplier_id', 'pdf_path', 'pdf_hash', 'source_path',
-                        'source_hash', 'source_format', 'source_size_bytes', 'source_original_name'],
+                        'source_hash', 'source_format', 'source_size_bytes', 'source_original_name',
+                        'vendor_snapshot', 'own_snapshot'],
                     ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
                     [$this->reference('supplier_id', 'table:supplier')],
+                    embeddedReferences: \MyInvoice\Service\Backup\Company\CompanyBackupPurchaseInvoicesProjection::embeddedReferences(),
                 ),
                 new TenantDataDefinition(
                     'file-area:purchase-invoice-pdfs', TenantDataObjectKind::FileArea,
@@ -1016,6 +1041,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
      * @param array<string,mixed> $ownership
      * @param list<array<string,mixed>> $references
      * @param array<string,mixed> $restoreOverrides
+     * @param list<array<string,mixed>> $embeddedReferences
      */
     private function tableDefinition(
         string $key,
@@ -1024,6 +1050,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         array $ownership,
         array $references,
         array $restoreOverrides = [],
+        array $embeddedReferences = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             $key,
@@ -1036,7 +1063,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'secrets' => [],
                 'company_backup' => [
                     'data_columns' => $columns,
-                    'embedded_references' => [],
+                    'embedded_references' => $embeddedReferences,
                     'generated_columns' => [],
                     'omit_columns' => [],
                     'references' => $references,

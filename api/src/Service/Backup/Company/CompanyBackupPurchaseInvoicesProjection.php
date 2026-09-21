@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Backup\Company;
 
 /**
- * Kontrakt hlaviček přijatých faktur. Před aktivací je nutné ošetřit vnořené
- * reference ve snapshotech i souborové cesty PDF a zdroje.
+ * Kontrakt hlaviček přijatých faktur. Před aktivací zbývají související
+ * závislosti a souborové cesty PDF a zdroje.
  */
 final class CompanyBackupPurchaseInvoicesProjection
 {
@@ -77,6 +77,16 @@ final class CompanyBackupPurchaseInvoicesProjection
             self::tenant('supplier_id', 'supplier'),
             self::tenant('vendor_id', 'clients'),
         ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    public static function embeddedReferences(): array
+    {
+        // PurchaseInvoiceRepository::update() mění vendor_id, snapshot ale ponechává.
+        // vendor_snapshot.id je tedy historický marker; own_snapshot je rovněž
+        // historický obsah bez živé vazby. Na rozdíl od invoices.supplier_snapshot
+        // tu žádné ID neřídí runtime lookup. Aktuální vazby mapuje references().
+        return [];
     }
 
     /** @return array<string,mixed> */
