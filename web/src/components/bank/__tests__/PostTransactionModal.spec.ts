@@ -236,7 +236,7 @@ describe('PostTransactionModal — našeptávač účtů', () => {
     expect(m.postTransaction).not.toHaveBeenCalled()
   })
 
-  it('opens the original rule dialog from the movement menu and only saves a rule', async () => {
+  it('opens the rule dialog from the movement menu and applies the rule to that movement', async () => {
     const wrapper = shallowMount(BankTransactionRow, {
       props: { tx: tx(-100), layout: 'mobile', isDoubleEntry: true, actions: {
         expandedDocs: ref(new Set()), expandedSuggestions: ref(new Set()), suggestionFor: () => null,
@@ -251,15 +251,17 @@ describe('PostTransactionModal — našeptávač účtů', () => {
     expect(wrapper.text()).not.toContain('bank.posting.split_on')
     const form = wrapper.findComponent({ name: 'RuleForm' })
     expect(form.props('showDryRun')).toBe(true)
-    expect(form.props('modelValue')).toEqual(expect.objectContaining({ amount_min: null, amount_max: null, priority: 100, applies_currency: 'CZK' }))
+    expect(form.props('modelValue')).toEqual(expect.objectContaining({ amount_min: 90, amount_max: 111, priority: 40, applies_currency: 'CZK' }))
     const rule = { ...form.props('modelValue'), debit_account_code: '518', credit_account_code: '221.100', message_contains: 'hosting' }
     form.vm.$emit('update:modelValue', rule)
     await flushPromises()
+    m.createRule.mockResolvedValueOnce({ rule: { id: 10, debit_account_code: '518', credit_account_code: '221.100' }, source_result: { status: 'posted', entry_id: 5 } })
     const save = wrapper.findAll('button').find(button => button.text() === 'common.save')!
     await save.trigger('click')
     await flushPromises()
     expect(m.createRule).toHaveBeenCalledWith(expect.objectContaining({ debit_account_code: '518', credit_account_code: '221.100', message_contains: 'hosting', mode: 'suggest' }))
-    expect(m.createRule.mock.calls[0][0]).toHaveProperty('backfill_suggestions', false)
+    expect(m.createRule.mock.calls[0][0]).toHaveProperty('source_transaction_id', 1)
+    expect(m.createRule.mock.calls[0][0]).not.toHaveProperty('backfill_suggestions')
     expect(m.postTransaction).not.toHaveBeenCalled()
     expect(wrapper.emitted('changed')).toHaveLength(1)
     expect(wrapper.emitted('posted')).toBeUndefined()

@@ -2038,6 +2038,77 @@ final class BankPostingService
         return $this->applySingleRule($supplierId, $tx, $rule, $userId, true);
     }
 
+    /**
+     * Okamžité použití pravidla, které uživatel právě založil z konkrétního pohybu.
+     *
+     * Založení pravidla z pohybu je výslovný pokyn „tenhle pohyb účtuj takhle", proto
+     * se návrh rovnou schválí stejnou cestou jako tlačítko Schválit v Automatice
+     * (čítač použití, série potvrzení, embedding). Pojistky zůstávají: spárovaná
+     * úhrada dokladu se pravidlem neúčtuje, uzavřené období skončí jako blokovaný
+     * návrh, měna a shoda se ověří znovu. Už zaúčtovaný pohyb se nepřepisuje, volající
+     * dostane informaci, zda se jeho kontace od pravidla liší, a nabídne přeúčtování.
+     *
+     * @return array{status:string, reason?:?string, entry_id?:int, suggestion_id?:int, same_accounts?:bool}
+     */
+    public function applyRuleToTransaction(int $supplierId, int $txId, int $ruleId, ?int $userId = null): array
+    {
+        if (!$this->txOwnedBySupplier($txId, $supplierId)) {
+            return ['status' => 'skipped', 'reason' => 'transaction_not_found'];
+        }
+        $tx = $this->loadTx($txId);
+        $rule = $this->rules->find($supplierId, $ruleId);
+        if ($tx === null || $rule === null) {
+            return ['status' => 'skipped', 'reason' => $tx === null ? 'transaction_not_found' : 'rule_not_found'];
+        }
+        if ((string) ($tx['source'] ?? 'statement') !== 'statement') {
+            return ['status' => 'skipped', 'reason' => 'email_notice_provisional'];
+        }
+        if ((string) $tx['match_status'] === 'ignored') {
+            return ['status' => 'skipped', 'reason' => 'ignored'];
+        }
+        if (in_array((string) $tx['match_status'], ['auto_exact', 'auto_partial', 'manual'], true)
+            || !empty($tx['has_explicit_allocation'])
+            || $this->cardClearingFor($supplierId, $tx, false) !== null) {
+            return ['status' => 'skipped', 'reason' => 'payment_matched'];
+        }
+
+        $entry = $this->journal->findBySource($supplierId, 'bank', $txId);
+        if ($entry !== null && ($entry['reversed_by'] ?? null) === null) {
+            $codes = $this->liveBankEntryCodes($supplierId, $txId) ?? [];
+            $nonBank = (float) $tx['amount'] > 0
+                ? (string) $rule['credit_account_code']
+                : (string) $rule['debit_account_code'];
+            return [
+                'status' => 'already_posted',
+                'entry_id' => (int) $entry['id'],
+                'same_accounts' => count($codes) === 2 && in_array($nonBank, $codes, true),
+            ];
+        }
+
+        $res = $this->suggestRuleForBackfill($supplierId, $txId, $ruleId, $userId);
+        if (($res['action'] ?? '') !== 'suggested') {
+            return ['status' => 'skipped', 'reason' => $res['reason'] ?? null];
+        }
+        $suggestionId = (int) ($res['suggestion_id'] ?? 0);
+        $sug = $suggestionId > 0 ? $this->suggestions->find($supplierId, $suggestionId) : null;
+        if ($sug === null || (int) ($sug['rule_id'] ?? 0) !== $ruleId || (string) $sug['source'] !== 'rule') {
+            return ['status' => 'suggested', 'reason' => $res['reason'] ?? null, 'suggestion_id' => $suggestionId];
+        }
+        if ((string) $sug['status'] !== 'pending') {
+            return [
+                'status' => (string) $sug['status'] === 'blocked' ? 'blocked' : 'suggested',
+                'reason' => $sug['note'] !== null ? (string) $sug['note'] : null,
+                'suggestion_id' => $suggestionId,
+            ];
+        }
+        try {
+            $entryId = $this->approveSuggestion($supplierId, $suggestionId, ['user_id' => $userId, 'posted_by' => $userId]);
+        } catch (PostingException $e) {
+            return ['status' => 'suggested', 'reason' => $e->errorCode, 'suggestion_id' => $suggestionId];
+        }
+        return ['status' => 'posted', 'entry_id' => $entryId, 'suggestion_id' => $suggestionId];
+    }
+
     /** @return array{action:string,reason?:string,entry_id?:int,suggestion_id?:int} */
     private function applyDetection(
         int $supplierId,

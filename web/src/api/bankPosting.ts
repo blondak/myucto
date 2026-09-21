@@ -104,6 +104,8 @@ export interface RuleHistory {
 export interface RuleDryRunResult {
   matched_count: number
   already_posted_count: number
+  /** Nespárované nezaúčtované shody v otevřeném období mimo zdrojový pohyb. */
+  applicable_count?: number
   shadowed_by_own_transfer: boolean
   sample: Array<{
     id: number
@@ -112,6 +114,30 @@ export interface RuleDryRunResult {
     description: string | null
     already_posted: boolean
   }>
+}
+
+/** Výsledek okamžitého použití pravidla založeného z pohybu. */
+export interface RuleSourceResult {
+  status: 'posted' | 'already_posted' | 'suggested' | 'blocked' | 'skipped'
+  reason?: string | null
+  entry_id?: number
+  suggestion_id?: number
+  same_accounts?: boolean
+}
+
+export interface RuleCreateResult {
+  rule: BankPostingRule
+  backfilled?: number
+  source_result?: RuleSourceResult
+  applied?: number
+}
+
+export type RuleCreateOptions = {
+  backfill_suggestions?: boolean
+  /** Pohyb, ze kterého se pravidlo zakládá: pravidlo je rovnou auto a hned se na něj použije. */
+  source_transaction_id?: number
+  /** Jen se `source_transaction_id`: zaúčtovat i další odpovídající nezaúčtované pohyby. */
+  apply_matching?: boolean
 }
 
 export interface PostResult {
@@ -191,14 +217,14 @@ export const bankPostingApi = {
 
   listRules: (params: { direction?: RuleDirection; active?: boolean; page?: number; per_page?: number } = {}, supplierId?: number) =>
     api.get<{ items: BankPostingRule[]; total: number; page: number; per_page: number }>('/accounting/bank-posting-rules', { params, ...(supplierId ? { headers: { 'X-Supplier-Id': String(supplierId) } } : {}) }).then(r => r.data),
-  createRule: (p: BankPostingRulePayload & { backfill_suggestions?: boolean }) =>
-    api.post<{ rule: BankPostingRule; backfilled?: number }>('/accounting/bank-posting-rules', p)
+  createRule: (p: BankPostingRulePayload & RuleCreateOptions) =>
+    api.post<RuleCreateResult>('/accounting/bank-posting-rules', p)
       .then(r => r.data),
   updateRule: (id: number, p: Partial<BankPostingRulePayload> & { mode?: RuleMode; is_active?: boolean; backfill_suggestions?: boolean }) =>
     api.put<BankPostingRule & { backfilled?: number }>(`/accounting/bank-posting-rules/${id}`, p).then(r => r.data),
   deleteRule: (id: number) =>
     api.delete(`/accounting/bank-posting-rules/${id}`).then(() => undefined),
-  dryRunRule: (p: BankPostingRulePayload) =>
+  dryRunRule: (p: BankPostingRulePayload & { source_transaction_id?: number }) =>
     api.post<RuleDryRunResult>('/accounting/bank-posting-rules/dry-run', p).then(r => r.data),
   promoteRule: (id: number) =>
     api.post<{ rule: BankPostingRule }>(`/accounting/bank-posting-rules/${id}/promote`, {}).then(r => r.data.rule),

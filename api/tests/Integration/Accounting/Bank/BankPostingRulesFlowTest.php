@@ -207,6 +207,135 @@ final class BankPostingRulesFlowTest extends BankPostingTestCase
         self::assertSame(0, $second['body']['backfilled'] ?? null);
     }
 
+    public function testRuleCreatedFromTransactionIsAutoPostsSourceAndAppliesToMatching(): void
+    {
+        $stmt = $this->statement();
+        $source = $this->transaction($stmt, -299.00, ['description' => 'PHONE CARE INSURANCE PRAHA']);
+        $other = $this->transaction($stmt, -299.00, ['description' => 'PHONE CARE INSURANCE PRAHA', 'posted_at' => self::YEAR . '-05-15']);
+        $matched = $this->transaction($stmt, -299.00, ['description' => 'PHONE CARE INSURANCE PRAHA', 'match_status' => 'manual']);
+        $unrelated = $this->transaction($stmt, -299.00, ['description' => 'Jiná platba']);
+
+        $action = $this->container->get(BankPostingRuleAction::class);
+        $payload = [
+            'name' => 'Pojištění telefonu', 'direction' => 'outgoing',
+            'message_contains' => 'PHONE CARE INSURANCE', 'amount_min' => 250, 'amount_max' => 350,
+            'debit_account_code' => '518', 'credit_account_code' => '221', 'priority' => 40,
+            'source_transaction_id' => $source,
+        ];
+        $dry = $this->callAction($action, 'dryRun', 'POST', 'accountant', $payload);
+        self::assertSame(200, $dry['status']);
+        self::assertSame(3, $dry['body']['matched_count'] ?? null);
+        self::assertSame(1, $dry['body']['applicable_count'] ?? null, 'Bez zdrojového a spárovaného pohybu.');
+
+        $res = $this->callAction($action, 'create', 'POST', 'accountant', $payload + ['apply_matching' => true]);
+        self::assertSame(201, $res['status']);
+        $ruleId = (int) $res['body']['rule']['id'];
+        self::assertSame('posted', $res['body']['source_result']['status'] ?? null);
+        self::assertSame(1, $res['body']['applied'] ?? null);
+
+        self::assertSame(1, $this->entryCountForTx($source));
+        self::assertSame(1, $this->entryCountForTx($other));
+        self::assertSame(0, $this->entryCountForTx($matched), 'Spárovaná úhrada se pravidlem neúčtuje.');
+        self::assertSame(0, $this->entryCountForTx($unrelated));
+
+        $rule = $this->ruleRow($ruleId);
+        self::assertSame('auto', $rule['mode'], 'Pravidlo z pohybu je rovnou automatické.');
+        self::assertSame(40, (int) $rule['priority']);
+        self::assertSame(2, (int) $rule['hit_count']);
+    }
+
+    public function testRuleFromTransactionWithoutApplyMatchingLeavesOthersUntouched(): void
+    {
+        $stmt = $this->statement();
+        $source = $this->transaction($stmt, -150.00, ['counterparty_account' => '77670']);
+        $other = $this->transaction($stmt, -150.00, ['counterparty_account' => '77670']);
+
+        $action = $this->container->get(BankPostingRuleAction::class);
+        $res = $this->callAction($action, 'create', 'POST', 'accountant', [
+            'name' => 'Poplatek', 'direction' => 'outgoing', 'counterparty_account' => '77670',
+            'debit_account_code' => '568', 'credit_account_code' => '221',
+            'source_transaction_id' => $source,
+        ]);
+        self::assertSame(201, $res['status']);
+        self::assertSame('posted', $res['body']['source_result']['status'] ?? null);
+        self::assertArrayNotHasKey('applied', $res['body']);
+        self::assertSame(1, $this->entryCountForTx($source));
+        self::assertSame(0, $this->entryCountForTx($other));
+    }
+
+    public function testRuleFromAlreadyPostedTransactionReportsDifferentAccountsForRepost(): void
+    {
+        $stmt = $this->statement();
+        $txId = $this->transaction($stmt, -500.00, ['counterparty_account' => '77671']);
+        $this->service->postManual($this->supplierId, $txId, [
+            'debit_account_code' => '568', 'credit_account_code' => '221',
+        ], $this->meta());
+
+        $action = $this->container->get(BankPostingRuleAction::class);
+        $body = [
+            'name' => 'Přeúčtovat', 'direction' => 'outgoing', 'counterparty_account' => '77671',
+            'debit_account_code' => '518', 'credit_account_code' => '221', 'source_transaction_id' => $txId,
+        ];
+        $res = $this->callAction($action, 'create', 'POST', 'accountant', $body);
+        self::assertSame(201, $res['status']);
+        self::assertSame('already_posted', $res['body']['source_result']['status'] ?? null);
+        self::assertFalse($res['body']['source_result']['same_accounts'] ?? null);
+        self::assertSame(1, $this->entryCountForTx($txId), 'Hotový zápis se sám nepřepisuje.');
+
+        $same = $this->callAction($action, 'create', 'POST', 'accountant', ['debit_account_code' => '568'] + $body);
+        self::assertTrue($same['body']['source_result']['same_accounts'] ?? null);
+    }
+
+    public function testRuleFromTransactionInClosedPeriodStaysBlockedSuggestion(): void
+    {
+        $stmt = $this->statement();
+        $txId = $this->transaction($stmt, -700.00, ['counterparty_account' => '77672']);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$this->periodId]);
+
+        $action = $this->container->get(BankPostingRuleAction::class);
+        $res = $this->callAction($action, 'create', 'POST', 'accountant', [
+            'name' => 'Uzavřené', 'direction' => 'outgoing', 'counterparty_account' => '77672',
+            'debit_account_code' => '568', 'credit_account_code' => '221', 'source_transaction_id' => $txId,
+        ]);
+        self::assertSame(201, $res['status']);
+        self::assertSame('blocked', $res['body']['source_result']['status'] ?? null);
+        self::assertSame(0, $this->entryCountForTx($txId));
+    }
+
+    public function testRuleFromForeignTenantTransactionIsRejected(): void
+    {
+        $otherSupplier = (int) ($this->db->pdo()->query(
+            'SELECT id FROM supplier WHERE id <> ' . $this->supplierId . ' ORDER BY id LIMIT 1'
+        )->fetchColumn() ?: 0);
+        if ($otherSupplier === 0) self::markTestSkipped('Chybí druhá firma pro tenantový test.');
+        $statement = $this->statement();
+        $txId = $this->transaction($statement, -500.00, ['counterparty_account' => '77673']);
+        $this->db->pdo()->prepare('UPDATE bank_statements SET supplier_id=? WHERE id=?')
+            ->execute([$otherSupplier, $statement]);
+
+        $action = $this->container->get(BankPostingRuleAction::class);
+        $res = $this->callAction($action, 'create', 'POST', 'accountant', [
+            'name' => 'Cizí', 'direction' => 'outgoing', 'counterparty_account' => '77673',
+            'debit_account_code' => '568', 'credit_account_code' => '221', 'source_transaction_id' => $txId,
+        ]);
+        self::assertSame(404, $res['status']);
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM bank_posting_rules WHERE counterparty_account = '77673'"
+        )->fetchColumn());
+    }
+
+    public function testRuleCreatedWithoutTransactionStaysSuggest(): void
+    {
+        $action = $this->container->get(BankPostingRuleAction::class);
+        $res = $this->callAction($action, 'create', 'POST', 'accountant', [
+            'name' => 'Ruční', 'direction' => 'outgoing', 'counterparty_account' => '77674',
+            'debit_account_code' => '568', 'credit_account_code' => '221', 'mode' => 'auto',
+        ]);
+        self::assertSame(201, $res['status']);
+        self::assertSame('suggest', $res['body']['rule']['mode'] ?? null);
+        self::assertArrayNotHasKey('source_result', $res['body']);
+    }
+
     public function testRuleBackfillRejectsTransactionOwnedByAnotherSupplier(): void
     {
         $otherSupplier = (int) ($this->db->pdo()->query(

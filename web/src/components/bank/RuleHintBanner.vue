@@ -31,7 +31,8 @@ const prefill = computed<BankPostingRulePayload>(() => {
     message_contains: frag || null,
     amount_min: Math.floor(base * 0.9),
     amount_max: Math.ceil(base * 1.1),
-    priority: 100,
+    // Pravidlo z konkrétní platby má přebít systémová rozpoznání i obecné šablony.
+    priority: 40,
     operation_type: null,
     auto_amount_cap: null,
     applies_currency: props.tx.currency || 'CZK',
@@ -66,7 +67,7 @@ function onSaved() {
       </button>
     </div>
 
-    <RuleFormModal v-if="showModal" :prefill="prefill" :base-amount="baseAmount"
+    <RuleFormModal v-if="showModal" :prefill="prefill" :base-amount="baseAmount" :source-transaction-id="tx.id"
       @saved="onSaved" @close="showModal = false" />
   </div>
 </template>

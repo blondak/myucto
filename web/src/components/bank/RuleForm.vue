@@ -17,6 +17,8 @@ const props = defineProps<{
   /** Základ částky (z transakce) pro helper „± %"; když chybí, helper se skryje. */
   baseAmount?: number
   showDryRun?: boolean
+  /** Pravidlo se zakládá z konkrétního pohybu: hned se použije a je rovnou automatické. */
+  fromTransaction?: boolean
 }>()
 const emit = defineEmits<{ 'update:modelValue': [BankPostingRulePayload] }>()
 
@@ -191,7 +193,8 @@ defineExpose({ runDryRun, dryRun })
       </div>
       <p class="text-xs text-neutral-500 mt-0.5">{{ t('automation.rules.mode_change_hint') }}</p>
     </div>
-    <p v-else class="text-xs text-neutral-500">{{ t('bank.posting.mode_suggest_only_hint') }}</p>
+    <p v-else-if="fromTransaction" class="text-xs text-neutral-500" data-test="rule-mode-hint">{{ t('bank.posting.mode_from_transaction_hint') }}</p>
+    <p v-else class="text-xs text-neutral-500" data-test="rule-mode-hint">{{ t('bank.posting.mode_suggest_only_hint') }}</p>
 
     <div v-if="showDryRun" class="border-t border-neutral-200 pt-3">
       <button type="button" @click="runDryRun" :disabled="dryRunLoading"

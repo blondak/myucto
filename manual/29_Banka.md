@@ -11,8 +11,13 @@ V rozbalovacím menu konkrétního pohybu je akce **Vytvořit účtovací pravid
 Předvyplní údaje protistrany a text pohybu; podmínky i účty můžete upravit.
 Používá plný editor bankovních pravidel. V polích MD a D hledáte účet podle
 čísla i názvu; bankovní strana nabízí účty 221 a nebankovní vynechává saldokonta.
-Uložení vytvoří pravidlo pro další podobné platby, samotný pohyb nezaúčtuje.
-Akci lze použít i u již zaúčtovaného pohybu.
+Uložení pravidlo hned použije na tento pohyb: nezaúčtovaný pohyb zaúčtuje
+podle pravidla. U pohybu, který už je zaúčtovaný jinou kontací, otevře
+přeúčtování s protiúčtem z pravidla ke kontrole. Spárované úhrady faktur
+pravidlo neúčtuje. Zaškrtávátko **Použít i na další odpovídající nezaúčtované
+pohyby (N)** zaúčtuje stejným pravidlem i ostatní shodné pohyby v otevřených
+obdobích. Pravidlo založené z pohybu je rovnou v režimu **Automaticky** a
+má výchozí prioritu 40, takže má přednost před systémovým rozpoznáním.
 
 GPC (ABO) je standardní český formát pro elektronickou výměnu výpisů. Umí ho
 exportovat: **KB**, **Fio Bank**, **ČSOB**, **Raiffeisenbank**, **Česká
@@ -655,7 +660,14 @@ Z rozbalovacího menu pohybu lze otevřít **Vytvořit účtovací pravidlo**.
 Otevře se stejný formulář jako na záložce **Pravidla účtování**, předvyplněný
 protistranou, zprávou, směrem, měnou a dostupnou kontací pohybu. Částka pohybu
 není výchozí účtovanou částkou; volitelný rozsah od/do zadáte sami nebo
-pomocí procentního rozpětí. Uložení pravidla samo pohyb nezaúčtuje.
+pomocí procentního rozpětí (předvyplněno ±10 %). Výchozí priorita je 40, pravidlo
+tak přebije systémová rozpoznání i obecná pravidla ze šablon. Po uložení se
+pravidlo hned použije na pohyb, ze kterého vzniklo (nezaúčtovaný pohyb se
+zaúčtuje, u jinak zaúčtovaného se nabídne přeúčtování), a volitelně i na další
+odpovídající nespárované nezaúčtované pohyby v otevřených obdobích (max. 200).
+Uzavřené období skončí jako blokovaný návrh v Automatice. Takové pravidlo je
+rovnou v režimu **Automaticky**: bez potvrzení účtuje, jakmile má rozsah částky
+a aspoň tři úspěšná použití; do té doby další platby nabízí ke schválení.
 
 Platby bez faktury (odvody na OSSZ/ZP, bankovní poplatky, úroky, leasing…) se
 neúčtují samy od prvního výskytu — na záložce **Pravidla účtování** si pro ně
@@ -684,7 +696,8 @@ v otevřených obdobích (max. 200) a vzniknou pouze návrhy ke schválení; opa
 spuštění nevytváří duplicity. Nevyplněná dolní nebo horní mez částky znamená
 „bez omezení" na dané straně intervalu, nikoli částku 0 Kč.
 
-Nové pravidlo vždy jen **navrhuje** (režim **Návrh**) — po importu vytvoří
+Pravidlo založené na záložce **Pravidla účtování** (ne z pohybu) vždy jen
+**navrhuje** (režim **Návrh**) — po importu vytvoří
 položku v **K zaúčtování**, kterou potvrdíš **Schválit** (případně přes ikonu
 ozubeného kolečka přepíšeš kontaci) nebo **Odmítnout**. Po pěti potvrzeních za
 sebou beze změny, bez odmítnutí a s vyplněným rozsahem částky se nabídne

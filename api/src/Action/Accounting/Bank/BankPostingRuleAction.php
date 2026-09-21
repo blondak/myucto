@@ -28,7 +28,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Pravidla účtování opakovaných bankovních transakcí — REST API (mini-epic
  * AUTOMATIZACE, §5). Validace: existence účtů v osnově, 221 strana dle směru (R6),
- * saldokontní blacklist (H2), aspoň 1 kritérium, mode create vždy suggest.
+ * saldokontní blacklist (H2), aspoň 1 kritérium, mode create suggest; výjimkou je
+ * pravidlo založené z konkrétního pohybu (`source_transaction_id`), které je rovnou
+ * auto a na zdrojový pohyb se hned použije.
  */
 final class BankPostingRuleAction
 {
@@ -152,15 +154,38 @@ final class BankPostingRuleAction
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
-        $ruleId = $this->rules->insert($supplierId, $data, $this->userId($request));
-        $this->log($request, 'bank_rule.created', $ruleId, ['name' => $data['name']]);
+        // Pravidlo založené z konkrétního pohybu: uživatel tím výslovně potvrdil kontaci
+        // na skutečné platbě, což je to „první úspěšné použití", po kterém se jinak
+        // pravidlo ručně přepínalo na automatiku. Brzdy politiky (rozsah částky, počet
+        // použití, strop, uzavřené období) platí dál, viz AutoPostingPolicyService.
+        $sourceTxId = (int) ($body['source_transaction_id'] ?? 0);
+        if ($sourceTxId > 0) {
+            if (!$this->ownsTransaction($supplierId, $sourceTxId)) {
+                return Json::error($response, 'not_found', 'Transakce nenalezena.', 404);
+            }
+            $data['mode'] = 'auto';
+        }
+        $userId = $this->userId($request);
+        $ruleId = $this->rules->insert($supplierId, $data, $userId);
+        $this->log($request, 'bank_rule.created', $ruleId, ['name' => $data['name']]
+            + ($sourceTxId > 0 ? ['source_transaction_id' => $sourceTxId] : []));
 
-        $backfilled = null;
-        if (!empty($body['backfill_suggestions'])) {
-            $backfilled = $this->backfill($supplierId, $ruleId, $data['direction'], $this->userId($request));
+        $payload = [];
+        if ($sourceTxId > 0) {
+            $payload['source_result'] = $this->service->applyRuleToTransaction($supplierId, $sourceTxId, $ruleId, $userId);
+            if (!empty($body['apply_matching'])) {
+                $payload['applied'] = $this->applyMatching($supplierId, $ruleId, $data['direction'], $userId, $sourceTxId);
+            }
+            $this->log($request, 'bank_rule.applied_from_transaction', $ruleId, [
+                'source_transaction_id' => $sourceTxId,
+                'source_status' => $payload['source_result']['status'],
+                'applied' => $payload['applied'] ?? null,
+            ]);
+        } elseif (!empty($body['backfill_suggestions'])) {
+            $payload['backfilled'] = $this->backfill($supplierId, $ruleId, $data['direction'], $userId);
         }
         $rule = $this->rules->find($supplierId, $ruleId);
-        return Json::ok($response, $backfilled === null ? ['rule' => $rule] : ['rule' => $rule, 'backfilled' => $backfilled], 201);
+        return Json::ok($response, ['rule' => $rule] + $payload, 201);
     }
 
     public function update(Request $request, Response $response, array $args): Response
@@ -255,8 +280,10 @@ final class BankPostingRuleAction
         }
 
         $txs = $this->tenantTransactions($supplierId, $rule['direction']);
+        $sourceTxId = (int) ($body['source_transaction_id'] ?? 0);
         $matched = 0;
         $alreadyPosted = 0;
+        $applicable = 0;
         $sample = [];
         foreach ($txs as $tx) {
             if (!$this->matcher->matching($rule, [
@@ -273,6 +300,10 @@ final class BankPostingRuleAction
             $posted = (bool) $tx['already_posted'];
             if ($posted) {
                 $alreadyPosted++;
+            } elseif ((string) $tx['match_status'] === 'unmatched' && (bool) $tx['in_open_period']
+                && (int) $tx['id'] !== $sourceTxId) {
+                // Kandidát pro „použít i na další pohyby" — stejný výběr jako applyMatching().
+                $applicable++;
             }
             if (count($sample) < 10) {
                 $sample[] = [
@@ -287,6 +318,7 @@ final class BankPostingRuleAction
         return Json::ok($response, [
             'matched_count'        => $matched,
             'already_posted_count' => $alreadyPosted,
+            'applicable_count'     => $applicable,
             'shadowed_by_own_transfer' => $rule['counterparty_account'] !== null
                 && $this->bankAccounts->matchCounterparty(
                     $supplierId,
@@ -493,8 +525,56 @@ final class BankPostingRuleAction
     /** Suggest degradace nad historickými unmatched nezaúčtovanými tx (limit 200, otevřená období). */
     private function backfill(int $supplierId, int $ruleId, string $direction, ?int $userId): int
     {
-        $sign = $direction === 'incoming' ? '> 0' : '< 0';
         $n = 0;
+        foreach ($this->backfillCandidates($supplierId, $direction) as $txId) {
+            $res = $this->service->suggestRuleForBackfill($supplierId, $txId, $ruleId, $userId);
+            if (($res['action'] ?? '') === 'suggested' && ($res['created'] ?? false) && ++$n >= self::BACKFILL_LIMIT) {
+                break;
+            }
+        }
+        return $n;
+    }
+
+    /**
+     * Pravidlo založené z pohybu na výslovnou žádost uživatele zaúčtuje i další
+     * odpovídající nespárované a nezaúčtované pohyby v otevřených obdobích. Výběr
+     * je stejný jako u backfillu, jen se návrh rovnou schválí
+     * ({@see BankPostingService::applyRuleToTransaction()}).
+     */
+    private function applyMatching(int $supplierId, int $ruleId, string $direction, ?int $userId, int $excludeTxId): int
+    {
+        $n = 0;
+        foreach ($this->backfillCandidates($supplierId, $direction) as $txId) {
+            if ($txId === $excludeTxId) {
+                continue;
+            }
+            $res = $this->service->applyRuleToTransaction($supplierId, $txId, $ruleId, $userId);
+            if ($res['status'] === 'posted' && ++$n >= self::BACKFILL_LIMIT) {
+                break;
+            }
+        }
+        return $n;
+    }
+
+    private function ownsTransaction(int $supplierId, int $txId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.id = ? AND ' . $this->ownsStatementSql('bs') . ' LIMIT 1'
+        );
+        $stmt->execute(array_merge([$txId], \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId)));
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Nespárované nezaúčtované výpisové pohyby tenanta v otevřených obdobích, od nejnovějších.
+     *
+     * @return \Generator<int>
+     */
+    private function backfillCandidates(int $supplierId, string $direction): \Generator
+    {
+        $sign = $direction === 'incoming' ? '> 0' : '< 0';
         $lastId = PHP_INT_MAX;
         do {
             $stmt = $this->db->pdo()->prepare(
@@ -516,14 +596,10 @@ final class BankPostingRuleAction
             ));
             $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
             foreach ($ids as $txId) {
-                $res = $this->service->suggestRuleForBackfill($supplierId, $txId, $ruleId, $userId);
-                if (($res['action'] ?? '') === 'suggested' && ($res['created'] ?? false) && ++$n >= self::BACKFILL_LIMIT) {
-                    break 2;
-                }
+                yield $txId;
             }
             if ($ids !== []) $lastId = $ids[array_key_last($ids)];
         } while (count($ids) === 500);
-        return $n;
     }
 
     /**
@@ -534,9 +610,11 @@ final class BankPostingRuleAction
         $sign = $direction === 'incoming' ? '> 0' : '< 0';
         $stmt = $this->db->pdo()->prepare(
             "SELECT bt.id, bt.posted_at, bt.amount, bt.variable_symbol, bt.counterparty_account,
-                    bt.counterparty_bank, bt.description, bt.counterparty_name,
+                    bt.counterparty_bank, bt.description, bt.counterparty_name, bt.match_status,
                     EXISTS (SELECT 1 FROM journal_entries je WHERE je.supplier_id = ?
-                              AND je.source_type = 'bank' AND je.source_id = bt.id AND je.reversed_by IS NULL) AS already_posted
+                              AND je.source_type = 'bank' AND je.source_id = bt.id AND je.reversed_by IS NULL) AS already_posted,
+                    EXISTS (SELECT 1 FROM accounting_periods p WHERE p.supplier_id = ?
+                              AND bt.posted_at BETWEEN p.starts_on AND p.ends_on AND p.status = 'open') AS in_open_period
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.source = 'statement' AND bt.amount {$sign}
@@ -545,9 +623,9 @@ final class BankPostingRuleAction
               ORDER BY bt.posted_at DESC
               LIMIT 2000"
         );
-        // je.supplier_id, resolver (2×)
+        // je.supplier_id, p.supplier_id, resolver (2×)
         $stmt->execute(array_merge(
-            [$supplierId],
+            [$supplierId, $supplierId],
             \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
         ));
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];

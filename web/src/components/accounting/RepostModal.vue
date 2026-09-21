@@ -43,6 +43,11 @@ const props = defineProps<{
   docId: number
   /** Popisek dokladu do hlavičky (číslo faktury, u banky popis pohybu). */
   docLabel?: string | null
+  /**
+   * Navržená kontace MD/D (pravidlo založené z už zaúčtovaného pohybu). Přepíše jen
+   * jednoduchý dvouřádkový zápis a jen jeho ne-bankovní stranu; rozúčtování nechá být.
+   */
+  proposedAccounts?: { debit: string; credit: string } | null
 }>()
 
 const emit = defineEmits<{ close: []; reposted: []; dimensionsSaved: [] }>()
@@ -156,6 +161,7 @@ async function load(): Promise<void> {
       side: l.side,
       amount: l.amount,
     }))
+    applyProposal()
   } catch (e: any) {
     error.value = t(postingErrorI18nKey(e?.response?.data?.error?.code))
   } finally {
@@ -169,6 +175,26 @@ watch(() => [props.open, props.docId], ([open]) => {
     void loadDimensions()
   }
 }, { immediate: true })
+
+const proposalApplied = ref(false)
+
+function applyProposal(): void {
+  proposalApplied.value = false
+  const proposal = props.proposedAccounts
+  if (!proposal || props.source !== 'bank-transactions' || lines.value.length !== 2) return
+  const debit = lines.value.find(l => l.side === 'debit')
+  const credit = lines.value.find(l => l.side === 'credit')
+  if (!debit || !credit) return
+  // Bankovní strana (221 s analytikou účtu výpisu) zůstává, mění se jen protiúčet.
+  if (credit.account_code.startsWith('221') && !proposal.debit.startsWith('221')) {
+    debit.account_code = proposal.debit
+  } else if (debit.account_code.startsWith('221') && !proposal.credit.startsWith('221')) {
+    credit.account_code = proposal.credit
+  } else {
+    return
+  }
+  proposalApplied.value = true
+}
 
 const canSubmit = computed(() =>
   !!plan.value && !blocked.value && !loading.value && !saving.value
@@ -244,6 +270,9 @@ async function submit(): Promise<void> {
             {{ t('accounting.repost.tax_neutral_available') }}
           </p>
         </div>
+        <p v-if="proposalApplied" class="text-sm text-primary-700" data-test="repost-proposal-hint">
+          {{ t('accounting.repost.proposal_from_rule') }}
+        </p>
 
         <dl class="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
           <div class="flex justify-between gap-2">

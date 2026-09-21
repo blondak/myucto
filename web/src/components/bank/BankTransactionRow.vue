@@ -7,7 +7,7 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import type { BankTransaction } from '@/api/bank'
 import type { AutomationProvenance } from '@/api/automation'
-import type { BankPostingRulePayload, PostResult } from '@/api/bankPosting'
+import type { BankPostingRule, BankPostingRulePayload, PostResult, RuleCreateResult } from '@/api/bankPosting'
 import PostingRowActions from './PostingRowActions.vue'
 import RuleFormModal from './RuleFormModal.vue'
 import RepostModal from '@/components/accounting/RepostModal.vue'
@@ -97,6 +97,12 @@ const statusTitle = computed(() => outsideSaldo.value ? t('bank.outside_saldo_hi
 // Dialog přeúčtování drží řádek, ne PostingRowActions: řádek se vykresluje ve
 // dvou podobách (tabulka i karta) a dvě instance dialogu by si přebíjely stav.
 const repostTx = ref<RowTx | null>(null)
+/** Kontace nového pravidla, kterou přeúčtování předvyplní (pravidlo z už zaúčtovaného pohybu). */
+const repostProposal = ref<{ debit: string; credit: string } | null>(null)
+// Pravidlo z konkrétního pohybu: pás ±10 % (bez něj plná automatika pravidlo jen navrhuje)
+// a priorita 40, aby přebilo systémová rozpoznání i obecná pravidla ze šablon (90–100).
+const RULE_FROM_TX_PRIORITY = 40
+const RULE_FROM_TX_BAND = 0.1
 const rulePrefill = computed<BankPostingRulePayload>(() => ({
   name: props.tx.counterparty_name || '',
   is_active: true,
@@ -106,9 +112,9 @@ const rulePrefill = computed<BankPostingRulePayload>(() => ({
   counterparty_prefix: null,
   variable_symbol: props.tx.variable_symbol,
   message_contains: props.tx.description || null,
-  amount_min: null,
-  amount_max: null,
-  priority: 100,
+  amount_min: Math.floor(Math.abs(props.tx.amount) * (1 - RULE_FROM_TX_BAND)),
+  amount_max: Math.ceil(Math.abs(props.tx.amount) * (1 + RULE_FROM_TX_BAND)),
+  priority: RULE_FROM_TX_PRIORITY,
   operation_type: null,
   auto_amount_cap: null,
   applies_currency: currency(),
@@ -182,6 +188,21 @@ function transferTooltip(tx: BankTransaction): string {
   return t(key, { account: transfer.own_account_label ?? tx.counterparty_account ?? '—' })
 }
 
+function onRuleSaved(rule: BankPostingRule, result?: RuleCreateResult) {
+  ruleTemplateOpen.value = false
+  const src = result?.source_result
+  if (src?.status === 'already_posted' && src.same_accounts === false && auth.canWrite('accounting')) {
+    repostProposal.value = { debit: rule.debit_account_code, credit: rule.credit_account_code }
+    repostTx.value = props.tx
+  }
+  emit('changed')
+}
+
+function closeRepost() {
+  repostTx.value = null
+  repostProposal.value = null
+}
+
 function onPosted(payload: { result: PostResult; debit: string; credit: string }) {
   emit('posted', payload, props.tx)
 }
@@ -251,7 +272,7 @@ function matchActions(tx: BankTransaction): RowAction[] {
      */
     {
       key: 'repost', label: t('accounting.repost.action'), icon: 'edit', variant: 'warning',
-      run: () => { repostTx.value = tx },
+      run: () => { repostProposal.value = null; repostTx.value = tx },
       show: !tx.posting?.payroll_posting_blocked && props.isDoubleEntry && tx.posting?.status === 'posted' && auth.canWrite('accounting'),
     },
   ]
@@ -521,9 +542,11 @@ function candidateReject() {
   <Teleport to="body">
     <RepostModal v-if="repostTx" :open="true" source="bank-transactions" :doc-id="repostTx.id"
       :doc-label="repostTx.description || repostTx.variable_symbol"
-      @close="repostTx = null" @reposted="repostTx = null; emit('changed')"
-      @dimensions-saved="repostTx = null; emit('changed')" />
+      :proposed-accounts="repostProposal"
+      @close="closeRepost" @reposted="closeRepost(); emit('changed')"
+      @dimensions-saved="closeRepost(); emit('changed')" />
     <RuleFormModal v-if="ruleTemplateOpen" :prefill="rulePrefill" :base-amount="Math.abs(tx.amount)"
-      @saved="ruleTemplateOpen = false; emit('changed')" @close="ruleTemplateOpen = false" />
+      :source-transaction-id="tx.id"
+      @saved="onRuleSaved" @close="ruleTemplateOpen = false" />
   </Teleport>
 </template>
