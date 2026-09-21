@@ -237,7 +237,17 @@ final class DocumentsAction
         if (mb_strlen($q) < 2) {
             return Json::ok($response, ['documents' => [], 'query' => $q]);
         }
-        return Json::ok($response, ['documents' => $this->documents->search($sid, $q, $this->viewer($request)), 'query' => $q]);
+        // Cesta ke složce, ať jde v našeptávači poznat, který z podobně pojmenovaných dokumentů je který.
+        $paths = [];
+        $docs = array_map(function (array $doc) use ($sid, &$paths): array {
+            $folderId = $doc['folder_id'] !== null ? (int) $doc['folder_id'] : null;
+            if ($folderId !== null && !array_key_exists($folderId, $paths)) {
+                $paths[$folderId] = implode(' / ', array_column($this->breadcrumb($sid, $folderId), 'name'));
+            }
+            $doc['folder_path'] = $folderId !== null ? $paths[$folderId] : null;
+            return $doc;
+        }, $this->documents->search($sid, $q, $this->viewer($request)));
+        return Json::ok($response, ['documents' => $docs, 'query' => $q]);
     }
 
     /** GET /api/documents/by-entity/{type}/{id} */

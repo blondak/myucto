@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { documentsApi, type DocItem, type EntityType } from '@/api/documents'
 import { docTypeBadge, formatBytes } from './docFormat'
+import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 
@@ -163,7 +164,11 @@ onMounted(load)
           @click="attach(c)"
         >
           <span :class="['shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold', docTypeBadge(c.doc_type).class]">{{ docTypeBadge(c.doc_type).label }}</span>
-          <span class="text-sm text-neutral-700 truncate">{{ c.title }}</span>
+          <span class="min-w-0 flex-1 text-sm text-neutral-700 truncate">{{ c.title }}</span>
+          <span class="shrink-0 max-w-[40%] truncate text-xs text-neutral-500" :title="c.folder_path || t('documents.root')">
+            {{ c.folder_path || t('documents.root') }}
+          </span>
+          <span class="shrink-0 w-20 text-right text-xs font-mono text-neutral-500">{{ formatDate(c.created_at) }}</span>
         </li>
       </ul>
     </div>

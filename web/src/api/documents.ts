@@ -80,6 +80,8 @@ export interface DocItem {
   scope?: DocScope
   owner_user_id?: number | null
   owner_name?: string | null
+  // jen ve výsledcích hledání: cesta ke složce („Smlouvy / Pojištění")
+  folder_path?: string | null
   // detail-only
   tags?: string[]
   links?: DocLink[]
