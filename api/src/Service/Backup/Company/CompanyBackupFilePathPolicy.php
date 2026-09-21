@@ -17,6 +17,7 @@ enum CompanyBackupFilePathPolicy: string
     case SupplierLogo = 'supplier_logo';
     case SupplierInvoiceAttachment = 'supplier_invoice_attachment';
     case SupplierInvoicePdf = 'supplier_invoice_pdf';
+    case SupplierImportedInvoicePdf = 'supplier_imported_invoice_pdf';
 
     public static function fromDefinition(TenantDataDefinition $definition): self
     {
@@ -36,6 +37,7 @@ enum CompanyBackupFilePathPolicy: string
     public function accepts(string $sourcePath, int $supplierId): bool
     {
         return match ($this) {
+            self::SupplierImportedInvoicePdf => CompanyBackupImportedInvoicePdfFilePath::accepts($sourcePath, $supplierId),
             self::Relative => true,
             self::SupplierContentHash => self::contentHash(
                 $sourcePath,
@@ -64,6 +66,9 @@ enum CompanyBackupFilePathPolicy: string
         $storedRelativePath = CompanyBackupFileEntry::normalizeSourcePath(
             $storedRelativePath,
         );
+        if ($this === self::SupplierImportedInvoicePdf) {
+            return CompanyBackupImportedInvoicePdfFilePath::sourcePath($storedRelativePath, $supplierId);
+        }
         if ($this === self::SupplierInvoiceAttachment) {
             if ($invoiceId === null) {
                 throw new \InvalidArgumentException('ID faktury pro cestu přílohy chybí.');
@@ -146,6 +151,11 @@ enum CompanyBackupFilePathPolicy: string
         ) {
             throw new \InvalidArgumentException(
                 'Zdrojová cesta souboru neodpovídá obnovované firmě.',
+            );
+        }
+        if ($this === self::SupplierImportedInvoicePdf) {
+            return CompanyBackupImportedInvoicePdfFilePath::restoreTargetPath(
+                $sourcePath, $sourceSupplierId, $targetSupplierId,
             );
         }
         if ($this === self::SupplierInvoiceAttachment) {

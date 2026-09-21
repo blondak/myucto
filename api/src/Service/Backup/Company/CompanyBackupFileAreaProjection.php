@@ -54,6 +54,7 @@ final readonly class CompanyBackupFileAreaProjection
                         CompanyBackupFilePathPolicy::SupplierContentHash,
                         CompanyBackupFilePathPolicy::SupplierInvoiceAttachment,
                         CompanyBackupFilePathPolicy::SupplierInvoicePdf,
+                        CompanyBackupFilePathPolicy::SupplierImportedInvoicePdf,
                     ], true)
                     !== ($owner->storedPrefix === '')
                 ) {
@@ -61,6 +62,9 @@ final readonly class CompanyBackupFileAreaProjection
                         'Souborový vlastník nemá jednoznačné kódování.',
                     );
                 }
+            }
+            if ($pathPolicy === CompanyBackupFilePathPolicy::SupplierImportedInvoicePdf) {
+                self::assertImportedInvoiceContract($subdirectory, $owners, $registry);
             }
             if ($pathPolicy === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment) {
                 self::assertInvoiceFileContract(
@@ -148,16 +152,55 @@ final readonly class CompanyBackupFileAreaProjection
                 $label . ' nemá exportované ID faktury a název souboru.',
             );
         }
-        $invoiceReferences = array_values(array_filter(
+        self::assertRequiredReference($projection, 'invoice_id', 'table:invoices');
+    }
+
+    private static function assertImportedInvoiceContract(
+        string $subdirectory,
+        CompanyBackupFileOwnerSet $owners,
+        TenantDataRegistry $registry,
+    ): void {
+        $owner = $owners->owners[0] ?? null;
+        $target = $registry->definition('table:invoices');
+        if ($subdirectory !== 'invoices-imported'
+            || count($owners->owners) !== 1
+            || !$owner instanceof CompanyBackupFileOwnerDefinition
+            || $owner->registryKey !== 'table:invoices'
+            || $owner->column !== 'imported_pdf_path'
+            || $owner->path !== [] || $owner->storedPrefix !== ''
+            || !$target instanceof TenantDataDefinition
+            || $target->kind !== TenantDataObjectKind::Table
+            || $target->policy !== TenantDataPolicy::TenantOwned
+            || ($target->details['primary_key'] ?? null) !== ['id']
+            || CanonicalJson::encode($target->details['ownership'] ?? null)
+                !== CanonicalJson::encode(['strategy' => 'supplier_id', 'column' => 'supplier_id'])
+        ) {
+            throw new \InvalidArgumentException('Importované PDF nemá jednoznačného vlastníka.');
+        }
+        $projection = CompanyBackupTableProjection::fromDefinition($target);
+        if (!in_array('supplier_id', $projection->dataColumns, true)
+            || !in_array('imported_pdf_path', $projection->dataColumns, true)
+        ) {
+            throw new \InvalidArgumentException('Importované PDF nemá exportovanou cestu a firmu.');
+        }
+        self::assertRequiredReference($projection, 'supplier_id', 'table:supplier');
+    }
+
+    private static function assertRequiredReference(
+        CompanyBackupTableProjection $projection,
+        string $column,
+        string $target,
+    ): void {
+        $references = array_values(array_filter(
             $projection->references->references,
             static fn (CompanyBackupReference $reference): bool =>
-                in_array('invoice_id', $reference->columns, true),
+                in_array($column, $reference->columns, true),
         ));
-        $reference = $invoiceReferences[0] ?? null;
-        if (count($invoiceReferences) !== 1
+        $reference = $references[0] ?? null;
+        if (count($references) !== 1
             || !$reference instanceof CompanyBackupReference
-            || $reference->columns !== ['invoice_id']
-            || $reference->target !== 'table:invoices'
+            || $reference->columns !== [$column]
+            || $reference->target !== $target
             || $reference->targetColumns !== ['id']
             || $reference->mapping !== CompanyBackupReferenceMapping::TenantId
             || $reference->constraint !== CompanyBackupReferenceConstraint::Required
@@ -165,9 +208,7 @@ final readonly class CompanyBackupFileAreaProjection
             || $reference->fallbacks !== []
             || $reference->condition !== null
         ) {
-            throw new \InvalidArgumentException(
-                $label . ' nemá povinnou ne-null referenci na fakturu.',
-            );
+            throw new \InvalidArgumentException('Vlastník souboru nemá povinnou ne-null referenci.');
         }
     }
 
