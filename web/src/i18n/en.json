@@ -27033,6 +27033,7 @@
     "cost_center_short": "cc",
     "link_project": "Project (billing)",
     "expand_all": "Expand all",
+    "collapse_all": "Collapse all",
     "toggle_children": "Expand or collapse children",
     "group_title": "Company group",
     "group_none": "The company is not part of any group. Global dimensions are shared by the companies of one group — for example projects of a parent company and its SPVs.",

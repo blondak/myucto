@@ -2452,10 +2452,6 @@ async function deleteDraft() {
                 </button>
               </div>
             </div>
-            <div v-if="docDims.enabled.value" data-test="invoice-header-dimensions">
-              <p class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.header_title') }}</p>
-              <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
-            </div>
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.currency') }}</label>
@@ -3046,6 +3042,10 @@ async function deleteDraft() {
               </option>
             </select>
             <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.classification.revenue_category_hint') }}</p>
+          </div>
+          <div v-if="docDims.enabled.value" class="sm:col-span-2" data-test="invoice-header-dimensions">
+            <p class="text-xs text-neutral-500 mb-1">{{ t('dimensions.header_title') }}</p>
+            <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
           </div>
         </div>
       </div>

@@ -91,7 +91,8 @@ describe('Dimensions.vue', () => {
 
   it('založí podřízenou hodnotu pod vybraným rodičem', async () => {
     m.createValue.mockResolvedValue({ id: 13 })
-    const wrapper = mount(Dimensions)
+    // Formulář hodnoty je v dialogu (Teleport do body) — ve stubu zůstane v komponentě.
+    const wrapper = mount(Dimensions, { global: { stubs: { teleport: true } } })
     await flushPromises()
     const addChild = wrapper.get('[data-test="dimension-value-VYROBA"]').findAll('button').find(b => b.attributes('title') === 'dimensions.value_add_child')
     await addChild!.trigger('click')

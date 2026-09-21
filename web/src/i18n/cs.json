@@ -27033,6 +27033,7 @@
     "cost_center_short": "stř.",
     "link_project": "Zakázka (fakturace)",
     "expand_all": "Rozbalit vše",
+    "collapse_all": "Sbalit vše",
     "toggle_children": "Rozbalit nebo sbalit podřízené",
     "group_title": "Skupina firem",
     "group_none": "Firma nepatří do žádné skupiny. Globální dimenze sdílí firmy jedné skupiny — například projekty mateřské firmy a jejích SPV.",

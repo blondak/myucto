@@ -19,6 +19,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import Modal from '@/components/ui/Modal.vue'
 
 /**
  * Firma → Dimenze: typy dimenzí a stromy jejich hodnot. Záložky dělí firemní
@@ -236,8 +237,12 @@ function toggle(valueId: number) {
   expanded.value = next
 }
 
-function expandAll() {
-  expanded.value = new Set(tree.value.map(({ value }) => value.id))
+/** Hodnoty, které mají podřízené — jen ty jde rozbalit. */
+const parentIds = computed(() => [...childCount.value.keys()])
+const allExpanded = computed(() => parentIds.value.length > 0 && parentIds.value.every(id => expanded.value.has(id)))
+
+function toggleAll() {
+  expanded.value = allExpanded.value ? new Set() : new Set(parentIds.value)
 }
 
 /** Možní rodiče: hodnoty typu kromě hodnoty samé a její větve. */
@@ -475,9 +480,9 @@ function valueCount(typeId: number) {
               <p class="text-xs text-neutral-500">{{ kindLabel(selectedType.kind) }} · {{ t(`dimensions.level_${selectedType.level}`) }}</p>
             </div>
             <div class="flex flex-wrap gap-2">
-              <button v-if="tree.length > 0" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" @click="expandAll">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
-                {{ t('dimensions.expand_all') }}
+              <button v-if="parentIds.length > 0" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" data-test="dimension-toggle-all" @click="toggleAll">
+                <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-180': allExpanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
+                {{ allExpanded ? t('dimensions.collapse_all') : t('dimensions.expand_all') }}
               </button>
               <button v-if="canWrite" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" @click="editType(selectedType)">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
@@ -537,8 +542,9 @@ function valueCount(typeId: number) {
       </div>
 
       <!-- Formulář typu -->
-      <div v-if="typeFormOpen && canWrite" class="mt-5 bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4" data-test="dimension-type-form">
-        <h3 class="text-lg font-semibold">{{ typeForm.id === null ? t('dimensions.type_new') : t('dimensions.type_edit') }}</h3>
+      <Modal v-if="typeFormOpen && canWrite" :title="typeForm.id === null ? t('dimensions.type_new') : t('dimensions.type_edit')"
+             width-class="max-w-2xl" @close="typeFormOpen = false">
+       <div class="space-y-4" data-test="dimension-type-form">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.name') }}</label>
@@ -576,7 +582,9 @@ function valueCount(typeId: number) {
           <input v-model="typeForm.is_active" type="checkbox" class="rounded border-neutral-300" />
           {{ t('dimensions.type_active') }}
         </label>
-        <div class="flex flex-wrap justify-end gap-2 border-t border-neutral-200 pt-3">
+       </div>
+       <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
           <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="typeFormOpen = false">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
@@ -586,11 +594,13 @@ function valueCount(typeId: number) {
             {{ busy ? t('common.saving') : t('common.save') }}
           </button>
         </div>
-      </div>
+       </template>
+      </Modal>
 
       <!-- Formulář hodnoty -->
-      <div v-if="valueFormOpen && canWrite && selectedType" class="mt-5 bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4" data-test="dimension-value-form">
-        <h3 class="text-lg font-semibold">{{ valueForm.id === null ? t('dimensions.value_new') : t('dimensions.value_edit') }}</h3>
+      <Modal v-if="valueFormOpen && canWrite && selectedType" :title="valueForm.id === null ? t('dimensions.value_new') : t('dimensions.value_edit')"
+             width-class="max-w-2xl" @close="valueFormOpen = false">
+       <div class="space-y-4" data-test="dimension-value-form">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.name') }}</label>
@@ -654,7 +664,9 @@ function valueCount(typeId: number) {
           <input v-model="valueForm.is_active" type="checkbox" class="rounded border-neutral-300" />
           {{ t('dimensions.value_active') }}
         </label>
-        <div class="flex flex-wrap justify-end gap-2 border-t border-neutral-200 pt-3">
+       </div>
+       <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
           <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="valueFormOpen = false">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
@@ -664,7 +676,8 @@ function valueCount(typeId: number) {
             {{ busy ? t('common.saving') : t('common.save') }}
           </button>
         </div>
-      </div>
+       </template>
+      </Modal>
     </template>
   </div>
 </template>
