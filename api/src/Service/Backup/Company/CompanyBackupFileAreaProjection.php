@@ -55,6 +55,7 @@ final readonly class CompanyBackupFileAreaProjection
                         CompanyBackupFilePathPolicy::SupplierInvoiceAttachment,
                         CompanyBackupFilePathPolicy::SupplierInvoicePdf,
                         CompanyBackupFilePathPolicy::SupplierImportedInvoicePdf,
+                        CompanyBackupFilePathPolicy::SupplierPurchaseInvoicePdf,
                     ], true)
                     !== ($owner->storedPrefix === '')
                 ) {
@@ -64,7 +65,16 @@ final readonly class CompanyBackupFileAreaProjection
                 }
             }
             if ($pathPolicy === CompanyBackupFilePathPolicy::SupplierImportedInvoicePdf) {
-                self::assertImportedInvoiceContract($subdirectory, $owners, $registry);
+                self::assertDirectInvoiceDocumentContract(
+                    $subdirectory, $owners, $registry,
+                    'invoices-imported', 'table:invoices', 'imported_pdf_path', 'Importované PDF',
+                );
+            }
+            if ($pathPolicy === CompanyBackupFilePathPolicy::SupplierPurchaseInvoicePdf) {
+                self::assertDirectInvoiceDocumentContract(
+                    $subdirectory, $owners, $registry,
+                    'purchase-invoices', 'table:purchase_invoices', 'pdf_path', 'PDF přijaté faktury',
+                );
             }
             if ($pathPolicy === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment) {
                 self::assertInvoiceFileContract(
@@ -155,18 +165,22 @@ final readonly class CompanyBackupFileAreaProjection
         self::assertRequiredReference($projection, 'invoice_id', 'table:invoices');
     }
 
-    private static function assertImportedInvoiceContract(
+    private static function assertDirectInvoiceDocumentContract(
         string $subdirectory,
         CompanyBackupFileOwnerSet $owners,
         TenantDataRegistry $registry,
+        string $expectedSubdirectory,
+        string $ownerRegistryKey,
+        string $pathColumn,
+        string $label,
     ): void {
         $owner = $owners->owners[0] ?? null;
-        $target = $registry->definition('table:invoices');
-        if ($subdirectory !== 'invoices-imported'
+        $target = $registry->definition($ownerRegistryKey);
+        if ($subdirectory !== $expectedSubdirectory
             || count($owners->owners) !== 1
             || !$owner instanceof CompanyBackupFileOwnerDefinition
-            || $owner->registryKey !== 'table:invoices'
-            || $owner->column !== 'imported_pdf_path'
+            || $owner->registryKey !== $ownerRegistryKey
+            || $owner->column !== $pathColumn
             || $owner->path !== [] || $owner->storedPrefix !== ''
             || !$target instanceof TenantDataDefinition
             || $target->kind !== TenantDataObjectKind::Table
@@ -175,13 +189,13 @@ final readonly class CompanyBackupFileAreaProjection
             || CanonicalJson::encode($target->details['ownership'] ?? null)
                 !== CanonicalJson::encode(['strategy' => 'supplier_id', 'column' => 'supplier_id'])
         ) {
-            throw new \InvalidArgumentException('Importované PDF nemá jednoznačného vlastníka.');
+            throw new \InvalidArgumentException($label . ' nemá jednoznačného vlastníka.');
         }
         $projection = CompanyBackupTableProjection::fromDefinition($target);
         if (!in_array('supplier_id', $projection->dataColumns, true)
-            || !in_array('imported_pdf_path', $projection->dataColumns, true)
+            || !in_array($pathColumn, $projection->dataColumns, true)
         ) {
-            throw new \InvalidArgumentException('Importované PDF nemá exportovanou cestu a firmu.');
+            throw new \InvalidArgumentException($label . ' nemá exportovanou cestu a firmu.');
         }
         self::assertRequiredReference($projection, 'supplier_id', 'table:supplier');
     }

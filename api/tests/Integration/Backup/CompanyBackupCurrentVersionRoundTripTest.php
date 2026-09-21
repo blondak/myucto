@@ -108,6 +108,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         $pdo = $this->db->pdo();
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS supplier');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS users');
+        $pdo->exec('DROP TEMPORARY TABLE IF EXISTS purchase_invoices');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_pdfs');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_attachments');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoices');
@@ -129,6 +130,14 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . 'supplier_id BIGINT UNSIGNED NOT NULL,'
             . 'invoice_number VARCHAR(64) NOT NULL,'
             . 'imported_pdf_path VARCHAR(255) NULL'
+            . ') ENGINE=InnoDB',
+        );
+        $pdo->exec(
+            'CREATE TEMPORARY TABLE purchase_invoices ('
+            . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
+            . 'supplier_id BIGINT UNSIGNED NOT NULL,'
+            . 'pdf_path VARCHAR(255) NULL,'
+            . 'pdf_hash CHAR(64) NULL'
             . ') ENGINE=InnoDB',
         );
         $pdo->exec(
@@ -179,6 +188,14 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertTrue(mkdir($existingImported, 0700, true));
         self::assertSame(strlen("existing-imported-tenant7\n"), file_put_contents(
             $existingImported . '/abcdef0123456789.pdf', "existing-imported-tenant7\n",
+        ));
+        $pdo->exec("INSERT INTO purchase_invoices (id,supplier_id,pdf_path,pdf_hash)"
+            . " VALUES (201,7,'supplier-7/1234567890abcdef.pdf',NULL)");
+        $purchaseDirectory = $this->root . '/live/custom-purchase-archive/supplier-7';
+        self::assertTrue(mkdir($purchaseDirectory, 0700, true));
+        $existingPurchase = "existing-purchase-tenant7\n";
+        self::assertSame(strlen($existingPurchase), file_put_contents(
+            $purchaseDirectory . '/1234567890abcdef.pdf', $existingPurchase,
         ));
         $pdfFilename = '20250131-120000-aaaaaaaa-invoice.pdf';
         $pdfContents = "existing-tenant-archived-pdf\n";
@@ -238,6 +255,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             }
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS supplier');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS users');
+            $pdo->exec('DROP TEMPORARY TABLE IF EXISTS purchase_invoices');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_pdfs');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_attachments');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoices');
@@ -285,8 +303,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             $validation,
             $pdo,
         );
-        self::assertSame(6, $preflight->rowCount);
-        self::assertSame(6, $preflight->identityCount);
+        self::assertSame(7, $preflight->rowCount);
+        self::assertSame(7, $preflight->identityCount);
         self::assertSame([], $preflight->externalReferences->requirements);
         $decisions = CompanyBackupReferenceDecisionPlan::fromArray([
             'format' => CompanyBackupReferenceDecisionPlan::FORMAT,
@@ -330,15 +348,15 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
 
         self::assertFalse($pdo->inTransaction());
         self::assertSame(8, $result->database->supplierId);
-        self::assertSame(6, $result->database->insertedRows);
+        self::assertSame(7, $result->database->insertedRows);
         self::assertSame(2, $result->database->deferredRows);
         self::assertSame(1, $result->database->updatedRows);
-        self::assertSame(5, $result->postImport->checkedTableCount);
-        self::assertSame(6, $result->postImport->checkedTenantRows);
+        self::assertSame(6, $result->postImport->checkedTableCount);
+        self::assertSame(7, $result->postImport->checkedTenantRows);
         self::assertSame(3,
             $result->postImport->invariantReport->invariantCount);
         self::assertSame(0, $result->postImport->invariantReport->checkCount);
-        self::assertSame(4, $result->publishedFileCount);
+        self::assertSame(5, $result->publishedFileCount);
 
         self::assertSame([
             [
@@ -473,6 +491,21 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             $importedRoot . '/supplier-7/ab/abcdef0123456789.pdf',
         ));
         self::assertDirectoryDoesNotExist($this->root . '/live/invoices-imported');
+        self::assertSame([
+            ['id' => 201, 'supplier_id' => 7,
+                'pdf_path' => 'supplier-7/1234567890abcdef.pdf', 'pdf_hash' => null],
+            ['id' => 202, 'supplier_id' => 8,
+                'pdf_path' => 'supplier-8/1234567890abcdef.pdf',
+                'pdf_hash' => str_repeat('b', 64)],
+        ], $this->fetchRows($pdo, 'SELECT id,supplier_id,pdf_path,pdf_hash FROM purchase_invoices ORDER BY id'));
+        self::assertSame("synthetic-purchase-pdf\n", file_get_contents(
+            $this->root . '/live/custom-purchase-archive/supplier-8/1234567890abcdef.pdf',
+        ));
+        self::assertSame("existing-purchase-tenant7\n", file_get_contents(
+            $this->root . '/live/custom-purchase-archive/supplier-7/1234567890abcdef.pdf',
+        ));
+        self::assertDirectoryDoesNotExist($this->root . '/live/purchase-invoices');
+
         self::assertSame([], $this->entries(
             $this->root . DIRECTORY_SEPARATOR . 'staging',
         ));
@@ -491,6 +524,12 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'supplier_id' => 7,
                 'invoice_number' => 'restored-invoice',
                 'imported_pdf_path' => 'supplier-7/ab/abcdef0123456789.pdf',
+            ]],
+            'table:purchase_invoices' => [[
+                'id' => 201, 'supplier_id' => 7,
+                'pdf_path' => 'supplier-7/1234567890abcdef.pdf',
+                // pdf_hash may identify an ISDOCX container, not these PDF bytes.
+                'pdf_hash' => str_repeat('b', 64),
             ]],
             'table:invoice_attachments' => [[
                 'id' => 11,
@@ -573,6 +612,11 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertSame(strlen($importedContents), file_put_contents($importedPath, $importedContents));
         $importedHash = hash('sha256', $importedContents);
         $importedArchivePath = 'files/invoice-imported-pdfs/' . $importedHash . '.pdf';
+        $purchaseContents = "synthetic-purchase-pdf\n";
+        $purchasePath = $this->root . DIRECTORY_SEPARATOR . 'source-purchase.pdf';
+        self::assertSame(strlen($purchaseContents), file_put_contents($purchasePath, $purchaseContents));
+        $purchaseHash = hash('sha256', $purchaseContents);
+        $purchaseArchivePath = 'files/purchase-invoice-pdfs/' . $purchaseHash . '.pdf';
         $fileInventory = CompanyBackupFileInventory::fromArray([
             'format' => CompanyBackupFileInventory::FORMAT,
             'version' => CompanyBackupFileInventory::VERSION,
@@ -626,8 +670,24 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                     ]],
                 ]],
             ], [
-                'registry_key' => 'file-area:supplier-logos',
+                'registry_key' => 'file-area:purchase-invoice-pdfs',
                 'order' => 4,
+                'entries' => [[
+                    'source_path' => 'supplier-7/1234567890abcdef.pdf',
+                    'archive_path' => $purchaseArchivePath,
+                    'state' => 'present',
+                    'bytes' => strlen($purchaseContents),
+                    'sha256' => $purchaseHash,
+                    'owners' => [[
+                        'registry_key' => 'table:purchase_invoices',
+                        'primary_key' => ['id' => 201],
+                        'column' => 'pdf_path',
+                        'path' => [],
+                    ]],
+                ]],
+            ], [
+                'registry_key' => 'file-area:supplier-logos',
+                'order' => 5,
                 'entries' => [[
                     'source_path' => 'sup-7.png',
                     'archive_path' => $logoArchivePath,
@@ -646,6 +706,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         $sourceFiles[$attachmentArchivePath] = $attachmentPath;
         $sourceFiles[$importedArchivePath] = $importedPath;
         $sourceFiles[$pdfArchivePath] = $pdfPath;
+        $sourceFiles[$purchaseArchivePath] = $purchasePath;
         $sourceFiles[$logoArchivePath] = $logoPath;
         $snapshot = new CompanyBackupMachineSnapshot(
             7,
@@ -765,6 +826,25 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                             'column' => 'imported_pdf_path',
                             'path' => [],
                             'stored_prefix' => '',
+                        ]],
+                    ],
+                ),
+                $this->tableDefinition(
+                    'table:purchase_invoices', TenantDataPolicy::TenantOwned,
+                    ['id', 'supplier_id', 'pdf_path', 'pdf_hash'],
+                    ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
+                    [$this->reference('supplier_id', 'table:supplier')],
+                ),
+                new TenantDataDefinition(
+                    'file-area:purchase-invoice-pdfs', TenantDataObjectKind::FileArea,
+                    TenantDataPolicy::TenantOwned, [$profile], [
+                        'file_policy' => 'historical_optional',
+                        'path_policy' => 'supplier_purchase_invoice_pdf',
+                        'storage_subdirectory' => 'purchase-invoices',
+                        'ownership' => ['strategy' => 'database_references'],
+                        'file_owners' => [[
+                            'registry_key' => 'table:purchase_invoices',
+                            'column' => 'pdf_path', 'path' => [], 'stored_prefix' => '',
                         ]],
                     ],
                 ),
@@ -1131,10 +1211,11 @@ final readonly class CurrentRoundTripFileAreaRootResolver implements
 
     public function resolve(string $storageSubdirectory): string
     {
-        if ($storageSubdirectory === 'invoices-imported') {
+        if (in_array($storageSubdirectory, ['invoices-imported', 'purchase-invoices'], true)) {
             return (new \MyInvoice\Service\Backup\Company\CompanyBackupConfiguredFileAreaRootResolver(
                 new \MyInvoice\Infrastructure\Config\Config([
                     'invoice' => ['import_archive_storage' => $this->root . '/custom-issued-archive'],
+                    'purchase_invoice' => ['archive_storage' => $this->root . '/custom-purchase-archive'],
                 ]),
             ))->resolve($storageSubdirectory);
         }
