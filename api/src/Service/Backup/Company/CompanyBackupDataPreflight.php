@@ -44,6 +44,12 @@ final readonly class CompanyBackupDataPreflight
         $result = null;
         $failure = null;
         try {
+            $invoiceDefinition = $contexts[CompanyBackupApprovalReceiptPolicy::REGISTRY_KEY]['definition'] ?? null;
+            $receiptCollector = $invoiceDefinition !== null
+                && in_array(CompanyBackupApprovalReceiptPolicy::COLUMN,
+                    CompanyBackupTableProjection::fromDefinition($invoiceDefinition)->dataColumns, true)
+                ? new CompanyBackupApprovalReceiptPreflightInventoryCollector($this->limits)
+                : null;
             $hasWorkReportLinks = false;
             foreach ($validation->inspection->dataInventory->objects as $object) {
                 if ($object->registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY) {
@@ -96,7 +102,13 @@ final readonly class CompanyBackupDataPreflight
                         &$pendingApprovalRequestCount,
                         $database,
                         $linkCollector,
+                        $receiptCollector,
                     ): void {
+                        if ($receiptCollector !== null
+                            && $object->registryKey === CompanyBackupApprovalReceiptPolicy::REGISTRY_KEY
+                        ) {
+                            $receiptCollector->acceptRow($row);
+                        }
                         if ($linkCollector !== null
                             && $object->registryKey === CompanyBackupWorkReportLinkPolicy::REGISTRY_KEY
                         ) {
@@ -142,6 +154,7 @@ final readonly class CompanyBackupDataPreflight
             $index->seal();
             $aggregateIndex?->seal();
             $linkInventory = $linkCollector?->finish($database);
+            $receiptInventory = $receiptCollector?->finish($database);
 
             $collector = new CompanyBackupExternalReferenceCollector($this->limits);
             $integrity = new CompanyBackupReferenceIntegrityValidator(
@@ -257,6 +270,7 @@ final readonly class CompanyBackupDataPreflight
                 new CompanyBackupSkippedInvoiceCounters($skippedCounters),
                 $pendingApprovalRequestCount,
                 $linkInventory,
+                $receiptInventory,
             );
         } catch (\Throwable $e) {
             $failure = $e;

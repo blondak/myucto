@@ -398,6 +398,7 @@ final class TenantPredicateTest extends TestCase
         // Veřejný token má globální UNIQUE index; kolize při obnově musí zahrnout
         // všechny firmy i revokované odkazy, cílové odkazy přitom nemění.
         'CompanyBackupWorkReportLinkCollisionLookup.php::hasCollision' => 'kontrola globální unikátnosti veřejného tokenu',
+        'CompanyBackupApprovalReceiptCollisionLookup.php::hasCollision' => 'globální kolize veřejného schvalovacího odkazu; vrací pouze boolean',
 
         // Superadmin-only endpointy (jinak 403) — globální rozsah je jejich smysl.
         'ListSentEmailsAction.php::__invoke'         => 'superadmin přehled odeslaných e-mailů napříč instancí',

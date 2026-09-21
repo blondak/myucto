@@ -27,6 +27,7 @@ final readonly class CompanyBackupDataPreflightResult
         public CompanyBackupSkippedInvoiceCounters $skippedInvoiceCounters = new CompanyBackupSkippedInvoiceCounters(),
         public int $pendingApprovalRequestCount = 0,
         public ?CompanyBackupWorkReportLinkInventory $workReportLinkInventory = null,
+        public ?CompanyBackupApprovalReceiptInventory $approvalReceiptInventory = null,
     ) {
         if ($rowCount < 0
             || $identityCount !== $rowCount
@@ -36,6 +37,7 @@ final readonly class CompanyBackupDataPreflightResult
             || $pendingApprovalRequestCount < 0
             || $pendingApprovalRequestCount > $rowCount
             || ($workReportLinkInventory !== null && $workReportLinkInventory->count() > $rowCount)
+            || ($approvalReceiptInventory !== null && $approvalReceiptInventory->count() > $rowCount)
             || $referenceOccurrenceCount < $externalReferences->occurrenceCount
             || preg_match(
                 '/^sha256:[0-9a-f]{64}$/D',
@@ -66,6 +68,7 @@ final readonly class CompanyBackupDataPreflightResult
             ...($skippedInvoiceCounters->count() > 0 ? ['skipped_invoice_counters' => $skippedInvoiceCounters->toArray()] : []),
             ...($pendingApprovalRequestCount > 0 ? ['pending_approval_request_count' => $pendingApprovalRequestCount] : []),
             ...($workReportLinkInventory !== null ? ['work_report_link_inventory_sha256' => $workReportLinkInventory->sha256()] : []),
+            ...($approvalReceiptInventory !== null ? ['approval_receipt_inventory_sha256' => $approvalReceiptInventory->sha256()] : []),
         ]);
     }
 
@@ -88,6 +91,10 @@ final readonly class CompanyBackupDataPreflightResult
             ...($this->workReportLinkInventory !== null ? [
                 'work_report_link_inventory' => $this->workReportLinkInventory->toArray(),
                 'work_report_link_inventory_sha256' => $this->workReportLinkInventory->sha256(),
+            ] : []),
+            ...($this->approvalReceiptInventory !== null ? [
+                'approval_receipt_inventory' => $this->approvalReceiptInventory->toArray(),
+                'approval_receipt_inventory_sha256' => $this->approvalReceiptInventory->sha256(),
             ] : []),
             'warnings' => [...($this->bankAccountCollision ? [CompanyBackupBankWarning::collision()] : []),
                 ...$this->skippedInvoiceCounters->warnings(),

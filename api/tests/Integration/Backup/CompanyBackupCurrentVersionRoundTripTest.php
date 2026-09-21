@@ -139,7 +139,9 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . 'pdf_generated_at DATETIME NULL,'
             . 'supplier_snapshot JSON NULL,'
             . 'client_snapshot JSON NULL,'
-            . 'bank_snapshot JSON NULL'
+            . 'bank_snapshot JSON NULL,'
+            . 'approval_receipt_hash CHAR(64) NULL,'
+            . 'approval_token VARCHAR(48) NULL'
             . ') ENGINE=InnoDB',
         );
         $pdo->exec(
@@ -301,6 +303,40 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         }
         if ($this->root !== '') {
             $this->removeTree($this->root);
+        }
+    }
+
+    public function testPreflightDetectsBothReceiptCollisionKindsWithoutChangingTarget(): void
+    {
+        $pdo = $this->db->pdo();
+        $registry = $this->registry();
+        $token = str_repeat('c', 48);
+        $hash = hash('sha256', $token);
+        $archive = $this->archive($registry, $hash);
+        $inspection = (new CompanyBackupArchiveInspector(
+            new CompanyBackupFormat([CompanyBackupSecretEnvelopeDescriptor::CAPABILITY]),
+            BackupUpcasterRegistry::empty(), $this->limits(),
+        ))->inspect($archive, self::PASSWORD, self::APP_VERSION, CompanyBackupFormat::CURRENT_SCHEMA_REVISION);
+        $validation = new CompanyBackupTechnicalValidation(
+            $inspection, $registry, self::APP_VERSION, CompanyBackupFormat::CURRENT_SCHEMA_REVISION,
+        );
+        $preflight = new CompanyBackupDataPreflight($this->limits());
+        $clear = $preflight->inspect($archive, self::PASSWORD, $validation, $pdo);
+        self::assertNotNull($clear->approvalReceiptInventory);
+        self::assertSame(0, $clear->approvalReceiptInventory->collisionCount());
+        $update = $pdo->prepare('UPDATE invoices SET approval_receipt_hash=?, approval_token=? WHERE id=101');
+        self::assertInstanceOf(PDOStatement::class, $update);
+        foreach ([[$hash, null], [null, $token]] as [$receipt, $active]) {
+            self::assertTrue($update->execute([$receipt, $active]));
+            $before = $this->fetchRows($pdo, 'SELECT * FROM invoices ORDER BY id');
+            $collision = $preflight->inspect($archive, self::PASSWORD, $validation, $pdo);
+            self::assertNotNull($collision->approvalReceiptInventory);
+            self::assertSame(1, $collision->approvalReceiptInventory->collisionCount());
+            self::assertNotSame($clear->bindingSha256, $collision->bindingSha256);
+            self::assertSame($before, $this->fetchRows($pdo, 'SELECT * FROM invoices ORDER BY id'));
+            $safe = json_encode($collision->toArray(), JSON_THROW_ON_ERROR);
+            self::assertStringNotContainsString($hash, $safe);
+            self::assertStringNotContainsString($token, $safe);
         }
     }
 
@@ -632,7 +668,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . '/' . substr($hash, 0, 16) . '.isdocx';
     }
 
-    private function archive(TenantDataRegistrySnapshot $registry): string
+    private function archive(TenantDataRegistrySnapshot $registry, ?string $receiptHash = null): string
     {
         $sourceRows = [
             'table:supplier' => [[
@@ -645,6 +681,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'supplier_snapshot' => self::invoiceSupplierSnapshot(7, 11),
                 'client_snapshot' => self::invoiceClientSnapshot(),
                 'bank_snapshot' => self::invoiceBankSnapshot(),
+                'approval_receipt_hash' => $receiptHash,
                 'id' => 101,
                 'supplier_id' => 7,
                 'invoice_number' => 'restored-invoice',
@@ -1027,7 +1064,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                     'table:invoices',
                     TenantDataPolicy::TenantOwned,
                     ['id', 'supplier_id', 'invoice_number', 'imported_pdf_path', 'pdf_path', 'pdf_generated_at', 'supplier_snapshot',
-                        'client_snapshot', 'bank_snapshot'],
+                        'client_snapshot', 'bank_snapshot', 'approval_receipt_hash'],
                     ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
                     [$this->reference('supplier_id', 'table:supplier')],
                     \MyInvoice\Service\Backup\Company\CompanyBackupInvoicesProjection::restoreOverrides(),

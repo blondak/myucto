@@ -47,7 +47,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
         if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
             self::markTestSkipped('pdo_sqlite není dostupné pro izolovaný SQL test.');
         }
-        $this->database = new PDO('sqlite::memory:', null, null, [
+        $this->database = new \Pdo\Sqlite('sqlite::memory:', null, null, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]);
@@ -176,6 +176,7 @@ final class CompanyBackupDataPreflightTest extends TestCase
 
     public function testWarnsAboutRequestedInvoiceWithoutChangingArchivedStateOrExposingToken(): void
     {
+        $this->approvalTarget();
         $token = str_repeat('a', 48);
         $rows = [
             ['id' => 71, 'supplier_id' => 42, 'approval_status' => 'requested',
@@ -206,6 +207,46 @@ final class CompanyBackupDataPreflightTest extends TestCase
         self::assertSame($rows, $archivedRows);
         self::assertArrayNotHasKey('approval_token', $archivedRows[0]);
         self::assertSame('unchanged', $this->sentinelValue());
+    }
+
+    public function testReceiptInventoryFromEncryptedArchiveBindsChangingTargetCollisions(): void
+    {
+        $this->approvalTarget();
+        $token = str_repeat('b', 48);
+        $hash = hash('sha256', $token);
+        [$archive, $validation] = $this->archive(countryReference: 7, invoices: [[
+            'id' => 71, 'supplier_id' => 42, 'approval_status' => 'approved',
+            'approval_receipt_hash' => $hash,
+        ]]);
+        $preflight = new CompanyBackupDataPreflight($this->limits());
+        $before = $preflight->inspect($archive, self::PASSWORD, $validation, $this->database);
+        self::assertNotNull($before->approvalReceiptInventory);
+        self::assertSame(1, $before->approvalReceiptInventory->count());
+        self::assertSame(0, $before->approvalReceiptInventory->collisionCount());
+        $insert = $this->database->prepare('INSERT INTO invoices (id,approval_token) VALUES (?,?)');
+        self::assertNotFalse($insert);
+        self::assertTrue($insert->execute([900, $token]));
+        $after = $preflight->inspect($archive, self::PASSWORD, $validation, $this->database);
+        self::assertNotNull($after->approvalReceiptInventory);
+        self::assertSame(1, $after->approvalReceiptInventory->collisionCount());
+        self::assertNotSame($before->bindingSha256, $after->bindingSha256);
+        $safe = CanonicalJson::encode($after->toArray());
+        self::assertStringNotContainsString($hash, $safe);
+        self::assertStringNotContainsString($token, $safe);
+        self::assertSame(hash('sha256', $hash), $after->approvalReceiptInventory->entries()[0]['receipt_fingerprint']);
+        self::assertSame(0, $this->temporaryIndexCount());
+        self::assertSame('unchanged', $this->sentinelValue());
+        $target = $this->database->query('SELECT approval_token FROM invoices WHERE id=900');
+        self::assertNotFalse($target);
+        self::assertSame($token, $target->fetchColumn());
+    }
+
+    private function approvalTarget(): void
+    {
+        $this->database->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, approval_receipt_hash TEXT, approval_token TEXT)');
+        self::assertInstanceOf(\Pdo\Sqlite::class, $this->database);
+        $this->database->createFunction('SHA2', static fn (?string $value, int $bits): ?string =>
+            $value === null ? null : hash('sha256', $value), 2);
     }
 
     public function testPendingApprovalCountIsBoundAndZeroKeepsLegacyBinding(): void
