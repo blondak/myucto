@@ -375,7 +375,7 @@ onBeforeUnmount(() => {
                 </td>
                 <td class="px-3 py-2 font-medium">{{ a.year }}</td>
                 <td class="px-3 py-2 text-right">{{ a.entries }}</td>
-                <td class="px-3 py-2 whitespace-nowrap">{{ a.has_payroll ? tt('payroll_not_transferred') : '—' }}</td>
+                <td class="px-3 py-2 whitespace-nowrap">{{ a.has_payroll ? tt('payroll_included') : '—' }}</td>
               </tr>
             </tbody>
           </table>

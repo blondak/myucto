@@ -27,12 +27,19 @@ final class PremierImportRepository
     public const KIND_CASH_REGISTER = 'cash_register';
     public const KIND_CASH_DOCUMENT = 'cash_document';
     public const KIND_TAX_RETURN = 'tax_return';
+    public const KIND_SMALL_ASSET = 'small_asset';
     public const KIND_BANK_STATEMENT = 'bank_statement';
     public const KIND_BANK_TRANSACTION = 'bank_transaction';
     public const KIND_PAYMENT = 'payment';
     public const KIND_ASSET = 'asset';
     /** Počáteční stav (import roku, ve kterém rok předtím převedený nebyl - saldo z osnovy). */
     public const KIND_OPENING = 'opening';
+    /** Osoba z PREMIER (`PER_MAIN.ID`, u starších verzí osobní číslo) => payroll_employees.id. */
+    public const KIND_PAYROLL_EMPLOYEE = 'payroll_employee';
+    /** Pracovní vztah (`PERSONAL.INTER`) => payroll_employments.id. */
+    public const KIND_PAYROLL_EMPLOYMENT = 'payroll_employment';
+    /** Zpracovaná mzda vztahu za měsíc (`INTER|YYYY-MM`) => payroll_employments.id. */
+    public const KIND_PAYROLL_MONTH = 'payroll_month';
 
     /** Jméno zámku je na serveru globální - obsahuje proto i databázi. */
     private const LOCK_SQL = "CONCAT('premier:', DATABASE(), ':', ?)";
@@ -106,7 +113,9 @@ final class PremierImportRepository
     /**
      * Zápisy deníku období, které nezaložil tento převod - stejná kontrola jako u POHODY
      * ({@see \MyInvoice\Service\Migration\Pohoda\ChartJournalImporter::foreignEntryCount()}):
-     * rekonciliace na konci převodu musí sedět jen na tom, co sama založila.
+     * rekonciliace na konci převodu musí sedět jen na tom, co sama založila. Otevírací
+     * zápis se nepočítá: založí ho uzávěrka převedeného minulého roku a převod roku ho
+     * převezme (musí sedět na počáteční stavy z PREMIER, jinak rekonciliace neprojde).
      */
     public function foreignEntryCount(int $supplierId, int $periodId): int
     {
@@ -114,7 +123,7 @@ final class PremierImportRepository
             "SELECT COUNT(*)
                FROM journal_entries e
               WHERE e.supplier_id = ? AND e.period_id = ?
-                AND e.source_type NOT IN ('closing', 'fx_revaluation')
+                AND e.source_type NOT IN ('closing', 'fx_revaluation', 'opening')
                 AND NOT EXISTS (
                     SELECT 1 FROM premier_import_map m
                      WHERE m.supplier_id = e.supplier_id AND m.kind = 'journal_entry' AND m.target_id = e.id

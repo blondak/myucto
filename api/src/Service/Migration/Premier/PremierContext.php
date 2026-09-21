@@ -54,6 +54,12 @@ final class PremierContext
     /** @var list<int> klienti převedených vydaných faktur (přepočet statistik) */
     public array $statsClients = [];
 
+    /** Evidence drobného majetku a účty, ze kterých se odvozuje ({@see PremierSmallAssets}). */
+    public ?PremierSmallAssets $smallAssets = null;
+
+    /** Zaměstnanci a zpracované mzdy zálohy ({@see PremierPayroll}). */
+    public ?PremierPayroll $payroll = null;
+
     public ?int $runId = null;
 
     /** @var (callable(string,int,int):void)|null */

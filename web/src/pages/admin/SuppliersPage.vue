@@ -34,7 +34,7 @@ onMounted(async () => {
 // ─── Suppliers (multi-tenant firmy) ───────────────────────────────────────
 const supplierDraft = reactive<SupplierCreatePayload>({
   company_name: '', street: '', city: '', zip: '', email: '',
-  country_iso2: 'CZ', ic: '', dic: '', is_vat_payer: true,
+  country_iso2: 'CZ', ic: '', dic: '', is_vat_payer: true, vat_period: 'monthly',
   commercial_register: '',
   default_payment_due_days: 14, default_hourly_rate: 1500,
 })
@@ -71,6 +71,9 @@ async function supplierLookupBank() {
   try {
     const r = await clientsApi.lookupBank(dic)
     supplierBankAccounts.value = r.accounts
+    // O plátcovství rozhoduje registr plátců (stejně jako v prvotním setupu);
+    // neúspěšné dohledání ho neshazuje.
+    if (r.found === true) supplierDraft.is_vat_payer = true
     if (r.accounts.length === 0) {
       supplierBankMessage.value = { type: 'error', text: t('supplier.bank_lookup_none') }
     } else {
@@ -90,7 +93,7 @@ async function supplierLookupBank() {
 function newSupplier() {
   Object.assign(supplierDraft, {
     company_name: '', street: '', city: '', zip: '', email: '',
-    country_iso2: 'CZ', ic: '', dic: '', is_vat_payer: true,
+    country_iso2: 'CZ', ic: '', dic: '', is_vat_payer: true, vat_period: 'monthly',
     commercial_register: '', taxpayer_type: undefined,
     default_payment_due_days: 14, default_hourly_rate: 1500,
   })
@@ -127,6 +130,10 @@ async function supplierLookupAres() {
     supplierDraft.commercial_register = d.commercial_register || supplierDraft.commercial_register
     if (d.taxpayer_type === 'fo' || d.taxpayer_type === 'po') supplierDraft.taxpayer_type = d.taxpayer_type
     supplierAresMessage.value = { type: 'success', text: t('supplier.ares_loaded', { name: d.company_name }) }
+    // Stejně jako setup: s DIČ rovnou dotáhni registr plátců (plátcovství + účet).
+    if (/^\d{8,10}$/.test((supplierDraft.dic || '').replace(/\D/g, ''))) {
+      await supplierLookupBank()
+    }
   } catch (e: any) {
     supplierAresMessage.value = { type: 'error', text: e?.response?.data?.error?.message || t('supplier.ares_failed') }
   } finally {
@@ -141,6 +148,7 @@ async function saveSupplier() {
   }
   try {
     const payload = { ...supplierDraft }
+    if (!payload.is_vat_payer) delete payload.vat_period
     if (supplierBank.account_number || supplierBank.iban) {
       payload.bank_account = {
         currency: supplierBank.currency,
@@ -288,7 +296,7 @@ function switchSupplier(id: number) {
 
     <!-- Supplier create modal (multi-tenant firma) -->
     <div v-if="supplierCreateOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-xl w-full p-5">
+      <div class="bg-surface rounded-xl shadow-lg max-w-xl w-full p-5 max-h-[90vh] overflow-y-auto">
         <h3 class="text-lg font-semibold mb-1">{{ t('supplier.create_title') }}</h3>
         <p class="text-xs text-neutral-500 mb-4">{{ t('supplier.create_hint') }}</p>
         <form @submit.prevent="saveSupplier">
@@ -319,6 +327,28 @@ function switchSupplier(id: number) {
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('supplier.dic') }}</label>
               <input v-model="supplierDraft.dic" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.taxpayer_type') }}</label>
+              <select v-model="supplierDraft.taxpayer_type" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+                <option :value="undefined">{{ t('supplier.taxpayer_auto') }}</option>
+                <option value="fo">{{ t('settings.taxpayer_fo') }}</option>
+                <option value="po">{{ t('settings.taxpayer_po') }}</option>
+              </select>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('supplier.taxpayer_hint') }}</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+              <label class="flex items-center gap-2 h-10 cursor-pointer">
+                <input v-model="supplierDraft.is_vat_payer" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+                <span class="text-sm text-neutral-800">{{ t('supplier.is_vat_payer') }}</span>
+              </label>
+              <div v-if="supplierDraft.is_vat_payer">
+                <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.vat_period') }}</label>
+                <select v-model="supplierDraft.vat_period" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+                  <option value="monthly">{{ t('settings.vat_monthly') }}</option>
+                  <option value="quarterly">{{ t('settings.vat_quarterly') }}</option>
+                </select>
+              </div>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('supplier.street') }} *</label>

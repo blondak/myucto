@@ -12,8 +12,12 @@ use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 
 /**
- * Karty dlouhodobého majetku PREMIER (`MAJETEK`) s daňovými odpisy po letech (`ODPISY`),
- * účetním plánem po měsících (`ODPISY_U`) a pohyby (`MAJ_POH`).
+ * Karty dlouhodobého majetku PREMIER s daňovými odpisy po letech, účetním plánem po měsících
+ * a pohyby. PREMIER vede dva registry se stejnou strukturou: `MAJETEK` (`ODPISY`, `ODPISY_U`,
+ * `MAJ_POH` přes INTER karty) a `MAJ_H` (`MAJ_H_OD`, `MAJ_H_OU`, `MAJ_H_PO` přes ID karty).
+ * Dlouhodobý majetek jsou jen karty řad hmotného a nehmotného majetku; drobný majetek převádí
+ * {@see SmallAssetImporter} a ostatní evidence (finanční majetek, leasing, rezervy) se jen
+ * ohlásí ({@see PremierSmallAssets::register()}).
  *
  * Karta vznikne jako historický majetek ve stavu zařazeno, bez zápisu v deníku: zařazení
  * i odpisy už v převedeném deníku jsou. Účty nese karta PREMIER sama (pořízení `PMD`/`PDAL`,
@@ -50,127 +54,165 @@ final class AssetImporter
     public function import(PremierContext $ctx): void
     {
         $p = $ctx->protocol;
-        $start = $ctx->startsOn();
-        $end = $ctx->endsOn();
-        $tax = self::byCard($ctx->backup->rows('ODPISY'), 'O_MAJETEK');
-        $plan = self::byCard($ctx->backup->rows('ODPISY_U'), 'O_MAJETEK');
-        $movements = self::byCard($ctx->backup->rows('MAJ_POH'), 'MAJETEK');
+        $policy = $ctx->smallAssets ?? PremierSmallAssets::fromBackup($ctx->backup);
         $existing = $this->map->all($ctx->supplierId, PremierImportRepository::KIND_ASSET);
-
-        foreach ($ctx->backup->rows('MAJETEK') as $row) {
-            $inter = (int) ($row['INTER'] ?? 0);
-            $number = trim((string) ($row['CISLO'] ?? ''));
-            if ($inter <= 0 || $number === '' || $number === '0') {
-                $p->warn(self::STEP, 'asset_without_number', 'Karta majetku bez inventárního čísla, nepřevzata.');
-                continue;
-            }
-            $inUse = self::date($row['DATUM_UO'] ?? null) ?? self::date($row['DATUM'] ?? null) ?? self::date($row['DATUM_P'] ?? null);
-            $disposal = self::date($row['DATUM_V'] ?? null);
-            if ($inUse === null || $inUse > $end) {
-                $p->count(self::STEP, 'later_years');
-                continue;
-            }
-            if ($disposal !== null && $disposal < $start) {
-                $p->count(self::STEP, 'disposed_before');
-                continue;
-            }
-            $key = 'asset|' . $inter;
-            $booked = self::bookedThrough($movements[$inter] ?? [], sprintf('%04d-12-31', $ctx->year - 1));
-            $monthPlan = self::monthPlan($plan[$inter] ?? []);
-            if (isset($existing[$key])) {
-                $this->confirmYear($ctx, $existing[$key], $tax[$inter] ?? [], $movements[$inter] ?? [], $number);
-                $p->count(self::STEP, 'existing');
-                continue;
-            }
-
-            $review = [];
-            foreach ($movements[$inter] ?? [] as $m) {
-                $kind = (int) ($m['KOD'] ?? 0);
-                if (!in_array($kind, self::KNOWN_MOVEMENTS, true) && (string) ($m['DATUM'] ?? '') <= $end) {
-                    $review[] = 'pohyb majetku „' . trim((string) ($m['POPIS'] ?? ('druh ' . $kind))) . '" ('
-                        . number_format((float) ($m['CASTKA'] ?? 0), 2, ',', ' ') . ' Kč) převod nepřebírá, doplňte ho na kartě';
+        // Dva registry karet se stejnou strukturou: `MAJETEK` (odpisy a pohyby přes INTER karty)
+        // a `MAJ_H` (odpisy a pohyby přes ID karty).
+        $registers = [
+            ['table' => 'MAJETEK', 'prefix' => 'asset|', 'link' => 'INTER',
+                'tax' => self::byCard($ctx->backup->rows('ODPISY'), 'O_MAJETEK'),
+                'plan' => self::byCard($ctx->backup->rows('ODPISY_U'), 'O_MAJETEK'),
+                'movements' => self::byCard($ctx->backup->rows('MAJ_POH'), 'MAJETEK')],
+            ['table' => 'MAJ_H', 'prefix' => 'asset|H|', 'link' => 'ID',
+                'tax' => self::byCard($ctx->backup->rows('MAJ_H_OD'), 'ID_MAJ_H'),
+                'plan' => self::byCard($ctx->backup->rows('MAJ_H_OU'), 'ID_MAJ_H'),
+                'movements' => self::byCard($ctx->backup->rows('MAJ_H_PO'), 'ID_MAJ_H')],
+        ];
+        $other = [];
+        foreach ($registers as $register) {
+            foreach ($ctx->backup->rows($register['table']) as $row) {
+                [$kind, $cardKind] = $policy->register((string) ($row['DOKLAD'] ?? ''));
+                if ($kind === PremierSmallAssets::REGISTER_SMALL) {
+                    $p->count(self::STEP, 'small_register');
+                    continue; // drobný majetek převádí SmallAssetImporter
                 }
-            }
-            $inputPrice = round((float) ($row['CENA'] ?? 0), 2);
-            $taxPrice = round((float) ($row['D_CENA'] ?? 0), 2);
-            if ($taxPrice > 0 && abs($taxPrice - $inputPrice) >= 0.01) {
-                $review[] = 'daňová vstupní cena ' . number_format($taxPrice, 2, ',', ' ') . ' Kč se liší od účetní';
-            }
-            $taxRows = $tax[$inter] ?? [];
-            $methodCode = (int) ($row['ZPUSOB'] ?? 0);
-            $taxMethod = $taxRows === [] ? 'none' : (self::TAX_METHODS[$methodCode] ?? 'none');
-            if ($taxRows !== [] && !isset(self::TAX_METHODS[$methodCode])) {
-                $review[] = 'způsob daňového odpisu ' . $methodCode . ' převod nezná';
-            }
-            $group = (int) ($row['SKUPINA'] ?? 0);
-            $taxGroup = $group >= 1 && $group <= 6 ? $group : null;
-            if (in_array($taxMethod, ['straight', 'accelerated'], true) && $taxGroup === null) {
-                $review[] = 'odpisová skupina chybí';
-            }
-            $openingYears = 0;
-            $openingTax = 0.0;
-            foreach ($taxRows as $t) {
-                $amount = (float) ($t['O_ODPIS'] ?? 0);
-                if ((int) substr((string) ($t['O_DATUM'] ?? ''), 0, 4) < $ctx->year && abs($amount) >= 0.005) {
-                    $openingYears++;
-                    $openingTax += $amount;
+                if ($kind === PremierSmallAssets::REGISTER_OTHER) {
+                    $other[strtoupper(trim((string) ($row['DOKLAD'] ?? '')))] = ($other[strtoupper(trim((string) ($row['DOKLAD'] ?? '')))] ?? 0) + 1;
+                    continue;
                 }
-            }
-            [$openingMonths, $openingAcc, $usefulLife] = self::accountingOpening($inUse, $monthPlan, $booked);
-            if ($monthPlan === []) {
-                $review[] = 'účetní odpisový plán chybí';
-            }
-            $series = strtoupper(trim((string) ($row['DOKLAD'] ?? '')));
-            $card = [
-                'inventory_number' => mb_substr($number, 0, 30),
-                'name' => mb_substr(trim((string) ($row['POPIS'] ?? '')) ?: $number, 0, 255),
-                'kind' => in_array($series, ['NM', 'DN'], true) ? 'intangible' : 'tangible',
-                'input_price' => $inputPrice,
-                'acquisition_date' => self::date($row['DATUM_P'] ?? null) ?? $inUse,
-                'put_into_use_date' => $inUse,
-                'status' => 'in_use',
-                'tax_method' => $taxMethod,
-                'tax_group' => $taxGroup,
-                'opening_tax_years' => $openingYears,
-                'opening_tax_amount' => round($openingTax, 2),
-                'opening_acc_months' => $openingMonths,
-                'opening_acc_amount' => min($openingAcc, $inputPrice),
-                'acc_useful_life_months' => $usefulLife,
-                'acc_method' => 'straight_line',
-                'acc_residual_value' => 0.0,
-            ];
-            foreach (['asset_account_code' => 'PMD', 'accumulated_account_code' => 'UDAL', 'acquisition_account_code' => 'PDAL'] as $field => $column) {
-                $code = AccountCode::fromMoney(trim((string) ($row[$column] ?? '')));
-                if ($code !== null) {
-                    $card[$field] = $code;
-                }
-            }
-            if (!isset($card['asset_account_code'])) {
-                $review[] = 'karta nemá majetkový účet';
-            }
-            if ($disposal !== null) {
-                $review[] = 'majetek je v PREMIER vyřazený ' . $disposal . ', vyřazení proveďte v MyÚčtu';
-            }
-            if ($review !== []) {
-                $card['status'] = 'draft';
-                $card['description'] = 'Převod z PREMIER - ke kontrole: ' . implode('; ', $review) . '.';
-            }
-            try {
-                $created = $this->assets->create($ctx->supplierId, $card, ['user_id' => $ctx->userOrNull()]);
-            } catch (AssetException $e) {
-                $p->warn(self::STEP, 'asset_rejected', "Karta majetku {$number} nepřevzata: " . $e->getMessage(), ['document_no' => $number]);
-                continue;
-            }
-            $assetId = (int) $created['asset']['id'];
-            $this->map->put($ctx->supplierId, PremierImportRepository::KIND_ASSET, $key, $assetId, $ctx->runId);
-            $p->count(self::STEP, $card['status'] === 'draft' ? 'drafts' : 'created');
-            if ($review !== []) {
-                $p->warn(self::STEP, 'asset_review', "Karta majetku {$number} převzata jako koncept ke kontrole: " . implode('; ', $review) . '.', ['document_no' => $number]);
-            } else {
-                $this->confirmYear($ctx, $assetId, $taxRows, $movements[$inter] ?? [], $number);
+                $this->importCard($ctx, $existing, $register, $row, $cardKind ?? 'tangible');
             }
         }
+        foreach ($other as $series => $count) {
+            $p->count(self::STEP, 'other_register', $count);
+            $p->info(self::STEP, 'other_register', "Evidence řady {$series} ({$count} karet: finanční majetek, leasing, ostatní evidence nebo rezervy) se do dlouhodobého majetku nepřevádí; účetně je v převedeném deníku.", ['series' => $series]);
+        }
         $p->finish(self::STEP);
+    }
+
+    /**
+     * @param array<string,int> $existing
+     * @param array{table:string,prefix:string,link:string,tax:array<string,list<array<string,mixed>>>,plan:array<string,list<array<string,mixed>>>,movements:array<string,list<array<string,mixed>>>} $register
+     * @param array<string,mixed> $row
+     */
+    private function importCard(PremierContext $ctx, array $existing, array $register, array $row, string $cardKind): void
+    {
+        $p = $ctx->protocol;
+        $start = $ctx->startsOn();
+        $end = $ctx->endsOn();
+        $tax = $register['tax'];
+        $plan = $register['plan'];
+        $movements = $register['movements'];
+        $inter = $register['link'] === 'INTER' ? (string) (int) ($row['INTER'] ?? 0) : self::cardKey($row['ID'] ?? '');
+        $number = trim((string) ($row['CISLO'] ?? ''));
+        if ($inter === '' || $inter === '0' || $number === '' || $number === '0') {
+            $p->warn(self::STEP, 'asset_without_number', 'Karta majetku bez inventárního čísla, nepřevzata.');
+            return;
+        }
+        $inUse = self::date($row['DATUM_UO'] ?? null) ?? self::date($row['DATUM'] ?? null) ?? self::date($row['DATUM_P'] ?? null);
+        $disposal = self::date($row['DATUM_V'] ?? null);
+        if ($inUse === null || $inUse > $end) {
+            $p->count(self::STEP, 'later_years');
+            return;
+        }
+        if ($disposal !== null && $disposal < $start) {
+            $p->count(self::STEP, 'disposed_before');
+            return;
+        }
+        $key = $register['prefix'] . $inter;
+        $booked = self::bookedThrough($movements[$inter] ?? [], sprintf('%04d-12-31', $ctx->year - 1));
+        $monthPlan = self::monthPlan($plan[$inter] ?? []);
+        if (isset($existing[$key])) {
+            $this->confirmYear($ctx, $existing[$key], $tax[$inter] ?? [], $movements[$inter] ?? [], $number);
+            $p->count(self::STEP, 'existing');
+            return;
+        }
+
+        $review = [];
+        foreach ($movements[$inter] ?? [] as $m) {
+            $kind = (int) ($m['KOD'] ?? 0);
+            if (!in_array($kind, self::KNOWN_MOVEMENTS, true) && (string) ($m['DATUM'] ?? '') <= $end) {
+                $review[] = 'pohyb majetku „' . trim((string) ($m['POPIS'] ?? ('druh ' . $kind))) . '" ('
+                    . number_format((float) ($m['CASTKA'] ?? 0), 2, ',', ' ') . ' Kč) převod nepřebírá, doplňte ho na kartě';
+            }
+        }
+        $inputPrice = round((float) ($row['CENA'] ?? 0), 2);
+        $taxPrice = round((float) ($row['D_CENA'] ?? 0), 2);
+        if ($taxPrice > 0 && abs($taxPrice - $inputPrice) >= 0.01) {
+            $review[] = 'daňová vstupní cena ' . number_format($taxPrice, 2, ',', ' ') . ' Kč se liší od účetní';
+        }
+        $taxRows = $tax[$inter] ?? [];
+        $methodCode = (int) ($row['ZPUSOB'] ?? 0);
+        $taxMethod = $taxRows === [] ? 'none' : (self::TAX_METHODS[$methodCode] ?? 'none');
+        if ($taxRows !== [] && !isset(self::TAX_METHODS[$methodCode])) {
+            $review[] = 'způsob daňového odpisu ' . $methodCode . ' převod nezná';
+        }
+        $group = (int) ($row['SKUPINA'] ?? 0);
+        $taxGroup = $group >= 1 && $group <= 6 ? $group : null;
+        if (in_array($taxMethod, ['straight', 'accelerated'], true) && $taxGroup === null) {
+            $review[] = 'odpisová skupina chybí';
+        }
+        $openingYears = 0;
+        $openingTax = 0.0;
+        foreach ($taxRows as $t) {
+            $amount = (float) ($t['O_ODPIS'] ?? 0);
+            if ((int) substr((string) ($t['O_DATUM'] ?? ''), 0, 4) < $ctx->year && abs($amount) >= 0.005) {
+                $openingYears++;
+                $openingTax += $amount;
+            }
+        }
+        [$openingMonths, $openingAcc, $usefulLife] = self::accountingOpening($inUse, $monthPlan, $booked);
+        if ($monthPlan === []) {
+            $review[] = 'účetní odpisový plán chybí';
+        }
+        $card = [
+            'inventory_number' => mb_substr($number, 0, 30),
+            'name' => mb_substr(trim((string) ($row['POPIS'] ?? '')) ?: $number, 0, 255),
+            'kind' => $cardKind,
+            'input_price' => $inputPrice,
+            'acquisition_date' => self::date($row['DATUM_P'] ?? null) ?? $inUse,
+            'put_into_use_date' => $inUse,
+            'status' => 'in_use',
+            'tax_method' => $taxMethod,
+            'tax_group' => $taxGroup,
+            'opening_tax_years' => $openingYears,
+            'opening_tax_amount' => round($openingTax, 2),
+            'opening_acc_months' => $openingMonths,
+            'opening_acc_amount' => min($openingAcc, $inputPrice),
+            'acc_useful_life_months' => $usefulLife,
+            'acc_method' => 'straight_line',
+            'acc_residual_value' => 0.0,
+        ];
+        foreach (['asset_account_code' => 'PMD', 'accumulated_account_code' => 'UDAL', 'acquisition_account_code' => 'PDAL'] as $field => $column) {
+            $code = AccountCode::fromMoney(trim((string) ($row[$column] ?? '')));
+            if ($code !== null) {
+                $card[$field] = $code;
+            }
+        }
+        if (!isset($card['asset_account_code'])) {
+            $review[] = 'karta nemá majetkový účet';
+        }
+        if ($disposal !== null) {
+            $review[] = 'majetek je v PREMIER vyřazený ' . $disposal . ', vyřazení proveďte v MyÚčtu';
+        }
+        if ($review !== []) {
+            $card['status'] = 'draft';
+            $card['description'] = 'Převod z PREMIER - ke kontrole: ' . implode('; ', $review) . '.';
+        }
+        try {
+            $created = $this->assets->create($ctx->supplierId, $card, ['user_id' => $ctx->userOrNull()]);
+        } catch (AssetException $e) {
+            $p->warn(self::STEP, 'asset_rejected', "Karta majetku {$number} nepřevzata: " . $e->getMessage(), ['document_no' => $number]);
+            return;
+        }
+        $assetId = (int) $created['asset']['id'];
+        $this->map->put($ctx->supplierId, PremierImportRepository::KIND_ASSET, $key, $assetId, $ctx->runId);
+        $p->count(self::STEP, $card['status'] === 'draft' ? 'drafts' : 'created');
+        if ($review !== []) {
+            $p->warn(self::STEP, 'asset_review', "Karta majetku {$number} převzata jako koncept ke kontrole: " . implode('; ', $review) . '.', ['document_no' => $number]);
+        } else {
+            $this->confirmYear($ctx, $assetId, $taxRows, $movements[$inter] ?? [], $number);
+        }
     }
 
     /**
@@ -323,15 +365,21 @@ final class AssetImporter
 
     /**
      * @param iterable<array<string,mixed>> $rows
-     * @return array<int,list<array<string,mixed>>> INTER karty => řádky
+     * @return array<string,list<array<string,mixed>>> INTER nebo ID karty => řádky
      */
     private static function byCard(iterable $rows, string $column): array
     {
         $out = [];
         foreach ($rows as $row) {
-            $out[(int) ($row[$column] ?? 0)][] = $row;
+            $out[self::cardKey($row[$column] ?? '')][] = $row;
         }
         return $out;
+    }
+
+    /** Klíč karty stejně pro kartu i její řádky (číselné ID doplněné nulami = totéž číslo). */
+    private static function cardKey(mixed $value): string
+    {
+        return is_numeric($value) ? (string) (int) $value : trim((string) $value);
     }
 
     private static function date(mixed $value): ?string

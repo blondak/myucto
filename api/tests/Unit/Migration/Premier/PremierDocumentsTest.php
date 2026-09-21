@@ -40,8 +40,8 @@ final class PremierDocumentsTest extends TestCase
         self::assertSame(['VF', '250001', 'invoice', true, '311000', 'detail'], [$doc['series'], $doc['number'], $doc['kind'], $doc['booked'], $doc['partner_account'], $doc['items_source']]);
         self::assertSame([10000.0, 2100.0, 12100.0, 0.0], [$doc['base'], $doc['vat'], $doc['total'], $doc['rounding']]);
         self::assertSame([
-            ['description' => 'Vývoj', 'quantity' => 8.0, 'unit' => 'hod', 'unit_price' => 1000.0, 'base' => 8000.0, 'vat' => 1680.0, 'rate' => 21.0, 'code' => self::SALE],
-            ['description' => 'Konzultace', 'quantity' => 2.0, 'unit' => 'hod', 'unit_price' => 1000.0, 'base' => 2000.0, 'vat' => 420.0, 'rate' => 21.0, 'code' => self::SALE],
+            ['description' => 'Vývoj', 'quantity' => 8.0, 'unit' => 'hod', 'unit_price' => 1000.0, 'base' => 8000.0, 'vat' => 1680.0, 'rate' => 21.0, 'code' => self::SALE, 'account' => ''],
+            ['description' => 'Konzultace', 'quantity' => 2.0, 'unit' => 'hod', 'unit_price' => 1000.0, 'base' => 2000.0, 'vat' => 420.0, 'rate' => 21.0, 'code' => self::SALE, 'account' => ''],
         ], $doc['items']);
         self::assertSame([0.0, null, false], [$doc['paid'], $doc['paid_at'], $doc['settled']]);
         self::assertSame([], $doc['reasons']);
@@ -116,7 +116,50 @@ final class PremierDocumentsTest extends TestCase
 
         $doc = $this->documents()->forYear(PremierDocuments::ISSUED, 2025)[0];
         self::assertSame('journal', $doc['items_source']);
-        self::assertSame([['description' => 'Služby podle položek', 'quantity' => 1.0, 'unit' => null, 'unit_price' => 6000.0, 'base' => 6000.0, 'vat' => 1260.0, 'rate' => 21.0, 'code' => self::SALE]], $doc['items']);
+        self::assertSame([['description' => 'Služby podle položek', 'quantity' => 1.0, 'unit' => null, 'unit_price' => 6000.0, 'base' => 6000.0, 'vat' => 1260.0, 'rate' => 21.0, 'code' => self::SALE, 'account' => '602100']], $doc['items']);
+    }
+
+    /**
+     * Účet položky z rozpisu (`UC_S`+`UC_SA`, jinak `UC_D`+`UC_DA`), protiúčty třídy 3 se
+     * přeskakují. Odpočet zálohy (314) proto zůstane bez účtu - nesmí zdědit nákladový účet
+     * dokladu, jinak by ho převod označil jako drobný majetek.
+     */
+    public function testDetailItemsKeepTheirOwnAccountIncludingEmptyForAdvanceDeduction(): void
+    {
+        $this->purchases[] = self::header(301, 'PF', '250301', '2025-11-05', 'Monitor');
+        $sb = ['SB_KOD' => 'PF', 'SBORNIK' => 301, 'KOD_DPH' => self::PURCHASE, 'SAZBA_DPH' => 21];
+        $this->journal[] = self::row(100, '2025-11-05', 'PF', '250301', 20000, '501200', '321000', ['IKOD' => 'P'] + $sb);
+        $this->journal[] = self::row(101, '2025-11-05', 'PF', '250301', -5000, '314000', '321000', ['IKOD' => 'P'] + $sb);
+        $this->journal[] = self::row(102, '2025-11-05', 'PF', '250301', 3150, '343021', '321000', ['IKOD' => 'D'] + $sb);
+        $this->purchaseItems[] = ['UC_S' => '501', 'UC_SA' => '200', 'UC_D' => '321', 'UC_DA' => '000'] + self::item(301, 1, 'Monitor', 19000, 3990, 21, self::PURCHASE);
+        $this->purchaseItems[] = ['UC_S' => '314', 'UC_SA' => '000', 'UC_D' => '321', 'UC_DA' => '000'] + self::item(301, 2, 'Odpočet zálohy', -5000, -1050, 21, self::PURCHASE);
+        // MD strana je protiúčet 321 - účet položky je pak Dal (`UC_D` + `UC_DA`).
+        $this->purchaseItems[] = ['UC_S' => '321', 'UC_D' => '518', 'UC_DA' => '100'] + self::item(301, 3, 'Doprava', 1000, 210, 21, self::PURCHASE);
+
+        $doc = $this->documents()->forYear(PremierDocuments::PURCHASE, 2025)[0];
+        self::assertSame('detail', $doc['items_source']);
+        self::assertSame([['Monitor', 19000.0, '501200'], ['Odpočet zálohy', -5000.0, ''], ['Doprava', 1000.0, '518100']],
+            array_map(static fn (array $i): array => [$i['description'], $i['base'], $i['account']], $doc['items']));
+    }
+
+    public function testJournalBuiltItemGetsTheExpenseAccountOfTheBucket(): void
+    {
+        $this->purchaseInvoice(302, '250302', '2025-09-10', [[100, 21, 'Nesedí na deník', 1]], 15000, 3150);
+        // Účet z rozpisu se u položky složené z deníku nepoužije - deník je zdroj pravdy.
+        $this->purchaseItems[array_key_last($this->purchaseItems)] += ['UC_S' => '501', 'UC_SA' => '200'];
+
+        $doc = $this->documents()->forYear(PremierDocuments::PURCHASE, 2025)[0];
+        self::assertSame('journal', $doc['items_source']);
+        self::assertSame([['Nesedí na deník', 15000.0, '518100']], array_map(static fn (array $i): array => [$i['description'], $i['base'], $i['account']], $doc['items']));
+    }
+
+    public function testUnbookedAdvanceListItemKeepsItsAccount(): void
+    {
+        $this->issued[] = self::header(9, 'ZVF', '259001', '2025-08-15', 'Zálohový list');
+        $this->issuedItems[] = ['UC_D' => '602', 'UC_DA' => '100'] + self::item(9, 1, 'Záloha', 5000, 1050, 21, self::SALE);
+
+        $doc = $this->documents()->forYear(PremierDocuments::ISSUED, 2025)[0];
+        self::assertSame('602100', $doc['items'][0]['account']);
     }
 
     public function testCreditNotePostedWithNegativeAmountsOnSameSides(): void

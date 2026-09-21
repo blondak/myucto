@@ -9,14 +9,12 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
-use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\WebAuthnConfig;
 use MyInvoice\Service\Ares\SupplierRegistryEnricher;
-use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Config\CfgLocalWriter;
 use MyInvoice\Service\System\ManagedModeGuard;
@@ -25,6 +23,7 @@ use MyInvoice\Service\Setup\PasswordSetupLinkIssuer;
 use MyInvoice\Service\Setup\ProvisionTokenGuard;
 use MyInvoice\Service\Setup\SetupPasswordMode;
 use MyInvoice\Service\Setup\TermsOrigin;
+use MyInvoice\Service\Supplier\SupplierInitializer;
 use MyInvoice\Service\System\AppUrlConfiguration;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -40,6 +39,17 @@ final class SetupAction
         'https://myucto.cz/obchodni-podminky',
     ];
 
+    /**
+     * Výchozí nastavení nové firmy — sdílené se zakládáním firmy v aplikaci,
+     * ať se obě cesty nemůžou znovu rozejít.
+     */
+    private readonly SupplierInitializer $supplierInitializer;
+
+    /**
+     * Závislosti inicializace firmy (enricher … autoPosting) zůstávají v signatuře
+     * kvůli volajícím, kteří akci skládají ručně; bez předaného
+     * {@see SupplierInitializer} se z nich sestaví.
+     */
     public function __construct(
         private readonly Connection $db,
         private readonly PasswordHasher $hasher,
@@ -48,7 +58,7 @@ final class SetupAction
         private readonly SessionManager $sessions,
         private readonly Config $config,
         private readonly AppUrlConfiguration $appUrl,
-        private readonly SupplierRegistryEnricher $enricher,
+        SupplierRegistryEnricher $enricher,
         // SEC-01: brání „nárokování" cizího bankovního účtu už při initial setupu.
         private readonly \MyInvoice\Repository\BankStatementOwnershipResolver $bankOwnership,
         private readonly SessionCookieFactory $sessionCookies,
@@ -57,25 +67,52 @@ final class SetupAction
         private readonly PasswordSetupLinkIssuer $passwordSetupLinks,
         // H-02 — ve spravované instalaci drží konfiguraci provozovatel, ne setup.
         private readonly ManagedModeGuard $managed,
-        // Právnická osoba se zakládá rovnou v podvojném účetnictví, a to bez
-        // směrné osnovy nefunguje — viz insertSupplier().
-        private readonly \MyInvoice\Service\Accounting\ChartOfAccountsSeeder $coaSeeder,
+        \MyInvoice\Service\Accounting\ChartOfAccountsSeeder $coaSeeder,
         // Spravovaná instalace dostává licenční klíč rovnou ve zřizovacím
         // požadavku — viz aktivaci na konci setupu.
         private readonly \MyInvoice\Service\License\LicenseService $license,
-        // Zveřejněné bankovní účty z registru plátců DPH (doplnění podle DIČ).
-        private readonly \MyInvoice\Service\Ares\CrpDphClient $crpdph,
-        // Plátcovství se eviduje v čase; historie je jediná zapisovací cesta.
-        private readonly \MyInvoice\Service\Vat\VatStatusService $vatStatus,
+        \MyInvoice\Service\Ares\CrpDphClient $crpdph,
+        \MyInvoice\Service\Vat\VatStatusService $vatStatus,
         private readonly \Psr\Log\LoggerInterface $log,
-        // Historie účetního režimu — bez ní firma nemá čím doložit režim k datu.
-        private readonly \MyInvoice\Repository\AccountingModeRepository $accountingModes,
-        // Účetní období pro rok založení — viz finalizeSupplierProfile().
-        private readonly \MyInvoice\Service\Accounting\AccountingPeriodProvisioner $periodProvisioner,
-        // Výchozí automatika účtování nové účetní jednotky — viz finalizeSupplierProfile().
-        private readonly \MyInvoice\Service\Accounting\AutoPostingPolicyService $autoPosting,
+        \MyInvoice\Repository\AccountingModeRepository $accountingModes,
+        \MyInvoice\Service\Accounting\AccountingPeriodProvisioner $periodProvisioner,
+        \MyInvoice\Service\Accounting\AutoPostingPolicyService $autoPosting,
         private readonly \MyInvoice\Service\Auth\MfaStepUpService $stepUp,
-    ) {}
+        ?SupplierInitializer $supplierInitializer = null,
+    ) {
+        $this->supplierInitializer = $supplierInitializer ?? new SupplierInitializer(
+            $db,
+            $enricher,
+            $crpdph,
+            $vatStatus,
+            $bankOwnership,
+            $coaSeeder,
+            $accountingModes,
+            $periodProvisioner,
+            $autoPosting,
+            $log,
+        );
+    }
+
+    /**
+     * Zachováno kvůli testům obohacení; logika žije v {@see SupplierInitializer}.
+     *
+     * @param array<string,mixed> $supplier
+     */
+    private function applyVatRegistryData(int $supplierId, array $supplier): void
+    {
+        $this->supplierInitializer->applyVatRegistryData($supplierId, $supplier);
+    }
+
+    /**
+     * Zachováno kvůli testům obohacení; logika žije v {@see SupplierInitializer}.
+     *
+     * @param array<string,mixed> $supplier
+     */
+    private function alignAccountingModeWithLegalForm(int $supplierId, array $supplier): void
+    {
+        $this->supplierInitializer->alignAccountingModeWithLegalForm($supplierId, $supplier);
+    }
 
     /**
      * SEC-01 (2. kolo): setup sice běží jen nad prázdnou tabulkou users, ale
@@ -86,209 +123,6 @@ final class SetupAction
      *
      * @param array<string,mixed> $supplier
      */
-    /**
-     * Doplní bankovní účet z registru plátců DPH (zveřejněné účty podle DIČ).
-     *
-     * Zřizovací požadavek účet neobsahuje — objednávka se na něj neptá a my ho
-     * neznáme. Spravovaná instalace tak vznikla s prázdnou CZK i EUR měnou
-     * a zákazník nemohl vystavit fakturu, dokud si účet nedoplnil ručně.
-     *
-     * ⚠️ Bere se JEN zveřejněný účet z registru. Je to účet, který u správce
-     * daně ohlásil sám plátce — nic se nehádá a nic neopisuje z jiného zdroje.
-     *
-     * ⚠️ Best-effort a jen do PRÁZDNÉ měny. Výpadek registru ani chybějící
-     * zveřejněný účet nesmí shodit dokončený setup; co se nedoplní, doplní si
-     * zákazník v Nastavení.
-     *
-     * @param array<string,mixed> $supplier
-     */
-    /**
-     * Srovná účetní režim s právní formou zjištěnou z ARESu.
-     *
-     * Režim se rozhoduje při zakládání firmy podle `supplier.taxpayer_type`
-     * ve VSTUPU. Bezobslužné zřízení ho ale neposílá — provozovatel právní
-     * formu nezná, zná jen IČ — takže s.r.o. vzniklo v daňové evidenci
-     * a účetnictví, kvůli kterému si zákazník MyÚčto koupil, bylo vypnuté.
-     * Právní formu přitom o pár řádků výš dohledal ARES; jen přišla POZDĚ,
-     * až po vložení řádku.
-     *
-     * ⚠️ Jen když typ poplatníka NEPŘIŠEL ve vstupu. Kdo ho poslal výslovně,
-     * rozhodl — a rozhodnutí volajícího se nepřepisuje registrem.
-     *
-     * ⚠️ Bez směrné osnovy je podvojné účetnictví rozbitý stav, proto se
-     * seeduje spolu s přepnutím. V okamžiku setupu firma nemá doklady, takže
-     * odpadá doúčtování minulosti, které řeší přepínač v Nastavení.
-     *
-     * @param array<string,mixed> $supplier
-     */
-    private function alignAccountingModeWithLegalForm(int $supplierId, array $supplier): void
-    {
-        if (in_array($supplier['taxpayer_type'] ?? null, ['fo', 'po'], true)) {
-            return;
-        }
-
-        try {
-            $pdo = $this->db->pdo();
-            $stmt = $pdo->prepare('SELECT taxpayer_type, accounting_mode FROM supplier WHERE id = ?');
-            $stmt->execute([$supplierId]);
-            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-            if (!is_array($row)
-                || (string) ($row['taxpayer_type'] ?? '') !== 'po'
-                || (string) ($row['accounting_mode'] ?? '') !== 'tax_evidence') {
-                return;
-            }
-
-            $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
-                ->execute([$supplierId]);
-            $this->coaSeeder->seedForSupplier($supplierId);
-            $this->log->info('setup: právnická osoba převedena do podvojného účetnictví podle ARESu', ['supplier_id' => $supplierId]);
-        } catch (\Throwable $e) {
-            // Špatný režim je nepříjemný, ale opravitelný v Nastavení; zahozený
-            // setup ne. Proto se to jen zaloguje.
-            $this->log->warning('setup: účetní režim se nepodařilo srovnat s právní formou', ['error' => $e->getMessage()]);
-        }
-    }
-
-    /**
-     * Dorovná profil firmy podle toho, co o ní zjistily veřejné registry.
-     *
-     * ⚠️ Musí běžet AŽ ZA obohacením. `insertSupplier()` vidí jen to, co přišlo
-     * ve zřizovacím požadavku, a ten nese pouze název, adresu, IČ a DIČ. Právní
-     * formu, plátcovství DPH i číslo účtu doplní teprve ARES a registr plátců —
-     * takže tři věci zapsané při vkládání firmy jsou v tu chvíli ještě odvozené
-     * ze špatného obrazu:
-     *
-     *   - historie účetního režimu nesla `tax_evidence`, i když
-     *     {@see self::alignAccountingModeWithLegalForm()} firmu vzápětí převedl
-     *     na `double_entry` — historie pak protiřečila `supplier` a `forYear()`
-     *     hlásil pro rok založení daňovou evidenci,
-     *   - `vat_period` zůstalo prázdné, protože v tu chvíli firma ještě nebyla
-     *     plátce; DPH i kontrolní hlášení pak nemají podle čeho podávat,
-     *   - účet z registru plátců se do `currencies` zapsal až po registraci
-     *     vlastních účtů, takže registr `supplier_bank_accounts` zůstal prázdný.
-     *
-     * Tady je obraz firmy hotový, tak se všechny tři dorovnají.
-     *
-     * Best-effort jako zbytek obohacení: neúplný profil se dá spravit
-     * v Nastavení, zahozený setup ne.
-     */
-    private function finalizeSupplierProfile(int $supplierId): void
-    {
-        try {
-            $pdo = $this->db->pdo();
-            $stmt = $pdo->prepare('SELECT accounting_mode, is_vat_payer, vat_period FROM supplier WHERE id = ?');
-            $stmt->execute([$supplierId]);
-            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-            if (!is_array($row)) {
-                return;
-            }
-
-            // Upsert přes UNIQUE (supplier_id, effective_from) — přepíše řádek
-            // z insertSupplier(), pokud se režim mezitím změnil.
-            $this->accountingModes->record($supplierId, date('Y-01-01'), (string) $row['accounting_mode']);
-
-            // Účetní období pro rok založení. Firma odsud odcházela s podvojným
-            // účetnictvím, ale BEZ jediného období — a poznala to až u prvního
-            // „Zaúčtovat". U nové instance na hostingu je to zbytečné: rok je znám
-            // (dnešek) a nic se tím nepřepisuje. Až sem, protože účetní režim je
-            // finální teprve po obohacení z ARESu (viz docblock výše) a v daňové
-            // evidenci provisioner správně neudělá nic.
-            $this->periodProvisioner->ensureOpenPeriodForDate(
-                $supplierId,
-                date('Y-m-d'),
-                \MyInvoice\Service\Accounting\AccountingPeriodProvisioner::REASON_SETUP,
-            );
-
-            // Výchozí nastavení účetní jednotky — automatické účtování faktur a plná
-            // automatika. Táž pravidla jako po aktivačním průvodci
-            // ({@see \MyInvoice\Service\Accounting\Activation\BackfillService}), jen
-            // jiná cesta: tahle firma podvojné účetnictví nezapíná, ona v něm rovnou
-            // vzniká. Podmínka na režim tu být musí — daňová evidence deník nevede,
-            // takže by jí automatika nastavovala účtování, které nemá kam zapsat.
-            if ((string) $row['accounting_mode'] === 'double_entry') {
-                $this->autoPosting->applyAccountingUnitDefaults($supplierId, null);
-            }
-
-            if ((int) $row['is_vat_payer'] === 1 && ($row['vat_period'] ?? null) === null) {
-                $pdo->prepare("UPDATE supplier SET vat_period = 'monthly' WHERE id = ? AND vat_period IS NULL")
-                    ->execute([$supplierId]);
-                $this->log->info('setup: plátci DPH doplněno měsíční zdaňovací období (§ 99 ZDPH)', ['supplier_id' => $supplierId]);
-            }
-
-            OwnBankAccountRegistrar::syncSupplier($pdo, $supplierId, $this->bankOwnership);
-        } catch (\Throwable $e) {
-            $this->log->warning('setup: profil firmy se nepodařilo dorovnat', ['error' => $e->getMessage()]);
-        }
-    }
-
-    private function applyVatRegistryData(int $supplierId, array $supplier): void
-    {
-        $ownAccount = isset($supplier['bank_account']) && is_array($supplier['bank_account'])
-            && trim((string) ($supplier['bank_account']['account_number'] ?? '')) !== '';
-        $dic = trim((string) ($supplier['dic'] ?? ''));
-        if ($dic === '') {
-            return;
-        }
-
-        try {
-            $res = $this->crpdph->lookup($dic);
-
-            // ⚠️ PLÁTCOVSTVÍ DPH. Zřizovací požadavek ho nenese — provozovatel
-            // ho nezná — a výchozí hodnota je „neplátce". Firma zapsaná
-            // v registru plátců tak naběhla jako NEPLÁTCE a všechny doklady
-            // by vznikaly bez daně. Registr přitom odpověděl už kvůli účtům.
-            //
-            // ⚠️ Zapisuje se přes historii (VH-01), ne přímo do `supplier` —
-            // plátcovství se eviduje v čase a `supplier.is_vat_payer` je jen
-            // živá cache dopočtená z historie.
-            if (($res['found'] ?? false) === true && !array_key_exists('is_vat_payer', $supplier)) {
-                $this->vatStatus->upsert($supplierId, '1900-01-01', true, false, 'Zjištěno z registru plátců DPH při zřízení.');
-                $this->vatStatus->refreshLiveCache($supplierId);
-                $this->log->info('setup: firma je podle registru plátce DPH', ['supplier_id' => $supplierId]);
-            }
-
-            $accounts = is_array($res['accounts'] ?? null) ? $res['accounts'] : [];
-            if (!$accounts) {
-                return;
-            }
-            // ⚠️ Účet ze zřizovacího požadavku má přednost — registr by ho
-            // přepsal jiným, který si zákazník nevybral. Plátcovství výš se
-            // ale zjistit muselo, proto se nekončí dřív.
-            if ($ownAccount) {
-                return;
-            }
-
-            // První zveřejněný účet je ten, který plátce uvádí jako hlavní.
-            $first = $accounts[0];
-            $number = trim((string) ($first['prefix'] ?? '')) !== ''
-                ? trim((string) $first['prefix']) . '-' . trim((string) ($first['number'] ?? ''))
-                : trim((string) ($first['number'] ?? ''));
-            $bankCode = trim((string) ($first['bank_code'] ?? ''));
-            $iban = trim((string) ($first['iban'] ?? '')) ?: null;
-            if ($number === '' && $iban === null) {
-                return;
-            }
-
-            // SEC-01: ani doplnění z registru si nesmí nárokovat účet, který už
-            // patří jinému dodavateli nebo na který chodí cizí výpisy.
-            if ($this->bankOwnership->accountClaimedByOtherSupplier($supplierId, $number ?: null, $iban)
-                || $this->bankOwnership->accountBlockedByForeignStatements($supplierId, $number ?: null, $iban)) {
-                $this->log->warning('setup: zveřejněný účet se nedoplnil — patří jinému dodavateli');
-                return;
-            }
-
-            $stmt = $this->db->pdo()->prepare(
-                "UPDATE currencies SET account_number = ?, bank_code = ?, iban = ?
-                   WHERE supplier_id = ? AND code = 'CZK'
-                     AND (account_number IS NULL OR account_number = '')
-                     AND (iban IS NULL OR iban = '')"
-            );
-            $stmt->execute([$number ?: null, $bankCode ?: null, $iban, $supplierId]);
-        } catch (\Throwable $e) {
-            $this->log->warning('setup: zveřejněné účty se nepodařilo načíst', ['error' => $e->getMessage()]);
-        }
-    }
-
     private function foreignBankAccountError(array $supplier): ?string
     {
         $bank = isset($supplier['bank_account']) && is_array($supplier['bank_account']) ? $supplier['bank_account'] : null;
@@ -521,10 +355,7 @@ final class SetupAction
         // Po commitu (mimo DB transakci — dělá síťové volání): doplň z veřejných
         // registrů, co jde (čísla domu, NACE, spisová značka, typ poplatníka, kód FÚ).
         if ($createdSupplierId !== null) {
-            $this->enricher->enrich($createdSupplierId, $supplier['ic'] ?? null, $supplier['dic'] ?? null);
-            $this->applyVatRegistryData($createdSupplierId, $supplier ?? []);
-            $this->alignAccountingModeWithLegalForm($createdSupplierId, $supplier ?? []);
-            $this->finalizeSupplierProfile($createdSupplierId);
+            $this->supplierInitializer->completeAfterCommit($createdSupplierId, $supplier ?? []);
         }
 
         // Spravovaná instalace aktivuje licenci sama, hned při zřízení.
@@ -700,40 +531,11 @@ final class SetupAction
         // INSERT currencies (CZK + EUR) pro nový supplier, UPDATE supplier.default_currency_id, FK_CHECKS=1.
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
 
-        // ⚠️ Režim účetnictví se ODVOZUJE z právní formy, nedědí se DB default.
-        //
-        // Sloupec `supplier.accounting_mode` má default `tax_evidence` (migrace
-        // 1001) a setup ho dosud nenastavoval vůbec. Jenže daňová evidence je
-        // režim pro fyzické osoby — právnická osoba je ze zákona účetní jednotka
-        // a vede podvojné účetnictví. Firma, která si přes ARES natáhla `pravniForma`
-        // s.r.o., tedy dostala rovnou špatný režim a musela ho hledat v Nastavení.
-        //
-        // Přepnout to zpětně přitom NENÍ zadarmo: doklady vzniklé v daňové
-        // evidenci se zapnutím podvojného účetnictví nedoúčtují a sestavy tiše
-        // nezahrnou minulost (viz text u přepínače). Špatný výchozí stav je proto
-        // dražší, než vypadá — správně se musí trefit hned na začátku.
-        //
-        // `fo` i prázdná hodnota zůstávají na daňové evidenci: u OSVČ je to
-        // správně a u neznámé právní formy je to ta zvratitelnější volba.
-        $taxpayerType = in_array($supplier['taxpayer_type'] ?? null, ['fo', 'po'], true)
-            ? (string) $supplier['taxpayer_type']
-            : null;
-        $accountingMode = $taxpayerType === 'po' ? 'double_entry' : 'tax_evidence';
-
-        // ⚠️ Zdaňovací období plátce se musí trefit hned — sestavy DPH a kontrolní
-        // hlášení z něj berou, jestli podávat měsíčně, nebo čtvrtletně. Setup ho dosud
-        // vůbec nesbíral, takže plátce zůstal na NULL a přiznání se nemělo o co opřít.
-        //
-        // Když wizard hodnotu nepošle, bereme `monthly`: nový plátce je podle §99
-        // ZDPH měsíční ze zákona a čtvrtletní období si smí zvolit až po podmínkách
-        // §99a. Měsíční default je proto ta bezpečnější strana omylu — nanejvýš se
-        // podá častěji, než bylo nutné.
-        $vatPeriod = null;
-        if (!empty($supplier['is_vat_payer'])) {
-            $vatPeriod = in_array($supplier['vat_period'] ?? null, ['monthly', 'quarterly'], true)
-                ? (string) $supplier['vat_period']
-                : 'monthly';
-        }
+        // Režim účetnictví a zdaňovací období se odvozují stejně jako při zakládání
+        // firmy v aplikaci — viz SupplierInitializer.
+        $taxpayerType = SupplierInitializer::taxpayerType($supplier);
+        $accountingMode = SupplierInitializer::accountingMode($taxpayerType);
+        $vatPeriod = SupplierInitializer::vatPeriod(!empty($supplier['is_vat_payer']), $supplier['vat_period'] ?? null);
 
         $stmt = $pdo->prepare(
             'INSERT INTO supplier
@@ -768,34 +570,6 @@ final class SetupAction
             (string) ($supplier['default_hourly_rate'] ?? '1500.00'),
         ]);
         $supplierId = (int) $pdo->lastInsertId();
-        \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus($pdo, $supplierId, !empty($supplier['is_vat_payer']));
-
-        // ⚠️ Historie účetního režimu musí vzniknout spolu s firmou. Seed v migraci
-        // 1066 naplnil `supplier_accounting_modes` jen firmám, které tehdy existovaly
-        // — firma založená později neměla v historii nic a dotazy „jaký režim platil
-        // v roce X" padaly na fallback na `supplier.accounting_mode`, tedy na dnešní
-        // stav místo tehdejšího.
-        //
-        // ⚠️ NE `1900-01-01` jako u DPH statusu. Historie účetního režimu není jen
-        // evidence — `continuousDoubleEntrySince()` z ní počítá, jestli je splněných
-        // 5 účetních období podle § 4 odst. 7 ZoÚ, než smí firma účetnictví ukončit.
-        // Datum od roku 1900 by firmě založené dnes vyrobilo 126 „odsloužených"
-        // období a ze zákonné pojistky by udělalo formalitu. 1. leden letošního roku
-        // je nejstarší datum, které umíme doložit; kdo přechází z jiného systému, si
-        // starší historii doplní v Nastavení.
-        $this->accountingModes->record($supplierId, date('Y-01-01'), $accountingMode);
-
-        // ⚠️ Podvojné účetnictví BEZ směrné osnovy je rozbitý stav — `PostingService`
-        // nemá na co mapovat `account_code`. `SettingsAction` proto osnovu seeduje
-        // při každém přepnutí na `double_entry` a totéž musí udělat setup, jinak by
-        // firma vznikla v režimu, který neumí zaúčtovat první doklad.
-        //
-        // Doúčtování minulosti, které přepínač v Nastavení řeší, tady odpadá:
-        // v okamžiku setupu firma žádné doklady nemá, takže není co backfillovat.
-        // Právě proto je tohle nejlevnější místo, kde režim určit.
-        if ($accountingMode === 'double_entry') {
-            $this->coaSeeder->seedForSupplier($supplierId);
-        }
 
         // Seed default currencies (CZK + EUR) pro tohoto supplier
         $bank = isset($supplier['bank_account']) && is_array($supplier['bank_account']) ? $supplier['bank_account'] : null;
@@ -838,13 +612,10 @@ final class SetupAction
             ->execute([$defaultCurrencyId, $supplierId]);
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
 
-        // ⚠️ Účet zapsaný na měnu musí rovnou do registru vlastních účtů. Účtování
-        // banky, analytika 221 i rozpoznání vlastní protistrany čtou
-        // `supplier_bank_accounts`, ne `currencies` — a ten se dosud naplnil až prvním
-        // importem výpisu. Do té doby si firma svůj vlastní účet neuměla přiřadit.
-        // Registrace až tady, po obnovení FK: řádek se váže na `currencies.id`.
-        OwnBankAccountRegistrar::syncSupplier($pdo, $supplierId, $this->bankOwnership);
-        BankRuleTemplateSeeder::seed($pdo, $supplierId);
+        // Historie plátcovství a režimu, směrná osnova, registr vlastních účtů
+        // a šablony bankovních pravidel — atomicky s firmou, až po obnovení FK
+        // (registr účtů se váže na `currencies.id`).
+        $this->supplierInitializer->seedWithinInsert($pdo, $supplierId, $accountingMode, !empty($supplier['is_vat_payer']));
 
         return $supplierId;
     }

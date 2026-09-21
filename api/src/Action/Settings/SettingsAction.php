@@ -15,7 +15,6 @@ use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
-use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
 use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
@@ -24,6 +23,7 @@ use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Mail\RecipientResolver;
 use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
+use MyInvoice\Service\Supplier\SupplierInitializer;
 use MyInvoice\Service\Tax\Return\TaxpayerTypeCodebook;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -55,7 +55,8 @@ final class SettingsAction
         private readonly IpMatcher $ipMatcher,
         private readonly InvoicePdfRenderer $pdf,
         private readonly Config $config,
-        private readonly \MyInvoice\Service\Ares\SupplierRegistryEnricher $enricher,
+        // Výchozí nastavení nové firmy — sdílené s prvotním setupem (SetupAction).
+        private readonly SupplierInitializer $supplierInitializer,
         private readonly \MyInvoice\Repository\UserSupplierRepository $userSuppliers,
         // Epic F1: při zapnutí podvojného účetnictví naseedujeme směrnou osnovu.
         private readonly \MyInvoice\Service\Accounting\ChartOfAccountsSeeder $coaSeeder,
@@ -309,6 +310,18 @@ final class SettingsAction
         $defaultVatId = (int) $pdo->query("SELECT id FROM vat_rates WHERE is_default = 1 ORDER BY id LIMIT 1")->fetchColumn()
             ?: (int) $pdo->query("SELECT id FROM vat_rates ORDER BY id LIMIT 1")->fetchColumn();
 
+        // Plátcovství: výslovná volba formuláře vyhrává, bez ní heuristika „má DIČ →
+        // je plátce". Neplatí pro identifikovanou osobu (§ 6g–6l, issue #94) — IO má
+        // DIČ, ale plátce není.
+        $isIdentified = !empty($b['is_identified']);
+        $isVatPayer = !$isIdentified && (array_key_exists('is_vat_payer', $b)
+            ? !empty($b['is_vat_payer'])
+            : !empty($b['dic']));
+        // Režim účetnictví a zdaňovací období stejně jako prvotní setup.
+        $taxpayerType = SupplierInitializer::taxpayerType($b);
+        $accountingMode = SupplierInitializer::accountingMode($taxpayerType);
+        $vatPeriod = SupplierInitializer::vatPeriod($isVatPayer, $b['vat_period'] ?? null);
+
         $fkSuspended = false;
         try {
             $newSupplierId = $this->licenseCapacity->createCompany(function () use (
@@ -318,6 +331,11 @@ final class SettingsAction
                 $defaultVatId,
                 $creatorUserId,
                 $assignCreator,
+                $isIdentified,
+                $isVatPayer,
+                $taxpayerType,
+                $accountingMode,
+                $vatPeriod,
                 &$fkSuspended,
             ): int {
                 $ownsTransaction = !$pdo->inTransaction();
@@ -340,14 +358,12 @@ final class SettingsAction
 
                     $stmt = $pdo->prepare(
                         'INSERT INTO supplier (company_name, display_name, street, city, zip, country_id,
-                                               ic, dic, is_vat_payer, is_identified, email, phone, web, tagline, commercial_register, taxpayer_type,
+                                               ic, dic, is_vat_payer, is_identified, email, phone, web, tagline, commercial_register,
+                                               taxpayer_type, accounting_mode, vat_period,
                                                default_currency_id, default_vat_rate_id,
-                                               default_payment_due_days, default_hourly_rate)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                                               default_payment_due_days, default_payment_due_unit, default_hourly_rate)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
                     );
-                    // Heuristika „má DIČ → je plátce" neplatí pro identifikovanou osobu
-                    // (§ 6g–6l, issue #94) — IO má DIČ, ale plátce není.
-                    $isIdentified = !empty($b['is_identified']);
                     $stmt->execute([
                         (string) $b['company_name'],
                         $this->nullable($b, 'display_name') ?: (string) $b['company_name'],
@@ -357,26 +373,25 @@ final class SettingsAction
                         $countryId,
                         $this->nullable($b, 'ic'),
                         $this->nullable($b, 'dic'),
-                        $isIdentified ? 0 : (!empty($b['is_vat_payer']) ? 1 : (!empty($b['dic']) ? 1 : 0)),
+                        $isVatPayer ? 1 : 0,
                         $isIdentified ? 1 : 0,
                         (string) $b['email'],
                         $this->nullable($b, 'phone'),
                         $this->nullable($b, 'web'),
                         $this->nullable($b, 'tagline'),
                         $this->nullable($b, 'commercial_register'),
-                        in_array($b['taxpayer_type'] ?? null, ['fo', 'po'], true) ? (string) $b['taxpayer_type'] : null,
+                        $taxpayerType,
+                        $accountingMode,
+                        $vatPeriod,
                         $bootstrapCurId ?: 0,
                         $defaultVatId ?: 1,
                         (int) ($b['default_payment_due_days'] ?? 14),
+                        in_array($b['default_payment_due_unit'] ?? null, ['days', 'month'], true)
+                            ? (string) $b['default_payment_due_unit']
+                            : 'days',
                         (float) ($b['default_hourly_rate'] ?? 1500.00),
                     ]);
                     $newSupplierId = (int) $pdo->lastInsertId();
-                    \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus(
-                        $pdo,
-                        $newSupplierId,
-                        $isIdentified ? false : (!empty($b['is_vat_payer']) || !empty($b['dic'])),
-                        $isIdentified,
-                    );
 
                     // 2. Seed default currencies pro nového supplier (CZK + EUR, bez bank polí)
                     $insertCur = $pdo->prepare(
@@ -414,19 +429,16 @@ final class SettingsAction
                         $fkSuspended = false;
                     }
 
-                    // Registr vlastních účtů — backfill migrace 1053 se na firmu
-                    // založenou později nevztahuje, takže by účet zapsaný výš na měnu
-                    // zůstal mimo registr až do prvního importu výpisu.
-                    //
-                    // ⚠️ Historie účetního režimu se tady ZÁMĚRNĚ neseeduje. Na rozdíl
-                    // od setupu tahle cesta `accounting_mode` vůbec nenastavuje (chybí
-                    // ve sloupcích INSERTu výš), takže s.r.o. skončí na DB defaultu
-                    // `tax_evidence`. Zapsat tuhle hodnotu do historie by chybu
-                    // zabetonovalo: dnes se dá opravit přepnutím režimu, protože
-                    // `forYear()` padá na `supplier.accounting_mode`, kdežto historický
-                    // řádek by rok založení navždy hlásil jako daňovou evidenci.
-                    OwnBankAccountRegistrar::syncSupplier($pdo, $newSupplierId, $this->bankOwnership);
-                    BankRuleTemplateSeeder::seed($pdo, $newSupplierId);
+                    // 4. Stejná inicializace jako prvotní setup: historie plátcovství
+                    //    a účetního režimu, směrná osnova, registr vlastních účtů,
+                    //    šablony bankovních pravidel — atomicky s firmou.
+                    $this->supplierInitializer->seedWithinInsert(
+                        $pdo,
+                        $newSupplierId,
+                        $accountingMode,
+                        $isVatPayer,
+                        $isIdentified,
+                    );
                     if ($assignCreator) {
                         $pdo->prepare(
                             'INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, NULL)'
@@ -449,19 +461,6 @@ final class SettingsAction
                         $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
                         $fkSuspended = false;
                     }
-
-                    // Registr vlastních účtů — backfill migrace 1053 se na firmu
-                    // založenou později nevztahuje, takže by účet zapsaný výš na měnu
-                    // zůstal mimo registr až do prvního importu výpisu.
-                    //
-                    // ⚠️ Historie účetního režimu se tady ZÁMĚRNĚ neseeduje. Na rozdíl
-                    // od setupu tahle cesta `accounting_mode` vůbec nenastavuje (chybí
-                    // ve sloupcích INSERTu výš), takže s.r.o. skončí na DB defaultu
-                    // `tax_evidence`. Zapsat tuhle hodnotu do historie by chybu
-                    // zabetonovalo: dnes se dá opravit přepnutím režimu, protože
-                    // `forYear()` padá na `supplier.accounting_mode`, kdežto historický
-                    // řádek by rok založení navždy hlásil jako daňovou evidenci.
-                    OwnBankAccountRegistrar::syncSupplier($pdo, $newSupplierId, $this->bankOwnership);
                     throw $e;
                 }
             });
@@ -472,9 +471,15 @@ final class SettingsAction
             return Json::error($response, 'create_failed', 'Vytvoření supplier selhalo: ' . $e->getMessage(), 500);
         }
 
-        // Po commitu (mimo DB transakci — síťové volání): doplň z veřejných registrů,
-        // co jde (čísla domu, NACE, spisová značka, typ poplatníka, kód FÚ).
-        $this->enricher->enrich($newSupplierId, $b['ic'] ?? null, $b['dic'] ?? null);
+        // Po commitu (mimo DB transakci — síťová volání na ARES a registr plátců):
+        // obohacení, srovnání režimu s právní formou, účetní období, výchozí
+        // automatika účtování, zdaňovací období. Plátcovství už je rozhodnuté výš,
+        // proto se předává výslovně — registr ho nepřepisuje (u IO by jinak mohl).
+        $this->supplierInitializer->completeAfterCommit(
+            $newSupplierId,
+            ['is_vat_payer' => $isVatPayer] + $b,
+            $creatorUserId > 0 ? $creatorUserId : null,
+        );
 
         $this->log($request, 'supplier.created', $newSupplierId, ['company_name' => $b['company_name'], 'ic' => $b['ic'] ?? null]);
         return Json::ok($response, ['id' => $newSupplierId], 201);

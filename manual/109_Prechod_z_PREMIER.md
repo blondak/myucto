@@ -6,9 +6,9 @@ Průvodce převede účetní rok z programu PREMIER do firmy v MyÚčtu. Vstupem
 záloha dat, kterou vytvoříte přímo v PREMIERu. Na rozdíl od POHODY tu není
 samostatný exportní nástroj ke stažení.
 
-Průvodce převádí jen **účetnictví**. Záloha obsahuje i mzdy, ty ale průvodce
-nepřevádí: mzdové zápisy jsou v převedeném deníku, zaměstnance a mzdy
-zadejte v modulu Mzdy.
+Průvodce převádí **účetnictví** a k němu **zaměstnance a zpracované mzdy**
+(§ 109.2.1). Mzdové zápisy jsou v převedeném deníku, mzdy se proto
+převezmou jako evidence předchozího systému a žádný účetní zápis nezaloží.
 
 Položka je v menu Systém, které vidí administrátor. Jiný uživatel s potřebnými
 oprávněními otevře průvodce přímým odkazem `/imports/premier`.
@@ -70,8 +70,12 @@ v MyÚčtu ještě není. Další rok převedete zopakováním postupu (§ 109.4
 | ostatní doklady s DPH mimo faktury (bankovní poplatky, interní doklady) | přijaté nebo vydané doklady s položkami po kódech DPH |
 | bankovní řady deníku | výpisy a bankovní pohyby v měně účtu |
 | vazby úhrad na faktury | spárování faktury s bankovním pohybem nebo pokladním dokladem |
-| dlouhodobý majetek | karty s daňovými a účetními odpisy let převodu |
+| dlouhodobý majetek (řady hmotného a nehmotného majetku) | karty s daňovými a účetními odpisy let převodu |
+| drobný majetek (řady drobného majetku, operativní evidence) | karty evidence drobného majetku |
+| zaměstnanci a pracovní vztahy (pracovní poměr, DPP, DPČ, jednatel) | osoby a pracovní vztahy v modulu Mzdy |
+| zpracované mzdy po měsících | převzaté mzdy předchozího systému, bez účetních zápisů |
 | ruční úpravy základu daně z přiznání k DPPO | položky rozpracovaného přiznání k DPPO |
+| uzavřený rok | uzávěrka roku v MyÚčtu (702/710) a navazující počáteční stavy |
 
 **Částky v Kč.** Faktura v cizí měně se převede v Kč podle zaúčtování
 v deníku, stejně jako z deníku počítá přiznání PREMIER. Položky faktury se
@@ -93,9 +97,26 @@ z přijaté faktury převod přebírá. Pokud PREMIER uplatnil odpočet dřív, 
 je datum plnění nebo vystavení dokladu, MyÚčto ho tak brzy nepřipustí a
 doklad zařadí do období podle data dokladu. Protokol takový doklad vypíše.
 
+**Majetek.** PREMIER vede karty majetku v řadách podle druhu evidence. Karty
+řad hmotného a nehmotného majetku se převedou jako dlouhodobý majetek
+s odpisy. Karty řad drobného neodpisovaného majetku a operativní evidence
+ostatního majetku se převedou do evidence drobného majetku (název,
+inventární číslo, datum pořízení, cena, umístění, odpovědná osoba,
+vyřazení). Evidence finančního majetku, leasingu, rezerv a ostatní
+evidence se nepřevádí, účetně je v převedeném deníku a protokol ji vypíše.
+
+**Drobný majetek bez evidence v PREMIERu.** Když účetní drobný majetek
+v PREMIERu jako evidenci nevedla a účtovala ho jen do nákladů, převod karty
+odvodí z přijatých faktur: položka zaúčtovaná na účet, který osnova
+PREMIERu pojmenovává jako drobný majetek (například „Spotřeba materiálu -
+dr. majetek"), s cenou za kus od 1 000 Kč bez DPH dostane kartu drobného
+majetku, levnější zůstane materiálem. Dobropis, který věc vrací, kartu
+vyřadí, pokud jde jednoznačně určit (stejný dodavatel a název, případně
+cena). Jinak ho protokol vypíše k ručnímu vyřazení.
+
 **Zaúčtování se nepřepočítává.** Deník je přesná kopie toho, co bylo
 v PREMIERu, a doklady se k němu jen připojí. Zápisy na 702 a 710 se
-nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.
+nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta (§ 109.6).
 
 **Doklady k ruční kontrole.** Doklad, jehož daňovou povahu záloha spolehlivě
 neurčuje (například kód opravy podle § 44 nebo § 74), převod převezme jako
@@ -105,9 +126,48 @@ potvrďte.
 
 Číslo dokladu, které už ve firmě je, dostane příponu roku.
 
+### 109.2.1 Zaměstnanci a mzdy
+
+Mzdy převod přenese jen firmě, která má zapnutý modul Mzdy a v Mzdy →
+Nastavení nastavenou výchozí mzdovou účtárnu. Bez toho převede účetnictví,
+mzdy přeskočí a protokol to řekne; po nastavení mezd převod roku zopakujte
+a mzdy se doplní.
+
+- **Zaměstnanci.** Každý pracovní vztah z PREMIERu se založí jako osoba
+  a pracovní vztah s osobním číslem z PREMIERu: jméno, rodné číslo, datum
+  narození, adresa, zdravotní pojišťovna, výplatní účet, druh vztahu
+  (pracovní poměr, DPP, DPČ, jednatel), nástup, skončení a sjednaná mzda
+  včetně jejích změn. V zákonné evidenci osoby doplní daňovou rezidenci,
+  prohlášení poplatníka po měsících a příslušnost k sociálnímu pojištění.
+  Doplňuje se jen to, co v MyÚčtu chybí. Vztah se stejným osobním číslem
+  a jménem, který ve firmě už je, převod převezme místo založení nového.
+- **Zpracované mzdy.** Každý měsíc do konce převáděného roku se uloží jako
+  převzatá mzda předchozího systému: hrubý příjem, vyměřovací základy,
+  pojistné zaměstnance i zaměstnavatele, záloha a srážková daň, daňový bonus,
+  čistá mzda, částka k výplatě a doby pojištění. Z nich vznikne převzatý
+  mzdový běh, evidenční list důchodového pojištění za rok přechodu
+  a srovnávací sestava převzatých mezd. Měsíce od začátku vedení mezd
+  v MyÚčtu se nepřebírají, ty počítá MyÚčto.
+- **Počáteční stavy ročních kumulací.** Za měsíce roku, ve kterém začíná
+  vedení mezd v MyÚčtu, před jeho prvním měsícem převod zapíše počáteční
+  stavy kumulací (roční zúčtování daně a potvrzení o zdanitelných příjmech
+  na ně navážou). Začátek vedení mezd nastavte v Mzdy → Nastavení ještě před
+  převodem posledního roku; když chybí, protokol navrhne měsíc po poslední
+  mzdě z PREMIERu.
+
+Zkontrolujte po převodu:
+
+- druh vztahu u zaměstnanců, u kterých ho protokol označil jako odvozený,
+- výplatní účty: převod je založí jako neověřené, ověřte je na kartě osoby,
+- mzdové složky, pravidelné předpisy a průměrný výdělek pro první měsíc
+  vedený v MyÚčtu,
+- upozornění rekonciliace mezd proti deníku (§ 109.5).
+
 ## 109.3 Co převod nepřenese
 
-- **Mzdy.** Zaměstnance a mzdy zadejte v modulu Mzdy.
+- **Docházka a podrobnosti mezd.** Mzdové složky jednotlivých měsíců,
+  nepřítomnosti, dovolená, průměrné výdělky, srážky ze mzdy, exekuce a děti
+  pro daňové zvýhodnění se nepřevádějí, zadejte je v modulu Mzdy.
 - **Sklad, zakázky a CRM.** Zápisy jsou v převedeném deníku, evidence se
   zakládá v MyÚčtu.
 - **Objednávky, nabídky a přílohy dokladů.** Skeny dokladů připojíte zvlášť
@@ -170,6 +230,14 @@ příčiny:
 
 Přiznání k DPH PREMIER v záloze neukládá, proto se s ním nekontroluje.
 
+**Mzdy proti deníku.** Zpracované mzdy převáděného roku se po měsících
+porovnají se zaúčtováním v deníku: hrubé příjmy (náklad 52x proti účtům 331,
+333 a 366), pojistné zaměstnance (proti 336), pojistné zaměstnavatele
+(náklad proti 336) a daň (proti 342, snížená o daňový bonus). Měsíc, který
+se liší, protokol vypíše i s částkami jako upozornění. Typicky jde o mzdu
+zpracovanou, ale ještě nezaúčtovanou, nebo o mzdu přepočtenou v PREMIERu po
+zaúčtování. Rekonciliace mezd běží i u firmy bez modulu Mzdy.
+
 ## 109.6 Režim účetnictví a automatika
 
 Chování je stejné jako u přechodu z POHODY: převod zapíše podvojné
@@ -180,6 +248,26 @@ převodu vypnutá a po úspěšném převodu se vrátí do stavu před ním, viz
 Odpisy majetku, které PREMIER v převedeném roce zaúčtoval, jsou v převedeném
 deníku. Hromadné zaúčtování odpisů v uzávěrce je proto pro převedené roky
 znovu neúčtuje a plán odpisů naváže dalším měsícem.
+
+### 109.6.1 Uzávěrka uzavřených roků
+
+PREMIER uzávěrkové zápisy do deníku neukládá. Rok, který je v PREMIERu
+uzavřený, převod uzavře i v MyÚčtu průvodcem uzávěrky. Za uzavřený se
+považuje rok, ke kterému záloha obsahuje podané přiznání k dani z příjmů
+právnických osob, nebo rok celý zamčený v PREMIERu v „Zamykání period".
+
+- Kurzové rozdíly a odpisy se spustí, ale nesmějí nic zaúčtovat: převzatý
+  deník je už obsahuje.
+- Dohadné položky, časové rozlišení, opravné položky a daň z příjmů se
+  potvrdí jako zaúčtované v PREMIERu.
+- Uzavření knih zaúčtuje zápis na 702 a 710 a otevření dalšího roku převezme
+  počáteční stavy z převodu (musí sedět účet po účtu).
+
+Uzávěrka proběhne jen tehdy, když převod roku skončil bez chyb a předchozí
+rok je uzavřený. Když by musela zaúčtovat cokoli navíc nebo něco nesouhlasí,
+celá se vrátí, rok zůstane otevřený a protokol řekne proč. Uzavřete ho pak
+ručně v Účetnictví → Uzávěrka. Rok, který v PREMIERu uzavřený není (typicky
+běžný rok), zůstává otevřený.
 
 ## 109.7 Opakovaný převod
 

@@ -254,11 +254,14 @@ final class PremierDocuments
                 $rounding += $value;
                 continue;
             }
-            $buckets[$code] ??= ['code' => $code, 'base' => 0.0, 'vat' => 0.0, 'rate' => $r['vat_rate']];
+            $buckets[$code] ??= ['code' => $code, 'base' => 0.0, 'vat' => 0.0, 'rate' => $r['vat_rate'], 'account' => ''];
             if ($isVatLine) {
                 $buckets[$code]['vat'] += $value;
             } else {
                 $buckets[$code]['base'] += $value;
+                if ($buckets[$code]['account'] === '') {
+                    $buckets[$code]['account'] = self::otherSide($r, $account);
+                }
             }
             if ($r['vat_rate'] > 0) {
                 $buckets[$code]['rate'] = $r['vat_rate'];
@@ -269,7 +272,7 @@ final class PremierDocuments
         if (!$doc['booked']) {
             // Nezaúčtovaný doklad (zálohový list): částky jen z položek.
             foreach ($prepared as $it) {
-                $buckets[$it['code']] ??= ['code' => $it['code'], 'base' => 0.0, 'vat' => 0.0, 'rate' => $it['rate']];
+                $buckets[$it['code']] ??= ['code' => $it['code'], 'base' => 0.0, 'vat' => 0.0, 'rate' => $it['rate'], 'account' => $it['account']];
                 $buckets[$it['code']]['base'] += $it['base'];
                 $buckets[$it['code']]['vat'] += $it['vat'];
             }
@@ -323,6 +326,7 @@ final class PremierDocuments
                     'description' => $prepared[0]['description'] ?? ($doc['text'] ?: ('Doklad ' . $doc['series'] . ' ' . $doc['number'])),
                     'quantity' => 1.0, 'unit' => null, 'unit_price' => $b['base'],
                     'base' => $b['base'], 'vat' => 0.0, 'rate' => $b['rate'], 'code' => (string) $code,
+                    'account' => (string) ($b['account'] ?? ''),
                 ]];
                 $sum = $b['base'];
             }
@@ -354,6 +358,10 @@ final class PremierDocuments
                     'vat' => $vat,
                     'rate' => $b['rate'],
                     'code' => (string) $code,
+                    // Nákladový / výnosový účet položky v PREMIER (`518100`) - rozlišuje drobný majetek.
+                    // Položka z rozpisu nese vlastní účet (i prázdný - odpočet zálohy na 314),
+                    // účet dokladu z deníku dostane jen položka složená z deníku.
+                    'account' => (string) ($it['account'] ?? ($b['account'] ?? '')),
                 ];
             }
         }
@@ -469,6 +477,8 @@ final class PremierDocuments
                 'vat' => $vat,
                 'rate' => (float) ($it['SAZBA_DPH'] ?? 0),
                 'code' => trim((string) ($it['KOD_DPH'] ?? '')),
+                // Účet položky: syntetika + analytika (`UC_S` + `UC_SA`, vydaná `UC_D` + `UC_DA`).
+                'account' => self::itemAccount($it),
             ];
         }
         return $out;
@@ -501,6 +511,23 @@ final class PremierDocuments
         }
         arsort($votes);
         return (string) array_key_first($votes);
+    }
+
+    /**
+     * Nákladový (přijatá) nebo výnosový (vydaná) účet položky. PREMIER vede na položce MD
+     * (`UC_S`/`UC_SA`) i Dal (`UC_D`/`UC_DA`); protiúčet partnera a DPH (3xx) se přeskakuje.
+     *
+     * @param array<string,mixed> $it
+     */
+    private static function itemAccount(array $it): string
+    {
+        foreach ([['UC_S', 'UC_SA'], ['UC_D', 'UC_DA']] as [$syn, $analytic]) {
+            $code = trim((string) ($it[$syn] ?? '')) . trim((string) ($it[$analytic] ?? ''));
+            if (ctype_digit($code) && strlen($code) >= 3 && !str_starts_with($code, '3')) {
+                return $code;
+            }
+        }
+        return '';
     }
 
     /** @param array<string,mixed> $r */
