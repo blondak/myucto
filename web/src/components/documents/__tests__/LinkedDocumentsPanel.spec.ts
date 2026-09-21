@@ -28,6 +28,7 @@ vi.mock('@/api/documents', () => ({
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: m.canWrite }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: m.toastSuccess, error: m.toastError }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/composables/useFormat', () => ({ formatDate: (d: string) => d }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }) }))
 
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
