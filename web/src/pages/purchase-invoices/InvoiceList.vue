@@ -990,6 +990,16 @@ async function bulkSetKind() {
             :placeholder="t('purchase_invoice.filters.all_vendors')"
           />
         </div>
+        <template v-if="vendorFilter !== '' && !auth.isClientRole && auth.canRead('clients')">
+          <RouterLink :to="{ name: 'client-detail', params: { id: vendorFilter } }" :class="btnOutline('neutral')" data-test="filter-vendor-detail">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+            {{ t('purchase_invoice.filters.vendor_detail') }}
+          </RouterLink>
+          <RouterLink v-if="auth.canWrite('clients')" :to="{ name: 'client-edit', params: { id: vendorFilter } }" :class="btnOutline('neutral')" data-test="filter-vendor-edit">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+            {{ t('purchase_invoice.filters.vendor_edit') }}
+          </RouterLink>
+        </template>
         <select v-if="!auth.isClientRole" v-model="projectFilter"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('purchase_invoice.filters.all_projects') }}</option>
