@@ -227,6 +227,18 @@ final class SummaryActionRevenueTest extends TestCase
         self::assertEqualsWithDelta($basePrev + 150.0, $this->rollingVal($after, 'CZK', 'prev_period_total'), 0.01, 'Předchozích 12m (−18 měsíců) += 150.');
     }
 
+    /** Výkazy práce: koncept starší než 2 měsíce (např. převzatý ke kontrole) se nenabízí. */
+    public function testDraftInvoicesSkipOldDrafts(): void
+    {
+        $client = $this->client('Golden Klient Draft');
+        $fresh = $this->invoice($client, date('Y-m-d'), null, 100.0, 121.0, status: 'draft');
+        $old = $this->invoice($client, '2019-05-10', null, 100.0, 121.0, status: 'draft');
+
+        $ids = array_column($this->call('draftInvoices', [$this->pdo, $this->supplierId]), 'id');
+        self::assertContains($fresh, $ids, 'Čerstvý koncept je mezi výkazy práce.');
+        self::assertNotContains($old, $ids, 'Koncept z roku 2019 se nenabízí.');
+    }
+
     // ── reflection wrappery nad private metodami SummaryAction ──────────────────
 
     /** @return list<array<string,mixed>> */

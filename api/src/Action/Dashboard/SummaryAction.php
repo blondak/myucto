@@ -760,6 +760,9 @@ final class SummaryAction
                    -- Koncept daňového dokladu k přijaté platbě (#89) sem nepatří —
                    -- nemá výkaz práce, vystavuje se z detailu zálohy/platby.
                    AND i.invoice_type != 'tax_document'
+                   -- Jen koncepty za poslední 2 měsíce: starší (typicky převzaté z jiného
+                   -- systému ke kontrole) nejsou rozpracovaný výkaz práce.
+                   AND COALESCE(i.issue_date, DATE(i.created_at)) >= DATE_SUB(CURDATE(), INTERVAL 2 MONTH)
                  ORDER BY i.updated_at DESC, i.id DESC
                  LIMIT 24";
         $stmt = $pdo->prepare($sql);
