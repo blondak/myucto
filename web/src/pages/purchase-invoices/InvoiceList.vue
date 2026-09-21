@@ -478,8 +478,29 @@ function mergeGroups(existing: PurchaseMonthGroup[], incoming: PurchaseMonthGrou
   return Array.from(byMonth.values()).sort((a, b) => b.month.localeCompare(a.month))
 }
 
-async function load(reset = true) {
+/**
+ * Načtení seznamu. Víc spouštěčů v jednom okamžiku (filtry z URL při otevření stránky
+ * a hned na to watcher týchž filtrů, použití uloženého filtru) = jeden požadavek.
+ * Odpověď, kterou mezitím předběhl novější požadavek, se zahodí, aby starší data
+ * nepřepsala novější.
+ */
+let loadSeq = 0
+let pendingReload: Promise<void> | null = null
+function load(reset = true): Promise<void> {
+  if (!reset) return fetchPage(false)
+  pendingReload ??= Promise.resolve().then(() => {
+    pendingReload = null
+    return fetchPage(true)
+  })
+  return pendingReload
+}
+
+async function fetchPage(reset: boolean) {
+  const seq = ++loadSeq
   if (reset) {
+    // Hledaný text je v tomto načtení, odložené hledání z téhož textu by načítalo znovu.
+    if (searchTimeout) clearTimeout(searchTimeout)
+    searchTimeout = null
     loading.value = true
     page.value = 1
     selectedIds.value = []
@@ -510,6 +531,7 @@ async function load(reset = true) {
       q:             search.value       || undefined,
       page: page.value,
     })
+    if (seq !== loadSeq) return
     if (reset) {
       groups.value = res.data
     } else {
@@ -518,11 +540,14 @@ async function load(reset = true) {
     total.value = res.meta.total
     pages.value = res.meta.pages ?? 1
   } catch (e) {
+    if (seq !== loadSeq) return
     error.value = apiErrorMessage(e)
   } finally {
-    loading.value = false
-    loadingMore.value = false
-    flashedIds.value = consumeFlashedRows('purchase_invoice')
+    if (seq === loadSeq) {
+      loading.value = false
+      loadingMore.value = false
+      flashedIds.value = consumeFlashedRows('purchase_invoice')
+    }
   }
 }
 
