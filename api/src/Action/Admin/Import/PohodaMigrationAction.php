@@ -53,7 +53,9 @@ final class PohodaMigrationAction
     /** Nahraných exportů firmy najednou (nové nahrání smaže nejstarší nečinný). */
     private const MAX_ACTIVE_UPLOADS = 3;
     /** Část exportu: pod `upload_max_filesize`, IIS `maxAllowedContentLength` i nginx `client_max_body_size`. */
-    public const CHUNK_BYTES = 8 * 1024 * 1024;
+    // Pod výchozím limitem nginx (client_max_body_size 1m): u instalací za cizí reverzní
+    // proxy by 8MB kousky skončily chybou 413 dřív, než dorazí do aplikace.
+    public const CHUNK_BYTES = 768 * 1024;
     /**
      * Exportní nástroje po programech. POHODA se exportuje přes XML rozhraní, PAMICA nemá
      * XML rozhraní a čte se přímo z mzdového datového souboru, takže má vlastní skript.

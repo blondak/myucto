@@ -85,7 +85,8 @@ const toolOpen = ref(false)
 const toolFiles = ref<PohodaToolFile[] | null>(null)
 const toolGroups = computed(() => [
   { key: 'xml', names: ['Export-Pohoda.cmd', 'Export-Pohoda.ps1', 'Export-PohodaMdb.cmd', 'Export-PohodaMdb.ps1'] },
-  { key: 'mdb', names: ['Export-PohodaMdbAccounting.cmd', 'Export-PohodaMdbAccounting.ps1'] },
+  // Převodník účetnictví volá Export-PohodaMdb.ps1 pro majetek a mzdy, bez něj skončí chybou.
+  { key: 'mdb', names: ['Export-PohodaMdbAccounting.cmd', 'Export-PohodaMdbAccounting.ps1', 'Export-PohodaMdb.ps1'] },
 ].map(group => ({ ...group, files: (toolFiles.value ?? []).filter(file => group.names.includes(file.name)) })))
 const toolLoading = ref(false)
 const toolDownloading = ref<string | null>(null)
@@ -476,12 +477,12 @@ onBeforeUnmount(() => {
                         <h5 class="font-medium text-neutral-800">{{ tt('tool_group_support_title') }}</h5>
                         <p class="mt-1 text-sm text-neutral-600">{{ tt('tool_group_support_hint') }}</p>
                       </div>
-                      <div class="min-w-0">
+                      <div class="min-w-0 flex-1">
                         <span class="break-all font-mono text-sm">{{ f.name }}</span>
                         <span class="ml-2 text-xs text-neutral-500">{{ formatBytes(f.size) }}</span>
                         <p class="mt-1 text-xs text-neutral-500">{{ tt(f.name === 'Export-PohodaMdb.cmd' ? 'tool_role_optional' : f.name === 'Export-PohodaMdb.ps1' ? 'tool_role_shared' : f.name.endsWith('.cmd') ? 'tool_role_launcher' : 'tool_role_script') }}</p>
                       </div>
-                      <button type="button" :class="btnOutlineSm('neutral')" :disabled="toolDownloading !== null" @click="downloadTool(f.name)">
+                      <button type="button" :class="[btnOutlineSm('neutral'), 'shrink-0']" :disabled="toolDownloading !== null" @click="downloadTool(f.name)">
                         <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
                         {{ tt('tool_download') }}
                       </button>

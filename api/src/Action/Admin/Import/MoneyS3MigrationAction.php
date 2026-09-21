@@ -57,7 +57,9 @@ final class MoneyS3MigrationAction
     private const MAX_BACKUP_BYTES = 4 * 1024 * 1024 * 1024;
     private const MAX_REPORT_BYTES = 5 * 1024 * 1024;
     /** Část zálohy: pod `upload_max_filesize`, IIS `maxAllowedContentLength` i nginx `client_max_body_size`. */
-    public const CHUNK_BYTES = 8 * 1024 * 1024;
+    // Pod výchozím limitem nginx (client_max_body_size 1m): u instalací za cizí reverzní
+    // proxy by 8MB kousky skončily chybou 413 dřív, než dorazí do aplikace.
+    public const CHUNK_BYTES = 768 * 1024;
     private const BACKUP_EXTENSIONS = ['lz', 'zip'];
     /** Nahraných záloh firmy najednou (nové nahrání smaže nejstarší nečinnou). */
     private const MAX_ACTIVE_UPLOADS = 3;
