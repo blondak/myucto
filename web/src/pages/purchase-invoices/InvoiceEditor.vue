@@ -605,6 +605,13 @@ onMounted(async () => {
   loaded.value = true
 })
 
+// Výchozí dimenze zakázky > dodavatele do prázdných typů hlavičky (i po vytěžení PDF/ISDOC).
+docDims.watchDefaults(
+  () => ({ client_id: form.value.vendor_id, project_id: form.value.project_id }),
+  () => loaded.value,
+  () => !isEdit.value,
+)
+
 watch(submissionId, (next, previous) => {
   if (!loaded.value || isEdit.value || next === previous) return
   void loadSubmissionOrigin()
@@ -2330,6 +2337,7 @@ function fieldErr(key: string): string | null {
           <div v-if="docDims.enabled.value" class="sm:col-span-2" data-test="purchase-header-dimensions">
             <p class="text-xs text-neutral-500 mb-1">{{ t('dimensions.header_title') }}</p>
             <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
+            <p v-if="docDims.hasAutoFilled.value" class="text-xs text-neutral-500 mt-1" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
           </div>
           <div>
             <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.classification.vat_classification') }}</label>

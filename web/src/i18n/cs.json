@@ -27083,6 +27083,13 @@
     "save_failed": "Doklad je uložený, ale dimenze se uložit nepodařilo: {message}",
     "needs_repost": "Položky dokladu mají různé dimenze, ale zaúčtovaný řádek nákladu je jen jeden. Pro rozdělení nákladu podle položek doklad přeúčtujte.",
     "edit_lines": "Upravit dimenze",
-    "lines_saved": "Dimenze řádků jsou uložené."
+    "lines_saved": "Dimenze řádků jsou uložené.",
+    "defaults": {
+      "title": "Výchozí dimenze",
+      "hint_client": "Předvyplní se do hlavičky vystavených i přijatých faktur a pokladních dokladů tohoto klienta. Doklad bez dimenze daného typu je dostane při zaúčtování. Výchozí dimenze zakázky mají přednost.",
+      "hint_project": "Předvyplní se do hlavičky faktur této zakázky. Doklad bez dimenze daného typu je dostane při zaúčtování. Mají přednost před výchozími dimenzemi klienta.",
+      "save_failed": "Karta je uložená, ale výchozí dimenze se uložit nepodařilo: {message}",
+      "autofilled": "Předvyplněno z výchozích dimenzí klienta, zakázky nebo placeného dokladu."
+    }
   }
 }

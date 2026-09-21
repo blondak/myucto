@@ -78,6 +78,24 @@ export interface DocumentDimensionsSaveResult extends DocumentDimensions {
 
 export type DimensionDocType = 'purchase-invoices' | 'invoices' | 'cash-documents' | 'bank-transactions' | 'journal-templates'
 
+/** Karta s výchozími dimenzemi (klient slouží jako odběratel i dodavatel). */
+export type DimensionDefaultsEntity = 'clients' | 'projects'
+
+export type DimensionPrefillSource = 'project' | 'client' | 'document'
+
+/** Předvyplnění hlavičky dokladu: typ → hodnota a odkud se vzala. */
+export interface DimensionPrefill {
+  header: Record<number, number>
+  sources: Record<number, DimensionPrefillSource>
+}
+
+export interface DimensionPrefillParams {
+  client_id?: number | null
+  project_id?: number | null
+  invoice_id?: number | null
+  purchase_invoice_id?: number | null
+}
+
 export interface DimensionTypePayload {
   code?: string
   name?: string
@@ -168,6 +186,16 @@ export const dimensionsApi = {
     api.put<DocumentDimensionsSaveResult>(`/accounting/dimensions/documents/${doc}/${id}`, {
       header: compactDimensions(payload.header),
       items: Object.fromEntries(Object.entries(payload.items ?? {}).map(([no, map]) => [no, compactDimensions(map)])),
+    }).then(r => r.data),
+
+  getDefaults: (entity: DimensionDefaultsEntity, id: number) =>
+    api.get<{ dimensions: Record<number, number> }>(`/${entity}/${id}/dimensions`).then(r => r.data.dimensions),
+  saveDefaults: (entity: DimensionDefaultsEntity, id: number, map: DimensionMap) =>
+    api.put<{ dimensions: Record<number, number> }>(`/${entity}/${id}/dimensions`, { dimensions: compactDimensions(map) })
+      .then(r => r.data.dimensions),
+  prefill: (params: DimensionPrefillParams) =>
+    api.get<DimensionPrefill>('/accounting/dimensions/prefill', {
+      params: Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v > 0)),
     }).then(r => r.data),
 
   getJournal: (entryId: number) =>

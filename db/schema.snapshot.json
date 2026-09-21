@@ -844,7 +844,8 @@
         "1857_bank_email_ingest_notices_toggle.sql",
         "1858_invoice_payment_variable_symbol.sql",
         "1859_premier_migration.sql",
-        "1860_dimensions.sql"
+        "1860_dimensions.sql",
+        "1861_dimension_defaults.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -3690,6 +3691,36 @@
             },
             "checks": {
                 "detail": "json_valid(`detail`)"
+            }
+        },
+        "dimension_defaults": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "client_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_dimdef_supplier": "BTREE (supplier_id)",
+                "idx_dimdef_type_value": "BTREE (dimension_type_id, dimension_value_id)",
+                "uq_dimdef_client_type": "UNIQUE BTREE (client_id, dimension_type_id)",
+                "uq_dimdef_project_type": "UNIQUE BTREE (project_id, dimension_type_id)"
+            },
+            "foreign_keys": {
+                "fk_dimdef_client": "(client_id) -> clients (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dimdef_project": "(project_id) -> projects (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dimdef_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dimdef_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_dimdef_owner": "`client_id` is null <> (`project_id` is null)"
             }
         },
         "dimension_types": {

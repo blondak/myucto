@@ -199,6 +199,7 @@ onMounted(async () => {
     else form.register_id = (registers.value.find(r => r.is_default) ?? registers.value[0])?.id ?? ''
   }
   await loadPartners('')
+  dimsReady.value = true
 })
 
 /**
@@ -362,6 +363,8 @@ const clients = ref<Client[]>([])
 const partnersFailed = ref(false)
 let partnerTimer: ReturnType<typeof setTimeout> | null = null
 let matchedPartner = ''
+/** Klient z číselníku, jehož název partner přesně nese (zdroj výchozích dimenzí). */
+const partnerClientId = ref<number | null>(null)
 
 // Nákup = dodavatel, ostatní účely (prodej) = odběratel.
 const partnerRole = computed<ClientRoleFilter>(() => (form.purpose === 'purchase' ? 'vendors' : 'customers'))
@@ -390,13 +393,28 @@ function onPartnerSearch() {
 // Doplňujeme jen při změně shody, ať to nepřepisuje ruční úpravu IČO/DIČ.
 function applyPartnerMatch() {
   const name = form.partner_name.trim().toLocaleLowerCase()
-  if (!name || name === matchedPartner) return
+  if (!name) { partnerClientId.value = null; return }
+  if (name === matchedPartner) return
   const hit = clients.value.find(c => c.company_name.trim().toLocaleLowerCase() === name)
-  if (!hit) return
+  if (!hit) { partnerClientId.value = null; return }
   matchedPartner = name
+  partnerClientId.value = hit.id
   form.partner_ic = hit.ic ?? ''
   form.partner_dic = hit.dic ?? ''
 }
+
+// Výchozí dimenze: u úhrady dimenze placeného dokladu (včetně jeho výchozích),
+// jinak výchozí dimenze partnera nalezeného v číselníku klientů.
+const dimsReady = ref(false)
+docDims.watchDefaults(
+  () => (form.invoice_id
+    ? { invoice_id: form.invoice_id }
+    : form.purchase_invoice_id
+      ? { purchase_invoice_id: form.purchase_invoice_id }
+      : { client_id: partnerClientId.value }),
+  () => dimsReady.value,
+  () => editId.value <= 0,
+)
 
 // Přepnutí prodej ↔ nákup mění roli (odběratelé/dodavatelé) → načti nabídku znovu.
 watch(partnerRole, () => { loadPartners(form.partner_name.trim()) })
@@ -734,6 +752,7 @@ async function save(post = true) {
         <div v-if="docDims.enabled.value" data-test="cash-header-dimensions">
           <p class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.header_title') }}</p>
           <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
+          <p v-if="docDims.hasAutoFilled.value" class="text-xs text-neutral-500 mt-1" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
         </div>
 
         <!-- Částka + DPH přepínač -->

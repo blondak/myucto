@@ -18,6 +18,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -564,6 +565,8 @@ const clientActions = computed<ActionItem[]>(() => {
         </dl>
       </div>
     </div>
+
+    <EntityDimensionDefaults entity="clients" :entity-id="client.id" mode="summary" />
 
     <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
       <div class="flex flex-wrap items-start justify-between gap-3 mb-4">

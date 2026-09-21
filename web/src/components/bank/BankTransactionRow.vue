@@ -58,6 +58,14 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const auth = useAuthStore()
+
+/** Spárovaná faktura → návrh dimenzí pohybu (její dimenze, jinak výchozí zakázky/klienta). */
+const dimensionPrefill = computed(() => props.tx.matched_invoice_id
+  ? { invoice_id: props.tx.matched_invoice_id }
+  : props.tx.matched_purchase_invoice_id
+    ? { purchase_invoice_id: props.tx.matched_purchase_invoice_id }
+    : null)
+
 const ruleTemplateOpen = ref(false)
 
 // Dimenze pohybu (Firma → Dimenze): štítky v řádku a vlastní rozbalovací editor.
@@ -380,7 +388,7 @@ function candidateReject() {
     <!-- Dimenze pohybu (Firma → Dimenze) — promítnou se i do jeho zaúčtování. -->
     <tr v-if="dimensionsAvailable && dimensionsOpen">
       <td :colspan="colspan" class="bg-neutral-50 px-4 py-3">
-        <DocumentDimensionsPanel doc-type="bank-transactions" :doc-id="tx.id" @saved="savedDimensions = $event" />
+        <DocumentDimensionsPanel doc-type="bank-transactions" :doc-id="tx.id" :prefill="dimensionPrefill" @saved="savedDimensions = $event" />
       </td>
     </tr>
   </template>
@@ -486,7 +494,7 @@ function candidateReject() {
       <LinkedDocumentsPanel entity-type="bank_transaction" :entity-id="tx.id" />
     </div>
     <DocumentDimensionsPanel v-if="dimensionsAvailable && dimensionsOpen" class="mt-1"
-      doc-type="bank-transactions" :doc-id="tx.id" @saved="savedDimensions = $event" />
+      doc-type="bank-transactions" :doc-id="tx.id" :prefill="dimensionPrefill" @saved="savedDimensions = $event" />
     <!-- Akce mobilní karty jedou ze stejného `matchActions(tx)` jako desktopový
          řádek. Dřív tu byla ručně psaná mřížka tlačítek se stejným obsahem:
          duplicitní, bez ikon a hlavně s `flex-1`, které třem tlačítkům přidělilo

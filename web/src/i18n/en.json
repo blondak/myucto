@@ -27083,6 +27083,13 @@
     "save_failed": "The document is saved, but its dimensions could not be saved: {message}",
     "needs_repost": "The document items carry different dimensions but the posted cost line is a single one. Repost the document to split the cost by items.",
     "edit_lines": "Edit dimensions",
-    "lines_saved": "Line dimensions saved."
+    "lines_saved": "Line dimensions saved.",
+    "defaults": {
+      "title": "Default dimensions",
+      "hint_client": "Prefilled into the header of issued and received invoices and cash documents of this client. A document without a dimension of that type gets it when posted. Project defaults take precedence.",
+      "hint_project": "Prefilled into the header of invoices of this project. A document without a dimension of that type gets it when posted. They take precedence over the client defaults.",
+      "save_failed": "The record is saved, but its default dimensions could not be saved: {message}",
+      "autofilled": "Prefilled from the default dimensions of the client, project or paid document."
+    }
   }
 }

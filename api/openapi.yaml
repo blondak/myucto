@@ -8331,6 +8331,95 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/clients/{id}/dimensions:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Clients]
+      summary: Výchozí dimenze klienta (odběratel i dodavatel)
+      description: |
+        Hodnoty dimenzí (Firma → Dimenze), kterými se předvyplní hlavička vystavené
+        i přijaté faktury klienta a které účtování doplní dokladu bez hodnoty daného
+        typu. Výchozí dimenze zakázky mají přednost.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Clients]
+      summary: Uložit výchozí dimenze klienta
+      description: Nahradí celou mapu. Vyžaduje zapnuté dimenze firmy; už zaúčtované doklady se nemění.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DimensionDefaults' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '400':
+          description: Neplatná hodnota dimenze (`invalid_dimension`)
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Dimenze nejsou u firmy zapnuté (`dimensions_disabled`)
+        '422':
+          description: Uzavřená hodnota dimenze (`dimension_closed`)
+
+  /api/v1/projects/{id}/dimensions:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Projects]
+      summary: Výchozí dimenze zakázky
+      description: Mají přednost před výchozími dimenzemi klienta.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Projects]
+      summary: Uložit výchozí dimenze zakázky
+      description: Nahradí celou mapu. Vyžaduje zapnuté dimenze firmy; už zaúčtované doklady se nemění.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DimensionDefaults' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '400':
+          description: Neplatná hodnota dimenze (`invalid_dimension`)
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Dimenze nejsou u firmy zapnuté (`dimensions_disabled`)
+        '422':
+          description: Uzavřená hodnota dimenze (`dimension_closed`)
+
   /api/v1/clients/lookup-bank:
     post:
       tags: [Lookup]
@@ -25181,6 +25270,15 @@ components:
         branding_enabled: { type: boolean, description: "Zapíná vlastní logo a barevný branding v e-mailech a PDF." }
         pdf_logo_show_name: { type: boolean }
         is_default: { type: boolean, readOnly: true, description: "Výchozí profil dodavatele použitý bez explicitní volby." }
+
+    DimensionDefaults:
+      type: object
+      required: [dimensions]
+      properties:
+        dimensions:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+          description: "Výchozí dimenze (Firma → Dimenze): id typu → id hodnoty, nejvýš jedna hodnota za typ."
 
     Client:
       type: object

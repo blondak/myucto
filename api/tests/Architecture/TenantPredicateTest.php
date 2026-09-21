@@ -179,6 +179,8 @@ final class TenantPredicateTest extends TestCase
         // což pokrývá DimensionVisibilityTest.
         'journal_entry_line_dimensions',
         'document_dimensions',
+        // Výchozí dimenze klienta a zakázky (1861).
+        'dimension_defaults',
     ];
 
     /**

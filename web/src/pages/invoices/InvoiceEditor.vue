@@ -1241,6 +1241,13 @@ onMounted(async () => {
   loaded.value = true
 })
 
+// Výchozí dimenze zakázky > klienta do prázdných typů hlavičky (nový doklad i změna klienta/zakázky).
+docDims.watchDefaults(
+  () => ({ client_id: form.value.client_id, project_id: form.value.project_id }),
+  () => loaded.value,
+  () => !isEdit.value,
+)
+
 onBeforeUnmount(() => {
   availabilityGeneration++
 })
@@ -3046,6 +3053,7 @@ async function deleteDraft() {
           <div v-if="docDims.enabled.value" class="sm:col-span-2" data-test="invoice-header-dimensions">
             <p class="text-xs text-neutral-500 mb-1">{{ t('dimensions.header_title') }}</p>
             <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
+            <p v-if="docDims.hasAutoFilled.value" class="text-xs text-neutral-500 mt-1" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
           </div>
         </div>
       </div>

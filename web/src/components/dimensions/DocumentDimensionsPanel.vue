@@ -2,8 +2,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DimensionFields from './DimensionFields.vue'
-import { dimensionsApi, compactDimensions, type DimensionDocType, type DimensionMap } from '@/api/dimensions'
+import { dimensionsApi, compactDimensions, type DimensionDocType, type DimensionMap, type DimensionPrefillParams } from '@/api/dimensions'
 import { useDimensions } from '@/composables/useDimensions'
+import { applyPrefill } from '@/composables/useDocumentDimensions'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 
@@ -11,6 +12,9 @@ import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
  * Dimenze hlavičky dokladu na jeho detailu (bankovní pohyb, pokladní doklad, faktura).
  * Uložení promítne dimenze i do už zaúčtovaných řádků dokladu — mění se jen
  * analytika, proto to jde i u dokladu v uzavřeném období.
+ *
+ * `prefill` (spárovaná faktura / klient) doplní prázdné typy jako návrh — uloží
+ * se až tlačítkem, doklad se sám nemění.
  */
 const props = withDefaults(defineProps<{
   docType: DimensionDocType
@@ -18,7 +22,8 @@ const props = withDefaults(defineProps<{
   readonly?: boolean
   /** Bez rámečku a nadpisu (vložení do existující karty). */
   bare?: boolean
-}>(), { readonly: false, bare: false })
+  prefill?: DimensionPrefillParams | null
+}>(), { readonly: false, bare: false, prefill: null })
 
 const emit = defineEmits<{ saved: [header: DimensionMap] }>()
 
@@ -31,9 +36,12 @@ const saved = ref<string>('{}')
 const loading = ref(false)
 const saving = ref(false)
 const needsRepost = ref(false)
+const autoFilled = ref<Record<number, number>>({})
 
 const dirty = computed(() => JSON.stringify(compactDimensions(header.value)) !== saved.value)
 const editable = computed(() => !props.readonly && dims.canEdit.value)
+const hasAutoFilled = computed(() =>
+  Object.entries(autoFilled.value).some(([typeId, valueId]) => header.value[Number(typeId)] === valueId))
 
 async function load() {
   if (!dims.enabled.value || props.docId <= 0) return
@@ -43,11 +51,32 @@ async function load() {
     const data = await dimensionsApi.getDocument(props.docType, props.docId)
     header.value = { ...data.header }
     saved.value = JSON.stringify(compactDimensions(data.header))
+    autoFilled.value = {}
   } catch {
     header.value = {}
   } finally {
     loading.value = false
   }
+  await applyPrefillParams()
+}
+
+let prefillSeq = 0
+async function applyPrefillParams() {
+  if (!editable.value || !dims.enabled.value) return
+  const params = props.prefill ?? {}
+  const seq = ++prefillSeq
+  let defaults: Record<number, number> = {}
+  if (Object.values(params).some(v => v != null && v > 0)) {
+    try {
+      defaults = (await dimensionsApi.prefill(params)).header
+    } catch {
+      return
+    }
+  }
+  if (seq !== prefillSeq) return
+  const result = applyPrefill(header.value, autoFilled.value, defaults)
+  header.value = result.header
+  autoFilled.value = result.autoFilled
 }
 
 async function save() {
@@ -55,6 +84,7 @@ async function save() {
   try {
     const result = await dimensionsApi.saveDocument(props.docType, props.docId, { header: header.value })
     saved.value = JSON.stringify(compactDimensions(result.header))
+    autoFilled.value = {}
     needsRepost.value = result.restamp.needs_repost
     toast.success(result.restamp.lines > 0
       ? t('dimensions.saved_restamped', { count: result.restamp.lines })
@@ -69,6 +99,7 @@ async function save() {
 
 onMounted(load)
 watch(() => [props.docType, props.docId], load)
+watch(() => JSON.stringify(props.prefill ?? {}), () => { if (!loading.value) void applyPrefillParams() })
 </script>
 
 <template>
@@ -84,6 +115,7 @@ watch(() => [props.docType, props.docId], load)
     </div>
     <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
     <DimensionFields v-else v-model="header" :disabled="!editable" />
+    <p v-if="!loading && hasAutoFilled" class="mt-2 text-xs text-neutral-500" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
     <p v-if="needsRepost" class="mt-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-800">
       {{ t('dimensions.needs_repost') }}
     </p>

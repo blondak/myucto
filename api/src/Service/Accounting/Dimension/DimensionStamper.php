@@ -17,7 +17,9 @@ use PDO;
  * kterou by razítkovala jen část z nich, by sestavy po dimenzích tiše zkreslila.
  *
  * Pravidla:
- *   • Hlavička dokladu platí pro všechny řádky zápisu.
+ *   • Hlavička dokladu platí pro všechny řádky zápisu. Typ, který hlavička nemá,
+ *     doplní výchozí dimenze zakázky, jinak klienta ({@see DimensionDefaults}) —
+ *     i u dokladů z importu, vytěžení a automatizací, které editor neviděly.
  *   • Dimenze položky přebíjí hlavičku (typ po typu) na výsledkových řádcích
  *     (náklad, výnos). Nesou-li položky jednoho výsledkového řádku různé dimenze,
  *     řádek se při zaúčtování rozdělí v poměru základu položek — účet, strana
@@ -239,7 +241,11 @@ final class DimensionStamper
                 ];
             }
         }
-        return [$dims['header'], $items];
+        $header = DimensionDefaults::fill(
+            $dims['header'],
+            (new DimensionDefaults($this->db))->forSource($supplierId, $sourceType, $sourceId),
+        );
+        return [$header, $items];
     }
 
     /** @return array<int,string> */

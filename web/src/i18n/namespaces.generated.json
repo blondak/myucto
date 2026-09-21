@@ -287,12 +287,14 @@
       "purchase_invoice"
     ],
     "client-new": [
+      "dimensions",
       "errors",
       "payment_method",
       "purchase_invoice",
       "settings"
     ],
     "client-detail": [
+      "dimensions",
       "documents",
       "linked_documents",
       "project",
@@ -301,6 +303,7 @@
       "workReportTracking"
     ],
     "client-edit": [
+      "dimensions",
       "errors",
       "payment_method",
       "purchase_invoice",
@@ -310,16 +313,19 @@
       "project"
     ],
     "project-new": [
+      "dimensions",
       "errors",
       "project"
     ],
     "project-detail": [
+      "dimensions",
       "documents",
       "linked_documents",
       "project",
       "workReportTracking"
     ],
     "project-edit": [
+      "dimensions",
       "errors",
       "project"
     ],
@@ -1036,6 +1042,7 @@
       "recurring"
     ],
     "recurring-new": [
+      "dimensions",
       "errors",
       "payment_method",
       "project",
@@ -1049,6 +1056,7 @@
       "recurring"
     ],
     "recurring-edit": [
+      "dimensions",
       "errors",
       "payment_method",
       "project",

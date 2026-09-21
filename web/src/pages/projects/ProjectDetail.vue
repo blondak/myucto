@@ -15,6 +15,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import SendWorkReportLinkModal from '@/components/modals/SendWorkReportLinkModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
 
 const toast = useToast()
 const auth = useAuthStore()
@@ -251,6 +252,8 @@ const projectActions = computed<ActionItem[]>(() => {
       <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-2">{{ t('project.note') }}</h3>
       <p class="text-sm text-neutral-700 whitespace-pre-wrap">{{ project.note }}</p>
     </div>
+
+    <EntityDimensionDefaults entity="projects" :entity-id="project.id" mode="summary" />
 
     <!-- KPI: nezaplaceno + po splatnosti -->
     <div v-if="(project.unpaid_summary?.length ?? 0) > 0" class="grid grid-cols-1 md:grid-cols-2 gap-4">

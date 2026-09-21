@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\CostCenterRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
+use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Service\Accounting\PostingService;
 use PDO;
@@ -46,6 +47,8 @@ final class DimensionService
         private readonly DimensionAssignmentRepository $assignments,
         private readonly CostCenterRepository $costCenters,
         private readonly PostingService $posting,
+        private readonly DimensionDefaultRepository $defaults,
+        private readonly DimensionDefaults $defaultsResolver,
     ) {}
 
     /** @return array<string,mixed> */
@@ -376,6 +379,62 @@ final class DimensionService
         return $changed;
     }
 
+    // ── výchozí dimenze klienta a zakázky ─────────────────────────────────────
+
+    /**
+     * @param 'client'|'project' $entity
+     * @return array<int,int> typ => hodnota
+     */
+    public function entityDefaults(int $supplierId, string $entity, int $entityId): array
+    {
+        $this->requireEntity($supplierId, $entity, $entityId);
+        return $this->defaults->forEntity($supplierId, $entity, $entityId);
+    }
+
+    /**
+     * Uloží výchozí dimenze klienta nebo zakázky. Už zaúčtované doklady se nemění —
+     * výchozí hodnoty se uplatní až u dokladů, které se budou účtovat.
+     *
+     * @param 'client'|'project' $entity
+     * @param array<int|string,mixed> $raw typ => hodnota
+     * @return array<int,int>
+     */
+    public function saveEntityDefaults(int $supplierId, string $entity, int $entityId, array $raw): array
+    {
+        $this->requireEnabled($supplierId);
+        $this->requireEntity($supplierId, $entity, $entityId);
+        $current = $this->defaults->forEntity($supplierId, $entity, $entityId);
+        $norm = $this->normalize($supplierId, $raw, array_values($current));
+        $this->defaults->replace($supplierId, $entity, $entityId, $norm);
+        return $norm;
+    }
+
+    /**
+     * Předvyplnění hlavičky dokladu v editoru: zakázka > klient, u platby dimenze
+     * placeného dokladu. Klient/zakázka cizí firmy nic nevrátí (predikát firmy).
+     *
+     * @return array{header:array<int,int>, sources:array<int,string>}
+     */
+    public function prefill(int $supplierId, ?int $clientId, ?int $projectId, ?string $linkedDocType = null, ?int $linkedDocId = null): array
+    {
+        if (!$this->repo->enabled($supplierId)) {
+            return ['header' => [], 'sources' => []];
+        }
+        $result = $this->defaultsResolver->resolve($supplierId, $clientId, $projectId);
+        if ($linkedDocType !== null && $linkedDocId !== null && $linkedDocId > 0
+            && in_array($linkedDocType, ['invoice', 'purchase_invoice'], true)) {
+            foreach ($this->defaultsResolver->effectiveHeader($supplierId, $linkedDocType, $linkedDocId) as $typeId => $valueId) {
+                if (!isset($result['header'][$typeId])) {
+                    $result['header'][$typeId] = $valueId;
+                    $result['sources'][$typeId] = 'document';
+                }
+            }
+            ksort($result['header']);
+            ksort($result['sources']);
+        }
+        return $result;
+    }
+
     /**
      * Filtr sestav na hodnotu dimenze včetně podřízených hodnot.
      */
@@ -485,6 +544,14 @@ final class DimensionService
     {
         if (!$this->repo->enabled($supplierId)) {
             throw new DimensionException('dimensions_disabled', 'Dimenze nejsou u firmy zapnuté (Nastavení firmy).', 409);
+        }
+    }
+
+    private function requireEntity(int $supplierId, string $entity, int $entityId): void
+    {
+        if (!in_array($entity, DimensionDefaultRepository::ENTITIES, true)
+            || !$this->defaults->ownsEntity($supplierId, $entity, $entityId)) {
+            throw new DimensionException('not_found', $entity === 'project' ? 'Zakázka nenalezena.' : 'Klient nenalezen.', 404);
         }
     }
 

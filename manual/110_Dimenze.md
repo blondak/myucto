@@ -119,6 +119,45 @@ vybranou hodnotu (nebo hodnotu pod ní). U Střediska se počítají i řádky, 
 nesou jen kód navázaného střediska, stejně jako v sestavách. Filtr se ukládá do
 adresy stránky i do uložených pohledů a platí i pro export deníku do PDF a XLSX.
 
+## Výchozí dimenze
+
+Klient a zakázka mohou mít **výchozí dimenze**: pro každý typ nejvýš jednu hodnotu,
+firemní i globální. Nastavují se ve formuláři klienta a zakázky v sekci **Výchozí
+dimenze**, detail klienta a zakázky je ukazuje jako štítky. Karta klienta slouží
+pro obě role, výchozí dimenze tedy platí pro vystavené faktury odběratele
+i přijaté faktury dodavatele.
+
+Kde se použijí:
+
+- **Vystavená faktura** a **přijatá faktura**: po výběru klienta (dodavatele) nebo
+  zakázky se předvyplní prázdné dimenze hlavičky. Stejně u nové faktury otevřené
+  z karty klienta nebo zakázky a u přijaté faktury vytěžené z PDF nebo ISDOC.
+- **Pokladní doklad**: u úhrady faktury se převezmou dimenze placené faktury,
+  jinak výchozí dimenze partnera, jehož název přesně odpovídá klientovi
+  v adresáři.
+- **Bankovní pohyb**: u spárovaného pohybu nabídne panel dimenzí hodnoty
+  spárované faktury (její dimenze, případně výchozí dimenze její zakázky
+  a klienta). Uloží se tlačítkem **Uložit dimenze**.
+
+Pravidla přednosti:
+
+- Výchozí dimenze zakázky mají přednost před výchozími dimenzemi klienta, typ
+  po typu. Typ, který zakázka nenastavuje, doplní klient.
+- Předvyplnění nikdy nepřepíše hodnotu, kterou už doklad má nebo kterou jste
+  vybrali ručně. Když změníte klienta nebo zakázku, změní se jen hodnoty, které
+  se předvyplnily automaticky a které jste neupravili.
+- Uzavřená hodnota a neaktivní typ se nepředvyplňují.
+
+Při zaúčtování platí totéž i pro doklady, které editorem neprošly (import,
+vytěžení, opakované faktury, automatizace): typ, pro který doklad hodnotu nemá,
+dostane výchozí hodnotu zakázky, jinak klienta. Dimenze uvedená na dokladu
+vždy vyhrává. U pokladního dokladu platí výchozí dimenze jeho zakázky a pak
+dimenze placené faktury, u bankovního pohybu dimenze spárované faktury.
+
+Změna výchozích dimenzí už zaúčtované doklady nemění. Projeví se u dokladů
+zaúčtovaných později a u dokladu, jehož dimenze na detailu znovu uložíte.
+Smazáním klienta, zakázky nebo hodnoty dimenze se výchozí nastavení odstraní.
+
 ## Sestavy
 
 - **Výsledovka**, **Obratová předvaha** a **Hlavní kniha** mají filtr na dimenzi:
@@ -134,7 +173,8 @@ adresy stránky i do uložených pohledů a platí i pro export deníku do PDF a
 
 Číselník dimenzí a výběry na dokladech vidí uživatel s právem číst účetnictví,
 měnit je smí uživatel s právem zápisu do účetnictví. Zapnutí dimenzí patří
-k nastavení firmy, skupinu firem spravuje správce firmy.
+k nastavení firmy, skupinu firem spravuje správce firmy. Výchozí dimenze klienta
+a zakázky smí měnit ten, kdo smí upravovat klienta, resp. zakázku.
 
 ## Převod z Money S3
 

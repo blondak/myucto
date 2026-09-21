@@ -9,6 +9,7 @@ import { codebooksApi, type Currency } from '@/api/codebooks'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
+import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
 
 /**
  * V `embedded` módu komponenta nečte route a vrací výsledek přes `@created`.
@@ -30,6 +31,8 @@ const isEdit = computed(() =>
   !props.embedded && route.params.id !== undefined && route.params.id !== 'new'
 )
 const projectId = computed(() => (isEdit.value ? Number(route.params.id) : null))
+/** Výchozí dimenze se ukládají zvlášť, až po uložení zakázky (nová zakázka id ještě nemá). */
+const dimensionDefaults = ref<InstanceType<typeof EntityDimensionDefaults> | null>(null)
 const initialClientId = ref<number | null>(null)
 
 const toast = useToast()
@@ -190,6 +193,7 @@ async function submit() {
       const { client_id, ...rest } = form.value
       void client_id
       const updated = await projectsApi.update(projectId.value, rest)
+      await dimensionDefaults.value?.save(projectId.value)
       const revBackfilled = updated.revenue_category_backfilled ?? 0
       if (revBackfilled > 0) {
         toast.success(t('project.default_revenue_category_backfilled', { count: revBackfilled }))
@@ -198,6 +202,7 @@ async function submit() {
       router.push(`/projects/${projectId.value}`)
     } else {
       const created = await projectsApi.create(form.value)
+      await dimensionDefaults.value?.save(created.id)
       if (props.embedded) { emit('created', created); return }
       router.push(`/projects/${created.id}`)
     }
@@ -372,6 +377,8 @@ async function submit() {
           </select>
           <p class="text-xs text-neutral-500 mt-1">{{ t('project.default_revenue_category_hint') }}</p>
         </div>
+
+        <EntityDimensionDefaults ref="dimensionDefaults" entity="projects" :entity-id="projectId" />
 
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('project.note') }}</label>

@@ -13,6 +13,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { settingsApi, type BrandingProfile } from '@/api/settings'
 import { eshopApi, type PriceLevel } from '@/api/eshop'
 import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
+import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
 
 /**
  * V `embedded` módu komponenta nečte route, neredirektuje a vrací výsledek
@@ -43,6 +44,8 @@ const isEdit = computed(() =>
   !props.embedded && route.params.id !== undefined && route.params.id !== 'new'
 )
 const clientId = computed(() => (isEdit.value ? Number(route.params.id) : null))
+/** Výchozí dimenze se ukládají zvlášť, až po uložení karty (nová karta id ještě nemá). */
+const dimensionDefaults = ref<InstanceType<typeof EntityDimensionDefaults> | null>(null)
 
 // Splatnost — UI preset selector. 'inherit' = dědit supplier default; ostatní hodnoty
 // zapíšou do form pevnou dvojici (payment_due_default, payment_due_unit). 'custom'
@@ -481,6 +484,7 @@ async function submit() {
   try {
     if (isEdit.value && clientId.value) {
       const updated = await clientsApi.update(clientId.value, payload)
+      await dimensionDefaults.value?.save(clientId.value)
       const backfilled = updated.expense_category_backfilled ?? 0
       if (backfilled > 0) {
         toast.success(t('client.default_expense_category_backfilled', { count: backfilled }))
@@ -498,6 +502,7 @@ async function submit() {
       router.push(`/clients/${clientId.value}`)
     } else {
       const created = await clientsApi.create(payload)
+      await dimensionDefaults.value?.save(created.id)
       for (const code of created._warnings ?? []) {
         toast.warning(t(`client.warning.${code}`))
       }
@@ -990,6 +995,8 @@ async function submit() {
           </select>
           <p class="text-xs text-neutral-500 mt-1">{{ t('client.default_revenue_category_hint') }}</p>
         </div>
+
+        <EntityDimensionDefaults ref="dimensionDefaults" entity="clients" :entity-id="clientId" />
 
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.note') }}</label>

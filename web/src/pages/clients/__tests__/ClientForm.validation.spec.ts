@@ -42,6 +42,9 @@ vi.mock('@/api/settings', () => ({ settingsApi: { listBrandingProfiles: vi.fn(as
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }),
 }))
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ canRead: () => false, canWrite: () => false }),
+}))
 vi.mock('@/composables/useDemoMode', () => ({
   useDemoMode: () => ({ blockDemoMutation: () => false }),
 }))

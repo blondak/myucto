@@ -592,6 +592,9 @@ final class Routes
         $app->get   ('/api/clients/{id:[0-9]+}/work-report-link/recipients', [WorkReportLinkAction::class, 'recipientsClient']);
         $app->post  ('/api/clients/{id:[0-9]+}/work-report-link/send',       [WorkReportLinkAction::class, 'sendClient']);
         $app->delete('/api/clients/{id:[0-9]+}/work-report-link',            [WorkReportLinkAction::class, 'revokeClient']);
+        // Výchozí dimenze klienta (Firma → Dimenze, migrace 1861)
+        $app->get   ('/api/clients/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'getClient']);
+        $app->put   ('/api/clients/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'saveClient']);
 
         // Projects
         $app->get   ('/api/clients/{client_id:[0-9]+}/projects', ListProjectsAction::class);
@@ -610,6 +613,9 @@ final class Routes
         $app->get   ('/api/projects/{id:[0-9]+}/work-report-link/recipients', [WorkReportLinkAction::class, 'recipientsProject']);
         $app->post  ('/api/projects/{id:[0-9]+}/work-report-link/send',       [WorkReportLinkAction::class, 'sendProject']);
         $app->delete('/api/projects/{id:[0-9]+}/work-report-link',            [WorkReportLinkAction::class, 'revokeProject']);
+        // Výchozí dimenze zakázky (Firma → Dimenze, migrace 1861)
+        $app->get   ('/api/projects/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'getProject']);
+        $app->put   ('/api/projects/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'saveProject']);
 
         // Invoices (M3 — draft + editor + sumace; vystavení/odeslání/PDF přijde v M4)
         $app->get    ('/api/invoices',              ListInvoicesAction::class);
@@ -2250,6 +2256,7 @@ final class Routes
             $g->post  ('/dimensions/group',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'createGroup']);
             $g->put   ('/dimensions/group',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateGroup']);
             $g->delete('/dimensions/group',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'leaveGroup']);
+            $g->get   ('/dimensions/prefill',                            [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'prefill']);
             // Kontační pravidla
             $g->get   ('/posting-rules',                            [PostingRuleAction::class, 'list']);
             // Srovnání kontací s analytickou osnovou. MUSÍ být nad {rule_key} — jinak by
