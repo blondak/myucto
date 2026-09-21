@@ -17,7 +17,7 @@ import { useDimensions } from '@/composables/useDimensions'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
-import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnFilledSm, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
 
@@ -492,8 +492,8 @@ function valueCount(typeId: number) {
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                 {{ t('common.delete') }}
               </button>
-              <button v-if="canWrite" type="button" :class="btnFilled('primary')" class="whitespace-nowrap" data-test="dimension-value-new" @click="newValue(null)">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+              <button v-if="canWrite" type="button" :class="btnFilledSm('primary')" class="whitespace-nowrap" data-test="dimension-value-new" @click="newValue(null)">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
                 {{ t('dimensions.value_new') }}
               </button>
             </div>
