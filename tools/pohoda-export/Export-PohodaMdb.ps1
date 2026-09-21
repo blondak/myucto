@@ -328,6 +328,16 @@ function Export-PohodaMdbGroup($Conn, [string]$Group, [string]$Cil, [string]$Ico
             $sql = "SELECT $select FROM [$t]"
             if ($tdef.Kde -and $Rok) {
                 $kde = $tdef.Kde
+                if ($t -eq 'MZdavky' -and $present -notcontains 'Rok') {
+                    $mzColumns = @()
+                    if ($existing -contains 'MZ') {
+                        $mzColumns = @((Get-PohodaRows $Conn 'SELECT * FROM [MZ] WHERE 1 = 0').Columns | ForEach-Object { $_.ColumnName })
+                    }
+                    if ($present -notcontains 'RefAg' -or $mzColumns -notcontains 'ID' -or $mzColumns -notcontains 'Rok') {
+                        throw "Tabulka MZdavky neobsahuje Rok ani použitelnou vazbu RefAg na MZ.ID; nelze ji bezpečně omezit na rok $Rok."
+                    }
+                    $kde = 'RefAg IN (SELECT ID FROM [MZ] WHERE Rok = {rok})'
+                }
                 if ($tdef.KdeNebo -and $present -contains $tdef.KdeNebo[0]) { $kde = "($kde) OR ($($tdef.KdeNebo[1]))" }
                 $sql += ' WHERE ' + ($kde -replace '\{rok\}', [string]$Rok)
             }

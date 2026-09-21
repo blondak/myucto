@@ -16,6 +16,8 @@ use MyInvoice\Support\CompanyIdNormalizer;
  */
 final class PohodaExport
 {
+    private ?PohodaMdbAccounting $mdb = null;
+
     public const FILES = [
         'journal' => '01_ucetni_denik.xml',
         'chart' => '02_uctova_osnova.xml',
@@ -84,6 +86,21 @@ final class PohodaExport
         if (!is_dir($dir)) {
             throw new PohodaException('export_not_found', 'Složka exportu ' . basename($dir) . ' neexistuje.');
         }
+        if (is_file($dir . DIRECTORY_SEPARATOR . PohodaMdbAccounting::FILE)) {
+            foreach (array_diff(array_keys(self::FILES), ['assets', 'payroll']) as $key) {
+                if (is_file($dir . DIRECTORY_SEPARATOR . self::FILES[$key])) {
+                    throw new PohodaException('export_mixed', 'Agenda obsahuje současně MDB převod a standardní účetní XML. Nahrajte pouze jeden export.');
+                }
+            }
+            $tables = new PohodaMdbTables($dir . DIRECTORY_SEPARATOR . PohodaMdbAccounting::FILE);
+            $ico = CompanyIdNormalizer::ic($tables->ico) ?? $tables->ico;
+            if (basename($dir) !== $ico . '_' . $tables->year) {
+                throw new PohodaException('mdb_agenda_mismatch', 'Složka agendy neodpovídá firmě a roku v MDB exportu.');
+            }
+            $export = new self($dir, $ico, $tables->year, ['ico' => $ico, 'program' => $tables->version, 'state' => 'ok', 'item_state' => 'ok', 'note' => '', 'timestamp' => '']);
+            $export->mdb = new PohodaMdbAccounting($tables);
+            return $export;
+        }
         foreach (self::REQUIRED as $key) {
             if (!is_file($dir . DIRECTORY_SEPARATOR . self::FILES[$key])) {
                 throw new PohodaException('export_incomplete', 'Ve složce ' . basename($dir) . ' chybí ' . self::FILES[$key] . ' - není to úplný export agendy Pohody.');
@@ -129,6 +146,10 @@ final class PohodaExport
      */
     public function records(string $key, string $tag): \Generator
     {
+        if ($this->mdb !== null && $this->mdb->has($key)) {
+            yield from $this->mdb->records($key);
+            return;
+        }
         $path = $this->path($key);
         if ($path === null) {
             return;
@@ -146,6 +167,10 @@ final class PohodaExport
     {
         $out = [];
         foreach (self::FILES as $key => $file) {
+            if ($this->mdb !== null && $this->mdb->has($key)) {
+                $out[] = ['key' => $key, 'file' => $file, 'exists' => true, 'state' => 'ok', 'note' => 'MDB', 'ico' => $this->ico];
+                continue;
+            }
             $path = $this->path($key);
             $info = $path !== null ? PohodaXml::packInfo($path) : null;
             $out[] = [
@@ -164,6 +189,9 @@ final class PohodaExport
     public function fingerprint(): string
     {
         $ctx = hash_init('sha256');
+        if ($this->mdb !== null) {
+            hash_update($ctx, PohodaMdbAccounting::FILE . ':' . hash_file('sha256', $this->dir . DIRECTORY_SEPARATOR . PohodaMdbAccounting::FILE) . "\n");
+        }
         foreach (self::FILES as $key => $file) {
             $path = $this->path($key);
             if ($path !== null) {
@@ -306,10 +334,13 @@ final class PohodaExport
                     $payroll = null;
                 }
             }
-            if (is_file($dir . '/' . self::FILES['journal'])) {
+            if (is_file($dir . '/' . self::FILES['journal']) || is_file($dir . '/' . PohodaMdbAccounting::FILE)) {
                 try {
                     $export = self::open($dir);
-                } catch (\Throwable) {
+                } catch (\Throwable $e) {
+                    if (is_file($dir . '/' . PohodaMdbAccounting::FILE)) {
+                        throw $e;
+                    }
                     continue;
                 }
                 $out[] = [
@@ -405,6 +436,12 @@ final class PohodaExport
         $sum = function (array $keys, string $tag): int {
             $n = 0;
             foreach ($keys as $key) {
+                if ($this->mdb !== null && $this->mdb->has($key)) {
+                    foreach ($this->records($key, $tag) as $_) {
+                        $n++;
+                    }
+                    continue;
+                }
                 $path = $this->path($key);
                 $n += $path !== null ? PohodaXml::count($path, $tag) : 0;
             }
