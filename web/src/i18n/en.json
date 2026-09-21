@@ -24959,6 +24959,8 @@
       "bank": "Bank",
       "link": "Documents linked to the journal",
       "payments": "Invoice payments",
+      "assets": "Fixed assets",
+      "small_assets": "Small assets",
       "vat_coefficients": "VAT deduction coefficient",
       "closing": "Closing of historical years",
       "reconciliation": "Reconciliation",
@@ -24999,7 +25001,18 @@
       "with_vat": "documents with VAT",
       "balances": "statement balances from the journal",
       "moved_entries": "entries at the period boundary",
-      "settled": "years settled"
+      "settled": "years settled",
+      "created_disposed": "created as disposed",
+      "disposed_before": "disposed before the conversion",
+      "later_years": "put into use after the conversion",
+      "drafts": "drafts for review",
+      "improvements": "technical improvements",
+      "disposed": "disposed in converted years",
+      "helper_cards": "helper cards without an asset account",
+      "tax_computed": "cards with computed tax plan",
+      "accounting_depreciation_booked": "accounting depreciation from the journal",
+      "tax_depreciation_confirmed": "confirmed tax depreciation",
+      "accounts_checked": "accounts checked"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",

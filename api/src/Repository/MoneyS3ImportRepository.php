@@ -31,6 +31,8 @@ final class MoneyS3ImportRepository
     public const KIND_BANK_STATEMENT = 'bank_statement';
     public const KIND_BANK_TRANSACTION = 'bank_transaction';
     public const KIND_PAYMENT = 'payment';
+    public const KIND_ASSET = 'asset';
+    public const KIND_SMALL_ASSET = 'small_asset';
 
     /** Jméno zámku je na serveru globální — obsahuje proto i databázi (instalace sdílí server). */
     private const LOCK_SQL = "CONCAT('money_s3:', DATABASE(), ':', ?)";

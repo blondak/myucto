@@ -24959,6 +24959,8 @@
       "bank": "Banka",
       "link": "Vazby dokladů na deník",
       "payments": "Úhrady faktur",
+      "assets": "Dlouhodobý majetek",
+      "small_assets": "Drobný majetek",
       "vat_coefficients": "Koeficient krácení DPH",
       "closing": "Uzávěrka historických let",
       "reconciliation": "Rekonciliace",
@@ -24999,7 +25001,18 @@
       "with_vat": "dokladů s DPH",
       "balances": "stavů výpisů z deníku",
       "moved_entries": "zápisů na hranici období",
-      "settled": "vypořádaných let"
+      "settled": "vypořádaných let",
+      "created_disposed": "založeno vyřazených",
+      "disposed_before": "vyřazených před převodem",
+      "later_years": "zařazených po převodu",
+      "drafts": "konceptů ke kontrole",
+      "improvements": "technických zhodnocení",
+      "disposed": "vyřazených v převedených letech",
+      "helper_cards": "pomocných karet bez majetkového účtu",
+      "tax_computed": "karet s dopočteným daňovým plánem",
+      "accounting_depreciation_booked": "účetních odpisů z deníku",
+      "tax_depreciation_confirmed": "potvrzených daňových odpisů",
+      "accounts_checked": "zkontrolovaných účtů"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",
