@@ -581,7 +581,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
     {
         return ' { "id" : ' . $supplierId . ', "company_name":"Synthetic archive",'
             . ' "email_profile_id":' . $emailProfileId . ', "branding_profile_id":999,'
-            . ' "branding_profile_name":"Historical brand", "zip":"00123" } ';
+            . ' "branding_profile_name":"Historical brand", "zip":"00123",'
+            . ' "logo_path":"storage/supplier-logos/sup-' . $supplierId . '.png" } ';
     }
 
     private static function purchaseVendorSnapshot(): string
@@ -824,6 +825,11 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                     'bytes' => strlen($logoContents),
                     'sha256' => $logoHash,
                     'owners' => [[
+                        'registry_key' => 'table:invoices',
+                        'primary_key' => ['id' => 101],
+                        'column' => 'supplier_snapshot',
+                        'path' => ['logo_path'],
+                    ], [
                         'registry_key' => 'table:supplier',
                         'primary_key' => ['id' => 7],
                         'column' => 'logo_path',
@@ -1035,6 +1041,11 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                         'file_policy' => 'historical_optional',
                         'path_policy' => 'supplier_logo',
                         'file_owners' => [[
+                            'registry_key' => 'table:invoices',
+                            'column' => 'supplier_snapshot',
+                            'path' => ['logo_path'],
+                            'stored_prefix' => 'storage/supplier-logos/',
+                        ], [
                             'registry_key' => 'table:supplier',
                             'column' => 'logo_path',
                             'path' => [],

@@ -101,6 +101,52 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
         self::assertTrue($database->rollBack());
     }
 
+    public function testRemapsHistoricalLogoWithoutChangingOtherSnapshotBytes(): void
+    {
+        $database = $this->database();
+        $snapshot = $this->snapshot();
+        self::assertTrue($database->beginTransaction());
+        $map = new CompanyBackupSqlFilePathMap(
+            $database, $this->inventory($snapshot), $snapshot, $snapshot,
+        );
+        $supplierPath = 'storage/supplier-logos/sup-7.png';
+        $map->transform(
+            $this->projection($snapshot, 'table:supplier'),
+            ['id' => 7, 'logo_path' => $supplierPath],
+            ['id' => 41, 'logo_path' => $supplierPath],
+            true,
+        );
+
+        $oldLogo = 'storage/supplier-logos/sup-7-brand-11-aaaaaaaaaaaa.png';
+        $newLogo = 'storage/supplier-logos/sup-41-brand-11-aaaaaaaaaaaa.png';
+        $source = "{ \"id\":7, \"email_profile_id\" : 29, \"branding_profile_id\":11, "
+            . "\"zip\":\"00123\", \"\\u006cogo_path\":\"$oldLogo\", "
+            . '"company_name":"Syntetický dodavatel" }';
+        $target = str_replace(
+            ['"id":7', '"email_profile_id" : 29'],
+            ['"id":41', '"email_profile_id" : 99'],
+            $source,
+        );
+        $expected = str_replace($oldLogo, $newLogo, $target);
+        $row = $map->transform(
+            $this->projection($snapshot, 'table:invoices'),
+            ['id' => 31, 'supplier_snapshot' => $source],
+            ['id' => 91, 'supplier_snapshot' => $target],
+            true,
+        );
+        self::assertSame($expected, $row['supplier_snapshot']);
+        $deferred = $map->transform(
+            $this->projection($snapshot, 'table:invoices'),
+            ['id' => 31, 'supplier_snapshot' => $source],
+            ['id' => 91, 'supplier_snapshot' => $target],
+            false,
+        );
+        self::assertSame($expected, $deferred['supplier_snapshot']);
+        $map->finish();
+        $map->close();
+        self::assertTrue($database->rollBack());
+    }
+
     public function testPreservesContentHashWhileRemappingTenantFilesystemPath(): void
     {
         $database = $this->database();

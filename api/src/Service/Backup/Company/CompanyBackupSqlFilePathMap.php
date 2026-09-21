@@ -933,7 +933,26 @@ final class CompanyBackupSqlFilePathMap
         }
 
         $raw = $row[$owner->column] ?? null;
-        $encoded = is_string($raw);
+        if (is_string($raw)) {
+            try {
+                $row[$owner->column] = CompanyBackupLosslessJson::replaceStringAtPath(
+                    $raw, $owner->path, $expected, $replacement,
+                );
+            } catch (CompanyBackupPreflightException $e) {
+                $pathMismatch = in_array($e->errorCode, [
+                    'lossless_json_target_missing',
+                    'lossless_json_replacement_invalid',
+                ], true);
+                throw self::error(
+                    $pathMismatch
+                        ? 'file_restore_owner_path_mismatch'
+                        : 'file_restore_owner_document_invalid',
+                    $areaRegistryKey,
+                    $e,
+                );
+            }
+            return $row;
+        }
         $document = $this->document($raw, $areaRegistryKey);
         if (!is_array($document)) {
             throw self::error(
@@ -959,9 +978,7 @@ final class CompanyBackupSqlFilePathMap
         }
         $value = $replacement;
         unset($value);
-        $row[$owner->column] = $encoded
-            ? CanonicalJson::encode($document)
-            : $document;
+        $row[$owner->column] = $document;
         return $row;
     }
 
@@ -983,8 +1000,12 @@ final class CompanyBackupSqlFilePathMap
             );
         }
         try {
+            CompanyBackupLosslessJson::rewriteIntegerTokens(
+                $raw,
+                static fn (): null => null,
+            );
             $decoded = json_decode($raw, true, 128, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
+        } catch (\JsonException|CompanyBackupPreflightException $e) {
             throw self::error(
                 'file_restore_owner_document_invalid',
                 $areaRegistryKey,

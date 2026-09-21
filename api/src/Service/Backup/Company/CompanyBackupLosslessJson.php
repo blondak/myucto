@@ -14,10 +14,18 @@ final class CompanyBackupLosslessJson
     private int $copiedUntil = 0;
     private string $output = '';
     private readonly int $length;
+    private bool $stringTargetFound = false;
 
     /** @param callable(list<int|string>,string):mixed $mapper */
-    private function __construct(private readonly string $json, private readonly mixed $mapper)
-    {
+    private function __construct(
+        private readonly string $json,
+        private readonly mixed $mapper,
+        /** @var list<int|string>|null */
+        private readonly ?array $stringTargetPath = null,
+        private readonly ?string $stringExpected = null,
+        private readonly ?string $stringReplacement = null,
+        private readonly ?string $stringReplacementToken = null,
+    ) {
         $this->length = strlen($json);
     }
 
@@ -36,20 +44,78 @@ final class CompanyBackupLosslessJson
         if ($maxBytes < 1 || strlen($json) > $maxBytes) {
             throw new CompanyBackupPreflightException('lossless_json_limit_exceeded');
         }
-        $parser = new self($json, $mapper);
-        $parser->whitespace();
-        $parser->value([], 0);
-        $parser->whitespace();
-        if ($parser->position !== $parser->length) {
+        return (new self($json, $mapper))->parse();
+    }
+
+    /**
+     * Přepíše jediný string na dekódované cestě bez změny ostatních JSON tokenů.
+     *
+     * @param list<int|string> $path
+     */
+    public static function replaceStringAtPath(
+        string $json,
+        array $path,
+        string $expected,
+        string $replacement,
+        int $maxBytes = self::DEFAULT_MAX_BYTES,
+    ): string {
+        if ($maxBytes < 1 || strlen($json) > $maxBytes
+            || strlen($replacement) > $maxBytes
+        ) {
+            throw new CompanyBackupPreflightException('lossless_json_limit_exceeded');
+        }
+        try {
+            $replacementToken = json_encode(
+                $replacement,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+            );
+        } catch (\JsonException $e) {
+            throw new CompanyBackupPreflightException(
+                'lossless_json_replacement_invalid', previous: $e,
+            );
+        }
+        if (strlen($replacementToken) > $maxBytes) {
+            throw new CompanyBackupPreflightException('lossless_json_limit_exceeded');
+        }
+        $parser = new self(
+            $json,
+            static fn (): null => null,
+            $path,
+            $expected,
+            $replacement,
+            $replacementToken,
+        );
+        $result = $parser->parse();
+        if (!$parser->stringTargetFound) {
+            throw new CompanyBackupPreflightException('lossless_json_target_missing');
+        }
+        if (strlen($result) > $maxBytes) {
+            throw new CompanyBackupPreflightException('lossless_json_limit_exceeded');
+        }
+        return $result;
+    }
+
+    private function parse(): string
+    {
+        $this->whitespace();
+        $this->value([], 0);
+        $this->whitespace();
+        if ($this->position !== $this->length) {
             throw self::invalid();
         }
-        return $parser->output . substr($json, $parser->copiedUntil);
+        return $this->output . substr($this->json, $this->copiedUntil);
     }
 
     /** @param list<int|string> $path */
     private function value(array $path, int $depth): void
     {
         $char = $this->json[$this->position] ?? null;
+        if ($this->stringTargetPath !== null
+            && $path === $this->stringTargetPath
+            && $char !== '"'
+        ) {
+            throw new CompanyBackupPreflightException('lossless_json_replacement_invalid');
+        }
         if ($char === '{') {
             $this->containerDepth($depth);
             $this->object($path, $depth + 1);
@@ -77,6 +143,20 @@ final class CompanyBackupLosslessJson
             throw self::invalid();
         }
         $token = substr($this->json, $start, $this->position - $start);
+        if ($this->stringTargetPath !== null) {
+            if ($path === $this->stringTargetPath) {
+                $this->stringTargetFound = true;
+                if ($this->decodedString($token) !== $this->stringExpected) {
+                    throw new CompanyBackupPreflightException('lossless_json_replacement_invalid');
+                }
+                if ($this->stringExpected !== $this->stringReplacement) {
+                    $this->output .= substr($this->json, $this->copiedUntil, $start - $this->copiedUntil)
+                        . $this->stringReplacementToken;
+                    $this->copiedUntil = $this->position;
+                }
+            }
+            return;
+        }
         $replacement = ($this->mapper)($path, $token);
         if ($replacement === null) {
             return;

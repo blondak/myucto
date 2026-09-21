@@ -172,4 +172,83 @@ final class CompanyBackupLosslessJsonTest extends TestCase
             });
         self::assertSame([['0'], ['list', 0]], $paths);
     }
+
+    public function testReplacesOnlyDecodedStringPathAndPreservesUnrelatedBytes(): void
+    {
+        $source = " { \"\\u006cogo_path\" : \"old\\/logo.png\", "
+            . '"total":1.2300,"exponent":1e+09,"id":7,"nested":{"logo_path":"old/logo.png"} } ';
+        $expected = str_replace('"old\\/logo.png"', '"new/logo.png"', $source);
+        self::assertSame($expected, CompanyBackupLosslessJson::replaceStringAtPath(
+            $source, ['logo_path'], 'old/logo.png', 'new/logo.png',
+        ));
+        self::assertSame($source, CompanyBackupLosslessJson::replaceStringAtPath(
+            $source, ['logo_path'], 'old/logo.png', 'old/logo.png',
+        ));
+        self::assertSame('{"0":"new","items":["old"]}',
+            CompanyBackupLosslessJson::replaceStringAtPath(
+                '{"0":"old","items":["old"]}', ['0'], 'old', 'new',
+            ));
+        self::assertSame('{"0":"old","items":["new"]}',
+            CompanyBackupLosslessJson::replaceStringAtPath(
+                '{"0":"old","items":["old"]}', ['items', 0], 'old', 'new',
+            ));
+    }
+
+    public function testStringReplacementRejectsMissingWrongTypeMismatchAndAmbiguity(): void
+    {
+        foreach ([
+            ['{"other":"old"}', ['logo_path'], 'lossless_json_target_missing'],
+            ['{"logo_path":null}', ['logo_path'], 'lossless_json_replacement_invalid'],
+            ['{"logo_path":{"x":1}}', ['logo_path'], 'lossless_json_replacement_invalid'],
+            ['{"logo_path":"other"}', ['logo_path'], 'lossless_json_replacement_invalid'],
+            ['{"logo_path":"old","\\u006cogo_path":"old"}', ['logo_path'], 'lossless_json_invalid'],
+            ['{"logo_path":"old","nested":{"a":1,"a":2}}', ['logo_path'], 'lossless_json_invalid'],
+            ['{"logo_path":"old","x":1e+}', ['logo_path'], 'lossless_json_invalid'],
+        ] as [$source, $path, $code]) {
+            try {
+                CompanyBackupLosslessJson::replaceStringAtPath(
+                    $source, $path, 'old', 'new',
+                );
+                self::fail('Chybný JSON nebo cílová hodnota musí být odmítnuty.');
+            } catch (CompanyBackupPreflightException $e) {
+                self::assertSame($code, $e->errorCode);
+            }
+        }
+    }
+
+    public function testStringReplacementEnforcesUtf8DepthAndInputOutputByteLimits(): void
+    {
+        foreach ([
+            ['{"logo_path":"old"}', "\xFF", 100, 'lossless_json_replacement_invalid'],
+            ['{"logo_path":"old"}', 'longer', 20, 'lossless_json_limit_exceeded'],
+            ['{"logo_path":"old"}', 'new', 5, 'lossless_json_limit_exceeded'],
+            [str_repeat('[', 65) . '"old"' . str_repeat(']', 65), 'new', 500,
+                'lossless_json_limit_exceeded'],
+        ] as [$source, $replacement, $maxBytes, $code]) {
+            try {
+                CompanyBackupLosslessJson::replaceStringAtPath(
+                    $source, $source[0] === '[' ? array_fill(0, 65, 0) : ['logo_path'],
+                    'old', $replacement, $maxBytes,
+                );
+                self::fail('Neplatné UTF-8 nebo limit musí zastavit náhradu.');
+            } catch (CompanyBackupPreflightException $e) {
+                self::assertSame($code, $e->errorCode);
+            }
+        }
+    }
+
+    public function testIntegerMapperStillRejectsStringReplacement(): void
+    {
+        self::assertSame('123', CompanyBackupLosslessJson::rewriteIntegerTokens(
+            '1', static fn (): int => 123, 1,
+        ));
+        try {
+            CompanyBackupLosslessJson::rewriteIntegerTokens(
+                '{"id":7}', static fn (): string => '8',
+            );
+            self::fail('Integer mapper nesmí začít přijímat string náhrady.');
+        } catch (CompanyBackupPreflightException $e) {
+            self::assertSame('lossless_json_replacement_invalid', $e->errorCode);
+        }
+    }
 }
