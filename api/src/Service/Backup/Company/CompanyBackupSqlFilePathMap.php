@@ -196,6 +196,8 @@ final class CompanyBackupSqlFilePathMap
             if ($binding === null) {
                 if ($area->pathPolicy
                     === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment
+                    || $area->pathPolicy
+                        === CompanyBackupFilePathPolicy::SupplierInvoicePdf
                     || $sourceStoredPath !== null || $targetStoredPath !== null
                 ) {
                     throw self::error(

@@ -101,6 +101,64 @@ final class CompanyBackupFileAreaProjectionTest extends TestCase
         }
     }
 
+    public function testInvoicePdfAreaRequiresExactOwnerAndDirectInvoiceBinding(): void
+    {
+        $registry = $this->registry(
+            tableName: 'invoice_pdfs',
+            areaName: 'invoice-pdfs',
+            pathPolicy: 'supplier_invoice_pdf',
+        );
+        $definition = $registry->definition('file-area:invoice-pdfs');
+        self::assertNotNull($definition);
+
+        $area = CompanyBackupFileAreaProjection::fromDefinition(
+            $definition,
+            $registry,
+        );
+
+        self::assertSame('invoices', $area->storageSubdirectory);
+        self::assertSame(
+            CompanyBackupFilePathPolicy::SupplierInvoicePdf,
+            $area->pathPolicy,
+        );
+        self::assertCount(1, $area->owners->owners);
+        self::assertSame('table:invoice_pdfs', $area->owners->owners[0]->registryKey);
+        self::assertSame('filename', $area->owners->owners[0]->column);
+        self::assertSame([], $area->owners->owners[0]->path);
+        self::assertSame('', $area->owners->owners[0]->storedPrefix);
+    }
+
+    public function testInvoicePdfAreaRejectsOwnerSwapBeforeSqlSource(): void
+    {
+        $registry = $this->registry(
+            areaChanges: ['file_owners' => [[
+                'registry_key' => 'table:invoice_pdfs',
+                'column' => 'invoice_id',
+                'path' => [],
+                'stored_prefix' => '',
+            ]]],
+            tableName: 'invoice_pdfs',
+            areaName: 'invoice-pdfs',
+            pathPolicy: 'supplier_invoice_pdf',
+        );
+        $definition = $registry->definition('file-area:invoice-pdfs');
+        self::assertNotNull($definition);
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::never())->method('prepare');
+
+        try {
+            iterator_to_array(
+                (new CompanyBackupSqlFileReferenceSource())->references(
+                    $pdo, 7, $definition, $registry,
+                ),
+            );
+            self::fail('Záměna PDF vlastníka nesmí vytvořit file area.');
+        } catch (CompanyBackupFileSourceException $e) {
+            self::assertSame('file_area_metadata_invalid', $e->errorCode);
+            self::assertSame('file-area:invoice-pdfs', $e->registryKey);
+        }
+    }
+
     /**
      * @param array<string,mixed> $areaChanges
      * @param array<string,mixed> $tableChanges
@@ -108,6 +166,9 @@ final class CompanyBackupFileAreaProjectionTest extends TestCase
     private function registry(
         array $areaChanges = [],
         array $tableChanges = [],
+        string $tableName = 'invoice_attachments',
+        string $areaName = 'invoice-attachments',
+        string $pathPolicy = 'supplier_invoice_attachment',
     ): TenantDataRegistry {
         $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
         $tableDetails = [
@@ -122,20 +183,20 @@ final class CompanyBackupFileAreaProjectionTest extends TestCase
         $areaDetails = [
             'file_policy' => 'historical_optional',
             'ownership' => ['strategy' => 'database_references'],
-            'path_policy' => 'supplier_invoice_attachment',
+            'path_policy' => $pathPolicy,
             'storage_subdirectory' => 'invoices',
-            'file_owners' => [$this->owner()],
+            'file_owners' => [$this->owner('table:' . $tableName)],
         ];
         return new TenantDataRegistry(1, [
             new TenantDataDefinition(
-                'table:invoice_attachments',
+                'table:' . $tableName,
                 TenantDataObjectKind::Table,
                 TenantDataPolicy::TenantOwnedIndirect,
                 [$profile],
                 [...$tableDetails, ...$tableChanges],
             ),
             new TenantDataDefinition(
-                'file-area:invoice-attachments',
+                'file-area:' . $areaName,
                 TenantDataObjectKind::FileArea,
                 TenantDataPolicy::TenantOwned,
                 [$profile],
@@ -159,10 +220,10 @@ final class CompanyBackupFileAreaProjectionTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function owner(): array
+    private function owner(string $registryKey = 'table:invoice_attachments'): array
     {
         return [
-            'registry_key' => 'table:invoice_attachments',
+            'registry_key' => $registryKey,
             'column' => 'filename',
             'path' => [],
             'stored_prefix' => '',

@@ -92,7 +92,8 @@ final class PdfArchiveService
         // archivace), ať v jednom adresáři nebydlí tisíce souborů. Sloupec `filename` zůstává
         // JEN jméno (bez podsložky) → UI/stahování čisté; read/purge si Y-m dopočítají z prefixu
         // a fallbackují na starý plochý layout.
-        $archiveDir = $this->archiveBaseDir($supplierId) . '/' . self::monthSubdir($archiveName);
+        $archiveDir = $this->archiveBaseDir($supplierId) . '/'
+            . PdfArchiveLayout::monthSubdirectory($archiveName);
         if (!is_dir($archiveDir)) {
             @mkdir($archiveDir, 0755, true);
         }
@@ -231,15 +232,6 @@ final class PdfArchiveService
     }
 
     /**
-     * Měsíční podadresář z názvu souboru (prefix `YYYYMMDD-…`) → `YYYY-MM`. Když název
-     * nezačíná 8 číslicemi (legacy/neznámý formát), vrátí '' = plochý _archive.
-     */
-    private static function monthSubdir(string $filename): string
-    {
-        return preg_match('/^(\d{4})(\d{2})\d{2}-/', $filename, $m) === 1 ? $m[1] . '-' . $m[2] : '';
-    }
-
-    /**
      * Absolutní cesta k archivovanému souboru. Zkusí měsíční podsložku
      * (_archive/{YYYY-MM}/{filename}); pokud tam soubor není (STARÉ ploché archivy
      * z doby před rozdělením), fallback na _archive/{filename}.
@@ -247,7 +239,7 @@ final class PdfArchiveService
     private function archiveFilePath(int $supplierId, string $filename): string
     {
         $base = $this->archiveBaseDir($supplierId);
-        $sub = self::monthSubdir($filename);
+        $sub = PdfArchiveLayout::monthSubdirectory($filename);
         if ($sub !== '') {
             $sharded = $base . '/' . $sub . '/' . $filename;
             if (is_file($sharded)) {

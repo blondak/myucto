@@ -38,6 +38,16 @@ final class CompanyBackupInvoiceAttachmentFilePathTest extends TestCase
         self::assertSame($filename, CompanyBackupInvoiceAttachmentFilePath::storedFilename($path, 7));
     }
 
+    public function testUnsafeBasenameKeepsAttachmentSpecificFailure(): void
+    {
+        try {
+            CompanyBackupInvoiceAttachmentFilePath::sourcePath('../proof.pdf', 7, 41);
+            self::fail('Neplatný název přílohy nesmí projít.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertSame('Cesta přílohy faktury není platná.', $e->getMessage());
+        }
+    }
+
     /** @param mixed $filename */
     #[DataProvider('invalidFilenames')]
     public function testRejectsUnsafeBasenameWithoutSanitizing(mixed $filename): void

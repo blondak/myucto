@@ -108,6 +108,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         $pdo = $this->db->pdo();
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS supplier');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS users');
+        $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_pdfs');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_attachments');
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoices');
         $pdo->exec(
@@ -137,6 +138,19 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . ') ENGINE=InnoDB',
         );
         $pdo->exec(
+            'CREATE TEMPORARY TABLE invoice_pdfs ('
+            . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
+            . 'invoice_id BIGINT UNSIGNED NOT NULL,'
+            . 'filename VARCHAR(255) NOT NULL,'
+            . 'size_bytes BIGINT UNSIGNED NOT NULL,'
+            . 'sha256 CHAR(64) NOT NULL,'
+            . 'was_sent TINYINT(1) NOT NULL,'
+            . 'sent_to TEXT NULL,'
+            . 'reason VARCHAR(64) NOT NULL,'
+            . 'archived_at DATETIME NOT NULL'
+            . ') ENGINE=InnoDB',
+        );
+        $pdo->exec(
             'CREATE TABLE `' . $this->recordsTable . '` ('
             . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
             . 'supplier_id BIGINT UNSIGNED NOT NULL,'
@@ -159,6 +173,23 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             "INSERT INTO invoice_attachments (id, invoice_id, filename)"
             . " VALUES (11, 101, 'same.pdf')",
         );
+        $pdfFilename = '20250131-120000-aaaaaaaa-invoice.pdf';
+        $pdfContents = "existing-tenant-archived-pdf\n";
+        $pdfInsert = $pdo->prepare(
+            'INSERT INTO invoice_pdfs'
+            . ' (id, invoice_id, filename, size_bytes, sha256, was_sent,'
+            . ' sent_to, reason, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        if (!$pdfInsert instanceof PDOStatement || !$pdfInsert->execute([
+            31, 101, $pdfFilename, strlen($pdfContents),
+            hash('sha256', $pdfContents), 1,
+            '["existing@example.test"]', 'sent', '2025-01-31 12:00:00',
+        ])) {
+            throw new \RuntimeException('Nelze vložit syntetický PDF archiv.');
+        }
+        if (!$pdfInsert->closeCursor()) {
+            throw new \RuntimeException('Nelze uzavřít vložení PDF archivu.');
+        }
         $pdo->exec(
             'INSERT INTO `' . $this->recordsTable . '`'
             . ' (id, supplier_id, parent_id, code) VALUES'
@@ -178,6 +209,17 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         ) {
             throw new \RuntimeException('Nelze vytvořit izolovanou existující přílohu.');
         }
+        $existingPdfDirectory = $this->root . DIRECTORY_SEPARATOR . 'live'
+            . DIRECTORY_SEPARATOR . 'invoices' . DIRECTORY_SEPARATOR . 'sup-7'
+            . DIRECTORY_SEPARATOR . '_archive';
+        if (!mkdir($existingPdfDirectory, 0700, true)
+            || file_put_contents(
+                $existingPdfDirectory . DIRECTORY_SEPARATOR . $pdfFilename,
+                $pdfContents,
+            ) !== strlen($pdfContents)
+        ) {
+            throw new \RuntimeException('Nelze vytvořit izolovaný existující PDF archiv.');
+        }
     }
 
     protected function tearDown(): void
@@ -189,6 +231,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             }
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS supplier');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS users');
+            $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_pdfs');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoice_attachments');
             $pdo->exec('DROP TEMPORARY TABLE IF EXISTS invoices');
             if ($this->recordsTable !== '') {
@@ -235,8 +278,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             $validation,
             $pdo,
         );
-        self::assertSame(5, $preflight->rowCount);
-        self::assertSame(5, $preflight->identityCount);
+        self::assertSame(6, $preflight->rowCount);
+        self::assertSame(6, $preflight->identityCount);
         self::assertSame([], $preflight->externalReferences->requirements);
         $decisions = CompanyBackupReferenceDecisionPlan::fromArray([
             'format' => CompanyBackupReferenceDecisionPlan::FORMAT,
@@ -280,15 +323,15 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
 
         self::assertFalse($pdo->inTransaction());
         self::assertSame(8, $result->database->supplierId);
-        self::assertSame(5, $result->database->insertedRows);
+        self::assertSame(6, $result->database->insertedRows);
         self::assertSame(2, $result->database->deferredRows);
         self::assertSame(1, $result->database->updatedRows);
-        self::assertSame(4, $result->postImport->checkedTableCount);
-        self::assertSame(5, $result->postImport->checkedTenantRows);
+        self::assertSame(5, $result->postImport->checkedTableCount);
+        self::assertSame(6, $result->postImport->checkedTenantRows);
         self::assertSame(3,
             $result->postImport->invariantReport->invariantCount);
         self::assertSame(0, $result->postImport->invariantReport->checkCount);
-        self::assertSame(2, $result->publishedFileCount);
+        self::assertSame(3, $result->publishedFileCount);
 
         self::assertSame([
             [
@@ -342,6 +385,31 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             ['id' => 11, 'invoice_id' => 101, 'filename' => 'same.pdf'],
             ['id' => 12, 'invoice_id' => 102, 'filename' => 'same.pdf'],
         ], $this->attachmentRows($pdo));
+        $restoredPdfFilename = '20250131-120000-aaaaaaaa-invoice.pdf';
+        self::assertSame([
+            [
+                'id' => 31,
+                'invoice_id' => 101,
+                'filename' => $restoredPdfFilename,
+                'size_bytes' => strlen("existing-tenant-archived-pdf\n"),
+                'sha256' => hash('sha256', "existing-tenant-archived-pdf\n"),
+                'was_sent' => 1,
+                'sent_to' => '["existing@example.test"]',
+                'reason' => 'sent',
+                'archived_at' => '2025-01-31 12:00:00',
+            ],
+            [
+                'id' => 32,
+                'invoice_id' => 102,
+                'filename' => $restoredPdfFilename,
+                'size_bytes' => strlen("synthetic-round-trip-archived-pdf\n"),
+                'sha256' => hash('sha256', "synthetic-round-trip-archived-pdf\n"),
+                'was_sent' => 1,
+                'sent_to' => '["recipient@example.test"]',
+                'reason' => 'sent',
+                'archived_at' => '2025-01-31 12:00:00',
+            ],
+        ], $this->pdfRows($pdo));
         $restoredLogo = $this->root . DIRECTORY_SEPARATOR . 'live'
             . DIRECTORY_SEPARATOR . 'supplier-logos'
             . DIRECTORY_SEPARATOR . 'sup-8.png';
@@ -371,6 +439,23 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             "existing-tenant-attachment\n",
             file_get_contents($existingAttachment),
         );
+        $restoredPdf = $this->root . DIRECTORY_SEPARATOR . 'live'
+            . DIRECTORY_SEPARATOR . 'invoices' . DIRECTORY_SEPARATOR . 'sup-8'
+            . DIRECTORY_SEPARATOR . '_archive' . DIRECTORY_SEPARATOR . '2025-01'
+            . DIRECTORY_SEPARATOR . $restoredPdfFilename;
+        self::assertFileExists($restoredPdf);
+        self::assertSame(
+            "synthetic-round-trip-archived-pdf\n",
+            file_get_contents($restoredPdf),
+        );
+        $existingPdf = $this->root . DIRECTORY_SEPARATOR . 'live'
+            . DIRECTORY_SEPARATOR . 'invoices' . DIRECTORY_SEPARATOR . 'sup-7'
+            . DIRECTORY_SEPARATOR . '_archive'
+            . DIRECTORY_SEPARATOR . $restoredPdfFilename;
+        self::assertSame(
+            "existing-tenant-archived-pdf\n",
+            file_get_contents($existingPdf),
+        );
         self::assertSame([], $this->entries(
             $this->root . DIRECTORY_SEPARATOR . 'staging',
         ));
@@ -393,6 +478,17 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'id' => 11,
                 'invoice_id' => 101,
                 'filename' => 'same.pdf',
+            ]],
+            'table:invoice_pdfs' => [[
+                'id' => 31,
+                'invoice_id' => 101,
+                'filename' => '20250131-120000-aaaaaaaa-invoice.pdf',
+                'size_bytes' => strlen("synthetic-round-trip-archived-pdf\n"),
+                'sha256' => hash('sha256', "synthetic-round-trip-archived-pdf\n"),
+                'was_sent' => 1,
+                'sent_to' => '["recipient@example.test"]',
+                'reason' => 'sent',
+                'archived_at' => '2025-01-31 12:00:00',
             ]],
             'table:' . $this->recordsTable => [[
                 'id' => 31,
@@ -447,6 +543,13 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         $attachmentHash = hash('sha256', $attachmentContents);
         $attachmentArchivePath = 'files/invoice-attachments/'
             . $attachmentHash . '.pdf';
+        $pdfContents = "synthetic-round-trip-archived-pdf\n";
+        $pdfPath = $this->root . DIRECTORY_SEPARATOR . 'source-archived-pdf.pdf';
+        if (file_put_contents($pdfPath, $pdfContents) !== strlen($pdfContents)) {
+            throw new \RuntimeException('Nelze zapsat syntetický PDF archiv.');
+        }
+        $pdfHash = hash('sha256', $pdfContents);
+        $pdfArchivePath = 'files/invoice-pdfs/' . $pdfHash . '.pdf';
         $fileInventory = CompanyBackupFileInventory::fromArray([
             'format' => CompanyBackupFileInventory::FORMAT,
             'version' => CompanyBackupFileInventory::VERSION,
@@ -467,8 +570,25 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                     ]],
                 ]],
             ], [
-                'registry_key' => 'file-area:supplier-logos',
+                'registry_key' => 'file-area:invoice-pdfs',
                 'order' => 2,
+                'entries' => [[
+                    'source_path' => 'sup-7/_archive/'
+                        . '20250131-120000-aaaaaaaa-invoice.pdf',
+                    'archive_path' => $pdfArchivePath,
+                    'state' => 'present',
+                    'bytes' => strlen($pdfContents),
+                    'sha256' => $pdfHash,
+                    'owners' => [[
+                        'registry_key' => 'table:invoice_pdfs',
+                        'primary_key' => ['id' => 31],
+                        'column' => 'filename',
+                        'path' => [],
+                    ]],
+                ]],
+            ], [
+                'registry_key' => 'file-area:supplier-logos',
+                'order' => 3,
                 'entries' => [[
                     'source_path' => 'sup-7.png',
                     'archive_path' => $logoArchivePath,
@@ -485,6 +605,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             ]],
         ], $registry);
         $sourceFiles[$attachmentArchivePath] = $attachmentPath;
+        $sourceFiles[$pdfArchivePath] = $pdfPath;
         $sourceFiles[$logoArchivePath] = $logoPath;
         $snapshot = new CompanyBackupMachineSnapshot(
             7,
@@ -514,6 +635,45 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         return TenantDataRegistrySnapshot::fromRegistry(new TenantDataRegistry(
             1,
             [
+                $this->tableDefinition(
+                    'table:invoice_pdfs',
+                    TenantDataPolicy::TenantOwnedIndirect,
+                    [
+                        'id', 'invoice_id', 'filename', 'size_bytes', 'sha256',
+                        'was_sent', 'sent_to', 'reason', 'archived_at',
+                    ],
+                    [
+                        'strategy' => 'foreign_key_path',
+                        'path' => [[
+                            'from_column' => 'invoice_id',
+                            'to_table' => 'invoices',
+                            'to_column' => 'id',
+                        ], [
+                            'from_column' => 'supplier_id',
+                            'to_table' => 'supplier',
+                            'to_column' => 'id',
+                        ]],
+                    ],
+                    [$this->reference('invoice_id', 'table:invoices')],
+                ),
+                new TenantDataDefinition(
+                    'file-area:invoice-pdfs',
+                    TenantDataObjectKind::FileArea,
+                    TenantDataPolicy::TenantOwned,
+                    [$profile],
+                    [
+                        'file_policy' => 'historical_optional',
+                        'path_policy' => 'supplier_invoice_pdf',
+                        'file_owners' => [[
+                            'registry_key' => 'table:invoice_pdfs',
+                            'column' => 'filename',
+                            'path' => [],
+                            'stored_prefix' => '',
+                        ]],
+                        'ownership' => ['strategy' => 'database_references'],
+                        'storage_subdirectory' => 'invoices',
+                    ],
+                ),
                 $this->tableDefinition(
                     'table:invoice_attachments',
                     TenantDataPolicy::TenantOwnedIndirect,
@@ -748,6 +908,27 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             'id' => (int) $row['id'],
             'invoice_id' => (int) $row['invoice_id'],
             'filename' => (string) $row['filename'],
+        ], $rows);
+    }
+
+    /** @return list<array<string,int|string|null>> */
+    private function pdfRows(PDO $pdo): array
+    {
+        $rows = $this->fetchRows(
+            $pdo,
+            'SELECT id, invoice_id, filename, size_bytes, sha256, was_sent,'
+                . ' sent_to, reason, archived_at FROM invoice_pdfs ORDER BY id',
+        );
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'invoice_id' => (int) $row['invoice_id'],
+            'filename' => (string) $row['filename'],
+            'size_bytes' => (int) $row['size_bytes'],
+            'sha256' => (string) $row['sha256'],
+            'was_sent' => (int) $row['was_sent'],
+            'sent_to' => is_string($row['sent_to']) ? $row['sent_to'] : null,
+            'reason' => (string) $row['reason'],
+            'archived_at' => (string) $row['archived_at'],
         ], $rows);
     }
 

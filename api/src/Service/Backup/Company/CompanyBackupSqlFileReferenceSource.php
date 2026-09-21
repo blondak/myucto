@@ -20,6 +20,8 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
     public function __construct(
         private int $batchSize = 1_000,
         private CompanyBackupTenantSqlSelector $tenantSelector = new CompanyBackupTenantSqlSelector(),
+        private CompanyBackupFileAreaRootResolver $roots =
+            new CompanyBackupRuntimeFileAreaRootResolver(),
     ) {
         if ($batchSize < 1 || $batchSize > 10_000) {
             throw new \InvalidArgumentException(
@@ -42,6 +44,13 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
             $definition,
             $registry,
         );
+        $pdfRoot = null;
+        if ($area->pathPolicy === CompanyBackupFilePathPolicy::SupplierInvoicePdf) {
+            $pdfRoot = $this->roots->resolve($area->storageSubdirectory);
+            if ($pdfRoot === '' || str_contains($pdfRoot, "\0")) {
+                throw $this->error('file_area_root_invalid', $area);
+            }
+        }
         foreach ($area->owners->owners as $owner) {
             $target = $registry->definition($owner->registryKey);
             if (!$target instanceof TenantDataDefinition) {
@@ -55,6 +64,7 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
                 $owner,
                 $selection,
                 $supplierId,
+                $pdfRoot,
             ) as $reference) {
                 yield $reference;
             }
@@ -69,6 +79,7 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
         CompanyBackupFileOwnerDefinition $owner,
         CompanyBackupSqlSelection $selection,
         int $supplierId,
+        ?string $pdfRoot,
     ): iterable {
         $primaryKey = $this->primaryKey($target, $area);
         $offset = 0;
@@ -103,11 +114,19 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
                     }
                 }
                 try {
-                    $sourcePath = $area->pathPolicy->sourcePath(
-                        $owner->relativeSourcePath($storedPath),
-                        $supplierId,
-                        $invoiceId,
-                    );
+                    $storedRelativePath = $owner->relativeSourcePath($storedPath);
+                    $sourcePath = $area->pathPolicy
+                        === CompanyBackupFilePathPolicy::SupplierInvoicePdf
+                        ? $this->invoicePdfSourcePath(
+                            $storedRelativePath,
+                            $supplierId,
+                            $pdfRoot,
+                        )
+                        : $area->pathPolicy->sourcePath(
+                            $storedRelativePath,
+                            $supplierId,
+                            $invoiceId,
+                        );
                 } catch (\InvalidArgumentException $e) {
                     throw $this->error(
                         'file_reference_path_invalid',
@@ -170,6 +189,8 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
         );
         $invoiceAttachment = $area->pathPolicy
             === CompanyBackupFilePathPolicy::SupplierInvoiceAttachment;
+        $requiredBasename = $invoiceAttachment
+            || $area->pathPolicy === CompanyBackupFilePathPolicy::SupplierInvoicePdf;
         $sql = 'SELECT ' . implode(', ', $keyColumns)
             . ', ' . $pathExpression . ' AS `' . self::PATH_ALIAS . '`'
             . ($invoiceAttachment
@@ -178,7 +199,7 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
                 : '')
             . ' FROM ' . $table . ' AS ' . $quotedAlias
             . ' WHERE ' . $selection->where
-            . ($invoiceAttachment ? ''
+            . ($requiredBasename ? ''
                 : ' AND ' . $pathExpression . ' IS NOT NULL'
                     . " AND " . $pathExpression . " <> ''")
             . ' ORDER BY ' . implode(', ', $keyColumns)
@@ -345,6 +366,36 @@ final readonly class CompanyBackupSqlFileReferenceSource implements
             ['options' => ['min_range' => 1]],
         );
         return is_int($parsed) ? $parsed : null;
+    }
+
+    private function invoicePdfSourcePath(
+        string $filename,
+        int $supplierId,
+        ?string $root,
+    ): string {
+        if (!is_string($root)) {
+            throw new \InvalidArgumentException(
+                'Kořen PDF archivu faktur není dostupný.',
+            );
+        }
+        $candidates = CompanyBackupInvoicePdfFilePath::sourceCandidates(
+            $filename,
+            $supplierId,
+        );
+        if ($candidates === []) {
+            throw new \InvalidArgumentException(
+                'Kandidáti cesty PDF archivu faktur nejsou platní.',
+            );
+        }
+        $flat = $candidates[count($candidates) - 1];
+        $monthly = count($candidates) > 1 ? $candidates[0] : null;
+        if (!is_string($monthly)) {
+            return $flat;
+        }
+        $monthlyPath = $root . DIRECTORY_SEPARATOR
+            . str_replace('/', DIRECTORY_SEPARATOR, $monthly);
+        clearstatcache(true, $monthlyPath);
+        return is_file($monthlyPath) ? $monthly : $flat;
     }
 
     private function error(

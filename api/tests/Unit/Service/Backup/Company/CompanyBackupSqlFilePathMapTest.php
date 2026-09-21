@@ -635,6 +635,51 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
         self::assertTrue($database->rollBack());
     }
 
+    public function testInvoicePdfRejectsMissingInventoryOwnerEvenWithNullOrEmptyFilename(): void
+    {
+        foreach ([null, ''] as $filename) {
+            $database = $this->database();
+            $snapshot = $this->pdfSnapshot();
+            self::assertTrue($database->beginTransaction());
+            $map = new CompanyBackupSqlFilePathMap(
+                $database,
+                CompanyBackupFileInventory::fromArray([
+                    'format' => CompanyBackupFileInventory::FORMAT,
+                    'version' => CompanyBackupFileInventory::VERSION,
+                    'areas' => [[
+                        'registry_key' => 'file-area:invoice-pdfs',
+                        'order' => 1,
+                        'entries' => [],
+                    ]],
+                ], $snapshot),
+                $snapshot,
+                $snapshot,
+            );
+            $map->transform(
+                $this->projection($snapshot, 'table:supplier'),
+                ['id' => 7], ['id' => 41], true,
+            );
+            try {
+                $map->transform(
+                    $this->projection($snapshot, 'table:invoice_pdfs'),
+                    ['id' => 31, 'invoice_id' => 101, 'filename' => $filename],
+                    ['id' => 91, 'invoice_id' => 901, 'filename' => $filename],
+                    true,
+                );
+                self::fail('PDF řádek bez manifestového vlastníka nesmí projít.');
+            } catch (CompanyBackupFileRestoreException $e) {
+                self::assertSame(
+                    'file_restore_inventory_owner_missing',
+                    $e->errorCode,
+                );
+                self::assertSame('file-area:invoice-pdfs', $e->registryKey);
+            } finally {
+                $map->close();
+                self::assertTrue($database->rollBack());
+            }
+        }
+    }
+
     private function database(): PDO
     {
         $dsn = getenv('COMPANY_BACKUP_FILE_MAP_TEST_DSN');
@@ -976,6 +1021,35 @@ final class CompanyBackupSqlFilePathMapTest extends TestCase
             new TenantDataRegistry(1, [$supplier, $invoices, $attachments, $area],
                 [$profile]),
             $profile,
+        );
+    }
+
+    private function pdfSnapshot(): TenantDataRegistrySnapshot
+    {
+        $raw = $this->attachmentSnapshot()->toArray();
+        foreach ($raw['definitions'] as &$definition) {
+            if ($definition['key'] === 'table:invoice_attachments') {
+                $definition['key'] = 'table:invoice_pdfs';
+            } elseif ($definition['key'] === 'file-area:invoice-attachments') {
+                $definition['key'] = 'file-area:invoice-pdfs';
+                $definition['details']['path_policy'] = 'supplier_invoice_pdf';
+                $definition['details']['file_owners'][0]['registry_key'] =
+                    'table:invoice_pdfs';
+            }
+        }
+        unset($definition);
+        $definitions = array_map(
+            static fn (array $definition): TenantDataDefinition =>
+                TenantDataDefinition::fromArray($definition),
+            $raw['definitions'],
+        );
+        return TenantDataRegistrySnapshot::fromRegistry(
+            new TenantDataRegistry(
+                $raw['version'],
+                $definitions,
+                [TenantDataRegistry::COMPANY_BACKUP_PROFILE],
+            ),
+            TenantDataRegistry::COMPANY_BACKUP_PROFILE,
         );
     }
 

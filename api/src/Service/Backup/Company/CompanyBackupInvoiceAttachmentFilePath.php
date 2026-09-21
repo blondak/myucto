@@ -11,7 +11,11 @@ final class CompanyBackupInvoiceAttachmentFilePath
     {
         self::assertPositiveId($supplierId);
         self::assertPositiveId($invoiceId);
-        $name = self::filename($filename);
+        try {
+            $name = CompanyBackupFileBasename::validate($filename);
+        } catch (\InvalidArgumentException) {
+            throw self::invalid();
+        }
         $path = 'sup-' . $supplierId . '/attachments/' . $invoiceId . '/' . $name;
         CompanyBackupFileEntry::normalizeSourcePath($path);
         return $path;
@@ -73,29 +77,11 @@ final class CompanyBackupInvoiceAttachmentFilePath
             return null;
         }
         try {
-            $filename = self::filename($matches[3]);
+            $filename = CompanyBackupFileBasename::validate($matches[3]);
         } catch (\InvalidArgumentException) {
             return null;
         }
         return ['invoice_id' => $invoiceId, 'filename' => $filename];
-    }
-
-    private static function filename(mixed $filename): string
-    {
-        if (!is_string($filename)
-            || strlen($filename) > 255
-            || str_contains($filename, '/')
-            || str_contains($filename, '\\')
-            || str_contains($filename, ':')
-            || preg_match('/[\x00-\x1F\x7F"<>|*?]/', $filename) === 1
-            || str_ends_with($filename, '.')
-            || str_ends_with($filename, ' ')
-            || preg_match('/\A(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|\z)/iuD', $filename) === 1
-        ) {
-            throw self::invalid();
-        }
-        CompanyBackupFileEntry::normalizeSourcePath($filename);
-        return $filename;
     }
 
     private static function assertPositiveId(int $id): void

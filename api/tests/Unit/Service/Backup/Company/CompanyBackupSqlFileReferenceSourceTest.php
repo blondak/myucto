@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Backup\Company;
 
 use MyInvoice\Service\Backup\Company\CompanyBackupFileSourceException;
+use MyInvoice\Service\Backup\Company\CompanyBackupFileAreaRootResolver;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupSqlFileReferenceSource;
@@ -361,6 +362,199 @@ final class CompanyBackupSqlFileReferenceSourceTest extends TestCase
         }
     }
 
+    public function testInvoicePdfsPreferMonthlyArchiveAndFallbackToLegacyFlatPath(): void
+    {
+        $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR
+            . 'myucto-pdf-source-' . bin2hex(random_bytes(8));
+        $monthly = $root . DIRECTORY_SEPARATOR . 'sup-7'
+            . DIRECTORY_SEPARATOR . '_archive' . DIRECTORY_SEPARATOR . '2025-01';
+        $flat = $root . DIRECTORY_SEPARATOR . 'sup-8'
+            . DIRECTORY_SEPARATOR . '_archive';
+        self::assertTrue(mkdir($monthly, 0700, true));
+        self::assertTrue(mkdir($flat, 0700, true));
+        $monthlyName = '20250131-120000-aaaaaaaa-monthly.pdf';
+        $flatName = '20250201-120000-bbbbbbbb-flat.pdf';
+        self::assertSame(7, file_put_contents(
+            $monthly . DIRECTORY_SEPARATOR . $monthlyName,
+            'monthly',
+        ));
+        self::assertSame(11, file_put_contents(
+            dirname($monthly) . DIRECTORY_SEPARATOR . $monthlyName,
+            'legacy-flat',
+        ));
+        self::assertSame(4, file_put_contents(
+            $flat . DIRECTORY_SEPARATOR . $flatName,
+            'flat',
+        ));
+
+        try {
+            $pdo = $this->invoicePdfDatabase($monthlyName, $flatName);
+            $registry = $this->invoicePdfRegistry();
+            $area = $registry->definition('file-area:invoice-pdfs');
+            self::assertNotNull($area);
+            $roots = new CountingPdfRootResolver($root);
+            $source = new CompanyBackupSqlFileReferenceSource(
+                batchSize: 1,
+                roots: $roots,
+            );
+
+            $own = iterator_to_array($source->references(
+                $pdo, 7, $area, $registry,
+            ));
+            $foreign = iterator_to_array($source->references(
+                $pdo, 8, $area, $registry,
+            ));
+
+            self::assertSame([
+                'sup-7/_archive/2025-01/' . $monthlyName,
+            ], array_column($own, 'sourcePath'));
+            self::assertSame([
+                'sup-8/_archive/' . $flatName,
+            ], array_column($foreign, 'sourcePath'));
+            self::assertSame([['id' => 31]], array_column($own, 'primaryKey'));
+            self::assertSame([['id' => 32]], array_column($foreign, 'primaryKey'));
+            self::assertSame(2, $roots->calls);
+        } finally {
+            $this->removeTree($root);
+        }
+    }
+
+    public function testMonthlyPdfSymlinkOutsideRootStopsCollectionDespiteFlatFallback(): void
+    {
+        $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR
+            . 'myucto-pdf-source-' . bin2hex(random_bytes(8));
+        $monthly = $root . '/sup-7/_archive/2025-01';
+        self::assertTrue(mkdir($monthly, 0700, true));
+        $outside = tempnam(sys_get_temp_dir(), 'myucto-pdf-outside-');
+        self::assertIsString($outside);
+        $name = '20250131-120000-aaaaaaaa-monthly.pdf';
+        try {
+            self::assertSame(7, file_put_contents($outside, 'outside'));
+            self::assertSame(4, file_put_contents(dirname($monthly) . '/' . $name, 'flat'));
+            if (!@symlink($outside, $monthly . '/' . $name)) {
+                self::markTestSkipped('Platforma testu nedovoluje vytvořit symlink.');
+            }
+            $pdo = $this->invoicePdfDatabase($name, 'other.pdf');
+            $registry = new TenantDataRegistry(1, $this->invoicePdfRegistry()->definitions(), [
+                TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+            ]);
+            $area = $registry->definition('file-area:invoice-pdfs');
+            self::assertNotNull($area);
+            $roots = new CountingPdfRootResolver($root);
+            $source = new CompanyBackupSqlFileReferenceSource(roots: $roots);
+            $references = iterator_to_array($source->references($pdo, 7, $area, $registry));
+            self::assertSame('sup-7/_archive/2025-01/' . $name, $references[0]->sourcePath);
+
+            try {
+                (new \MyInvoice\Service\Backup\Company\CompanyBackupFileCollector($roots))->collect(
+                    $pdo,
+                    \MyInvoice\Service\Backup\Registry\TenantDataRegistrySnapshot::fromRegistry(
+                        $registry,
+                        TenantDataRegistry::COMPANY_BACKUP_PROFILE,
+                    ),
+                    7,
+                    $source,
+                );
+                self::fail('Měsíční symlink nesmí uniknout kontrole ani použít plochou kopii.');
+            } catch (CompanyBackupFileSourceException $e) {
+                self::assertSame('file_source_path_unsafe', $e->errorCode);
+                self::assertSame('sup-7/_archive/2025-01/' . $name, $e->sourcePath);
+            }
+        } finally {
+            @unlink($outside);
+            $this->removeTree($root);
+        }
+    }
+
+    public function testInvoicePdfMissingCandidatesKeepLegacyFlatReference(): void
+    {
+        $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR
+            . 'myucto-pdf-source-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($root, 0700, true));
+        try {
+            $name = '20251340-120000-cccccccc-missing.pdf';
+            $pdo = $this->invoicePdfDatabase($name, 'other.pdf');
+            $registry = $this->invoicePdfRegistry();
+            $area = $registry->definition('file-area:invoice-pdfs');
+            self::assertNotNull($area);
+
+            $references = iterator_to_array(
+                (new CompanyBackupSqlFileReferenceSource(
+                    roots: new CountingPdfRootResolver($root),
+                ))->references($pdo, 7, $area, $registry),
+            );
+
+            self::assertSame(
+                ['sup-7/_archive/' . $name],
+                array_column($references, 'sourcePath'),
+            );
+        } finally {
+            $this->removeTree($root);
+        }
+    }
+
+    public function testInvoicePdfFilenameWithoutDateHasOnlyLegacyFlatCandidate(): void
+    {
+        $pdo = $this->invoicePdfDatabase('legacy.pdf', 'other.pdf');
+        $registry = $this->invoicePdfRegistry();
+        $area = $registry->definition('file-area:invoice-pdfs');
+        self::assertNotNull($area);
+
+        $references = iterator_to_array(
+            (new CompanyBackupSqlFileReferenceSource(
+                roots: new CountingPdfRootResolver(sys_get_temp_dir()),
+            ))->references($pdo, 7, $area, $registry),
+        );
+
+        self::assertSame(
+            ['sup-7/_archive/legacy.pdf'],
+            array_column($references, 'sourcePath'),
+        );
+    }
+
+    public function testInvoicePdfRejectsInvalidRootBeforeQuery(): void
+    {
+        $registry = $this->invoicePdfRegistry();
+        $area = $registry->definition('file-area:invoice-pdfs');
+        self::assertNotNull($area);
+        foreach (['', "bad\0root"] as $root) {
+            $pdo = $this->createMock(PDO::class);
+            $pdo->expects(self::never())->method('prepare');
+            try {
+                iterator_to_array(
+                    (new CompanyBackupSqlFileReferenceSource(
+                        roots: new CountingPdfRootResolver($root),
+                    ))->references($pdo, 7, $area, $registry),
+                );
+                self::fail('Neplatný runtime kořen nesmí otevřít SQL dotaz.');
+            } catch (CompanyBackupFileSourceException $e) {
+                self::assertSame('file_area_root_invalid', $e->errorCode);
+                self::assertSame('file-area:invoice-pdfs', $e->registryKey);
+            }
+        }
+    }
+
+    public function testInvoicePdfRejectsNullAndEmptyFilenameInsteadOfSkipping(): void
+    {
+        foreach ([null, ''] as $filename) {
+            $pdo = $this->invoicePdfDatabase($filename, 'other.pdf');
+            $registry = $this->invoicePdfRegistry();
+            $area = $registry->definition('file-area:invoice-pdfs');
+            self::assertNotNull($area);
+            try {
+                iterator_to_array(
+                    (new CompanyBackupSqlFileReferenceSource(
+                        roots: new CountingPdfRootResolver(sys_get_temp_dir()),
+                    ))->references($pdo, 7, $area, $registry),
+                );
+                self::fail('Prázdný PDF filename nesmí být přes SQL filtr vynechán.');
+            } catch (CompanyBackupFileSourceException $e) {
+                self::assertSame('file_reference_path_invalid', $e->errorCode);
+                self::assertSame('file-area:invoice-pdfs', $e->registryKey);
+            }
+        }
+    }
+
     /** @param list<array<string,mixed>> $rows */
     private function statement(array $rows): PDOStatement
     {
@@ -502,6 +696,97 @@ final class CompanyBackupSqlFileReferenceSourceTest extends TestCase
         ]);
     }
 
+    private function invoicePdfDatabase(mixed $ownFilename, mixed $foreignFilename): PDO
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE supplier (id INTEGER PRIMARY KEY)');
+        $pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
+        $pdo->exec('CREATE TABLE invoice_pdfs (id INTEGER PRIMARY KEY, invoice_id INTEGER, filename TEXT)');
+        $pdo->exec('INSERT INTO supplier (id) VALUES (7), (8)');
+        $pdo->exec('INSERT INTO invoices (id, supplier_id) VALUES (101, 7), (201, 8)');
+        $statement = $pdo->prepare(
+            'INSERT INTO invoice_pdfs (id, invoice_id, filename) VALUES (?, ?, ?)',
+        );
+        self::assertInstanceOf(PDOStatement::class, $statement);
+        self::assertTrue($statement->execute([31, 101, $ownFilename]));
+        self::assertTrue($statement->execute([32, 201, $foreignFilename]));
+        self::assertTrue($statement->closeCursor());
+        return $pdo;
+    }
+
+    private function invoicePdfRegistry(): TenantDataRegistry
+    {
+        $profile = TenantDataRegistry::COMPANY_BACKUP_PROFILE;
+        return new TenantDataRegistry(1, [
+            new TenantDataDefinition(
+                'table:invoice_pdfs',
+                TenantDataObjectKind::Table,
+                TenantDataPolicy::TenantOwnedIndirect,
+                [$profile],
+                [
+                    'primary_key' => ['id'],
+                    'ownership' => $this->invoiceOwnership(),
+                    'secrets' => [],
+                    'company_backup' => [
+                        'data_columns' => ['id', 'invoice_id', 'filename'],
+                        'embedded_references' => [],
+                        'generated_columns' => [],
+                        'omit_columns' => [],
+                        'references' => [[
+                            'columns' => ['invoice_id'],
+                            'target' => 'table:invoices',
+                            'target_columns' => ['id'],
+                            'mapping' => CompanyBackupReferenceMapping::TenantId->value,
+                            'constraint' => CompanyBackupReferenceConstraint::Required->value,
+                            'nullable_columns' => [],
+                            'fallbacks' => [],
+                        ]],
+                        'restore_overrides' => [],
+                    ],
+                ],
+            ),
+            new TenantDataDefinition(
+                'file-area:invoice-pdfs',
+                TenantDataObjectKind::FileArea,
+                TenantDataPolicy::TenantOwned,
+                [$profile],
+                [
+                    'file_policy' => 'historical_optional',
+                    'ownership' => ['strategy' => 'database_references'],
+                    'path_policy' => 'supplier_invoice_pdf',
+                    'storage_subdirectory' => 'invoices',
+                    'file_owners' => [[
+                        'registry_key' => 'table:invoice_pdfs',
+                        'column' => 'filename',
+                        'path' => [],
+                        'stored_prefix' => '',
+                    ]],
+                ],
+            ),
+        ]);
+    }
+
+    private function removeTree(string $directory): void
+    {
+        if (!is_dir($directory) || is_link($directory)) {
+            return;
+        }
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(
+                $directory,
+                \FilesystemIterator::SKIP_DOTS,
+            ),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iterator as $item) {
+            $item->isDir() && !$item->isLink()
+                ? @rmdir($item->getPathname())
+                : @unlink($item->getPathname());
+        }
+        @rmdir($directory);
+    }
+
     /**
      * @param list<array{from_column:string,to_table:string,to_column:string}>|null $path
      * @return array<string,mixed>
@@ -614,5 +899,18 @@ final class CompanyBackupSqlFileReferenceSourceTest extends TestCase
             'path' => $path,
             'stored_prefix' => 'storage/supplier-logos/',
         ];
+    }
+}
+
+final class CountingPdfRootResolver implements CompanyBackupFileAreaRootResolver
+{
+    public int $calls = 0;
+
+    public function __construct(private readonly string $root) {}
+
+    public function resolve(string $storageSubdirectory): string
+    {
+        ++$this->calls;
+        return $this->root;
     }
 }

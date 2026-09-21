@@ -16,6 +16,7 @@ enum CompanyBackupFilePathPolicy: string
     case SupplierContentHash = 'supplier_content_hash';
     case SupplierLogo = 'supplier_logo';
     case SupplierInvoiceAttachment = 'supplier_invoice_attachment';
+    case SupplierInvoicePdf = 'supplier_invoice_pdf';
 
     public static function fromDefinition(TenantDataDefinition $definition): self
     {
@@ -48,6 +49,10 @@ enum CompanyBackupFilePathPolicy: string
                 $sourcePath,
                 $supplierId,
             ),
+            self::SupplierInvoicePdf => CompanyBackupInvoicePdfFilePath::accepts(
+                $sourcePath,
+                $supplierId,
+            ),
         };
     }
 
@@ -65,6 +70,11 @@ enum CompanyBackupFilePathPolicy: string
             }
             return CompanyBackupInvoiceAttachmentFilePath::sourcePath(
                 $storedRelativePath, $supplierId, $invoiceId,
+            );
+        }
+        if ($this === self::SupplierInvoicePdf) {
+            return CompanyBackupInvoicePdfFilePath::sourcePath(
+                $storedRelativePath, $supplierId,
             );
         }
         if ($this === self::SupplierContentHash) {
@@ -94,6 +104,11 @@ enum CompanyBackupFilePathPolicy: string
         }
         if ($this === self::SupplierInvoiceAttachment) {
             return CompanyBackupInvoiceAttachmentFilePath::storedFilename(
+                $sourcePath, $supplierId,
+            );
+        }
+        if ($this === self::SupplierInvoicePdf) {
+            return CompanyBackupInvoicePdfFilePath::storedFilename(
                 $sourcePath, $supplierId,
             );
         }
@@ -139,6 +154,11 @@ enum CompanyBackupFilePathPolicy: string
             }
             return CompanyBackupInvoiceAttachmentFilePath::restoreTargetPath(
                 $sourcePath, $sourceSupplierId, $targetSupplierId, $targetInvoiceId,
+            );
+        }
+        if ($this === self::SupplierInvoicePdf) {
+            return CompanyBackupInvoicePdfFilePath::restoreTargetPath(
+                $sourcePath, $sourceSupplierId, $targetSupplierId,
             );
         }
         if ($this === self::Relative) {
