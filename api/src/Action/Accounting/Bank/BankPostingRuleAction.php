@@ -156,14 +156,16 @@ final class BankPostingRuleAction
         }
         // Pravidlo založené z konkrétního pohybu: uživatel tím výslovně potvrdil kontaci
         // na skutečné platbě, což je to „první úspěšné použití", po kterém se jinak
-        // pravidlo ručně přepínalo na automatiku. Brzdy politiky (rozsah částky, počet
-        // použití, strop, uzavřené období) platí dál, viz AutoPostingPolicyService.
+        // pravidlo ručně přepínalo na automatiku. Jde o výslovné rozhodnutí uživatele
+        // (`mode_set_manually_at`), takže politika nevyžaduje počet použití ani rozsah
+        // částky; strop, uzavřené období a ostatní brzdy platí dál, viz AutoPostingPolicyService.
         $sourceTxId = (int) ($body['source_transaction_id'] ?? 0);
         if ($sourceTxId > 0) {
             if (!$this->ownsTransaction($supplierId, $sourceTxId)) {
                 return Json::error($response, 'not_found', 'Transakce nenalezena.', 404);
             }
             $data['mode'] = 'auto';
+            $data['mode_set_manually_at'] = date('Y-m-d H:i:s');
         }
         $userId = $this->userId($request);
         $ruleId = $this->rules->insert($supplierId, $data, $userId);

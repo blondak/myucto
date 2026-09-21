@@ -31,6 +31,8 @@ export interface BankPostingRule {
   credit_account_code: string
   description: string | null
   mode: RuleMode
+  /** Kdy uživatel výslovně přepnul pravidlo na automatiku; takové pravidlo nepotřebuje historii použití. */
+  mode_set_manually_at?: string | null
   hit_count: number
   rejected_streak: number
   last_hit_at: string | null
@@ -40,8 +42,8 @@ export interface BankPostingRule {
 }
 
 export type BankPostingRulePayload = Omit<BankPostingRule,
-  'id' | 'supplier_id' | 'hit_count' | 'rejected_streak' | 'approved_streak' | 'promotion_candidate' | 'last_hit_at' | 'created_at' | 'updated_at' | 'mode' | 'created_by_name' | 'system_template_key'>
-  & { mode?: RuleMode }   // create: BE vynutí 'suggest'; update změnu režimu ignoruje klient
+  'id' | 'supplier_id' | 'hit_count' | 'rejected_streak' | 'approved_streak' | 'promotion_candidate' | 'last_hit_at' | 'created_at' | 'updated_at' | 'mode' | 'mode_set_manually_at' | 'created_by_name' | 'system_template_key'>
+  & { mode?: RuleMode }   // create: BE vynutí 'suggest'; při editaci mění režim promote/demote, ne update
 
 export interface PostingSuggestion {
   id: number

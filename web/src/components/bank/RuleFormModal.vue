@@ -9,6 +9,7 @@ import {
   type BankPostingRule, type BankPostingRulePayload, type RuleCreateResult,
 } from '@/api/bankPosting'
 import RuleForm from './RuleForm.vue'
+import { promoteConfirmMessage } from './rulePromotion'
 
 const props = defineProps<{
   /** Editovaný záznam; null/undefined = zakládání nového. */
@@ -132,13 +133,26 @@ async function save() {
   saving.value = true
   try {
     if (isEdit.value && props.rule) {
-      const { mode: _mode, ...fields } = payload
-      const updated = await bankPostingApi.updateRule(props.rule.id, { ...fields, backfill_suggestions: backfill.value })
+      const rule = props.rule
+      // Režim se mění auditovatelnými endpointy promote/demote až po uložení pravidla;
+      // vynucené povýšení (bez 5 potvrzení) musí uživatel výslovně potvrdit.
+      const { mode, ...fields } = payload
+      const promote = mode === 'auto' && rule.mode === 'suggest'
+      const demote = mode === 'suggest' && rule.mode === 'auto'
+      if (promote && !confirm(promoteConfirmMessage({
+        ...rule, amount_min: payload.amount_min, amount_max: payload.amount_max,
+      }, t))) return
+      const updated = await bankPostingApi.updateRule(rule.id, { ...fields, backfill_suggestions: backfill.value })
+      let saved: BankPostingRule = updated
+      if (promote) saved = await bankPostingApi.promoteRule(rule.id)
+      else if (demote) saved = await bankPostingApi.demoteRule(rule.id)
       const msg = updated.backfilled && updated.backfilled > 0
         ? t('bank.posting.rule_created_backfilled', { count: updated.backfilled })
-        : t('common.saved')
+        : promote ? t('automation.rules.promoted')
+          : demote ? t('automation.rules.demoted')
+            : t('common.saved')
       toast.success(msg)
-      emit('saved', updated)
+      emit('saved', saved)
     } else {
       if (fromTransaction.value) {
         const res = await bankPostingApi.createRule({
@@ -175,7 +189,8 @@ async function save() {
 
       <RuleForm ref="formRef" :model-value="payload" @update:model-value="Object.assign(payload, $event)" :accounts="accounts"
         :mode="isEdit ? 'edit' : 'create'" :base-amount="baseAmount" :show-dry-run="true"
-        :from-transaction="fromTransaction" />
+        :from-transaction="fromTransaction" :initial-mode="rule?.mode"
+        :promotion-candidate="rule?.promotion_candidate ?? false" />
 
       <label v-if="fromTransaction && applicableCount > 0" data-test="apply-matching"
         class="flex items-center gap-2 mt-3 text-sm text-neutral-700 cursor-pointer">

@@ -666,8 +666,10 @@ pravidlo hned použije na pohyb, ze kterého vzniklo (nezaúčtovaný pohyb se
 zaúčtuje, u jinak zaúčtovaného se nabídne přeúčtování), a volitelně i na další
 odpovídající nespárované nezaúčtované pohyby v otevřených obdobích (max. 200).
 Uzavřené období skončí jako blokovaný návrh v Automatice. Takové pravidlo je
-rovnou v režimu **Automaticky**: bez potvrzení účtuje, jakmile má rozsah částky
-a aspoň tři úspěšná použití; do té doby další platby nabízí ke schválení.
+rovnou v režimu **Automaticky** a další odpovídající platby účtuje bez potvrzení.
+Založení z pohybu je tvoje výslovná volba automatiky, proto pravidlo nečeká na
+historii použití ani nepotřebuje rozsah částky. Dál ho hlídá **Limit pro
+automatiku**, uzavřené období, neobvyklé částky a denní limit firmy.
 
 Platby bez faktury (odvody na OSSZ/ZP, bankovní poplatky, úroky, leasing…) se
 neúčtují samy od prvního výskytu — na záložce **Pravidla účtování** si pro ně
@@ -700,10 +702,22 @@ Pravidlo založené na záložce **Pravidla účtování** (ne z pohybu) vždy j
 **navrhuje** (režim **Návrh**) — po importu vytvoří
 položku v **K zaúčtování**, kterou potvrdíš **Schválit** (případně přes ikonu
 ozubeného kolečka přepíšeš kontaci) nebo **Odmítnout**. Po pěti potvrzeních za
-sebou beze změny, bez odmítnutí a s vyplněným rozsahem částky se nabídne
-**Povýšit na automatiku**. Režim se nikdy nepřepne sám — povýšení vždy potvrdí
-člověk. Od dalšího výskytu se zápis vytvoří bez čekání ve frontě (transakce
-zůstane vidět v historii se štítkem, kdo/co ji zaúčtovalo).
+sebou beze změny, bez odmítnutí a s vyplněným rozsahem částky pravidlo označí
+jako připravené a tlačítko **Povýšit na automatiku** v seznamu zezelená.
+
+Na automatiku ale můžeš pravidlo přepnout **kdykoli ručně**, i bez historie
+potvrzení: v seznamu tlačítkem **Povýšit na automatiku** (u aktivního pravidla
+v režimu Návrh je vždy k dispozici), nebo v úpravě pravidla výběrem **Režim:
+Automaticky** a uložením. U pravidla, které ještě nemá pět čistých potvrzení,
+se potvrzovací dialog výslovně zeptá na **vynucené povýšení bez historie**
+a upozorní i na chybějící rozsah částky. Takové povýšení se v **Historii**
+pravidla zapíše jako ručně vynucené. Ručně povýšené pravidlo účtuje samo hned
+od dalšího výskytu, bez ohledu na počet použití a rozsah částky; strop
+automatiky, uzavřené období, neobvyklé částky a denní limit platí dál. Zpět
+na návrhy ho vrátíš tlačítkem **Jen návrhy** nebo v úpravě volbou **Režim:
+Návrh**. Režim se nikdy nepřepne na automatiku sám. Od dalšího výskytu se zápis
+vytvoří bez čekání ve frontě (transakce zůstane vidět v historii se štítkem,
+kdo/co ji zaúčtovalo).
 
 Když transakci odpovídá víc aktivních pravidel najednou, MyÚčto nikdy neúčtuje
 automaticky — vytvoří návrh podle pravidla s vyšší úspěšností a označí to jako

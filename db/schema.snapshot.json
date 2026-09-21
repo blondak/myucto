@@ -845,7 +845,8 @@
         "1858_invoice_payment_variable_symbol.sql",
         "1859_premier_migration.sql",
         "1860_dimensions.sql",
-        "1861_dimension_defaults.sql"
+        "1861_dimension_defaults.sql",
+        "1862_bank_posting_rule_mode_set_manually.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -2493,6 +2494,7 @@
                 "last_rejected_tx_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "message_contains": "varchar(120) NULL DEFAULT NULL",
                 "mode": "enum('suggest','auto') NOT NULL DEFAULT 'suggest'",
+                "mode_set_manually_at": "datetime NULL DEFAULT NULL",
                 "name": "varchar(120) NOT NULL",
                 "operation_type": "varchar(40) NULL DEFAULT NULL",
                 "priority": "smallint(5) unsigned NOT NULL DEFAULT 100",

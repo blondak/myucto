@@ -14,6 +14,7 @@ import { bankPostingApi, bankPostingErrorMessage, type BankPostingRule } from '@
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import RuleTemplatesModal from '@/components/bank/RuleTemplatesModal.vue'
 import RuleHistoryModal from '@/components/bank/RuleHistoryModal.vue'
+import { promoteConfirmMessage } from '@/components/bank/rulePromotion'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
@@ -128,7 +129,7 @@ async function remove(r: BankPostingRule) {
 }
 
 async function promote(r: BankPostingRule) {
-  if (busyId.value || !confirm(t('automation.rules.promote_confirm', { name: r.name }))) return
+  if (busyId.value || !confirm(promoteConfirmMessage(r, t))) return
   busyId.value = r.id
   try {
     await bankPostingApi.promoteRule(r.id)
@@ -159,6 +160,10 @@ async function backfill(r: BankPostingRule) {
     await load()
   } catch (e) { toast.error(bankPostingErrorMessage(e, t)) }
   finally { busyId.value = null }
+}
+
+function canPromote(r: BankPostingRule): boolean {
+  return r.is_active && r.mode === 'suggest' && auth.canWrite('bank.rules')
 }
 
 function amountRange(r: BankPostingRule): string {
@@ -277,11 +282,6 @@ watch([() => supplierStore.currentSupplierId, page], ([supplierId], [previousSup
                 <span v-if="r.mode === 'suggest' && r.approved_streak > 0" class="mt-1 inline-flex rounded bg-primary-50 px-2 py-0.5 font-medium text-primary-700">
                   {{ t('automation.rules.streak', { n: Math.min(r.approved_streak, 5) }) }}
                 </span>
-                <button v-if="r.promotion_candidate && auth.canWrite('bank.rules')" type="button" @click="promote(r)"
-                  :disabled="busyId === r.id" :class="`${btnOutlineSm('success')} mt-1`">
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.badgeCheck" /></svg>
-                  {{ t('automation.rules.promote') }}
-                </button>
                 <span v-if="r.rejected_streak >= 2" class="ml-1 text-warning-600" :title="t('bank.posting.rejects', { count: r.rejected_streak })">
                   ⚠ {{ r.rejected_streak }}
                 </span>
@@ -295,6 +295,13 @@ watch([() => supplierStore.currentSupplierId, page], ([supplierId], [previousSup
                 <button type="button" @click="historyRule = r" :class="btnOutlineSm('neutral')">
                   <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
                   {{ t('automation.rules.history') }}
+                </button>
+                <button v-if="canPromote(r)" type="button" @click="promote(r)" :disabled="busyId === r.id"
+                  :class="btnOutlineSm(r.promotion_candidate ? 'success' : 'neutral')"
+                  :title="r.promotion_candidate ? undefined : t('automation.rules.promote_forced_title')"
+                  :data-test="r.promotion_candidate ? 'rule-promote' : 'rule-promote-forced'">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.badgeCheck" /></svg>
+                  {{ t('automation.rules.promote') }}
                 </button>
                 <button v-if="r.mode === 'auto' && auth.canWrite('bank.rules')" type="button" @click="demote(r)" :disabled="busyId === r.id" :class="btnOutlineSm('warning')">
                   <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
@@ -346,8 +353,8 @@ watch([() => supplierStore.currentSupplierId, page], ([supplierId], [previousSup
             </span>
             <div class="flex flex-wrap justify-end gap-1">
               <button type="button" @click="historyRule = r" :class="btnOutlineSm('neutral')"><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>{{ t('automation.rules.history') }}</button>
-              <button v-if="r.promotion_candidate && auth.canWrite('bank.rules')" type="button" @click="promote(r)" :class="btnOutlineSm('success')"><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.badgeCheck" /></svg>{{ t('automation.rules.promote') }}</button>
-              <button v-else-if="r.mode === 'auto' && auth.canWrite('bank.rules')" type="button" @click="demote(r)" :class="btnOutlineSm('warning')"><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>{{ t('automation.rules.demote') }}</button>
+              <button v-if="canPromote(r)" type="button" @click="promote(r)" :disabled="busyId === r.id" :class="btnOutlineSm(r.promotion_candidate ? 'success' : 'neutral')" :title="r.promotion_candidate ? undefined : t('automation.rules.promote_forced_title')"><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.badgeCheck" /></svg>{{ t('automation.rules.promote') }}</button>
+              <button v-else-if="r.mode === 'auto' && auth.canWrite('bank.rules')" type="button" @click="demote(r)" :disabled="busyId === r.id" :class="btnOutlineSm('warning')"><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>{{ t('automation.rules.demote') }}</button>
               <button v-if="r.is_active && auth.canWrite('bank.rules')" type="button" @click="backfill(r)" :disabled="busyId === r.id" :class="btnOutlineSm('primary')"><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>{{ t('automation.rules.backfill') }}</button>
               <button v-if="auth.canWrite('bank.rules')" @click="toggleActive(r)" :disabled="busyId === r.id"
                 class="cursor-pointer text-neutral-500 disabled:opacity-50">{{ r.is_active ? t('bank.posting.inactive') : t('bank.posting.active') }}</button>

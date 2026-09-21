@@ -212,6 +212,28 @@ final class AutoPostingPolicyServiceTest extends BankPostingTestCase
         self::assertSame('suggest', $this->policy->decide($this->supplierId, $expense)->decision);
     }
 
+    public function testManuallyAutoRuleSkipsHitsAndBandButKeepsCap(): void
+    {
+        $this->policy->upsertRow($this->supplierId, OperationType::BANK_RULE_CUSTOM, 'auto', $this->userId);
+        $plain = ['mode' => 'auto', 'hit_count' => 0, 'amount_min' => null, 'amount_max' => null];
+        self::assertSame('suggest', $this->policy->decide($this->supplierId, $this->input(
+            operation: OperationType::BANK_RULE_CUSTOM, debit: '518', credit: '221', rule: $plain))->decision);
+
+        $manual = $plain + ['mode_set_manually_at' => '2026-09-21 10:00:00'];
+        self::assertSame('auto', $this->policy->decide($this->supplierId, $this->input(
+            operation: OperationType::BANK_RULE_CUSTOM, debit: '518', credit: '221', rule: $manual))->decision);
+
+        $suggestMode = ['mode' => 'suggest'] + $manual;
+        self::assertSame('suggest', $this->policy->decide($this->supplierId, $this->input(
+            operation: OperationType::BANK_RULE_CUSTOM, debit: '518', credit: '221', rule: $suggestMode))->decision);
+
+        $capped = $manual + ['auto_amount_cap' => 500.0];
+        $over = $this->policy->decide($this->supplierId, $this->input(
+            operation: OperationType::BANK_RULE_CUSTOM, amount: 600.0, debit: '518', credit: '221', rule: $capped));
+        self::assertSame('suggest', $over->decision);
+        self::assertSame('amount_over_cap', $over->note);
+    }
+
     public function testPeriodLockAnomalyAutoAllowedAndDailyLimitGuards(): void
     {
         $this->policy->upsertRow($this->supplierId, OperationType::BANK_FEE, 'auto', $this->userId);

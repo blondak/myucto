@@ -15,7 +15,7 @@ final class BankPostingRuleRepository
 {
     private const COLS = 'id, supplier_id, name, direction, counterparty_account, counterparty_bank,
         variable_symbol, message_contains, amount_min, amount_max, debit_account_code, credit_account_code,
-        description, mode, is_active, hit_count, last_hit_at, rejected_streak, last_rejected_tx_id,
+        description, mode, mode_set_manually_at, is_active, hit_count, last_hit_at, rejected_streak, last_rejected_tx_id,
         priority, operation_type, system_template_key, auto_amount_cap, applies_currency,
         counterparty_prefix, approved_streak, created_by, created_at, updated_at';
 
@@ -142,9 +142,9 @@ final class BankPostingRuleRepository
             'INSERT INTO bank_posting_rules
                 (supplier_id, name, direction, counterparty_account, counterparty_bank, variable_symbol,
                  message_contains, amount_min, amount_max, debit_account_code, credit_account_code,
-                 description, mode, is_active, priority, operation_type, system_template_key,
+                 description, mode, mode_set_manually_at, is_active, priority, operation_type, system_template_key,
                  auto_amount_cap, applies_currency, counterparty_prefix, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['name'],
@@ -159,6 +159,7 @@ final class BankPostingRuleRepository
             $data['credit_account_code'],
             $data['description'] ?? null,
             $data['mode'] ?? 'suggest',
+            $data['mode_set_manually_at'] ?? null,
             array_key_exists('is_active', $data) ? (int) $data['is_active'] : 1,
             $data['priority'] ?? 100,
             $data['operation_type'] ?? null,
@@ -181,7 +182,7 @@ final class BankPostingRuleRepository
         $allowed = [
             'name', 'direction', 'counterparty_account', 'counterparty_bank', 'variable_symbol',
             'message_contains', 'amount_min', 'amount_max', 'debit_account_code', 'credit_account_code',
-            'description', 'mode', 'is_active',
+            'description', 'mode', 'mode_set_manually_at', 'is_active',
             'priority', 'operation_type', 'auto_amount_cap', 'applies_currency', 'counterparty_prefix',
         ];
         $sets = [];

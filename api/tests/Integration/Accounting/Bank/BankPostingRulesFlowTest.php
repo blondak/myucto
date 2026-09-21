@@ -240,6 +240,7 @@ final class BankPostingRulesFlowTest extends BankPostingTestCase
 
         $rule = $this->ruleRow($ruleId);
         self::assertSame('auto', $rule['mode'], 'Pravidlo z pohybu je rovnou automatické.');
+        self::assertNotNull($rule['mode_set_manually_at'], 'Založení z pohybu je výslovná volba automatiky.');
         self::assertSame(40, (int) $rule['priority']);
         self::assertSame(2, (int) $rule['hit_count']);
     }

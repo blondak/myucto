@@ -29,3 +29,31 @@ describe('RuleForm account selection', () => {
     wrapper.unmount()
   })
 })
+
+describe('RuleForm režim při editaci', () => {
+  const stubs = { ChartAccountSelect: { name: 'ChartAccountSelect', props: ['modelValue', 'accounts'], template: '<div />' } }
+  const base = { name: 'Synthetic rule', direction: 'outgoing', debit_account_code: '518.100', credit_account_code: '221.100', is_active: true, mode: 'suggest' } as BankPostingRulePayload
+
+  it('nabídne výběr režimu a u nekandidáta upozorní na vynucené povýšení', async () => {
+    const wrapper = mount(RuleForm, { props: { modelValue: base, accounts, mode: 'edit', initialMode: 'suggest', promotionCandidate: false }, global: { stubs } })
+    await flushPromises()
+    const select = wrapper.find('[data-test="rule-mode-select"]')
+    expect(select.exists()).toBe(true)
+    expect(wrapper.find('[data-test="rule-mode-forced"]').exists()).toBe(false)
+    await select.setValue('auto')
+    expect(wrapper.find('[data-test="rule-mode-forced"]').exists()).toBe(true)
+    expect(wrapper.emitted('update:modelValue')!.at(-1)![0]).toEqual(expect.objectContaining({ mode: 'auto' }))
+    wrapper.unmount()
+  })
+
+  it('u kandidáta vynucené povýšení nehlásí a neaktivní pravidlo nejde přepnout na automatiku', async () => {
+    const candidate = mount(RuleForm, { props: { modelValue: base, accounts, mode: 'edit', initialMode: 'suggest', promotionCandidate: true }, global: { stubs } })
+    await candidate.find('[data-test="rule-mode-select"]').setValue('auto')
+    expect(candidate.find('[data-test="rule-mode-forced"]').exists()).toBe(false)
+    candidate.unmount()
+
+    const inactive = mount(RuleForm, { props: { modelValue: { ...base, is_active: false }, accounts, mode: 'edit', initialMode: 'suggest' }, global: { stubs } })
+    expect((inactive.find('[data-test="rule-mode-select"]').element as HTMLSelectElement).disabled).toBe(true)
+    inactive.unmount()
+  })
+})

@@ -3762,7 +3762,14 @@ paths:
       - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
     post:
       tags: [Accounting]
-      summary: Povýší prověřené návrhové pravidlo na plnou automatiku
+      summary: Přepne aktivní návrhové pravidlo na plnou automatiku
+      description: |
+        Povýšit lze kterékoli aktivní návrhové pravidlo. Kandidát (pět čistých potvrzení,
+        rozsah částky) se v historii zapíše jako `rule_promoted` bez důvodu, ostatní jako
+        vynucené povýšení s důvodem `manual_forced`. Povýšení nastaví
+        `mode_set_manually_at`; takové pravidlo pak automatika účtuje i bez historie
+        použití a bez rozsahu částky (strop `auto_amount_cap`, uzavřené období, anomálie
+        a denní limit platí dál). Stažení na návrhy `mode_set_manually_at` vynuluje.
       responses:
         '403':
           description: |
@@ -3780,8 +3787,7 @@ paths:
                 type: object
                 properties: { rule: { $ref: '#/components/schemas/BankPostingRule' } }
         '404': { description: not_found }
-        '409': { description: rule_not_suggest / rule_not_ready }
-        '422': { description: amount_band_required }
+        '409': { description: rule_not_suggest }
 
   /api/v1/accounting/bank-posting-rules/{id}/demote:
     parameters:
@@ -23800,6 +23806,9 @@ components:
             promotion_candidate: { type: boolean }
             rejected_streak: { type: integer }
             mode: { type: string, enum: [suggest, auto] }
+            mode_set_manually_at:
+              type: [string, "null"]
+              description: Kdy uživatel výslovně přepnul pravidlo na automatiku (ruční povýšení nebo založení z pohybu); NULL u automatiky bez výslovného rozhodnutí.
             last_hit_at: { type: [string, "null"], format: date-time }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }

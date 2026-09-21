@@ -159,6 +159,82 @@ final class E7LearningFlowTest extends BankPostingTestCase
         self::assertSame(0, $demoted['approved_streak']);
     }
 
+    public function testManualForcedPromotionOfFreshRuleIsLoggedAndAutoPosts(): void
+    {
+        $ruleId = $this->rule([
+            'name' => 'Vynucené', 'direction' => 'outgoing', 'counterparty_account' => '902101',
+            'debit_account_code' => '518', 'credit_account_code' => '221', 'mode' => 'suggest',
+        ]);
+        $this->db->pdo()->prepare(
+            "INSERT INTO auto_posting_policy (supplier_id, operation_type, level, updated_by)
+             VALUES (?, 'bank.rule.custom', 'auto', ?)
+             ON DUPLICATE KEY UPDATE level=VALUES(level), updated_by=VALUES(updated_by)"
+        )->execute([$this->supplierId, $this->userId]);
+        $fresh = $this->ruleRow($ruleId);
+        self::assertFalse(RulePromotionService::isCandidate($fresh));
+        self::assertNull($fresh['mode_set_manually_at']);
+
+        $promoted = $this->promotion->promote($this->supplierId, $ruleId, $this->userId);
+        self::assertSame('auto', $promoted['mode']);
+        self::assertNotNull($promoted['mode_set_manually_at']);
+        $events = array_values(array_filter(
+            $this->corrections->forRule($this->supplierId, $ruleId),
+            static fn (array $row): bool => $row['event_type'] === 'rule_promoted',
+        ));
+        self::assertCount(1, $events);
+        self::assertSame('manual_forced', $events[0]['reason']);
+        $log = $this->db->pdo()->prepare(
+            "SELECT payload FROM activity_log
+              WHERE supplier_id = ? AND action = 'bank_rule.promoted' AND entity_id = ?"
+        );
+        $log->execute([$this->supplierId, $ruleId]);
+        $payload = json_decode((string) $log->fetchColumn(), true);
+        self::assertTrue($payload['forced'] ?? null);
+        self::assertSame(0, $payload['hit_count'] ?? null);
+
+        $statement = $this->statement();
+        $tx = $this->transaction($statement, -1500, ['counterparty_account' => '902101']);
+        $res = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('posted', $res['action'], 'Ručně povýšené pravidlo účtuje samo i bez historie.');
+
+        $demoted = $this->promotion->demote($this->supplierId, $ruleId, $this->userId, 'manual');
+        self::assertSame('suggest', $demoted['mode']);
+        self::assertNull($demoted['mode_set_manually_at']);
+    }
+
+    public function testCandidatePromotionHasNoForcedReasonAndAutoRuleWithoutManualFlagNeedsTrackRecord(): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO auto_posting_policy (supplier_id, operation_type, level, updated_by)
+             VALUES (?, 'bank.rule.custom', 'auto', ?)
+             ON DUPLICATE KEY UPDATE level=VALUES(level), updated_by=VALUES(updated_by)"
+        )->execute([$this->supplierId, $this->userId]);
+        $templateRule = $this->rule([
+            'name' => 'Šablona', 'direction' => 'outgoing', 'counterparty_account' => '902201',
+            'debit_account_code' => '518', 'credit_account_code' => '221', 'mode' => 'auto',
+        ]);
+        $statement = $this->statement();
+        $tx = $this->transaction($statement, -1500, ['counterparty_account' => '902201']);
+        self::assertSame('suggested', $this->service->handleTransaction($tx, $this->userId)['action']);
+
+        $candidate = $this->rule([
+            'name' => 'Kandidát', 'direction' => 'outgoing', 'counterparty_account' => '902202',
+            'amount_min' => 100, 'amount_max' => 5000,
+            'debit_account_code' => '518', 'credit_account_code' => '221', 'mode' => 'suggest',
+        ]);
+        $this->db->pdo()->prepare('UPDATE bank_posting_rules SET hit_count=5, approved_streak=5 WHERE id=?')
+            ->execute([$candidate]);
+        $this->promotion->promote($this->supplierId, $candidate, $this->userId);
+        $events = array_values(array_filter(
+            $this->corrections->forRule($this->supplierId, $candidate),
+            static fn (array $row): bool => $row['event_type'] === 'rule_promoted',
+        ));
+        self::assertCount(1, $events);
+        self::assertNull($events[0]['reason']);
+        self::assertNotNull($this->ruleRow($candidate)['mode_set_manually_at']);
+        self::assertNull($this->ruleRow($templateRule)['mode_set_manually_at']);
+    }
+
     public function testUnpostDemotesAutoRuleWithoutChangingRejectMemory(): void
     {
         $ruleId = $this->rule([

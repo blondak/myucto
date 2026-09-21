@@ -389,9 +389,14 @@ jednoznačná oprava má přednost před starší historií deníku; rozporné o
 nevytvoří další návrh bez vaší kontroly.
 
 Pravidlo v režimu **jen návrhy** ukazuje počet potvrzení beze změny. Po pěti
-takových potvrzeních za sebou, bez odmítnutí a s vyplněným rozsahem částky,
-nabídne tlačítko **Povýšit na automatiku**. K povýšení nikdy nedojde samo —
-rozhodnutí vždy potvrdí člověk. Tlačítko **Historie** zobrazí časovou osu
+takových potvrzeních za sebou, bez odmítnutí a s vyplněným rozsahem částky, je
+připravené k povýšení a tlačítko **Povýšit na automatiku** se zvýrazní. Povýšit
+můžete i pravidlo bez této historie: tlačítko je u každého aktivního návrhového
+pravidla a režim lze změnit také v úpravě pravidla. Takové vynucené povýšení
+musíte výslovně potvrdit a v historii pravidla je označené jako ruční. Ručně
+povýšené pravidlo pak účtuje samo i bez předchozích použití a bez rozsahu
+částky; strop automatiky, uzavřené období, anomálie a denní limit platí dál.
+K povýšení nikdy nedojde samo, rozhodnutí vždy potvrdí člověk. Tlačítko **Historie** zobrazí časovou osu
 pravidla, zaznamenané změny kontace, autora a úspěšnost.
 
 Pokud automatický zápis stornujete, pravidlo se bezpečně vrátí do režimu **jen

@@ -168,7 +168,14 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
             // stejně jako spárovaná platba či dedikovaný TransferPairService (ten vlastní
             // převody účtuje bez těchto brzd taky). Symetrie s guardem
             // {@see BankPostingService::assertFxResultAccounts} posvěcujícím 221↔221 vklad.
-            $needsTrackRecord = !$this->isInternalTransfer($in->debitAccountCode, $in->creditAccountCode);
+            //
+            // Pravidlo, které uživatel výslovně přepnul na automatiku (ruční povýšení nebo
+            // založení z konkrétního pohybu, `mode_set_manually_at`), historii použití ani
+            // rozsah částky nepotřebuje: uživatel tím převzal odpovědnost za automatiku.
+            // Strop, anomálie, denní limit, uzavřené období i úroveň automatiky typu
+            // operace platí dál.
+            $needsTrackRecord = !$this->isInternalTransfer($in->debitAccountCode, $in->creditAccountCode)
+                && ($rule['mode_set_manually_at'] ?? null) === null;
             if (($rule['mode'] ?? null) !== 'auto'
                 || ($needsTrackRecord && (
                     (int) ($rule['hit_count'] ?? 0) < 3

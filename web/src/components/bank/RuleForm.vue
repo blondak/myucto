@@ -19,6 +19,10 @@ const props = defineProps<{
   showDryRun?: boolean
   /** Pravidlo se zakládá z konkrétního pohybu: hned se použije a je rovnou automatické. */
   fromTransaction?: boolean
+  /** Edit: uložený režim pravidla (pro upozornění na vynucené povýšení). */
+  initialMode?: 'suggest' | 'auto'
+  /** Edit: pravidlo má 5 potvrzení beze změny, povýšení tedy není vynucené. */
+  promotionCandidate?: boolean
 }>()
 const emit = defineEmits<{ 'update:modelValue': [BankPostingRulePayload] }>()
 
@@ -38,6 +42,10 @@ watch(() => props.modelValue, (v) => {
 watch(form, () => {
   if (!syncing) emit('update:modelValue', { ...form })
 }, { deep: true })
+
+const forcedPromotion = computed(() =>
+  props.mode === 'edit' && props.initialMode === 'suggest' && form.mode === 'auto' && !props.promotionCandidate,
+)
 
 const activeAccounts = computed(() =>
   props.accounts.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)),
@@ -188,9 +196,14 @@ defineExpose({ runDryRun, dryRun })
 
     <div v-if="mode === 'edit'">
       <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.rule_mode') }}</label>
-      <div class="w-full h-10 px-3 border border-neutral-200 rounded-md text-sm bg-neutral-50 flex items-center">
-        {{ form.mode === 'auto' ? t('bank.posting.mode_auto') : t('bank.posting.mode_suggest') }}
-      </div>
+      <select v-model="form.mode" data-test="rule-mode-select"
+        :disabled="!form.is_active && initialMode !== 'auto'"
+        class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-50">
+        <option value="suggest">{{ t('bank.posting.mode_suggest') }}</option>
+        <option value="auto" :disabled="!form.is_active">{{ t('bank.posting.mode_auto') }}</option>
+      </select>
+      <p v-if="forcedPromotion" class="text-xs text-warning-600 mt-0.5" data-test="rule-mode-forced">{{ t('automation.rules.mode_forced_hint') }}</p>
+      <p v-if="!form.is_active && form.mode === 'suggest'" class="text-xs text-neutral-500 mt-0.5">{{ t('automation.rules.mode_inactive_hint') }}</p>
       <p class="text-xs text-neutral-500 mt-0.5">{{ t('automation.rules.mode_change_hint') }}</p>
     </div>
     <p v-else-if="fromTransaction" class="text-xs text-neutral-500" data-test="rule-mode-hint">{{ t('bank.posting.mode_from_transaction_hint') }}</p>

@@ -35,6 +35,9 @@ function eventText(event: RuleHistory['events'][number]): string {
     const reason = t(`automation.rules.demote_reason.${event.reason || 'manual'}`)
     return t(key, { reason })
   }
+  if (event.event_type === 'rule_promoted' && event.reason === 'manual_forced') {
+    return t('automation.rules.event.rule_promoted_forced')
+  }
   return t(key)
 }
 </script>
